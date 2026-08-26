@@ -92,6 +92,21 @@ export interface ChatDraftRow {
    * the model.
    */
   templateBinding?: ChatTemplateBinding
+  /**
+   * Short label → the full URL it stands in for, for links this draft folded
+   * (`lib/chat/link-fold.ts`).
+   *
+   * Same reason as `templateBinding` above: the composer's text holds the SHORT
+   * form, so the URL has nowhere to live inside `text`. Losing this map would
+   * not lose the draft — it would send `svenstaro/genact` as literal prose
+   * where the user wrote a link, which is the one outcome worth a column.
+   *
+   * DEVICE-LOCAL, like `templateBinding`: `draft.replace` carries text and
+   * attachments only. A draft that reaches another device arrives with its
+   * labels unfolded into plain words, which reads oddly but never lies about
+   * where a link pointed.
+   */
+  foldedLinks?: Record<string, string>
 }
 
 export interface SetDraftOptions {
@@ -108,6 +123,11 @@ export interface SetDraftOptions {
    * values the moment the user typed a character.
    */
   templateBinding?: ChatTemplateBinding | null
+  /**
+   * Folded-link map to store. Three-way like `templateBinding`: omit to
+   * PRESERVE, pass a map to replace, pass `null` to clear.
+   */
+  foldedLinks?: Record<string, string> | null
 }
 
 /**
@@ -173,12 +193,15 @@ export async function setDraft(
     // Omitted means keep; `null` means clear. See `SetDraftOptions`.
     const templateBinding =
       options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
+    const foldedLinks =
+      options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
     await db.chatDrafts.put({
       sessionId,
       text,
       updatedAt: Date.now(),
       revision,
       ...(templateBinding ? { templateBinding } : {}),
+      ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
       ...(options.originClientId || hostStateRow?.clientId
         ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
         : {}),

@@ -133,6 +133,9 @@ export function fuzzyFilterSortRanked<T>(
     return kept.map((item) => ({ item, positions: [] }))
   }
 
+  // Hoisted: constant for the whole call, and the loop below runs once per
+  // candidate on every keystroke.
+  const lowerQuery = q.toLowerCase()
   const scored: { item: T; score: number; positions: number[]; idx: number }[] = []
   items.forEach((item, idx) => {
     const primary = fuzzyMatch(q, getText(item))
@@ -142,7 +145,13 @@ export function fuzzyFilterSortRanked<T>(
     }
     if (options.secondaryText) {
       const secondary = options.secondaryText(item)
-      const secondaryMatch = secondary ? fuzzyMatch(q, secondary) : null
+      // Secondary text is prose, and a loose subsequence over a sentence
+      // matches almost anything — typing a full command name still listed a
+      // dozen unrelated commands, because "compact" is a subsequence of most
+      // descriptions. Descriptions therefore need a CONTIGUOUS hit; only the
+      // primary text (a short name or path) keeps the forgiving match.
+      const secondaryMatch =
+        secondary && secondary.toLowerCase().includes(lowerQuery) ? fuzzyMatch(q, secondary) : null
       // Demote description-only hits so a name match always wins; no primary
       // positions to highlight in that case.
       if (secondaryMatch !== null) {

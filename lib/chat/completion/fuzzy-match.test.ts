@@ -172,3 +172,26 @@ describe("fuzzyFilterSort", () => {
     expect(result).toHaveLength(2)
   })
 })
+
+describe("secondary text requires a contiguous hit", () => {
+  const commands = [
+    { name: "compact", description: "Summarise older turns and free the context window." },
+    { name: "plan", description: "Create or inspect the session's structured plan." },
+  ]
+
+  it("does not keep a description that only matches as a loose subsequence", () => {
+    // "compac" IS a subsequence of /plan's description (c…o…m…p…a…c) — which is
+    // how a fully typed command name used to return a dozen rows.
+    const result = fuzzyFilterSort(commands, "compac", (c) => c.name, {
+      secondaryText: (c) => c.description,
+    })
+    expect(result.map((c) => c.name)).toEqual(["compact"])
+  })
+
+  it("still keeps a description that genuinely contains the query", () => {
+    const result = fuzzyFilterSort(commands, "session", (c) => c.name, {
+      secondaryText: (c) => c.description,
+    })
+    expect(result.map((c) => c.name)).toEqual(["plan"])
+  })
+})

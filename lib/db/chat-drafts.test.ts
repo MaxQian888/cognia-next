@@ -425,3 +425,32 @@ describe("draft template binding", () => {
     }
   })
 })
+
+describe("draft folded links", () => {
+  const links = { "svenstaro/genact": "https://github.com/svenstaro/genact" }
+
+  it("stores the label → URL map alongside the text", async () => {
+    await setDraft("s-link", "look at svenstaro/genact", [], { foldedLinks: links })
+
+    await expect(getDraft("s-link")).resolves.toMatchObject({ foldedLinks: links })
+  })
+
+  it("preserves the map on a save that does not mention it", async () => {
+    await setDraft("s-link", "look at svenstaro/genact", [], { foldedLinks: links })
+    await setDraft("s-link", "look at svenstaro/genact now", [])
+
+    await expect(getDraft("s-link")).resolves.toMatchObject({ foldedLinks: links })
+  })
+
+  it("clears the map when an empty one is passed", async () => {
+    // The composer passes its live map on every save, so deleting the last link
+    // has to actually clear the row — otherwise a stale label would expand into
+    // a URL the user removed.
+    await setDraft("s-link", "look at svenstaro/genact", [], { foldedLinks: links })
+    await setDraft("s-link", "no links here", [], { foldedLinks: {} })
+
+    const row = await getDraft("s-link")
+    expect(row?.text).toBe("no links here")
+    expect(row?.foldedLinks).toBeUndefined()
+  })
+})

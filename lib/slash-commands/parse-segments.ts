@@ -23,6 +23,19 @@
 //      line must keep rule 2's `end: contentEnd`, which includes trailing
 //      whitespace, and `[].every()` is vacuously true for a blank line), and a
 //      non-empty command name (so a lone `/` never reaches `isKnownCommand`).
+//   2c. LINKS ARE INERT inside a chain. A pasted `https://…` token neither
+//      names a command nor breaks the chain, so `https://github.com/a/b /clear`
+//      runs `/clear` and keeps the URL as text (where `link-context.ts` picks
+//      it up as it always has). Without this the whole line collapsed to prose
+//      and the command silently became part of the prompt — and because Enter
+//      sends, a message that carries a link has nowhere else to put a command.
+//      The `isKnownCommand` gate still guards everything: `https://x /usr/bin`
+//      is prose, because `/usr` is not a command.
+//      A link is inert only where it cannot be an ARGUMENT. Before the first
+//      command it always is; after one it is inert only when a SECOND command
+//      proves the line is a chain. `/remember https://…` is therefore one
+//      command holding a URL (rule 1 args), not a chain that drops it, while
+//      `/help https://… /clear` still chains.
 //   3. An UNKNOWN line-start `/word` is treated as text (typos and literal
 //      slash content are never silently dropped) — hence the injected
 //      `isKnownCommand` predicate, which keeps this function pure/testable.
@@ -33,6 +46,7 @@
 // whole-message prefix short-circuits in the composer's submit handler.
 
 import { findTokenEnd, isMentionStart } from "./mention-boundary"
+import { findUrlSpans, isHttpUrlToken, startsWithHttpScheme } from "@/lib/chat/link-token"
 
 export interface CommandSegment {
   kind: "command"
@@ -67,6 +81,22 @@ export interface MentionSegment {
   end: number
 }
 
+export interface LinkSegment {
+  kind: "link"
+  /** Exact source substring (the whole URL, punctuation already trimmed). */
+  raw: string
+  /**
+   * The URL this stands for. Same as `raw` for a URL written out in full;
+   * different for a FOLDED link, whose text is a short label — the overlay
+   * needs the real address to pick the site's icon.
+   */
+  url?: string
+  /** Inclusive start index in the source (the scheme's first character). */
+  start: number
+  /** Exclusive end index in the source. */
+  end: number
+}
+
 export interface ParamSegment {
   kind: "param"
   /** Declared parameter id between the braces, with surrounding space trimmed. */
@@ -91,7 +121,7 @@ export type InputSegment = CommandSegment | TextSegment
  * the overlay consumes it, and because `pillDeleteRange` has to see every pill
  * kind in one list.
  */
-export type RichSegment = InputSegment | MentionSegment | ParamSegment
+export type RichSegment = InputSegment | MentionSegment | ParamSegment | LinkSegment
 
 export interface ParseSegmentsOptions {
   /**
@@ -101,6 +131,16 @@ export interface ParseSegmentsOptions {
    * view it expects.
    */
   mentions?: boolean
+  /**
+   * Is this token a link? Defaults to {@link isHttpUrlToken}.
+   *
+   * The composer widens it: a pasted URL is FOLDED to a short label in the text
+   * (`lib/chat/link-fold.ts`), so `svenstaro/genact` is every bit as much a link
+   * as the URL it replaced — and must stay just as inert inside a command chain
+   * (rule 2c), or folding a link would silently stop the command beside it from
+   * running.
+   */
+  isLinkToken?: (token: string) => boolean
 }
 
 const isWhitespace = (ch: string): boolean => /\s/.test(ch)
@@ -140,22 +180,44 @@ export function tokenizeLine(value: string, start: number, hardEnd: number): Lin
 }
 
 /**
- * True when every token in `tokens` is a `/`-prefixed known command — the
- * all-or-nothing test for same-line chaining (rule 2b). Requires at least two
- * tokens; see the header for why.
+ * True when every token in `tokens` is either a `/`-prefixed known command or
+ * an inert link — the all-or-nothing test for same-line chaining (rules 2b and
+ * 2c). Requires at least two tokens and at least one actual command; see the
+ * header for why.
+ *
+ * WHERE the link sits decides whether it is inert. A link BEFORE the first
+ * command is pasted context that a command follows (`<url> /clear` — rule 2c's
+ * whole purpose). A link AFTER a command is that command's ARGUMENT unless a
+ * second command proves the line is really a chain:
+ *
+ *   - `/remember https://…`      → not a chain. One command handed a URL; rule
+ *                                  1 gives it `args` covering the rest of the
+ *                                  line. Calling it a chain emitted `args: ""`
+ *                                  and silently dropped the URL.
+ *   - `/help https://… /clear`   → a chain. Two commands, so the link between
+ *                                  them is context, not an argument.
  */
 export function isCommandChain(
   value: string,
   tokens: readonly LineToken[],
-  isKnownCommand: (name: string) => boolean
+  isKnownCommand: (name: string) => boolean,
+  isLinkToken: (token: string) => boolean = isHttpUrlToken
 ): boolean {
   if (tokens.length < 2) return false
-  return tokens.every(
-    (tok) =>
-      value[tok.start] === "/" &&
-      tok.end > tok.start + 1 &&
-      isKnownCommand(value.slice(tok.start + 1, tok.end))
-  )
+  let commands = 0
+  let linksAfterFirstCommand = 0
+  for (const tok of tokens) {
+    if (isLinkToken(value.slice(tok.start, tok.end))) {
+      if (commands > 0) linksAfterFirstCommand++
+      continue
+    }
+    if (value[tok.start] !== "/") return false
+    if (tok.end <= tok.start + 1) return false
+    if (!isKnownCommand(value.slice(tok.start + 1, tok.end))) return false
+    commands++
+  }
+  if (commands === 0) return false
+  return linksAfterFirstCommand === 0 || commands >= 2
 }
 
 /**
@@ -170,8 +232,16 @@ export function parseSegments(
 export function parseSegments(
   input: string,
   isKnownCommand: (name: string) => boolean,
-  opts: { mentions: true }
+  opts: ParseSegmentsOptions & { mentions: true }
 ): RichSegment[]
+// Without `mentions`, the result is the plain command/text view — the options
+// that only change PARSING (`isLinkToken`) must not widen the return type, or
+// every submit-path caller would suddenly be handed pill segments it cannot use.
+export function parseSegments(
+  input: string,
+  isKnownCommand: (name: string) => boolean,
+  opts: ParseSegmentsOptions & { mentions?: false }
+): InputSegment[]
 export function parseSegments(
   input: string,
   isKnownCommand: (name: string) => boolean,
@@ -183,6 +253,12 @@ export function parseSegments(
   opts?: ParseSegmentsOptions
 ): RichSegment[] {
   const segments: InputSegment[] = []
+  const isLinkToken = opts?.isLinkToken ?? isHttpUrlToken
+  // Only a WIDENED predicate can recognise a link that has no scheme (the
+  // composer's, which also matches folded labels). With the default one,
+  // `startsWithHttpScheme` is already the complete test, so the token scan
+  // below is pure waste and is skipped outright.
+  const linkMayLackScheme = opts?.isLinkToken !== undefined
   const len = input.length
   if (len === 0) return segments
 
@@ -203,15 +279,30 @@ export function parseSegments(
 
     const fnw = firstNonWhitespace(input, i, contentEnd)
     let isCommand = false
-    if (fnw !== -1 && input[fnw] === "/") {
+    // A line can open with a command (rules 1/2b) or with a link that a command
+    // follows (rule 2c). Anything else is prose and skips the LINE tokeniser
+    // entirely: a paragraph costs one character read for the `/`, then a scheme
+    // probe, and — only for a caller whose predicate recognises scheme-less
+    // links — a walk to the end of the line's first word.
+    const opensCommand = fnw !== -1 && input[fnw] === "/"
+    const opensLink =
+      fnw !== -1 &&
+      !opensCommand &&
+      (startsWithHttpScheme(input, fnw) ||
+        (linkMayLackScheme && isLinkToken(input.slice(fnw, findTokenEnd(input, fnw, contentEnd)))))
+    if (opensCommand || opensLink) {
       const tokens = tokenizeLine(input, fnw, contentEnd)
-      if (isCommandChain(input, tokens, isKnownCommand)) {
+      if (isCommandChain(input, tokens, isKnownCommand, isLinkToken)) {
         // Rule 2b — one segment per token, empty args. The whitespace BETWEEN
         // tokens is emitted as text so the segment list stays contiguous (the
         // chip overlay paints by index).
         isCommand = true
         if (pendingStart === null) pendingStart = i
         for (const tok of tokens) {
+          // Link tokens stay inside the text run: they are context for the
+          // prompt, not something to execute, and `link-context.ts` reads them
+          // straight off the raw input.
+          if (isLinkToken(input.slice(tok.start, tok.end))) continue
           pushText(pendingStart, tok.start)
           segments.push({
             kind: "command",
@@ -224,7 +315,7 @@ export function parseSegments(
           pendingStart = tok.end
         }
         // Trailing whitespace after the last command joins the next text run.
-      } else {
+      } else if (opensCommand) {
         const wordEnd = findTokenEnd(input, fnw + 1, contentEnd)
         const name = input.slice(fnw + 1, wordEnd)
         if (name.length > 0 && isKnownCommand(name)) {
@@ -266,6 +357,74 @@ export function parseSegments(
  */
 export function splitMentionSegments(segments: readonly InputSegment[]): RichSegment[] {
   return segments.flatMap(splitMentions)
+}
+
+/**
+ * Derive the link-aware view: split every link out of the TEXT segments into
+ * its own {@link LinkSegment}, leaving commands, mentions and params untouched.
+ *
+ * Two kinds of link reach this: raw `http(s)://…` runs found in the text, and
+ * `extraSpans` — absolute ranges the caller already knows are links. The
+ * composer passes the FOLDED ones (`foldedLinkSpans`), whose text is a short
+ * label with no scheme to recognise; passing ranges rather than a predicate
+ * keeps the "what counts as the end of a token" rule in one place instead of
+ * two.
+ *
+ * Applied on top of {@link splitMentionSegments} rather than inside it because
+ * only the chip overlay wants it — the submit path reads links straight off the
+ * raw input and would be confused by a third pill kind. Contiguity and absolute
+ * indices are preserved, which the overlay depends on.
+ */
+export function splitLinkSegments(
+  segments: readonly RichSegment[],
+  extraSpans: readonly { raw: string; url?: string; start: number; end: number }[] = []
+): RichSegment[] {
+  return segments.flatMap((seg) => {
+    if (seg.kind !== "text") return [seg]
+    const own = findUrlSpans(seg.value).map((span) => ({
+      raw: span.raw,
+      url: span.raw,
+      start: seg.start + span.start,
+      end: seg.start + span.end,
+    }))
+    const extra = extraSpans.filter(
+      (span) =>
+        span.start >= seg.start &&
+        span.end <= seg.end &&
+        !own.some((hit) => span.start < hit.end && hit.start < span.end)
+    )
+    const spans = [...own, ...extra].sort((a, b) => a.start - b.start)
+    if (spans.length === 0) return [seg]
+    const out: RichSegment[] = []
+    let cursor = seg.start
+    for (const span of spans) {
+      if (span.start > cursor) {
+        out.push({
+          kind: "text",
+          value: seg.value.slice(cursor - seg.start, span.start - seg.start),
+          start: cursor,
+          end: span.start,
+        })
+      }
+      out.push({
+        kind: "link",
+        raw: span.raw,
+        ...(span.url ? { url: span.url } : {}),
+        start: span.start,
+        end: span.end,
+      })
+      cursor = span.end
+    }
+    if (cursor < seg.end) {
+      out.push({
+        kind: "text",
+        value: seg.value.slice(cursor - seg.start),
+        start: cursor,
+        end: seg.end,
+      })
+    }
+    return out
+  })
 }
 
 /**

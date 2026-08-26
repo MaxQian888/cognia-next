@@ -57,4 +57,13 @@ describe("ComposerGhostText", () => {
     expect(screen.queryByTestId("composer-ghost-position")).not.toBeInTheDocument()
     expect(screen.queryByTestId("composer-ghost-cycle")).not.toBeInTheDocument()
   })
+
+  it("takes the code font when the skin puts the textarea in it", () => {
+    // Same alignment contract as the chip overlay: a proportional ghost over a
+    // monospace textarea drifts further with every character typed.
+    const { rerender } = render(<ComposerGhostText value="hello" ghost=" world" mono />)
+    expect(screen.getByTestId("composer-ghost-text").firstElementChild).toHaveClass("font-mono")
+    rerender(<ComposerGhostText value="hello" ghost=" world" />)
+    expect(screen.getByTestId("composer-ghost-text").firstElementChild).not.toHaveClass("font-mono")
+  })
 })

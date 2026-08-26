@@ -1,4 +1,5 @@
 import { pillDeleteRange } from "./composer-pill-delete"
+import { foldedToken } from "@/lib/chat/link-fold"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { splitParamSegments } from "@/lib/chat/template/param-segments"
@@ -98,5 +99,51 @@ describe("pillDeleteRange — {{parameter}} pills", () => {
   it("does not treat a parameter inside code as a pill", () => {
     const v = "`{{module}}`"
     expect(pillDeleteRange(v, 11, richSegs(v), "backward")).toBeNull()
+  })
+})
+
+describe("pillDeleteRange — folded links", () => {
+  const label = foldedToken("svenstaro/genact")
+  const value = `see ${label} now`
+  const labelEnd = 4 + label.length
+  const segments = [
+    { kind: "text" as const, value: "see ", start: 0, end: 4 },
+    { kind: "link" as const, raw: label, start: 4, end: labelEnd },
+    { kind: "text" as const, value: " now", start: labelEnd, end: value.length },
+  ]
+
+  it("takes the whole label on Backspace at its right edge", () => {
+    expect(pillDeleteRange(value, labelEnd, segments, "backward")).toEqual({
+      start: 4,
+      end: labelEnd,
+    })
+  })
+
+  it("takes the label and its trailing space on Delete at its left edge", () => {
+    expect(pillDeleteRange(value, 4, segments, "forward")).toEqual({
+      start: 4,
+      end: labelEnd + 1,
+    })
+  })
+
+  // A folded label is a URL in disguise; half of it is not a shorter link, it
+  // is prose that used to be one. So the middle deletes as a whole too — unlike
+  // a command or a parameter, which keep the character-by-character escape.
+  it("takes the whole label from a caret in its middle, either direction", () => {
+    expect(pillDeleteRange(value, 12, segments, "backward")).toEqual({ start: 4, end: labelEnd })
+    expect(pillDeleteRange(value, 12, segments, "forward")).toEqual({ start: 4, end: labelEnd })
+  })
+
+  // A URL that has NOT folded is ordinary text the link scanner happens to
+  // match — `foldLinks` never folds the one under the caret, so this is exactly
+  // the URL the user is still typing. Backspacing a typo must take one
+  // character, not the whole address.
+  it("leaves a raw, unfolded URL to delete one character at a time", () => {
+    const raw = "https://github.com/svenstro"
+    const rawSegments = [{ kind: "link" as const, raw, url: raw, start: 0, end: raw.length }]
+    expect(pillDeleteRange(raw, raw.length, rawSegments, "backward")).toBeNull()
+    expect(pillDeleteRange(raw, 12, rawSegments, "backward")).toBeNull()
+    expect(pillDeleteRange(raw, 12, rawSegments, "forward")).toBeNull()
+    expect(pillDeleteRange(raw, 0, rawSegments, "forward")).toBeNull()
   })
 })

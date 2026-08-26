@@ -92,7 +92,8 @@ describe("runSegments", () => {
     const ok = cmd({ name: "ok", handler: () => {} })
     const deps = makeDeps([boom, ok])
     const res = await run("/boom\n/ok\nstill here", deps)
-    expect(res.errors).toEqual([{ name: "boom", message: "kaboom" }])
+    // `occurrence` pins WHICH `/boom` failed — a name repeats, a position does not.
+    expect(res.errors).toEqual([{ name: "boom", occurrence: 0, message: "kaboom" }])
     expect(res.outgoingText).toBe("still here")
     expect(res.ranAction).toBe(true)
   })

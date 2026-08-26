@@ -27,6 +27,17 @@
       "hint": "Press Up / Down in an empty composer to recall previous messages.",
       "label": "Recall input history"
     },
+    "linkChips": {
+      "hint": "How a pasted link reads on its chip above the composer.",
+      "label": "Link chips",
+      "rulesHint": "One per line: a host, optionally followed by ` = ` and the prefix to drop. Yours are applied before the built-in ones.",
+      "rulesLabel": "Your own shortening rules",
+      "rulesPlaceholder": "wiki.corp.example = https://wiki.corp.example/display/",
+      "styleFull": "Full URL",
+      "styleHost": "Host only (github.com)",
+      "styleLabel": "Link label",
+      "styleShort": "Shortened (github.com/a/b → a/b)"
+    },
     "persistDrafts": {
       "hint": "Keep unsent text in each conversation when you switch away.",
       "label": "Save unsent drafts"

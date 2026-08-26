@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ContextChipBar } from "./context-chip-bar"
 import type { StagedAttachmentState, StagedAttachmentsValue } from "./staged-attachment-store"
 import { useChatStore } from "@/stores/chat"
+import { parseSegments } from "@/lib/slash-commands/parse-segments"
 
 // Drive the attachment side through controllable mocks; the reference side
 // reads the real chat-store.
@@ -134,24 +135,55 @@ describe("ContextChipBar", () => {
     expect(screen.queryByTestId("composer-preparing-images")).not.toBeInTheDocument()
   })
 
-  it("includes recognized web links in the same context bar", () => {
-    const onRemoveLink = jest.fn()
+  // Links used to be chipped here as well. They are not any more: a link is
+  // visible in the text itself, as a blue underlined label, so a second copy
+  // above the box was pure duplication — see the header of this component.
+  it("does not chip a link that the text already shows", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar text="Read https://example.com/docs" onRemoveLink={onRemoveLink} />
+        <ContextChipBar />
       </TooltipProvider>
     )
-    expect(screen.getByText("example.com")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Remove example.com" }))
-    expect(onRemoveLink).toHaveBeenCalledWith("https://example.com/docs")
+    expect(screen.queryByTestId("composer-link-chip")).toBeNull()
+  })
+})
+
+describe("ContextChipBar — only what the text cannot show", () => {
+  const KNOWN = new Set(["clear", "compact"])
+  const parse = (input: string) => parseSegments(input, (name) => KNOWN.has(name))
+
+  it("chips a FAILED command inside the same context group", () => {
+    render(
+      <TooltipProvider>
+        <ContextChipBar
+          segments={parse("/compact /clear")}
+          commandErrors={[{ name: "clear", message: "boom" }]}
+          onRemoveCommand={jest.fn()}
+        />
+      </TooltipProvider>
+    )
+    const group = screen.getByRole("group", { name: /attached files, links, and references/i })
+    expect(group).toContainElement(screen.getByTestId("failed-command-pill-clear"))
   })
 
-  it("renders no link chips for ordinary draft text", () => {
+  it("keeps staged commands out of the row — each is a pill on its own token", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar text="ordinary draft" onRemoveLink={jest.fn()} />
+        <ContextChipBar segments={parse("/compact /clear")} onRemoveCommand={jest.fn()} />
       </TooltipProvider>
     )
-    expect(screen.queryByText("example.com")).toBeNull()
+    expect(screen.queryByTestId("failed-command-pill-clear")).toBeNull()
+  })
+
+  // jsdom lays nothing out, so every child reports offsetTop 0 and the fold
+  // stays disengaged. That is the honest answer for an unlaid-out row; the
+  // arithmetic itself is covered in `use-overflow-fold.test.ts`.
+  it("shows no fold toggle when nothing overflows", () => {
+    render(
+      <TooltipProvider>
+        <ContextChipBar segments={parse("/compact /clear")} onRemoveCommand={jest.fn()} />
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("composer-context-fold")).toBeNull()
   })
 })

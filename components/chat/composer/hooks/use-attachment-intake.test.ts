@@ -284,10 +284,4 @@ describe("misc intake", () => {
     act(() => view.result.current.openFileDialog())
     expect(click).toHaveBeenCalled()
   })
-
-  it("removeLink strips the URL from the draft", () => {
-    const { view, state } = mount({ initialText: "see https://example.com/docs now" })
-    act(() => view.result.current.removeLink("https://example.com/docs"))
-    expect(state.value).not.toContain("https://example.com/docs")
-  })
 })

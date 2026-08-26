@@ -271,7 +271,10 @@
       "unavailable": "/{name} 暂不可用。"
     },
     "context": {
-      "ariaLabel": "已附加的文件、链接与引用"
+      "ariaLabel": "已附加的文件、链接与引用",
+      "foldCollapse": "收起",
+      "foldCollapseShort": "收起",
+      "foldExpand": "展开另外 {count} 项"
     },
     "draftRestore": {
       "dismiss": "关闭",

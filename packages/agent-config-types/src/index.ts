@@ -3426,6 +3426,22 @@ export interface AppSettings {
     /** Persist unsent drafts per session in Dexie and restore on session switch. Default true. */
     persistDrafts?: boolean
     /**
+     * How a recognised link reads on its composer chip.
+     *
+     * `style` picks the shape: `"short"` (default) applies the rules below and
+     * the built-in ones, `"host"` shows only the hostname (the historical
+     * behaviour), `"full"` shows the whole URL. `rules` are consulted BEFORE
+     * the built-ins, so a team can both add an internal host and override a
+     * known one; each drops a literal prefix from the URL to form the label.
+     *
+     * Presentation only — nothing here changes which links get dereferenced.
+     * See `lib/chat/link-display.ts`.
+     */
+    linkChips?: {
+      style?: import("@/lib/chat/link-display").LinkDisplayStyle
+      rules?: Array<{ host: string; strip?: string }>
+    }
+    /**
      * Thinking tiers to HIDE from the composer's effort control. A user who
      * only ever works at three depths gets a three-stop track instead of six,
      * which is the difference between a control they aim at and one they drag

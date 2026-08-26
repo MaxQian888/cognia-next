@@ -10,16 +10,11 @@
 import { estimateTokenCount } from "@cognia/document/document-processor"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
+// Recognition (what a URL looks like) lives in `link-token.ts` — the parser and
+// the chip overlay need the identical rule and cannot depend on this module.
+import { findUrlSpans, trimUrlPunctuation } from "./link-token"
 
 export const MAX_LINK_CONTEXTS = 3
-
-const URL_CANDIDATE_RE = /https?:\/\/[^\s<>"'`]+/giu
-const SIMPLE_TRAILING_PUNCTUATION = /[.,;:!?]$/u
-const CLOSING_PAIRS = [
-  ["(", ")"],
-  ["[", "]"],
-  ["{", "}"],
-] as const
 
 interface FoundUrl {
   raw: string
@@ -42,26 +37,6 @@ export interface LinkContextResult {
   tokens: number
 }
 
-function count(value: string, needle: string): number {
-  return value.split(needle).length - 1
-}
-
-function trimUrlPunctuation(value: string): string {
-  let next = value
-  while (SIMPLE_TRAILING_PUNCTUATION.test(next)) next = next.slice(0, -1)
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const [open, close] of CLOSING_PAIRS) {
-      if (next.endsWith(close) && count(next, close) > count(next, open)) {
-        next = next.slice(0, -1)
-        changed = true
-      }
-    }
-  }
-  return next
-}
-
 export function normalizeHttpUrl(value: string): string | null {
   const trimmed = trimUrlPunctuation(value.trim())
   if (!trimmed) return null
@@ -78,8 +53,7 @@ function findHttpUrls(text: string, maxLinks = MAX_LINK_CONTEXTS): FoundUrl[] {
   if (maxLinks <= 0) return []
   const found: FoundUrl[] = []
   const seen = new Set<string>()
-  for (const match of text.matchAll(URL_CANDIDATE_RE)) {
-    const raw = trimUrlPunctuation(match[0])
+  for (const { raw } of findUrlSpans(text)) {
     const normalized = normalizeHttpUrl(raw)
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
@@ -93,17 +67,12 @@ export function extractHttpUrls(text: string, maxLinks = MAX_LINK_CONTEXTS): str
   return findHttpUrls(text, maxLinks).map((item) => item.normalized)
 }
 
-export function removeHttpUrl(text: string, normalizedUrl: string): string {
-  const match = findHttpUrls(text, Number.POSITIVE_INFINITY).find(
-    (item) => item.normalized === normalizedUrl
-  )
-  if (!match) return text
-  return text
-    .replace(match.raw, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/ +\n/g, "\n")
-    .trim()
-}
+// `removeHttpUrl` lived here to back the composer's per-link "remove" chip.
+// That chip (`components/chat/composer/link-context.tsx`) and its `removeLink`
+// wiring are gone — links now read as styled text in the box itself, and the
+// way to stop one being dereferenced is to delete it from the message. The
+// helper had no caller left, so it is not kept as a decoy: `git log` has it if
+// an explicit opt-out surface is ever wanted back.
 
 async function defaultReadUrl(url: string): Promise<LinkContextReaderResult | null> {
   const { buildEnrichDeps } = await import("@/lib/capture/enrich")

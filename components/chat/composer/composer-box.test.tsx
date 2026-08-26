@@ -17,8 +17,12 @@ jest.mock("@/components/mobile/chat/composer-plus-menu", () => ({
   ComposerPlusMenu: () => <button data-testid="plus-menu">plus</button>,
 }))
 jest.mock("./char-counter", () => ({ CharCounter: () => null }))
+// Stubbed, but not to nothing: the overlay is the composer's TEXT layer now,
+// so whether it is painting is part of the box's arrangement.
 jest.mock("../composer-chip-overlay", () => ({
-  ComposerChipOverlay: () => null,
+  ComposerChipOverlay: ({ hidden }: { hidden?: boolean }) => (
+    <div data-testid="composer-chip-overlay" data-hidden={hidden ? "true" : undefined} />
+  ),
   TEXTAREA_TYPOGRAPHY: "",
 }))
 jest.mock("./composer-ghost-text", () => ({ ComposerGhostText: () => null }))
@@ -303,5 +307,48 @@ describe("ComposerBox — resolved tokens actually reach the DOM", () => {
     )
     render(<ComposerBox {...props({ skin })} />)
     expect(screen.getByLabelText("ariaMessage").className).toContain("font-mono")
+  })
+})
+
+describe("ComposerBox — the preview owns the words", () => {
+  const withPreview = (on: boolean) =>
+    props({
+      textInput: { value: "review {{module}} now", setInput: jest.fn() },
+      preview: { on, text: "review login now", toggle: jest.fn() },
+    })
+
+  it("stands the chip overlay down while the parameter preview is showing", () => {
+    // The overlay paints the composer's text now. In preview mode a second box
+    // renders the SUBSTITUTED sentence, and both drawing at once is exactly the
+    // doubled, overlapping text the preview toggle used to produce.
+    render(<ComposerBox {...withPreview(true)} />)
+    expect(screen.getByTestId("composer-chip-overlay")).toHaveAttribute("data-hidden", "true")
+    expect(screen.getByTestId("composer-param-preview")).toHaveTextContent("review login now")
+  })
+
+  it("paints the overlay again once the preview is off", () => {
+    render(<ComposerBox {...withPreview(false)} />)
+    expect(screen.getByTestId("composer-chip-overlay")).not.toHaveAttribute("data-hidden")
+  })
+
+  it("moves the bookmark into the corner when there is no preview toggle", () => {
+    render(<ComposerBox {...props({ saveAsTemplate: jest.fn(), preview: null })} />)
+    expect(screen.getByTestId("composer-save-as-template").className).toContain("end-1")
+    expect(screen.queryByTestId("composer-param-preview-toggle")).toBeNull()
+  })
+
+  it("gives the corner back to the preview toggle when the message has parameters", () => {
+    render(<ComposerBox {...props({ ...withPreview(false), saveAsTemplate: jest.fn() })} />)
+    expect(screen.getByTestId("composer-save-as-template").className).toContain("end-7")
+    expect(screen.getByTestId("composer-param-preview-toggle").className).toContain("end-1")
+  })
+
+  it("keeps the two corner controls clickable above the text layers", () => {
+    // Both sit inside the textarea's box. A positioned element with
+    // `z-index: auto` paints under a sibling with a positive one, and hit
+    // testing follows paint order — so without an explicit z they were dead.
+    render(<ComposerBox {...props({ ...withPreview(false), saveAsTemplate: jest.fn() })} />)
+    expect(screen.getByTestId("composer-save-as-template").className).toContain("z-[3]")
+    expect(screen.getByTestId("composer-param-preview-toggle").className).toContain("z-[3]")
   })
 })

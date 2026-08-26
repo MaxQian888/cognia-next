@@ -100,6 +100,61 @@ describe("detectTrigger — slash mode", () => {
       detectTrigger(value, value.length, { hasCommandPrefix: hasPrefix(["clear", "compact"]) })
     ).toMatchObject({ kind: "slash", tokenStart: 9, query: "cle" })
   })
+
+  it("flags the caret in the trailing space after a chain as past-argument", () => {
+    // `/clear /resume ▮` — the anchor falls back to the first token, which is
+    // fine for identifying the command but must NOT reopen the panel: picking a
+    // row there overwrote `/clear`.
+    const value = "/clear /resume "
+    const tg = detectTrigger(value, value.length, {
+      hasCommandPrefix: hasPrefix(["clear", "resume"]),
+    })
+    expect(tg).toMatchObject({ kind: "slash", query: "clear", caretPastArgument: true })
+    expect(tg?.argumentQuery).toBeUndefined()
+  })
+
+  it("does not flag past-argument while the caret is still in the command word", () => {
+    expect(detectTrigger("/clear", 6)?.caretPastArgument).toBeUndefined()
+    expect(detectTrigger("/clear ", 7)?.caretPastArgument).toBeUndefined()
+  })
+})
+
+describe("detectTrigger — links are inert (parse-segments rule 2c)", () => {
+  const hasPrefix = (names: string[]) => (q: string) => names.some((n) => n.startsWith(q))
+
+  it("completes a command typed after a pasted link", () => {
+    const value = "https://github.com/svenstaro/genact /cl"
+    expect(
+      detectTrigger(value, value.length, { hasCommandPrefix: hasPrefix(["clear"]) })
+    ).toMatchObject({ kind: "slash", tokenStart: 36, query: "cl" })
+  })
+
+  it("does not trigger while the caret is still inside the leading link", () => {
+    const value = "https://github.com/a /clear"
+    expect(detectTrigger(value, 10, { hasCommandPrefix: hasPrefix(["clear"]) })).toBeNull()
+  })
+
+  it("keeps chaining across a link that sits between two commands", () => {
+    const value = "/clear https://x.dev/a /res"
+    expect(
+      detectTrigger(value, value.length, { hasCommandPrefix: hasPrefix(["clear", "resume"]) })
+    ).toMatchObject({ kind: "slash", tokenStart: 23, query: "res" })
+  })
+
+  it("completes a command after a FOLDED link, which has no scheme to see", () => {
+    const value = "svenstaro/genact /cl"
+    expect(
+      detectTrigger(value, value.length, {
+        hasCommandPrefix: hasPrefix(["clear"]),
+        isLinkToken: (token) => token === "svenstaro/genact",
+      })
+    ).toMatchObject({ kind: "slash", tokenStart: 17, query: "cl" })
+  })
+
+  it("leaves an ordinary word before a slash as prose", () => {
+    // Only LINKS are inert — a bare word still means "this line is not a chain".
+    expect(detectTrigger("see /clear", 10, { hasCommandPrefix: hasPrefix(["clear"]) })).toBeNull()
+  })
 })
 
 describe("detectTrigger — `!` / `#` first-line modes", () => {

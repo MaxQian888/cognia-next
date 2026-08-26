@@ -10,6 +10,15 @@
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { formatLinkRules, parseLinkRules, type LinkDisplayStyle } from "@/lib/chat/link-display"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_COMPOSER_SKIN } from "@/lib/chat/composer-skin"
@@ -73,6 +82,12 @@ export function ComposerBehaviorCard() {
   // `components/chat/composer/effort-selector-view.ts`), so an absent value
   // reads as on.
   const effortSliderMode = (cb.effortSelectorMode ?? DEFAULT_EFFORT_SELECTOR_MODE) === "slider"
+  // Link-chip presentation. `short` is the default shape; the rule list is
+  // edited as text (one per line) because that is how people think about a
+  // list of hosts, and it round-trips through `parseLinkRules`.
+  const linkChips = cb.linkChips ?? {}
+  const linkStyle: LinkDisplayStyle = linkChips.style ?? "short"
+  const rulesText = formatLinkRules(linkChips.rules ?? [])
 
   function update(patch: Partial<ComposerBehavior>): void {
     void save({ composerBehavior: { ...cb, ...patch } })
@@ -146,6 +161,69 @@ export function ComposerBehaviorCard() {
         checked={effortSliderMode}
         onChange={(next) => update({ effortSelectorMode: next ? "slider" : "list" })}
       />
+
+      {/* Link chips: presentation only. Nothing here changes which links get
+          read at send time — see `lib/chat/link-display.ts`. */}
+      <div className="space-y-3 border-t pt-4">
+        <div className="space-y-0.5">
+          <Label className="text-sm">{t("linkChips.label")}</Label>
+          <p className="text-xs text-muted-foreground">{t("linkChips.hint")}</p>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="composer-link-style" className="text-sm font-normal">
+            {t("linkChips.styleLabel")}
+          </Label>
+          <Select
+            value={linkStyle}
+            onValueChange={(next) =>
+              update({ linkChips: { ...linkChips, style: next as LinkDisplayStyle } })
+            }
+          >
+            <SelectTrigger
+              id="composer-link-style"
+              className="w-64"
+              aria-label={t("linkChips.styleLabel")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="short">{t("linkChips.styleShort")}</SelectItem>
+              <SelectItem value="host">{t("linkChips.styleHost")}</SelectItem>
+              <SelectItem value="full">{t("linkChips.styleFull")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="composer-link-rules" className="text-sm font-normal">
+            {t("linkChips.rulesLabel")}
+          </Label>
+          {/*
+            Uncontrolled, keyed by the saved text and committed on blur: rules
+            are only well-formed between keystrokes, so parsing on every one
+            would delete a host the moment the user typed the `=` after it.
+            The key re-seeds the field if the value changes elsewhere (another
+            device syncing this shared setting).
+          */}
+          <Textarea
+            id="composer-link-rules"
+            key={rulesText}
+            defaultValue={rulesText}
+            rows={3}
+            spellCheck={false}
+            placeholder={t("linkChips.rulesPlaceholder")}
+            aria-label={t("linkChips.rulesLabel")}
+            className="font-mono text-xs"
+            onBlur={(event) => {
+              const next = parseLinkRules(event.currentTarget.value)
+              if (formatLinkRules(next) === rulesText) return
+              update({ linkChips: { ...linkChips, rules: next } })
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{t("linkChips.rulesHint")}</p>
+        </div>
+      </div>
     </div>
   )
 }

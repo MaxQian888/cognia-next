@@ -13,13 +13,15 @@
 //     whole rest of the message, which silently killed both popovers).
 //   - Same-line command chaining (`/compact /clear`, see `parse-segments.ts`
 //     rule 2b) anchors the popover to the token the caret is in, as long as
-//     every token before it also starts with `/`.
+//     every token before it also starts with `/` — or is a link, which is inert
+//     (rule 2c), so `https://… /clear` still completes.
 //   - `@path` triggers anywhere as long as the `@` follows whitespace or the
 //     line start. This skips email addresses (`user@host`).
 //   - The token ends at the next whitespace; backspacing over the trigger
 //     char dismisses the popover.
 
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
+import { isHttpUrlToken } from "@/lib/chat/link-token"
 import { tokenizeLine } from "@/lib/slash-commands/parse-segments"
 import { docsProviderPrefixes } from "@/lib/docs-providers"
 
@@ -69,6 +71,19 @@ export interface ComposerTrigger {
   argumentEnd?: number
   /** First argument text up to the caret, used for inline option completion. */
   argumentQuery?: string
+  /**
+   * True when the caret has moved past everything this trigger could complete:
+   * the command word is finished AND the caret is beyond its first argument
+   * token. The command is still IDENTIFIED — the hint bar wants that while you
+   * type the rest of the arguments — but there is nothing left to pick, so the
+   * completion popover must stay shut.
+   *
+   * Without this the popover reopened on the FIRST command of a chain the
+   * moment the caret sat in the trailing space (`/clear /resume ▮`), showing
+   * "clear" in its search box and offering to overwrite `/clear` with whatever
+   * you picked.
+   */
+  caretPastArgument?: boolean
 }
 
 export interface DetectTriggerOptions {
@@ -94,6 +109,13 @@ export interface DetectTriggerOptions {
    * commands that take args is unaffected.
    */
   hasCommandPrefix?: (query: string) => boolean
+  /**
+   * Is this token a link? Defaults to {@link isHttpUrlToken}. The composer
+   * widens it so a FOLDED link (`svenstaro/genact`, see `lib/chat/link-fold.ts`)
+   * stays as inert as the URL it replaced — otherwise folding a link would kill
+   * command completion on the same line.
+   */
+  isLinkToken?: (token: string) => boolean
 }
 
 const SLASH_TRIGGER: TriggerKind = "slash"
@@ -154,10 +176,13 @@ function namespacePrefixesFor(
  * starts with `/`, that token becomes the anchor instead — so `/compact /cl`
  * completes `cl` rather than treating it as `/compact`'s argument.
  *
+ * Links (rule 2c) are inert: a `https://…` token neither anchors nor breaks a
+ * chain, so a message that opens with a pasted URL can still take a command.
+ *
  * Two deliberate limits:
  *   - The caret's own token must literally start with `/`. A caret in empty
  *     space after `/pet ` belongs to no token, so it falls back to the first
- *     token and the argument-completion branch keeps working.
+ *     command token and the argument-completion branch keeps working.
  *   - Only tokens BEFORE the caret's token are checked. Requiring the whole
  *     line would break `/help /model opus` (the trailing `opus` would drag the
  *     anchor back to `/help`, and picking would then overwrite the wrong token).
@@ -167,22 +192,34 @@ function slashAnchor(
   lineStart: number,
   lineEnd: number,
   caret: number,
-  hasCommandPrefix?: (query: string) => boolean
+  hasCommandPrefix?: (query: string) => boolean,
+  isLinkToken: (token: string) => boolean = isHttpUrlToken
 ): number | null {
   const tokens = tokenizeLine(value, lineStart, lineEnd)
-  if (tokens.length === 0 || value[tokens[0].start] !== "/") return null
+  if (tokens.length === 0) return null
+  const isLink = (index: number): boolean =>
+    isLinkToken(value.slice(tokens[index].start, tokens[index].end))
+
+  // Leading links are inert context (parse-segments rule 2c): `<url> /cl` still
+  // completes `cl`. Anything else before the first `/` token is prose.
+  let first = 0
+  while (first < tokens.length && isLink(first)) first++
+  if (first >= tokens.length || value[tokens[first].start] !== "/") return null
 
   const index = tokens.findIndex((tok) => caret >= tok.start && caret <= tok.end)
-  if (index < 0) return tokens[0].start
-  for (let j = 1; j <= index; j++) {
-    if (value[tokens[j].start] !== "/") return tokens[0].start
+  if (index <= first) return tokens[first].start
+  for (let j = first + 1; j <= index; j++) {
+    if (value[tokens[j].start] !== "/" && !isLink(j)) return tokens[first].start
   }
-  if (index > 0 && hasCommandPrefix) {
+  // The caret's OWN token has to be a command word — a caret inside a trailing
+  // link belongs to the first command's argument region, not to a new command.
+  if (value[tokens[index].start] !== "/" || isLink(index)) return tokens[first].start
+  if (hasCommandPrefix) {
     // Distinguish a chained command from a path argument: `/add-dir /usr/loc`
     // matches no command name, so keep the first-token anchor and let the
     // argument-completion branch handle it.
     const query = value.slice(tokens[index].start + 1, Math.min(caret, tokens[index].end))
-    if (!hasCommandPrefix(query)) return tokens[0].start
+    if (!hasCommandPrefix(query)) return tokens[first].start
   }
   return tokens[index].start
 }
@@ -227,24 +264,37 @@ export function detectTrigger(
     const lineStart = value.lastIndexOf("\n", caret - 1) + 1
     const nextNewline = value.indexOf("\n", lineStart)
     const lineEnd = nextNewline === -1 ? value.length : nextNewline
-    const slashPos = slashAnchor(value, lineStart, lineEnd, caret, opts?.hasCommandPrefix)
+    const slashPos = slashAnchor(
+      value,
+      lineStart,
+      lineEnd,
+      caret,
+      opts?.hasCommandPrefix,
+      opts?.isLinkToken
+    )
     if (slashPos !== null && caret >= slashPos) {
       const tokenEnd = findTokenEnd(value, slashPos + 1, lineEnd)
-      let argumentFields: Pick<ComposerTrigger, "argumentStart" | "argumentEnd" | "argumentQuery"> =
-        {}
+      let argumentFields: Pick<
+        ComposerTrigger,
+        "argumentStart" | "argumentEnd" | "argumentQuery" | "caretPastArgument"
+      > = {}
       if (caret > tokenEnd) {
         let argumentStart = tokenEnd
         while (argumentStart < lineEnd && /\s/.test(value[argumentStart])) {
           argumentStart++
         }
         const argumentEnd = findTokenEnd(value, argumentStart, lineEnd)
-        if (caret <= argumentEnd) {
-          argumentFields = {
-            argumentStart,
-            argumentEnd,
-            argumentQuery: value.slice(argumentStart, caret),
-          }
-        }
+        argumentFields =
+          caret <= argumentEnd
+            ? {
+                argumentStart,
+                argumentEnd,
+                argumentQuery: value.slice(argumentStart, caret),
+              }
+            : // Past the first argument: the command is still the one being
+              // edited (the hint bar keeps showing it) but nothing here is
+              // completable.
+              { caretPastArgument: true }
       }
       return {
         kind: SLASH_TRIGGER,

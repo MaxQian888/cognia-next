@@ -27,6 +27,17 @@
       "hint": "在空输入框中按上/下方向键调出历史消息。",
       "label": "调出输入历史"
     },
+    "linkChips": {
+      "hint": "粘贴的链接在输入框上方的徽标中如何显示。",
+      "label": "链接徽标",
+      "rulesHint": "每行一条：域名，可再跟 ` = ` 和要去掉的前缀。自定义规则先于内置规则生效。",
+      "rulesLabel": "自定义缩写规则",
+      "rulesPlaceholder": "wiki.corp.example = https://wiki.corp.example/display/",
+      "styleFull": "完整网址",
+      "styleHost": "仅域名（github.com）",
+      "styleLabel": "链接文字",
+      "styleShort": "缩写（github.com/a/b → a/b）"
+    },
     "persistDrafts": {
       "hint": "切换对话时保留每个对话中未发送的文本。",
       "label": "保存未发送草稿"

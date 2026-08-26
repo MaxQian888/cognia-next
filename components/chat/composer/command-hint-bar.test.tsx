@@ -98,3 +98,15 @@ describe("CommandHintBar", () => {
     expect(screen.getByTestId("command-hint-bar")).not.toHaveTextContent("needsArgs")
   })
 })
+
+describe("resolveCommandHint — past the first argument", () => {
+  it("keeps naming the command once the caret reaches the second argument", () => {
+    // `caretPastArgument` is the only signal there: `argumentStart` is unset
+    // beyond the first argument token, which used to make the hint vanish at
+    // the exact moment a multi-argument command still needed it.
+    const value = "/review src/a.ts src/b.ts"
+    const trigger = detectTrigger(value, value.length)
+    expect(trigger?.caretPastArgument).toBe(true)
+    expect(resolveCommandHint(trigger, commandMap, value)?.command.name).toBe("review")
+  })
+})

@@ -101,6 +101,11 @@ function setStatus(status: ChatStatus): void {
   })
 }
 
+// The first full Composer mount in the test body costs as much as the cold-open
+// hook under parallel workers and overruns the 5s default the same way, so the
+// file gets the same 30s budget.
+jest.setTimeout(30_000)
+
 // Cold-open Dexie can exceed the default 5s hook budget on the first test.
 beforeEach(async () => {
   useChatStore.getState().clear()
@@ -146,7 +151,9 @@ describe("composer primary button", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
 
     fireEvent.click(send)
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("also check the tests", []))
+    // Third argument is the template run this turn was written from — `null`
+    // for a hand-typed turn with no parameterized template behind it.
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("also check the tests", [], null))
     expect(onStop).not.toHaveBeenCalled()
   })
 

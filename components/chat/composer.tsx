@@ -68,6 +68,10 @@ import {
 } from "@/lib/chat/composer-skin"
 import { resolveStylePack } from "@/types/appearance/style-pack"
 import { buildLinkContextBlocks, mergeContextBlocks } from "@/lib/chat/link-context"
+import { isHttpUrlToken } from "@/lib/chat/link-token"
+import { expandFoldedLinks } from "@/lib/chat/link-fold"
+import { requestBrowserUrl } from "@/lib/browser/open-url-request"
+import { openExternal } from "@/lib/tauri/opener"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,7 +108,8 @@ import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
-import { CommandQueueBar } from "./composer/command-queue-bar"
+import { hasSlashCompletion } from "./composer/slash-completion"
+import { useLinkFolding } from "./composer/hooks/use-link-folding"
 import { CommandHintBar } from "./composer/command-hint-bar"
 import { resolveSendButton } from "./composer/send-button-mode"
 import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
@@ -139,7 +144,11 @@ import {
   type SystemMessageBlock,
   type SlashCommandResultBlock,
 } from "@/lib/slash-commands/system-blocks"
-import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import {
+  parseSegments,
+  splitLinkSegments,
+  splitMentionSegments,
+} from "@/lib/slash-commands/parse-segments"
 import type { ParamSegment } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { listParamTokens, splitParamSegments } from "@/lib/chat/template/param-segments"
@@ -549,7 +558,6 @@ function ComposerInner(props: InnerProps) {
     onDragLeave,
     onDrop,
     isDragging,
-    removeLink,
     pastedBlocks,
     removePastedBlock,
     isPreparingAttachments,
@@ -694,12 +702,44 @@ function ComposerInner(props: InnerProps) {
     [customCommands, pluginCommands]
   )
 
+  // A pasted URL is FOLDED to its short label in the text, with the full URL
+  // held aside (`lib/chat/link-fold.ts`). Every consumer below therefore has to
+  // treat a label as a link: the parser (so a command beside one still runs),
+  // the overlay (so it paints blue), and the send/clipboard paths (so the URL
+  // comes back).
+  const linkFolding = useLinkFolding({
+    value: controller.textInput.value,
+    setInput: controller.textInput.setInput,
+    textareaRef,
+    setCaret,
+    display: composerBehavior?.linkChips,
+  })
+  // Destructured so this depends on the PREDICATE, not on the whole hook
+  // object: `isFoldedToken` only changes when the folded-link map does, whereas
+  // the object also carries `fold`/`onCut`, whose identities track the textarea
+  // callbacks. Widening this dep re-ran the `parseSegments` memo hanging off it
+  // — and the overlay/trigger memos below it — on every composer render.
+  const { isFoldedToken } = linkFolding
+  const isLinkToken = useCallback(
+    (token: string) => isHttpUrlToken(token) || isFoldedToken(token),
+    [isFoldedToken]
+  )
+  // The `useState` setter behind the hook — referentially stable, so the draft
+  // effects can depend on it without re-running on every render.
+  const setFoldedLinks = linkFolding.setLinks
+  // The MAP, not the hook object: `submit` is the biggest callback in this file
+  // and this is the only field of the hook it reads. Depending on the whole
+  // object rebuilt it on every render, since `fold`/`onCut` track the textarea
+  // callbacks — the same trap the two destructures above exist to avoid.
+  const foldedLinks = linkFolding.links
+
   // Segment the live input for the submit-time command pipeline (`runSegments`)
   // and the `hasCommand` check. NO mentions here — `runSegments` expects the
   // plain command/text view.
   const segments = useMemo(
-    () => parseSegments(controller.textInput.value, (name) => commandMap.has(name)),
-    [controller.textInput.value, commandMap]
+    () =>
+      parseSegments(controller.textInput.value, (name) => commandMap.has(name), { isLinkToken }),
+    [controller.textInput.value, commandMap, isLinkToken]
   )
 
   // Which spans of the input are code, so `{{parameter}}` tokens inside a fenced
@@ -716,8 +756,16 @@ function ComposerInner(props: InnerProps) {
   // sub-split) so we don't run a second full tokenizer pass over the input on
   // every keystroke.
   const overlaySegments = useMemo(
-    () => splitParamSegments(splitMentionSegments(segments), codeRanges),
-    [segments, codeRanges]
+    // mentions → links → params. Each pass only ever sub-splits TEXT segments,
+    // so the order is about which pill wins a shared span: an `@mention` and a
+    // link cannot overlap (a link token has no `@` start), and `{{param}}`
+    // braces never appear inside a URL run.
+    () =>
+      splitParamSegments(
+        splitLinkSegments(splitMentionSegments(segments), linkFolding.spans),
+        codeRanges
+      ),
+    [segments, codeRanges, linkFolding.spans]
   )
 
   // ── `{{parameter}}` values ────────────────────────────────────────────────
@@ -1042,6 +1090,7 @@ function ComposerInner(props: InnerProps) {
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: resolvedMentionMode,
       hasCommandPrefix,
+      isLinkToken,
     })
     if (!tg) return null
     if (
@@ -1052,7 +1101,26 @@ function ComposerInner(props: InnerProps) {
       return null
     }
     return tg
-  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode, hasCommandPrefix])
+  }, [
+    controller.textInput.value,
+    caret,
+    popoverDismissed,
+    resolvedMentionMode,
+    hasCommandPrefix,
+    isLinkToken,
+  ])
+
+  // The trigger the COMPLETION PANEL acts on. `trigger` itself stays wider on
+  // purpose (the hint bar and ghost-text suppression still want to know which
+  // command the caret is in); this one is null whenever the panel has nothing
+  // left to offer, and it gates the popover, its keyboard capture and pill
+  // delete together. One verdict, so a panel that is not showing can never eat
+  // a keystroke — which is how Enter used to overwrite the first command of a
+  // chained line instead of sending the message.
+  const completionTrigger = useMemo(
+    () => (hasSlashCompletion(trigger, slashCommands) ? trigger : null),
+    [trigger, slashCommands]
+  )
 
   useEffect(() => {
     if (!popoverDismissed) return
@@ -1064,7 +1132,14 @@ function ComposerInner(props: InnerProps) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
-  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode, hasCommandPrefix])
+  }, [
+    controller.textInput.value,
+    caret,
+    popoverDismissed,
+    resolvedMentionMode,
+    hasCommandPrefix,
+    isLinkToken,
+  ])
 
   // Drop one staged command from the input. Works on the absolute segment
   // range, then eats a single adjoining separator so removing the middle of
@@ -1400,6 +1475,10 @@ function ComposerInner(props: InnerProps) {
     // Snapshot the folded-paste bodies too: the optimistic clear wipes them, so
     // the send (and a restore-on-failure) reads from this stable map.
     const pasteMap = pastedBlocks
+    // Same for the folded links: the text carries short labels, and this is the
+    // map that turns them back into the URLs the user actually wrote.
+    const linkMap = foldedLinks
+    const restoreText = (text: string) => expandFoldedLinks(expandPastes(text, pasteMap), linkMap)
 
     // ── Optimistic clear ───────────────────────────────────────────────────
     // Natural chat UX: the box empties the instant you hit send — not after the
@@ -1417,6 +1496,7 @@ function ComposerInner(props: InnerProps) {
       // thrown send (e.g. declining the oversize dialog).
       controller.textInput.clear()
       setPastedBlocks({})
+      setFoldedLinks({})
       cleared = true
     }
     // Run only once a send is CONFIRMED successful: now it is safe to drop (and
@@ -1445,6 +1525,10 @@ function ComposerInner(props: InnerProps) {
       if (!cleared) return
       controller.textInput.setInput(text)
       setPastedBlocks(pasteMap)
+      // The text comes back holding SHORT labels, so the label→URL map has to
+      // come back with it. Without this a failed send left every folded link as
+      // literal prose, and the retry shipped `··owner/repo` to the model.
+      setFoldedLinks(linkMap)
       cleared = false
       // Attachments were never cleared, so there is nothing to restore — the
       // staged files are still live in the controller.
@@ -1593,7 +1677,7 @@ function ComposerInner(props: InnerProps) {
         let sent = true
         if (outgoingText.length > 0 || filesToSend.length > 0) {
           sent = await props.onSubmit(
-            expandPastes(outgoingText, pasteMap),
+            restoreText(outgoingText),
             filesToSend,
             precomputed,
             templateRun
@@ -1621,7 +1705,7 @@ function ComposerInner(props: InnerProps) {
       }
 
       const sent = await props.onSubmit(
-        expandPastes(pipelineText, pasteMap),
+        restoreText(pipelineText),
         filesToSend,
         precomputed,
         templateRun
@@ -1670,6 +1754,8 @@ function ComposerInner(props: InnerProps) {
     history,
     clearAfterSendEnabled,
     pastedBlocks,
+    foldedLinks,
+    setFoldedLinks,
     noteCommandUsed,
     isMobile,
   ])
@@ -1743,10 +1829,10 @@ function ComposerInner(props: InnerProps) {
       // Japanese, etc.) candidate doesn't accidentally confirm/navigate the
       // popover. `nativeEvent.isComposing` is authoritative for the keystroke
       // that ends composition; the state flag is a belt-and-suspenders backup.
-      if (trigger && (isComposing || e.nativeEvent.isComposing)) {
+      if (completionTrigger && (isComposing || e.nativeEvent.isComposing)) {
         return
       }
-      if (trigger) {
+      if (completionTrigger) {
         if (e.key === "Escape") {
           e.preventDefault()
           dismissPopover()
@@ -1764,14 +1850,14 @@ function ComposerInner(props: InnerProps) {
         }
         // Tab selects the highlighted item. Bash mode has no list to confirm,
         // so Tab falls through there to default textarea behavior.
-        if (e.key === "Tab" && !e.shiftKey && trigger.kind !== "bash") {
+        if (e.key === "Tab" && !e.shiftKey && completionTrigger.kind !== "bash") {
           e.preventDefault()
           popoverRef.current?.confirm()
           return
         }
         if (e.key === "Enter" && !e.shiftKey) {
           // Bash mode: Enter should fall through to submit (bash run).
-          if (trigger.kind === "bash") {
+          if (completionTrigger.kind === "bash") {
             e.preventDefault()
             void submit()
             return
@@ -1788,7 +1874,7 @@ function ComposerInner(props: InnerProps) {
       // popover is open (mid-typing edits stay normal), not composing, plain key
       // (let ⌥/⌘ word/line deletes through), and the selection is collapsed.
       if (
-        !trigger &&
+        !completionTrigger &&
         !isComposing &&
         !e.nativeEvent.isComposing &&
         (e.key === "Backspace" || e.key === "Delete") &&
@@ -1832,7 +1918,8 @@ function ComposerInner(props: InnerProps) {
         !e.metaKey &&
         !e.ctrlKey &&
         !e.altKey &&
-        !trigger &&
+        // No open panel — with one showing, Tab belongs to its list.
+        !completionTrigger &&
         !ghost.ghost &&
         paramTokens.length > 0
       ) {
@@ -1851,7 +1938,7 @@ function ComposerInner(props: InnerProps) {
       // the ranked alternatives (the same bindings VS Code uses for cycling
       // inline suggestions). All fall through to existing behavior when there
       // is no ghost to act on.
-      if (!trigger && ghost.ghost) {
+      if (!completionTrigger && ghost.ghost) {
         if (e.key === "Tab" && !e.shiftKey) {
           if (acceptGhost()) {
             e.preventDefault()
@@ -1918,7 +2005,7 @@ function ComposerInner(props: InnerProps) {
       }
     },
     [
-      trigger,
+      completionTrigger,
       permissionMode,
       setPermissionMode,
       dismissPopover,
@@ -1956,9 +2043,21 @@ function ComposerInner(props: InnerProps) {
       // Last submit's per-command failures describe text the user has now
       // changed — drop them rather than leave stale red pills on the queue bar.
       setCommandErrors((current) => (current.length > 0 ? [] : current))
+      // Fold any URL the caret has moved past. Never the one being typed — the
+      // caret rule inside `foldLinks` sees to that — and never mid-composition,
+      // where rewriting the value would drop the IME's in-flight text.
+      if (!isComposing) {
+        linkFolding.fold(e.target.value, e.target.selectionStart ?? e.target.value.length)
+      }
     },
-    [controller.textInput, history]
+    [controller.textInput, history, isComposing, linkFolding]
   )
+
+  // Leaving the box settles every remaining URL, including one just pasted with
+  // the caret still sitting at its end.
+  const onBlur = useCallback(() => {
+    linkFolding.fold(controller.textInput.value, -1)
+  }, [linkFolding, controller.textInput.value])
 
   const onSelect = useCallback(
     (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -1989,9 +2088,22 @@ function ComposerInner(props: InnerProps) {
       const ta = e.currentTarget
       const caretAt = ta.selectionStart ?? 0
       if (caretAt !== (ta.selectionEnd ?? caretAt)) return // a drag-selection, not a click
+      // ⌘/Ctrl-click follows a link, the way it does everywhere else. The
+      // overlay that paints the label captures no pointer events, so the click
+      // lands in the textarea and the caret tells us which token it hit.
+      if (e.metaKey || e.ctrlKey) {
+        const link = linkFolding.spans.find((span) => caretAt >= span.start && caretAt <= span.end)
+        if (link) {
+          e.preventDefault()
+          // The embedded browser pane takes it when one is open; otherwise the
+          // OS browser does, which is what every other link in the app does.
+          if (!requestBrowserUrl(link.url)) void openExternal(link.url)
+          return
+        }
+      }
       setActiveParamId(paramTokenAt(caretAt)?.paramId ?? null)
     },
-    [paramTokenAt]
+    [paramTokenAt, linkFolding.spans]
   )
 
   // ── Mobile inline mention popover ──────────────────────────────────────
@@ -2005,7 +2117,7 @@ function ComposerInner(props: InnerProps) {
   const mobileMentionOpen = !!(mobileMentionEnabled && isAtTrigger)
   const mobileMentionQuery = mobileMentionOpen ? (trigger?.query ?? "") : ""
 
-  const desktopTrigger = mobileMentionOpen ? null : trigger
+  const desktopTrigger = mobileMentionOpen ? null : completionTrigger
 
   const onPickMobileMember = useCallback(
     (member: Character) => {
@@ -2054,6 +2166,9 @@ function ComposerInner(props: InnerProps) {
       attachments.clear()
       // Folded-paste bodies are in-memory only (not persisted); drop them too.
       setPastedBlocks({})
+      // Folded links belong to the draft they were pasted into; the restore
+      // below brings this session's own map back.
+      setFoldedLinks({})
       // Parameter values belong to the draft they were typed into.
       setTemplateBinding(undefined)
       setActiveParamId(null)
@@ -2070,6 +2185,10 @@ function ComposerInner(props: InnerProps) {
         }
         // The tokens come back with the text; their values come back here.
         setTemplateBinding(row?.templateBinding)
+        // Same for links: the text holds short labels, and this is what turns
+        // them back into URLs on send. Without it a restored draft would ship
+        // `svenstaro/genact` as prose.
+        setFoldedLinks(row?.foldedLinks ?? {})
         // Attachments whose binary survived are re-staged for real: the file
         // comes back, ready to send. Seed the store with its cached extraction
         // first so re-staging doesn't re-parse a document we already read.
@@ -2122,6 +2241,7 @@ function ComposerInner(props: InnerProps) {
     persistDrafts,
     sessionId,
     draftHydratedFor,
+    setFoldedLinks,
     controller.textInput,
     attachments,
     staged,
@@ -2184,6 +2304,9 @@ function ComposerInner(props: InnerProps) {
       // stored value — omission means "preserve" in `setDraft`.
       setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments, undefined, {
         templateBinding: effectiveBinding ?? null,
+        // Passed on every save (never omitted) so removing the last link
+        // actually clears the stored map — omission means "preserve".
+        foldedLinks,
       })
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
@@ -2195,6 +2318,7 @@ function ComposerInner(props: InnerProps) {
     draftHydratedFor,
     persistDrafts,
     effectiveBinding,
+    foldedLinks,
   ])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
@@ -2303,19 +2427,18 @@ function ComposerInner(props: InnerProps) {
               className="mb-1"
             />
           ) : null}
-          <CommandQueueBar
-            segments={segments}
-            errors={commandErrors}
-            onRemove={removeCommandSegment}
-          />
+          {/* One row, and only for what has no form in the text: attachments,
+              @-references, artifacts — plus any command that FAILED. Commands
+              and links show up in the text itself. */}
           <ContextChipBar
             onRunOcr={handleRunOcrForPanel}
             ocrBusy={ocr.status === "running"}
             onExtractOcrToInput={handleExtractOcrToInput}
             onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
-            text={controller.textInput.value}
-            onRemoveLink={removeLink}
             preparingImageCount={preparingImageCount}
+            segments={segments}
+            commandErrors={commandErrors}
+            onRemoveCommand={removeCommandSegment}
           />
           <Collapse>
             <DraftRestoredAttachments
@@ -2433,6 +2556,10 @@ function ComposerInner(props: InnerProps) {
           }
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
+          isComposing={isComposing}
+          onBlur={onBlur}
+          onCopy={linkFolding.onCopy}
+          onCut={linkFolding.onCut}
           ghost={ghost}
           ghostSourceLabel={ghostSourceLabel}
           acceptGhost={acceptGhost}

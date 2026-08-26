@@ -79,6 +79,7 @@ import {
   type SlashGroup,
 } from "./composer-popover-groups"
 import { cn } from "@/lib/utils"
+import { commandArgumentOptions, hasSlashCompletion } from "./composer/slash-completion"
 import {
   COMPOSER_MEMORY_TARGETS,
   isMemoryTargetAvailable,
@@ -625,7 +626,6 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 
   useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
-  const open = trigger !== null && anchor !== null
   const title = useMemo(
     () => triggerTitle(trigger?.kind, t, tAgent, tDocs),
     [trigger?.kind, t, tAgent, tDocs]
@@ -636,6 +636,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       : undefined
   const showingArgumentSuggestions =
     argumentCommand !== undefined && commandArgumentOptions(argumentCommand).length > 0
+  // The panel is a COMPLETION surface: it belongs on screen only while there is
+  // something left to pick. `hasSlashCompletion` is the shared verdict — the
+  // composer gates ↑/↓/Tab/Enter on the same call, so a panel that is not
+  // showing can never swallow a keystroke. See `slash-completion.ts`.
+  const open = trigger !== null && anchor !== null && hasSlashCompletion(trigger, slashCommands)
   // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
   const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
   // Hoisted out of the per-row header check so it isn't recomputed N times.
@@ -916,14 +921,6 @@ function safeLookup(
     /* fall through */
   }
   return fallback
-}
-
-function commandArgumentOptions(command: SlashCommand | undefined): readonly string[] {
-  if (!command) return []
-  if (command.argumentOptions && command.argumentOptions.length > 0) {
-    return command.argumentOptions
-  }
-  return command.params?.find((param) => param.type === "enum")?.options ?? []
 }
 
 function argumentHintParts(hint: string | undefined): string[] {

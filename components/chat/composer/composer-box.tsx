@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "sonner"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { cn } from "@/lib/utils"
 import type { PermissionMode } from "@/stores/chat/chat-store"
 
@@ -103,6 +104,18 @@ export interface ComposerBoxProps {
   onMouseUp?: (e: React.MouseEvent<HTMLTextAreaElement>) => void
   onCompositionStart: () => void
   onCompositionEnd: () => void
+  /** Settle any half-typed URL into its folded label when focus leaves. */
+  onBlur?: () => void
+  /** Expand folded links on the way to the clipboard. */
+  onCopy?: (e: ClipboardEvent<HTMLTextAreaElement>) => void
+  onCut?: (e: ClipboardEvent<HTMLTextAreaElement>) => void
+  /**
+   * True while an IME composition is in flight. The overlay cannot show the
+   * candidate text (it only ever sees the committed value), so for those few
+   * keystrokes the textarea paints its own glyphs again — see the layering note
+   * on the textarea below.
+   */
+  isComposing?: boolean
   /** How to paint each `{{parameter}}` chip. See `ComposerChipOverlay`. */
   paramState?: (paramId: string) => ParamPillState
   /**
@@ -179,6 +192,10 @@ export function ComposerBox({
   onMouseUp,
   onCompositionStart,
   onCompositionEnd,
+  onBlur,
+  onCopy,
+  onCut,
+  isComposing,
   paramState,
   preview,
   saveAsTemplate,
@@ -208,6 +225,25 @@ export function ComposerBox({
   t,
   tAttach,
 }: ComposerBoxProps) {
+  // Re-sync the overlays' scroll mirror to whatever the textarea's scrollTop is
+  // NOW, every time the value changes.
+  //
+  // The mirror below is an imperative `transform` written from the textarea's
+  // `scroll` event, and React never manages that style key, so it survives
+  // re-renders. It also survives the value being REPLACED — send clears the
+  // box, a draft restore or a session switch swaps it — which resets scrollTop
+  // to 0 without necessarily emitting a `scroll` event. The chip overlay is now
+  // the only layer painting the text (the textarea's glyphs are transparent),
+  // so a stale offset does not misplace a pill background any more: it draws
+  // the whole message outside its clipped box and the composer reads as empty.
+  useIsomorphicLayoutEffect(() => {
+    const offset = `translateY(${-(textareaRef.current?.scrollTop ?? 0)}px)`
+    const chip = chipOverlayRef.current
+    if (chip) chip.style.transform = offset
+    const ghostEl = ghostOverlayRef.current
+    if (ghostEl) ghostEl.style.transform = offset
+  }, [textInput.value, textareaRef, chipOverlayRef, ghostOverlayRef])
+
   return (
     <div
       className={cn(
@@ -321,11 +357,24 @@ export function ComposerBox({
           value={textInput.value}
           segments={overlaySegments}
           paramState={paramState}
+          // Same family as the textarea, or the pills drift out from under the
+          // glyphs on a mono skin.
+          mono={skin.mono}
+          // The overlay IS the visible text (see the textarea below), so it has
+          // to stand down whenever something else is painting the same words:
+          // an IME composition (the textarea takes its glyphs back) and the
+          // parameter preview (which renders the substituted sentence in its
+          // own box). Painting anyway is exactly the doubled, overlapping text
+          // that preview mode showed.
+          hidden={isComposing || preview?.on === true}
         />
         <ComposerGhostText
           ref={ghostOverlayRef}
           value={textInput.value}
-          ghost={ghost.ghost}
+          // Same reason as the chip overlay above: nothing may paint over the
+          // preview's substituted text.
+          ghost={preview?.on ? "" : ghost.ghost}
+          mono={skin.mono}
           sourceLabel={ghostSourceLabel}
           // Position + cycle hint only make sense with an alternative to
           // move to, and Alt+] is unreachable on touch.
@@ -342,10 +391,24 @@ export function ComposerBox({
           // accept/dismiss control below instead.
           acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
         />
+        {/*
+          Layering: the textarea keeps the caret, the selection, the scroll and
+          every native input behaviour — but its GLYPHS are transparent and the
+          chip overlay above paints them instead. That is what lets a link read
+          as blue underlined text: a `<textarea>` has exactly one colour, so
+          per-token styling is impossible inside it.
+
+          Two details make the swap safe. `caret-foreground` is explicit because
+          the caret otherwise inherits `color` and would vanish with the text.
+          And during an IME composition the textarea paints its own glyphs again
+          (`isComposing`): the overlay renders the committed value, which does
+          not include the candidate text being composed.
+        */}
         <Textarea
           aria-label={t("ariaMessage")}
           className={cn(
             "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
+            !isComposing && "text-transparent caret-foreground",
             // Hidden, never unmounted: unmounting would drop focus, the caret,
             // the scroll position and every ref the composer holds on it.
             preview?.on && "hidden",
@@ -358,8 +421,11 @@ export function ComposerBox({
           disabled={disabled}
           name="message"
           onChange={onChange}
+          onBlur={onBlur}
           onCompositionEnd={onCompositionEnd}
           onCompositionStart={onCompositionStart}
+          onCopy={onCopy}
+          onCut={onCut}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onScroll={(e) => {
@@ -381,31 +447,61 @@ export function ComposerBox({
           value={textInput.value}
         />
         {saveAsTemplate ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("saveTemplate.trigger")}
-            data-testid="composer-save-as-template"
-            className="absolute end-7 top-0 size-6 text-muted-foreground/70 hover:text-foreground"
-            onClick={saveAsTemplate}
-          >
-            <BookmarkPlusIcon className="size-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("saveTemplate.trigger")}
+                data-testid="composer-save-as-template"
+                // Above BOTH the textarea (`z-[1]`) and the chip overlay
+                // (`z-[2]`). A positioned element with `z-index: auto` paints
+                // below a sibling with a positive one, and hit-testing follows
+                // paint order — so without this the textarea swallowed every
+                // click aimed here, and the hover never lit up either.
+                className={cn(
+                  "absolute top-0 z-[3] size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground",
+                  // The corner slot belongs to the preview toggle when there is
+                  // one to show. With no parameters in the message there is no
+                  // toggle, and holding its place left the bookmark hanging one
+                  // slot in from an empty edge.
+                  preview ? "end-7" : "end-1"
+                )}
+                onClick={saveAsTemplate}
+              >
+                <BookmarkPlusIcon className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t("saveTemplate.trigger")}</TooltipContent>
+          </Tooltip>
         ) : null}
         {preview ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={preview.on ? t("templateParams.previewOff") : t("templateParams.previewOn")}
-            aria-pressed={preview.on}
-            data-testid="composer-param-preview-toggle"
-            className="absolute end-1 top-0 size-6 text-muted-foreground/70 hover:text-foreground"
-            onClick={preview.toggle}
-          >
-            {preview.on ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={
+                  preview.on ? t("templateParams.previewOff") : t("templateParams.previewOn")
+                }
+                aria-pressed={preview.on}
+                data-testid="composer-param-preview-toggle"
+                className="absolute end-1 top-0 z-[3] size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground aria-pressed:text-foreground"
+                onClick={preview.toggle}
+              >
+                {preview.on ? (
+                  <EyeOffIcon className="size-3.5" />
+                ) : (
+                  <EyeIcon className="size-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {preview.on ? t("templateParams.previewOff") : t("templateParams.previewOn")}
+            </TooltipContent>
+          </Tooltip>
         ) : null}
         <CharCounter />
         <MobileGhostAccept

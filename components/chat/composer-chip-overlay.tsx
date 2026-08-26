@@ -1,8 +1,8 @@
 // Visual "command chip" layer painted behind the composer textarea. The
 // textarea stays the single source of truth (it keeps its own glyphs, caret,
 // IME, paste, draft, voice integrations); this overlay only paints a pill
-// background under each `/command` token so a multi-command message reads like
-// Slack / Raycast. It never captures pointer events and is aria-hidden — the
+// background under each `/command`, `@mention`, `{{param}}` and link token so a
+// message with several of them reads like Slack / Raycast. It never captures pointer events and is aria-hidden — the
 // readable text is the textarea on top.
 //
 // Alignment contract: the inner element copies the textarea's exact box model
@@ -12,6 +12,9 @@
 
 import { Fragment, forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
+import { brandIconAsset } from "@/components/icons/brand-icon"
+import { brandIdForHost } from "@/lib/chat/link-display"
+import { LINK_MARKER } from "@/lib/chat/link-fold"
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
 
 /**
@@ -34,6 +37,19 @@ export const TEXTAREA_TYPOGRAPHY = "px-1 py-1.5 pe-10 text-sm leading-6"
 export const OVERLAY_FONT_SIZE = "max(16px, 1rem)"
 
 /**
+ * The other half of the alignment contract: the FAMILY.
+ *
+ * A skin may render the textarea in the code font (`mono: true` — `dense` and
+ * `sharp` do). The overlays are separate elements, so they keep the UI sans
+ * face unless told otherwise, and a proportional pill layer under monospace
+ * glyphs drifts further from its token with every character on the line — the
+ * second `/command` chip ends up covering the wrong span entirely. Every
+ * overlay that mirrors the textarea takes this prop and applies it beside
+ * {@link TEXTAREA_TYPOGRAPHY}.
+ */
+export const OVERLAY_MONO_CLASS = "font-mono"
+
+/**
  * How a `{{parameter}}` pill should read.
  *
  * - `empty` — declared or typed, no value yet. A dashed outline, so an unfilled
@@ -45,6 +61,66 @@ export const OVERLAY_FONT_SIZE = "max(16px, 1rem)"
  *   the user should know before it does, not after.
  */
 export type ParamPillState = "empty" | "filled" | "unresolved"
+
+/**
+ * Generic link glyph, for a host with no brand mark of its own. Inlined as a
+ * data URI because this is a CSS background, which cannot take `currentColor` —
+ * hence one variant per theme rather than a single tinted icon.
+ */
+function genericLinkIcon(color: string): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" ` +
+    `stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">` +
+    `<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><path d="M8 12h8"/></svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+}
+
+const GENERIC_LINK_LIGHT = genericLinkIcon("#2563eb")
+const GENERIC_LINK_DARK = genericLinkIcon("#60a5fa")
+
+/**
+ * The folded label's first character, painted over with the site's icon.
+ *
+ * The glyph itself renders transparent — the cell exists only to reserve
+ * exactly one character of space in a layer that must match the textarea
+ * glyph for glyph. Horizontal padding with a matching negative margin lets a
+ * slightly wider mark breathe without taking any layout width.
+ */
+function LinkMarker({ url }: { url?: string }) {
+  let brand: { src: string; mono: boolean } | null = null
+  if (url) {
+    try {
+      brand = brandIconAsset(brandIdForHost(new URL(url).hostname))
+    } catch {
+      brand = null
+    }
+  }
+  return (
+    <span
+      data-link-icon={brand ? "brand" : "generic"}
+      className={cn(
+        // Left-aligned inside its two cells: the mark takes the first, and what
+        // is left of the second becomes the gap before the label.
+        "bg-left bg-no-repeat align-baseline text-transparent no-underline [background-size:0.9em]",
+        // A monochrome mark is black artwork; on a dark surface it has to flip.
+        brand?.mono && "dark:invert",
+        // Theme-swapped generic glyph (a background cannot use currentColor).
+        !brand &&
+          "[background-image:var(--composer-link-icon-light)] dark:[background-image:var(--composer-link-icon-dark)]"
+      )}
+      style={
+        brand
+          ? { backgroundImage: `url("${brand.src}")` }
+          : ({
+              "--composer-link-icon-light": GENERIC_LINK_LIGHT,
+              "--composer-link-icon-dark": GENERIC_LINK_DARK,
+            } as React.CSSProperties)
+      }
+    >
+      {LINK_MARKER}
+    </span>
+  )
+}
 
 const PARAM_PILL_CLASS: Record<ParamPillState, string> = {
   empty: "border border-dashed border-muted-foreground/50",
@@ -63,32 +139,45 @@ interface ComposerChipOverlayProps {
    * inserted.
    */
   paramState?: (paramId: string) => ParamPillState
+  /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
+  mono?: boolean
+  /**
+   * Stop painting, without unmounting.
+   *
+   * Used while an IME composition is in flight: this layer only ever sees the
+   * COMMITTED value, so it cannot show the candidate text mid-composition. The
+   * textarea takes its own glyphs back for those keystrokes and this one steps
+   * aside. It stays mounted so the scroll-mirror ref and the layout stay put.
+   */
+  hidden?: boolean
 }
 
 const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
-  function ComposerChipOverlay({ value, segments, paramState }, innerRef) {
+  function ComposerChipOverlay({ value, segments, paramState, mono, hidden }, innerRef) {
     // Nothing to paint when there are no pill segments — render an invisible
     // placeholder so the DOM node is stable but cheap.
     const hasPill = segments.some(
-      (s) => s.kind === "command" || s.kind === "mention" || s.kind === "param"
+      (s) => s.kind === "command" || s.kind === "mention" || s.kind === "param" || s.kind === "link"
     )
 
     return (
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 overflow-hidden"
+        // Above the textarea (`z-[1]`): the selection highlight is painted by
+        // the textarea, and a text layer underneath it would disappear the
+        // moment anything was selected.
+        className={cn(
+          "pointer-events-none absolute inset-0 z-[2] overflow-hidden",
+          hidden && "invisible"
+        )}
         data-testid="composer-chip-overlay"
+        data-hidden={hidden || undefined}
       >
-        {/*
-          This layer paints ONLY pill backgrounds. Its text MUST stay fully
-          transparent — the readable glyphs come from the textarea on top, which
-          is a single color. Giving any span a visible text color double-renders
-          the text behind the real one and shows as overlapping/ghosted glyphs.
-        */}
         <div
           ref={innerRef}
           className={cn(
-            "block min-h-9 w-full break-words whitespace-pre-wrap text-transparent",
+            "block min-h-9 w-full break-words whitespace-pre-wrap",
+            mono && OVERLAY_MONO_CLASS,
             TEXTAREA_TYPOGRAPHY
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}
@@ -97,7 +186,7 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
             ? segments.map((seg, i) => {
                 if (seg.kind === "command") {
                   // Pill wraps ONLY the `/command` token; its args render as
-                  // plain (still transparent) text, so a line like
+                  // plain text, so a line like
                   // `/reset ////////` shows a tight `/reset` chip instead of one
                   // huge pill over the slashes. `box-decoration-clone` keeps the
                   // rounded background intact if the chip ever wraps a line.
@@ -141,6 +230,29 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
                       className={cn("box-decoration-clone rounded-md", PARAM_PILL_CLASS[state])}
                     >
                       {seg.raw}
+                    </span>
+                  )
+                }
+                if (seg.kind === "link") {
+                  // A link reads the way links read everywhere else: blue and
+                  // underlined. No pill — the text here is already the short
+                  // label (`lib/chat/link-fold.ts` folded the URL down to it),
+                  // so a box around it would be one decoration too many.
+                  //
+                  // The label's first character is the marker cell; the site's
+                  // own mark is painted INTO it as a background, which is the
+                  // only way to show an icon without adding a glyph the
+                  // textarea does not have.
+                  const hasMarker = seg.raw.startsWith(LINK_MARKER)
+                  const rest = hasMarker ? seg.raw.slice(LINK_MARKER.length) : seg.raw
+                  return (
+                    <span
+                      key={`${seg.start}-${i}`}
+                      data-chip="link"
+                      className="text-blue-600 underline decoration-blue-600/50 underline-offset-2 dark:text-blue-400 dark:decoration-blue-400/50"
+                    >
+                      {hasMarker ? <LinkMarker url={seg.url} /> : null}
+                      {rest}
                     </span>
                   )
                 }

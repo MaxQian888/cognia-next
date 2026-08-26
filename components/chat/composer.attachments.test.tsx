@@ -6,6 +6,12 @@
 // buildSendContent is mocked so we can force the token total without staging a
 // real binary attachment (blob→data-url conversion isn't available in jsdom).
 
+// The first full Composer mount in this file costs ~7s under parallel workers
+// (module graph + Radix subtrees), which overruns the 5s default and then
+// cascades — the timed-out test leaves React mid-act, so every later render
+// yields a null textarea. Same 30s budget the other full-Composer suites use.
+jest.setTimeout(30_000)
+
 jest.mock("@/lib/slash-commands/custom", () => ({
   loadCustomSlashCommands: jest.fn(async () => []),
 }))
@@ -172,12 +178,15 @@ describe("Composer — attachment send contract", () => {
     await typeAndEnter(ta, "Read https://example.com/docs")
 
     expect(buildLinkContextBlocksMock).toHaveBeenCalledWith("Read https://example.com/docs")
+    // Third argument is the template run this turn was written from — `null`
+    // here because nothing in this suite sends from a parameterized template.
     expect(onSend).toHaveBeenCalledWith(
       [
         { type: "text", text: "Read https://example.com/docs" },
         { type: "text", text: "Linked page context" },
       ],
-      []
+      [],
+      null
     )
   })
 
@@ -188,7 +197,7 @@ describe("Composer — attachment send contract", () => {
 
     await typeAndEnter(ta, "hi")
 
-    expect(onSend).toHaveBeenCalledWith("hi", [])
+    expect(onSend).toHaveBeenCalledWith("hi", [], null)
     expect(dialogOpen()).toBe(false)
     expect(ta.value).toBe("")
   })
@@ -208,7 +217,7 @@ describe("Composer — attachment send contract", () => {
     expect(onSend).not.toHaveBeenCalled()
 
     await clickButton("Send anyway")
-    expect(onSend).toHaveBeenCalledWith([{ type: "text", text: "big" }], [])
+    expect(onSend).toHaveBeenCalledWith([{ type: "text", text: "big" }], [], null)
   })
 
   it("keeps the draft when the user cancels the oversize dialog", async () => {

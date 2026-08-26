@@ -28,7 +28,6 @@ import {
   prepareComposerAttachments,
 } from "@/lib/chat/attachments/prepare"
 import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
-import { removeHttpUrl } from "@/lib/chat/link-context"
 import { collectDroppedFiles, MAX_DROPPED_DIR_FILES } from "@/lib/chat/drop-entries"
 import { registerCommand } from "@/lib/plugin/commands/registry"
 import { collapsePaste } from "@/lib/paste-collapse"
@@ -327,14 +326,6 @@ export function useAttachmentIntake({
     fileInputRef.current?.click()
   }, [])
 
-  const removeLink = useCallback(
-    (url: string) => {
-      textInput.setInput(removeHttpUrl(textInput.value, url))
-      requestAnimationFrame(() => textareaRef.current?.focus())
-    },
-    [textInput, textareaRef]
-  )
-
   return {
     fileInputRef,
     acceptFiles,
@@ -354,7 +345,6 @@ export function useAttachmentIntake({
     onDragLeave,
     onDrop,
     isDragging: dragDepth > 0,
-    removeLink,
     pastedBlocks,
     removePastedBlock,
     attachmentPrepareCount,

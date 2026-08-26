@@ -131,4 +131,42 @@ describe("ComposerBehaviorCard", () => {
       })
     })
   })
+
+  describe("link chips", () => {
+    it("saves a shortening rule list typed as text, on blur", async () => {
+      const user = userEvent.setup()
+      render(<ComposerBehaviorCard />)
+
+      const rules = screen.getByLabelText("linkChips.rulesLabel")
+      await user.click(rules)
+      await user.paste("wiki.corp.example = https://wiki.corp.example/display/")
+      await user.tab()
+
+      expect(save).toHaveBeenCalledWith({
+        composerBehavior: {
+          linkChips: {
+            rules: [{ host: "wiki.corp.example", strip: "https://wiki.corp.example/display/" }],
+          },
+        },
+      })
+    })
+
+    it("does not save when blurring an unchanged rule list", async () => {
+      mockSettings = { composerBehavior: { linkChips: { rules: [{ host: "x.dev" }] } } }
+      const user = userEvent.setup()
+      render(<ComposerBehaviorCard />)
+
+      await user.click(screen.getByLabelText("linkChips.rulesLabel"))
+      await user.tab()
+      expect(save).not.toHaveBeenCalled()
+    })
+
+    it("seeds the field from the saved rules", () => {
+      mockSettings = {
+        composerBehavior: { linkChips: { rules: [{ host: "x.dev", strip: "https://x.dev/" }] } },
+      }
+      render(<ComposerBehaviorCard />)
+      expect(screen.getByLabelText("linkChips.rulesLabel")).toHaveValue("x.dev = https://x.dev/")
+    })
+  })
 })

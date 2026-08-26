@@ -19,7 +19,11 @@
 
 import { forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
-import { TEXTAREA_TYPOGRAPHY, OVERLAY_FONT_SIZE } from "../composer-chip-overlay"
+import {
+  TEXTAREA_TYPOGRAPHY,
+  OVERLAY_FONT_SIZE,
+  OVERLAY_MONO_CLASS,
+} from "../composer-chip-overlay"
 
 interface ComposerGhostTextProps {
   /** The full textarea value the ghost trails. */
@@ -34,6 +38,8 @@ interface ComposerGhostTextProps {
   positionLabel?: string
   /** Translated "Alt+] to cycle" hint. Omit to hide. */
   cycleHint?: string
+  /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
+  mono?: boolean
 }
 
 const BADGE_CLASS =
@@ -41,7 +47,7 @@ const BADGE_CLASS =
 
 const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>(
   function ComposerGhostText(
-    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint },
+    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint, mono },
     innerRef
   ) {
     if (!ghost) return null
@@ -57,6 +63,7 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
           ref={innerRef}
           className={cn(
             "block min-h-9 w-full break-words whitespace-pre-wrap",
+            mono && OVERLAY_MONO_CLASS,
             TEXTAREA_TYPOGRAPHY
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}

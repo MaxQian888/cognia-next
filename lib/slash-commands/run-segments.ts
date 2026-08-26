@@ -32,6 +32,16 @@ export interface RunSegmentsDeps {
 export interface CommandError {
   name: string
   message: string
+  /**
+   * 0-based position among the COMMAND segments of this batch.
+   *
+   * A name alone cannot identify which command failed: `/model opus /model
+   * sonnet` is two occurrences of one name, and the failure chip would
+   * otherwise mark both (and number one of them wrong). Optional so a
+   * hand-built error still type-checks; the chip falls back to the first
+   * same-named command it has not already spoken for.
+   */
+  occurrence?: number
 }
 
 export interface RunSegmentsResult {
@@ -57,6 +67,10 @@ export async function runSegments(
   let hasOverride = false
   const errors: CommandError[] = []
   let ranAction = false
+  // Counts EVERY command segment, including the ones that never run (unknown,
+  // template), so it lines up with the chip row's own `filter(kind ===
+  // "command")` walk over the same text.
+  let occurrence = -1
 
   for (const seg of segments) {
     if (seg.kind === "text") {
@@ -64,6 +78,7 @@ export async function runSegments(
       if (trimmed) outgoingParts.push(trimmed)
       continue
     }
+    occurrence += 1
 
     const command = commandMap.get(seg.name)
     if (!command) {
@@ -80,6 +95,7 @@ export async function runSegments(
       } catch (err) {
         errors.push({
           name: seg.name,
+          occurrence,
           message: err instanceof Error ? err.message : String(err),
         })
       }

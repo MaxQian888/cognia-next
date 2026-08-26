@@ -10,77 +10,104 @@ jest.mock("next-intl", () => ({
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
-import { CommandQueueBar } from "./command-queue-bar"
+import { FailedCommandChips } from "./failed-command-chips"
 
 const KNOWN = new Set(["help", "model", "clear", "compact", "review"])
 const parse = (input: string) => parseSegments(input, (n) => KNOWN.has(n))
 
-describe("CommandQueueBar", () => {
+describe("FailedCommandChips", () => {
   it("renders nothing for plain prose", () => {
     const { container } = render(
-      <CommandQueueBar segments={parse("just talking")} onRemove={jest.fn()} />
+      <FailedCommandChips segments={parse("just talking")} onRemove={jest.fn()} />
     )
     expect(container.firstChild).toBeNull()
   })
 
-  it("renders nothing for a single command (the chip overlay already shows it)", () => {
+  // Staged commands need no chip of their own — each one is already a pill on
+  // its own token in the text. Only a FAILURE has nowhere else to appear.
+  it("stays quiet for a batch that has not failed", () => {
     const { container } = render(
-      <CommandQueueBar segments={parse("/clear")} onRemove={jest.fn()} />
+      <FailedCommandChips segments={parse("/compact /clear")} onRemove={jest.fn()} />
     )
     expect(container.firstChild).toBeNull()
   })
 
-  it("renders one numbered pill per command in a same-line chain", () => {
-    render(<CommandQueueBar segments={parse("/compact /clear")} onRemove={jest.fn()} />)
-    expect(screen.getByTestId("command-queue-pill-compact")).toBeInTheDocument()
-    expect(screen.getByTestId("command-queue-pill-clear")).toBeInTheDocument()
-  })
-
-  it("renders pills for a multi-line batch and shows args", () => {
-    render(<CommandQueueBar segments={parse("/model opus\n/review auth")} onRemove={jest.fn()} />)
-    expect(screen.getByTestId("command-queue-pill-model")).toHaveTextContent("opus")
-    expect(screen.getByTestId("command-queue-pill-review")).toHaveTextContent("auth")
-  })
-
-  it("keeps execution order", () => {
-    render(<CommandQueueBar segments={parse("/compact /clear /help")} onRemove={jest.fn()} />)
-    const pills = screen.getAllByTestId(/^command-queue-pill-/)
-    expect(pills.map((p) => p.dataset.testid)).toEqual([
-      "command-queue-pill-compact",
-      "command-queue-pill-clear",
-      "command-queue-pill-help",
-    ])
-  })
-
-  it("reports the exact segment range when a pill is removed", async () => {
-    const onRemove = jest.fn()
-    const user = userEvent.setup()
-    render(<CommandQueueBar segments={parse("/compact /clear")} onRemove={onRemove} />)
-    await user.click(screen.getByRole("button", { name: /removeAria.*clear/ }))
-    // `/clear` occupies [9, 15) in "/compact /clear".
-    expect(onRemove).toHaveBeenCalledWith(9, 15)
-  })
-
-  it("marks a failed command and shows the bar even for a single command", () => {
+  it("chips the command that failed, and only that one", () => {
     render(
-      <CommandQueueBar
-        segments={parse("/clear")}
-        errors={[{ name: "clear", message: "boom" }]}
-        onRemove={jest.fn()}
-      />
-    )
-    expect(screen.getByTestId("command-queue-pill-clear")).toHaveAttribute("data-failed", "true")
-  })
-
-  it("marks only the commands that actually failed", () => {
-    render(
-      <CommandQueueBar
+      <FailedCommandChips
         segments={parse("/compact /clear")}
         errors={[{ name: "clear", message: "boom" }]}
         onRemove={jest.fn()}
       />
     )
-    expect(screen.getByTestId("command-queue-pill-compact")).not.toHaveAttribute("data-failed")
-    expect(screen.getByTestId("command-queue-pill-clear")).toHaveAttribute("data-failed", "true")
+    expect(screen.queryByTestId("failed-command-pill-compact")).toBeNull()
+    expect(screen.getByTestId("failed-command-pill-clear")).toHaveAttribute("data-failed", "true")
+  })
+
+  it("keeps the command's position in the batch", () => {
+    // "the second one failed" is the difference between re-running everything
+    // and re-running one thing.
+    render(
+      <FailedCommandChips
+        segments={parse("/compact /clear")}
+        errors={[{ name: "clear", message: "boom" }]}
+        onRemove={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("failed-command-pill-clear")).toHaveTextContent("2")
+  })
+
+  // A name is not an identity. Marking every `/compact` in the line because one
+  // of them failed both over-reports and puts the wrong number on a chip.
+  it("chips only the occurrence that failed when a command repeats", () => {
+    render(
+      <FailedCommandChips
+        segments={parse("/compact /clear /compact")}
+        errors={[{ name: "compact", occurrence: 2, message: "boom" }]}
+        onRemove={jest.fn()}
+      />
+    )
+    const pills = screen.getAllByTestId("failed-command-pill-compact")
+    expect(pills).toHaveLength(1)
+    expect(pills[0]).toHaveTextContent("3")
+  })
+
+  // An error with no occurrence (an older payload, or a batch parsed from a
+  // slice of the text) still surfaces — once — against a same-named command.
+  it("falls back to one same-named command when the occurrence is unknown", () => {
+    render(
+      <FailedCommandChips
+        segments={parse("/compact /clear /compact")}
+        errors={[{ name: "compact", message: "boom" }]}
+        onRemove={jest.fn()}
+      />
+    )
+    expect(screen.getAllByTestId("failed-command-pill-compact")).toHaveLength(1)
+  })
+
+  it("shows the failed command's arguments", () => {
+    render(
+      <FailedCommandChips
+        segments={parse("/model opus\n/review auth")}
+        errors={[{ name: "review", message: "boom" }]}
+        onRemove={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("failed-command-pill-review")).toHaveTextContent("auth")
+  })
+
+  it("reports the exact segment range when a pill is removed", async () => {
+    const onRemove = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <FailedCommandChips
+        segments={parse("/compact /clear")}
+        errors={[{ name: "clear", message: "boom" }]}
+        onRemove={onRemove}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: /removeAria.*clear/ }))
+    // `/clear` occupies [9, 15) in "/compact /clear".
+    expect(onRemove).toHaveBeenCalledWith(9, 15)
   })
 })

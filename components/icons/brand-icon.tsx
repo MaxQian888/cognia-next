@@ -238,6 +238,22 @@ export function hasBrandIcon(id: string): boolean {
   return BRAND_ALIASES[normalizeBrandId(id)] !== undefined
 }
 
+/**
+ * Path to a brand mark, for the callers that cannot render a component — the
+ * composer's chip overlay paints its icons as CSS backgrounds, because the
+ * overlay mirrors the textarea character for character and an extra element in
+ * the flow would shift every pill after it.
+ *
+ * `mono` reports whether the asset is a single-colour mark (the lobe set names
+ * its colour variants `-color`). A monochrome mark is black and needs
+ * inverting on a dark surface; a colour one must never be touched.
+ */
+export function brandIconAsset(id: string): { src: string; mono: boolean } | null {
+  const asset = BRAND_ALIASES[normalizeBrandId(id)]
+  if (!asset) return null
+  return { src: asset.src, mono: !asset.src.includes("-color") }
+}
+
 function fallbackLetter(value: string): string {
   return value.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?"
 }

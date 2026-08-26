@@ -271,7 +271,10 @@
       "unavailable": "/{name} is not available yet."
     },
     "context": {
-      "ariaLabel": "Attached files, links, and references"
+      "ariaLabel": "Attached files, links, and references",
+      "foldCollapse": "Show fewer",
+      "foldCollapseShort": "Less",
+      "foldExpand": "Show {count} more"
     },
     "draftRestore": {
       "dismiss": "Dismiss",

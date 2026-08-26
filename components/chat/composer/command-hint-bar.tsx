@@ -36,13 +36,42 @@ export function resolveCommandHint(
 ): { command: SlashCommand; missingParams: boolean } | null {
   if (!trigger || trigger.kind !== "slash") return null
   // Only once the caret has moved PAST the command word — while the name is
-  // still being typed the popover itself is the affordance.
-  if (trigger.argumentStart === undefined) return null
+  // still being typed the popover itself is the affordance. Both argument
+  // states qualify: inside the first argument token (`argumentStart` set) and
+  // anywhere after it (`caretPastArgument`). The second case used to drop the
+  // hint at the second word, which is exactly when a multi-argument command
+  // still needs it.
+  if (trigger.argumentStart === undefined && !trigger.caretPastArgument) return null
+  // `caretPastArgument` says the caret is past the ANCHORED command's first
+  // argument — and in a chain the anchor falls back to the line's FIRST
+  // command, so the caret may actually be sitting in a later one's arguments.
+  // Naming `/clear` while the user types `/clear /resume ▮` is worse than the
+  // silence this branch replaced, so stand down whenever another known command
+  // follows on the same line.
+  if (trigger.argumentStart === undefined && chainedCommandFollows(trigger, commandMap, value)) {
+    return null
+  }
   const command = commandMap.get(trigger.query)
   if (!command) return null
   const typedArgs = value.slice(trigger.tokenEnd).trim()
   const requiresArgs = (command.params?.length ?? 0) > 0 || Boolean(command.argumentHint)
   return { command, missingParams: requiresArgs && typedArgs.length === 0 }
+}
+
+/**
+ * Is there another KNOWN `/command` between the anchored one and the end of its
+ * line? Bounded to the line because a command on a later line is a separate
+ * statement, not a continuation of this one's arguments.
+ */
+function chainedCommandFollows(
+  trigger: ComposerTrigger,
+  commandMap: ReadonlyMap<string, SlashCommand>,
+  value: string
+): boolean {
+  const newline = value.indexOf("\n", trigger.tokenEnd)
+  const lineEnd = newline === -1 ? value.length : newline
+  const rest = value.slice(trigger.tokenEnd, lineEnd)
+  return rest.split(/\s+/).some((token) => token.startsWith("/") && commandMap.has(token.slice(1)))
 }
 
 export function CommandHintBar({ trigger, commandMap, value }: CommandHintBarProps) {

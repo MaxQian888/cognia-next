@@ -108,6 +108,11 @@ function renderComposer(session: ChatSession, onSend = jest.fn(async () => undef
   return { ta, onSend }
 }
 
+// The first full Composer mount in the test body costs as much as the cold-open
+// hook below and overruns the 5s default the same way under parallel workers,
+// so the file gets the same 30s budget.
+jest.setTimeout(30_000)
+
 // Cold-open Dexie (delete + reopen + migrate the full schema) can exceed the
 // default 5s hook budget on the first test of the file — repo convention is a
 // 30s hook timeout for suites that reset the DB per test.
@@ -130,7 +135,9 @@ describe("composerBehavior — sendOnEnter", () => {
     fireEvent.change(ta, { target: { value: "hello" } })
     const notPrevented = fireEvent.keyDown(ta, { key: "Enter" })
     expect(notPrevented).toBe(false) // preventDefault was called
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", []))
+    // Third argument is the template run this turn was written from — `null`
+    // for a hand-typed turn with no parameterized template behind it.
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", [], null))
     await waitFor(() => expect(ta.value).toBe(""))
   })
 
@@ -146,7 +153,7 @@ describe("composerBehavior — sendOnEnter", () => {
 
     const metaEnter = fireEvent.keyDown(ta, { key: "Enter", metaKey: true })
     expect(metaEnter).toBe(false) // prevented → submit
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", []))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", [], null))
   })
 })
 
@@ -156,7 +163,7 @@ describe("composerBehavior — clearAfterSend", () => {
     const { ta, onSend } = renderComposer(mkSession())
     fireEvent.change(ta, { target: { value: "keep me" } })
     fireEvent.keyDown(ta, { key: "Enter" })
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep me", []))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep me", [], null))
     // Give the post-send clear path a chance to (not) run.
     await new Promise((r) => setTimeout(r, 20))
     expect(ta.value).toBe("keep me")

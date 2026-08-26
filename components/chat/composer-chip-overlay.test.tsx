@@ -1,8 +1,9 @@
 import { render } from "@testing-library/react"
 import { createRef } from "react"
 import { ComposerChipOverlay } from "./composer-chip-overlay"
-import { parseSegments } from "@/lib/slash-commands/parse-segments"
+import { parseSegments, splitLinkSegments } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { LINK_MARKER } from "@/lib/chat/link-fold"
 import { splitParamSegments } from "@/lib/chat/template/param-segments"
 
 const known = (n: string) => ["help", "model", "review"].includes(n)
@@ -70,21 +71,31 @@ describe("ComposerChipOverlay", () => {
     expect(container.querySelectorAll('[data-chip="command"]')).toHaveLength(1)
   })
 
-  it("keeps overlay text transparent so it never double-renders behind the textarea", () => {
+  it("paints the text itself, above the textarea, without dropping a character", () => {
     const value = "/model opus\nping @alice"
     const { container, getByTestId } = render(
       <ComposerChipOverlay value={value} segments={segs(value)} />
     )
-    // The text layer is transparent; only pill backgrounds are visible.
-    const layer = getByTestId("composer-chip-overlay").firstElementChild!
-    expect(layer.className).toContain("text-transparent")
-    // No pill span sets a visible text color (that would ghost over the textarea).
-    for (const pill of container.querySelectorAll("[data-chip]")) {
-      expect(pill.className).not.toMatch(/(?:^|\s)text-(primary|foreground|muted-foreground)/)
-    }
+    // This layer IS the visible text now (the textarea's own glyphs are
+    // transparent), so it must sit ABOVE the textarea — a text layer under the
+    // selection highlight disappears the moment anything is selected.
+    const overlay = getByTestId("composer-chip-overlay")
+    expect(overlay.className).toContain("z-[2]")
+    expect(overlay.firstElementChild!.className).not.toContain("text-transparent")
     // The command pill carries the command token; full text is preserved overall.
     expect(container.querySelector('[data-chip="command"]')?.textContent).toBe("/model")
     expect(container.textContent).toBe("/model opus\nping @alice")
+  })
+
+  it("steps aside while an IME composition is in flight", () => {
+    // It only ever sees the COMMITTED value, so mid-composition the textarea
+    // paints its own glyphs and this layer must not double-print them.
+    const { getByTestId } = render(
+      <ComposerChipOverlay value="/help" segments={segs("/help")} hidden />
+    )
+    const overlay = getByTestId("composer-chip-overlay")
+    expect(overlay.className).toContain("invisible")
+    expect(overlay).toHaveAttribute("data-hidden", "true")
   })
 
   it("renders a pill for each @mention and keeps full coverage", () => {
@@ -162,5 +173,73 @@ describe("ComposerChipOverlay", () => {
       expect(container.querySelectorAll('[data-chip="param"]')).toHaveLength(1)
       expect(container.textContent).toBe(value)
     })
+  })
+})
+
+describe("ComposerChipOverlay — alignment with the textarea", () => {
+  it("takes the code font when the skin puts the textarea in it", () => {
+    // The overlay is a separate element from the <textarea>, so a mono skin
+    // that only styled the textarea left proportional pills under monospace
+    // glyphs — every chip after the first drifted off its token.
+    const { getByTestId, rerender } = render(
+      <ComposerChipOverlay value="/help" segments={segs("/help")} mono />
+    )
+    expect(getByTestId("composer-chip-overlay").firstElementChild).toHaveClass("font-mono")
+    rerender(<ComposerChipOverlay value="/help" segments={segs("/help")} />)
+    expect(getByTestId("composer-chip-overlay").firstElementChild).not.toHaveClass("font-mono")
+  })
+})
+
+describe("ComposerChipOverlay — link pills", () => {
+  const linkSegs = (v: string) => splitLinkSegments(segs(v))
+
+  it("pills a URL inside prose without dropping a character", () => {
+    const value = "see https://github.com/svenstaro/genact now"
+    const { container } = render(<ComposerChipOverlay value={value} segments={linkSegs(value)} />)
+    const pills = container.querySelectorAll('[data-chip="link"]')
+    expect(pills).toHaveLength(1)
+    expect(pills[0].textContent).toBe("https://github.com/svenstaro/genact")
+    // Conventional link styling — blue and underlined, no pill box.
+    expect(pills[0].className).toMatch(/text-blue-600/)
+    expect(pills[0].className).toMatch(/underline/)
+    expect(container.textContent).toBe(value)
+  })
+
+  it("pills the link and the command on a link + command line", () => {
+    const value = "https://github.com/a/b /help"
+    const { container } = render(<ComposerChipOverlay value={value} segments={linkSegs(value)} />)
+    expect(container.querySelectorAll('[data-chip="link"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-chip="command"]')).toHaveLength(1)
+    expect(container.textContent).toBe(value)
+  })
+})
+
+describe("ComposerChipOverlay — the folded link's icon cell", () => {
+  const marked = `${LINK_MARKER}svenstaro/genact`
+
+  const segments = (value: string, url: string) =>
+    splitLinkSegments(segs(value), [{ raw: marked, url, start: 0, end: marked.length }])
+
+  it("paints the site's own mark into the first character", () => {
+    const url = "https://github.com/svenstaro/genact"
+    const { container } = render(
+      <ComposerChipOverlay value={marked} segments={segments(marked, url)} />
+    )
+    const icon = container.querySelector("[data-link-icon]")!
+    expect(icon).toHaveAttribute("data-link-icon", "brand")
+    expect(icon.getAttribute("style")).toContain("github")
+    // The cell is one real character, so the mirror still matches the textarea.
+    expect(icon.textContent).toBe(LINK_MARKER)
+    expect(container.textContent).toBe(marked)
+  })
+
+  it("falls back to a generic link glyph for a host with no mark", () => {
+    const { container } = render(
+      <ComposerChipOverlay
+        value={marked}
+        segments={segments(marked, "https://wiki.corp.example/x")}
+      />
+    )
+    expect(container.querySelector("[data-link-icon]")).toHaveAttribute("data-link-icon", "generic")
   })
 })

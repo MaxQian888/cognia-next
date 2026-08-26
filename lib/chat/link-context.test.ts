@@ -10,7 +10,6 @@ import {
   extractHttpUrls,
   mergeContextBlocks,
   normalizeHttpUrl,
-  removeHttpUrl,
 } from "./link-context"
 
 describe("chat link context", () => {
@@ -22,15 +21,11 @@ describe("chat link context", () => {
     ).toEqual(["https://example.com/docs", "http://second.test/a_(b)", "https://third.test/"])
   })
 
-  it("rejects unsafe/non-web URLs and removes a recognized URL cleanly", () => {
+  it("rejects unsafe/non-web URLs", () => {
     expect(normalizeHttpUrl("   ")).toBeNull()
     expect(normalizeHttpUrl("not a url")).toBeNull()
     expect(normalizeHttpUrl("javascript:alert(1)")).toBeNull()
     expect(normalizeHttpUrl("http://localhost:3000")).toBe("http://localhost:3000/")
-    expect(removeHttpUrl("Before https://example.com/path after", "https://example.com/path")).toBe(
-      "Before after"
-    )
-    expect(removeHttpUrl("No link here", "https://example.com/path")).toBe("No link here")
   })
 
   it("honors a zero link limit", () => {
