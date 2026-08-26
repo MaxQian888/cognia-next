@@ -1,8 +1,15 @@
 /** Build-only adapter that forwards packaged MCP sidecar operations to the host. */
-import { proxyToHost } from "@/lib/external-bridge/orchestration-proxy-client"
+import {
+  proxyToHost,
+  proxyToRenderer,
+} from "@/lib/external-bridge/orchestration-proxy-client"
 
 function hostCall(command: string, ...args: unknown[]): Promise<unknown> {
   return proxyToHost(command, { arguments: args })
+}
+
+function rendererCall(command: string, input: unknown): Promise<unknown> {
+  return proxyToRenderer(command, input as Record<string, unknown>)
 }
 
 export const wikiSearch = (...args: unknown[]) => hostCall("wikiSearch", ...args)
@@ -15,6 +22,10 @@ export const teamList = (...args: unknown[]) => hostCall("teamList", ...args)
 export const planList = (...args: unknown[]) => hostCall("planList", ...args)
 export const planRun = (...args: unknown[]) => hostCall("planRun", ...args)
 export const pluginToolInvoke = (...args: unknown[]) => hostCall("pluginToolInvoke", ...args)
+export const scheduleTask = (input: unknown) => rendererCall("schedule_task", input)
+export const listScheduledTasks = (input: unknown) => rendererCall("list_scheduled_tasks", input)
+export const cancelScheduledTask = (input: unknown) => rendererCall("cancel_scheduled_task", input)
+export const spawnTask = (input: unknown) => rendererCall("spawn_task", input)
 
 export const connectorsListAdapters = (...args: unknown[]) =>
   hostCall("connectorsListAdapters", ...args)

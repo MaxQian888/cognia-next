@@ -21,6 +21,10 @@ import { fileURLToPath } from "node:url"
 
 import * as esbuild from "esbuild"
 
+import {
+  createMcpHostBridgePlugin,
+  writeCheckedMcpSidecarOutput,
+} from "./lib/mcp-host-bridge.mjs"
 import { newestMtimeMs } from "./lib/newest-mtime.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -28,34 +32,7 @@ const root = join(__dirname, "..", "..")
 const entry = join(root, "lib/external-bridge/mcp-server/standalone-entry.ts")
 const bridgeRuntime = join(root, "scripts/build/mcp-bridge-runtime.ts")
 const outfile = join(root, "sidecar", "cognia-mcp.mjs")
-
-// Imports the packaged sidecar cannot satisfy in-process (Dexie tables and
-// handlers that live in the renderer): they are rewritten to the host-proxy
-// adapter. Kept byte-identical to `build-cli-binary.mjs` — one drifting list
-// would give the desktop and headless sidecars different tool surfaces.
-const HOST_BRIDGED_IMPORTS = new Set([
-  "@/lib/db/wiki-articles",
-  "@/lib/db/skills",
-  "@/lib/db/characters",
-  "../audit-log",
-  "../handlers/orchestration",
-  "../handlers/rag",
-  "../handlers/runtime",
-  "../handlers/wiki",
-  "../handlers/connectors",
-  "../handlers/inbound",
-  "../handlers/memory",
-  "../handlers/workflow",
-])
-
-const hostBridgePlugin = {
-  name: "cognia-mcp-host-bridge",
-  setup(build) {
-    build.onResolve({ filter: /.*/ }, (args) =>
-      HOST_BRIDGED_IMPORTS.has(args.path) ? { path: bridgeRuntime } : undefined
-    )
-  },
-}
+const hostBridgePlugin = createMcpHostBridgePlugin(bridgeRuntime)
 
 const CREATE_REQUIRE_BANNER =
   "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);"
@@ -88,7 +65,7 @@ async function main() {
   }
 
   mkdirSync(dirname(outfile), { recursive: true })
-  await esbuild.build({
+  const result = await esbuild.build({
     entryPoints: [entry],
     outfile,
     bundle: true,
@@ -99,8 +76,11 @@ async function main() {
     plugins: [hostBridgePlugin],
     banner: { js: CREATE_REQUIRE_BANNER },
     loader: ASSET_LOADERS,
+    metafile: true,
+    write: false,
     logLevel: "info",
   })
+  writeCheckedMcpSidecarOutput(result, outfile)
 
   if (!existsSync(outfile)) {
     process.stderr.write("[build-mcp-sidecar] esbuild reported success but produced no file\n")

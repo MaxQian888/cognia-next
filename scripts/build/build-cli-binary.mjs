@@ -33,6 +33,10 @@ import { execFileSync } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
 import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
+import {
+  createMcpHostBridgePlugin,
+  writeCheckedMcpSidecarOutput,
+} from "./lib/mcp-host-bridge.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
@@ -45,6 +49,7 @@ const mcpRelayEntry = path.join(root, "sidecar/mcp-stdio-relay.mjs")
 const toolBridgeEntry = path.join(root, "sidecar/cognia-tool-bridge.mjs")
 const mcpSidecarEntry = path.join(root, "lib/external-bridge/mcp-server/standalone-entry.ts")
 const mcpBridgeRuntime = path.join(root, "scripts/build/mcp-bridge-runtime.ts")
+const mcpHostBridgePlugin = createMcpHostBridgePlugin(mcpBridgeRuntime)
 const sidecarNodeModules = path.join(root, "sidecar/node_modules")
 const vscodeHostRoot = path.join(root, "sidecar/vscode-ext-host")
 const binDir = path.join(root, "cli/dist/bin")
@@ -77,31 +82,6 @@ const SIDECAR_COPIED_RUNTIME_DEPS = [
   ...SIDECAR_EXTERNALS,
   "undici",
 ]
-
-const MCP_HOST_BRIDGED_IMPORTS = new Set([
-  "@/lib/db/wiki-articles",
-  "@/lib/db/skills",
-  "@/lib/db/characters",
-  "../audit-log",
-  "../handlers/orchestration",
-  "../handlers/rag",
-  "../handlers/runtime",
-  "../handlers/wiki",
-  "../handlers/connectors",
-  "../handlers/inbound",
-  "../handlers/memory",
-  "../handlers/workflow",
-])
-
-const mcpHostBridgePlugin = {
-  name: "cognia-mcp-host-bridge",
-  setup(build) {
-    build.onResolve({ filter: /.*/ }, (args) => {
-      if (MCP_HOST_BRIDGED_IMPORTS.has(args.path)) return { path: mcpBridgeRuntime }
-      return undefined
-    })
-  },
-}
 
 // Runtime closure of @cognia/vscode-ext-host. Keep the TypeScript/@types dev
 // packages out of CLI and server distributions while preserving standalone
@@ -351,7 +331,7 @@ console.log(`build-cli-binary: wrote ${path.relative(root, mcpRelayBundle)}`)
 // the same host layout so cognia-server never depends on a client-supplied
 // filesystem path.
 const mcpSidecarBundle = path.join(sidecarOutDir, "cognia-mcp.mjs")
-await esbuild.build({
+const mcpSidecarResult = await esbuild.build({
   entryPoints: [mcpSidecarEntry],
   outfile: mcpSidecarBundle,
   bundle: true,
@@ -362,8 +342,11 @@ await esbuild.build({
   plugins: [mcpHostBridgePlugin],
   banner: { js: CREATE_REQUIRE_BANNER },
   loader: ASSET_LOADERS,
+  metafile: true,
+  write: false,
   logLevel: "info",
 })
+writeCheckedMcpSidecarOutput(mcpSidecarResult, mcpSidecarBundle)
 console.log(`build-cli-binary: wrote ${path.relative(root, mcpSidecarBundle)}`)
 
 // 2b. Copy the sidecar's runtime-read data files next to the bundle. esbuild
