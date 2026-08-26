@@ -34,6 +34,8 @@ function deps(over: Partial<UseStacksDeps> = {}): UseStacksDeps & {
   validate: jest.Mock
   restack: jest.Mock
   setParent: jest.Mock
+  history: jest.Mock
+  revert: jest.Mock
 } {
   return {
     discover: jest.fn(async () => [STACK]),
@@ -48,6 +50,8 @@ function deps(over: Partial<UseStacksDeps> = {}): UseStacksDeps & {
       updates: [],
     })),
     setParent: jest.fn(async () => {}),
+    history: jest.fn(async () => [] as Array<[string, string]>),
+    revert: jest.fn(async () => "0".repeat(40)),
     ...over,
   } as never
 }
@@ -120,6 +124,76 @@ describe("useStacks", () => {
       await result.current.setParent("me/b", null)
     })
     expect(injected.setParent).toHaveBeenCalledWith("/repos/app", "me/b", null)
+  })
+
+  it("carries each layer's pinned tips, so an undo survives a reload", async () => {
+    // The restack that needs undoing is the one whose damage you notice after
+    // closing the panel. An affordance that only lives in that restack's toast
+    // is not an undo.
+    const injected = deps({
+      history: jest.fn(async (_root: string, branch: string) =>
+        branch === "me/b"
+          ? ([["refs/cognia/stack-history/me/b/1700", "a".repeat(40)]] as Array<[string, string]>)
+          : []
+      ),
+    })
+    const { result } = renderHook(() => useStacks("/repos/app", injected))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows[0]!.history).toEqual({
+      "me/a": [],
+      "me/b": [{ ref: "refs/cognia/stack-history/me/b/1700", oid: "a".repeat(40) }],
+    })
+  })
+
+  it("still shows the stack when the pinned tips cannot be read", async () => {
+    const injected = deps({
+      history: jest.fn(async () => {
+        throw new Error("no git bridge")
+      }),
+    })
+    const { result } = renderHook(() => useStacks("/repos/app", injected))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows).toHaveLength(1)
+    expect(result.current.rows[0]!.history).toEqual({ "me/a": [], "me/b": [] })
+  })
+
+  it("puts a branch back on a pinned tip and re-reads", async () => {
+    const injected = deps()
+    const { result } = renderHook(() => useStacks("/repos/app", injected))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      await result.current.undo("me/b", "refs/cognia/stack-history/me/b/1700")
+    })
+    expect(injected.revert).toHaveBeenCalledWith(
+      "/repos/app",
+      "me/b",
+      "refs/cognia/stack-history/me/b/1700"
+    )
+    await waitFor(() => expect(injected.discover).toHaveBeenCalledTimes(2))
+  })
+
+  it("passes the remote and the announcer straight through to the restack", async () => {
+    // A stack with open pull requests must be pushed after a restack, or the
+    // pull requests show commits that no longer exist. The panel decides that;
+    // the hook must not quietly drop either half.
+    const injected = deps()
+    const announce = jest.fn(async () => {})
+    const { result } = renderHook(() => useStacks("/repos/app", injected))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      await result.current.restack(STACK, { remote: "origin", announce })
+    })
+    expect(injected.restack).toHaveBeenCalledWith(STACK, { remote: "origin", announce })
+  })
+
+  it("restacks locally when given no options at all", async () => {
+    const injected = deps()
+    const { result } = renderHook(() => useStacks("/repos/app", injected))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      await result.current.restack(STACK)
+    })
+    expect(injected.restack).toHaveBeenCalledWith(STACK, {})
   })
 
   it("reads nothing without a repository", async () => {
