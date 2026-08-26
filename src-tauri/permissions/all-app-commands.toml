@@ -427,6 +427,7 @@ commands.allow = [
   "git_conflicts",
   "git_create_branch",
   "git_create_tag",
+  "git_default_branch",
   "git_delete_branch",
   "git_delete_tag",
   "git_diff_commit",
