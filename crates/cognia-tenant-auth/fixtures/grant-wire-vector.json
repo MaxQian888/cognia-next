@@ -1,0 +1,8 @@
+{
+  "note": "Frozen ADR-0149 grant wire vector. Verified by crates/cognia-tenant-auth AND by services/share-server, which cannot depend on that crate. Never regenerate: a change here is a wire break.",
+  "keyHex": "6f4a2d3f8c1b5e7a90d2c4b6f8e0a1c3d5e7f9b1a3c5d7e9f1b3d5a7c9e1f3b5",
+  "claimsJson": "{\"grantId\":\"7a1f5c62-1f9a-4d2e-9c53-8e0b2a6d4f11\",\"userId\":\"usr_adalovelace000000000001\",\"orgId\":\"org_acmecorporation000001\",\"issuedAt\":1800000000,\"expiresAt\":1800000300}",
+  "token": "eyJncmFudElkIjoiN2ExZjVjNjItMWY5YS00ZDJlLTljNTMtOGUwYjJhNmQ0ZjExIiwidXNlcklkIjoidXNyX2FkYWxvdmVsYWNlMDAwMDAwMDAwMDAxIiwib3JnSWQiOiJvcmdfYWNtZWNvcnBvcmF0aW9uMDAwMDAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAsImV4cGlyZXNBdCI6MTgwMDAwMDMwMH0.0RDGqswN5J_ZwgeD8427fdSAHQRL6y2iTBbknZNqWzc",
+  "verifyAtUnix": 1800000100,
+  "expiredAtUnix": 1800000400
+}

@@ -12,6 +12,7 @@
 //! keeps them honest.
 
 pub mod codegen;
+pub mod grant;
 pub mod limits;
 pub mod policy;
 pub mod proto;

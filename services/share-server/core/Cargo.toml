@@ -14,3 +14,10 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# ADR-0149 §8 — verifying collaboration-plane grants. Deliberately the same
+# primitives `crates/cognia-tenant-auth` mints with, so the two stay wire
+# compatible; see `src/grant.rs` for why this service cannot depend on it.
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"

@@ -384,4 +384,56 @@ mod tests {
         assert!(validate_request_timestamp(now + 31, Duration::from_secs(30)).is_err());
         assert!(validate_request_timestamp(now - 31, Duration::from_secs(30)).is_err());
     }
+
+    /// The frozen wire vector — ADR-0149 §8.
+    ///
+    /// `services/share-server` verifies collaboration-plane grants with its own
+    /// implementation, because the image build context (`context:
+    /// services/share-server`) makes a path dependency on this crate resolve
+    /// under `cargo test` and fail inside Docker. Duplicated code that nothing
+    /// pins drifts, and the drift would be invisible until grants this crate
+    /// mints started being rejected in production.
+    ///
+    /// So both sides verify the same bytes. Never regenerate this fixture: a
+    /// change to it IS a wire break, and it should be as hard to make silently
+    /// as any other one.
+    #[test]
+    fn the_frozen_wire_vector_still_verifies() {
+        let raw = include_str!("../fixtures/grant-wire-vector.json");
+        let vector: serde_json::Value = serde_json::from_str(raw).expect("fixture is json");
+        let key = hex_bytes(vector["keyHex"].as_str().expect("keyHex"));
+        let token = vector["token"].as_str().expect("token");
+
+        let signer = GrantSigner::new(&key).expect("key");
+        let claims: GrantClaims = signer.verify(token).expect("the frozen vector must verify");
+        assert_eq!(claims.org_id.as_str(), "org_acmecorporation000001");
+        assert_eq!(claims.user_id.as_str(), "usr_adalovelace000000000001");
+
+        // And the token is exactly what this signer would produce for those
+        // claims — so a change to field order or naming fails here too.
+        assert_eq!(signer.sign(&claims).expect("sign"), token);
+    }
+
+    /// The claims JSON in the fixture is the exact byte string this crate
+    /// serialises, which is what makes the token reproducible.
+    #[test]
+    fn the_frozen_vector_records_the_bytes_that_were_signed() {
+        let raw = include_str!("../fixtures/grant-wire-vector.json");
+        let vector: serde_json::Value = serde_json::from_str(raw).expect("fixture is json");
+        let token = vector["token"].as_str().expect("token");
+        let payload = token.split_once('.').expect("payload").0;
+        let decoded = URL_SAFE_NO_PAD.decode(payload).expect("base64url");
+        assert_eq!(
+            String::from_utf8(decoded).expect("utf8"),
+            vector["claimsJson"].as_str().expect("claimsJson")
+        );
+    }
+
+    fn hex_bytes(value: &str) -> Vec<u8> {
+        assert!(value.len().is_multiple_of(2), "hex must be even length");
+        (0..value.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&value[index..index + 2], 16).expect("hex"))
+            .collect()
+    }
 }
