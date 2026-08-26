@@ -21,6 +21,7 @@ import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
+import { useResolvedBinding } from "@/hooks/connectors/use-resolved-binding"
 import { HistoryLoadEarlier } from "@/components/inbox/history-load-earlier"
 import { PageLoading } from "@/components/ui/loading-states"
 import { ChatPane } from "@/components/chat/chat-view"
@@ -30,7 +31,6 @@ import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connect
 import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import {
   effectiveCapabilities,
   effectiveCapabilitiesForRow,
@@ -73,6 +73,21 @@ function ConversationDetail({
   // null for non-platform sessions; we fall back to "auto" to keep
   // ConversationHeader's prop contract.
   const resolvedMode = useResolvedConnectorMode(session ?? null)
+
+  // The header's policy read-out used to be handed `defaultPrivateChatPolicy()`
+  // — a literal, not this bot's policy — so it described a bot nobody had
+  // configured. Resolved live through the same three layers the bus uses;
+  // `undefined` until the adapter row loads, which the read-out says out loud
+  // rather than papering over with a default.
+  const resolvedBinding = useResolvedBinding(
+    session?.platformBinding
+      ? {
+          adapterId: session.platformBinding.adapterId,
+          conversationKey,
+          characterId: session.characterId,
+        }
+      : null
+  )
 
   // Mount the chat IPC + team-chat once per route. Both subscribers are
   // mirrored here for parity with `DesktopChatWorkspace`; only the one
@@ -170,7 +185,7 @@ function ConversationDetail({
           title={session.title}
           platform={platform}
           currentMode={currentMode}
-          policy={defaultPrivateChatPolicy()}
+          policy={resolvedBinding?.trigger}
           characterId={session.characterId}
         />
         {canFetchHistory && (

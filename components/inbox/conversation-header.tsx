@@ -46,7 +46,8 @@ interface ConversationHeaderProps {
   title: string
   platform: PlatformKind
   currentMode: ConnectorMode
-  policy: TriggerPolicy
+  /** The RESOLVED policy; `undefined` while the adapter row is still loading. */
+  policy: TriggerPolicy | undefined
   characterId?: string
   /** Current ConversationOverrideRow.providerOverride, if set. */
   providerOverride?: string

@@ -3,8 +3,15 @@
 /**
  * Policy info chip for the Inbox conversation header.
  *
- * Shows a brief tooltip summarising the resolved trigger policy:
- * rules and rate-limit blockers are rendered in human-readable form.
+ * Summarises the trigger policy this conversation actually evaluates against —
+ * the adapter row merged with the character layer and the conversation
+ * override, resolved by `useResolvedBinding`. It used to be handed
+ * `defaultPrivateChatPolicy()` by the route, a literal that described a bot
+ * nobody had configured, so the read-out was wrong for every conversation and
+ * silently right for none.
+ *
+ * `undefined` means the adapter row has not loaded yet, and the chip says so:
+ * falling back to a default is exactly the failure this replaced.
  */
 
 import { useTranslations } from "next-intl"
@@ -14,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { TriggerPolicy, TriggerRule, TriggerBlocker } from "@/types/connectors/policy"
 
 interface PolicyInfoProps {
-  policy: TriggerPolicy
+  policy: TriggerPolicy | undefined
 }
 
 type Translator = (key: string, values?: Record<string, string | number>) => string
@@ -60,10 +67,10 @@ function describeBlocker(blocker: TriggerBlocker, t: Translator): string {
 export function PolicyInfo({ policy }: PolicyInfoProps) {
   const t = useTranslations("inbox.policyInfo")
   const tFn: Translator = (key, values) => t(key, values)
-  const ruleParts = policy.rules.map((r) => describeRule(r, tFn))
-  const blockerParts = policy.blockers.map((b) => describeBlocker(b, tFn))
+  const ruleParts = (policy?.rules ?? []).map((r) => describeRule(r, tFn))
+  const blockerParts = (policy?.blockers ?? []).map((b) => describeBlocker(b, tFn))
 
-  const summary = [...ruleParts, ...blockerParts].join(". ")
+  const summary = policy ? [...ruleParts, ...blockerParts].join(". ") : t("unresolved")
 
   return (
     <Tooltip>

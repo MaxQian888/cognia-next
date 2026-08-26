@@ -98,4 +98,15 @@ describe("PolicyInfo", () => {
     expect(trigger).toHaveAttribute("data-slot", "button")
     expect(trigger).toHaveAccessibleName(/policy/i)
   })
+
+  /**
+   * The route used to hand this component `defaultPrivateChatPolicy()` — a
+   * literal, not the conversation's policy. An unresolved policy now says so
+   * rather than borrowing a default that describes a different bot.
+   */
+  it("says the policy has not loaded rather than showing a default", () => {
+    render(<PolicyInfo policy={undefined} />)
+    expect(screen.getByText("The bot's policy has not loaded yet.")).toBeInTheDocument()
+    expect(screen.queryByText("No trigger rules configured.")).not.toBeInTheDocument()
+  })
 })

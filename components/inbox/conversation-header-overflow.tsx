@@ -27,12 +27,7 @@
 
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import {
-  ListChecksIcon,
-  MessageSquareIcon,
-  MoreHorizontalIcon,
-  UserRoundIcon,
-} from "lucide-react"
+import { ListChecksIcon, MessageSquareIcon, MoreHorizontalIcon, UserRoundIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -107,7 +102,8 @@ export interface ConversationHeaderOverflowProps {
   sessionId: string
   /** Parsed from the conversationKey by the header; "" when unparseable. */
   adapterId: string
-  policy: TriggerPolicy
+  /** The RESOLVED policy; `undefined` while the adapter row is still loading. */
+  policy: TriggerPolicy | undefined
   overrideRow?: ConversationOverrideRow
   providerOverride?: string
   modelOverride?: string

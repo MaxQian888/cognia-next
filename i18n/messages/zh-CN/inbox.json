@@ -576,7 +576,8 @@
       "unknown": "未知规则",
       "user-allowlist": "用户：{names}"
     },
-    "title": "策略"
+    "title": "策略",
+    "unresolved": "尚未读取到机器人的策略。"
   },
   "providerModelSwitcher": {
     "aria": "Provider 与模型覆盖",
