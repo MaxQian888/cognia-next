@@ -55,6 +55,39 @@ pub struct Membership {
     pub workspace_role: Option<WorkspaceRole>,
 }
 
+/// A workspace as the plane knows it — ADR-0149 §6.
+///
+/// Thin on purpose: roots, trust and provisioning stay local, because they
+/// describe one machine's relationship to a checkout and a client acting on
+/// somebody else's paths is not a feature.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    /// The local `projectId`, unchanged — ADR-0149 §1 froze that on purpose.
+    pub id: String,
+    pub org_id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// One person's seat in a workspace, as the roster reports it.
+///
+/// Carries the person, not just their id, so a roster renders without a second
+/// round trip per member — and `guest` is absent because it is derived: the
+/// reader knows the org memberships, and the server stating it too would be a
+/// second implementation of one rule.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMember {
+    pub user_id: String,
+    pub display_name: String,
+    pub role: WorkspaceRole,
+    /// Whether this person also belongs to the org that owns the workspace.
+    /// The raw fact; `personStandingFrom` on the client turns it into a word.
+    pub org_member: bool,
+}
+
 /// One workspace membership, as `GET …/memberships/me` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,6 +184,22 @@ pub trait Store: Send + Sync {
         user_id: &str,
     ) -> Result<Vec<WorkspaceMembershipRow>, StoreError>;
 
+    /// Workspaces in this org, narrowed to `visible` when the caller cannot
+    /// traverse. Alphabetical, so a roster page has a stable order.
+    async fn list_workspaces(
+        &self,
+        org_id: &str,
+        visible: Option<&[String]>,
+    ) -> Result<Vec<Workspace>, StoreError>;
+
+    /// Everyone in one workspace, with their name and whether they are also in
+    /// the org. Empty for a workspace nobody was recruited into.
+    async fn list_workspace_members(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+    ) -> Result<Vec<WorkspaceMember>, StoreError>;
+
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError>;
 
     async fn get_issue(&self, org_id: &str, id: &str) -> Result<Option<Issue>, StoreError>;
@@ -187,6 +236,11 @@ struct Tables {
     org_logto_ids: HashMap<String, String>,
     /// `(org_id, provider, tenant, subject) -> user_id`
     external_identities: HashMap<(String, String, String, String), String>,
+    /// `(org_id, workspace_id) -> Workspace`
+    workspaces: HashMap<(String, String), Workspace>,
+    /// `user_id -> display name`, so a roster can be assembled without a
+    /// second table the test double does not have.
+    users: HashMap<String, String>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
 }
@@ -246,6 +300,26 @@ impl InMemoryStore {
             (workspace_id.to_owned(), user_id.to_owned()),
             (org_id.to_owned(), role),
         );
+    }
+
+    pub fn add_workspace(&self, org_id: &str, workspace_id: &str, name: &str) {
+        self.tables.write().workspaces.insert(
+            (org_id.to_owned(), workspace_id.to_owned()),
+            Workspace {
+                id: workspace_id.to_owned(),
+                org_id: org_id.to_owned(),
+                name: name.to_owned(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+    }
+
+    pub fn add_user(&self, user_id: &str, display_name: &str) {
+        self.tables
+            .write()
+            .users
+            .insert(user_id.to_owned(), display_name.to_owned());
     }
 }
 
@@ -314,6 +388,48 @@ impl Store for InMemoryStore {
             .collect();
         workspaces.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
         Ok(workspaces)
+    }
+
+    async fn list_workspaces(
+        &self,
+        org_id: &str,
+        visible: Option<&[String]>,
+    ) -> Result<Vec<Workspace>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows: Vec<Workspace> = tables
+            .workspaces
+            .iter()
+            .filter(|((org, workspace), _)| {
+                org == org_id
+                    && visible.is_none_or(|allowed| allowed.iter().any(|w| w == workspace))
+            })
+            .map(|(_, workspace)| workspace.clone())
+            .collect();
+        rows.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(rows)
+    }
+
+    async fn list_workspace_members(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+    ) -> Result<Vec<WorkspaceMember>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows: Vec<WorkspaceMember> = tables
+            .workspace_memberships
+            .iter()
+            .filter(|((workspace, _), (org, _))| workspace == workspace_id && org == org_id)
+            .map(|((_, user), (_, role))| WorkspaceMember {
+                user_id: user.clone(),
+                display_name: tables.users.get(user).cloned().unwrap_or_default(),
+                role: *role,
+                org_member: tables
+                    .org_memberships
+                    .contains_key(&(org_id.to_owned(), user.clone())),
+            })
+            .collect();
+        rows.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+        Ok(rows)
     }
 
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError> {
@@ -497,6 +613,9 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0001_collab.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0002_workspaces.sql"))
+            .await?;
         Ok(())
     }
 
@@ -676,6 +795,74 @@ impl Store for PgStore {
                     workspace_id: row.get("workspace_id"),
                     role: WorkspaceRole::parse(&raw)
                         .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_workspaces(
+        &self,
+        org_id: &str,
+        visible: Option<&[String]>,
+    ) -> Result<Vec<Workspace>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        // `$2::text[] IS NULL` keeps one prepared statement for both the
+        // traversing caller and the one narrowed to their own workspaces.
+        let rows = transaction
+            .query(
+                "SELECT id, org_id, name, created_at, updated_at FROM workspaces \
+                 WHERE org_id = $1 AND ($2::text[] IS NULL OR id = ANY($2)) \
+                 ORDER BY name, id",
+                &[&org_id, &visible],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(rows
+            .iter()
+            .map(|row| Workspace {
+                id: row.get("id"),
+                org_id: row.get("org_id"),
+                name: row.get("name"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    async fn list_workspace_members(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+    ) -> Result<Vec<WorkspaceMember>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        // One statement rather than a roster read plus a membership probe per
+        // person: `org_member` is the fact a guest is derived from, and asking
+        // for it N times is how a ten-person workspace becomes eleven queries.
+        let rows = transaction
+            .query(
+                "SELECT w.user_id, u.display_name, w.role, \
+                        (o.user_id IS NOT NULL) AS org_member \
+                 FROM workspace_memberships w \
+                 JOIN users u ON u.id = w.user_id \
+                 LEFT JOIN org_memberships o \
+                   ON o.user_id = w.user_id AND o.org_id = w.org_id \
+                 WHERE w.org_id = $1 AND w.workspace_id = $2 \
+                 ORDER BY u.display_name, w.user_id",
+                &[&org_id, &workspace_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        rows.iter()
+            .map(|row| {
+                let raw: String = row.get("role");
+                Ok(WorkspaceMember {
+                    user_id: row.get("user_id"),
+                    display_name: row.get("display_name"),
+                    role: WorkspaceRole::parse(&raw)
+                        .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+                    org_member: row.get("org_member"),
                 })
             })
             .collect()

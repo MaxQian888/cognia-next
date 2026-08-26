@@ -25,7 +25,9 @@ use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, 
 use crate::model::{
     ActorError, ActorKind, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus,
 };
-use crate::store::{IssuePatch, IssueQuery, NewIssue, Store, StoreError};
+use crate::store::{
+    IssuePatch, IssueQuery, NewIssue, Store, StoreError, Workspace, WorkspaceMember,
+};
 
 /// How long a minted grant lives.
 ///
@@ -68,6 +70,11 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
         .route("/v1/orgs/{org_id}/memberships/me", get(my_memberships))
+        .route("/v1/orgs/{org_id}/workspaces", get(list_workspaces))
+        .route(
+            "/v1/orgs/{org_id}/workspaces/{workspace_id}/members",
+            get(list_workspace_members),
+        )
         .route(
             "/v1/orgs/{org_id}/issues",
             get(list_issues).post(create_issue),
@@ -386,6 +393,52 @@ async fn my_memberships(
         org_role: membership.org_role,
         workspaces,
     }))
+}
+
+/// Workspaces this caller can see — ADR-0149 §6.
+///
+/// Narrowed by `readable_scope`, the same resolver the issue listing uses, so
+/// an org admin traverses everything and everyone else sees exactly what they
+/// were recruited into. Reusing it rather than re-deriving is what keeps one
+/// answer to "what may this person see".
+async fn list_workspaces(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Workspace>>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let scope = readable_scope(state.store.as_ref(), &claims).await?;
+    let workspaces = match &scope {
+        WorkspaceScope::All => state.store.list_workspaces(&org_id, None).await?,
+        WorkspaceScope::Only(ids) => state.store.list_workspaces(&org_id, Some(ids)).await?,
+    };
+    Ok(Json(workspaces))
+}
+
+/// Everyone in one workspace.
+///
+/// Read access to the workspace is required, and `authorize_workspace` is what
+/// decides it — a roster is a thing you can see because you are in the room,
+/// not because you know its id.
+async fn list_workspace_members(
+    State(state): State<AppState>,
+    Path((org_id, workspace_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<WorkspaceMember>>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &workspace_id,
+        WorkspaceCapability::Read,
+    )
+    .await?;
+    Ok(Json(
+        state
+            .store
+            .list_workspace_members(&org_id, &workspace_id)
+            .await?,
+    ))
 }
 
 async fn list_issues(
@@ -734,6 +787,103 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED, "{issue}");
         issue["id"].as_str().unwrap().to_owned()
+    }
+
+    /// A roster with names, and the raw fact a guest is derived from.
+    #[tokio::test]
+    async fn a_workspace_roster_carries_names_and_org_membership() {
+        let store = seeded();
+        store.add_workspace(ORG, "proj-1", "Mercury");
+        store.add_user(ada().as_str(), "Ada");
+        store.add_user(bob().as_str(), "Bob");
+        // Bob is in the org but not this workspace; Cleo is a guest in it.
+        let cleo = UserId::parse("usr_cccccccccccccccccccccccc").unwrap();
+        store.add_workspace_member(ORG, "proj-1", cleo.as_str(), WorkspaceRole::Viewer);
+        store.add_user(cleo.as_str(), "Cleo");
+
+        let (status, body) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/workspaces/proj-1/members"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let members = body.as_array().unwrap();
+        assert_eq!(members.len(), 2, "{body}");
+        let ada_row = members
+            .iter()
+            .find(|row| row["userId"] == ada().as_str())
+            .unwrap();
+        assert_eq!(ada_row["displayName"], "Ada");
+        assert_eq!(ada_row["orgMember"], true);
+        let cleo_row = members
+            .iter()
+            .find(|row| row["userId"] == cleo.as_str())
+            .unwrap();
+        // The raw fact, never the verdict: `personStandingFrom` on the client
+        // is the one implementation of "guest".
+        assert_eq!(cleo_row["orgMember"], false);
+        assert!(cleo_row.get("guest").is_none());
+    }
+
+    /// A roster is something you can see because you are in the room, not
+    /// because you know the room's id.
+    #[tokio::test]
+    async fn a_roster_needs_read_access_to_that_workspace() {
+        let store = seeded();
+        store.add_workspace(ORG, "proj-1", "Mercury");
+        // Bob is an org member with no membership in `proj-1`.
+        let (status, _) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/workspaces/proj-1/members"),
+                &token_for(&bob()),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn workspaces_are_narrowed_to_what_the_caller_was_recruited_into() {
+        let store = seeded();
+        store.add_workspace(ORG, "proj-1", "Mercury");
+        store.add_workspace(ORG, "proj-2", "Venus");
+
+        let (status, body) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/workspaces"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let names: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["Mercury"], "{body}");
+    }
+
+    #[tokio::test]
+    async fn an_org_admin_traverses_every_workspace() {
+        // §4 rejects hiding a workspace from its own org's admin: off-boarding,
+        // audit and compliance all need a way in.
+        let store = seeded();
+        store.add_org_member(ORG, bob().as_str(), OrgRole::Admin);
+        store.add_workspace(ORG, "proj-1", "Mercury");
+        store.add_workspace(ORG, "proj-2", "Venus");
+
+        let (status, body) = call(
+            app(store),
+            get(&format!("/v1/orgs/{ORG}/workspaces"), &token_for(&bob())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body.as_array().unwrap().len(), 2, "{body}");
     }
 
     #[tokio::test]
