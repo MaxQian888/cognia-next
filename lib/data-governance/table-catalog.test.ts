@@ -19,7 +19,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(310)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(313)
     db.close()
   })
 

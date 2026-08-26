@@ -604,6 +604,25 @@ describe("getDb", () => {
     )
   })
 
+  it("v198 opens the collaboration plan and run mirrors", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(198)
+    expect(db.collabPlans.schema.primKey.name).toBe("id")
+    expect(db.collabRuns.schema.primKey.name).toBe("id")
+    // Read by org on every refresh and by workspace for the activity panel.
+    expect(db.collabPlans.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["orgId", "workspaceId", "status", "updatedAt", "fetchedAt"])
+    )
+    expect(db.collabRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["orgId", "workspaceId", "issueId", "planId", "status", "startedAt"])
+    )
+    // Artifacts are read, never queried — an index on them would be dead weight
+    // on every write for a lookup nothing performs.
+    expect(db.collabRuns.schema.indexes.map((index) => index.name)).not.toContain("artifacts")
+  })
+
   it("v196 indexes the external subject the IM plane resolves people by", async () => {
     const db = getDb()
     await db.open()

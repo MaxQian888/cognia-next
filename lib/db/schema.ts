@@ -143,6 +143,8 @@ import type { LabelRow } from "@/types/labels"
 import type { Issue, IssueCounter, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
 import type { CollabIssueMirrorRow } from "./collab-issue-mirror-types"
 import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
+import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
+import type { CollabRunMirrorRow } from "./collab-run-mirror-types"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
@@ -4649,6 +4651,24 @@ export class CogniaDB extends Dexie {
       collabWorkspaces: "&id, orgId, name, updatedAt, fetchedAt",
     })
 
+    // ADR-0149 §6 Batch 7c — the collaboration plane's plan and run mirrors.
+    // Two more REBUILDABLE read-through caches, like `collabIssues` and
+    // `collabWorkspaces`.
+    //
+    // `collabPlans` holds plan HEADERS only. The server returns steps from the
+    // single-plan route and omits them from the listing, so mirroring them
+    // would cost one request per plan on every refresh to fill a detail view
+    // that does not exist. The counts the activity panel renders arrive with
+    // the header.
+    //
+    // `collabRuns` carries its artifacts inline: they are the payoff of the
+    // row (the PR link), they are small, and the server never sends them apart
+    // from their run. Not indexed — a link is read, never queried.
+    this.version(198).stores({
+      collabPlans: "&id, orgId, workspaceId, status, updatedAt, fetchedAt",
+      collabRuns: "&id, orgId, workspaceId, issueId, planId, status, startedAt, fetchedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4670,6 +4690,10 @@ export class CogniaDB extends Dexie {
   // v197 — ADR-0149 collaboration-plane workspace mirror. Rebuildable cache;
   // see `lib/db/collab-workspace-mirror.ts`.
   collabWorkspaces!: Table<CollabWorkspaceMirrorRow, string>
+  // v198 — ADR-0149 collaboration-plane plan and run mirrors. Rebuildable
+  // caches; see `lib/db/collab-plan-mirror.ts` and `lib/db/collab-run-mirror.ts`.
+  collabPlans!: Table<CollabPlanMirrorRow, string>
+  collabRuns!: Table<CollabRunMirrorRow, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.
