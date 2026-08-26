@@ -2032,6 +2032,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character?.a2uiEnabled ??
     appSettings?.a2uiDefaultEnabled ??
     false
+  // The IM scopes' own switch, conversation over bot. `undefined` at both means
+  // "whatever this channel supports", i.e. the channel-capability default
+  // computed below — which is the behaviour that used to be unconditional.
+  const imA2uiPreference = imOverrideRow?.a2uiEnabled ?? imAdapterRow?.a2uiEnabled
   let connectorCapabilityPrompt: string | null = null
   if (session?.platformBinding?.adapterId) {
     try {
@@ -2070,7 +2074,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // crash the send; just skip the prompt injection.
     }
   }
-  const a2uiEnabled = baseA2uiEnabled || connectorCapabilityPrompt !== null
+  const a2uiEnabled = imA2uiPreference ?? (baseA2uiEnabled || connectorCapabilityPrompt !== null)
   if (a2uiEnabled) {
     for (const t of namespacedA2UIToolNames()) allowed.add(t)
   }
@@ -2229,7 +2233,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // G6 — append the connector-capability section after the A2UI prompt so
   // the model knows which kinds will degrade on this channel and avoids
   // the unsupported ones (Chart on OneBot, Slider on Slack, …).
-  if (connectorCapabilityPrompt) {
+  // Gated on `a2uiEnabled`: this section tells the model which A2UI component
+  // kinds degrade on this channel. Appending it to a turn that has no A2UI
+  // tools describes an ability the model does not have.
+  if (connectorCapabilityPrompt && a2uiEnabled) {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing
       ? `${existing}\n\n${connectorCapabilityPrompt}`

@@ -238,6 +238,19 @@ export interface AdapterInstanceRow {
    */
   replyQuoting?: boolean
   /**
+   * Whether this bot's replies may paint interactive A2UI surfaces.
+   *
+   * Tri-state, and `undefined` is NOT "off": it means "whatever this channel
+   * supports", which is what `build-options.ts` has always forced for an IM
+   * session whose adapter has a cached capability matrix — an IM reply has no
+   * artifact dock, so making A2UI opt-in per bot would degrade every rich reply
+   * to plain markdown. `false` is an explicit opt-out for a channel where
+   * cards are unwanted; `true` turns it on even before a matrix is cached.
+   *
+   * Non-indexed additive — no Dexie bump. Read by `resolveSendOptions`.
+   */
+  a2uiEnabled?: boolean
+  /**
    * Ordered failover targets (multi-bot): when THIS adapter's circuit
    * breaker is open at delivery time, the outbound runner re-enqueues the
    * job through the first enabled same-platform sibling listed here instead
@@ -808,6 +821,14 @@ export interface ConversationOverrideRow {
    * unless an operator sets this `false` to suppress it for a conversation.
    */
   allowOcr?: boolean
+  /**
+   * Per-conversation A2UI switch. `undefined` inherits the bot's
+   * `a2uiEnabled`, which in turn defaults to "whatever this channel supports".
+   * `false` is how a chat that wants plain text says so.
+   *
+   * Non-indexed additive — no Dexie bump.
+   */
+  a2uiEnabled?: boolean
   /**
    * Per-conversation opt-in for the self-driving `/goal` command (v49
    * inbox optimization). Mirrors `allowComputerUse` exactly in shape and

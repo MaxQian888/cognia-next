@@ -23,6 +23,7 @@ function fromRow(row: AdapterInstanceRow | undefined): ConversationBehaviorValue
     inboundActivationPolicy: row?.inboundActivationPolicy,
     activeRunDispatchMode: row?.activeRunDispatchMode,
     activationTtlHours: row?.activationTtlMs ? String(row.activationTtlMs / 3_600_000) : "",
+    a2ui: row?.a2uiEnabled,
   }
 }
 
@@ -66,6 +67,8 @@ function AdapterBehaviorDraft({ adapterId, row }: { adapterId: string; row?: Ada
         activeRunDispatchMode: draft.activeRunDispatchMode,
         activationTtlMs:
           Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3_600_000) : undefined,
+        // Tri-state: `undefined` restores "whatever this channel supports".
+        a2uiEnabled: draft.a2ui,
       },
       "settings.adapter.behavior"
     )

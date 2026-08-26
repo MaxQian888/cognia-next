@@ -154,3 +154,84 @@ describe("resolveSendOptions — inbox suppression gate", () => {
     expect(opts.suppressedReason).toBe("muted")
   })
 })
+
+/**
+ * A2UI on an IM turn used to be unconditional: any adapter with a cached
+ * capability matrix forced it on, so a channel that wanted plain text had no
+ * way to say so. It is now tri-state at both IM scopes, and `undefined` still
+ * means "whatever this channel supports" — which is the forced behaviour, kept
+ * as the DEFAULT rather than as a law.
+ */
+describe("resolveSendOptions — IM A2UI tri-state", () => {
+  const PLATFORM_BINDING = {
+    platform: "telegram" as const,
+    adapterId: "tg-1",
+    conversationKey: "telegram:tg-1:42",
+    conversationRef: { platform: "telegram" as const, adapterId: "tg-1", chatId: 42 },
+  }
+
+  function imAdapterRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "tg-1",
+      type: "telegram",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "svc", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      // A non-empty matrix is what used to force A2UI on unconditionally.
+      lastKnownCapabilities: { text: true },
+      createdAt: 0,
+      updatedAt: 1,
+      ...overrides,
+    }
+  }
+
+  const a2uiToolsIn = (opts: Awaited<ReturnType<typeof resolveSendOptions>>) =>
+    (opts.allowedTools ?? []).some((tool) => tool.toLowerCase().includes("a2ui"))
+
+  it("still turns A2UI on for a channel that supports it and says nothing", async () => {
+    const opts = await resolveSendOptions({
+      session: { id: "s1", platformBinding: PLATFORM_BINDING } as never,
+      platformBinding: PLATFORM_BINDING,
+      imAdapterRow: imAdapterRow() as never,
+    })
+    expect(a2uiToolsIn(opts)).toBe(true)
+  })
+
+  it("lets a bot opt out of interactive cards entirely", async () => {
+    const opts = await resolveSendOptions({
+      session: { id: "s1", platformBinding: PLATFORM_BINDING } as never,
+      platformBinding: PLATFORM_BINDING,
+      imAdapterRow: imAdapterRow({ a2uiEnabled: false }) as never,
+    })
+    expect(a2uiToolsIn(opts)).toBe(false)
+    // The capability section describes which A2UI kinds degrade on this
+    // channel; appending it to a turn with no A2UI tools would describe an
+    // ability the model does not have.
+    expect(opts.appendSystemPrompt ?? "").not.toMatch(/A2UI/i)
+  })
+
+  it("lets one conversation opt back in over a bot that opted out", async () => {
+    const opts = await resolveSendOptions({
+      session: { id: "s1", platformBinding: PLATFORM_BINDING } as never,
+      platformBinding: PLATFORM_BINDING,
+      imAdapterRow: imAdapterRow({ a2uiEnabled: false }) as never,
+      imOverrideRow: { a2uiEnabled: true } as never,
+    })
+    expect(a2uiToolsIn(opts)).toBe(true)
+  })
+
+  it("lets one conversation opt out of a bot that leaves it to the channel", async () => {
+    const opts = await resolveSendOptions({
+      session: { id: "s1", platformBinding: PLATFORM_BINDING } as never,
+      platformBinding: PLATFORM_BINDING,
+      imAdapterRow: imAdapterRow() as never,
+      imOverrideRow: { a2uiEnabled: false } as never,
+    })
+    expect(a2uiToolsIn(opts)).toBe(false)
+  })
+})

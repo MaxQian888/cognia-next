@@ -12057,6 +12057,8 @@
         "allowGoalDriving": "允许在此会话上启动自驱 /goal",
         "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
         "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
+        "allowOcr": "识别图片中的文字",
+        "allowOcrHint": "默认开启：助手可以对收到的图片和文档做本地 OCR。关掉之后，本会话的附件不会被读取。",
         "allowScheduleTools": "允许此会话的 Agent 管理定时任务",
         "allowScheduleToolsWarning": "仅向此会话暴露创建、查看和取消定时任务工具；Agent 只能修改自己创建的任务。默认关闭。",
         "allowedSkills": {
@@ -28459,6 +28461,11 @@
         "timeRangeLabel": "时间范围"
       },
       "behaviorEditor": {
+        "a2ui": "交互卡片",
+        "a2uiChannelDefault": "按渠道支持情况",
+        "a2uiHelp": "由平台原生渲染的按钮、表单与图表。若某个会话只该收到纯文本，就关掉它。",
+        "a2uiOff": "关闭 —— 只发纯文本",
+        "a2uiOn": "开启",
         "activationTtl": "激活有效期（小时）",
         "activationTtlPlaceholder": "例如 24",
         "activation_always": "始终激活",

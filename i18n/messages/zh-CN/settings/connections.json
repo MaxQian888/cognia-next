@@ -439,6 +439,11 @@
     "timeRangeLabel": "时间范围"
   },
   "behaviorEditor": {
+    "a2ui": "交互卡片",
+    "a2uiChannelDefault": "按渠道支持情况",
+    "a2uiHelp": "由平台原生渲染的按钮、表单与图表。若某个会话只该收到纯文本，就关掉它。",
+    "a2uiOff": "关闭 —— 只发纯文本",
+    "a2uiOn": "开启",
     "activationTtl": "激活有效期（小时）",
     "activationTtlPlaceholder": "例如 24",
     "activation_always": "始终激活",

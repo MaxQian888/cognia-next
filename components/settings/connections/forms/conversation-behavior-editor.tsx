@@ -49,6 +49,13 @@ export interface ConversationBehaviorValue {
   inboundActivationPolicy?: InboundActivationPolicy
   activeRunDispatchMode?: ActiveRunDispatchMode
   activationTtlHours?: string
+  /**
+   * Whether replies may paint interactive surfaces. Tri-state at BOTH scopes,
+   * unlike the fields above: `undefined` at the bot scope is not "off" either,
+   * it is "whatever the channel supports", which is what the runtime has always
+   * forced for an IM conversation with a cached capability matrix.
+   */
+  a2ui?: boolean
 }
 
 export interface ConversationBehaviorEditorProps {
@@ -220,6 +227,28 @@ export function ConversationBehaviorEditor({
             </SelectContent>
           </Select>
           {source("activeRunDispatchMode")}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor={`${scope}-behavior-a2ui`}>{t("a2ui")}</Label>
+          <Select
+            value={value.a2ui === undefined ? INHERIT : value.a2ui ? "on" : "off"}
+            onValueChange={(next) => set("a2ui", next === INHERIT ? undefined : next === "on")}
+          >
+            <SelectTrigger id={`${scope}-behavior-a2ui`} data-testid="behavior-a2ui">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {/* Offered at the bot scope too — see the field's docblock. */}
+              <SelectItem value={INHERIT}>
+                {scope === "adapter" ? t("a2uiChannelDefault") : t("inherit")}
+              </SelectItem>
+              <SelectItem value="on">{t("a2uiOn")}</SelectItem>
+              <SelectItem value="off">{t("a2uiOff")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("a2uiHelp")}</p>
+          {source("a2ui")}
         </div>
 
         <div className="space-y-1.5">

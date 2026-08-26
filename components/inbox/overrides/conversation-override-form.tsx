@@ -19,7 +19,7 @@ import { useMemo, useState } from "react"
 import type { Character } from "@cognia/agent-config-types"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { InfoIcon, ShieldAlertIcon, XIcon } from "lucide-react"
+import { InfoIcon, ScanTextIcon, ShieldAlertIcon, XIcon } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -223,6 +223,12 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [liveActivity, setLiveActivity] = useState(initialRow?.liveActivity !== false)
   const [appendActivity, setAppendActivity] = useState(initialRow?.appendActivity !== false)
   const [replyQuoting, setReplyQuoting] = useState(initialRow?.replyQuoting !== false)
+  // Tri-state, so `undefined` (inherit the bot) is distinct from an explicit off.
+  const [a2ui, setA2ui] = useState<boolean | undefined>(initialRow?.a2uiEnabled)
+  // Default-ALLOW, unlike the three switches below it: reading an inbound image
+  // is routinely what the conversation is about. `false` is the only value
+  // worth persisting.
+  const [allowOcr, setAllowOcr] = useState(initialRow?.allowOcr !== false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   // The composition axes. `undefined` means "follow the layer below", which is
   // what an unset field has always meant here.
@@ -388,6 +394,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           appendActivity: appendActivity ? undefined : false,
           replyQuoting: replyQuoting ? undefined : false,
           allowComputerUse: allowComputerUse ? true : undefined,
+          allowOcr: allowOcr ? undefined : false,
+          a2uiEnabled: a2ui,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           allowScheduleTools: allowScheduleTools ? true : undefined,
           providerOverride:
@@ -526,6 +534,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
             activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
             activationTtlHours,
+            a2ui,
           }}
           sources={effectiveSources}
           targetKind={effectiveTargetKind}
@@ -537,6 +546,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             setActivationPolicy(next.inboundActivationPolicy ?? "inherit")
             setDispatchMode(next.activeRunDispatchMode ?? "inherit")
             setActivationTtlHours(next.activationTtlHours ?? "")
+            setA2ui(next.a2ui)
           }}
         />
       </div>
@@ -675,6 +685,25 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
+          </div>
+        </div>
+        {/* Default-ALLOW, and the only member of this group that is — no
+         * destructive marker, because switching it OFF is the restriction. */}
+        <div className="flex items-start gap-3 border-t pt-4">
+          <ScanTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="conv-override-allow-ocr" className="cursor-pointer">
+                {t("fields.allowOcr")}
+              </Label>
+              <Switch
+                id="conv-override-allow-ocr"
+                checked={allowOcr}
+                onCheckedChange={setAllowOcr}
+                data-testid="conv-override-allow-ocr"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("fields.allowOcrHint")}</p>
           </div>
         </div>
         <div className="flex items-start gap-3 border-t pt-4">

@@ -125,6 +125,8 @@ export type AdapterInstancePatch = Partial<
     // ADR-0009 §3A.3 — bot-wide reply-quoting default (settings
     // ReplyQuotingDefault card).
     | "replyQuoting"
+    // Bot-wide A2UI switch (tri-state — see the row's docblock).
+    | "a2uiEnabled"
     | "failoverAdapterIds"
     // Multi-bot outbound: rate-limit spillover targets (load balancing).
     | "balanceAdapterIds"

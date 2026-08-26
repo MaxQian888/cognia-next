@@ -439,6 +439,11 @@
     "timeRangeLabel": "Time range"
   },
   "behaviorEditor": {
+    "a2ui": "Interactive cards",
+    "a2uiChannelDefault": "Whatever this channel supports",
+    "a2uiHelp": "Buttons, forms and charts rendered natively by the platform. Turn off for a chat that should only ever get plain text.",
+    "a2uiOff": "Off — plain text only",
+    "a2uiOn": "On",
     "activationTtl": "Activation TTL (hours)",
     "activationTtlPlaceholder": "e.g. 24",
     "activation_always": "Always active",

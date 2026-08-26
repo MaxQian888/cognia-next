@@ -12057,6 +12057,8 @@
         "allowGoalDriving": "Allow self-driving /goal on this conversation",
         "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
         "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
+        "allowOcr": "Read text in images",
+        "allowOcrHint": "On by default: the assistant may run local OCR on inbound images and documents. Turning it off leaves attachments unread in this conversation.",
         "allowScheduleTools": "Allow this conversation's agent to manage schedules",
         "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
         "allowedSkills": {
@@ -28459,6 +28461,11 @@
         "timeRangeLabel": "Time range"
       },
       "behaviorEditor": {
+        "a2ui": "Interactive cards",
+        "a2uiChannelDefault": "Whatever this channel supports",
+        "a2uiHelp": "Buttons, forms and charts rendered natively by the platform. Turn off for a chat that should only ever get plain text.",
+        "a2uiOff": "Off — plain text only",
+        "a2uiOn": "On",
         "activationTtl": "Activation TTL (hours)",
         "activationTtlPlaceholder": "e.g. 24",
         "activation_always": "Always active",

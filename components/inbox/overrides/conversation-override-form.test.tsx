@@ -874,4 +874,87 @@ describe("ConversationOverrideForm", () => {
       expect(cleared?.trigger).toBeUndefined()
     })
   })
+
+  /**
+   * `allowOcr` is the one default-ALLOW capability in this group: reading an
+   * inbound image is routinely what the conversation is about. Only `false` is
+   * worth persisting, so the row stays clean for every conversation that never
+   * touched the switch.
+   */
+  it("persists only an explicit OCR opt-out", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_ocr"
+        sessionId="s_ocr"
+        onDone={onDone}
+      />
+    )
+    expect(screen.getByTestId("conv-override-allow-ocr")).toBeChecked()
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(
+      (
+        await getDb()
+          .conversationOverrides.where("conversationKey")
+          .equals("lark:lark-1:oc_ocr")
+          .first()
+      )?.allowOcr
+    ).toBeUndefined()
+
+    fireEvent.click(screen.getByTestId("conv-override-allow-ocr"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      expect(
+        (
+          await getDb()
+            .conversationOverrides.where("conversationKey")
+            .equals("lark:lark-1:oc_ocr")
+            .first()
+        )?.allowOcr
+      ).toBe(false)
+    })
+  })
+
+  // Tri-state: inherit / on / off. `build-options` reads `undefined` as
+  // "whatever this channel supports", which is not the same as off.
+  it("persists the A2UI tri-state and clears it back to inherit", async () => {
+    const user = userEvent.setup()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_a2ui"
+        sessionId="s_a2ui"
+      />
+    )
+
+    await user.click(screen.getByTestId("behavior-a2ui"))
+    await user.click(await screen.findByRole("option", { name: "Off — plain text only" }))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      expect(
+        (
+          await getDb()
+            .conversationOverrides.where("conversationKey")
+            .equals("lark:lark-1:oc_a2ui")
+            .first()
+        )?.a2uiEnabled
+      ).toBe(false)
+    })
+
+    await user.click(screen.getByTestId("behavior-a2ui"))
+    await user.click(await screen.findByRole("option", { name: "Inherit" }))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      expect(
+        (
+          await getDb()
+            .conversationOverrides.where("conversationKey")
+            .equals("lark:lark-1:oc_a2ui")
+            .first()
+        )?.a2uiEnabled
+      ).toBeUndefined()
+    })
+  })
 })

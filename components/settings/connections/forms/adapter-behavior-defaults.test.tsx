@@ -55,3 +55,30 @@ it("offers delegate only where background work has a carrier", async () => {
   })
   expect(delegate).toHaveAttribute("aria-disabled", "true")
 })
+
+// Tri-state at the BOT scope too — `undefined` there means "whatever this
+// channel supports", not off, so the picker needs three options and not two.
+it("writes the bot-wide A2UI switch and can clear it back to the channel default", async () => {
+  const user = userEvent.setup()
+  render(<AdapterBehaviorDefaults adapterId="a" />)
+
+  await user.click(screen.getByTestId("behavior-a2ui"))
+  await user.click(screen.getByRole("option", { name: "a2uiOff" }))
+  await user.click(screen.getByRole("button", { name: "save" }))
+  expect(mockUpdateAdapterConfigSection).toHaveBeenCalledWith(
+    "a",
+    "behavior",
+    expect.objectContaining({ a2uiEnabled: false }),
+    "settings.adapter.behavior"
+  )
+
+  await user.click(screen.getByTestId("behavior-a2ui"))
+  await user.click(screen.getByRole("option", { name: "a2uiChannelDefault" }))
+  await user.click(screen.getByRole("button", { name: "save" }))
+  expect(mockUpdateAdapterConfigSection).toHaveBeenLastCalledWith(
+    "a",
+    "behavior",
+    expect.objectContaining({ a2uiEnabled: undefined }),
+    "settings.adapter.behavior"
+  )
+})
