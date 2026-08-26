@@ -357,7 +357,11 @@
       "succeeded": "Succeeded",
       "failed": "Failed",
       "cancelled": "Cancelled"
-    }
+    },
+    "stackOn": "Stack on",
+    "stackOnHint": "Base this issue's pull request on another issue's branch instead of the base branch, so each review shows only its own change. Only branches a finished run already pushed are offered.",
+    "stackOnNone": "Nothing — base branch",
+    "baseBranchStacked": "Set by the stack: a pull request has one base."
   },
   "notify": {
     "open": "Open issue",

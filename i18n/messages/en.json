@@ -12817,6 +12817,7 @@
       },
       "baseBranch": "Base branch",
       "baseBranchHint": "The branch the pull request targets; the head branch is derived from the issue identifier.",
+      "baseBranchStacked": "Set by the stack: a pull request has one base.",
       "cancel": "Cancel run",
       "cancelled": "Run cancelled",
       "description": "Choose the execution engine. This is the confirmation — the engine starts as soon as you press Run.",
@@ -12838,6 +12839,9 @@
       "reviewRule": "When the run ends the issue moves to In review — never straight to Done.",
       "section": "Runs",
       "sectionHint": "Dispatch this issue to its assigned agent or squad. A run owns In progress; when it finishes the issue comes back to you at In review.",
+      "stackOn": "Stack on",
+      "stackOnHint": "Base this issue's pull request on another issue's branch instead of the base branch, so each review shows only its own change. Only branches a finished run already pushed are offered.",
+      "stackOnNone": "Nothing — base branch",
       "started": "{identifier} dispatched to {adapter}",
       "status": {
         "cancelled": "Cancelled",

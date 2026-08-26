@@ -357,7 +357,11 @@
       "succeeded": "成功",
       "failed": "失败",
       "cancelled": "已取消"
-    }
+    },
+    "stackOn": "叠加在",
+    "stackOnHint": "把这个 issue 的 PR 基于另一个 issue 的分支，而不是基分支，这样每次评审只看到它自己的改动。只列出已完成的运行真正推送过的分支。",
+    "stackOnNone": "不叠加——使用基分支",
+    "baseBranchStacked": "由所叠加的分支决定：一个 PR 只有一个基分支。"
   },
   "notify": {
     "open": "打开议题",

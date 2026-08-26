@@ -26,6 +26,23 @@ jest.mock("@/lib/issues/run/registry", () => {
 const mockToastSuccess = jest.fn()
 jest.mock("sonner", () => ({ toast: { success: (...a: unknown[]) => mockToastSuccess(...a) } }))
 
+// The stack picker asks the database what sibling issues already pushed. Stub
+// the three reads at their own seam so the dialog's own logic is what is tested.
+let mockIssue: unknown = {
+  id: "iss-1",
+  projectId: "w1",
+  issueProjectId: "ip-1",
+  githubRef: { repoFullName: "octo/repo", number: 1 },
+}
+let mockProject: unknown = {
+  id: "ip-1",
+  resources: [{ kind: "github-repo", repoFullName: "octo/repo", addedAt: 1 }],
+}
+let mockRuns: unknown[] = []
+jest.mock("@/lib/db/issues", () => ({ getIssue: async () => mockIssue }))
+jest.mock("@/lib/db/issue-projects", () => ({ getIssueProject: async () => mockProject }))
+jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: async () => mockRuns }))
+
 import userEvent from "@testing-library/user-event"
 import { render, screen, waitFor } from "@testing-library/react"
 import { IssueRunRefusedError } from "@/lib/issues/run/registry"
@@ -122,5 +139,91 @@ describe("RunIssueDialog", () => {
     renderDialog()
     expect(await screen.findByTestId("run-issue-empty")).toBeInTheDocument()
     expect(screen.getByTestId("run-issue-submit")).toBeDisabled()
+  })
+})
+
+describe("stacked runs", () => {
+  const pushed = (issueId: string, head: string) => ({
+    id: `run-${head}`,
+    issueId,
+    projectId: "w1",
+    adapterId: "github-loop",
+    kind: "github-loop",
+    targetId: "job",
+    targetRef: { repoFullName: "octo/repo", head, base: "main" },
+    status: "succeeded",
+    by: { kind: "human" },
+    startedAt: 1,
+    updatedAt: 2,
+    endedAt: 2,
+    artifacts: [],
+  })
+
+  beforeEach(() => {
+    mockRuns = []
+    mockIssue = {
+      id: "iss-1",
+      projectId: "w1",
+      issueProjectId: "ip-1",
+      githubRef: { repoFullName: "octo/repo", number: 1 },
+    }
+    mockProject = {
+      id: "ip-1",
+      resources: [{ kind: "github-repo", repoFullName: "octo/repo", addedAt: 1 }],
+    }
+  })
+
+  it("hides the picker when there is no branch to stack on", async () => {
+    mockListOptions.mockResolvedValue([{ adapter: adapters.loop, verdict: { ok: true } }])
+    renderDialog()
+    await screen.findByTestId("run-issue-base")
+    expect(screen.queryByTestId("run-issue-stack")).toBeNull()
+  })
+
+  it("offers a sibling issue's pushed branch and sends it as the stack option", async () => {
+    mockRuns = [pushed("iss-2", "issue/merc-2")]
+    mockListOptions.mockResolvedValue([{ adapter: adapters.loop, verdict: { ok: true } }])
+    mockStart.mockResolvedValue({ adapterId: "github-loop" })
+    renderDialog()
+
+    const picker = await screen.findByTestId("run-issue-stack")
+    await userEvent.click(picker)
+    await userEvent.click(await screen.findByRole("option", { name: "issue/merc-2" }))
+
+    await userEvent.click(screen.getByTestId("run-issue-submit"))
+    await waitFor(() =>
+      expect(mockStart).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({ stackOn: "issue/merc-2" }),
+        })
+      )
+    )
+  })
+
+  it("locks the base field to the stack branch, because a PR has one base", async () => {
+    mockRuns = [pushed("iss-2", "issue/merc-2")]
+    mockListOptions.mockResolvedValue([{ adapter: adapters.loop, verdict: { ok: true } }])
+    renderDialog()
+
+    const base = await screen.findByTestId("run-issue-base")
+    expect(base).not.toBeDisabled()
+
+    await userEvent.click(screen.getByTestId("run-issue-stack"))
+    await userEvent.click(await screen.findByRole("option", { name: "issue/merc-2" }))
+
+    await waitFor(() => expect(screen.getByTestId("run-issue-base")).toBeDisabled())
+    expect(screen.getByTestId("run-issue-base")).toHaveValue("issue/merc-2")
+  })
+
+  it("sends no stack option when the run is not stacked", async () => {
+    mockRuns = [pushed("iss-2", "issue/merc-2")]
+    mockListOptions.mockResolvedValue([{ adapter: adapters.loop, verdict: { ok: true } }])
+    mockStart.mockResolvedValue({ adapterId: "github-loop" })
+    renderDialog()
+    await screen.findByTestId("run-issue-stack")
+    await userEvent.click(screen.getByTestId("run-issue-submit"))
+    await waitFor(() => expect(mockStart).toHaveBeenCalled())
+    const [[call]] = mockStart.mock.calls
+    expect(call.options).not.toHaveProperty("stackOn")
   })
 })
