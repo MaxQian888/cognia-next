@@ -418,7 +418,38 @@ that is already granted.
 | **6** | ✅ `share-server` gains tenancy and identity; `ops-controller` gains RLS | Controller: `0002_tenant_isolation.sql` (ENABLE + FORCE on all twelve tables) and every statement inside a `tenant_scope` transaction. Share: `org_id`/`creator_user_id` columns, grant verification in both the Rust server and the Worker, and a grant-only `/v1/orgs/{org}/shares` plane. |
 | **7a** | ✅ The plane becomes reachable, and Guest lands | `lib/collab/connection.ts` (where the server is), `lib/collab/refresh.ts` (the one pull, run from `lib/issues/boot.ts`), `GET /v1/orgs/{org}/memberships/me`, `pullCollabMemberships`, and the Collaboration server card. |
 | **7b** | ✅ Workspace metadata and the roster | `workspaces` table + `GET …/workspaces` and `…/workspaces/{id}/members`, Dexie v197 `collabWorkspaces`, `replaceWorkspaceRoster`, and the `/workspace` Members section — where a guest becomes visible to somebody other than themselves. |
-| **7c** | ⏳ Plans and Runs on the plane | follows the Issues slice — server tables, endpoints and mirrors, in the shape Batch 3 established. |
+| **7c** | ✅ Plans and Runs on the plane | `0003_plans_runs.sql` (`plans`/`plan_steps`/`runs`/`run_artifacts`, all four ENABLE + FORCE), six routes, Dexie v198 `collabPlans`/`collabRuns`, `pullCollabActivity`, and the `/workspace` Team activity section. |
+
+**Batch 7c notes.** Three lines this slice would not cross.
+
+A local `AgentPlan` carries its execution machinery — step params with
+absolute paths, tool inputs, MCP server ids, a `sessionId`, a `generationId`
+race guard, an unbounded `metadata` bag. None of it travels, for the reason
+§6 already gave about workspace roots: shipping one machine's paths across
+the plane invites a client to act on somebody else's checkout, and a race
+guard for a driver running on another laptop means nothing to a reader. A
+run's engine-native `targetId` is gone for the same reason — an AgentTask id
+on Ada's machine names nothing on Bob's.
+
+An artifact link must be http(s), enforced as a database constraint rather
+than a comment. A `file:///Users/ada/…` href opens nothing on a colleague's
+screen and publishes the shape of Ada's home directory to the whole org.
+
+Progress is recomputed server-side from the steps and never taken from a
+client. Two writers reporting different progress for one plan is a
+disagreement with no tiebreak, and the steps are the tiebreak. The rules
+that follow — a retried step loses the outcome it no longer has, an end time
+is sticky while terminal and clears on the way out — live in Rust and
+nowhere else, so the test double and production cannot drift apart on what a
+plan's progress is.
+
+The steps themselves are deliberately not mirrored. They come from the
+single-plan route, so pulling them would cost one request per plan on every
+refresh to fill a detail view that does not exist. That is the same call
+Batch 7b made about rosters and reached the opposite answer, because a
+roster is what makes a guest visible to anybody else and a step list
+currently makes nobody see anything. `CollabClient.getPlan` is the seam that
+view will use, and nothing calls it yet.
 
 **Batch 7a notes.** The missing thing was the same one three times.
 

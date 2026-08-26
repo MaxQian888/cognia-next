@@ -352,7 +352,29 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 | **6** | ✅ `share-server` 补租户与身份；`ops-controller` 补 RLS | 控制器：`0002_tenant_isolation.sql`（12 张表全部 ENABLE + FORCE），每条语句都跑在 `tenant_scope` 事务里。分享：`org_id`/`creator_user_id` 两列、Rust 服务与 Worker 双侧的 grant 校验、以及仅接受 grant 的 `/v1/orgs/{org}/shares` 面。 |
 | **7a** | ✅ 协作面变得可达，Guest 落地 | `lib/collab/connection.ts`（服务器在哪）、`lib/collab/refresh.ts`（唯一的那次拉取，由 `lib/issues/boot.ts` 触发）、`GET /v1/orgs/{org}/memberships/me`、`pullCollabMemberships`，以及「协作服务器」设置卡片。 |
 | **7b** | ✅ Workspace 元数据与名册 | `workspaces` 表 + `GET …/workspaces` 与 `…/workspaces/{id}/members`、Dexie v197 `collabWorkspaces`、`replaceWorkspaceRoster`，以及 `/workspace` 的「成员」区块——guest 在这里第一次能被本人以外的人看见。 |
-| **7c** | ⏳ Plans 与 Runs 上协作面 | 沿用 Issues 那一刀的形状——服务端表、端点与镜像。 |
+| **7c** | ✅ Plans 与 Runs 上协作面 | `0003_plans_runs.sql`（`plans`/`plan_steps`/`runs`/`run_artifacts`，四张表全部 ENABLE + FORCE）、6 条路由、Dexie v198 `collabPlans`/`collabRuns`、`pullCollabActivity`，以及 `/workspace` 的「团队动态」区块。 |
+
+**Batch 7c 补记。** 这一刀有三条不越过的线。
+
+本地 `AgentPlan` 带着自己的执行机件——含绝对路径的 step params、工具入参、MCP
+server id、`sessionId`、作为竞态守卫的 `generationId`、无边界的 `metadata`。这些
+一样都不上协作面，理由与 §6 对 workspace 根目录给出的完全相同：把某一台机器的路径
+运过去，等于邀请客户端去操作别人的检出；而一个跑在另一台笔记本上的驱动器的竞态守卫，
+对读者毫无意义。运行的引擎原生 `targetId` 因同一理由被去掉——Ada 机器上的
+AgentTask id 在 Bob 机器上什么也不指。
+
+产物链接必须是 http(s)，而且写成数据库约束而不是注释。`file:///Users/ada/…` 在同事
+屏幕上打不开任何东西，却把 Ada 家目录的形状公开给了整个 org。
+
+进度由服务端从步骤重算，绝不采信客户端。两个写入者对同一个 plan 报出不同进度，是一
+个没有裁决依据的分歧，而步骤就是那个裁决依据。由此派生的规则——重试的步骤丢掉它已
+不再拥有的结果、终态时间在终态期间粘住并在离开终态时清除——只写在 Rust 一处，这样
+测试替身与生产不会对「一个 plan 的进度是什么」产生分歧。
+
+步骤本身刻意不镜像。它们来自单个 plan 的路由，因此拉取它们意味着每次刷新每个 plan
+一次请求，去填一个并不存在的详情视图。这与 Batch 7b 对名册做的是同一个判断，但答案
+相反：名册是让 guest 能被别人看见的那样东西，而步骤列表目前不让任何人看见任何东西。
+`CollabClient.getPlan` 是那个视图将来要用的接缝，现在没有任何调用方。
 
 **Batch 7a 补记。** 缺的一直是同一样东西，缺了三次。
 
