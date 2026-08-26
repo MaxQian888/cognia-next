@@ -266,6 +266,12 @@ const shouldRespondToMessageMock = jest.fn((..._a: unknown[]) => ({
 jest.mock("@/lib/connectors/at-gate", () => ({
   shouldRespondToMessage: (...a: unknown[]) => shouldRespondToMessageMock(...a),
 }))
+// The dry run has to reflect the layer that actually decides admission, so it
+// reads the conversation's override the way the bus does.
+const readForResolutionMock = jest.fn(async (_key: string) => undefined as unknown)
+jest.mock("@/lib/db/conversation-overrides", () => ({
+  readForResolution: (key: string) => readForResolutionMock(key),
+}))
 
 const enqueueOutbound = jest.fn(
   async (input: { request: { metadata: { idempotencyKey: string } } }) => ({
@@ -718,13 +724,38 @@ describe("createConnectorsAPI", () => {
 
     it("previewAtGate dry-runs the guardrails against the instance row", async () => {
       const api = createConnectorsAPI(PLUGIN)
-      const event = { kind: "create" }
+      const event = { kind: "create", conversationKey: "telegram:cai_1:c1" }
       expect(await api.previewAtGate("cai_1", event as never)).toEqual({
         allowed: false,
         reason: "chat_blocklist",
       })
-      expect(shouldRespondToMessageMock).toHaveBeenCalledWith(event, INSTANCE_ROW)
+      expect(shouldRespondToMessageMock).toHaveBeenCalledWith(event, INSTANCE_ROW, undefined)
       await expect(api.previewAtGate("missing", event as never)).rejects.toThrow(/not found/)
+    })
+
+    // The conversation's `inboundActivationPolicy` outranks the bot's, so a
+    // preview that ignored the override would answer for a different layer
+    // than the one that decides.
+    it("previewAtGate passes the conversation override to the predictor", async () => {
+      const override = { inboundActivationPolicy: "always" }
+      readForResolutionMock.mockResolvedValueOnce(override)
+      const api = createConnectorsAPI(PLUGIN)
+      const event = { kind: "create", conversationKey: "telegram:cai_1:c1" }
+      await api.previewAtGate("cai_1", event as never)
+      expect(readForResolutionMock).toHaveBeenCalledWith("telegram:cai_1:c1")
+      expect(shouldRespondToMessageMock).toHaveBeenLastCalledWith(event, INSTANCE_ROW, override)
+    })
+
+    // A dry run must never be the thing that breaks: an unreadable override
+    // degrades to the bot-level prediction rather than throwing.
+    it("previewAtGate survives an unreadable override", async () => {
+      readForResolutionMock.mockRejectedValueOnce(new Error("dexie down"))
+      const api = createConnectorsAPI(PLUGIN)
+      const event = { kind: "create", conversationKey: "telegram:cai_1:c1" }
+      await expect(api.previewAtGate("cai_1", event as never)).resolves.toEqual({
+        allowed: false,
+        reason: "chat_blocklist",
+      })
     })
   })
 

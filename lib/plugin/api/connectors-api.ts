@@ -54,6 +54,7 @@ import {
 import { getRunningAdapter, listRunningAdapters } from "@/lib/connectors/lifecycle"
 import { matchDispatchRule, type DispatchRuleHit } from "@/lib/connectors/dispatch-rules"
 import { shouldRespondToMessage, type AtGateDecision } from "@/lib/connectors/at-gate"
+import { readForResolution } from "@/lib/db/conversation-overrides"
 import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { requireMethod, withScopeCapture } from "@/lib/skills/built-in/im/_helpers"
 import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
@@ -308,8 +309,15 @@ export interface PluginConnectorsAPI {
     event: Pick<NormalizedInboundEvent, "plainText" | "sender" | "channel">
   ): Promise<DispatchRuleHit | null>
   /**
-   * Dry-run the instance's inbound guardrails (allow/blocklist +
-   * at-response strategy) against an inbound event. Pure — nothing is gated.
+   * Dry-run the instance's inbound guardrails — the chat allow/blocklist plus
+   * the group-admission policy — against an inbound event. Pure; nothing is
+   * gated, stored or sent.
+   *
+   * The conversation's own override is read when the event names a
+   * conversation the host knows, so the answer reflects the layer that
+   * actually decides. One case it predicts conservatively: a
+   * `mention_activates` thread also admits follow-ups inside an already-open
+   * activation window, which is stored state a dry run must not consume.
    */
   previewAtGate(instanceId: string, event: NormalizedInboundEvent): Promise<AtGateDecision>
   /**
@@ -582,8 +590,13 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     getDispatchRules: async (instanceId) => (await requireInstance(instanceId)).dispatchRules ?? [],
     previewDispatchRules: async (instanceId, event) =>
       matchDispatchRule((await requireInstance(instanceId)).dispatchRules, event),
-    previewAtGate: async (instanceId, event) =>
-      shouldRespondToMessage(event, await requireInstance(instanceId)),
+    previewAtGate: async (instanceId, event) => {
+      const [instance, override] = await Promise.all([
+        requireInstance(instanceId),
+        readForResolution(event.conversationKey).catch(() => undefined),
+      ])
+      return shouldRespondToMessage(event, instance, override)
+    },
     getOutboundJob: async (jobId) => {
       const row = await getDb().outboundQueue.get(jobId)
       return row ? toJobStatus(row) : null

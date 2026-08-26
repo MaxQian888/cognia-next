@@ -220,7 +220,7 @@ export function ConversationHeaderOverflow({
             />
           )}
           {adapterId && <QuietHoursChip adapterId={adapterId} conversationKey={conversationKey} />}
-          {adapterId && <AtStrategyChip adapterId={adapterId} />}
+          {adapterId && <AtStrategyChip adapterId={adapterId} conversationKey={conversationKey} />}
           {adapterId && (
             <TopicRuntimeChip adapterId={adapterId} conversationKey={conversationKey} />
           )}

@@ -11815,12 +11815,16 @@
       "unknownCharacter": "角色"
     },
     "atStrategy": {
-      "always": "所有消息",
-      "aria": "回复策略：{strategy}",
+      "always": "每条消息",
+      "aria": "群内准入：{strategy}",
       "direct_only": "仅私聊",
       "label": "回复",
-      "mention_only": "仅 @提及",
-      "tooltip": "该适配器的回复范围：{strategy}"
+      "mention_activates": "@ 一次后可继续追问",
+      "mention_each": "每次都要 @",
+      "tooltip": {
+        "adapter": "这个机器人在群里回复的条件：{strategy}",
+        "conversation": "本会话覆盖了机器人设置：{strategy}"
+      }
     },
     "banner": {
       "outboundSaturated": {

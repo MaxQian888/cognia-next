@@ -25,10 +25,13 @@
  */
 
 import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/event"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
-import type { ConversationAdmissionReason } from "@/lib/connectors/conversation-admission"
+import {
+  resolveInboundActivationPolicy,
+  type ConversationAdmissionReason,
+} from "@/lib/connectors/conversation-admission"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 
@@ -103,14 +106,34 @@ function pickChatId(event: NormalizedInboundEvent): string {
 }
 
 /**
- * Decide whether `event` should reach `ctx.emit()` given the adapter's
- * configured guardrails. Only `kind === "create"` events are gated —
- * edit / delete / system events pass through unchanged because the
- * at-strategy is about responding to fresh messages.
+ * Predict whether `event` would reach the AI, given this adapter's guardrails.
+ *
+ * NOT on the host inbound path. `gateInboundEvent` enforces only the chat
+ * allow/blocklist at the transport edge; the mention half belongs to
+ * `admitConversationEvent`, which runs in the bus after the durable job exists
+ * and after conversation overrides resolve. Its one production caller is
+ * `ctx.connectors.previewAtGate` — a plugin asking "would this message be
+ * answered?" without sending it.
+ *
+ * Because it is a PREDICTION, it resolves the admission policy the same way the
+ * bus does (`resolveInboundActivationPolicy`, which maps the legacy
+ * `atResponseStrategy` too). It used to read `atResponseStrategy` raw, so it
+ * predicted from a field the current settings UI no longer writes and disagreed
+ * with the host for every adapter configured since.
+ *
+ * One branch it cannot fully reproduce: `mention_activates` in a thread also
+ * admits a follow-up inside an ALREADY-ACTIVE window, which lives in stored
+ * activation state this pure function has no access to. It predicts the
+ * first-contact answer there, which is the conservative one.
+ *
+ * Only `kind === "create"` events are gated — edit / delete / system events
+ * pass through unchanged because admission is about responding to fresh
+ * messages.
  */
 export function shouldRespondToMessage(
   event: NormalizedInboundEvent,
-  adapter: AdapterInstanceRow
+  adapter: AdapterInstanceRow,
+  override?: Pick<ConversationOverrideRow, "inboundActivationPolicy"> | null
 ): AtGateDecision {
   if (event.kind && event.kind !== "create") {
     return { allowed: true }
@@ -130,14 +153,20 @@ export function shouldRespondToMessage(
     return { allowed: false, reason: "chat_allowlist" }
   }
 
-  const strategy: AtResponseStrategy = adapter.atResponseStrategy ?? DEFAULT_AT_RESPONSE_STRATEGY
+  const policy = resolveInboundActivationPolicy(adapter, override ?? undefined)
   const isDm = event.channel.kind === "private"
+  // Private chats are admitted before the policy is consulted at all, matching
+  // `admitConversationEvent`'s first line — `direct_only` included, since a DM
+  // is exactly what that policy is for.
+  if (isDm) return { allowed: true }
 
-  switch (strategy) {
+  switch (policy) {
     case "always":
       return { allowed: true }
-    case "mention_only":
-      if (isDm) return { allowed: true }
+    case "direct_only":
+      return { allowed: false, reason: "at_direct_only" }
+    case "mention_each":
+    case "mention_activates":
       // A reply to one of OUR messages is as direct an address as a mention,
       // and `defaultGroupChatPolicy()` gates on both — so this gate has to
       // accept it or the `reply-to-bot` trigger rule never reaches the bus.
@@ -147,9 +176,6 @@ export function shouldRespondToMessage(
       // shapes that omit it.
       if (event.mentions.selfMentioned || isReplyToSelf(event)) return { allowed: true }
       return { allowed: false, reason: "at_mention_required" }
-    case "direct_only":
-      if (isDm) return { allowed: true }
-      return { allowed: false, reason: "at_direct_only" }
   }
 }
 

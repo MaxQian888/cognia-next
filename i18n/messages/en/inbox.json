@@ -67,12 +67,16 @@
     "unknownCharacter": "Character"
   },
   "atStrategy": {
-    "always": "All messages",
-    "aria": "Reply strategy: {strategy}",
-    "direct_only": "Direct only",
+    "always": "Every message",
+    "aria": "Group admission: {strategy}",
+    "direct_only": "Direct chats only",
     "label": "Reply",
-    "mention_only": "@mention only",
-    "tooltip": "This adapter replies to: {strategy}"
+    "mention_activates": "@mention, then follow-ups",
+    "mention_each": "@mention each time",
+    "tooltip": {
+      "adapter": "This bot answers in a group when: {strategy}",
+      "conversation": "This conversation overrides the bot: {strategy}"
+    }
   },
   "banner": {
     "outboundSaturated": {

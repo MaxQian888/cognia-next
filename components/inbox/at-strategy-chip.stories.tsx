@@ -3,12 +3,13 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { AtStrategyChip } from "./at-strategy-chip"
 import { seedDb } from "@/lib/storybook/seed-db"
 import { makeAdapterInstance } from "@/lib/storybook/fixtures/inbox"
+import type { InboundActivationPolicy } from "@/types/connectors/policy"
 
 const ADAPTER_ID = "story-adapter"
+const CONVERSATION_KEY = `telegram:${ADAPTER_ID}:c1`
 
-// `AtStrategyChip` live-queries the bound `adapterInstances` row and renders
-// nothing for the implicit "always" strategy. Seed an adapter per story so the
-// restrictive strategies surface; the AlwaysHidden story seeds "always".
+// The chip resolves the group-admission policy across both layers, so each
+// story seeds the rows it is reporting on rather than passing a prop.
 const meta = {
   title: "Inbox/AtStrategyChip",
   component: AtStrategyChip,
@@ -19,17 +20,23 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const MentionOnly: Story = {
-  beforeEach: async () => {
+function withAdapterPolicy(inboundActivationPolicy: InboundActivationPolicy): Story["beforeEach"] {
+  return async () => {
     await seedDb(async (db) => {
       await db.adapterInstances.put(
-        makeAdapterInstance({ id: ADAPTER_ID, atResponseStrategy: "mention_only" })
+        makeAdapterInstance({ id: ADAPTER_ID, inboundActivationPolicy })
       )
     })
-  },
+  }
 }
 
-export const DirectOnly: Story = {
+export const MentionEach: Story = { beforeEach: withAdapterPolicy("mention_each") }
+export const MentionActivates: Story = { beforeEach: withAdapterPolicy("mention_activates") }
+export const DirectOnly: Story = { beforeEach: withAdapterPolicy("direct_only") }
+export const EveryMessage: Story = { beforeEach: withAdapterPolicy("always") }
+
+/** A row predating `inboundActivationPolicy` still resolves through the same map. */
+export const LegacyStrategyRow: Story = {
   beforeEach: async () => {
     await seedDb(async (db) => {
       await db.adapterInstances.put(
@@ -39,18 +46,22 @@ export const DirectOnly: Story = {
   },
 }
 
-// "always" is the implicit default → renders nothing.
-export const AlwaysHidden: Story = {
+/** The conversation's own policy outranks the bot's, and the tooltip says so. */
+export const ConversationOverride: Story = {
+  args: { adapterId: ADAPTER_ID, conversationKey: CONVERSATION_KEY },
   beforeEach: async () => {
     await seedDb(async (db) => {
       await db.adapterInstances.put(
-        makeAdapterInstance({ id: ADAPTER_ID, atResponseStrategy: "always" })
+        makeAdapterInstance({ id: ADAPTER_ID, inboundActivationPolicy: "mention_each" })
       )
+      await db.conversationOverrides.put({
+        id: "co-story",
+        conversationKey: CONVERSATION_KEY,
+        sessionId: "ses_story",
+        inboundActivationPolicy: "always",
+        createdAt: 0,
+        updatedAt: 0,
+      })
     })
   },
-  render: (args) => (
-    <div className="rounded border border-dashed px-3 py-2 text-xs text-muted-foreground">
-      renders nothing → <AtStrategyChip {...args} />
-    </div>
-  ),
 }
