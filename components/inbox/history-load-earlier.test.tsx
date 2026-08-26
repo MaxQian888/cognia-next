@@ -83,4 +83,51 @@ describe("HistoryLoadEarlier", () => {
     render(<HistoryLoadEarlier conversationKey="k" adapterId="adp" />)
     expect(screen.getByText("error")).toBeInTheDocument()
   })
+
+  /**
+   * The bar used to be unmounted entirely here, which made "the bot cannot
+   * read history" indistinguishable from "there is nothing earlier" and from a
+   * page that failed to render.
+   */
+  it("stays mounted, disabled and explained when the bot cannot fetch history", () => {
+    render(
+      <HistoryLoadEarlier
+        conversationKey="k"
+        adapterId="adp"
+        unavailable={{
+          available: false,
+          capability: "history.fetch",
+          cause: "missing_oauth_scope",
+          detail: "channels:history",
+          actionable: true,
+        }}
+      />
+    )
+    expect(screen.getByTestId("history-load-earlier-unavailable")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "aria" })).toBeDisabled()
+    expect(screen.getByTestId("capability-notice")).toHaveAttribute(
+      "data-cause",
+      "missing_oauth_scope"
+    )
+  })
+
+  // The capability is the more specific fact, and moving to the desktop app
+  // would not fix it — so it must not be reported as a web-mode limitation.
+  it("prefers the capability reason over the web-mode gate when both apply", () => {
+    hookReturn = { ...hookReturn, canHydrate: false }
+    render(
+      <HistoryLoadEarlier
+        conversationKey="k"
+        adapterId="adp"
+        unavailable={{
+          available: false,
+          capability: "history.fetch",
+          cause: "not_declared",
+          actionable: false,
+        }}
+      />
+    )
+    expect(screen.getByRole("button", { name: "aria" })).not.toHaveAttribute("title")
+    expect(screen.getByTestId("capability-notice")).toHaveAttribute("data-cause", "not_declared")
+  })
 })

@@ -93,14 +93,22 @@ describe("ReplyQuotingDefault", () => {
     expect(mockUpdate).toHaveBeenCalledWith("a1", { replyQuoting: undefined })
   })
 
-  it("renders nothing when THIS Slack install's grant lacks chat:write", () => {
-    // The platform declares `send.reply`; this workspace cannot post at all,
-    // so a reply-quoting toggle would configure something that never happens.
+  /**
+   * The platform declares `send.reply`; this workspace cannot post at all. The
+   * card used to vanish here, which is the one reading an operator cannot act
+   * on — re-authorizing brings the toggle back, and nothing said so.
+   */
+  it("disables the switch and names the missing grant, rather than hiding", () => {
     setup({
       type: "slack",
       settings: { connectedScopes: { scopes: ["channels:history"], grantedAtMs: 1 } },
     })
-    expect(screen.queryByTestId("reply-quoting-default")).toBeNull()
+    expect(screen.getByTestId("reply-quoting-default")).toBeInTheDocument()
+    expect(screen.getByTestId("reply-quoting-default-switch")).toBeDisabled()
+    expect(screen.getByTestId("capability-notice")).toHaveAttribute(
+      "data-cause",
+      "missing_oauth_scope"
+    )
   })
 
   it("renders the control when the Slack grant does carry chat:write", () => {
@@ -111,9 +119,13 @@ describe("ReplyQuotingDefault", () => {
     expect(screen.getByTestId("reply-quoting-default")).toBeInTheDocument()
   })
 
-  it("renders nothing for a platform whose adapter lacks send.reply (inert control avoided)", () => {
+  // A platform limit, not a misconfiguration: WeChat OA has no reply
+  // primitive, so the honest read-out is "nothing to do here" — a different
+  // sentence from the Slack one above, and the reason both causes exist.
+  it("labels the control inert on a platform with no reply primitive", () => {
     setup({ type: "wechat-oa" })
-    expect(screen.queryByTestId("reply-quoting-default")).not.toBeInTheDocument()
+    expect(screen.getByTestId("reply-quoting-default-switch")).toBeDisabled()
+    expect(screen.getByTestId("capability-notice")).toHaveAttribute("data-cause", "not_declared")
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 

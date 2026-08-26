@@ -34,8 +34,8 @@ import type { PlatformKind } from "@/types/connectors/platform-kind"
 import {
   effectiveCapabilities,
   effectiveCapabilitiesForRow,
-  hasEffectiveCapability,
 } from "@/lib/connectors/effective-capabilities"
+import { capabilityAvailability } from "@/lib/connectors/capability-availability"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 function ConversationInner() {
@@ -120,7 +120,8 @@ function ConversationDetail({
   // The bot row behind this conversation. "Load earlier" is gated on what THIS
   // instance can do, not on what the platform's adapter implements — a Slack
   // grant without a `*:history` scope has no history to fetch and the button
-  // would only produce a `missing_scope` toast.
+  // would only produce a `missing_scope` toast. The bar is still MOUNTED when
+  // it cannot: an absent bar reads the same as an empty backlog.
   const adapterRow = useAdapterInstance(session?.platformBinding?.adapterId)
 
   // Expose the viewed conversation so the connector inbound bridge can suppress
@@ -149,7 +150,7 @@ function ConversationDetail({
   const adapterId = session.platformBinding!.adapterId
   // Until the row resolves, answer from the platform table — the same fallback
   // the model's tool manifest uses, so the button never contradicts the tools.
-  const canFetchHistory = hasEffectiveCapability(
+  const historyAccess = capabilityAvailability(
     adapterRow ? effectiveCapabilitiesForRow(adapterRow) : effectiveCapabilities({ platform }),
     "history.fetch"
   )
@@ -188,9 +189,11 @@ function ConversationDetail({
           policy={resolvedBinding?.trigger}
           characterId={session.characterId}
         />
-        {canFetchHistory && (
-          <HistoryLoadEarlier conversationKey={conversationKey} adapterId={adapterId} />
-        )}
+        <HistoryLoadEarlier
+          conversationKey={conversationKey}
+          adapterId={adapterId}
+          unavailable={historyAccess.available ? undefined : historyAccess}
+        />
         <ArtifactWorkspaceDock>
           <ChatPane
             showHeader={false}

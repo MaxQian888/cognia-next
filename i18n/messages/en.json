@@ -29775,6 +29775,7 @@
         }
       },
       "usagePresence": {
+        "badgeStale": "This bot is set to publish a status badge it cannot publish, so no status is going out at all.",
         "conversationHelp": "Conversation key hosting the pinned usage card (e.g. lark:'<'adapterId>:'<'chatId>). The card is created on the first refresh and edited in place afterwards.",
         "conversationLabel": "Card conversation",
         "enableHelp": "Periodically publish your local token usage (tokens, cost) to this platform — as a status badge next to your name and/or a pinned card that updates in place.",
@@ -29785,6 +29786,7 @@
         "modeBoth": "Badge + pinned card",
         "modeCard": "Pinned card",
         "modeLabel": "Display mode",
+        "switchToCard": "Switch to the in-chat card",
         "targetsHelp": "Platform user ids (one per line) the status badge is applied to — e.g. Lark open_id (ou_…). Leave empty to only maintain the status text.",
         "targetsLabel": "Badge target users",
         "title": "Usage status",

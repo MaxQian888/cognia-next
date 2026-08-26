@@ -10,9 +10,14 @@
  * `syncUsagePresenceSchedule` (create / retune / delete), so the toggle is
  * the single switch the operator touches.
  *
- * The badge tier is only offered on platforms that declare the
- * `presence.status` capability (Lark 系统状态, Slack profile status, Discord
- * bot presence); everywhere else the card tier remains available.
+ * The badge tier needs the `presence.status` capability (Lark 系统状态, Slack
+ * profile status, Discord bot presence) — eight of eleven platforms have no
+ * such primitive at all. Those platforms used to lose the option silently AND
+ * have the dropdown coerced to "card" for display, so a bot whose stored mode
+ * was `badge` showed "in-chat card" while the runner published nothing at all:
+ * the screen reported a tier that was neither stored nor running. Now the
+ * stored mode is shown as it is, the unreachable options are disabled with the
+ * reason, and a stale stored mode gets a one-click repair.
  */
 
 import { useEffect, useRef, useState } from "react"
@@ -32,10 +37,10 @@ import {
 } from "@/components/ui/select"
 import { getDb } from "@/lib/db/schema"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
-import {
-  effectiveCapabilitiesForRow,
-  hasEffectiveCapability,
-} from "@/lib/connectors/effective-capabilities"
+import { Button } from "@/components/ui/button"
+import { CapabilityNotice } from "@/components/connectors/capability-notice"
+import { capabilityAvailability } from "@/lib/connectors/capability-availability"
+import { effectiveCapabilitiesForRow } from "@/lib/connectors/effective-capabilities"
 import { syncUsagePresenceSchedule } from "@/lib/connectors/presence/usage-status-runner"
 import {
   DEFAULT_USAGE_PRESENCE_CONFIG,
@@ -70,9 +75,11 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
   )
 
   const config: UsagePresenceConfig = { ...DEFAULT_USAGE_PRESENCE_CONFIG, ...row?.presence }
-  const supportsBadge = row
-    ? hasEffectiveCapability(effectiveCapabilitiesForRow(row), "presence.status")
-    : false
+  const badge = row
+    ? capabilityAvailability(effectiveCapabilitiesForRow(row), "presence.status")
+    : undefined
+  const supportsBadge = badge?.available === true
+  const wantsBadge = config.mode === "badge" || config.mode === "both"
 
   const [targetsText, setTargetsText] = useState("")
   const [conversationKey, setConversationKey] = useState("")
@@ -97,7 +104,10 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
   }
 
   const showCardFields = config.mode === "card" || config.mode === "both"
-  const showBadgeFields = supportsBadge && (config.mode === "badge" || config.mode === "both")
+  // Rendered whenever the stored mode selects the badge tier, even when this
+  // bot cannot serve it: the setting exists on the row and the operator needs
+  // to see what is configured before deciding to repair it.
+  const showBadgeFields = wantsBadge
 
   return (
     <Card data-testid="usage-presence">
@@ -127,7 +137,7 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
               <div className="space-y-1">
                 <Label>{t("modeLabel")}</Label>
                 <Select
-                  value={supportsBadge ? config.mode : "card"}
+                  value={config.mode}
                   onValueChange={(v) => void save({ mode: v as UsagePresenceMode })}
                   disabled={saving}
                 >
@@ -135,9 +145,16 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {supportsBadge ? <SelectItem value="badge">{t("modeBadge")}</SelectItem> : null}
+                    {/* Kept and disabled rather than dropped: a removed option
+                     * leaves Radix with no item matching a stored `badge`, and
+                     * the trigger then renders BLANK. */}
+                    <SelectItem value="badge" disabled={!supportsBadge}>
+                      {t("modeBadge")}
+                    </SelectItem>
                     <SelectItem value="card">{t("modeCard")}</SelectItem>
-                    {supportsBadge ? <SelectItem value="both">{t("modeBoth")}</SelectItem> : null}
+                    <SelectItem value="both" disabled={!supportsBadge}>
+                      {t("modeBoth")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -177,6 +194,30 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
               </div>
             </div>
 
+            {badge && !badge.available ? (
+              <CapabilityNotice
+                availability={badge}
+                data-testid="usage-presence-badge-unavailable"
+                action={
+                  wantsBadge ? (
+                    <div className="space-y-1.5">
+                      <p className="text-destructive">{t("badgeStale")}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => void save({ mode: "card" })}
+                        data-testid="usage-presence-switch-to-card"
+                      >
+                        {t("switchToCard")}
+                      </Button>
+                    </div>
+                  ) : null
+                }
+              />
+            ) : null}
+
             {showBadgeFields ? (
               <div className="space-y-1">
                 <Label htmlFor="usage-presence-targets">{t("targetsLabel")}</Label>
@@ -188,7 +229,7 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
                   value={targetsText}
                   onChange={(e) => setTargetsText(e.target.value)}
                   onBlur={() => void save({ targetUserIds: parseUserIdLines(targetsText) })}
-                  disabled={saving}
+                  disabled={saving || !supportsBadge}
                 />
               </div>
             ) : null}

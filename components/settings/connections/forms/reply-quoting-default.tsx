@@ -13,9 +13,12 @@
  * reads the row via `useLiveQuery`, persists immediately through
  * `updateAdapterInstance`, and is mounted ONCE in `config-detail.tsx`.
  *
- * Renders nothing when the platform's adapter does not declare `send.reply`
- * — the switch would be inert there (the runtime never quotes on such
- * platforms), and an inert control is a latent bug (CLAUDE.md rule 7).
+ * Where the bot cannot quote at all the switch is rendered DISABLED with the
+ * reason, not hidden. It used to `return null`, citing CLAUDE.md rule 7 —
+ * which asks for the opposite: dormancy must be *labeled inert in the UI*.
+ * Hiding is not a label. It cost the operator the difference between "DingTalk
+ * has no reply primitive" (true on 4 of 11 platforms, and permanent) and "the
+ * settings page failed to load".
  */
 
 import { useTranslations } from "next-intl"
@@ -25,10 +28,9 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { getDb } from "@/lib/db/schema"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
-import {
-  effectiveCapabilitiesForRow,
-  hasEffectiveCapability,
-} from "@/lib/connectors/effective-capabilities"
+import { CapabilityNotice } from "@/components/connectors/capability-notice"
+import { capabilityAvailability } from "@/lib/connectors/capability-availability"
+import { effectiveCapabilitiesForRow } from "@/lib/connectors/effective-capabilities"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 export interface ReplyQuotingDefaultProps {
@@ -48,8 +50,9 @@ export function ReplyQuotingDefault({ adapterId }: ReplyQuotingDefaultProps) {
 
   if (!row) return null
   // What THIS bot can do, not what the platform implements: a Slack grant
-  // without `chat:write` cannot reply at all, so there is nothing to configure.
-  if (!hasEffectiveCapability(effectiveCapabilitiesForRow(row), "send.reply")) return null
+  // without `chat:write` cannot reply at all, and four platforms have no reply
+  // primitive to begin with.
+  const quoting = capabilityAvailability(effectiveCapabilitiesForRow(row), "send.reply")
 
   const enabled = row.replyQuoting !== false
 
@@ -74,10 +77,16 @@ export function ReplyQuotingDefault({ adapterId }: ReplyQuotingDefaultProps) {
             id={`reply-quoting-default-${adapterId}`}
             checked={enabled}
             onCheckedChange={toggle}
+            disabled={!quoting.available}
             aria-label={t("label")}
             data-testid="reply-quoting-default-switch"
           />
         </div>
+        {/* The stored value is still shown rather than forced to off: it is
+         * what the row says, and it becomes live again the moment the cause is
+         * fixed (a re-authorized Slack grant). The notice is what marks it
+         * inert meanwhile. */}
+        {!quoting.available && <CapabilityNotice availability={quoting} />}
       </CardContent>
     </Card>
   )

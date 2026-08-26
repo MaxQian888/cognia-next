@@ -29775,6 +29775,7 @@
         }
       },
       "usagePresence": {
+        "badgeStale": "此机器人被设置为发布它无法发布的状态徽章，所以现在什么状态都没有发出去。",
         "conversationHelp": "承载置顶用量卡片的会话 key（例如 lark:'<'adapterId>:'<'chatId>）。首次刷新时创建卡片，之后原地更新。",
         "conversationLabel": "卡片会话",
         "enableHelp": "定期把本机的 token 用量（tokens、成本）发布到该平台——以用户名旁的状态徽章和/或原地更新的置顶卡片呈现。",
@@ -29785,6 +29786,7 @@
         "modeBoth": "徽章 + 置顶卡片",
         "modeCard": "置顶卡片",
         "modeLabel": "展示方式",
+        "switchToCard": "改用会话内卡片",
         "targetsHelp": "状态徽章要挂载的平台用户 ID（每行一个），例如飞书 open_id（ou_…）。留空则只维护状态文案。",
         "targetsLabel": "徽章目标用户",
         "title": "用量状态",

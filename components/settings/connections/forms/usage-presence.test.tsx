@@ -93,7 +93,13 @@ describe("UsagePresence", () => {
     })
   })
 
-  it("hides the badge tier on platforms without presence.status (telegram)", async () => {
+  /**
+   * The badge tier used to vanish here AND the dropdown was coerced to show
+   * "card" — so this row, stored as `badge`, displayed a tier it was not set
+   * to, while the runner published nothing. Both halves of that are fixed: the
+   * stored mode is shown as stored, and the reason is on screen.
+   */
+  it("keeps a stored badge tier visible and inert on a platform without presence.status", async () => {
     await getDb().adapterInstances.put(
       baseRow({
         type: "telegram",
@@ -102,13 +108,50 @@ describe("UsagePresence", () => {
     )
     render(<UsagePresence adapterId="ad-up" />)
     await waitFor(() => screen.getByTestId("usage-presence-mode"))
-    expect(screen.queryByTestId("usage-presence-targets")).toBeNull()
+    expect(screen.getByTestId("usage-presence-badge-unavailable")).toHaveAttribute(
+      "data-cause",
+      "not_declared"
+    )
+    expect(screen.getByTestId("usage-presence-targets")).toBeDisabled()
   })
 
-  it("hides the badge tier for a webhook-mode Discord bot — presence is a gateway op", async () => {
+  // The stale stored mode is the actionable half: nothing at all is being
+  // published, and one press makes the bot publish the tier it can serve.
+  it("offers a one-press repair for a mode this bot cannot run", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({
+        type: "telegram",
+        presence: { enabled: true, mode: "badge", intervalMinutes: 5, window: "today" },
+      })
+    )
+    render(<UsagePresence adapterId="ad-up" />)
+    fireEvent.click(await screen.findByTestId("usage-presence-switch-to-card"))
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get("ad-up")
+      expect(row?.presence?.mode).toBe("card")
+    })
+  })
+
+  // A supported platform whose stored mode does not select the badge tier has
+  // nothing stale to repair — only the reason it cannot be chosen.
+  it("explains without offering a repair when the stored mode is already reachable", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({
+        type: "telegram",
+        presence: { enabled: true, mode: "card", intervalMinutes: 5, window: "today" },
+      })
+    )
+    render(<UsagePresence adapterId="ad-up" />)
+    await waitFor(() => screen.getByTestId("usage-presence-badge-unavailable"))
+    expect(screen.queryByTestId("usage-presence-switch-to-card")).toBeNull()
+  })
+
+  it("names the transport for a webhook-mode Discord bot — presence is a gateway op", async () => {
     // Discord declares presence.status, but `setPresenceStatus` needs the
     // gateway client and throws without one, so a webhook-mode instance could
-    // only ever fail. The projection knows; the platform table could not.
+    // only ever fail. The projection knows; the platform table could not. And
+    // unlike Telegram this one IS fixable, which is why the two causes are
+    // different sentences.
     await getDb().adapterInstances.put(
       baseRow({
         type: "discord",
@@ -118,10 +161,14 @@ describe("UsagePresence", () => {
     )
     render(<UsagePresence adapterId="ad-up" />)
     await waitFor(() => screen.getByTestId("usage-presence-mode"))
-    expect(screen.queryByTestId("usage-presence-targets")).toBeNull()
+    expect(screen.getByTestId("usage-presence-badge-unavailable")).toHaveAttribute(
+      "data-cause",
+      "transport_unsupported"
+    )
+    expect(screen.getByTestId("usage-presence-targets")).toBeDisabled()
   })
 
-  it("shows it for the same bot on the gateway", async () => {
+  it("shows it, enabled and unexplained, for the same bot on the gateway", async () => {
     await getDb().adapterInstances.put(
       baseRow({
         type: "discord",
@@ -130,7 +177,8 @@ describe("UsagePresence", () => {
       })
     )
     render(<UsagePresence adapterId="ad-up" />)
-    expect(await screen.findByTestId("usage-presence-targets")).toBeTruthy()
+    expect(await screen.findByTestId("usage-presence-targets")).toBeEnabled()
+    expect(screen.queryByTestId("usage-presence-badge-unavailable")).toBeNull()
   })
 
   it("shows the card conversation field and persists it on blur", async () => {
