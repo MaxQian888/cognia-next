@@ -1616,6 +1616,7 @@ pub fn run() {
             git::commands::git_refs,
             git::commands::git_blame,
             git::commands::git_branches,
+            git::commands::git_default_branch,
             git::commands::git_remotes,
             git::commands::git_tags,
             git::commands::git_stash_list,

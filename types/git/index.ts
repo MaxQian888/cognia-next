@@ -326,6 +326,30 @@ export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
   },
 }
 
+/**
+ * How a repository's trunk was determined.
+ *
+ * Kept because "the remote told us" and "we guessed" are different facts, and a
+ * caller that roots a stack on the answer needs to tell them apart.
+ */
+export type GitDefaultBranchSource = "remoteHead" | "remoteBranch" | "localBranch" | "guess"
+
+export const GIT_DEFAULT_BRANCH_SOURCES = [
+  "remoteHead",
+  "remoteBranch",
+  "localBranch",
+  "guess",
+] as const satisfies readonly GitDefaultBranchSource[]
+
+/** A repository's trunk, and how sure the backend is of it. */
+export interface GitDefaultBranch {
+  /** Short name, e.g. `main` — never `origin/main`. */
+  branch: string
+  source: GitDefaultBranchSource
+  /** Whether the name resolves to a commit, locally or as a tracking ref. */
+  exists: boolean
+}
+
 // ── Stacked branches (crates/cognia-git/src/stack.rs) ──────────────────────
 
 /** What this machine's git can do, probed rather than assumed from a version. */

@@ -10,7 +10,7 @@ import {
 import { runHeadlessExec } from "@/lib/terminal/headless-exec"
 
 const mockExec = runHeadlessExec as jest.Mock
-import type { GitRemote, GitStatus } from "@/types/git"
+import type { GitDefaultBranch, GitRemote } from "@/types/git"
 import type { TeammatePrBinding } from "./binding"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
 
@@ -33,27 +33,52 @@ describe("parseGitHubRepo", () => {
 function remote(over: Partial<GitRemote>): GitRemote {
   return { name: "origin", fetchUrl: "https://github.com/acme/app.git", pushUrl: "", ...over }
 }
-function status(branch: string | null): GitStatus {
-  return {
-    branch,
-    upstream: null,
-    ahead: 0,
-    behind: 0,
-    staged: [],
-    changes: [],
-    merge: [],
-    isRebasing: false,
-    isMerging: false,
-  }
+function trunk(over: Partial<GitDefaultBranch> = {}): GitDefaultBranch {
+  return { branch: "main", source: "remoteHead", exists: true, ...over }
 }
 
 describe("createResolveTeamRepo", () => {
-  it("resolves origin repo + current branch", async () => {
+  it("resolves the origin repo and the repository's trunk", async () => {
     const resolve = createResolveTeamRepo({
       remotes: async () => [remote({})],
-      status: async () => status("develop"),
+      defaultBranch: async () => trunk({ branch: "develop" }),
     })
-    expect(await resolve("/repo")).toEqual({ fullName: "acme/app", defaultBranch: "develop" })
+    expect(await resolve("/repo")).toEqual({
+      fullName: "acme/app",
+      defaultBranch: "develop",
+      defaultBranchSource: "remoteHead",
+      defaultBranchExists: true,
+    })
+  })
+
+  it("reports the trunk, not whatever branch is checked out", async () => {
+    // The regression this replaced: the resolver read `git status().branch`,
+    // so an agent working on a feature branch reported that feature branch as
+    // the repository default — and the stack publisher rooted the whole stack
+    // on it. The seam is now a dedicated trunk read that never sees HEAD.
+    const seen: Array<[string, string | undefined]> = []
+    const resolve = createResolveTeamRepo({
+      remotes: async () => [remote({})],
+      defaultBranch: async (dir, name) => {
+        seen.push([dir, name])
+        return trunk({ branch: "main", source: "remoteBranch" })
+      },
+    })
+    expect((await resolve("/repo"))?.defaultBranch).toBe("main")
+    expect(seen).toEqual([["/repo", "origin"]])
+  })
+
+  it("asks about the remote it actually picked", async () => {
+    const seen: Array<string | undefined> = []
+    const resolve = createResolveTeamRepo({
+      remotes: async () => [remote({ name: "upstream" })],
+      defaultBranch: async (_dir, name) => {
+        seen.push(name)
+        return trunk()
+      },
+    })
+    await resolve("/repo")
+    expect(seen).toEqual(["upstream"])
   })
 
   it("prefers the origin remote over others", async () => {
@@ -62,31 +87,36 @@ describe("createResolveTeamRepo", () => {
         remote({ name: "upstream", fetchUrl: "https://github.com/other/repo.git" }),
         remote({}),
       ],
-      status: async () => status("main"),
+      defaultBranch: async () => trunk(),
     })
     expect((await resolve("/repo"))?.fullName).toBe("acme/app")
   })
 
-  it("defaults the branch to main when status is unavailable", async () => {
+  it("degrades to an honest guess when the trunk read fails", async () => {
     const resolve = createResolveTeamRepo({
       remotes: async () => [remote({})],
-      status: async () => {
-        throw new Error("no status")
+      defaultBranch: async () => {
+        throw new Error("no git bridge")
       },
     })
-    expect((await resolve("/repo"))?.defaultBranch).toBe("main")
+    const resolved = await resolve("/repo")
+    expect(resolved?.defaultBranch).toBe("main")
+    // Carried through so a caller can refuse rather than publish onto it.
+    expect(resolved?.defaultBranchSource).toBe("guess")
+    expect(resolved?.defaultBranchExists).toBe(false)
   })
 
   it("returns null with no remotes or a non-github remote", async () => {
     expect(
-      await createResolveTeamRepo({ remotes: async () => [], status: async () => status("m") })(
-        "/r"
-      )
+      await createResolveTeamRepo({
+        remotes: async () => [],
+        defaultBranch: async () => trunk(),
+      })("/r")
     ).toBeNull()
     expect(
       await createResolveTeamRepo({
         remotes: async () => [remote({ fetchUrl: "https://gitlab.com/a/b.git", pushUrl: "" })],
-        status: async () => status("m"),
+        defaultBranch: async () => trunk(),
       })("/r")
     ).toBeNull()
   })

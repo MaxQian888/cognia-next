@@ -1,5 +1,5 @@
 import type { AgentTeamDeliveryNode } from "@/types/agent/agent-team-runtime"
-import { createGithubDeliveryAdapter } from "./github-delivery-adapter"
+import { createGithubDeliveryAdapter, stackRootBase } from "./github-delivery-adapter"
 
 const node: AgentTeamDeliveryNode = {
   id: "layer-1",
@@ -68,5 +68,60 @@ describe("GitHub stacked delivery adapter", () => {
       repositories: {},
     })
     await expect(adapter.observe(node)).rejects.toThrow(/Unknown GitHub repository binding/)
+  })
+})
+
+describe("stackRootBase", () => {
+  it("takes the operator's declared base over anything resolved", () => {
+    // A team may be stacking onto a release branch on purpose; the binding is
+    // a statement about their repository, not a hint.
+    expect(
+      stackRootBase("primary", "release/2026.08", {
+        fullName: "acme/app",
+        defaultBranch: "main",
+        defaultBranchExists: true,
+      })
+    ).toBe("release/2026.08")
+  })
+
+  it("falls back to the resolved trunk when it exists", () => {
+    expect(
+      stackRootBase("primary", undefined, {
+        fullName: "acme/app",
+        defaultBranch: "develop",
+        defaultBranchSource: "remoteHead",
+        defaultBranchExists: true,
+      })
+    ).toBe("develop")
+  })
+
+  it("refuses a guessed trunk that does not exist, naming the guess", () => {
+    // Publishing onto it would fail at GitHub once per layer with an error
+    // about the pull request rather than about the root.
+    expect(() =>
+      stackRootBase("primary", undefined, {
+        fullName: "acme/app",
+        defaultBranch: "main",
+        defaultBranchSource: "guess",
+        defaultBranchExists: false,
+      })
+    ).toThrow(/guessed `main`, which does not exist/)
+  })
+
+  it("refuses when no trunk was resolved at all", () => {
+    expect(() => stackRootBase("primary", undefined, { fullName: "acme/app" })).toThrow(
+      /no resolvable default branch/
+    )
+  })
+
+  it("does not silently substitute `main`", () => {
+    // The behaviour this replaced: `?? "main"`, which turned an unresolvable
+    // trunk into a confident wrong answer.
+    for (const resolved of [
+      { fullName: "acme/app" },
+      { fullName: "acme/app", defaultBranch: "main", defaultBranchExists: false },
+    ]) {
+      expect(() => stackRootBase("primary", undefined, resolved)).toThrow()
+    }
   })
 })

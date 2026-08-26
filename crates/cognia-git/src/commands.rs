@@ -14,6 +14,7 @@ use super::types::{
     GitStatus, GitTag, GitWorktree, RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
+use super::branch::DefaultBranch;
 use super::stack::{
     RestackOutcome, StackCapabilities, StackLayerState, StackPushOutcome,
 };
@@ -169,6 +170,14 @@ pub async fn git_blame(
 #[tauri::command]
 pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError> {
     blocking("git_branches", move || branch::list_branches(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn git_default_branch(
+    repo_path: String,
+    remote: Option<String>,
+) -> Result<DefaultBranch, GitError> {
+    branch::default_branch(&repo_path, remote.as_deref().unwrap_or("origin")).await
 }
 
 #[tauri::command]

@@ -31,6 +31,7 @@ import {
   type GitBranch,
   type GitCommit,
   type GitConflict,
+  type GitDefaultBranch,
   type GitDiff,
   type GitFileChange,
   type GitFileDiffStat,
@@ -343,6 +344,24 @@ export async function gitBlame(
 export async function gitBranches(repoPath: string): Promise<GitBranch[]> {
   if (!hasGitBridge()) return []
   return transport.call<GitBranch[]>("git_branches", { repoPath })
+}
+
+/**
+ * The repository's trunk, resolved from local refs alone.
+ *
+ * Reads inert without a bridge — but there is no honest inert answer here, so
+ * it reports a `guess` that says `exists: false` rather than a confident
+ * `"main"` a caller would then base a pull request on.
+ */
+export async function gitDefaultBranch(
+  repoPath: string,
+  remote?: string
+): Promise<GitDefaultBranch> {
+  if (!hasGitBridge()) return { branch: "main", source: "guess", exists: false }
+  return transport.call<GitDefaultBranch>("git_default_branch", {
+    repoPath,
+    ...(remote ? { remote } : {}),
+  })
 }
 
 export async function gitRemotes(repoPath: string): Promise<GitRemote[]> {

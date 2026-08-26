@@ -2,7 +2,7 @@
  * Production resolvers for the Agent Team PR feedback deps — the desktop wiring
  * that makes the loop reachable:
  *   - `resolveTeamRepo`: the team workingDir's GitHub repo + default branch,
- *     parsed from the origin remote (`git remote` + `git status`).
+ *     parsed from the origin remote (`git remote` + `git_default_branch`).
  *   - `resolvePrObserveOctokit`: a request-ready client, built from a PAT via the
  *     `gh` CLI (portable; the app may override with a cleaner credential source).
  *   - `runPrReview`: the internal reviewer, run through the team's dispatch via
@@ -13,11 +13,11 @@
  * null and the loop stays inert.
  */
 
-import { gitRemotes, gitStatus } from "@/lib/git/commands"
+import { gitDefaultBranch, gitRemotes } from "@/lib/git/commands"
 import { getOctokitForRepo } from "@/lib/github/octokit-factory"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
-import type { GitRemote, GitStatus } from "@/types/git"
+import type { GitDefaultBranch, GitRemote } from "@/types/git"
 import { getTeamRunContext } from "@/lib/ai/agent/team/team-run-context"
 import { dispatchStructured } from "@/lib/ai/agent/team/structured-dispatch"
 import {
@@ -38,22 +38,48 @@ export function parseGitHubRepo(url: string): string | null {
 
 export interface ResolveTeamRepoDeps {
   remotes: (workingDir: string) => Promise<GitRemote[]>
-  status: (workingDir: string) => Promise<GitStatus>
+  defaultBranch: (workingDir: string, remote?: string) => Promise<GitDefaultBranch>
 }
 
-/** Resolve the team's GitHub repo + default (current) branch from its workingDir. */
+export interface ResolvedTeamRepo {
+  fullName: string
+  /** The repository's trunk — never the branch that happens to be checked out. */
+  defaultBranch: string
+  /** How that name was arrived at, so a caller can refuse to build on a guess. */
+  defaultBranchSource: GitDefaultBranch["source"]
+  /** Whether the name resolves to a commit in this repository. */
+  defaultBranchExists: boolean
+}
+
+/**
+ * Resolve the team's GitHub repo + trunk from its workingDir.
+ *
+ * The trunk comes from `git_default_branch`, not from `git status`. Reading it
+ * off the checkout was a defect with a narrow tell: it looks right in every
+ * test and every demo, because those run on the trunk. Anywhere else — an
+ * agent working on `feature/x`, a task worktree, a bisect — it reported that
+ * feature branch as the repository's default, and both consumers build on the
+ * answer: PR feedback opens pull requests against it, and the stack publisher
+ * roots the entire stack on it.
+ */
 export function createResolveTeamRepo(
-  deps: ResolveTeamRepoDeps = { remotes: gitRemotes, status: gitStatus }
-): (workingDir: string) => Promise<{ fullName: string; defaultBranch: string } | null> {
+  deps: ResolveTeamRepoDeps = { remotes: gitRemotes, defaultBranch: gitDefaultBranch }
+): (workingDir: string) => Promise<ResolvedTeamRepo | null> {
   return async (workingDir) => {
     const remotes = await deps.remotes(workingDir).catch(() => [] as GitRemote[])
     if (remotes.length === 0) return null
     const origin = remotes.find((r) => r.name === "origin") ?? remotes[0]
     const fullName = parseGitHubRepo(origin.fetchUrl || origin.pushUrl || "")
     if (!fullName) return null
-    const status = await deps.status(workingDir).catch(() => null)
-    const defaultBranch = status?.branch ?? "main"
-    return { fullName, defaultBranch }
+    const trunk = await deps
+      .defaultBranch(workingDir, origin.name)
+      .catch(() => ({ branch: "main", source: "guess", exists: false }) as GitDefaultBranch)
+    return {
+      fullName,
+      defaultBranch: trunk.branch,
+      defaultBranchSource: trunk.source,
+      defaultBranchExists: trunk.exists,
+    }
   }
 }
 

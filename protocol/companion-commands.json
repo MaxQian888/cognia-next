@@ -5631,6 +5631,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "git_default_branch",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "git_delete_branch",
       "target": "execution",
       "operation": "write",

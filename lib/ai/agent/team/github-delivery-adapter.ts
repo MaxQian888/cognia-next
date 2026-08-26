@@ -4,6 +4,7 @@ import type { AgentTeamDeliveryNode } from "@/types/agent/agent-team-runtime"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { ScmDeliveryAdapter, ScmDeliveryObservation } from "./delivery-graph"
 import { getDb } from "@/lib/db/schema"
+import type { ResolvedTeamRepo } from "./pr-feedback/resolvers"
 
 export interface GithubDeliveryAdapterOptions {
   octokit: OctokitLike
@@ -120,9 +121,17 @@ export function createGithubDeliveryAdapter(
 }
 
 export interface ApproveAndMergeGithubStackOptions {
-  resolveTeamRepo?: (path: string) => Promise<{ fullName: string } | null>
+  resolveTeamRepo?: (path: string) => Promise<ResolvedTeamRepoLike | null>
   resolveOctokit?: (fullName: string) => Promise<OctokitLike | null>
 }
+
+/**
+ * What the resolver reports back, with the trunk fields optional so a caller
+ * that only needs `fullName` (approve-and-merge) can pass a narrower stub.
+ */
+export type ResolvedTeamRepoLike = {
+  fullName: string
+} & Partial<Pick<ResolvedTeamRepo, "defaultBranch" | "defaultBranchSource" | "defaultBranchExists">>
 
 /** Resolve real GitHub bindings, persist the single stack approval, then merge fail-stop. */
 export async function approveAndMergeGithubStack(
@@ -163,6 +172,38 @@ export async function approveAndMergeGithubStack(
   })
   await service.approve(graphId)
   await service.merge(graphId)
+}
+
+/**
+ * The branch a stack's bottom layer is based on.
+ *
+ * Two inputs, in order of authority. An explicit `baseBranch` on the repository
+ * binding is an operator's statement about their own repository and wins
+ * outright — including over a resolver that disagrees, because the operator may
+ * be stacking onto a release branch on purpose.
+ *
+ * Otherwise the resolved trunk, but only when it exists. The alternative to
+ * throwing here is publishing a stack rooted on a branch GitHub has never heard
+ * of, which fails layer by layer with `Base ref must be a branch` — an error
+ * that points at the pull request instead of at the root that produced it.
+ * Refusing once, by name, is the difference between a fixable message and a
+ * confusing one.
+ */
+export function stackRootBase(
+  repositoryId: string,
+  declaredBase: string | undefined,
+  resolved: ResolvedTeamRepoLike
+): string {
+  if (declaredBase) return declaredBase
+  const trunk = resolved.defaultBranch
+  if (!trunk || resolved.defaultBranchExists === false) {
+    const guess = trunk ? ` (guessed \`${trunk}\`, which does not exist)` : ""
+    throw new Error(
+      `Repository ${repositoryId} has no resolvable default branch${guess} — ` +
+        `set a base branch on the repository binding`
+    )
+  }
+  return trunk
 }
 
 export async function prepareAndPublishGithubStack(
@@ -214,10 +255,7 @@ export async function prepareAndPublishGithubStack(
     const resolved = await resolveTeamRepo(binding.path)
     if (!resolved) throw new Error(`Repository ${binding.id} has no GitHub remote`)
     repositories[binding.id] = resolved.fullName
-    defaults[binding.id] =
-      "defaultBranch" in resolved && typeof resolved.defaultBranch === "string"
-        ? resolved.defaultBranch
-        : (binding.baseBranch ?? "main")
+    defaults[binding.id] = stackRootBase(binding.id, binding.baseBranch, resolved)
   }
   const first = Object.values(repositories)[0]
   if (!first) return undefined
@@ -233,7 +271,8 @@ export async function prepareAndPublishGithubStack(
     runId,
     repositories: stackBindings.map((binding) => ({
       repositoryId: binding.id,
-      baseBranch: defaults[binding.id] ?? binding.baseBranch ?? "main",
+      // Every id is populated above or the loop threw; no `"main"` fallback.
+      baseBranch: defaults[binding.id]!,
       dependsOn: (binding.dependsOn ?? []).filter((id) =>
         stackBindings.some((item) => item.id === id)
       ),
