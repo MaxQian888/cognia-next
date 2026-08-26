@@ -119,11 +119,29 @@ const ghOf = (deps: PrDeps) =>
 const generateOf = (deps: PrDeps) => deps.generate ?? generateText
 
 /**
- * Detect the PR base branch: the `config.git.baseBranch` override when it
- * exists in the repo, else the first of main → master that does.
+ * Detect the PR base branch.
+ *
+ * A recorded stack parent wins outright. That is the whole content of a
+ * stacked pull request — layer *n*'s base is layer *n-1* — so opening this one
+ * against the trunk instead would put every commit below it in the diff and
+ * quietly undo the stack `/stack on` was used to build. The pointer is only
+ * honoured when the parent branch actually exists; a stale pointer to a merged
+ * and deleted branch falls through to the trunk rather than producing a pull
+ * request the forge rejects.
+ *
+ * Otherwise the `config.git.baseBranch` override when it exists in the repo,
+ * else the first of main → master that does.
  */
-async function detectBase(deps: PrDeps): Promise<string | null> {
+async function detectBase(deps: PrDeps, branch?: string): Promise<string | null> {
   const git = gitOf(deps)
+  if (branch) {
+    const recorded = await git(["config", "--get", `branch.${branch}.cognia-parent`], deps.cwd)
+    const parent = recorded.code === 0 ? recorded.stdout.trim() : ""
+    if (parent && parent !== branch) {
+      const exists = await git(["rev-parse", "--verify", "--quiet", parent], deps.cwd)
+      if (exists.code === 0) return parent
+    }
+  }
   const override = resolveGitWorkflowConfig(deps.config?.git).baseBranch
   const candidates = override ? [override] : [...BASE_CANDIDATES]
   for (const candidate of candidates) {
@@ -139,7 +157,11 @@ async function runFlow(deps: PrDeps): Promise<void> {
     return
   }
   const git = gitOf(deps)
-  const base = await detectBase(deps)
+  // The branch is read first: its recorded stack parent, when it has one, IS
+  // the base of this pull request.
+  const branchRes = await git(["rev-parse", "--abbrev-ref", "HEAD"], deps.cwd)
+  const branch = branchRes.stdout.trim()
+  const base = await detectBase(deps, branch)
   if (!base) {
     const override = resolveGitWorkflowConfig(deps.config?.git).baseBranch
     deps.dispatch({
@@ -150,8 +172,6 @@ async function runFlow(deps: PrDeps): Promise<void> {
     })
     return
   }
-  const branchRes = await git(["rev-parse", "--abbrev-ref", "HEAD"], deps.cwd)
-  const branch = branchRes.stdout.trim()
   if (branch === base) {
     deps.dispatch({
       type: "NOTICE",

@@ -94,6 +94,7 @@ import { councilRun } from "./council-controller"
 import { orchestrateRun } from "./orchestrate-controller"
 import { runCommit } from "./commit-controller"
 import { runPr } from "./pr-controller"
+import { runStack } from "./stack-controller"
 
 export interface RuntimeDeps {
   dispatch: (action: TuiAction) => void
@@ -333,6 +334,7 @@ const REAL: RuntimeImpl = {
   orchestrateRun,
   runCommit,
   runPr,
+  runStack,
 }
 
 export async function runRuntimeRequest(
@@ -621,6 +623,13 @@ export async function runRuntimeRequest(
         config,
         home: deps.home,
         ...(deps.prDraft ? { prDraft: deps.prDraft } : {}),
+      })
+    case "stack":
+      return impl.runStack({
+        dispatch,
+        cwd,
+        ...(req.action ? { action: req.action } : {}),
+        ...(arg ? { arg } : {}),
       })
     case "view":
       return impl.viewFile(arg, { dispatch, cwd })

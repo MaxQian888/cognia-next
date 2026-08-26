@@ -1,6 +1,7 @@
 import { DEV_WORKFLOW_COMMANDS } from "./dev-workflow-commands"
 import { commitCommand } from "./commit-command"
 import { prCommand } from "./pr-command"
+import { stackCommand } from "./stack-command"
 import type { CommandContext } from "./types"
 
 const ctx = (args: string): CommandContext => ({
@@ -11,12 +12,13 @@ const ctx = (args: string): CommandContext => ({
 })
 
 describe("DEV_WORKFLOW_COMMANDS", () => {
-  it("registers review, commit, pr, and fix", () => {
+  it("registers review, commit, pr, stack, and fix", () => {
     expect(DEV_WORKFLOW_COMMANDS.map((c) => c.name).sort()).toEqual([
       "commit",
       "fix",
       "pr",
       "review",
+      "stack",
     ])
   })
 })
@@ -44,5 +46,34 @@ describe("prCommand", () => {
   })
   it("exposes internal apply / cancel subcommands", () => {
     expect((prCommand.subcommands ?? []).map((s) => s.name).sort()).toEqual(["apply", "cancel"])
+  })
+})
+
+describe("stackCommand", () => {
+  it("routes the root to the list action", () => {
+    // Listing is what someone means by a bare `/stack`; there is no verb that
+    // mutates anything without being named.
+    expect(stackCommand.handler!(ctx(""))).toMatchObject({
+      kind: "runtime",
+      runtime: { feature: "stack", action: "list" },
+    })
+  })
+
+  it("exposes on / off / check / restack / push", () => {
+    expect((stackCommand.subcommands ?? []).map((s) => s.name).sort()).toEqual([
+      "check",
+      "off",
+      "on",
+      "push",
+      "restack",
+    ])
+  })
+
+  it("routes every verb to its own action under the stack feature", () => {
+    for (const sub of stackCommand.subcommands ?? []) {
+      expect(sub.handler(ctx(""))).toMatchObject({
+        runtime: { feature: "stack", action: sub.name },
+      })
+    }
   })
 })

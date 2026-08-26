@@ -20,6 +20,9 @@ interface GitState {
   masterExists?: boolean
   branch?: string
   commits?: string
+  /** Recorded stack parent for the current branch, and whether it exists. */
+  stackParent?: string
+  stackParentExists?: boolean
 }
 
 function makeGit(st: GitState) {
@@ -31,6 +34,12 @@ function makeGit(st: GitState) {
       return { ...OK, code: st.masterExists === false ? 1 : 0 }
     if (s === "rev-parse --abbrev-ref HEAD")
       return { stdout: st.branch ?? "feature/x", stderr: "", code: 0 }
+    if (s.startsWith("config --get branch."))
+      return st.stackParent
+        ? { stdout: `${st.stackParent}\n`, stderr: "", code: 0 }
+        : { ...OK, code: 1 }
+    if (st.stackParent && s === `rev-parse --verify --quiet ${st.stackParent}`)
+      return { ...OK, code: st.stackParentExists === false ? 1 : 0 }
     if (args[0] === "log") return { stdout: st.commits ?? "- feat: x\n", stderr: "", code: 0 }
     if (args[0] === "diff") return { stdout: " a.ts | 2 +-\n", stderr: "", code: 0 }
     return OK
@@ -285,5 +294,34 @@ describe("formatPrBody with a configured footer", () => {
     const once = formatPrBody("body", "F")
     expect(once).toBe("body\n\nF")
     expect(formatPrBody(once, "F")).toBe(once)
+  })
+})
+
+describe("stacked branches", () => {
+  it("bases the pull request on the recorded stack parent", async () => {
+    // Opening layer 2 against the trunk instead would put layer 1's commits in
+    // its diff and quietly undo the stack `/stack on` was used to build.
+    const h = harness({ git: { branch: "me/ui", stackParent: "me/api" } })
+    await runPr(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT") as { base: string }
+    expect(draft.base).toBe("me/api")
+  })
+
+  it("falls through to the trunk when the recorded parent is gone", async () => {
+    // A merged and deleted parent leaves a stale pointer; using it anyway
+    // produces a pull request the forge rejects for an unknown base ref.
+    const h = harness({
+      git: { branch: "me/ui", stackParent: "me/api", stackParentExists: false },
+    })
+    await runPr(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT") as { base: string }
+    expect(draft.base).toBe("main")
+  })
+
+  it("ignores a pointer that names the branch itself", async () => {
+    const h = harness({ git: { branch: "me/ui", stackParent: "me/ui" } })
+    await runPr(h.deps)
+    const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT") as { base: string }
+    expect(draft.base).toBe("main")
   })
 })
