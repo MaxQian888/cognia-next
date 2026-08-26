@@ -1613,10 +1613,16 @@
     "blockersHelp": "A blocker wins over every condition above. The message is still recorded.",
     "blockersTitle": "Never answer when",
     "cancel": "Cancel",
+    "conversationScopeHelp": "This chat inherits the bot's policy. Take over the parts it needs to differ on; the rest keeps following the bot.",
     "gaps": {
       "group-mention": "An @-mention in a group matches nothing. Turn on “The bot is @-mentioned” if it should answer in groups.",
       "no-rules": "No condition is on, so this bot will never answer anything.",
       "plain-private": "A direct message that does not address the bot matches nothing. Turn on “Any direct message” if it should answer one-to-one chats."
+    },
+    "overrideParts": {
+      "blockers": "Use this chat's own blockers",
+      "rules": "Use this chat's own conditions",
+      "storeUnmatched": "Decide separately whether to keep unmatched messages"
     },
     "removeAria": "Remove",
     "residual": "{count, plural, =1 {# extra keyword condition is kept as it was saved and is not shown above.} other {# extra keyword conditions are kept as they were saved and are not shown above.}}",

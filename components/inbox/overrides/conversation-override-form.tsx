@@ -39,6 +39,7 @@ import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { EscalationPolicyEditor } from "./escalation-policy-editor"
+import { ConversationTriggerOverride } from "./conversation-trigger-override"
 import { updateAdapterConfigSection, type AdapterInstancePatch } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -46,7 +47,10 @@ import type {
   ActiveRunDispatchMode,
   ConnectorMode,
   InboundActivationPolicy,
+  TriggerPolicy,
 } from "@/types/connectors/policy"
+import { resolveBinding } from "@/lib/connectors/policy-resolve"
+import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { ConversationBehaviorEditor } from "@/components/settings/connections/forms/conversation-behavior-editor"
 import type { ImConfigSource, ImExecutionTarget } from "@/lib/connectors/effective-config"
 import { EntityPicker } from "@/components/settings/connections/forms/_shared/entity-picker"
@@ -237,6 +241,31 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   )
   // SLA escalation chain (slice 1B). `undefined` = inherit the bot default.
   const [escalation, setEscalation] = useState<EscalationPolicy | undefined>(initialRow?.escalation)
+  // Per-chat trigger override. Three independent parts, each inheriting the
+  // bot's until this chat takes it over — see `ConversationTriggerOverride`.
+  const [trigger, setTrigger] = useState<Partial<TriggerPolicy> | undefined>(initialRow?.trigger)
+  // What this chat inherits when it overrides nothing: the bot's own policy
+  // with the character layer applied, resolved by the SAME function the bus
+  // uses so the screen cannot describe a policy the conversation does not run.
+  const adapterRow = useAdapterInstance(adapterId)
+  const inheritedTrigger: TriggerPolicy | undefined = useMemo(() => {
+    if (!adapterRow) return undefined
+    const boundCharacterId =
+      characterState === "none"
+        ? undefined
+        : characterState === "character"
+          ? characterId.trim() || undefined
+          : adapterRow.defaultCharacterId
+    const boundCharacter = boundCharacterId
+      ? (characters.find((c) => c.id === boundCharacterId) ?? null)
+      : null
+    return resolveBinding({
+      adapter: adapterRow,
+      character: boundCharacter,
+      override: null,
+    }).trigger
+  }, [adapterRow, characters, characterId, characterState])
+
   const platform = useMemo(() => {
     try {
       return parseConversationKey(conversationKey).platform
@@ -373,6 +402,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           allowedBuiltInSkillIds: resolvedAllowed,
           requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
           quietHours: resolvedQuietHours,
+          // `undefined` clears the override, which is what "inherit everything"
+          // means; `resolveBinding` reads an absent or empty partial the same way.
+          trigger,
         },
       })
       await mutateConversationOverride({
@@ -508,6 +540,19 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           }}
         />
       </div>
+
+      {/* Whether this chat answers at all. Rendered only once the bot's policy
+       * is known: taking a part over seeds it from what the chat currently
+       * evaluates, and seeding from a placeholder would silence the chat. */}
+      {inheritedTrigger && (
+        <div className="border-b pb-5">
+          <ConversationTriggerOverride
+            baseline={inheritedTrigger}
+            value={trigger}
+            onChange={setTrigger}
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="conv-override-character-state">{t("fields.character")}</Label>

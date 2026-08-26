@@ -1613,10 +1613,16 @@
     "blockersHelp": "拦截条件优先于上面所有条件。消息仍然会被记录。",
     "blockersTitle": "满足以下任一条件时不回复",
     "cancel": "取消",
+    "conversationScopeHelp": "本会话默认继承机器人的策略。只接管需要不同的部分，其余继续跟随机器人。",
     "gaps": {
       "group-mention": "群里的 @ 不会命中任何条件。若希望它在群里回复，请开启「机器人被 @ 到」。",
       "no-rules": "没有开启任何条件，这个机器人不会回复任何消息。",
       "plain-private": "未点名的私聊消息不会命中任何条件。若希望它回复一对一会话，请开启「任何私聊消息」。"
+    },
+    "overrideParts": {
+      "blockers": "本会话使用自己的拦截条件",
+      "rules": "本会话使用自己的触发条件",
+      "storeUnmatched": "单独决定是否保留未命中的消息"
     },
     "removeAria": "移除",
     "residual": "另有 {count} 条关键词条件按原样保留，未在上方展示。",

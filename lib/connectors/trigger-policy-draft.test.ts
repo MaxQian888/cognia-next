@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import {
   addressedOnlyChatPolicy,
@@ -13,6 +15,8 @@ import {
   toTriggerPolicyDraft,
   triggerCoverageGaps,
   triggerDraftWarnings,
+  type TriggerCoverageGap,
+  type TriggerDraftWarning,
 } from "./trigger-policy-draft"
 
 function emptyState(): PolicyEvalState {
@@ -308,5 +312,69 @@ describe("triggerDraftWarnings", () => {
     expect(
       evaluatePolicy(fromTriggerPolicyDraft(draft), event(), emptyState(), 1_000).blocked
     ).toBe(true)
+  })
+})
+
+/**
+ * `triggerCoverageGaps` and `triggerDraftWarnings` are rendered through
+ * `t(`gaps.${gap}`)` / `t(`warnings.${warning}`)`, and `lint:i18n` skips
+ * template-literal keys entirely — so a new member of either union ships as a
+ * raw key path in the UI with every gate green.
+ */
+describe("localisation catalogue", () => {
+  const GAPS: TriggerCoverageGap[] = ["no-rules", "plain-private", "group-mention"]
+  const WARNINGS: TriggerDraftWarning[] = [
+    "slash-command-empty",
+    "keyword-empty",
+    "user-allowlist-empty",
+    "channel-allowlist-empty",
+    "user-blocklist-empty",
+    "channel-blocklist-empty",
+    "keyword-blocklist-empty",
+    "rate-limit-blocks-everything",
+  ]
+  /** Independently spelled — the conversation editor indexes by these. */
+  const OVERRIDE_PARTS = ["rules", "blockers", "storeUnmatched"]
+
+  it.each(["en", "zh-CN"])("covers every dynamic key in %s", (locale) => {
+    const messages = JSON.parse(
+      readFileSync(`i18n/messages/${locale}/settings/connections.json`, "utf8")
+    ).triggerPolicy
+    for (const gap of GAPS) expect(messages.gaps).toHaveProperty(gap)
+    for (const warning of WARNINGS) expect(messages.warnings).toHaveProperty(warning)
+    for (const part of OVERRIDE_PARTS) expect(messages.overrideParts).toHaveProperty(part)
+  })
+
+  // The lists above are hand-kept, so pin them to the real unions: a member
+  // added without a message would otherwise just be missing from both.
+  it("keeps the pinned lists exhaustive", () => {
+    expect(
+      triggerCoverageGaps({ rules: [], blockers: [], storeUnmatchedInDraftMode: false })
+    ).toEqual(expect.arrayContaining([expect.any(String)]))
+    const everySlotOn = emptyTriggerPolicyDraft()
+    everySlotOn.rules.slashCommand.enabled = true
+    everySlotOn.rules.keyword.enabled = true
+    everySlotOn.rules.userAllowlist.enabled = true
+    everySlotOn.rules.channelAllowlist.enabled = true
+    everySlotOn.blockers.userBlocklist.enabled = true
+    everySlotOn.blockers.channelBlocklist.enabled = true
+    everySlotOn.blockers.keywordBlocklist.enabled = true
+    everySlotOn.blockers.rateLimit = {
+      enabled: true,
+      perUserPerMin: 0,
+      perChannelPerMin: 0,
+      perTenantPerMin: undefined,
+    }
+    expect(new Set(triggerDraftWarnings(everySlotOn))).toEqual(new Set(WARNINGS))
+    expect(
+      new Set([
+        ...triggerCoverageGaps({ rules: [], blockers: [], storeUnmatchedInDraftMode: false }),
+        ...triggerCoverageGaps({
+          rules: [{ kind: "reply-to-bot" }],
+          blockers: [],
+          storeUnmatchedInDraftMode: false,
+        }),
+      ])
+    ).toEqual(new Set(GAPS))
   })
 })

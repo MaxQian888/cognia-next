@@ -8,12 +8,26 @@ import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { ConversationOverrideForm } from "./conversation-override-form"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { __setInboxWriteRouteDepsForTests } from "@/lib/connectors/inbox-writes/route"
+
+// Every write in this form goes through the cross-shell inbox-write facade,
+// which resolves to "unavailable" under jsdom because the test shell declares
+// no `connector-runtime` capability. Without this seam every save assertion
+// times out on `InboxWriteUnavailableError` instead of testing the form.
+let restoreWriteRoute: (() => void) | undefined
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   useAgentTeamStore.setState({ teams: {} })
+  restoreWriteRoute = __setInboxWriteRouteDepsForTests({ hasConnectorRuntime: () => true })
+})
+
+afterEach(() => {
+  restoreWriteRoute?.()
+  restoreWriteRoute = undefined
 })
 
 describe("ConversationOverrideForm", () => {
@@ -313,7 +327,9 @@ describe("ConversationOverrideForm", () => {
   it("selects Provider and Model from the configured catalog for Direct Agent", async () => {
     await getDb().settings.put({
       id: "singleton",
-      providerSettings: { anthropic: { enabled: true, models: ["claude-test"] } },
+      // `enabledModels` is the whitelist the picker reads; `models` is not a
+      // field of `UserProviderSettings` at all.
+      providerSettings: { anthropic: { enabled: true, enabledModels: ["claude-test"] } },
     } as never)
     const user = userEvent.setup()
     render(
@@ -326,7 +342,7 @@ describe("ConversationOverrideForm", () => {
     await user.click(screen.getByTestId("conv-override-target"))
     await user.click(screen.getByRole("option", { name: "Direct Agent" }))
     await user.click(screen.getByTestId("conv-override-provider-model"))
-    await user.click(await screen.findByRole("option", { name: "anthropic · claude-test" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic · claude-test" }))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(async () => {
       expect(
@@ -569,7 +585,7 @@ describe("ConversationOverrideForm", () => {
     })
     await getDb().settings.put({
       id: "singleton",
-      providerSettings: { new: { enabled: true, models: ["model"] } },
+      providerSettings: { new: { enabled: true, enabledModels: ["model"] } },
     } as never)
     const existing = await getDb().conversationOverrides.get("co-existing")
     render(
@@ -727,5 +743,135 @@ describe("ConversationOverrideForm", () => {
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(await getDb().conversationOverrides.get(initial.id)).toEqual(initial)
     confirm.mockRestore()
+  })
+
+  /**
+   * `ConversationOverrideRow.trigger` was declared, merged by `resolveBinding`
+   * and evaluated by the bus, and nothing in the product could set it. The
+   * section renders only once the bot's own policy is readable, because taking
+   * a part over seeds it from what the chat currently evaluates.
+   */
+  it("offers the trigger override once the bot's policy is known", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: defaultTriggerPolicyFor("lark"),
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_trigger"
+        sessionId="s_trigger"
+      />
+    )
+
+    expect(await screen.findByTestId("conversation-trigger-override")).toBeInTheDocument()
+    expect(screen.getByTestId("conv-trigger-override-rules-switch")).not.toBeChecked()
+  })
+
+  it("seeds the trigger override from an existing row", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: defaultTriggerPolicyFor("lark"),
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const initial: ConversationOverrideRow = {
+      id: "co-trigger",
+      conversationKey: "lark:lark-1:oc_trigger_seed",
+      sessionId: "s_trigger_seed",
+      trigger: { blockers: [{ kind: "cooldown-after-bot-reply", secs: 30 }] },
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.put(initial)
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={initial.conversationKey}
+        sessionId={initial.sessionId}
+        initialRow={initial}
+      />
+    )
+
+    expect(await screen.findByTestId("conv-trigger-override-blockers-switch")).toBeChecked()
+    expect(screen.getByTestId("conv-trigger-override-rules-switch")).not.toBeChecked()
+    expect(screen.getByTestId("conv-trigger-cooldown-secs")).toHaveValue(30)
+  })
+
+  it("persists a trigger override and clears it back to inherit", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: defaultTriggerPolicyFor("lark"),
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const { unmount } = render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_trigger_save"
+        sessionId="s_trigger_save"
+      />
+    )
+
+    fireEvent.click(await screen.findByTestId("conv-trigger-override-blockers-switch"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const persisted = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals("lark:lark-1:oc_trigger_save")
+        .first()
+      // Seeded from what the chat already evaluates, and carrying ONLY the part
+      // that was taken over — the conditions keep following the bot.
+      expect(persisted?.trigger).toEqual({ blockers: defaultTriggerPolicyFor("lark").blockers })
+    })
+    unmount()
+
+    const existing = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_trigger_save")
+      .first()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_trigger_save"
+        sessionId="s_trigger_save"
+        initialRow={existing}
+      />
+    )
+    fireEvent.click(await screen.findByTestId("conv-trigger-override-blockers-switch"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const cleared = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals("lark:lark-1:oc_trigger_save")
+        .first()
+      expect(cleared?.trigger).toBeUndefined()
+    })
   })
 })
