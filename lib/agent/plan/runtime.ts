@@ -388,11 +388,17 @@ class PlanRuntime {
       throw err
     }
 
+    // Resolved once, not per step: a plan is one piece of work, and steps that
+    // cannot see each other's edits are not a plan.
+    const { resolvePlanExecutionRoot } = await import("./step-workspace")
+    const executionRoot = await resolvePlanExecutionRoot(executing).catch(() => undefined)
+
     planRunCtx.registerPlanRunContext({
       runId,
       planId,
       plan: executing,
       ...(executing.characterId ? { characterId: executing.characterId } : {}),
+      ...(executionRoot ? { executionRoot: executionRoot.root } : {}),
       writer: {
         setStepStatus: async (stepId, status, patch) => {
           await this.setStepStatus(planId, stepId, status, patch)

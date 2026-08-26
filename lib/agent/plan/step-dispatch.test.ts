@@ -4,6 +4,7 @@ import { PluginToolInvocationError } from "@/lib/plugin/core/invoke-plugin-tool"
 import type { PlanRunContext } from "./plan-run-context"
 import { PLAN_APPROVAL_SCOPE, dispatchPlanStepNode, planApprovalKey } from "./step-dispatch"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { ExecutionBroker, __resetExecutionBrokerForTesting } from "@/lib/execution/broker"
 
 const executeAgentMock = jest.fn()
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
@@ -111,7 +112,10 @@ function step(over: Partial<PlanStep> = {}): PlanStep {
   }
 }
 
-function makeCtx(s: PlanStep): {
+function makeCtx(
+  s: PlanStep,
+  ctxOver: Partial<PlanRunContext> = {}
+): {
   ctx: PlanRunContext
   calls: Array<{ stepId: string; status: PlanStepStatus; patch?: Record<string, unknown> }>
 } {
@@ -144,6 +148,7 @@ function makeCtx(s: PlanStep): {
         calls.push({ stepId, status, patch: patch as Record<string, unknown> })
       },
     },
+    ...ctxOver,
   }
   return { ctx, calls }
 }
@@ -692,5 +697,131 @@ describe("editor_review", () => {
     await expect(dispatchPlanStepNode(ctx, "s1", new AbortController().signal)).rejects.toThrow(
       /requires params.path and params.content/
     )
+  })
+})
+
+describe("dispatchPlanStepNode — the directory a step runs in", () => {
+  afterEach(() => {
+    __resetExecutionBrokerForTesting()
+  })
+
+  /** Poll until `predicate` holds. This suite runs in `node`, so no DOM helper. */
+  async function until(predicate: () => boolean, label: string): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error(`timed out waiting for ${label}`)
+  }
+
+  it("runs the turn in the run's execution root", async () => {
+    // Before this, `executeAgent` was called with no `cwd` at all, so every
+    // plan ran wherever the app default pointed rather than in the workspace
+    // the plan belongs to.
+    executeAgentMock.mockResolvedValue({ text: "ok", channel: "sidecar" })
+    const { ctx } = makeCtx(step(), { executionRoot: "/repo" })
+    await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(executeAgentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cwd: "/repo" })
+    )
+  })
+
+  it("passes no cwd when the plan has no directory", async () => {
+    // A real answer rather than a failure: inventing a path would be worse
+    // than letting the runner use its own default.
+    executeAgentMock.mockResolvedValue({ text: "ok", channel: "sidecar" })
+    const { ctx } = makeCtx(step())
+    await dispatchPlanStepNode(ctx, "s1", signal)
+    const [, options] = executeAgentMock.mock.calls[0]
+    expect(options).not.toHaveProperty("cwd")
+  })
+
+  it("serializes two steps that share the directory", async () => {
+    // `maxConcurrency > 1` admits several steps at once and every step of a run
+    // shares one checkout, so without the slot two tool-enabled agents edit the
+    // same tree at the same time.
+    let running = 0
+    let overlapped = false
+    let releaseFirst: (() => void) | undefined
+    executeAgentMock.mockImplementation(async () => {
+      running += 1
+      if (running > 1) overlapped = true
+      if (!releaseFirst) await new Promise<void>((resolve) => (releaseFirst = resolve))
+      running -= 1
+      return { text: "ok", channel: "sidecar" }
+    })
+
+    const first = makeCtx(step({ id: "s1" }), { executionRoot: "/repo" })
+    const second = makeCtx(step({ id: "s1" }), { executionRoot: "/repo" })
+    const firstRun = dispatchPlanStepNode(first.ctx, "s1", signal)
+    const secondRun = dispatchPlanStepNode(second.ctx, "s1", signal)
+
+    await until(() => releaseFirst !== undefined, "the first turn to start")
+    releaseFirst!()
+    await Promise.all([firstRun, secondRun])
+    expect(overlapped).toBe(false)
+    expect(executeAgentMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not name the plan's session on the lease", async () => {
+    // The broker exempts any leg naming a session that already has an active
+    // leg — the rule that stops a foreground chat turn blocking on its own
+    // stream. Every step shares the plan's session, so naming it would exempt
+    // every step after the first and the slot would serialize nothing. This is
+    // the regression guard for the test above, which would then pass vacuously.
+    const acquired: unknown[] = []
+    const broker = new ExecutionBroker()
+    const realAcquire = broker.acquire.bind(broker)
+    broker.acquire = (request) => {
+      acquired.push(request)
+      return realAcquire(request)
+    }
+    __resetExecutionBrokerForTesting(broker)
+
+    executeAgentMock.mockResolvedValue({ text: "ok", channel: "sidecar" })
+    const { ctx } = makeCtx(step(), { executionRoot: "/repo" })
+    await dispatchPlanStepNode(ctx, "s1", signal)
+    expect(acquired).toHaveLength(1)
+    expect(acquired[0]).not.toHaveProperty("sessionId")
+    expect(acquired[0]).toMatchObject({ kind: "workflow-step", slotKey: "dir:/repo" })
+  })
+
+  it("does not serialize steps with no directory", async () => {
+    // Nothing to exclude anyone from; inventing a slot would queue steps that
+    // never conflict.
+    let peak = 0
+    let running = 0
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    executeAgentMock.mockImplementation(async () => {
+      running += 1
+      peak = Math.max(peak, running)
+      await gate
+      running -= 1
+      return { text: "ok", channel: "sidecar" }
+    })
+
+    const a = makeCtx(step({ id: "s1" }))
+    const b = makeCtx(step({ id: "s1" }))
+    const runs = Promise.all([
+      dispatchPlanStepNode(a.ctx, "s1", signal),
+      dispatchPlanStepNode(b.ctx, "s1", signal),
+    ])
+    await until(() => peak === 2, "both turns to run at once")
+    release!()
+    await runs
+  })
+
+  it("releases the slot when the turn throws", async () => {
+    // Otherwise one failed step wedges every later step in that directory.
+    executeAgentMock.mockRejectedValueOnce(new Error("boom"))
+    const first = makeCtx(step({ id: "s1", attempts: 1 }), { executionRoot: "/repo" })
+    await expect(dispatchPlanStepNode(first.ctx, "s1", signal)).rejects.toThrow("boom")
+
+    executeAgentMock.mockResolvedValue({ text: "second", channel: "sidecar" })
+    const second = makeCtx(step({ id: "s1" }), { executionRoot: "/repo" })
+    const res = await dispatchPlanStepNode(second.ctx, "s1", signal)
+    expect(res.output).toMatchObject({ text: "second" })
   })
 })

@@ -240,3 +240,39 @@ are closed. What changed, and why each was a defect rather than a preference:
 Not done, deliberately: the CLI's markdown plans (`~/.cognia/plans/*.md`) remain
 a separate, file-backed concept — bridging them into `AgentPlan` needs a CLI↔app
 handoff design (ADR-0078) rather than a conversion function.
+
+## Workspace amendment (2026-08-26)
+
+§3 said a plan is "a DAG of typed `PlanSteps`" and said nothing about where they
+run. `step-dispatch.ts` called `executeAgent` with no `cwd`, so every
+`agent_turn` step ran wherever the app's default working directory pointed —
+not in the workspace the plan belongs to. On a plan created inside a project the
+agent looked like it was ignoring the repository, and that was true at any
+concurrency, not only in parallel.
+
+**A run has one directory, resolved once.** `resolvePlanExecutionRoot`
+(`lib/agent/plan/step-workspace.ts`) reads the plan's workspace primary root,
+falling back to the session's own working directory, and `PlanRunContext`
+carries it for the life of the run. Undefined stays a real answer: a plan with
+neither has nothing to point an agent at, and inventing a path is worse than
+letting the runner use its own default.
+
+**Per-step isolation is rejected, not deferred.** An earlier sketch had each
+step take its own worktree through `AgentTeamRegistryWorkspaceController`. That
+is right for a team, whose members do independent work and reconcile at the end,
+and wrong for a plan: step 3 that cannot see what step 2 wrote is not a plan. A
+plan is one piece of work and its steps share one checkout.
+
+**Which is exactly why parallel steps must not overlap.** `config.maxConcurrency`
+admits several steps at once, and two tool-enabled agents editing the same
+checkout interleave edits, builds and git operations — the corruption
+`lib/execution/slot-key.ts` exists to prevent. Steps now take the execution slot
+for their directory. Approval gates, MCP calls, and any step in a plan with no
+directory take none and stay as parallel as before.
+
+**The lease deliberately omits `sessionId`.** The broker exempts any leg naming a
+session that already has an active leg — the rule that keeps a foreground chat
+turn from blocking on its own stream. Every step of a plan shares the plan's
+session, so naming it would exempt every step after the first and the slot would
+serialize nothing at all. Cancellation still reaches the steps: the plan's own
+`AbortController` is chained into the lease as its caller signal.

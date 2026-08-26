@@ -99,11 +99,19 @@ async function runStepWork(
   switch (step.kind) {
     case "agent_turn": {
       const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-      const result = await executeAgent(stepPrompt(step), {
-        toolsEnabled: true,
-        ...(runCtx.characterId ? { characterId: runCtx.characterId } : {}),
-        abortSignal: signal,
-      })
+      const cwd = runCtx.executionRoot
+      const turn = (turnSignal: AbortSignal) =>
+        executeAgent(stepPrompt(step), {
+          toolsEnabled: true,
+          ...(runCtx.characterId ? { characterId: runCtx.characterId } : {}),
+          ...(cwd ? { cwd } : {}),
+          abortSignal: turnSignal,
+        })
+
+      // Every step of a run shares one directory, so `maxConcurrency > 1` puts
+      // two tool-enabled agents in the same checkout. The slot serializes the
+      // ones that write; steps with no directory take none and stay parallel.
+      const result = await runStepInSlot(runCtx, cwd, signal, turn)
       return { value: { text: result.text, channel: result.channel }, summary: result.text }
     }
 
@@ -408,4 +416,53 @@ export async function dispatchPlanStepNode(
     })
     throw err
   }
+}
+
+/**
+ * Run a step's work holding the execution slot for its directory.
+ *
+ * Without a directory there is nothing to exclude anyone from, so the work runs
+ * directly — inventing a slot would queue steps that never conflict.
+ *
+ * The lease's signal is combined with the run's own: a paused or cancelled plan
+ * must abort the turn, and so must the broker cancelling the lease.
+ */
+async function runStepInSlot<T>(
+  runCtx: PlanRunContext,
+  cwd: string | undefined,
+  signal: AbortSignal,
+  work: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const [{ slotKeyForPath }, { combineAbortSignals, runWithExecutionLease }] = await Promise.all([
+    import("@/lib/execution/slot-key"),
+    import("@/lib/execution/admit"),
+  ])
+  const slotKey = slotKeyForPath(cwd)
+  if (!slotKey) return work(signal)
+
+  return runWithExecutionLease(
+    {
+      kind: "workflow-step",
+      label: runCtx.plan.title,
+      runId: runCtx.runId,
+      // Deliberately NOT `sessionId`. The broker exempts any leg naming a
+      // session that already has an active leg — the rule that keeps a
+      // foreground chat turn from being blocked by its own stream. Every step
+      // of a plan shares the plan's session, so passing it would exempt every
+      // step after the first and the slot would serialize nothing at all.
+      // Cancellation still reaches these steps: the plan's own AbortController
+      // is chained in as `signal` below.
+      ...(runCtx.plan.projectId ? { projectId: runCtx.plan.projectId } : {}),
+      slotKey,
+      signal,
+    },
+    async (lease) => {
+      const combined = combineAbortSignals(signal, lease.signal)
+      try {
+        return await work(combined?.signal ?? signal)
+      } finally {
+        combined?.cleanup()
+      }
+    }
+  )
 }

@@ -187,3 +187,30 @@ approval_gate     → waitForDecision(scope, id, signal)  (reuses approval-bus)
 ## 当前状态修订（2026-08-13）
 
 Plan persistence、approval、projection、execution 以及 plan/goal/team integration 已经实现。提案中若干路径后来发生迁移；canonical owner 是当前 plan repository、projections、goal orchestration 与 AgentTeam execution modules。不得根据历史路径清单再建一套 plan engine。
+
+## 工作区修订（2026-08-26）
+
+§3 说计划是「一张由带类型的 `PlanStep` 组成的 DAG」，却没有说这些步骤**在哪里**执行。
+`step-dispatch.ts` 调 `executeAgent` 时根本不传 `cwd`，于是每个 `agent_turn` 步骤都跑在
+应用默认工作目录里——而不是计划所属的工作区。在项目里创建的计划看起来就像 agent 无视了
+仓库，而且这在任何并发度下都成立，不只是并行时。
+
+**一次运行只有一个目录，且只解析一次。** `resolvePlanExecutionRoot`
+（`lib/agent/plan/step-workspace.ts`）读取计划所属工作区的主根，退回到会话自己的工作目录；
+`PlanRunContext` 在整次运行期间携带它。解析不出来仍然是一个真实的答案：两者都没有的计划
+本来就没有目录可指，凭空造一个路径比让运行器用它自己的默认值更糟。
+
+**逐步骤隔离是被否决的，不是被推迟的。** 早先的草案让每个步骤通过
+`AgentTeamRegistryWorkspaceController` 各切一个工作树。那对团队是对的——成员做的是彼此独立
+的事，最后再收敛；对计划是错的：看不见第 2 步写了什么的第 3 步，根本不成其为计划。计划是
+一件事，它的步骤共用同一个检出。
+
+**而这恰恰是并行步骤不能重叠的理由。** `config.maxConcurrency` 会同时放行多个步骤，两个带
+工具的 agent 在同一个检出里会把编辑、构建和 git 操作交织在一起——正是
+`lib/execution/slot-key.ts` 存在要防的那类损坏。现在步骤会占用其目录的执行位。审批门、MCP
+调用，以及没有目录的计划里的任何步骤都不占位，并行度与以前相同。
+
+**租约刻意不带 `sessionId`。** broker 会豁免任何指向「已有活跃 leg 的会话」的租约——这条规则
+是为了让前台聊天回合不被自己的流阻塞。计划的每个步骤共享计划的会话，所以带上它会让第一个
+之后的每个步骤都被豁免，执行位将什么都不串行。取消仍然能到达这些步骤：计划自己的
+`AbortController` 作为调用方信号链进了租约。

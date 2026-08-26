@@ -32,6 +32,14 @@ export interface PlanRunContext {
   readonly plan: AgentPlan
   /** Character the plan's `agent_turn` steps run as (session character). */
   readonly characterId?: string
+  /**
+   * The directory every step of this run works in, resolved once at run start
+   * (`resolvePlanExecutionRoot`). Undefined when the plan belongs to no
+   * workspace and its session has no working directory — the steps then use
+   * the runner's own default and take no execution slot, because there is no
+   * directory to exclude anyone from.
+   */
+  readonly executionRoot?: string
   readonly writer: PlanRunStepWriter
 }
 
