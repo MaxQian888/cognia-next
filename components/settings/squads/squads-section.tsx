@@ -19,14 +19,12 @@
  * mounted.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { MenuIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
@@ -46,7 +44,6 @@ function SquadsSectionInner() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [sheetOpen, setSheetOpen] = useState(false)
 
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
@@ -78,7 +75,6 @@ function SquadsSectionInner() {
       next.set(SQUAD_TAB_PARAM, panel)
       // Relative, so `?section=squads` and anything else on the URL survives.
       router.replace(`${pathname}?${next.toString()}`, { scroll: false })
-      setSheetOpen(false)
     },
     [router, pathname, searchParams]
   )
@@ -103,7 +99,6 @@ function SquadsSectionInner() {
     // navigation. The signal originates outside React (a native menu event),
     // so there is no render-time path to react to it; the page this replaces
     // bridged it the same way.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     handleCreate()
   }, [pendingCreate, clearPendingCreate, handleCreate])
 
@@ -124,34 +119,22 @@ function SquadsSectionInner() {
   )
 
   return (
-    <div
-      className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[300px_minmax(0,1fr)]"
+    <SettingsMasterDetail
+      nav={() => nav}
+      navTitle={t("nav.openList")}
+      mobileTriggerLabel={t("nav.openList")}
+      activeKey={activePanel}
+      navWidth={300}
+      triggerTestId="squads-nav-sheet-trigger"
       data-testid="squads-section"
     >
-      <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-        {nav}
-      </div>
-
       <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
-        {/* Outside PanelTransition on purpose — see the file header. */}
+        {/* Outside PanelTransition on purpose — see the file header. The pane
+            header keeps naming the open Squad; the frame's own trigger row —
+            which only appears once the pane is too narrow for any rail — is
+            what opens the list there, so this header no longer carries a
+            second copy of that button. */}
         <div className="flex shrink-0 items-center gap-2 border-b p-3">
-          <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="md:hidden"
-                aria-label={t("nav.openList")}
-                data-testid="squads-nav-sheet-trigger"
-              >
-                <MenuIcon className="size-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetTitle className="sr-only">{t("nav.openList")}</SheetTitle>
-              {nav}
-            </SheetContent>
-          </Sheet>
           <span className="min-w-0 truncate text-sm font-medium">{headerTitle}</span>
         </div>
 
@@ -173,7 +156,7 @@ function SquadsSectionInner() {
           </PanelTransition>
         </div>
       </div>
-    </div>
+    </SettingsMasterDetail>
   )
 }
 

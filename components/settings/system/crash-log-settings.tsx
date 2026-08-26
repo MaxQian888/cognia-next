@@ -50,6 +50,7 @@ import type {
   CrashLogSourceFilter,
 } from "@/lib/logging/crash-log"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
+import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 
 /* ─── Severity helpers ─── */
 
@@ -421,13 +422,16 @@ export function CrashLogSettings() {
       </div>
 
       {/* ─── Fill-height two-pane layout ─── */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(300px,360px)_1fr]">
+      {/* Tiered off the pane's own width, not the viewport: this pane is the
+          window minus the app rail minus the settings sidebar, so `md:` used
+          to split into two columns while there was only ~440px to split. */}
+      <SettingsListDetail listWidth={360} className="gap-3">
         {/* Left: filters + log list */}
         <div
           data-testid="crash-list-pane"
           className={cn(
             "min-h-0 flex-col overflow-hidden rounded-lg border",
-            mobileDetailOpen ? "hidden md:flex" : "flex"
+            mobileDetailOpen ? "hidden @[560px]/settings-pane:flex" : "flex"
           )}
         >
           <div className="shrink-0 space-y-2 border-b p-2">
@@ -515,7 +519,7 @@ export function CrashLogSettings() {
           data-testid="crash-detail-pane"
           className={cn(
             "min-h-0 flex-col overflow-hidden rounded-lg border",
-            mobileDetailOpen ? "flex" : "hidden md:flex"
+            mobileDetailOpen ? "flex" : "hidden @[560px]/settings-pane:flex"
           )}
         >
           {!selectedItem ? (
@@ -532,7 +536,7 @@ export function CrashLogSettings() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0 md:hidden"
+                  className="h-8 w-8 shrink-0 @[560px]/settings-pane:hidden"
                   onClick={() => setMobileDetailOpen(false)}
                   aria-label={t("crash.actions.back")}
                 >
@@ -618,7 +622,7 @@ export function CrashLogSettings() {
                       <Info className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">{t("crash.native.title")}</span>
                     </div>
-                    <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-2 @[860px]/settings-pane:grid-cols-2">
                       <DiagnosticsField label={t("crash.native.status")}>
                         <div className="flex items-center gap-2">
                           <Circle
@@ -672,7 +676,7 @@ export function CrashLogSettings() {
             </>
           )}
         </div>
-      </div>
+      </SettingsListDetail>
     </div>
   )
 }

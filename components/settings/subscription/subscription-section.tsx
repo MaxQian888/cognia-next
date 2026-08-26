@@ -3,7 +3,9 @@
 // Unified Subscription settings section (ADR-0025). Master/detail shell — a
 // grouped nav on the left, one panel on the right. Mirrors `appearance-section.tsx`
 // / `ocr-section.tsx`, the house pattern for sections with more entries than a
-// tab strip can carry: below `md` the nav collapses into a left Sheet.
+// tab strip can carry. `SettingsMasterDetail` owns the split: the rail tiers off
+// the pane's own width (full → compact → icon → drawer) rather than the
+// viewport, which this pane never gets.
 // `subscription` is a member of the shell's `FILL_HEIGHT_SECTIONS`, so this
 // component owns its own scroll and fills the frame.
 //
@@ -18,20 +20,18 @@
 //   ?subTab=<panel>   — the active panel id (single source of truth).
 //   ?innerTab=<inner> — legacy, Anthropic-only; still resolved, never written.
 
-import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
-import { MenuIcon, ZapIcon } from "lucide-react"
+import { ZapIcon } from "lucide-react"
 
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
 } from "@/components/settings/common/related-sections-strip"
-import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 
 import { CloudSyncCard } from "./cloud-sync-card"
 import { ImportExportButtons } from "./import-export-buttons"
@@ -76,7 +76,6 @@ export function SubscriptionSection() {
   const t = useTranslations("subscription")
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
   const activePanel = resolveSubscriptionPanel(
     searchParams.get(SUBTAB_PARAM),
@@ -90,7 +89,6 @@ export function SubscriptionSection() {
     // on the next read (see `resolveSubscriptionPanel`), so drop it.
     params.delete(INNER_TAB_PARAM)
     router.replace(`?${params.toString()}`, { scroll: false })
-    setMobileSheetOpen(false)
   }
 
   // The Overview panel's empty state offers "add an account", which is the
@@ -113,38 +111,15 @@ export function SubscriptionSection() {
 
       <RelatedSectionsStrip current="subscription" targets={CLAUDE_CODE_RELATED} />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_1fr]">
-        {/* Desktop nav */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {navNode}
-        </div>
-
-        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="subscription-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-              </SheetHeader>
-              {navNode}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => navNode}
+        navTitle={t("nav.title")}
+        mobileTriggerLabel={t("nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`nav.items.${activePanel}.label`)}
+        navWidth={280}
+        triggerTestId="subscription-mobile-nav-trigger"
+      >
         {/* Detail. `@container/subscription-pane`: panels are now a fixed-ish
             width regardless of viewport, so any multi-column layout inside them
             must size off this box, not the window (same as the appearance and
@@ -159,7 +134,7 @@ export function SubscriptionSection() {
             </PanelTransition>
           </div>
         </div>
-      </div>
+      </SettingsMasterDetail>
     </div>
   )
 }

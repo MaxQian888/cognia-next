@@ -46,6 +46,13 @@ jest.mock("./components/appearance-preview", () => ({
 jest.mock("./components/appearance-config-toolbar", () => ({
   AppearanceConfigToolbar: () => <div data-testid="io-toolbar-stub" />,
 }))
+// jsdom measures every box at 0, which the section reads as "not measured yet"
+// and treats as wide. Driving the width from here is what lets the narrow case
+// be asserted at all.
+let detailWidth = 0
+jest.mock("@/hooks/use-element-width", () => ({
+  useElementWidth: () => detailWidth,
+}))
 // `usePluginSlotHasExtensions` lives in the same module as the slot, so the
 // factory has to provide both or the section crashes calling undefined.
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
@@ -57,6 +64,7 @@ import { AppearanceSection } from "./appearance-section"
 
 beforeEach(() => {
   replace.mockClear()
+  detailWidth = 0
   searchString = ""
   hasPluginExtensions = false
 })
@@ -181,6 +189,31 @@ describe("AppearanceSection", () => {
         expect(screen.getAllByTestId("appearance-preview-stub")).toHaveLength(1)
       }
     )
+
+    it("starts collapsed once the detail column is too narrow to spare the height", () => {
+      // In a ~400px column the preview is a ~300px-tall card sitting between
+      // the user and the controls they opened the panel to change.
+      detailWidth = 400
+      render(<AppearanceSection />)
+      expect(screen.queryByTestId("appearance-preview-stub")).not.toBeInTheDocument()
+      expect(screen.getByTestId("appearance-panel-title")).toBeInTheDocument()
+    })
+
+    it("starts open in a wide detail column", () => {
+      detailWidth = 700
+      render(<AppearanceSection />)
+      expect(screen.getByTestId("appearance-preview-stub")).toBeInTheDocument()
+    })
+
+    it("lets an explicit toggle override the narrow default", async () => {
+      detailWidth = 400
+      const user = userEvent.setup()
+      render(<AppearanceSection />)
+      expect(screen.queryByTestId("appearance-preview-stub")).not.toBeInTheDocument()
+
+      await user.click(screen.getByTestId("appearance-preview-toggle"))
+      expect(screen.getByTestId("appearance-preview-stub")).toBeInTheDocument()
+    })
 
     it("collapses the preview without taking the panel identity with it", async () => {
       const user = userEvent.setup()

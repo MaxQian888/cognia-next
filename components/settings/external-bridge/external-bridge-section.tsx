@@ -15,12 +15,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { MenuIcon, WebhookIcon } from "lucide-react"
+import { WebhookIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import {
   ALL_BRIDGE_SCOPES,
@@ -48,7 +47,6 @@ export function ExternalBridgeSection() {
   const searchParams = useSearchParams()
   const [settings, setSettings] = useState<ExternalBridgeSettings | undefined>(undefined)
   const [loading, setLoading] = useState(true)
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
   const activePanel = resolveBridgePanel(searchParams.get(BRIDGE_PANEL_PARAM))
 
@@ -76,7 +74,6 @@ export function ExternalBridgeSection() {
       const next = new URLSearchParams(searchParams.toString())
       next.set(BRIDGE_PANEL_PARAM, id)
       router.replace(`?${next.toString()}`, { scroll: false })
-      setMobileSheetOpen(false)
     },
     [router, searchParams]
   )
@@ -119,37 +116,15 @@ export function ExternalBridgeSection() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {navNode}
-        </div>
-
-        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="bridge-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-              </SheetHeader>
-              {navNode}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => navNode}
+        navTitle={t("nav.title")}
+        mobileTriggerLabel={t("nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`nav.items.${activePanel}.label`)}
+        navWidth={320}
+        triggerTestId="bridge-mobile-nav-trigger"
+      >
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
           <div
             className="min-h-0 flex-1 overflow-y-auto p-3 @container/bridge-pane"
@@ -160,7 +135,7 @@ export function ExternalBridgeSection() {
             </PanelTransition>
           </div>
         </div>
-      </div>
+      </SettingsMasterDetail>
     </div>
   )
 }

@@ -8,8 +8,10 @@
  * live under `./panels/` and this file owns only the shared data (config,
  * status, cooldowns), the deep link, and the layout.
  *
- * Layout mirrors `appearance-section.tsx`: `md:grid-cols-[320px_1fr]`, the nav
- * collapsing into a left Sheet below `md`, and a detail pane that owns its
+ * Layout mirrors `appearance-section.tsx`: `SettingsMasterDetail` owns the nav/detail split: the rail tiers off
+ * the pane's own width (full → compact → icon → drawer) rather than the
+ * viewport, which this pane never gets — it is the window minus the app rail
+ * minus the settings sidebar. The detail pane owns its
  * scroll and declares `@container/gateway-pane` so panel internals size off the
  * pane rather than the window.
  */
@@ -17,14 +19,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, MenuIcon, NetworkIcon } from "lucide-react"
+import { AlertTriangleIcon, NetworkIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { isTauri } from "@/lib/tauri"
 import {
   gatewayGetConfig,
@@ -79,7 +80,6 @@ export function GatewaySection() {
   const [config, setConfig] = useState<GatewayConfig>(DEFAULT_GATEWAY_CONFIG)
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [starting, setStarting] = useState(false)
   const [restartRequired, setRestartRequired] = useState(false)
 
@@ -227,7 +227,6 @@ export function GatewaySection() {
       const next = new URLSearchParams(searchParams.toString())
       next.set(GATEWAY_PANEL_PARAM, id)
       router.replace(`?${next.toString()}`, { scroll: false })
-      setMobileSheetOpen(false)
     },
     [router, searchParams]
   )
@@ -297,38 +296,15 @@ export function GatewaySection() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4 md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-1">
-        {/* Desktop nav */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {navNode}
-        </div>
-
-        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="gateway-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-              </SheetHeader>
-              {navNode}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => navNode}
+        navTitle={t("nav.title")}
+        mobileTriggerLabel={t("nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`nav.items.${activePanel}.label`)}
+        navWidth={320}
+        triggerTestId="gateway-mobile-nav-trigger"
+      >
         {/* `@container/gateway-pane`: the detail pane is a fraction of the
             window, so anything multi-column inside a panel must size off this
             box rather than the viewport. */}
@@ -359,7 +335,7 @@ export function GatewaySection() {
             </PanelTransition>
           </div>
         </div>
-      </div>
+      </SettingsMasterDetail>
     </div>
   )
 }

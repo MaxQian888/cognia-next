@@ -8,22 +8,23 @@
  * say what each area actually governs, and the cards nested a border per group
  * inside the settings pane, so a page of switches read as a page of boxes. It
  * is now the same master/detail shape as Providers / Gateway / External Bridge:
- * `md:grid-cols-[280px_1fr]`, the nav collapsing into a left Sheet below `md`,
- * and a detail pane that owns its scroll. The panels themselves are flat
- * `SettingsStack`s.
+ * `SettingsMasterDetail` owns the nav/detail split: the rail tiers off
+ * the pane's own width (full → compact → icon → drawer) rather than the
+ * viewport, which this pane never gets — it is the window minus the app rail
+ * minus the settings sidebar. The detail pane owns its scroll, and the panels themselves are
+ * flat `SettingsStack`s.
  *
  * The deep-link param is unchanged (`?agentRuntimeTab=`), so bookmarks and the
  * Sidecar panel's sessions counter still land on the right panel.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
-import { MenuIcon, WorkflowIcon } from "lucide-react"
+import { WorkflowIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -49,7 +50,6 @@ export function AgentRuntimeSection() {
   const t = useTranslations("settings.agentRuntimeSection")
   const router = useRouter()
   const params = useSearchParams()
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
   const activePanel = resolveAgentRuntimePanel(params.get(AGENT_RUNTIME_PANEL_PARAM))
 
@@ -58,7 +58,6 @@ export function AgentRuntimeSection() {
       const next = new URLSearchParams(params.toString())
       next.set(AGENT_RUNTIME_PANEL_PARAM, id)
       router.replace(`?${next.toString()}`, { scroll: false })
-      setMobileSheetOpen(false)
     },
     [router, params]
   )
@@ -87,38 +86,17 @@ export function AgentRuntimeSection() {
 
       <RelatedSectionsStrip current="agent-runtime" targets={CLAUDE_CODE_RELATED} />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-        {/* Desktop nav */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {renderNav("agent-runtime")}
-        </div>
-
-        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="agent-runtime-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-              </SheetHeader>
-              {renderNav("agent-runtime-sheet")}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={(slot) =>
+          slot === "rail" ? renderNav("agent-runtime") : renderNav("agent-runtime-sheet")
+        }
+        navTitle={t("nav.title")}
+        mobileTriggerLabel={t("nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`nav.items.${activePanel}.label`)}
+        navWidth={280}
+        triggerTestId="agent-runtime-mobile-nav-trigger"
+      >
         {/* The pane is a fraction of the window, so panel internals size off
             `@container/settings-stack` (declared by `SettingsStack`) rather
             than the viewport. */}
@@ -132,7 +110,7 @@ export function AgentRuntimeSection() {
             </PanelTransition>
           </div>
         </div>
-      </div>
+      </SettingsMasterDetail>
     </div>
   )
 }

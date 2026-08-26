@@ -16,6 +16,7 @@
 import { useRef, useState, type ComponentType, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { useSettingsPaneDensity } from "@/components/settings/common/settings-master-detail"
 import { cn } from "@/lib/utils"
 import type { AppearanceNavGroup, AppearancePanelId } from "../nav-config"
 
@@ -85,9 +86,10 @@ export function AppearanceNav({ groups, activeId, onSelect, hiddenIds = [] }: Ap
         const items = group.items.filter((item) => !hidden.has(item.id))
         if (items.length === 0) return null
         return (
-          <div key={group.id}>
+          <div key={group.id} data-nav-group-block>
             <div
               className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+              data-nav-group
               data-testid={`appearance-nav-group-${group.id}`}
             >
               {t(`groups.${group.id}`)}
@@ -136,6 +138,10 @@ function AppearanceNavItem({
   onKeyDown: (event: KeyboardEvent, id: AppearancePanelId) => void
   registerRef: (node: HTMLButtonElement | null) => void
 }) {
+  // At the frame's icon tier only the glyph is painted; the label stays in the
+  // accessible name (`sr-only`, not `hidden`) and the mouse gets a title.
+  const density = useSettingsPaneDensity()
+
   return (
     <div role="listitem">
       <Button
@@ -145,6 +151,8 @@ function AppearanceNavItem({
         aria-current={isSelected ? "true" : undefined}
         data-testid={`appearance-nav-item-${id}`}
         data-active={isSelected}
+        data-nav-row
+        title={density === "icon" ? label : undefined}
         tabIndex={isRoving ? 0 : -1}
         onClick={() => onSelect(id)}
         onKeyDown={(event) => onKeyDown(event, id)}
@@ -155,9 +163,13 @@ function AppearanceNavItem({
         )}
       >
         <Icon className="mt-0.5 size-4 shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{label}</span>
-          <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+        <span className="min-w-0 flex-1" data-nav-text>
+          <span className="block truncate text-sm font-medium" data-nav-label>
+            {label}
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground" data-nav-desc>
+            {description}
+          </span>
         </span>
       </Button>
     </div>

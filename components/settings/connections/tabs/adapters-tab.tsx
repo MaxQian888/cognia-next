@@ -28,6 +28,7 @@ import { getPlatformMeta } from "../adapters/platform-meta"
 import { AddConnectorGrid } from "../adapters/add-connector-grid"
 import { useSelectedAdapter } from "../adapters/use-selected-adapter"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
+import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 
 // Platform kinds whose configuration dialog is wired into this tab. Each ships
 // with a dialog under `../forms/`; the dispatcher below picks the right one by
@@ -198,24 +199,24 @@ export function AdaptersTab() {
         </Card>
       ) : (
         // Master-detail: a bordered sidebar (search + status filter + list +
-        // stats) on md+ screens, collapsing to a Sheet drawer on mobile. The
+        // stats) once the pane is wide enough, collapsing to a Sheet drawer
+        // below that. The threshold is the pane's own width, not the
+        // viewport — this pane is the window minus the app rail minus the
+        // settings sidebar, so `md:` used to fire ~330px early. The
         // detail panel reads the `?adapter=<id>` URL param set by row clicks.
         // Both panes own their internal scroll so the frame stays fixed
         // (mirrors the AI Provider page).
-        <div
-          className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[300px_1fr]"
-          data-testid="adapters-shell"
-        >
-          {/* Desktop sidebar */}
+        <SettingsListDetail listWidth={300} data-testid="adapters-shell">
+          {/* Sidebar, once the pane is wide enough to hold one */}
           <div
-            className="hidden min-h-0 overflow-hidden rounded-lg border md:flex md:flex-col"
+            className="hidden min-h-0 overflow-hidden rounded-lg border @[560px]/settings-pane:flex @[560px]/settings-pane:flex-col"
             data-testid="adapters-sidebar"
           >
             {sidebar}
           </div>
 
-          {/* Mobile top bar + drawer */}
-          <div className="flex items-center gap-2 md:hidden">
+          {/* Narrow-pane top bar + drawer */}
+          <div className="flex items-center gap-2 @[560px]/settings-pane:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
@@ -266,7 +267,7 @@ export function AdaptersTab() {
               </div>
             )}
           </div>
-        </div>
+        </SettingsListDetail>
       )}
 
       {/* Platform picker — brand-card grid → opens the matching dialog. */}

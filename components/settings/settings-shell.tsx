@@ -13,6 +13,7 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { SettingsSidebar } from "./settings-sidebar"
 import { SectionResetButton } from "./common/section-reset-button"
 import { SettingsEmptyState } from "./common/settings-section"
+import { useMediaQuery } from "@/hooks/ui"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
@@ -340,6 +341,18 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   "logs",
 ])
 
+/**
+ * Window width below which the settings sidebar starts collapsed to its 3rem
+ * icon rail.
+ *
+ * The sidebar is 15rem of the window that no section pane ever gets back, and
+ * every master/detail section downstream is then splitting what is left. At
+ * 1024px the sidebar is a quarter of the window; giving those 192px back moves
+ * a section pane up a whole tier (`SettingsMasterDetail`), which is worth more
+ * than a list of section names the ⌘K finder can also produce.
+ */
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1100
+
 function isSection(value: string | null): value is SettingsSectionId {
   return value !== null && VALID_SECTIONS.has(value as SettingsSectionId)
 }
@@ -357,6 +370,12 @@ function SettingsShellInner({ actions }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
+  // Null until the user touches the sidebar; from then on their choice wins for
+  // the rest of the session. An automatic rule that keeps re-collapsing a rail
+  // the user just re-opened is worse than having no rule at all.
+  const [sidebarChoice, setSidebarChoice] = useState<boolean | null>(null)
+  const narrowWindow = useMediaQuery(`(max-width: ${SIDEBAR_AUTO_COLLAPSE_WIDTH - 0.02}px)`)
+  const sidebarOpen = sidebarChoice ?? !narrowWindow
   const [sectionHeaderActionsTarget, setSectionHeaderActionsTarget] =
     useState<HTMLDivElement | null>(null)
 
@@ -396,7 +415,8 @@ function SettingsShellInner({ actions }: Props) {
 
   return (
     <SidebarProvider
-      defaultOpen
+      open={sidebarOpen}
+      onOpenChange={setSidebarChoice}
       data-bg-target="chat"
       className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt"
       style={{ "--sidebar-width": "15rem" } as React.CSSProperties}

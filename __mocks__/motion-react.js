@@ -140,6 +140,14 @@ function LazyMotion({ children }) {
   return children
 }
 
+// Namespaces the `layoutId`s beneath it in the real library; here there is no
+// layout projection to namespace, so it is a pass-through like the wrappers
+// above. It still has to EXIST — rendering `undefined` as a component is a
+// hard React error, not a degraded animation.
+function LayoutGroup({ children }) {
+  return children
+}
+
 const noopMotionValue = (initial) => {
   const value = { current: initial }
   return {
@@ -157,6 +165,7 @@ module.exports = {
   m: motion,
   AnimatePresence,
   LazyMotion,
+  LayoutGroup,
   MotionConfig: ({ children }) => children,
   useAnimation: () => ({
     start: jest.fn().mockResolvedValue(undefined),

@@ -26,12 +26,11 @@
 import { useCallback, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { MenuIcon, NetworkIcon, PlusIcon } from "lucide-react"
+import { NetworkIcon, PlusIcon } from "lucide-react"
 import { nanoid } from "nanoid"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,6 +42,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -117,7 +117,6 @@ function SubagentsSectionInner() {
 
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<string | null>(null)
-  const [sheetOpen, setSheetOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [pendingPanel, setPendingPanel] = useState<SubagentPanelId | null>(null)
   const [flying, setFlying] = useState(false)
@@ -147,7 +146,6 @@ function SubagentsSectionInner() {
       const next = new URLSearchParams(searchParams?.toString() ?? "")
       next.set(SUBAGENT_TAB_PARAM, panel)
       router.replace(`?${next.toString()}`, { scroll: false })
-      setSheetOpen(false)
     },
     [router, searchParams]
   )
@@ -281,34 +279,15 @@ function SubagentsSectionInner() {
 
       <SubagentImportDialog open={importing} onOpenChange={setImporting} onImported={() => {}} />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[300px_1fr]">
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {navNode}
-        </div>
-
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="subagent-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {tNav("mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="flex w-[300px] flex-col p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{tNav("title")}</SheetTitle>
-              </SheetHeader>
-              {navNode}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">{header.title}</p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => navNode}
+        navTitle={tNav("title")}
+        mobileTriggerLabel={tNav("mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={header.title}
+        navWidth={300}
+        triggerTestId="subagent-mobile-nav-trigger"
+      >
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
           {/* Outside PanelTransition — see the file header. */}
           <div className="flex shrink-0 items-center gap-2 border-b p-3">
@@ -340,7 +319,7 @@ function SubagentsSectionInner() {
             </PanelTransition>
           </div>
         </div>
-      </div>
+      </SettingsMasterDetail>
 
       <SubagentFlightGhost activePanel={activePanel} onFlightChange={setFlying}>
         <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs">

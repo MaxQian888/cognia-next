@@ -1,9 +1,13 @@
 "use client"
 
 // Master/detail shell for the Appearance settings section — a grouped nav on
-// the left, one panel on the right. Mirrors `ocr-section.tsx` /
-// `provider-settings.tsx`, the house pattern for sections with more entries
-// than a tab strip can carry: below `md` the nav collapses into a left Sheet.
+// the left, one panel on the right. The nav/detail split itself belongs to
+// `SettingsMasterDetail`, which tiers the rail (full → compact → icon →
+// drawer) off *this pane's* width. The `md:grid-cols-[320px_1fr]` this file
+// used to carry measured the viewport, which this pane never gets: it is the
+// window minus the app rail minus the settings sidebar, so the two-column
+// layout locked in at 768px of window while the pane was still ~440px wide and
+// the detail column was down to 171px.
 // `appearance` is a member of the shell's `FILL_HEIGHT_SECTIONS`, so this
 // component owns its own scroll and fills the frame.
 //
@@ -23,16 +27,17 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ChevronDownIcon, MenuIcon, PaletteIcon } from "lucide-react"
+import { ChevronDownIcon, PaletteIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { useElementWidth } from "@/hooks/use-element-width"
 import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { StylePanel } from "./panels/style-panel"
 import { ThemeTab } from "./tabs/theme-tab"
 import { WallpaperTab } from "./tabs/wallpaper-tab"
@@ -121,16 +126,30 @@ function AppearancePreviewBody() {
  * desktop the only thing naming the current panel was the highlight in the nav.
  * The preview stays collapsible — it is the tallest thing in the header and
  * means little on, say, the Custom CSS panel.
+ *
+ * It also starts collapsed once the detail column is narrow. In a 400px column
+ * the preview is a ~300px-tall card sitting between you and the controls you
+ * opened the panel to change, and it is the one thing here that degrades
+ * gracefully by not being shown. An explicit toggle still overrides the
+ * default in either direction, for the rest of the panel's life.
  */
+const PREVIEW_MIN_DETAIL_WIDTH = 520
+
 function AppearanceDetailHeader({ panel }: { panel: AppearancePanelId }) {
   const t = useTranslations("settings.appearance")
   const tPreview = useTranslations("settings.appearance.preview")
-  const [previewOpen, setPreviewOpen] = useState(true)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const width = useElementWidth(headerRef)
+  const [previewChoice, setPreviewChoice] = useState<boolean | null>(null)
+  // Width 0 is `useElementWidth`'s "not measured yet"; defaulting it to open
+  // keeps the desktop case from painting a collapsed preview for one frame.
+  const previewOpen = previewChoice ?? (width === 0 || width >= PREVIEW_MIN_DETAIL_WIDTH)
   const Icon = APPEARANCE_PANEL_ICONS[panel]
   return (
     <Collapsible
+      ref={headerRef}
       open={previewOpen}
-      onOpenChange={setPreviewOpen}
+      onOpenChange={setPreviewChoice}
       data-testid="appearance-preview-rail"
     >
       <div className="flex items-start gap-2">
@@ -168,7 +187,6 @@ export function AppearanceSection() {
   const t = useTranslations("settings.appearance")
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   // Lazy init: one store per mounted section, so tests can't leak into
   // each other the way a module singleton would.
   const [previewStore] = useState(createPreviewDraftStore)
@@ -192,7 +210,6 @@ export function AppearanceSection() {
     const next = new URLSearchParams(searchParams.toString())
     next.set(APPEARANCE_TAB_PARAM, id)
     router.replace(`?${next.toString()}`, { scroll: false })
-    setMobileSheetOpen(false)
   }
 
   const navNode = (
@@ -218,37 +235,15 @@ export function AppearanceSection() {
           <AppearanceConfigToolbar />
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
-          {/* Desktop nav */}
-          <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-            {navNode}
-          </div>
-
-          {/* Below md the nav lives in a Sheet. The active panel is named by
-              the detail header directly below, so the trigger stands alone
-              rather than repeating that label a second time. */}
-          <div className="flex items-center gap-2 md:hidden">
-            <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-              <SheetTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-start gap-1.5"
-                  data-testid="appearance-mobile-nav-trigger"
-                >
-                  <MenuIcon className="size-4" />
-                  {t("nav.mobileTrigger")}
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[300px] p-0">
-                <SheetHeader className="px-3 pt-3">
-                  <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-                </SheetHeader>
-                {navNode}
-              </SheetContent>
-            </Sheet>
-          </div>
-
+        <SettingsMasterDetail
+          nav={() => navNode}
+          navTitle={t("nav.title")}
+          mobileTriggerLabel={t("nav.mobileTrigger")}
+          activeKey={activePanel}
+          activeLabel={t(`nav.items.${activePanel}.label`)}
+          navWidth={320}
+          triggerTestId="appearance-mobile-nav-trigger"
+        >
           {/* Detail: pinned preview header + the scrolling panel body. A
               non-scrolling flex header rather than `position: sticky` — same
               result, no interaction with the overflow/min-h-0 chain. */}
@@ -268,7 +263,7 @@ export function AppearanceSection() {
               <PanelTransition activeKey={activePanel}>{renderPanel(activePanel)}</PanelTransition>
             </div>
           </div>
-        </div>
+        </SettingsMasterDetail>
       </div>
     </AppearancePreviewDraftProvider>
   )

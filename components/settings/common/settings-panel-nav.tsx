@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER, MOBILE_SPRING } from "@/lib/ui/motion"
+import { useSettingsPaneDensity } from "./settings-master-detail"
 
 /** Small counters/markers surfaced on a row so they are visible from any panel. */
 export interface SettingsNavBadge {
@@ -95,9 +96,10 @@ export function SettingsPanelNav<Id extends string, GroupId extends string>({
       animate={reduce ? undefined : "animate"}
     >
       {groups.map((group) => (
-        <div key={group.id}>
+        <div key={group.id} data-nav-group-block>
           <div
             className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            data-nav-group
             data-testid={`${idPrefix}-nav-group-${group.id}`}
           >
             {labels.group(group.id)}
@@ -143,6 +145,11 @@ function SettingsNavRow<Id extends string>({
   idPrefix: string
   onSelect: (id: Id) => void
 }) {
+  // Only the glyph is painted once the frame drops to its icon tier, so the
+  // row grows a hover title. The label itself is still in the accessible name
+  // (the frame hides it with `sr-only`, not `hidden`) — this is for the mouse.
+  const density = useSettingsPaneDensity()
+
   return (
     <motion.div role="listitem" variants={reduce ? undefined : STAGGER_CHILD} className="relative">
       {/* Own layer so the pill slides between rows via shared layout. Under
@@ -162,6 +169,8 @@ function SettingsNavRow<Id extends string>({
         aria-current={isSelected ? "true" : undefined}
         data-testid={`${idPrefix}-nav-item-${id}`}
         data-active={isSelected}
+        data-nav-row
+        title={density === "icon" ? label : undefined}
         onClick={() => onSelect(id)}
         className={cn(
           "relative h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
@@ -172,14 +181,19 @@ function SettingsNavRow<Id extends string>({
         )}
       >
         <Icon className="mt-0.5 size-4 shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{label}</span>
-          <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+        <span className="min-w-0 flex-1" data-nav-text>
+          <span className="block truncate text-sm font-medium" data-nav-label>
+            {label}
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground" data-nav-desc>
+            {description}
+          </span>
         </span>
         {badge ? (
           <Badge
             variant={badge.variant ?? "secondary"}
             className="mt-0.5 shrink-0 px-1.5 text-[10px]"
+            data-nav-badge
             data-testid={`${idPrefix}-nav-badge-${id}`}
             aria-label={badge.ariaLabel}
           >

@@ -30,7 +30,6 @@ import {
   Search,
   Filter,
   Bot,
-  Menu,
 } from "lucide-react"
 import * as Icons from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -45,7 +44,6 @@ import {
   EmptyDescription,
   EmptyContent,
 } from "@/components/ui/empty"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,6 +71,7 @@ import {
 import { toast } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import {
   useCustomModeStore,
   type CustomModeConfig,
@@ -148,7 +147,6 @@ export function CustomModeSettings() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [selectedModes, setSelectedModes] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
   // File input ref for import
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -489,7 +487,6 @@ export function CustomModeSettings() {
                 aria-current={mode.id === activeMode?.id ? "true" : undefined}
                 onClick={() => {
                   setSelectedId(mode.id)
-                  setMobileSheetOpen(false)
                 }}
                 className={cn(
                   "h-auto min-w-0 flex-1 items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-2 text-left font-normal transition-colors",
@@ -713,38 +710,15 @@ export function CustomModeSettings() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[300px_minmax(0,1fr)]">
-        {/* Desktop rail */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {rail}
-        </div>
-
-        {/* Below md the rail lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="custom-mode-mobile-nav-trigger"
-              >
-                <Menu className="size-4" />
-                {tCustomMode("mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="flex w-[300px] flex-col p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{tSettings("customModes")}</SheetTitle>
-              </SheetHeader>
-              {rail}
-            </SheetContent>
-          </Sheet>
-          {activeMode ? (
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">{activeMode.name}</p>
-          ) : null}
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => rail}
+        navTitle={tSettings("customModes")}
+        mobileTriggerLabel={tCustomMode("mobileTrigger")}
+        activeKey={activeMode?.id ?? "__empty__"}
+        activeLabel={activeMode?.name}
+        navWidth={300}
+        triggerTestId="custom-mode-mobile-nav-trigger"
+      >
         {/* Detail pane */}
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
           <PanelTransition
@@ -754,7 +728,7 @@ export function CustomModeSettings() {
             {detail}
           </PanelTransition>
         </div>
-      </div>
+      </SettingsMasterDetail>
 
       {/* Hidden file input for import */}
       <Input

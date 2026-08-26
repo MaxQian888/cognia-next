@@ -7,8 +7,9 @@
  * Mirrors the model-provider settings layout: a left sidebar with a pinned
  * Auto-Router pseudo-entry plus one row per registered OCR provider, and a
  * right detail panel with Config / Models / Advanced tabs (or the Auto-Router
- * defaults form when the pinned entry is selected). Mobile shells get a Sheet
- * drawer for the sidebar.
+ * defaults form when the pinned entry is selected). `SettingsMasterDetail` owns
+ * the split: the sidebar tiers off the pane's own width (full → compact → icon
+ * → drawer) rather than the viewport, which this pane never gets.
  *
  * This file is the orchestrator — it holds all in-session state and threads
  * callbacks down into `OcrSidebar`, `OcrDetailPanel`, and the three tab
@@ -17,9 +18,6 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Menu } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { detectNativePlatform, type NativePlatform } from "@/lib/capacitor/_shared"
 import type { ProbeOutcome } from "@/lib/ocr/probe"
 import type { ExtractDeps } from "@/lib/ocr/index"
@@ -47,6 +45,7 @@ import { OcrCapabilitiesTab } from "./tabs/ocr-capabilities-tab"
 import { OcrTryItTab } from "./tabs/ocr-try-it-tab"
 import { OcrCompareView } from "./ocr-compare-view"
 import { OcrSetupWizard, hasNoCloudCredentials } from "./ocr-setup-wizard"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 
 // Re-export the model-manager API so external consumers (and the existing
 // test suite at the time of the redesign) keep their import paths working.
@@ -224,7 +223,6 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
   )
   const [probeResults, setProbeResults] = useState<Record<string, ProbeOutcome>>({})
   const [probingId, setProbingId] = useState<string | null>(null)
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   // First-visit auto-open: derive the initial value so we don't need a
   // useEffect+setState dance (react-hooks/set-state-in-effect). The wizard
   // surfaces once on mount when the user hasn't dismissed it AND no cloud
@@ -315,7 +313,6 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id)
-    setMobileSheetOpen(false)
   }, [])
 
   const sidebarNode = (
@@ -465,47 +462,24 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4" data-testid="ocr-section">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[360px_1fr]">
-        {/* Desktop sidebar */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {sidebarNode}
-        </div>
-
-        {/* Mobile top bar with sheet trigger */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="ocr-mobile-sheet-trigger"
-              >
-                <Menu className="h-4 w-4" />
-                {t("ocr.sidebar.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("ocr.providers.title")}</SheetTitle>
-              </SheetHeader>
-              {sidebarNode}
-            </SheetContent>
-          </Sheet>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">
-              {selectedId === OCR_AUTO_ROUTER_ID
-                ? t("ocr.autoRouter.label")
-                : selectedId === OCR_COMPARE_ID
-                  ? t("ocr.compare.sidebarLabel")
-                  : t(`ocr.providers.${selectedId}.label`)}
-            </p>
-          </div>
-        </div>
-
+      <SettingsMasterDetail
+        nav={() => sidebarNode}
+        navTitle={t("ocr.providers.title")}
+        mobileTriggerLabel={t("ocr.sidebar.mobileTrigger")}
+        activeKey={selectedId}
+        activeLabel={
+          selectedId === OCR_AUTO_ROUTER_ID
+            ? t("ocr.autoRouter.label")
+            : selectedId === OCR_COMPARE_ID
+              ? t("ocr.compare.sidebarLabel")
+              : t(`ocr.providers.${selectedId}.label`)
+        }
+        navWidth={360}
+        triggerTestId="ocr-mobile-sheet-trigger"
+      >
         {/* Detail panel */}
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{detailNode}</div>
-      </div>
+      </SettingsMasterDetail>
 
       <OcrSetupWizard
         open={wizardOpen}

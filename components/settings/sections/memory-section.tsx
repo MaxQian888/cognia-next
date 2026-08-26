@@ -5,8 +5,10 @@
  * retrieval, retention, and privacy controls.
  *
  * Layout mirrors `gateway-section.tsx` (the shared master/detail shape in this
- * app): `md:grid-cols-[260px_1fr]`, the nav collapsing into a left Sheet below
- * `md`, and a detail pane that owns its own scroll and declares
+ * app): `SettingsMasterDetail` owns the nav/detail split: the rail tiers off
+ * the pane's own width (full → compact → icon → drawer) rather than the
+ * viewport, which this pane never gets — it is the window minus the app rail
+ * minus the settings sidebar. The detail pane owns its own scroll and declares
  * `@container/memory-pane` so panel internals size off the pane rather than the
  * window.
  *
@@ -19,12 +21,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { BrainIcon, MenuIcon } from "lucide-react"
+import { BrainIcon } from "lucide-react"
 
 import { useMemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { MemoryDangerZone } from "@/components/settings/memory/danger-zone"
 import { MemoryToggleRow } from "@/components/settings/memory/memory-controls"
@@ -33,9 +36,7 @@ import { DEFAULT_MEMORY_PANEL, type MemoryPanelId } from "@/components/settings/
 import { LearningPanel } from "@/components/settings/memory/panels/learning-panel"
 import { OverviewPanel } from "@/components/settings/memory/panels/overview-panel"
 import { RetrievalPanel } from "@/components/settings/memory/panels/retrieval-panel"
-import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
 
 export function MemorySection() {
@@ -43,7 +44,6 @@ export function MemorySection() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const [activePanel, setActivePanel] = useState<MemoryPanelId>(DEFAULT_MEMORY_PANEL)
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
 
   const config = resolveMemoryConfig(settings?.memory)
   const insights = useMemoryInsights(config)
@@ -123,7 +123,6 @@ export function MemorySection() {
       activeId={activePanel}
       onSelect={(id) => {
         setActivePanel(id)
-        setMobileSheetOpen(false)
       }}
       conflictCount={insights.corpus.stats.conflicts}
       retrievalDegraded={insights.retrievalMode?.kind === "bm25"}
@@ -156,38 +155,15 @@ export function MemorySection() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
-        {/* Desktop nav */}
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {renderNav("memory")}
-        </div>
-
-        {/* Below md the nav lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="memory-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("nav.title")}</SheetTitle>
-              </SheetHeader>
-              {renderNav("memory-sheet")}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={(slot) => (slot === "rail" ? renderNav("memory") : renderNav("memory-sheet"))}
+        navTitle={t("nav.title")}
+        mobileTriggerLabel={t("nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`nav.items.${activePanel}.label`)}
+        navWidth={260}
+        triggerTestId="memory-mobile-nav-trigger"
+      >
         {/* `@container/memory-pane`: the detail pane is a fraction of the
             window, so anything multi-column inside a panel must size off this
             box rather than the viewport. */}
@@ -203,7 +179,7 @@ export function MemorySection() {
             <PanelTransition activeKey={activePanel}>{panel}</PanelTransition>
           </section>
         </div>
-      </div>
+      </SettingsMasterDetail>
     </div>
   )
 }

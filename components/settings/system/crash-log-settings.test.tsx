@@ -263,14 +263,18 @@ describe("detail pane", () => {
   })
 })
 
-describe("narrow-screen list/detail switch", () => {
+describe("narrow-pane list/detail switch", () => {
   const hasToken = (testId: string, token: string) =>
     screen.getByTestId(testId).classList.contains(token)
 
-  it("starts with the detail pane hidden on mobile and the list visible", () => {
+  it("starts with the detail pane hidden in a narrow pane and the list visible", () => {
     setup()
     expect(hasToken("crash-detail-pane", "hidden")).toBe(true)
-    expect(hasToken("crash-detail-pane", "md:flex")).toBe(true)
+    // The pane's own width decides, not the viewport: this surface renders
+    // inside the settings frame, which is the window minus the app rail minus
+    // the settings sidebar, so a `md:` gate split the columns ~330px early.
+    expect(hasToken("crash-detail-pane", "@[560px]/settings-pane:flex")).toBe(true)
+    expect(hasToken("crash-detail-pane", "md:flex")).toBe(false)
     expect(hasToken("crash-list-pane", "hidden")).toBe(false)
     expect(hasToken("crash-list-pane", "flex")).toBe(true)
   })

@@ -13,6 +13,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { SettingsPageHeader } from "@/components/settings/common/settings-section"
 import { useIsNarrow } from "@/hooks/ui/use-media-query"
 import { SearchSettingsNav } from "./search-settings-nav"
+import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 import {
   SEARCH_SECTIONS,
   SEARCH_SECTION_PARAM,
@@ -81,7 +82,11 @@ export function SearchSettings() {
               </Accordion>
             </div>
           ) : (
-            <div className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-4">
+            /* The rail used to be a flat 220px with no breakpoint at all, so
+               the detail column was whatever the pane had left — 204px in an
+               835px window. `SettingsListDetail` measures the pane and keeps
+               the rail a share of it. */
+            <SettingsListDetail listWidth={260}>
               {/* ── Master rail ─────────────────────────────────────────── */}
               <aside className="min-h-0 overflow-y-auto rounded-lg border p-2">
                 <SearchSettingsNav active={active} onSelect={navigate} />
@@ -106,7 +111,7 @@ export function SearchSettings() {
                   <ActiveComponent />
                 </div>
               </section>
-            </div>
+            </SettingsListDetail>
           )}
         </div>
       </SearchSectionNavProvider>

@@ -18,7 +18,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { MenuIcon, RotateCcwIcon, ScrollTextIcon } from "lucide-react"
+import { RotateCcwIcon, ScrollTextIcon } from "lucide-react"
 
 import {
   AlertDialog,
@@ -31,8 +31,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { UnsavedBar } from "@/components/settings/common/unsaved-bar"
 import { useTransportHealth } from "@/hooks/logging"
 import {
@@ -66,7 +66,6 @@ export function LogsSection({ onClose }: LogsSectionProps) {
     refreshInterval: 3000,
   })
 
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   // Enabled transports open their configuration by default: a switch that is
   // on but blank is the state worth showing.
@@ -84,7 +83,6 @@ export function LogsSection({ onClose }: LogsSectionProps) {
       const next = new URLSearchParams(searchParams.toString())
       next.set(LOGS_PANEL_PARAM, id)
       router.replace(`?${next.toString()}`, { scroll: false })
-      setMobileSheetOpen(false)
     },
     [router, searchParams]
   )
@@ -169,37 +167,15 @@ export function LogsSection({ onClose }: LogsSectionProps) {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {renderNav("logs")}
-        </div>
-
-        {/* Below md the rail lives in a Sheet; the bar shows where you are. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                data-testid="logs-mobile-nav-trigger"
-              >
-                <MenuIcon className="size-4" />
-                {t("settings.nav.mobileTrigger")}
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] p-0">
-              <SheetHeader className="px-3 pt-3">
-                <SheetTitle className="text-sm">{t("settings.nav.title")}</SheetTitle>
-              </SheetHeader>
-              {renderNav("logs-sheet")}
-            </SheetContent>
-          </Sheet>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">
-            {t(`settings.nav.items.${activePanel}.label`)}
-          </p>
-        </div>
-
+      <SettingsMasterDetail
+        nav={(slot) => (slot === "rail" ? renderNav("logs") : renderNav("logs-sheet"))}
+        navTitle={t("settings.nav.title")}
+        mobileTriggerLabel={t("settings.nav.mobileTrigger")}
+        activeKey={activePanel}
+        activeLabel={t(`settings.nav.items.${activePanel}.label`)}
+        navWidth={260}
+        triggerTestId="logs-mobile-nav-trigger"
+      >
         {/* `@container/settings-stack` is declared by `SettingsStack` inside
             each panel, so every multi-column row measures this pane rather
             than the window. */}
@@ -233,7 +209,7 @@ export function LogsSection({ onClose }: LogsSectionProps) {
             </div>
           </section>
         </div>
-      </div>
+      </SettingsMasterDetail>
 
       <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
         <AlertDialogContent>

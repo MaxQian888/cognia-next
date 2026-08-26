@@ -38,8 +38,29 @@ jest.mock("./settings-sidebar", () => ({
   SettingsSidebar: () => <div data-testid="settings-sidebar" />,
 }))
 
+// Narrow-window state for the sidebar auto-collapse rule.
+let narrowWindow = false
+jest.mock("@/hooks/ui", () => ({
+  useMediaQuery: () => narrowWindow,
+}))
+
 jest.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SidebarProvider: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: React.ReactNode
+    open?: boolean
+    onOpenChange?: (next: boolean) => void
+  }) => (
+    <div data-testid="sidebar-provider" data-open={String(open)}>
+      <button type="button" data-testid="sidebar-toggle" onClick={() => onOpenChange?.(!open)}>
+        toggle sidebar
+      </button>
+      {children}
+    </div>
+  ),
   SidebarInset: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SidebarTrigger: () => <button type="button">trigger</button>,
 }))
@@ -247,5 +268,50 @@ describe("SettingsShell fill-height layout", () => {
     expect(panel).toHaveClass("w-full", "max-w-[100vw]", "min-w-0")
     expect(panel!.className).not.toMatch(/\bflex-1\b/)
     expect(container.innerHTML).toMatch(/max-w-5xl/)
+  })
+})
+
+describe("SettingsShell — sidebar auto-collapse", () => {
+  afterEach(() => {
+    narrowWindow = false
+  })
+
+  it("keeps the sidebar open in a wide window", () => {
+    render(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "true")
+  })
+
+  it("starts the sidebar collapsed in a narrow window", () => {
+    // 15rem of a 1024px window is a quarter of it, and it is a quarter no
+    // section pane can reclaim — every master/detail section downstream then
+    // splits what is left.
+    narrowWindow = true
+    render(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "false")
+  })
+
+  it("follows the window while the user has not chosen", () => {
+    narrowWindow = true
+    const { rerender } = render(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "false")
+
+    narrowWindow = false
+    rerender(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "true")
+  })
+
+  it("lets a manual toggle win for the rest of the session", async () => {
+    narrowWindow = true
+    const user = userEvent.setup()
+    const { rerender } = render(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "false")
+
+    await user.click(screen.getByTestId("sidebar-toggle"))
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "true")
+
+    // Still narrow, and still open: a rule that keeps re-collapsing the rail
+    // the user just opened is worse than having no rule at all.
+    rerender(<SettingsShell />)
+    expect(screen.getByTestId("sidebar-provider")).toHaveAttribute("data-open", "true")
   })
 })
