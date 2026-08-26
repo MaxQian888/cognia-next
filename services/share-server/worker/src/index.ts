@@ -22,6 +22,15 @@ export interface Env {
   MAX_BODY_BYTES?: string
   /** Hard ceiling on share TTL in seconds (string env var). Default 30 days. */
   MAX_TTL_SECONDS?: string
+  /**
+   * Hex-encoded HMAC key shared with the collaboration server, so this Worker
+   * can verify the grants it mints — ADR-0149 §8.
+   *
+   * Unset means this deployment has no collaboration plane, never "authorize
+   * anyone": every grant path refuses outright rather than falling through to
+   * `SHARE_UPLOAD_SECRET`.
+   */
+  SHARE_GRANT_KEY?: string
 }
 
 interface ShareMeta {
@@ -40,6 +49,18 @@ interface ShareMeta {
    * upload-secret gate).
    */
   ownerToken?: string
+  /**
+   * The Org this share belongs to — ADR-0149 §8.
+   *
+   * Absent for every share created before tenancy, and for one created with
+   * the global upload secret, which proves nothing about who is asking. Those
+   * stay readable by code and revocable by their owner token; they are simply
+   * invisible to org-scoped listing, because nothing knows whose they are and
+   * guessing would be worse.
+   */
+  orgId?: string
+  /** The person who created it. Present exactly when {@link orgId} is. */
+  creatorUserId?: string
 }
 
 // Exported for the constants-parity test against ../../share-constants.json
@@ -88,6 +109,98 @@ function timingSafeEqual(a: string, b: string): boolean {
   return mismatch === 0
 }
 
+/** The org and person behind a verified grant. */
+interface GrantCaller {
+  orgId: string
+  userId: string
+}
+
+function bearer(request: Request): string | null {
+  const header = request.headers.get("Authorization") ?? ""
+  const prefix = "Bearer "
+  return header.startsWith(prefix) ? header.slice(prefix.length) : null
+}
+
+function base64UrlToBytes(value: string): Uint8Array | null {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/")
+  try {
+    const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4))
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  } catch {
+    return null
+  }
+}
+
+function hexToBytes(value: string): Uint8Array | null {
+  if (value.length === 0 || value.length % 2 !== 0) return null
+  const out = new Uint8Array(value.length / 2)
+  for (let index = 0; index < out.length; index++) {
+    const byte = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+    if (Number.isNaN(byte)) return null
+    out[index] = byte
+  }
+  return out
+}
+
+/**
+ * Verify the bearer as a collaboration-plane grant — ADR-0149 §8.
+ *
+ * The wire format is `base64url(claimsJson).base64url(hmacSha256(payload))`,
+ * the same one `crates/cognia-tenant-auth` mints and `core/src/grant.rs`
+ * verifies. A frozen vector at `crates/cognia-tenant-auth/fixtures/` pins all
+ * three against each other, because a silent divergence would look like
+ * "sharing stopped working" and nothing else.
+ *
+ * `null` covers every negative case on purpose — no header, no key, a bad
+ * signature, an expired grant. The caller's next move is the same 401 for all
+ * of them, and separating them here would only invite a handler to leak which.
+ */
+async function grantCaller(request: Request, env: Env): Promise<GrantCaller | null> {
+  const key = env.SHARE_GRANT_KEY ? hexToBytes(env.SHARE_GRANT_KEY.trim()) : null
+  if (!key || key.length < 32) return null
+  const token = bearer(request)
+  if (!token) return null
+  const dot = token.indexOf(".")
+  if (dot <= 0) return null
+
+  const payload = token.slice(0, dot)
+  const signature = base64UrlToBytes(token.slice(dot + 1))
+  if (!signature) return null
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  )
+  // `crypto.subtle.verify` is the constant-time comparison; never re-implement
+  // it against a hex string here.
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    cryptoKey,
+    signature,
+    new TextEncoder().encode(payload)
+  )
+  if (!valid) return null
+
+  const claimsBytes = base64UrlToBytes(payload)
+  if (!claimsBytes) return null
+  let claims: { orgId?: unknown; userId?: unknown; expiresAt?: unknown }
+  try {
+    claims = JSON.parse(new TextDecoder().decode(claimsBytes))
+  } catch {
+    return null
+  }
+  if (typeof claims.orgId !== "string" || typeof claims.userId !== "string") return null
+  // Signature first, expiry second: an attacker must not learn whether a
+  // forged payload would have been in date.
+  if (typeof claims.expiresAt !== "number" || claims.expiresAt < Math.floor(Date.now() / 1000)) {
+    return null
+  }
+  return { orgId: claims.orgId, userId: claims.userId }
+}
+
 function isAuthorized(request: Request, env: Env): boolean {
   const header = request.headers.get("Authorization") ?? ""
   const prefix = "Bearer "
@@ -119,7 +232,14 @@ function generateOwnerToken(): string {
  * remain manageable. The global upload secret alone never authorizes actions on
  * a share that has its own owner token — this is what isolates tenants.
  */
-function isShareOwner(request: Request, meta: ShareMeta, env: Env): boolean {
+async function isShareOwner(request: Request, meta: ShareMeta, env: Env): Promise<boolean> {
+  // ADR-0149 §8 — an org grant reaches its own org's shares. This is the
+  // off-boarding case: revoking what a departing person shared cannot depend
+  // on still holding the per-share tokens they were handed.
+  if (meta.orgId) {
+    const caller = await grantCaller(request, env)
+    if (caller?.orgId === meta.orgId) return true
+  }
   if (meta.ownerToken) {
     const supplied = request.headers.get("X-Owner-Token") ?? ""
     return timingSafeEqual(supplied, meta.ownerToken)
@@ -149,12 +269,33 @@ function maxBodyBytes(env: Env): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_BODY_BYTES
 }
 
-async function deleteShare(env: Env, code: string): Promise<void> {
-  await Promise.all([env.SHARE_BUCKET.delete(`share/${code}`), env.SHARE_KV.delete(`meta:${code}`)])
+/**
+ * Secondary index for org listing: `org:<orgId>:<code>` → "".
+ *
+ * KV has no query, only a prefix scan, so "which shares belong to this org"
+ * needs its own key space. Written and deleted alongside the metadata; a
+ * dangling index entry is filtered on read rather than trusted, because KV is
+ * eventually consistent and an index that could resurrect a deleted share
+ * would be worse than one that occasionally lists nothing.
+ */
+function orgIndexKey(orgId: string, code: string): string {
+  return `org:${orgId}:${code}`
+}
+
+async function deleteShare(env: Env, code: string, orgId?: string): Promise<void> {
+  await Promise.all([
+    env.SHARE_BUCKET.delete(`share/${code}`),
+    env.SHARE_KV.delete(`meta:${code}`),
+    orgId ? env.SHARE_KV.delete(orgIndexKey(orgId, code)) : Promise.resolve(),
+  ])
 }
 
 async function handleCreate(request: Request, env: Env): Promise<Response> {
-  if (!isAuthorized(request, env)) return json({ error: "unauthorized" }, 401)
+  // A grant first, the legacy secret second. Order matters: the grant is the
+  // credential that says WHO is asking, and a deployment that has both should
+  // attribute the share rather than fall back to the anonymous path.
+  const caller = await grantCaller(request, env)
+  if (!caller && !isAuthorized(request, env)) return json({ error: "unauthorized" }, 401)
 
   const declared = Number(request.headers.get("Content-Length") ?? "")
   if (Number.isFinite(declared) && declared > maxBodyBytes(env)) {
@@ -199,14 +340,20 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
     viewCount: 0,
     revoked: false,
     ownerToken,
+    // Both, or neither. They come from one verified grant, and half of them
+    // would be a claim nobody made.
+    ...(caller ? { orgId: caller.orgId, creatorUserId: caller.userId } : {}),
   }
 
   await env.SHARE_BUCKET.put(`share/${code}`, JSON.stringify(body.envelope), {
     httpMetadata: { contentType: "application/json" },
   })
-  await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(meta), {
-    expirationTtl: Math.max(ttl, KV_MIN_TTL_SECONDS),
-  })
+  const kvTtl = Math.max(ttl, KV_MIN_TTL_SECONDS)
+  await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(meta), { expirationTtl: kvTtl })
+  if (caller) {
+    // Same TTL as the metadata, so the index cannot outlive what it points at.
+    await env.SHARE_KV.put(orgIndexKey(caller.orgId, code), "", { expirationTtl: kvTtl })
+  }
 
   return json({ code, ownerToken, expiresAt }, 201)
 }
@@ -224,11 +371,11 @@ async function handleRead(env: Env, code: string, ctx: ExecutionContext): Promis
     return json({ error: "not found" }, 404)
   }
   if (meta.expiresAt && Date.now() >= meta.expiresAt) {
-    ctx.waitUntil(deleteShare(env, code))
+    ctx.waitUntil(deleteShare(env, code, meta.orgId))
     return json({ error: "not found" }, 404)
   }
   if (typeof meta.maxViews === "number" && meta.viewCount >= meta.maxViews) {
-    ctx.waitUntil(deleteShare(env, code))
+    ctx.waitUntil(deleteShare(env, code, meta.orgId))
     return json({ error: "not found" }, 404)
   }
 
@@ -243,7 +390,7 @@ async function handleRead(env: Env, code: string, ctx: ExecutionContext): Promis
   const exhausted = typeof meta.maxViews === "number" && nextCount >= meta.maxViews
   if (exhausted) {
     // This is the last allowed view — hand back the body, then destroy.
-    ctx.waitUntil(deleteShare(env, code))
+    ctx.waitUntil(deleteShare(env, code, meta.orgId))
   } else {
     const updated: ShareMeta = { ...meta, viewCount: nextCount }
     const remainingTtl = meta.expiresAt
@@ -270,10 +417,10 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
   // a 404 regardless of credentials (no oracle for which codes exist).
   if (!meta) return json({ error: "not found" }, 404)
   if (meta.expiresAt && Date.now() >= meta.expiresAt) {
-    await deleteShare(env, code)
+    await deleteShare(env, code, meta.orgId)
     return json({ error: "not found" }, 404)
   }
-  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
+  if (!(await isShareOwner(request, meta, env))) return json({ error: "unauthorized" }, 401)
   return json({
     viewCount: meta.viewCount,
     expiresAt: meta.expiresAt,
@@ -292,10 +439,10 @@ async function handleRenew(request: Request, env: Env, code: string): Promise<Re
   const meta = await readMeta(env, code)
   if (!meta) return json({ error: "not found" }, 404)
   if (meta.expiresAt && Date.now() >= meta.expiresAt) {
-    await deleteShare(env, code)
+    await deleteShare(env, code, meta.orgId)
     return json({ error: "not found" }, 404)
   }
-  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
+  if (!(await isShareOwner(request, meta, env))) return json({ error: "unauthorized" }, 401)
 
   let body: { ttlSeconds?: number }
   try {
@@ -322,12 +469,69 @@ async function handleDelete(request: Request, env: Env, code: string): Promise<R
   // without leaking existence or requiring a credential.
   if (!meta) return new Response(null, { status: 204, headers: CORS_HEADERS })
   if (meta.expiresAt && Date.now() >= meta.expiresAt) {
-    await deleteShare(env, code)
+    await deleteShare(env, code, meta.orgId)
     return new Response(null, { status: 204, headers: CORS_HEADERS })
   }
-  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
-  await deleteShare(env, code)
+  if (!(await isShareOwner(request, meta, env))) return json({ error: "unauthorized" }, 401)
+  await deleteShare(env, code, meta.orgId)
   return new Response(null, { status: 204, headers: CORS_HEADERS })
+}
+
+/**
+ * One org's live shares — ADR-0149 §8. Grant-only.
+ *
+ * The legacy upload secret is deliberately not honoured here: it says nothing
+ * about which org is asking, so accepting it would let any holder list every
+ * tenant's links, which is the exact failure the ADR names.
+ */
+async function handleListOrgShares(request: Request, env: Env, orgId: string): Promise<Response> {
+  const caller = await grantCaller(request, env)
+  // A grant for a different org is refused exactly like no grant at all — a
+  // distinguishable "wrong org" would confirm the org in the path exists.
+  if (caller?.orgId !== orgId) return json({ error: "unauthorized" }, 401)
+
+  const index = await env.SHARE_KV.list({ prefix: `org:${orgId}:`, limit: 500 })
+  const codes = index.keys.map((key) => key.name.slice(`org:${orgId}:`.length))
+  const now = Date.now()
+  const shares = []
+  for (const code of codes) {
+    const meta = await readMeta(env, code)
+    // A dangling index entry — KV is eventually consistent — is skipped, never
+    // reported as a share that still exists.
+    if (!meta || meta.orgId !== orgId) continue
+    if (meta.expiresAt && now >= meta.expiresAt) continue
+    // No owner token and no envelope: a listing is for deciding what to
+    // revoke, and handing back the per-share secret would turn a read into a
+    // grant.
+    shares.push({
+      code,
+      createdAt: meta.createdAt,
+      expiresAt: meta.expiresAt,
+      maxViews: meta.maxViews,
+      viewCount: meta.viewCount,
+      creatorUserId: meta.creatorUserId,
+    })
+  }
+  shares.sort((left, right) => right.createdAt - left.createdAt)
+  return json({ shares })
+}
+
+/** Revoke one of an org's shares without holding its owner token. */
+async function handleDeleteOrgShare(
+  request: Request,
+  env: Env,
+  orgId: string,
+  code: string
+): Promise<Response> {
+  const caller = await grantCaller(request, env)
+  if (caller?.orgId !== orgId) return json({ error: "unauthorized" }, 401)
+
+  const meta = await readMeta(env, code)
+  // A code in another org answers exactly like a code that never existed:
+  // anything else is an oracle for which codes are real.
+  if (!meta || meta.orgId !== orgId) return json({ error: "not found" }, 404)
+  await deleteShare(env, code, orgId)
+  return json({ ok: true })
 }
 
 export default {
@@ -343,6 +547,19 @@ export default {
     if (pathname === "/v1/share" && request.method === "POST") {
       return handleCreate(request, env)
     }
+    const orgMatch = pathname.match(/^\/v1\/orgs\/([^/]+)\/shares(?:\/([^/]+))?$/)
+    if (orgMatch) {
+      const orgId = decodeURIComponent(orgMatch[1])
+      const code = orgMatch[2] ? decodeURIComponent(orgMatch[2]) : undefined
+      if (code === undefined && request.method === "GET") {
+        return handleListOrgShares(request, env, orgId)
+      }
+      if (code !== undefined && request.method === "DELETE") {
+        return handleDeleteOrgShare(request, env, orgId, code)
+      }
+      return json({ error: "method not allowed" }, 405)
+    }
+
     const match = pathname.match(/^\/v1\/share\/([^/]+)(\/stats)?$/)
     if (match) {
       const code = decodeURIComponent(match[1])

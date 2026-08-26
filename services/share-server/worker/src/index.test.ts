@@ -272,3 +272,137 @@ describe("cors + size guards", () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ---------------------------------------------------------------------------
+// ADR-0149 §8 — the org-scoped plane
+// ---------------------------------------------------------------------------
+
+const GRANT_KEY = "0123456789abcdef0123456789abcdef"
+
+/** Mint a grant this Worker will accept. The Worker only ever verifies one. */
+async function grantFor(orgId: string, userId = "usr_ada"): Promise<string> {
+  const expiresAt = Math.floor(Date.now() / 1000) + 300
+  const claims = JSON.stringify({ userId, orgId, expiresAt })
+  const payload = base64Url(new TextEncoder().encode(claims))
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(GRANT_KEY),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))
+  return `${payload}.${base64Url(new Uint8Array(signature))}`
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
+}
+
+function granted(method: string, grant: string, body?: unknown): RequestInit {
+  return {
+    method,
+    headers: { Authorization: `Bearer ${grant}`, "Content-Type": "application/json" },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  }
+}
+
+describe("org-scoped shares", () => {
+  it("attributes a share created with a grant, and lists it for that org", async () => {
+    const grant = await grantFor("org_acme")
+    const created = await run(req("/v1/share", granted("POST", grant, { envelope: ENVELOPE })))
+    expect(created.status).toBe(201)
+    const { code } = await created.json<{ code: string }>()
+
+    const listed = await run(req("/v1/orgs/org_acme/shares", granted("GET", grant)))
+    expect(listed.status).toBe(200)
+    const body = await listed.json<{ shares: Record<string, unknown>[] }>()
+    const row = body.shares.find((share) => share.code === code)
+    expect(row).toBeDefined()
+    expect(row?.creatorUserId).toBe("usr_ada")
+    // A listing is for deciding what to revoke; handing back the per-share
+    // secret would turn a read into a grant.
+    expect(row?.ownerToken).toBeUndefined()
+  })
+
+  it("does not list a share created with the legacy secret", async () => {
+    const { code } = await create({})
+    const grant = await grantFor("org_legacyless")
+    const listed = await run(req("/v1/orgs/org_legacyless/shares", granted("GET", grant)))
+    expect(listed.status).toBe(200)
+    const body = await listed.json<{ shares: { code: string }[] }>()
+    expect(body.shares.some((share) => share.code === code)).toBe(false)
+  })
+
+  it("refuses a grant for a different org exactly like no grant at all", async () => {
+    const other = await grantFor("org_other")
+    expect((await run(req("/v1/orgs/org_acme/shares", granted("GET", other)))).status).toBe(401)
+    expect((await run(req("/v1/orgs/org_acme/shares", { method: "GET" }))).status).toBe(401)
+  })
+
+  it("never honours the legacy upload secret on the org plane", async () => {
+    // One global bearer says nothing about which org is asking; accepting it
+    // would let any holder list and delete every tenant's links.
+    expect((await run(req("/v1/orgs/org_acme/shares", authed("GET")))).status).toBe(401)
+    expect((await run(req("/v1/orgs/org_acme/shares/abcdefgh", authed("DELETE")))).status).toBe(401)
+  })
+
+  it("lets an org revoke its own share without the owner token", async () => {
+    const grant = await grantFor("org_revoke")
+    const created = await run(req("/v1/share", granted("POST", grant, { envelope: ENVELOPE })))
+    const { code } = await created.json<{ code: string }>()
+
+    const deleted = await run(req(`/v1/orgs/org_revoke/shares/${code}`, granted("DELETE", grant)))
+    expect(deleted.status).toBe(200)
+    expect((await run(req(`/v1/share/${code}`, { method: "GET" }))).status).toBe(404)
+  })
+
+  it("answers 404 for a code in another org, so it is not an existence oracle", async () => {
+    const acme = await grantFor("org_acme2")
+    const other = await grantFor("org_other2")
+    const created = await run(req("/v1/share", granted("POST", acme, { envelope: ENVELOPE })))
+    const { code } = await created.json<{ code: string }>()
+
+    const refused = await run(req(`/v1/orgs/org_other2/shares/${code}`, granted("DELETE", other)))
+    expect(refused.status).toBe(404)
+    // And the share survived.
+    expect((await run(req(`/v1/share/${code}`, { method: "GET" }))).status).toBe(200)
+  })
+
+  it("refuses an expired grant", async () => {
+    const expiresAt = Math.floor(Date.now() / 1000) - 10
+    const claims = JSON.stringify({ userId: "usr_ada", orgId: "org_acme", expiresAt })
+    const payload = base64Url(new TextEncoder().encode(claims))
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(GRANT_KEY),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    )
+    const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))
+    const stale = `${payload}.${base64Url(new Uint8Array(signature))}`
+    expect((await run(req("/v1/orgs/org_acme/shares", granted("GET", stale)))).status).toBe(401)
+  })
+
+  it("refuses a grant signed with the wrong key", async () => {
+    const claims = JSON.stringify({
+      userId: "usr_ada",
+      orgId: "org_acme",
+      expiresAt: Math.floor(Date.now() / 1000) + 300,
+    })
+    const payload = base64Url(new TextEncoder().encode(claims))
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode("ffffffffffffffffffffffffffffffff"),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    )
+    const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))
+    const forged = `${payload}.${base64Url(new Uint8Array(signature))}`
+    expect((await run(req("/v1/orgs/org_acme/shares", granted("GET", forged)))).status).toBe(401)
+  })
+})
