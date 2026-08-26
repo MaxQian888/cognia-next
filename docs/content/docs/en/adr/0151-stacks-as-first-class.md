@@ -85,11 +85,15 @@ stack that cannot land.
 The engine is host-neutral (`lib/stack/`, `crates/cognia-git/src/stack.rs`) with
 a forge adapter seam, and five callers use it:
 
-- **Source Control** — a Stacks panel that lists, validates, restacks, and
-  records or clears parents.
+- **Source Control** — a Stacks panel that lists, validates, restacks, records
+  or clears parents, creates a new layer branch, publishes the chain of pull
+  requests, lands it bottom first, and undoes a restack from the tip it pinned.
+  The forge half is opt-in: nothing reaches GitHub until Publish or Land is
+  pressed, and Restack force-pushes only once the stack has pull requests that
+  would otherwise show commits which no longer exist.
 - **Agent Team** — a settings switch for `githubDeliveryPolicy`, off by
-  default, and a trunk read that no longer reports whatever branch is checked
-  out.
+  default, a trunk read that no longer reports whatever branch is checked out,
+  and an ancestry check before anything is published.
 - **Workflows** — built-in `action.stack.{list,parent,validate,restack,push}`.
   Forge delivery stays a plugin concern (ADR-0018/0026); putting GitHub
   credentials in the built-in node set to reach it would be the wrong trade.
@@ -101,11 +105,31 @@ a forge adapter seam, and five callers use it:
 
 ## Consequences
 
-**Two authoring models converge on one branch chain.** Branch-per-layer keeps
-its parent in git config; commit-per-pull-request identifies a change by a
-`Cognia-Change-Id` trailer written at commit time (no git hook is installed).
-Both produce the same real chain of branches, which is the only thing a forge
-sees.
+**Two authoring models converge on one branch chain — one of them is inert.**
+Branch-per-layer keeps its parent in git config and is what everything
+produces. Commit-per-pull-request would identify a change by a
+`Cognia-Change-Id` trailer written at commit time (no git hook installed); it is
+declared, because the merge rule genuinely differs and writing that rule against
+a model the type does not know is how it gets forgotten, but nothing authors it.
+That dormancy is labelled on all three axes — the type, the panel, and a sweep
+in `model.test.ts` that asserts its own scanned count before reporting no
+callers.
+
+**Agent Team's delivery graph is deliberately not `lib/stack`.** They look
+alike and are not the same thing: a `Stack` is one repository's chain with git
+as the truth and a restack as the repair, while the delivery graph is several
+repositories with cross-repository dependencies, node state persisted so a
+half-finished merge resumes, an approval gate, and a remediation loop that hands
+a failing layer back to an agent. Folding it into `mergeStack` would drop all
+four, so what is shared is shared — the ordering rule, the base chain, and the
+ancestry check — and the rest stays.
+
+**A chain of branches is not a stack until git says so.** Agent Team derived
+its layers from `agentTeamChildRuns` sorted by `createdAt`, which reports who
+finished first and nothing about ancestry: two agents branching off the trunk in
+parallel produce exactly that list. `assertPublishableStack` writes each layer's
+intended parent — which is also what makes a run's work visible in the Stacks
+panel — then asks git, and refuses by name before any pull request exists.
 
 **Merging is one sequence for all three methods.** After a layer merges, the
 remainder is restacked onto the trunk — which drops the commits the merge

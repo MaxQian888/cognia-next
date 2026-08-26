@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Stacks can now be published, landed and undone from Source Control. The panel gains Publish (pushes the whole stack with a lease, then opens or retargets one pull request per layer, bottom first), Land (merges bottom first, restacking the remainder onto the trunk after each merge so no layer's diff repeats the one below it), a link to each layer's pull request, an Undo that puts a branch back on the tip a restack pinned, and a New layer form that creates the branch and records its parent. Both forge actions wait for a clean validation, because publishing a stack that does not validate opens pull requests containing each other's diffs; nothing reaches GitHub until one of them is pressed, and Restack force-pushes only once the stack has pull requests. Agent Team now checks that a run's branches really are a stack in git — layers were derived from completion order, which two agents branching off the trunk in parallel satisfy exactly — and refuses by name before opening any pull request.
