@@ -25,7 +25,7 @@ import {
   buildPlatformCapabilityCells,
 } from "./capability-cells"
 import { buildDeviceRuntime } from "./device-runtime"
-import { buildGrantRows, type GrantEvidence } from "./grant-capabilities"
+import { buildGrantRows, ownerPermits, type GrantEvidence } from "./grant-capabilities"
 import { buildDevicePlacement } from "./placement-directory"
 import type {
   BuildDeviceRowsInput,
@@ -141,6 +141,9 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
       lockedComputerUse: row.allowLockedComputerUse === true,
     },
     revoked: adminState === "revoked",
+    // ADR-0149 §5 step two. The host re-decides this per request; the mirror
+    // exists so the console can explain a switch it is drawing as off.
+    ownerSuspended: !ownerPermits(input.hostPersonUserId, hostDevice?.userId),
   }
 
   const capabilities = buildPlatformCapabilityCells({

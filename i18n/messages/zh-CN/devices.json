@@ -27,7 +27,8 @@
     "granted": "已授权",
     "partial": "部分授权",
     "denied": "未授权",
-    "unknown": "未知"
+    "unknown": "未知",
+    "suspended": "已挂起"
   },
   "never": "从未",
   "notAvailable": "—",
@@ -141,7 +142,8 @@
     "reason": {
       "mirrorOnly": "来自本地镜像——无法向主机查询。",
       "deviceRevoked": "已吊销的设备不持有任何能力，无论本地记录还写着什么。",
-      "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。"
+      "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。",
+      "ownerMismatch": "这台设备属于另一个人，而不是当前登录的人，因此宿主不会兑现它的授权。授权本身没有被撤销——回到它所属的人手上就会重新生效。"
     },
     "lifecycle": "生命周期",
     "lifecycleHint": "暂停会阻断该设备，直到你恢复它。吊销不可逆——设备必须重新配对。",
@@ -158,7 +160,8 @@
       "paired-device": "没有可管理的授权。"
     },
     "title": "访问授权",
-    "heldCount": "已授权 {held}/{total}"
+    "heldCount": "已授权 {held}/{total}",
+    "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。"
   },
   "runtime": {
     "shellTiers": "Shell 档位",

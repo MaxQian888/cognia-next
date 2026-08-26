@@ -37,6 +37,8 @@ import type {
 import { devicePresence } from "@/lib/companion/device-presence-registry"
 import { listExecutionWorkers } from "@/lib/fleet/execution-workers"
 import { listUsers } from "@/lib/db/identity"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { readHostPerson } from "@/lib/identity/host-person"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
@@ -108,6 +110,26 @@ async function readOwnerNames(
   }
 }
 
+/**
+ * The person signed in on THIS host — ADR-0149 §5 step two.
+ *
+ * Read from the host rather than from the renderer's own sign-in state,
+ * because `host_bindings.user_id` is the value the capability query actually
+ * joins against. Asking the renderer would risk the console explaining a
+ * decision the host is not making.
+ *
+ * `undefined` off the desktop and whenever nobody has signed in, which is the
+ * common state and means ownership decides nothing.
+ */
+async function readHostPersonId(): Promise<string | undefined> {
+  try {
+    const person = await readHostPerson(getActiveAccountId())
+    return person?.userId ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function readWorkers(): Promise<WorkerInput[]> {
   try {
     return await listExecutionWorkers()
@@ -144,6 +166,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const [hostDevices, setHostDevices] = useState<Map<string, HostDeviceSummaryInput> | null>(null)
   const [workers, setWorkers] = useState<WorkerInput[]>([])
   const [ownerNames, setOwnerNames] = useState<Map<string, string>>(() => new Map())
+  const [hostPersonUserId, setHostPersonUserId] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   /**
    * The clock the rows are judged against, advanced by the poll rather than
@@ -157,9 +180,14 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
-    const [devices, workerRows] = await Promise.all([readHostDevices(), readWorkers()])
+    const [devices, workerRows, hostPerson] = await Promise.all([
+      readHostDevices(),
+      readWorkers(),
+      readHostPersonId(),
+    ])
     setHostDevices(devices)
     setWorkers(workerRows)
+    setHostPersonUserId(hostPerson)
     setOwnerNames(await readOwnerNames(devices))
     setLoading(false)
     setNow(Date.now())
@@ -202,6 +230,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
       sandboxConnections: connections,
       activeHostId,
       ownerNames,
+      ...(hostPersonUserId ? { hostPersonUserId } : {}),
       now,
     })
   }, [
@@ -212,6 +241,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     connections,
     activeHostId,
     ownerNames,
+    hostPersonUserId,
     health.available,
     now,
   ])

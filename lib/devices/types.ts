@@ -87,8 +87,15 @@ export type DeviceGrantId = "control" | "agentControl" | "terminal" | "lockedCom
  * `companion_list_device_grants` answers with an all-of test, so a device
  * holding `agent.run` but not `workspace.write` reported as plain "off" — the
  * owner could not tell a never-granted device from a half-revoked one.
+ *
+ * `suspended` is ADR-0149 §5 step two: the grant rows are still there, but the
+ * device belongs to a different person than the one signed in on this host, so
+ * the host refuses them. Distinct from `denied` on purpose — nothing was
+ * revoked, and handing the device back to its person restores it without a
+ * re-grant. Showing it as `denied` would invite an owner to re-grant something
+ * that is already granted.
  */
-export type DeviceGrantState = "granted" | "partial" | "denied" | "unknown"
+export type DeviceGrantState = "granted" | "partial" | "denied" | "unknown" | "suspended"
 
 export interface DeviceGrantRow {
   id: DeviceGrantId
@@ -337,5 +344,15 @@ export interface BuildDeviceRowsInput {
    * *somebody*. "Unknown person" is a worse answer than an id you can search.
    */
   ownerNames?: ReadonlyMap<string, string>
+  /**
+   * The person signed in on THIS host, from `host_bindings` — ADR-0149 §5
+   * step two.
+   *
+   * Absent when nobody has signed in, which is the common state and means
+   * ownership decides nothing. When present, a device attributed to somebody
+   * else has its grants suspended by the host, and the console must say so
+   * rather than keep drawing them as live.
+   */
+  hostPersonUserId?: string
   now: number
 }

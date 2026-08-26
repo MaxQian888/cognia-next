@@ -156,3 +156,39 @@ describe("AccessSection — devices with no grants", () => {
     expect(screen.queryByTestId("grant-control")).not.toBeInTheDocument()
   })
 })
+
+describe("AccessSection — a device that belongs to somebody else", () => {
+  function suspendedRow(): DeviceRow {
+    return row({
+      grants: buildGrantRows({
+        hostCapabilities: ["agent.run", "workspace.read", "workspace.write"],
+        mirror: { control: true, agentControl: false, terminal: false, lockedComputerUse: false },
+        revoked: false,
+        ownerSuspended: true,
+      }),
+    })
+  }
+
+  it("says once, at the top, that the host is not honouring the grants", () => {
+    render(<AccessSection row={suspendedRow()} actions={actions()} />)
+    // One banner rather than four identical reason lines: the fact is about
+    // the device, not about any one grant.
+    expect(screen.getByTestId("device-access-owner-suspended")).toBeInTheDocument()
+  })
+
+  it("draws every switch off, because the host is refusing them right now", () => {
+    render(<AccessSection row={suspendedRow()} actions={actions()} />)
+    for (const id of [
+      "paired-device-remote-control-d1",
+      "paired-device-agent-control-d1",
+      "paired-device-remote-terminal-d1",
+    ]) {
+      expect(screen.getByTestId(id)).not.toBeChecked()
+    }
+  })
+
+  it("does not show the banner for an ordinary device", () => {
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.queryByTestId("device-access-owner-suspended")).not.toBeInTheDocument()
+  })
+})

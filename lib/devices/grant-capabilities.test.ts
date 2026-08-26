@@ -7,6 +7,7 @@ import {
   LOCKED_USE_AVAILABLE,
   buildGrantRows,
   isGrantEnabled,
+  ownerPermits,
   type GrantEvidence,
 } from "./grant-capabilities"
 
@@ -177,5 +178,81 @@ describe("row coverage", () => {
   it("returns exactly one row per grant id, in catalog order", () => {
     const rows = buildGrantRows(evidence())
     expect(rows.map((row) => row.id)).toEqual([...DEVICE_GRANT_IDS])
+  })
+})
+
+describe("ownerPermits", () => {
+  const HOST = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
+  const OTHER = "usr_bbbbbbbbbbbbbbbbbbbbbbbb"
+
+  it("permits the bound person's own device and refuses somebody else's", () => {
+    expect(ownerPermits(HOST, HOST)).toBe(true)
+    expect(ownerPermits(HOST, OTHER)).toBe(false)
+  })
+
+  it("permits when either side is unattributed", () => {
+    // Nobody signed in — the common state, and not a denial.
+    expect(ownerPermits(undefined, OTHER)).toBe(true)
+    // Every device that existed before ADR-0149 gave `devices` its column.
+    expect(ownerPermits(HOST, undefined)).toBe(true)
+    expect(ownerPermits(undefined, undefined)).toBe(true)
+  })
+
+  /**
+   * The host decides this in SQL, per request. This mirror exists only to
+   * explain a switch the console draws as off, so it must not answer
+   * differently — a mirror that drifts would keep drawing a grant as live that
+   * the host has been refusing.
+   */
+  it("matches the SQL predicate the host actually evaluates", () => {
+    const rust = readFileSync(
+      join(process.cwd(), "src-tauri", "src", "companion_api", "security_store.rs"),
+      "utf8"
+    )
+    const match = rust.match(/pub const OWNER_PREDICATE_SQL: &str =\s*"([^"]+)";/)
+    expect(match).not.toBeNull()
+    const predicate = match![1]!
+
+    // Read as: host unattributed, OR device unattributed, OR they are the same
+    // person — which is exactly the three-branch shape above.
+    expect(predicate).toContain("h.user_id IS NULL")
+    expect(predicate).toContain("d.user_id IS NULL")
+    expect(predicate).toContain("d.user_id = h.user_id")
+    expect(predicate.split(" OR ")).toHaveLength(3)
+
+    // And the Rust twin, whose own test drives it against the SQL.
+    expect(rust).toContain(
+      "pub fn owner_permits(host_person: Option<&str>, device_person: Option<&str>) -> bool"
+    )
+  })
+})
+
+describe("buildGrantRows under a suspended owner", () => {
+  it("marks every grant suspended without claiming the capabilities are gone", () => {
+    const rows = buildGrantRows(evidence({ hostCapabilities: [...CONTROL], ownerSuspended: true }))
+
+    for (const row of rows) {
+      expect(row.state).toBe("suspended")
+      expect(row.heldCapabilities).toEqual([])
+      expect(row.reasonKey).toBe("ownerMismatch")
+      // The switch reads off: the host is refusing the grant right now.
+      expect(isGrantEnabled(row)).toBe(false)
+    }
+  })
+
+  it("lets revocation win, because a revoked device is revoked for everybody", () => {
+    const rows = buildGrantRows(
+      evidence({ hostCapabilities: [...CONTROL], ownerSuspended: true, revoked: true })
+    )
+    expect(rowFor(rows, "control").state).toBe("denied")
+    expect(rowFor(rows, "control").reasonKey).toBe("deviceRevoked")
+  })
+
+  it("leaves an unsuspended device exactly as it was", () => {
+    const before = buildGrantRows(evidence({ hostCapabilities: [...CONTROL] }))
+    const after = buildGrantRows(
+      evidence({ hostCapabilities: [...CONTROL], ownerSuspended: false })
+    )
+    expect(after).toEqual(before)
   })
 })

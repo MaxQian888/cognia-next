@@ -502,8 +502,9 @@ describe("device ownership (ADR-0149 §5, step one)", () => {
   })
 
   it("an unowned device is not a restricted device", () => {
-    // Step one changes no decision: the grant rows must be identical whether
-    // or not the host reported an owner.
+    // With nobody signed in on this host, ownership decides nothing — the
+    // grant rows must be identical whether or not the host reported an owner.
+    // This is the state the two-release split protects, and it survives 4b.
     const owned = pairedRow(
       rowsWith({ hostDevices: hostDevice({ userId: "usr_ada000000000000000000" }) })
     )
@@ -514,5 +515,38 @@ describe("device ownership (ADR-0149 §5, step one)", () => {
   it("reports no owner when the host could not be asked at all", () => {
     const rows = rowsWith({ hostDevices: undefined })
     expect(pairedRow(rows)?.ownerUserId).toBeUndefined()
+  })
+
+  // ── ADR-0149 §5 step two: the grant decision follows the person ──────────
+
+  const ADA = "usr_ada000000000000000000"
+  const BOB = "usr_bob000000000000000000"
+
+  it("suspends every grant on a device that belongs to somebody else", () => {
+    const row = pairedRow(
+      rowsWith({ hostDevices: hostDevice({ userId: BOB }), hostPersonUserId: ADA })
+    )
+    expect(row?.grants.every((grant) => grant.state === "suspended")).toBe(true)
+    expect(row?.grants.every((grant) => grant.reasonKey === "ownerMismatch")).toBe(true)
+  })
+
+  it("leaves the signed-in person's own device alone", () => {
+    const mine = pairedRow(
+      rowsWith({ hostDevices: hostDevice({ userId: ADA }), hostPersonUserId: ADA })
+    )
+    const unbound = pairedRow(rowsWith({ hostDevices: hostDevice({ userId: ADA }) }))
+    expect(mine?.grants).toEqual(unbound?.grants)
+  })
+
+  it("does not suspend a device the host never attributed", () => {
+    // Every device that existed before the column did is in this state, and
+    // denying them would be the fleet-wide lockout 4a existed to avoid.
+    const row = pairedRow(rowsWith({ hostDevices: hostDevice(), hostPersonUserId: ADA }))
+    expect(row?.grants.some((grant) => grant.state === "suspended")).toBe(false)
+  })
+
+  it("does not suspend anything when nobody is signed in on this host", () => {
+    const row = pairedRow(rowsWith({ hostDevices: hostDevice({ userId: BOB }) }))
+    expect(row?.grants.some((grant) => grant.state === "suspended")).toBe(false)
   })
 })

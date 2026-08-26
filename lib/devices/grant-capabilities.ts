@@ -86,6 +86,31 @@ export interface GrantEvidence {
   }
   /** A revoked device holds nothing, whatever any table still says. */
   revoked: boolean
+  /**
+   * The host refuses this device's grants because it belongs to somebody else
+   * — ADR-0149 §5 step two. Derived by {@link ownerPermits}; nothing here
+   * decides it, because the decision is the host's and this is a mirror.
+   */
+  ownerSuspended?: boolean
+}
+
+/**
+ * The client twin of `OWNER_PREDICATE_SQL` in
+ * `src-tauri/src/companion_api/security_store.rs`.
+ *
+ * The host is the authority — it re-evaluates this per request in SQL — and
+ * this copy exists only so the console can SAY why a switch that looks on is
+ * not being honoured. A co-located test reads the Rust file and fails if the
+ * two ever disagree, because a mirror that drifts is worse than no mirror: it
+ * would draw a grant as live that the host has been refusing for weeks.
+ *
+ * Both `undefined`s pass, for the reasons the Rust doc gives: nobody signed in
+ * is a supported state, and an unattributed device is every device that
+ * existed before the column did.
+ */
+export function ownerPermits(hostPerson?: string, devicePerson?: string): boolean {
+  if (!hostPerson || !devicePerson) return true
+  return hostPerson === devicePerson
 }
 
 function stateFromCapabilities(
@@ -111,6 +136,23 @@ export function buildGrantRows(evidence: GrantEvidence): DeviceGrantRow[] {
 
   return DEVICE_GRANT_IDS.map((id): DeviceGrantRow => {
     const capabilities = GRANT_CAPABILITIES[id]
+
+    // Ahead of every other branch, including the revoked one is not right —
+    // a revoked device is revoked whoever it belongs to, and that is the more
+    // specific fact. But ownership outranks the capability tables, because the
+    // host stops honouring the rows they are read from.
+    if (evidence.ownerSuspended && !evidence.revoked) {
+      return {
+        id,
+        state: "suspended",
+        capabilities,
+        // Deliberately empty: these are what the device WOULD hold. Listing
+        // them under a suspended row reads as "still has these".
+        heldCapabilities: [],
+        available: id !== "lockedComputerUse" || LOCKED_USE_AVAILABLE,
+        reasonKey: "ownerMismatch",
+      }
+    }
 
     if (id === "lockedComputerUse") {
       return {
@@ -174,7 +216,13 @@ export function buildGrantRows(evidence: GrantEvidence): DeviceGrantRow[] {
   })
 }
 
-/** True when the row confers anything at all — drives the switch's checked state. */
+/**
+ * True when the row confers anything at all — drives the switch's checked state.
+ *
+ * `suspended` is deliberately NOT enabled: the switch must read off, because
+ * the host is refusing the grant right now. The row's reason line is what tells
+ * the owner the grant is still recorded and will come back.
+ */
 export function isGrantEnabled(row: DeviceGrantRow): boolean {
   return row.state === "granted" || row.state === "partial"
 }

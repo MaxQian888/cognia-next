@@ -8354,12 +8354,14 @@
         "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them."
       },
       "notApplicableTitle": "No grants to manage",
+      "ownerSuspendedHint": "Grants suspended: this device belongs to someone else.",
       "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",
       "pause": "Pause",
       "reason": {
         "deviceRevoked": "Revoked devices hold nothing, whatever the local record still says.",
         "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out.",
-        "mirrorOnly": "From the local mirror — this host could not be asked."
+        "mirrorOnly": "From the local mirror — this host could not be asked.",
+        "ownerMismatch": "This device belongs to a different person than the one signed in here, so the host is not honouring its grants. Nothing was revoked — they take effect again for the person it belongs to."
       },
       "resume": "Resume",
       "revoke": "Revoke",
@@ -8470,6 +8472,7 @@
       "denied": "Not granted",
       "granted": "Granted",
       "partial": "Partial",
+      "suspended": "Suspended",
       "unknown": "Unknown"
     },
     "host": {
@@ -8528,14 +8531,14 @@
       "lastConnected": "Last connected",
       "lastSeen": "Last seen",
       "noStreams": "No event stream is open right now.",
+      "owner": "Belongs to",
+      "ownerNone": "Unclaimed",
       "paired": "Paired",
       "platform": "Platform",
       "presence": "Presence",
       "reachability": "Reachability",
       "ref": "Reference",
       "role": "Role",
-      "owner": "Belongs to",
-      "ownerNone": "Unclaimed",
       "serverVersion": "Server version",
       "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
     },

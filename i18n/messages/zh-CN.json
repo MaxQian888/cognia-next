@@ -8354,12 +8354,14 @@
         "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。"
       },
       "notApplicableTitle": "没有可管理的授权",
+      "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。",
       "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",
       "pause": "暂停",
       "reason": {
         "deviceRevoked": "已吊销的设备不持有任何能力，无论本地记录还写着什么。",
         "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。",
-        "mirrorOnly": "来自本地镜像——无法向主机查询。"
+        "mirrorOnly": "来自本地镜像——无法向主机查询。",
+        "ownerMismatch": "这台设备属于另一个人，而不是当前登录的人，因此宿主不会兑现它的授权。授权本身没有被撤销——回到它所属的人手上就会重新生效。"
       },
       "resume": "恢复",
       "revoke": "吊销",
@@ -8470,6 +8472,7 @@
       "denied": "未授权",
       "granted": "已授权",
       "partial": "部分授权",
+      "suspended": "已挂起",
       "unknown": "未知"
     },
     "host": {
@@ -8528,14 +8531,14 @@
       "lastConnected": "最近连接",
       "lastSeen": "最近可见",
       "noStreams": "当前没有打开的事件流。",
+      "owner": "归属",
+      "ownerNone": "无人认领",
       "paired": "配对于",
       "platform": "平台",
       "presence": "在场",
       "reachability": "可达性",
       "ref": "标识",
       "role": "角色",
-      "owner": "归属",
-      "ownerNone": "无人认领",
       "serverVersion": "服务端版本",
       "streamCount": "{count, plural, other {# 条事件流}}"
     },

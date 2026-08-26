@@ -111,6 +111,10 @@ const GRANT_TONE: Record<DeviceGrantState, string> = {
   partial: "text-amber-600 dark:text-amber-400",
   denied: "text-muted-foreground",
   unknown: "text-muted-foreground",
+  // Not "off": the grant is recorded and the host is refusing to honour it
+  // because the device belongs to somebody else. Sharing `denied`'s grey
+  // would invite an owner to re-grant something already granted.
+  suspended: "text-amber-600 dark:text-amber-400",
 }
 
 export function ReachabilityDot({

@@ -27,7 +27,8 @@
     "granted": "Granted",
     "partial": "Partial",
     "denied": "Not granted",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "suspended": "Suspended"
   },
   "never": "Never",
   "notAvailable": "—",
@@ -141,7 +142,8 @@
     "reason": {
       "mirrorOnly": "From the local mirror — this host could not be asked.",
       "deviceRevoked": "Revoked devices hold nothing, whatever the local record still says.",
-      "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out."
+      "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out.",
+      "ownerMismatch": "This device belongs to a different person than the one signed in here, so the host is not honouring its grants. Nothing was revoked — they take effect again for the person it belongs to."
     },
     "lifecycle": "Lifecycle",
     "lifecycleHint": "Pausing blocks this device until you resume it. Revoking is permanent — the device has to pair again.",
@@ -158,7 +160,8 @@
       "paired-device": "No grants to manage."
     },
     "title": "Access",
-    "heldCount": "{held}/{total} granted"
+    "heldCount": "{held}/{total} granted",
+    "ownerSuspendedHint": "Grants suspended: this device belongs to someone else."
   },
   "runtime": {
     "shellTiers": "Shell tiers",

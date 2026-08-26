@@ -170,6 +170,9 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
   const paused = row.adminState === "paused"
 
   const held = row.grants.filter((grant) => grant.available && isGrantEnabled(grant)).length
+  // ADR-0149 §5 step two. One banner rather than four identical reason lines:
+  // the fact is about the device, not about any one grant.
+  const ownerSuspended = row.grants.some((grant) => grant.state === "suspended")
 
   return (
     <DeviceSection
@@ -187,6 +190,13 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
           <Alert variant="destructive">
             <AlertTitle>{t("access.revokedTitle")}</AlertTitle>
             <AlertDescription>{t("access.revokedBody")}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {ownerSuspended ? (
+          <Alert data-testid="device-access-owner-suspended">
+            <AlertTitle>{t("access.ownerSuspendedHint")}</AlertTitle>
+            <AlertDescription>{t("access.reason.ownerMismatch")}</AlertDescription>
           </Alert>
         ) : null}
 
