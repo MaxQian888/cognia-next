@@ -17,6 +17,9 @@ import {
 function fromRow(row: AdapterInstanceRow | undefined): ConversationBehaviorValue {
   return {
     mode: row?.defaultMode ?? "auto",
+    autonomy: row?.defaultAutonomy,
+    engagement: row?.defaultEngagement,
+    authority: row?.defaultAuthority,
     inboundActivationPolicy: row?.inboundActivationPolicy,
     activeRunDispatchMode: row?.activeRunDispatchMode,
     activationTtlHours: row?.activationTtlMs ? String(row.activationTtlMs / 3_600_000) : "",
@@ -53,6 +56,12 @@ function AdapterBehaviorDraft({ adapterId, row }: { adapterId: string; row?: Ada
       "behavior",
       {
         defaultMode: draft.mode ?? "auto",
+        // The axes are what routing reads; `defaultMode` stays as the mirror.
+        // Written as `undefined` when unset so clearing a pinned axis actually
+        // removes it rather than leaving the previous value behind.
+        defaultAutonomy: draft.autonomy,
+        defaultEngagement: draft.engagement,
+        defaultAuthority: draft.authority,
         inboundActivationPolicy: draft.inboundActivationPolicy,
         activeRunDispatchMode: draft.activeRunDispatchMode,
         activationTtlMs:

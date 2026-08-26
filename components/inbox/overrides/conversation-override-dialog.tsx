@@ -58,6 +58,11 @@ export function ConversationOverrideDialog(props: ConversationOverrideDialogProp
           initialRow={initialRow ?? null}
           effectiveSources={{
             mode: effectiveConfig?.mode.source ?? "system-default",
+            // Per-axis provenance: an axis derived from the mode mirror
+            // inherits the mode's source, so these are not all the same label.
+            autonomy: effectiveConfig?.autonomy.source ?? "system-default",
+            engagement: effectiveConfig?.engagement.source ?? "system-default",
+            authority: effectiveConfig?.authority.source ?? "system-default",
             inboundActivationPolicy:
               effectiveConfig?.behavior.inboundActivationPolicy.source ?? "system-default",
             activeRunDispatchMode:

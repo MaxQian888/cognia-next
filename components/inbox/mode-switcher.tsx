@@ -54,7 +54,11 @@ export function ModeSwitcher({
       //    the authoritative write to the paired host.
       await mutateConversationOverride({
         kind: "upsert",
-        input: { conversationKey, sessionId, mode },
+        // The axes are cleared alongside the mirror. Routing prefers them, so
+        // a stale `autonomy` left by an assignment or an SLA escalation would
+        // otherwise swallow this chip entirely: the operator picks a mode and
+        // the bot keeps doing what it was doing.
+        input: { conversationKey, sessionId, mode, autonomy: undefined, engagement: undefined },
       })
 
       // 2. Cancel any in-flight AI run for this conversation.

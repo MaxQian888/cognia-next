@@ -20,18 +20,38 @@ it("reuses the shared behavior editor in Adapter scope", () => {
   expect(screen.getByTestId("behavior-ttl")).toHaveValue(1)
 })
 
-it("edits defaultMode through the shared behavior section", async () => {
+it("writes the axes a preset means, and the legacy mirror alongside", async () => {
   const user = userEvent.setup()
   render(<AdapterBehaviorDefaults adapterId="a" />)
 
   await user.click(screen.getByTestId("behavior-mode"))
-  await user.click(screen.getByRole("option", { name: "modeDraft" }))
+  await user.click(screen.getByRole("option", { name: "preset_draft" }))
   await user.click(screen.getByRole("button", { name: "save" }))
 
   expect(mockUpdateAdapterConfigSection).toHaveBeenCalledWith(
     "a",
     "behavior",
-    expect.objectContaining({ defaultMode: "draft" }),
+    expect.objectContaining({
+      // The axes are what routing reads; `defaultMode` is the mirror kept in
+      // step for `InboxSendPolicy.forcedMode` and older clients.
+      defaultAutonomy: "suggest",
+      defaultMode: "draft",
+      // `draft` leaves engagement derived, so binding a team later still works.
+      defaultEngagement: undefined,
+    }),
     "settings.adapter.behavior"
   )
+})
+
+it("offers delegate only where background work has a carrier", async () => {
+  const user = userEvent.setup()
+  render(<AdapterBehaviorDefaults adapterId="a" />)
+
+  await user.click(screen.getByTestId("behavior-mode"))
+  // A bot with no team or workflow bound cannot run anything in the
+  // background, so the option says so instead of silently doing nothing.
+  const delegate = screen.getByRole("option", {
+    name: /preset_delegate/,
+  })
+  expect(delegate).toHaveAttribute("aria-disabled", "true")
 })

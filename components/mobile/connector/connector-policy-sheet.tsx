@@ -119,15 +119,23 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
               updatedAt: Date.now(),
             }
       )
-      if (!hasQuiet) {
-        // Drop any existing quiet-hours window locally — see comment above.
-        await getDb()
-          .adapterInstances.where("id")
-          .equals(policy.id)
-          .modify((row) => {
-            delete row.quietHours
-          })
-      }
+      // One pass for both deletions, because `update` cannot remove a key.
+      //
+      // The axis defaults go for the same reason the inbox chip clears them:
+      // routing prefers the axes, so a default pinned in desktop settings
+      // would otherwise swallow this sheet's choice of mode. Cleared locally
+      // only — the relayed `adapter_update_policy` command has no axis fields
+      // yet, so a paired host applies the mode and keeps its own axes until
+      // that contract grows them.
+      await getDb()
+        .adapterInstances.where("id")
+        .equals(policy.id)
+        .modify((row) => {
+          delete row.defaultAutonomy
+          delete row.defaultEngagement
+          // Drop any existing quiet-hours window locally — see comment above.
+          if (!hasQuiet) delete row.quietHours
+        })
       await enqueue({
         command: "adapter_update_policy",
         payload: {

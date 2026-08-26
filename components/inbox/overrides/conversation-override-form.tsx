@@ -115,7 +115,13 @@ export interface ConversationOverrideFormProps {
   /** Canonical effective-config provenance resolved by the caller. */
   effectiveSources?: Partial<
     Record<
-      "mode" | "inboundActivationPolicy" | "activeRunDispatchMode" | "activationTtlHours",
+      | "mode"
+      | "autonomy"
+      | "engagement"
+      | "authority"
+      | "inboundActivationPolicy"
+      | "activeRunDispatchMode"
+      | "activationTtlHours",
       ImConfigSource
     >
   >
@@ -214,6 +220,11 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [appendActivity, setAppendActivity] = useState(initialRow?.appendActivity !== false)
   const [replyQuoting, setReplyQuoting] = useState(initialRow?.replyQuoting !== false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
+  // The composition axes. `undefined` means "follow the layer below", which is
+  // what an unset field has always meant here.
+  const [autonomy, setAutonomy] = useState(initialRow?.autonomy)
+  const [engagement, setEngagement] = useState(initialRow?.engagement)
+  const [authority, setAuthority] = useState(initialRow?.authority)
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
   const [archived, setArchived] = useState(initialRow?.archived ?? false)
@@ -314,6 +325,8 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
       // The assignee itself is untouched.
       const routingEdited =
         nextMode !== initialRow?.mode ||
+        autonomy !== initialRow?.autonomy ||
+        engagement !== initialRow?.engagement ||
         nextCharacterId !== initialRow?.characterId ||
         nextCharacterDisabled !== initialRow?.characterDisabled ||
         nextTeamId !== initialRow?.teamId ||
@@ -328,6 +341,10 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         patch: {
           ...(routingEdited ? ASSIGNMENT_ROUTING_MARKER_CLEAR : {}),
           mode: nextMode,
+          // The axes routing actually reads. `mode` above stays the mirror.
+          autonomy,
+          engagement,
+          authority,
           inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
           activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
           activationTtlMs: parseActivationTtlMs(activationTtlHours),
@@ -471,13 +488,20 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           scope="conversation"
           value={{
             mode: mode === "unset" ? undefined : mode,
+            autonomy,
+            engagement,
+            authority,
             inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
             activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
             activationTtlHours,
           }}
           sources={effectiveSources}
+          targetKind={effectiveTargetKind}
           onChange={(next) => {
             setMode(next.mode ?? "unset")
+            setAutonomy(next.autonomy)
+            setEngagement(next.engagement)
+            setAuthority(next.authority)
             setActivationPolicy(next.inboundActivationPolicy ?? "inherit")
             setDispatchMode(next.activeRunDispatchMode ?? "inherit")
             setActivationTtlHours(next.activationTtlHours ?? "")

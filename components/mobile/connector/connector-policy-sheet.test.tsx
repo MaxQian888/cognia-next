@@ -128,7 +128,11 @@ describe("<ConnectorPolicySheet />", () => {
         })
       )
     )
-    expect(modifyMock).not.toHaveBeenCalled()
+    // The modifier still runs — it is now also what clears the bot's axis
+    // defaults — but it must leave a saved quiet-hours window alone.
+    const row: Record<string, unknown> = { quietHours: { from: "22:00", to: "07:00" } }
+    modifyMock.mock.calls.forEach(([fn]) => (fn as (r: unknown) => void)(row))
+    expect(row.quietHours).toBeDefined()
     expect(enqueueMock).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
@@ -219,5 +223,22 @@ describe("<ConnectorPolicySheet />", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Save failed: boom"))
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  // Routing prefers the composition axes, so a `defaultAutonomy` pinned in
+  // desktop settings would otherwise outrank whatever mode this sheet saves.
+  it("clears the bot's axis defaults when a mode is saved", async () => {
+    const user = userEvent.setup()
+    render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+    await user.click(screen.getByTestId("policy-save"))
+
+    await waitFor(() => expect(modifyMock).toHaveBeenCalled())
+    const row: Record<string, unknown> = {
+      defaultAutonomy: "observe",
+      defaultEngagement: "human",
+    }
+    modifyMock.mock.calls.forEach(([fn]) => (fn as (r: unknown) => void)(row))
+    expect(row.defaultAutonomy).toBeUndefined()
+    expect(row.defaultEngagement).toBeUndefined()
   })
 })
