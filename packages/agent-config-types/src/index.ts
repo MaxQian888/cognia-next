@@ -1515,8 +1515,27 @@ export interface SdkContextUsage {
   mcpTools?: Array<{ name: string; serverName: string; tokens: number; isLoaded?: boolean }>
   memoryFiles?: Array<{ path: string; type: string; tokens: number }>
   agents?: Array<{ agentType: string; source: string; tokens: number }>
-  skills?: unknown
+  /**
+   * Built-in tools the CLI declared but has not loaded into the window. They
+   * back the "System tools (deferred)" category and must never be counted as
+   * occupancy — see `lib/claude/context-breakdown.ts`.
+   */
+  deferredBuiltinTools?: Array<{ name: string; tokens: number; isLoaded?: boolean }>
+  skills?: {
+    totalSkills: number
+    includedSkills: number
+    tokens: number
+    skillFrontmatter?: Array<{ name: string; source: string; tokens: number }>
+  }
   slashCommands?: { totalCommands: number; includedCommands: number; tokens: number }
+  /**
+   * Fraction of the window at which the CLI auto-compacts, and whether it will.
+   * Authoritative: the renderer's own `AUTO_COMPACT_FRACTION` is a mirror of the
+   * default and is wrong whenever the user (or a config) moved the threshold or
+   * turned the behaviour off, so the UI must prefer these when present.
+   */
+  autoCompactThreshold?: number
+  isAutoCompactEnabled?: boolean
 }
 
 /** Narrow mirror of the SDK's `McpServerStatus` (live in-session client state). */

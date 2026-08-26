@@ -3,6 +3,7 @@ import type { UIMessage } from "ai"
 import {
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
+  getLatestRunProviderId,
   contextLevel,
   DEFAULT_CONTEXT_WINDOW,
   getLatestUsage,
@@ -156,6 +157,31 @@ describe("computeContextWindowUsage", () => {
     const r = computeContextWindowUsage(usage, "claude-opus-4-8", 4096)
     expect(r.max).toBe(4096)
     expect(r.fraction).toBeCloseTo(0.5, 5)
+    expect(r.windowSource).toBe("override")
+  })
+
+  it("prefers the window the agent itself reported over the table AND the override", () => {
+    // External agents (ACP `usage_update.size`, Codex `modelContextWindow`) run
+    // models this build has no table row for; their own figure is authoritative.
+    const usage: UsageInfo = { contextTokens: 136_000, contextWindow: 272_000 }
+    const r = computeContextWindowUsage(usage, "claude-opus-4-8", 4096)
+    expect(r.max).toBe(272_000)
+    expect(r.used).toBe(136_000)
+    expect(r.fraction).toBeCloseTo(0.5, 5)
+    expect(r.windowSource).toBe("agent")
+  })
+
+  it("ignores a non-positive agent window instead of dividing by it", () => {
+    const usage: UsageInfo = { inputTokens: 100, contextWindow: 0 }
+    const r = computeContextWindowUsage(usage, "claude-sonnet-4-5")
+    expect(r.max).toBe(200_000)
+    expect(r.windowSource).toBe("catalog")
+  })
+
+  it("marks occupancy unreported when the runtime published no usage at all", () => {
+    // The caller must render this as unknown, never as an empty window.
+    expect(computeContextWindowUsage(null, "claude-opus-4-8").reported).toBe(false)
+    expect(computeContextWindowUsage({ inputTokens: 1 }, "claude-opus-4-8").reported).toBe(true)
   })
 })
 
@@ -308,5 +334,37 @@ describe("catalog parity", () => {
         window: model.contextLength,
       })
     }
+  })
+})
+
+describe("getLatestRunProviderId", () => {
+  const assistant = (run?: Record<string, unknown>) =>
+    ({
+      id: "a",
+      role: "assistant",
+      parts: [],
+      metadata: run ? { run } : {},
+    }) as unknown as UIMessage
+
+  it("returns null before any assistant turn", () => {
+    expect(getLatestRunProviderId([])).toBeNull()
+    expect(getLatestRunProviderId([assistant()])).toBeNull()
+  })
+
+  it("reads the lane off the newest assistant turn", () => {
+    expect(
+      getLatestRunProviderId([
+        assistant({ providerId: "anthropic" }),
+        assistant({ providerId: "external" }),
+      ])
+    ).toBe("external")
+  })
+
+  // A turn that has not been stamped yet (still streaming, or a send that
+  // aborted before the metadata was attached) has an UNKNOWN lane. Letting the
+  // previous turn answer for it made a finished external turn disable
+  // "Compact now" on the sidecar turn that followed it.
+  it("does not let an older turn answer for an unstamped newest one", () => {
+    expect(getLatestRunProviderId([assistant({ providerId: "external" }), assistant()])).toBeNull()
   })
 })

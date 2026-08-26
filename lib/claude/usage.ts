@@ -110,6 +110,77 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
 }
 
 /**
+ * Map an external agent's turn accounting onto the renderer's {@link UsageInfo}.
+ *
+ * Shared by the GUI chat lane and the CLI TUI (`external-event-mapper`) so the
+ * two cannot drift. Three rules, all about not inventing figures:
+ *
+ * - `contextTokens` / `contextWindow` are carried through untouched. They are
+ *   OCCUPANCY and window size as the agent itself reported them (ACP
+ *   `usage_update.size`, Codex `modelContextWindow`) and outrank this build's
+ *   model table, which may not know the agent's model at all.
+ * - Absent fields stay absent. A missing cache count is not a zero.
+ * - `providerCost` becomes `totalCostUsd` only when the provider named USD.
+ *   OpenCode returns a bare number with no currency; relabelling that as
+ *   dollars would put a fabricated unit into the session cost.
+ */
+export function externalTokenUsageToUsageInfo(usage: {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
+  contextTokens?: number
+  modelContextWindow?: number
+  providerCost?: { amount: number; currency?: string }
+}): UsageInfo {
+  return {
+    inputTokens: usage.promptTokens,
+    outputTokens: usage.completionTokens,
+    ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+    ...(usage.modelContextWindow === undefined ? {} : { contextWindow: usage.modelContextWindow }),
+    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+    ...(usage.cacheReadTokens === undefined ? {} : { cacheReadInputTokens: usage.cacheReadTokens }),
+    ...(usage.cacheWriteTokens === undefined
+      ? {}
+      : { cacheCreationInputTokens: usage.cacheWriteTokens }),
+    ...(usage.providerCost && usage.providerCost.currency === "USD"
+      ? { totalCostUsd: usage.providerCost.amount }
+      : {}),
+  }
+}
+
+/**
+ * Which execution lane produced the newest assistant turn, from the `run`
+ * metadata `use-claude-chat-controller` stamps on it (`"external"` for an
+ * external agent, the provider id for the built-in path). `null` before any
+ * assistant turn, and `null` when the newest one carries no lane.
+ *
+ * The context read-out needs this to avoid asserting the built-in sidecar's
+ * compaction policy over a turn the sidecar never ran.
+ *
+ * It answers for the NEWEST assistant message and stops there — it does not
+ * keep walking back for the most recent message that happens to carry a lane.
+ * Doing so let a finished external turn speak for the turn after it whenever
+ * that one had not been stamped yet (still streaming, or a send that aborted
+ * before `attachRunMetadataToLastAssistant` ran), so the read-out said
+ * "compaction is managed by the agent" and disabled "Compact now" on a session
+ * the sidecar does run. An unstamped newest turn is an UNKNOWN lane, and every
+ * caller already has a defined answer for null.
+ */
+export function getLatestRunProviderId(messages: UIMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== "assistant") continue
+    const meta = (msg as { metadata?: Record<string, unknown> }).metadata
+    const run = meta?.run as { providerId?: unknown } | undefined
+    return typeof run?.providerId === "string" ? run.providerId : null
+  }
+  return null
+}
+
+/**
  * Tokens occupying the *active* context window after a turn.
  *
  * Everything the model saw on the latest turn counts: the fresh input, the
@@ -204,19 +275,42 @@ export interface ContextWindowUsage {
   level: ContextLevel
   /** Absolute token count at which auto-compaction triggers. */
   compactThresholdTokens: number
+  /**
+   * Whether `used` came from real usage data. `false` means the runtime
+   * reported nothing — the occupancy is UNKNOWN, not zero.
+   */
+  reported: boolean
+  /** Which tier supplied `max` — the agent itself, a caller pin, or the table. */
+  windowSource: "agent" | "override" | "catalog"
 }
 
 /**
  * Compute window occupancy from a single turn's usage. `usage` is the latest
  * turn (or null for a fresh session → 0 used). `maxOverride` lets callers pin
  * a window size (e.g. tests, or a non-default deployment).
+ *
+ * Window sizing has three tiers, most authoritative first:
+ *
+ * 1. `usage.contextWindow` — the size the *agent itself* reported for the live
+ *    model (ACP `usage_update.size`, Codex `modelContextWindow`, pi-rpc
+ *    `contextUsage.contextWindow`). An external agent may run a model this
+ *    build has never heard of, so its own figure always wins.
+ * 2. `maxOverride` — a caller-pinned window.
+ * 3. The model table / conservative default.
+ *
+ * `reported` says whether occupancy came from real data at all. Callers must
+ * not render `0%` when it is false: a session whose runtime publishes no usage
+ * has an *unknown* window occupancy, not an empty one, and the system prompt
+ * alone makes "empty" untrue.
  */
 export function computeContextWindowUsage(
   usage: UsageInfo | null,
   modelId: string | undefined,
   maxOverride?: number
 ): ContextWindowUsage {
-  const max = maxOverride ?? getModelContextWindow(modelId)
+  const agentWindow =
+    usage?.contextWindow !== undefined && usage.contextWindow > 0 ? usage.contextWindow : undefined
+  const max = agentWindow ?? maxOverride ?? getModelContextWindow(modelId)
   const used = usage ? tokensInWindow(usage) : 0
   const fraction = max > 0 ? Math.min(1, used / max) : 0
   return {
@@ -226,5 +320,7 @@ export function computeContextWindowUsage(
     remaining: Math.max(0, max - used),
     level: contextLevel(fraction),
     compactThresholdTokens: Math.round(max * AUTO_COMPACT_FRACTION),
+    reported: usage !== null,
+    windowSource: agentWindow ? "agent" : maxOverride ? "override" : "catalog",
   }
 }

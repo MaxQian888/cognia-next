@@ -27,6 +27,7 @@ import type {
   ToolUseSummaryPart,
 } from "./parts-extensions"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { attachUsageToLastAssistant } from "@/lib/chat/message-run-metadata"
 import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
 import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
@@ -425,7 +426,7 @@ export function applySdkEvent(
     case "result": {
       const result = evt as SDKResultMessage
       return {
-        messages: attachUsageToLastAssistant(messages, result),
+        messages: attachSdkUsageToLastAssistant(messages, result),
         turnComplete: true,
         result,
       }
@@ -1342,27 +1343,18 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
  *
  * The SDK sometimes nests usage one level deeper (`result.message.usage`),
  * so we look in both places. Cache token fields are snake_case in the SDK.
+ *
+ * Only the EXTRACTION is local: the walk-and-merge is
+ * `attachUsageToLastAssistant` in `lib/chat/message-run-metadata.ts`, shared
+ * with the external-agent lane so both write `metadata.usage` the same way.
  */
-function attachUsageToLastAssistant(messages: UIMessage[], result: SDKResultMessage): UIMessage[] {
+function attachSdkUsageToLastAssistant(
+  messages: UIMessage[],
+  result: SDKResultMessage
+): UIMessage[] {
   const usage = extractUsage(result)
   if (!usage) return messages
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role !== "assistant") continue
-    const prior = ((msg as { metadata?: Record<string, unknown> }).metadata ?? {}) as Record<
-      string,
-      unknown
-    >
-    const merged: UIMessage = {
-      ...msg,
-      ...({ metadata: { ...prior, usage } } as { metadata: Record<string, unknown> }),
-    }
-    const out = messages.slice()
-    out[i] = merged
-    return out
-  }
-  return messages
+  return attachUsageToLastAssistant(messages, usage as unknown as Record<string, unknown>)
 }
 
 export function extractUsage(result: SDKResultMessage): UsageInfo | null {

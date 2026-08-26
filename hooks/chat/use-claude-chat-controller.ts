@@ -39,8 +39,10 @@ import {
 } from "@/lib/chat/session-peer-delivery"
 import { expireSessionPeerMessages } from "@/lib/db/session-peer-messages"
 import { markAttachedSessionRunning } from "@/lib/chat/attached-session"
+import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
 import {
   attachRunMetadataToLastAssistant,
+  attachUsageToLastAssistant,
   buildCompletedRunMetadata,
 } from "@/lib/chat/message-run-metadata"
 import {
@@ -1794,7 +1796,7 @@ export function useClaudeChat() {
             },
           }
           const completedAt = Date.now()
-          const finalMessages = attachRunMetadataToLastAssistant(
+          const withRun = attachRunMetadataToLastAssistant(
             store.getState().sessions[sessionId]?.messages ?? [...baseList, finalAssistant],
             buildCompletedRunMetadata({
               providerId: "external",
@@ -1803,6 +1805,20 @@ export function useClaudeChat() {
               reportedDurationMs: result.duration,
             })
           )
+          // The agent's own token accounting — including the context occupancy
+          // and window size it reports (ACP `usage_update`, Codex
+          // `modelContextWindow`). Without this the turn lands with no usage at
+          // all and the context read-out shows an empty window for a session
+          // that is anything but.
+          const finalMessages = result.tokenUsage
+            ? attachUsageToLastAssistant(
+                withRun,
+                externalTokenUsageToUsageInfo(result.tokenUsage) as unknown as Record<
+                  string,
+                  unknown
+                >
+              )
+            : withRun
           store.getState().replaceSessionMessages(sessionId, finalMessages)
           chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)

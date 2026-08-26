@@ -10,7 +10,6 @@ import type {
   ExternalAgentHookFireEvent,
   ExternalAgentPermissionRequestEvent,
   ExternalAgentPlanUpdateEvent,
-  ExternalAgentTokenUsage,
   ExternalAgentToolCallUpdateEvent,
   ExternalAgentToolResultEvent,
   ExternalAgentToolUseStartEvent,
@@ -18,6 +17,7 @@ import type {
 
 import type { TuiAction } from "../../tui/state/types"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
+import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
 
 function contentBlockEvent(
   event: Extract<
@@ -469,23 +469,10 @@ function errorActions(event: ExternalAgentErrorEvent): TuiAction[] {
 }
 
 function usageActions(event: ExternalAgentDoneEvent): TuiAction[] {
+  // Shared with the GUI chat lane so the two mappings cannot drift.
   return event.tokenUsage
-    ? [{ type: "SET_USAGE", usage: tokenUsageToUsageInfo(event.tokenUsage) }]
+    ? [{ type: "SET_USAGE", usage: externalTokenUsageToUsageInfo(event.tokenUsage) }]
     : []
-}
-
-function tokenUsageToUsageInfo(usage: ExternalAgentTokenUsage) {
-  return {
-    inputTokens: usage.promptTokens,
-    outputTokens: usage.completionTokens,
-    ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-    ...(usage.modelContextWindow === undefined ? {} : { contextWindow: usage.modelContextWindow }),
-    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
-    ...(usage.cacheReadTokens === undefined ? {} : { cacheReadInputTokens: usage.cacheReadTokens }),
-    ...(usage.cacheWriteTokens === undefined
-      ? {}
-      : { cacheCreationInputTokens: usage.cacheWriteTokens }),
-  }
 }
 
 function hookActions(event: ExternalAgentHookFireEvent): TuiAction[] {

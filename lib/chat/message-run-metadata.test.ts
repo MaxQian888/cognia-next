@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai"
 import {
   attachRunMetadataToLastAssistant,
+  attachUsageToLastAssistant,
   buildCompletedRunMetadata,
   runMetadataOf,
 } from "./message-run-metadata"
@@ -87,5 +88,43 @@ describe("assistant run metadata", () => {
 
     const userOnly = [messages()[0]]
     expect(attachRunMetadataToLastAssistant(userOnly, { completedAt: 200 })).toBe(userOnly)
+  })
+})
+
+describe("attachUsageToLastAssistant", () => {
+  const usageOf = (list: UIMessage[]) =>
+    (list[1].metadata as { usage?: Record<string, unknown> }).usage
+
+  it("stamps the turn's tokens on the newest assistant without losing its metadata", () => {
+    const next = attachUsageToLastAssistant(messages(), {
+      inputTokens: 120,
+      contextTokens: 41_000,
+      contextWindow: 272_000,
+    })
+    expect(usageOf(next)).toEqual({
+      inputTokens: 120,
+      contextTokens: 41_000,
+      contextWindow: 272_000,
+    })
+    expect((next[1].metadata as { branchGroupId?: string }).branchGroupId).toBe("b1")
+  })
+
+  it("merges into an existing usage object instead of replacing it", () => {
+    const seeded = messages()
+    seeded[1] = {
+      ...seeded[1],
+      metadata: { ...(seeded[1].metadata as object), usage: { inputTokens: 5, outputTokens: 9 } },
+    } as UIMessage
+    expect(usageOf(attachUsageToLastAssistant(seeded, { outputTokens: 12 }))).toEqual({
+      inputTokens: 5,
+      outputTokens: 12,
+    })
+  })
+
+  it("is a no-op for an empty patch or a transcript with no assistant", () => {
+    const list = messages()
+    expect(attachUsageToLastAssistant(list, {})).toBe(list)
+    const userOnly: UIMessage[] = [{ id: "u1", role: "user", parts: [] }]
+    expect(attachUsageToLastAssistant(userOnly, { inputTokens: 1 })).toBe(userOnly)
   })
 })

@@ -6,11 +6,12 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import {
   CompactNowButton,
+  ContextTurnSummary,
   ContextUsageIndicator,
   ContextWindowHeader,
-  SdkBreakdown,
   UsageRow,
 } from "./context-usage-indicator"
+import type { SessionUsageTotals } from "@/lib/claude/usage"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { compactSession } from "@/lib/claude/ipc"
@@ -198,6 +199,78 @@ describe("ContextWindowHeader", () => {
     expect(fill?.className).toContain("bg-red-500")
   })
 
+  it("says the occupancy is unknown rather than drawing an empty window", () => {
+    render(
+      <ContextWindowHeader
+        title="Context window"
+        fraction={0}
+        level="ok"
+        used={0}
+        max={200_000}
+        reported={false}
+      />
+    )
+    const bar = screen.getByTestId("context-window-bar")
+    expect(bar).toHaveAttribute("data-reported", "false")
+    // No fill, no threshold marker, and no "0%" claim anywhere.
+    expect(bar.querySelector("div")).toBeNull()
+    expect(screen.queryByTestId("context-compact-marker")).toBeNull()
+    expect(screen.queryByText("0%")).toBeNull()
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
+  })
+
+  it("places the compact marker at the threshold the runtime actually reported", () => {
+    render(
+      <ContextWindowHeader
+        title="Context window"
+        fraction={0.5}
+        level="ok"
+        used={100_000}
+        max={200_000}
+        compaction={{ threshold: 0.92, enabled: true, source: "sdk" }}
+      />
+    )
+    expect(screen.getByTestId("context-compact-marker")).toHaveStyle({ left: "92%" })
+    expect(screen.getByText(/compactThreshold:/)).toHaveTextContent("92%")
+  })
+
+  it("drops the marker and names the owner when compaction is not ours", () => {
+    render(
+      <ContextWindowHeader
+        title="Context window"
+        fraction={0.5}
+        level="ok"
+        used={100_000}
+        max={200_000}
+        compaction={{ threshold: null, enabled: false, source: "agent-owned" }}
+      />
+    )
+    expect(screen.queryByTestId("context-compact-marker")).toBeNull()
+    expect(screen.getByText("compactAgentOwned")).toBeInTheDocument()
+  })
+
+  it("keeps the built-in sidecar threshold for callers that pass no policy", () => {
+    render(<ContextWindowHeader fraction={0.5} level="warn" used={100_000} max={200_000} />)
+    expect(screen.getByTestId("context-compact-marker")).toHaveStyle({ left: "83.5%" })
+  })
+
+  it("leads with the heading and a level-tinted percentage when titled", () => {
+    render(
+      <ContextWindowHeader
+        title="Context window"
+        fraction={0.5}
+        level="warn"
+        used={100_000}
+        max={200_000}
+      />
+    )
+    expect(screen.getByText("Context window")).toBeInTheDocument()
+    const pct = screen.getByText("50%")
+    expect(pct.className).toContain("text-amber-500")
+    // The window size moves under the bar so the heading can own the top row.
+    expect(screen.getByText("100K / 200K")).toBeInTheDocument()
+  })
+
   it("uses the ok fill class when nearly empty", () => {
     const { container } = render(
       <ContextWindowHeader fraction={0.05} level="ok" used={10_000} max={200_000} />
@@ -244,6 +317,14 @@ describe("CompactNowButton", () => {
     expect(mockedCompact).not.toHaveBeenCalled()
   })
 
+  it("is disabled when the runtime owns its own compaction", () => {
+    render(<CompactNowButton sessionId="s1" usedTokens={5000} supported={false} />)
+    const btn = screen.getByTestId("compact-now-button")
+    expect(btn).toBeDisabled()
+    fireEvent.click(btn)
+    expect(mockedCompact).not.toHaveBeenCalled()
+  })
+
   it("is disabled when the window is empty", () => {
     render(<CompactNowButton sessionId="s1" usedTokens={0} />)
     expect(screen.getByTestId("compact-now-button")).toBeDisabled()
@@ -275,56 +356,166 @@ describe("ContextUsageIndicator — SDK-authoritative usage", () => {
     expect(node).toHaveAttribute("data-max-tokens", "8000")
   })
 
-  it("renders the per-category breakdown from the SDK snapshot", () => {
-    // Rendered directly: the breakdown lives inside the hover-card content which
-    // the vendored <Context> only mounts when open (mirrors how UsageRow /
-    // ContextWindowHeader are unit-tested in isolation).
-    render(
-      <SdkBreakdown
-        usage={{
-          totalTokens: 1000,
-          maxTokens: 10000,
-          percentage: 0.1,
-          systemPromptSections: [{ name: "base", tokens: 300 }],
-          mcpTools: [{ name: "t", serverName: "s", tokens: 200 }],
-          memoryFiles: [],
-        }}
-      />
-    )
-    expect(screen.getByTestId("sdk-breakdown")).toBeInTheDocument()
-    expect(screen.getByText("breakdownTitle")).toBeInTheDocument()
-    // Zero-token groups (memoryFiles) are hidden; populated groups render.
-    expect(screen.getByText("breakdownSystemPrompt")).toBeInTheDocument()
-    expect(screen.getByText("breakdownMcp")).toBeInTheDocument()
-    expect(screen.queryByText("breakdownMemory")).toBeNull()
+  it("shows the trigger as unknown, not 0%, when nothing reported usage", () => {
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    const trigger = screen.getByTestId("context-trigger")
+    expect(trigger).toHaveAttribute("data-reported", "false")
+    expect(trigger).toHaveTextContent("—")
+    expect(trigger).not.toHaveTextContent("0%")
+    expect(screen.getByTestId("context-ring")).toHaveAttribute("data-muted", "true")
   })
 
-  it("renders nothing when every breakdown group is zero/absent", () => {
-    const { container } = render(
-      <SdkBreakdown usage={{ totalTokens: 0, maxTokens: 10000, percentage: 0 }} />
-    )
-    expect(container.firstChild).toBeNull()
+  it("sizes the window from the window the external agent itself reported", () => {
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([
+          assistantWithUsage("a-1", { contextTokens: 136_000, contextWindow: 272_000 }),
+        ])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    // Not the catalog's 1M guess for the session model.
+    expect(node).toHaveAttribute("data-max-tokens", "272000")
+    expect(node).toHaveAttribute("data-used-tokens", "136000")
   })
 
-  it("hides the breakdown entirely in simplified usage-display mode", () => {
-    const { container } = render(
-      <SdkBreakdown
-        mode="simplified"
-        usage={{
-          totalTokens: 1000,
-          maxTokens: 10000,
-          percentage: 0.1,
-          systemPromptSections: [{ name: "base", tokens: 300 }],
-        }}
-      />
+  it("never claims the sidecar's compaction policy over an external turn", () => {
+    act(() => {
+      useChatStore.getState().replaceMessages([
+        {
+          id: "a-1",
+          role: "assistant",
+          parts: [{ type: "text", text: "hi" }],
+          metadata: {
+            run: { providerId: "external" },
+            usage: { contextTokens: 136_000, contextWindow: 272_000 },
+          },
+        } as unknown as UIMessage,
+      ])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(node).toHaveAttribute("data-compaction", "agent-owned")
+    expect(node).toHaveAttribute("data-window-source", "agent")
+  })
+
+  it("uses the built-in threshold for a turn the sidecar ran", () => {
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 100, outputTokens: 20 })])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    expect(screen.getByTestId("context-usage-indicator")).toHaveAttribute(
+      "data-compaction",
+      "builtin"
     )
-    expect(container.firstChild).toBeNull()
   })
 
   it("falls back to the estimate when no SDK snapshot is supplied", () => {
     render(<ContextUsageIndicator modelId="claude-sonnet-4-6" sdkUsage={null} />)
     const node = screen.getByTestId("context-usage-indicator")
     expect(node).toHaveAttribute("data-max-tokens", "1000000")
-    expect(screen.queryByTestId("sdk-breakdown")).toBeNull()
+  })
+})
+
+const totals = (over: Partial<SessionUsageTotals> = {}): SessionUsageTotals => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  totalCostUsd: 0,
+  turns: 0,
+  ...over,
+})
+
+describe("ContextTurnSummary", () => {
+  it("keeps a value in every row before the first reply lands", () => {
+    render(<ContextTurnSummary usage={null} session={totals()} />)
+    // The regression: these three rows used to render a label with an empty
+    // column next to it whenever the token count was zero/absent.
+    for (const label of ["usageInput", "usageOutput", "usageCached"]) {
+      const row = screen.getByText(label).parentElement
+      expect(row?.textContent).toBe(`${label}—`)
+    }
+    expect(screen.getByText("noUsageYet")).toBeInTheDocument()
+    expect(screen.getByTestId("session-total")).toHaveTextContent("—")
+  })
+
+  it("renders a measured zero as 0, not as unknown", () => {
+    render(
+      <ContextTurnSummary
+        usage={{ inputTokens: 120, outputTokens: 0 }}
+        session={totals({ inputTokens: 120, turns: 1 })}
+      />
+    )
+    expect(screen.getByText("usageOutput").parentElement?.textContent).toBe("usageOutput0")
+    expect(screen.getByText("usageInput").parentElement?.textContent).toContain("120")
+  })
+
+  it("prints an absent field as unknown even when a sibling field is present", () => {
+    // ACP reports occupancy with no prompt/completion split; rendering the
+    // missing halves as 0 would claim the turn spent nothing.
+    render(
+      <ContextTurnSummary
+        usage={{ contextTokens: 136_000, contextWindow: 272_000 }}
+        session={totals({ turns: 1 })}
+        assistantTurns={1}
+      />
+    )
+    for (const label of ["usageInput", "usageOutput", "usageCached"]) {
+      expect(screen.getByText(label).parentElement?.textContent).toBe(`${label}—`)
+    }
+    expect(screen.getByTestId("session-total")).toHaveTextContent("—")
+  })
+
+  it("sums cache reads and cache writes into the cached row", () => {
+    render(
+      <ContextTurnSummary
+        usage={{ cacheReadInputTokens: 1_200, cacheCreationInputTokens: 800 }}
+        session={totals({ turns: 1 })}
+      />
+    )
+    // Previously always blank: the vendored slot read a field the indicator
+    // never populated, so the cache row rendered `null` at any size.
+    expect(screen.getByText("usageCached").parentElement?.textContent).toContain("2K")
+  })
+
+  it("prices a slice when the model is known and drops the hint when it is not", () => {
+    const { rerender } = render(
+      <ContextTurnSummary
+        usage={{ inputTokens: 1_000_000 }}
+        session={totals({ turns: 1 })}
+        modelId="claude-sonnet-4-5"
+        providerId="anthropic"
+      />
+    )
+    expect(screen.getByText("usageInput").parentElement?.textContent).toMatch(/\$/)
+    rerender(
+      <ContextTurnSummary usage={{ inputTokens: 1_000_000 }} session={totals({ turns: 1 })} />
+    )
+    expect(screen.getByText("usageInput").parentElement?.textContent).not.toMatch(/\$/)
+  })
+
+  it("distinguishes an unreporting runtime from a session that has not run", () => {
+    // External-agent turns land with no usage metadata at all; calling that
+    // "nothing has happened yet" mislabels which fact is missing.
+    const { rerender } = render(<ContextTurnSummary usage={null} session={totals()} />)
+    expect(screen.getByText("noUsageYet")).toBeInTheDocument()
+    rerender(<ContextTurnSummary usage={null} session={totals()} assistantTurns={3} />)
+    expect(screen.getByText("usageNotReported")).toBeInTheDocument()
+  })
+
+  it("drops the empty-state hint once a turn has been recorded", () => {
+    render(
+      <ContextTurnSummary
+        usage={{ inputTokens: 10, outputTokens: 4 }}
+        session={totals({ inputTokens: 10, outputTokens: 4, turns: 2 })}
+      />
+    )
+    expect(screen.queryByText("noUsageYet")).toBeNull()
+    expect(screen.queryByText("usageNotReported")).toBeNull()
+    expect(screen.getByTestId("session-total")).toHaveTextContent("14")
   })
 })

@@ -67,3 +67,34 @@ export function attachRunMetadataToLastAssistant(
   }
   return messages
 }
+
+/**
+ * Attach a turn's token accounting to the newest assistant message.
+ *
+ * The built-in sidecar lane gets `metadata.usage` from the SDK `result` event
+ * (`lib/claude/adapter.ts`); the external-agent lane had no equivalent, so its
+ * turns reached the transcript with no usage at all and every consumer — the
+ * context indicator, the session cost, `/context` — read them as a session that
+ * had spent nothing. Merges rather than replaces, so a partially-populated
+ * usage object already on the message keeps its fields.
+ */
+export function attachUsageToLastAssistant(
+  messages: UIMessage[],
+  usage: Record<string, unknown>
+): UIMessage[] {
+  const entries = Object.entries(usage).filter(([, value]) => value !== undefined)
+  if (entries.length === 0) return messages
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== "assistant") continue
+    const metadata = (message.metadata as Record<string, unknown> | undefined) ?? {}
+    const existing = (metadata.usage as Record<string, unknown> | undefined) ?? {}
+    const next = messages.slice()
+    next[index] = {
+      ...message,
+      metadata: { ...metadata, usage: { ...existing, ...Object.fromEntries(entries) } },
+    }
+    return next
+  }
+  return messages
+}
