@@ -51,7 +51,7 @@ describe("CapabilityMatrixCard", () => {
     )
     const unavailable = screen.getByTestId("capability-matrix-unavailable")
     expect(unavailable).toHaveTextContent("send.file")
-    expect(unavailable).toHaveTextContent("reasons.missing_oauth_scope")
+    expect(unavailable).toHaveTextContent("reason.missing_oauth_scope")
     expect(unavailable).toHaveTextContent("files:write")
   })
 
@@ -70,7 +70,7 @@ describe("CapabilityMatrixCard", () => {
   it("names the setting that turned a capability off", () => {
     render(<CapabilityMatrixCard row={row({ type: "slack" })} />)
     const unavailable = screen.getByTestId("capability-matrix-unavailable")
-    expect(unavailable).toHaveTextContent("reasons.instance_setting_off")
+    expect(unavailable).toHaveTextContent("reason.instance_setting_off")
     expect(unavailable).toHaveTextContent("assistantAppEnabled")
   })
 
@@ -78,7 +78,7 @@ describe("CapabilityMatrixCard", () => {
     render(<CapabilityMatrixCard row={row({ type: "discord", transportMode: "webhook" })} />)
     const unavailable = screen.getByTestId("capability-matrix-unavailable")
     expect(unavailable).toHaveTextContent("presence.status")
-    expect(unavailable).toHaveTextContent("reasons.transport_unsupported")
+    expect(unavailable).toHaveTextContent("reason.transport_unsupported")
   })
 
   it("names the upstream action a OneBot server does not implement", () => {
@@ -91,7 +91,7 @@ describe("CapabilityMatrixCard", () => {
       />
     )
     const unavailable = screen.getByTestId("capability-matrix-unavailable")
-    expect(unavailable).toHaveTextContent("reasons.upstream_impl_unsupported")
+    expect(unavailable).toHaveTextContent("reason.upstream_impl_unsupported")
     expect(unavailable).toHaveTextContent("set_msg_emoji_like")
   })
 
@@ -117,5 +117,26 @@ describe("CapabilityMatrixCard", () => {
     render(<CapabilityMatrixCard row={row({ type: "wechat-oa" })} />)
     expect(screen.getByTestId("capability-matrix-available")).toHaveTextContent("send.text")
     expect(screen.queryByTestId("capability-matrix-unavailable")).toBeNull()
+  })
+
+  /**
+   * A narrow Slack grant suppresses five capabilities for the same missing
+   * scope. Every row still names its own capability and reason; five stacked
+   * copies of the remedy read as five separate problems.
+   */
+  it("prints the remedy once per cause, not once per capability", () => {
+    render(
+      <CapabilityMatrixCard
+        row={row({
+          type: "slack",
+          settings: { connectedScopes: { scopes: ["chat:write"], grantedAtMs: 1 } },
+        })}
+      />
+    )
+    const text = screen.getByTestId("capability-matrix-unavailable").textContent ?? ""
+    const remedies = text.split("nextStep.missing_oauth_scope").length - 1
+    const reasons = text.split("reason.missing_oauth_scope").length - 1
+    expect(reasons).toBeGreaterThan(1)
+    expect(remedies).toBe(1)
   })
 })

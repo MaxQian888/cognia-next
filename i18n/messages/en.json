@@ -6871,6 +6871,22 @@
         }
       }
     },
+    "capability": {
+      "nextStep": {
+        "instance_setting_off": "Turn that setting on to use it.",
+        "missing_oauth_scope": "Re-authorize this bot to add the missing access.",
+        "transport_unsupported": "Switch this bot's connection method to one that carries it.",
+        "upstream_impl_unsupported": "Point this bot at a server that implements it, or upgrade the one it uses."
+      },
+      "reason": {
+        "instance_setting_off": "Turned off by this bot's “{detail}” setting.",
+        "missing_oauth_scope": "The connector was not granted the access this needs ({detail}).",
+        "not_declared": "This platform does not offer it.",
+        "scene_unsupported": "The platform only offers this in: {detail}.",
+        "transport_unsupported": "This bot connects over a method that has no channel for it — it needs {detail}.",
+        "upstream_impl_unsupported": "The server this bot connects to does not implement {detail}."
+      }
+    },
     "identityMerge": {
       "cancel": "Cancel",
       "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
@@ -28069,13 +28085,6 @@
         },
         "capabilityMatrix": {
           "availableLabel": "Available",
-          "reasons": {
-            "instance_setting_off": "Turned off by this bot's “{detail}” setting.",
-            "missing_oauth_scope": "The connector was not granted the access this needs ({detail}). Re-authorize it to add them.",
-            "scene_unsupported": "The platform only offers this in: {detail}.",
-            "transport_unsupported": "Needs the {detail} transport; this bot uses a different one.",
-            "upstream_impl_unsupported": "The server this bot connects to does not implement {detail}."
-          },
           "scopeHint": "Resolved for this bot as configured. Some capabilities are also limited to particular conversations, and a few depend on the individual message.",
           "title": "What this bot can do",
           "unavailableLabel": "Not available on this bot"

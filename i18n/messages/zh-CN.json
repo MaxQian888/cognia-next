@@ -6871,6 +6871,22 @@
         }
       }
     },
+    "capability": {
+      "nextStep": {
+        "instance_setting_off": "打开该设置即可使用。",
+        "missing_oauth_scope": "重新授权此机器人以补上缺少的权限。",
+        "transport_unsupported": "把此机器人的连接方式换成能承载它的那一种。",
+        "upstream_impl_unsupported": "把此机器人指向一个实现了它的服务端，或升级现有的那个。"
+      },
+      "reason": {
+        "instance_setting_off": "被此机器人的「{detail}」设置关闭了。",
+        "missing_oauth_scope": "连接器没有获得所需的授权（{detail}）。",
+        "not_declared": "该平台不提供此能力。",
+        "scene_unsupported": "该平台只在以下场景提供此能力：{detail}。",
+        "transport_unsupported": "此机器人使用的连接方式没有承载它的通道 —— 它需要 {detail}。",
+        "upstream_impl_unsupported": "此机器人连接的服务端未实现 {detail}。"
+      }
+    },
     "identityMerge": {
       "cancel": "取消",
       "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",
@@ -28069,13 +28085,6 @@
         },
         "capabilityMatrix": {
           "availableLabel": "可用",
-          "reasons": {
-            "instance_setting_off": "被此机器人的「{detail}」设置关闭了。",
-            "missing_oauth_scope": "连接器没有获得所需的授权（{detail}）。重新授权即可补上。",
-            "scene_unsupported": "该平台只在以下场景提供此能力：{detail}。",
-            "transport_unsupported": "需要 {detail} 传输方式，而此机器人使用的是另一种。",
-            "upstream_impl_unsupported": "此机器人连接的服务端未实现 {detail}。"
-          },
           "scopeHint": "按此机器人的当前配置解析。部分能力还会限定在特定会话中，少数取决于具体的那条消息。",
           "title": "这个机器人能做什么",
           "unavailableLabel": "此机器人不可用"

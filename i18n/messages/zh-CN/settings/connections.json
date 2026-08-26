@@ -209,14 +209,7 @@
       "title": "这个机器人能做什么",
       "unavailableLabel": "此机器人不可用",
       "availableLabel": "可用",
-      "scopeHint": "按此机器人的当前配置解析。部分能力还会限定在特定会话中，少数取决于具体的那条消息。",
-      "reasons": {
-        "missing_oauth_scope": "连接器没有获得所需的授权（{detail}）。重新授权即可补上。",
-        "upstream_impl_unsupported": "此机器人连接的服务端未实现 {detail}。",
-        "instance_setting_off": "被此机器人的「{detail}」设置关闭了。",
-        "scene_unsupported": "该平台只在以下场景提供此能力：{detail}。",
-        "transport_unsupported": "需要 {detail} 传输方式，而此机器人使用的是另一种。"
-      }
+      "scopeHint": "按此机器人的当前配置解析。部分能力还会限定在特定会话中，少数取决于具体的那条消息。"
     }
   },
   "aiBindingDefaults": {

@@ -16,6 +16,18 @@
  * unavailable list is the actionable half, so it renders first and names the
  * remedy.
  *
+ * The words come from `components/connectors/capability-notice.tsx`, which is
+ * the single vocabulary for the six causes. This card used to own a private
+ * copy under its own namespace — so the same missing Slack scope read as a
+ * sentence here and as a vanished button in the Inbox, and only the screen
+ * nobody visits while troubleshooting had the sentence.
+ *
+ * The next step is printed once per CAUSE, not once per capability. A narrow
+ * Slack grant suppresses five capabilities for the same missing scope, and
+ * five stacked copies of "re-authorize this bot" read as five problems. The
+ * reason still repeats — it names a different capability each time — but the
+ * remedy is a property of the cause.
+ *
  * Capability ids and scope names are shown verbatim, the same way
  * `ConnectedScopesCard` shows raw scopes: they are identifiers the operator
  * matches against the platform's own console, and translating them would make
@@ -26,9 +38,9 @@ import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useCapabilityUnavailableText } from "@/components/connectors/capability-notice"
 import { effectiveCapabilitiesForRow } from "@/lib/connectors/effective-capabilities"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import type { CapabilitySuppressionReason } from "@/types/connectors/effective-capability"
 
 export interface CapabilityMatrixCardProps {
   row: AdapterInstanceRow
@@ -36,14 +48,13 @@ export interface CapabilityMatrixCardProps {
 
 export function CapabilityMatrixCard({ row }: CapabilityMatrixCardProps) {
   const t = useTranslations("settings.connections.adapters.capabilityMatrix")
+  const describe = useCapabilityUnavailableText()
   const snapshot = effectiveCapabilitiesForRow(row)
+  const remedyShown = new Set<string>()
 
   // A platform with no declared capabilities (a plugin connector that declares
   // none, or a planned-but-disabled platform) has nothing to say here.
   if (snapshot.declared.length === 0) return null
-
-  const reasonText = (reason: CapabilitySuppressionReason, detail: string): string =>
-    t(`reasons.${reason}`, { detail })
 
   return (
     <Card data-testid="capability-matrix-card">
@@ -55,16 +66,22 @@ export function CapabilityMatrixCard({ row }: CapabilityMatrixCardProps) {
           <div className="space-y-1.5" data-testid="capability-matrix-unavailable">
             <p className="font-medium text-muted-foreground">{t("unavailableLabel")}</p>
             <ul className="space-y-1.5">
-              {snapshot.suppressed.map((entry) => (
-                <li key={entry.capability} className="flex flex-col gap-0.5">
-                  <Badge variant="outline" className="w-fit font-mono text-[10px]">
-                    {entry.capability}
-                  </Badge>
-                  <span className="text-[11px] text-muted-foreground">
-                    {reasonText(entry.reason, entry.detail)}
-                  </span>
-                </li>
-              ))}
+              {snapshot.suppressed.map((entry) => {
+                const { reason, nextStep } = describe(entry.reason, entry.detail)
+                const firstOfCause = !remedyShown.has(entry.reason)
+                remedyShown.add(entry.reason)
+                return (
+                  <li key={entry.capability} className="flex flex-col gap-0.5">
+                    <Badge variant="outline" className="w-fit font-mono text-[10px]">
+                      {entry.capability}
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground">
+                      {reason}
+                      {nextStep && firstOfCause ? ` ${nextStep}` : null}
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         )}
