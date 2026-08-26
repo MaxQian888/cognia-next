@@ -415,5 +415,44 @@ that is already granted.
    principals card falls back to showing the raw id rather than a word that
    says nothing, the same call the device console's owner row makes.
 
-| **6** | `share-server` gains tenancy and identity; `ops-controller` gains RLS | `services/share-server/{src,worker}`, `crates/cognia-ops-controller/migrations/` |
+| **6** | ✅ `share-server` gains tenancy and identity; `ops-controller` gains RLS | Controller: `0002_tenant_isolation.sql` (ENABLE + FORCE on all twelve tables) and every statement inside a `tenant_scope` transaction. Share: `org_id`/`creator_user_id` columns, grant verification in both the Rust server and the Worker, and a grant-only `/v1/orgs/{org}/shares` plane. |
 | **7** | Workspace, Plans and Runs on the collaboration plane | follows Batch 3 |
+
+**Batch 6 notes.** Four things worth recording.
+
+1. **The controller's `WHERE tenant_id = $1` was the isolation, and that was
+   the bug.** Every table already carried the column and every query already
+   filtered on it, so one forgotten predicate in any of ~30 statements served
+   another tenant's servers, logs and operations — and only review stood
+   between that and production. `FORCE` matters as much as `ENABLE`: the
+   controller connects as the table owner, and an owner is exempt from a
+   merely-ENABLEd policy, so the migration would have been theatre.
+
+2. **Three statements cannot be scoped, and they are named rather than
+   tolerated.** Consuming an enrollment token and authenticating an agent are
+   credential lookups where the tenant is the query's *output*; the lease sweep
+   is cross-tenant by definition. They take an explicit `app.cross_tenant`
+   escape and a test pins that exactly three callers use it. `heartbeat_operation`
+   and `transition_operation` did *not* take that escape — the agent gateway
+   already holds the agent's authenticated tenant, so they gained a parameter
+   instead.
+
+3. **The grant verifier now exists three times, and that is not a mistake.**
+   `.github/workflows/images.yml` builds both services with their own directory
+   as the Docker build context, so a `path = "../../crates/…"` dependency
+   resolves under `cargo test` and fails inside the image — the same constraint
+   §7 already recorded for `services/diagnostic-server`. The Worker is
+   TypeScript besides. So the format is duplicated in `cognia-share-core`, in
+   the Worker, and in `cognia-tenant-auth` which owns it, and all three verify
+   one **frozen wire vector** checked in beside the owner. Duplicated code that
+   nothing pins drifts, and this drift would surface only in production, as
+   "sharing stopped working".
+
+4. **The app cannot present a grant yet, and no client path was built to
+   pretend otherwise.** `lib/share/client.ts` sends the configured upload
+   secret; obtaining a grant needs a configured collaboration endpoint, which
+   is the same thing Batch 5 found missing for `pullCollabIssues`. The server
+   half is complete and inert until Batch 7 gives the plane a configuration
+   surface — which is why the legacy secret keeps working and pre-tenancy
+   shares are left alone rather than backfilled with a guess.
+

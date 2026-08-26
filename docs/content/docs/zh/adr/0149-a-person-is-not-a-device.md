@@ -349,5 +349,34 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
    底层都会拒绝。本批之前写下的行保留其 `acct_…` 值；principals 卡片回落显示裸 id，
    而不是一个什么也没说的词——与设备控制台归属行是同一个判断。
 
-| **6** | `share-server` 补租户与身份；`ops-controller` 补 RLS | `services/share-server/{src,worker}`、`crates/cognia-ops-controller/migrations/` |
+| **6** | ✅ `share-server` 补租户与身份；`ops-controller` 补 RLS | 控制器：`0002_tenant_isolation.sql`（12 张表全部 ENABLE + FORCE），每条语句都跑在 `tenant_scope` 事务里。分享：`org_id`/`creator_user_id` 两列、Rust 服务与 Worker 双侧的 grant 校验、以及仅接受 grant 的 `/v1/orgs/{org}/shares` 面。 |
 | **7** | Workspace、Plans 与 Runs 上协作面 | 承接 Batch 3 |
+
+**Batch 6 补记。** 四件值得记录的事。
+
+1. **控制器的隔离一直就是那句 `WHERE tenant_id = $1`，而这正是问题所在。** 每张表都有
+   这一列、每条查询都在过滤它，所以 ~30 条语句里漏掉任何一处，就会把别的租户的服务器、
+   日志和操作端出去——挡在它和生产之间的只有 code review。`FORCE` 和 `ENABLE` 一样
+   关键：控制器以表的 owner 身份连接，而 owner 对「仅 ENABLE」的策略是豁免的，那样这份
+   迁移就只是做戏。
+
+2. **有三条语句无法被 scope，它们被点名，而不是被容忍。** 消费入册令牌与鉴定 agent 都是
+   **凭据查找**——租户是查询的**输出**而不是输入；租约清扫按定义就是跨租户的。它们走一个
+   显式的 `app.cross_tenant` 出口，并且有测试钉住「恰好三个调用方」。
+   `heartbeat_operation` 与 `transition_operation` **没有**走这个出口——agent 网关本来
+   就握着该 agent 已鉴定的租户，所以它们改成多收一个参数。
+
+3. **grant 校验器现在存在三份，这不是失误。** `.github/workflows/images.yml` 用各自的
+   目录作为 Docker build context 构建这两个服务，所以 `path = "../../crates/…"` 依赖在
+   `cargo test` 下能解析、进了镜像就失败——§7 已经为 `services/diagnostic-server` 记录过
+   同样的约束；Worker 还是 TypeScript。于是格式在 `cognia-share-core`、Worker、以及拥有
+   它的 `cognia-tenant-auth` 里各存一份，三者共同校验一个**冻结的线格式向量**（放在拥有
+   者旁边）。没人钉住的重复代码一定会漂移，而这种漂移只会在生产暴露，且只表现为
+   「分享突然不能用了」。
+
+4. **应用端目前还给不出 grant，我也没有为此造一条假装可用的路径。**
+   `lib/share/client.ts` 发的是配置好的上传密钥；要拿到 grant 需要一个已配置的协作面端点
+   ——这正是 Batch 5 在 `pullCollabIssues` 上发现缺失的同一件事。服务端这一半是完整的，
+   在 Batch 7 给协作面配上配置面之前处于待用状态——这也是为什么旧密钥继续可用、
+   而租户化之前的分享被原样保留而不是用猜测回填。
+
