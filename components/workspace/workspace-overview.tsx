@@ -40,6 +40,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { WorkspaceCapabilities } from "./workspace-capabilities"
 import { WorkspaceMembers } from "./workspace-members"
+import { WorkspaceActivity } from "./workspace-activity"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 
 /** Trailing-separator-insensitive, matching `lib/db/trusted-workspaces.ts`. */
@@ -252,6 +253,7 @@ export function WorkspaceOverview() {
               to anybody but themselves. Reads the projection, so it never
               blocks on the network. */}
           <WorkspaceMembers workspaceId={workspaceId} />
+          <WorkspaceActivity workspaceId={workspaceId} />
         </TabsContent>
 
         <TabsContent value="environments" className="mt-0" data-testid="workspace-environments">

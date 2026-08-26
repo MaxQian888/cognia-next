@@ -257,5 +257,41 @@
       "member": "Member",
       "viewer": "Viewer"
     }
+  },
+  "activity": {
+    "title": "Team activity",
+    "empty": "No shared plans or runs in this workspace yet.",
+    "plans": "Plans",
+    "runs": "Runs",
+    "progress": "{completed} of {total} steps",
+    "noSteps": "No steps",
+    "startedBy": "Started by {name}",
+    "unattached": "Not attached to an issue or plan",
+    "artifactsAria": "Links this run produced",
+    "planStatusAria": "Plan status",
+    "runStatusAria": "Run status",
+    "planStatus": {
+      "draft": "Draft",
+      "awaiting_approval": "Awaiting approval",
+      "approved": "Approved",
+      "executing": "Executing",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "runStatus": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "runKind": {
+      "agent-task": "Agent task",
+      "agent-team": "Agent team",
+      "github-loop": "GitHub loop",
+      "plan": "Plan"
+    }
   }
 }

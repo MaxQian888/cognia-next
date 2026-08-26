@@ -257,5 +257,41 @@
       "member": "成员",
       "viewer": "只读"
     }
+  },
+  "activity": {
+    "title": "团队动态",
+    "empty": "这个工作区还没有共享的计划或运行。",
+    "plans": "计划",
+    "runs": "运行",
+    "progress": "{completed} / {total} 步",
+    "noSteps": "暂无步骤",
+    "startedBy": "由 {name} 发起",
+    "unattached": "未关联到议题或计划",
+    "artifactsAria": "本次运行产出的链接",
+    "planStatusAria": "计划状态",
+    "runStatusAria": "运行状态",
+    "planStatus": {
+      "draft": "草稿",
+      "awaiting_approval": "待审批",
+      "approved": "已审批",
+      "executing": "执行中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "failed": "已失败",
+      "cancelled": "已取消"
+    },
+    "runStatus": {
+      "queued": "排队中",
+      "running": "运行中",
+      "succeeded": "成功",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "runKind": {
+      "agent-task": "Agent 任务",
+      "agent-team": "Agent 团队",
+      "github-loop": "GitHub 循环",
+      "plan": "计划"
+    }
   }
 }

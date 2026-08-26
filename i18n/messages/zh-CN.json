@@ -44680,6 +44680,42 @@
       "undoFollow": "撤销",
       "unpin": "取消置顶 {name}",
       "untrustedHint": "未受信任的工作区"
+    },
+    "activity": {
+      "artifactsAria": "本次运行产出的链接",
+      "empty": "这个工作区还没有共享的计划或运行。",
+      "noSteps": "暂无步骤",
+      "planStatus": {
+        "approved": "已审批",
+        "awaiting_approval": "待审批",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "draft": "草稿",
+        "executing": "执行中",
+        "failed": "已失败",
+        "paused": "已暂停"
+      },
+      "planStatusAria": "计划状态",
+      "plans": "计划",
+      "progress": "{completed} / {total} 步",
+      "runKind": {
+        "agent-task": "Agent 任务",
+        "agent-team": "Agent 团队",
+        "github-loop": "GitHub 循环",
+        "plan": "计划"
+      },
+      "runStatus": {
+        "cancelled": "已取消",
+        "failed": "失败",
+        "queued": "排队中",
+        "running": "运行中",
+        "succeeded": "成功"
+      },
+      "runStatusAria": "运行状态",
+      "runs": "运行",
+      "startedBy": "由 {name} 发起",
+      "title": "团队动态",
+      "unattached": "未关联到议题或计划"
     }
   },
   "worktreeWorkflow": {

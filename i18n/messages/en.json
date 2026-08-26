@@ -44680,6 +44680,42 @@
       "undoFollow": "Undo",
       "unpin": "Unpin {name}",
       "untrustedHint": "Untrusted workspace"
+    },
+    "activity": {
+      "artifactsAria": "Links this run produced",
+      "empty": "No shared plans or runs in this workspace yet.",
+      "noSteps": "No steps",
+      "planStatus": {
+        "approved": "Approved",
+        "awaiting_approval": "Awaiting approval",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "draft": "Draft",
+        "executing": "Executing",
+        "failed": "Failed",
+        "paused": "Paused"
+      },
+      "planStatusAria": "Plan status",
+      "plans": "Plans",
+      "progress": "{completed} of {total} steps",
+      "runKind": {
+        "agent-task": "Agent task",
+        "agent-team": "Agent team",
+        "github-loop": "GitHub loop",
+        "plan": "Plan"
+      },
+      "runStatus": {
+        "cancelled": "Cancelled",
+        "failed": "Failed",
+        "queued": "Queued",
+        "running": "Running",
+        "succeeded": "Succeeded"
+      },
+      "runStatusAria": "Run status",
+      "runs": "Runs",
+      "startedBy": "Started by {name}",
+      "title": "Team activity",
+      "unattached": "Not attached to an issue or plan"
     }
   },
   "worktreeWorkflow": {
