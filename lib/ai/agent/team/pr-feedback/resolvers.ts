@@ -14,6 +14,7 @@
  */
 
 import { gitDefaultBranch, gitRemotes } from "@/lib/git/commands"
+import { parseForgeRemote } from "@/lib/stack/forge/remote"
 import { getOctokitForRepo } from "@/lib/github/octokit-factory"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
@@ -27,13 +28,17 @@ import {
   type RunReview,
 } from "./reviewer"
 
-/** Parse a GitHub "owner/name" from an https or ssh remote URL. */
+/**
+ * Parse a GitHub "owner/name" from an https or ssh remote URL.
+ *
+ * Delegates to the stack engine's parser rather than carrying a second regex:
+ * that one also distinguishes "a host we have no adapter for" from "not a
+ * remote at all", and two parsers that disagree about `github.acme.com` is how
+ * a token ends up at the wrong host.
+ */
 export function parseGitHubRepo(url: string): string | null {
-  if (!url) return null
-  const cleaned = url.trim().replace(/\.git$/, "")
-  const m = /github\.com[:/]+([^/]+)\/([^/]+?)$/i.exec(cleaned)
-  if (!m) return null
-  return `${m[1]}/${m[2]}`
+  const parsed = parseForgeRemote(url)
+  return parsed?.forge === "github" ? parsed.fullName : null
 }
 
 export interface ResolveTeamRepoDeps {
