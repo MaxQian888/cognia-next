@@ -517,7 +517,7 @@ const HOST_CATEGORIES = [
     description: "Host capabilities, service secrets, backups, sync, logs, and bridge administration.",
     skill: "cognia-host-system",
     pattern:
-      /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|logs_|perf_|secret_|sync_)/,
+      /^(app_|backup_|companion_|device_|external_bridge_|host_|keyring_|langfuse_|logs_|perf_|secret_|sync_)/,
   },
 ]
 
@@ -537,6 +537,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^(?:agent_task_|team_task_)/, "agent-tasks"],
   [/^app_settings_/, "settings"],
   [/^automation_consent_/, "automation-consent"],
+  [/^langfuse_/, "langfuse-tracing"],
   [/^background_job_/, "background-jobs"],
   [/^background_monitor_/, "background-monitors"],
   [/^external_agent_|^(?:spawn|send_to|kill)_external_agent$|^get_external_agent_status$/, "external-agents"],

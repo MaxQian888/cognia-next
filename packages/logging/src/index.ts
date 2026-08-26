@@ -50,6 +50,7 @@ export {
   shutdownLogger,
 } from "./core"
 export { clearRecentErrorLogs, getRecentErrorLogs, subscribeRecentErrorLogs } from "./recent-errors"
+export { installConsoleBridge, type InstallConsoleBridgeOptions } from "./console-bridge"
 
 export {
   OBSERVABILITY_EVENT_V1_SCHEMA,
@@ -65,6 +66,15 @@ export {
   type ObservabilityRuntime,
   type StructuredLogAdapterContext,
 } from "./observability-event"
+
+export {
+  structuredLogEntriesToOtlpLogs,
+  type OtlpLogAnyValue,
+  type OtlpLogAttribute,
+  type OtlpLogRecord,
+  type OtlpLogResourceMetadata,
+  type OtlpResourceLogs,
+} from "./otlp-log-record"
 
 export {
   OBSERVABILITY_GOLDEN_FIXTURES,

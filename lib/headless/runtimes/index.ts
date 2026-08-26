@@ -62,6 +62,15 @@
  * - `companion-outbound-runner` — drains phone-originated writes from the
  *   browser-local IndexedDB queue into the paired desktop; a brain is the
  *   receiving authority and never owns that client-side queue.
+ * - renderer `LangfuseTransport` — batches local `AgentTraceSpan` rows through
+ *   the authenticated companion transport and is therefore client-owned. A
+ *   brain exports its AI SDK observations from the sidecar's process-wide
+ *   Langfuse span processor; account-bound companion batches terminate in the
+ *   Rust service-plane `langfuse_trace_ingest` arm.
+ * - renderer `instrumentation-client` console bridge and `OtlpLogTransport` —
+ *   capture WebView/client logs and share the desktop Host or credentialless
+ *   Collector egress policy. Headless processes own their process logging and
+ *   OTel exporters directly; they do not bootstrap the renderer logger graph.
  * - `storage-persistence` — `navigator.storage.persist()` is a browser API.
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main

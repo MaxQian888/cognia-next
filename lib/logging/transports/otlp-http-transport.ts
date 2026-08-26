@@ -17,15 +17,15 @@
  */
 
 import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/types/logging"
+import { emitLoggerDiagnostic } from "@cognia/logging/core"
 import { recordDrop, type LogDropCounts, type LogDropReason } from "@cognia/logging/types/transport"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { type OtlpResourceMetadata, spansToOtlp } from "@cognia/agent-trace/span-to-otlp"
 
-const consoleApi = globalThis.console
-
 const OTLP_STRUCTURAL_STRING_FIELDS = new Set([
+  "id",
   "traceId",
   "spanId",
   "parentSpanId",
@@ -66,6 +66,8 @@ export interface OtlpHttpTransportOptions {
   resource?: OtlpResourceMetadata
   /** Buffer threshold before auto-flush. */
   bufferSize?: number
+  /** Hard in-memory queue bound; oldest spans are evicted under pressure. */
+  maxQueueEntries?: number
   /** Background flush interval in ms. */
   flushInterval?: number
   /** Retry attempts on transient failure before dropping a batch. */
@@ -74,6 +76,14 @@ export interface OtlpHttpTransportOptions {
   retryBaseMs?: number
   /** Capture prompt/tool content. Default false (mirrors Dexie transport). */
   captureContent?: boolean
+  /** Destination policy for independently consenting to content by span role. */
+  spanContentPolicy?: (span: AgentTraceSpan) => boolean
+  /** Destination-owned semantic filter, evaluated before buffering or dedupe. */
+  spanFilter?: (span: AgentTraceSpan) => boolean
+  /** Destination serializer; defaults to the backend-neutral OTLP mapping. */
+  serializeBatch?: (spans: AgentTraceSpan[], resource: OtlpResourceMetadata) => unknown
+  /** Drop repeated immutable span IDs before they can be exported twice. */
+  deduplicateSpanIds?: boolean
   /** Per-field byte cap when content capture is on. */
   maxPreviewBytes?: number
   /** Network timeout per request. */
@@ -90,6 +100,7 @@ export interface OtlpHttpTransportOptions {
 
 const DEFAULT_OPTIONS = {
   bufferSize: 32,
+  maxQueueEntries: 2048,
   flushInterval: 5_000,
   maxRetries: 3,
   retryBaseMs: 500,
@@ -104,7 +115,15 @@ export class OtlpHttpTransport implements Transport {
   private options: Required<
     Omit<
       OtlpHttpTransportOptions,
-      "fetchImpl" | "sleepImpl" | "randomImpl" | "headers" | "resource" | "transportName"
+      | "fetchImpl"
+      | "sleepImpl"
+      | "randomImpl"
+      | "headers"
+      | "resource"
+      | "transportName"
+      | "spanContentPolicy"
+      | "spanFilter"
+      | "serializeBatch"
     >
   > & {
     headers: Record<string, string>
@@ -115,6 +134,10 @@ export class OtlpHttpTransport implements Transport {
   private fetchImpl: typeof fetch
   private sleepImpl: (ms: number) => Promise<void>
   private randomImpl: () => number
+  private spanContentPolicy: ((span: AgentTraceSpan) => boolean) | undefined
+  private spanFilter: ((span: AgentTraceSpan) => boolean) | undefined
+  private serializeBatch: (spans: AgentTraceSpan[], resource: OtlpResourceMetadata) => unknown
+  private readonly seenSpanIds = new Map<string, true>()
   private lastSuccessAt: string | undefined
   private lastFailureAt: string | undefined
   private lastError: string | undefined
@@ -147,10 +170,15 @@ export class OtlpHttpTransport implements Transport {
       headers: { ...(options.headers ?? {}) },
       resource: options.resource ?? { serviceName: "cognia-ai" },
       bufferSize: options.bufferSize ?? DEFAULT_OPTIONS.bufferSize,
+      maxQueueEntries: Math.max(
+        1,
+        Math.floor(options.maxQueueEntries ?? DEFAULT_OPTIONS.maxQueueEntries)
+      ),
       flushInterval: options.flushInterval ?? DEFAULT_OPTIONS.flushInterval,
       maxRetries: options.maxRetries ?? DEFAULT_OPTIONS.maxRetries,
       retryBaseMs: options.retryBaseMs ?? DEFAULT_OPTIONS.retryBaseMs,
       captureContent: options.captureContent ?? DEFAULT_OPTIONS.captureContent,
+      deduplicateSpanIds: options.deduplicateSpanIds ?? false,
       maxPreviewBytes: options.maxPreviewBytes ?? DEFAULT_OPTIONS.maxPreviewBytes,
       requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPTIONS.requestTimeoutMs,
       maxRequestBytes: options.maxRequestBytes ?? DEFAULT_OPTIONS.maxRequestBytes,
@@ -158,6 +186,9 @@ export class OtlpHttpTransport implements Transport {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis)
     this.sleepImpl = options.sleepImpl ?? defaultSleep
     this.randomImpl = options.randomImpl ?? Math.random
+    this.spanContentPolicy = options.spanContentPolicy
+    this.spanFilter = options.spanFilter
+    this.serializeBatch = options.serializeBatch ?? spansToOtlp
     this.startFlushTimer()
   }
 
@@ -173,6 +204,8 @@ export class OtlpHttpTransport implements Transport {
     if (patch.headers) this.options.headers = { ...patch.headers }
     if (patch.resource) this.options.resource = patch.resource
     if (typeof patch.bufferSize === "number") this.options.bufferSize = patch.bufferSize
+    if (typeof patch.maxQueueEntries === "number")
+      this.options.maxQueueEntries = Math.max(1, Math.floor(patch.maxQueueEntries))
     if (typeof patch.flushInterval === "number") {
       this.options.flushInterval = patch.flushInterval
       this.startFlushTimer()
@@ -181,6 +214,10 @@ export class OtlpHttpTransport implements Transport {
     if (typeof patch.retryBaseMs === "number") this.options.retryBaseMs = patch.retryBaseMs
     if (typeof patch.captureContent === "boolean")
       this.options.captureContent = patch.captureContent
+    if (typeof patch.deduplicateSpanIds === "boolean") {
+      this.options.deduplicateSpanIds = patch.deduplicateSpanIds
+      if (!patch.deduplicateSpanIds) this.seenSpanIds.clear()
+    }
     if (typeof patch.maxPreviewBytes === "number")
       this.options.maxPreviewBytes = patch.maxPreviewBytes
     if (typeof patch.requestTimeoutMs === "number")
@@ -190,17 +227,43 @@ export class OtlpHttpTransport implements Transport {
     if (patch.fetchImpl) this.fetchImpl = patch.fetchImpl
     if (patch.sleepImpl) this.sleepImpl = patch.sleepImpl
     if (patch.randomImpl) this.randomImpl = patch.randomImpl
+    // PRESENCE, not truthiness. These three are the only options whose absence
+    // is itself a setting: `bootstrap.ts` re-applies `spanFilter: hasAiExecutionHost
+    // ? isNotSidecarAutoObservation : undefined` on every settings change, so a
+    // truthiness guard could install a filter but never take it off again — the
+    // destination then dropped every `chat` / `execute_tool` span for the rest
+    // of the session.
+    if ("spanContentPolicy" in patch) this.spanContentPolicy = patch.spanContentPolicy
+    if ("spanFilter" in patch) this.spanFilter = patch.spanFilter
+    if ("serializeBatch" in patch) this.serializeBatch = patch.serializeBatch ?? spansToOtlp
   }
 
   log(entry: StructuredLogEntry): void {
     const span = extractSpanFromEntry(entry)
     if (!span) return
+    if (this.spanFilter && !this.spanFilter(span)) return
     if (this.closed) {
       this.recordDropped("shutdown-discarded", 1)
       return
     }
     if (!this.options.endpoint) return // exporter unconfigured — silently drop
+    if (this.options.deduplicateSpanIds) {
+      const dedupeKey = `${span.traceId}:${span.spanId}`
+      if (this.seenSpanIds.has(dedupeKey)) {
+        this.recordDropped("entry-rejected", 1)
+        return
+      }
+      this.seenSpanIds.set(dedupeKey, true)
+      if (this.seenSpanIds.size > 50_000) {
+        const oldest = this.seenSpanIds.keys().next().value
+        if (oldest) this.seenSpanIds.delete(oldest)
+      }
+    }
     const sanitized = this.sanitizeSpan(span)
+    if (this.buffer.length >= this.options.maxQueueEntries) {
+      this.buffer.shift()
+      this.recordDropped("overflow-evicted", 1)
+    }
     this.buffer.push(sanitized)
     if (this.buffer.length >= this.options.bufferSize) {
       void this.flush()
@@ -277,7 +340,7 @@ export class OtlpHttpTransport implements Transport {
 
   private async exportBatch(batch: AgentTraceSpan[], batchEpoch: number): Promise<void> {
     if (batchEpoch !== this.discardEpoch) return
-    const payload = spansToOtlp(batch, this.options.resource)
+    const payload = this.serializeBatch(batch, this.options.resource)
     const body = JSON.stringify(payload)
     if (!hasNoLeakingPiiInOtlp(payload)) {
       this.recordDropped("entry-rejected", batch.length)
@@ -370,7 +433,16 @@ export class OtlpHttpTransport implements Transport {
     this.recordDropped("ship-failed", batch.length)
     this.lastFailureAt = new Date().toISOString()
     this.lastError = lastError?.message ?? "OTLP export failed"
-    consoleApi.warn("agent-trace OTLP export failed", lastError)
+    emitLoggerDiagnostic({
+      code: "otlp.trace.export.failed",
+      message: "Agent Trace OTLP export failed.",
+      level: "warn",
+      sourceTransport: this.name,
+      data: {
+        error: this.lastError,
+        droppedSpans: batch.length,
+      },
+    })
   }
 
   private sanitizeSpan(span: AgentTraceSpan): AgentTraceSpan {
@@ -382,7 +454,10 @@ export class OtlpHttpTransport implements Transport {
     if (out.handoff) {
       out.handoff = { fromAgent: out.handoff.fromAgent, toAgent: out.handoff.toAgent }
     }
-    if (!this.options.captureContent) {
+    const captureContent = this.spanContentPolicy
+      ? this.spanContentPolicy(span)
+      : this.options.captureContent
+    if (!captureContent) {
       delete out.inputPreview
       delete out.outputPreview
       return out

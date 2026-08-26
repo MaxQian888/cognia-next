@@ -90,6 +90,52 @@ describe("OtlpHttpTransport buffering & flush", () => {
     await t.close()
   })
 
+  it("lets each destination exclude spans already emitted by another runtime", async () => {
+    const bodies: string[] = []
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 99,
+      flushInterval: 0,
+      spanFilter: (span) => span.operationName !== "chat",
+      fetchImpl: jest.fn(async (_url, init) => {
+        bodies.push(String(init?.body))
+        return makeOkResponse()
+      }) as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "root", operationName: "invoke_agent" })))
+    t.log(makeEntry(makeSpan({ id: "manual-generation", operationName: "chat" })))
+
+    await t.close()
+
+    const payload = JSON.parse(bodies[0])
+    expect(payload.resourceSpans[0].scopeSpans[0].spans).toHaveLength(1)
+  })
+
+  it("lets updateOptions take a span filter back off again", async () => {
+    const bodies: string[] = []
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 99,
+      flushInterval: 0,
+      spanFilter: (span) => span.operationName !== "chat",
+      fetchImpl: jest.fn(async (_url, init) => {
+        bodies.push(String(init?.body))
+        return makeOkResponse()
+      }) as unknown as typeof fetch,
+    })
+    // `bootstrap.ts` re-applies its whole option object on every settings
+    // change, and passes `spanFilter: undefined` once the AI execution host is
+    // gone. A truthiness guard here left the filter installed forever.
+    t.updateOptions({ spanFilter: undefined })
+    t.log(makeEntry(makeSpan({ id: "root", operationName: "invoke_agent" })))
+    t.log(makeEntry(makeSpan({ id: "manual-generation", operationName: "chat" })))
+
+    await t.close()
+
+    const payload = JSON.parse(bodies[0])
+    expect(payload.resourceSpans[0].scopeSpans[0].spans).toHaveLength(2)
+  })
+
   it("silently drops spans when endpoint is empty (degraded transport)", async () => {
     const fetchMock = jest.fn()
     const t = new OtlpHttpTransport({
@@ -130,6 +176,38 @@ describe("OtlpHttpTransport buffering & flush", () => {
     await t.close()
     expect(fetchMock).toHaveBeenCalled()
     expect(t.getPendingCount()).toBe(0)
+  })
+
+  it("bounds the pending queue and keeps the newest spans", async () => {
+    let captured: unknown = null
+    const fetchMock = jest.fn(async (_url, init) => {
+      captured = JSON.parse(init!.body as string)
+      return makeOkResponse()
+    })
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 99,
+      maxQueueEntries: 2,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "oldest", spanId: "1111111111111111" })))
+    t.log(makeEntry(makeSpan({ id: "middle", spanId: "2222222222222222" })))
+    t.log(makeEntry(makeSpan({ id: "newest", spanId: "3333333333333333" })))
+
+    expect(t.getPendingCount()).toBe(2)
+    expect(t.getHealth()).toMatchObject({
+      droppedEntries: 1,
+      droppedByReason: { "overflow-evicted": 1 },
+    })
+
+    await t.close()
+    const spans = (
+      captured as {
+        resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ spanId: string }> }> }>
+      }
+    ).resourceSpans[0].scopeSpans[0].spans
+    expect(spans.map((span) => span.spanId)).toEqual(["IiIiIiIiIiI=", "MzMzMzMzMzM="])
   })
 
   it("can discard a pending batch without sending after consent withdrawal", async () => {

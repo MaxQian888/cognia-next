@@ -5,17 +5,29 @@
  */
 
 const saveAppSettings = jest.fn(async () => undefined)
+const getLangfuseCredentialsStatus = jest.fn(async () => {
+  throw new Error("Host unavailable")
+})
+const testLangfuseConnection = jest.fn(async () => ({ connected: true, status: 200 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: { save: typeof saveAppSettings }) => unknown) =>
     selector({ save: saveAppSettings }),
 }))
+jest.mock("@/lib/logging/langfuse-host", () => ({
+  clearLangfuseCredentials: jest.fn(async () => undefined),
+  setLangfuseCredentials: jest.fn(async () => undefined),
+  getLangfuseCredentialsStatus: () => getLangfuseCredentialsStatus(),
+  testLangfuseConnection: () => testLangfuseConnection(),
+}))
+jest.mock("@/lib/platform/detect", () => ({ isTauri: jest.fn(() => true) }))
 
 import { useEffect } from "react"
-import { render, screen, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { TransportHealthSnapshot } from "@cognia/logging/types/transport"
 
 import { CONFIG_BOUNDS } from "@/lib/logging"
+import { isTauri } from "@/lib/platform/detect"
 import {
   TRANSPORT_KEYS,
   useLogSettingsDraft,
@@ -24,6 +36,7 @@ import {
 
 import { LogsTransportsPanel } from "./transports-panel"
 
+const mockIsTauri = jest.mocked(isTauri)
 let draft: ReturnType<typeof useLogSettingsDraft>
 
 function snapshot(
@@ -70,6 +83,9 @@ function Harness({
 
 beforeEach(() => {
   window.localStorage.clear()
+  getLangfuseCredentialsStatus.mockClear()
+  testLangfuseConnection.mockClear()
+  mockIsTauri.mockReturnValue(true)
 })
 
 describe("LogsTransportsPanel", () => {
@@ -94,6 +110,7 @@ describe("LogsTransportsPanel", () => {
           langfuse: snapshot("langfuse"),
           "agent-trace": snapshot("agent-trace"),
           "agent-trace-otlp": snapshot("agent-trace-otlp", "offline"),
+          "otlp-logs": snapshot("otlp-logs", "healthy"),
         }}
       />
     )
@@ -106,6 +123,7 @@ describe("LogsTransportsPanel", () => {
     expect(screen.getByTestId("logs-transport-health-badge-agentTraceOtlp")).toHaveTextContent(
       "offline"
     )
+    expect(screen.getByTestId("logs-transport-health-badge-otlpLogs")).toHaveTextContent("healthy")
   })
 
   it("toggles a transport in the draft", async () => {
@@ -202,48 +220,76 @@ describe("LogsTransportsPanel", () => {
     expect(JSON.stringify(draft.transports.langfuseConfig)).not.toContain("sk-live-abc")
   })
 
-  it("swaps the OTLP credential fields for the Grafana Cloud preset", async () => {
+  it("keeps Langfuse model and tool content consent independent", async () => {
     const user = userEvent.setup()
     render(<Harness />)
 
-    expect(screen.getByTestId("agent-trace-otlp-headers")).toBeInTheDocument()
+    const model = screen.getByRole("switch", { name: "Capture model content" })
+    const tool = screen.getByRole("switch", { name: "Capture tool content" })
+    expect(model).not.toBeChecked()
+    expect(tool).not.toBeChecked()
+
+    await user.click(tool)
+
+    expect(draft.transports.langfuseConfig.captureModelContent).toBe(false)
+    expect(draft.transports.langfuseConfig.captureToolContent).toBe(true)
+  })
+
+  it("tests the account Host connection from the Langfuse panel", async () => {
+    getLangfuseCredentialsStatus.mockResolvedValueOnce({
+      configured: true,
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-account",
+      environment: "test",
+      captureModelContent: false,
+      captureToolContent: false,
+    })
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const button = await screen.findByRole("button", { name: "Test connection" })
+    await waitFor(() => expect(button).toBeEnabled())
+    await user.click(button)
+
+    expect(testLangfuseConnection).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole("status")).toHaveTextContent("Connection succeeded.")
+  })
+
+  it("swaps the OTLP credential fields for the Grafana Cloud preset", async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
 
     await user.click(screen.getByTestId("agent-trace-otlp-preset"))
     await user.click(screen.getByRole("option", { name: /Grafana Cloud/i }))
 
     expect(screen.getByTestId("agent-trace-otlp-grafana-instance-id")).toBeInTheDocument()
     expect(screen.getByTestId("agent-trace-otlp-grafana-api-token")).toBeInTheDocument()
-    // Grafana Cloud authenticates with the instance id + token pair, so the
-    // free-form header field would only invite a pasted Authorization line.
     expect(screen.queryByTestId("agent-trace-otlp-headers")).not.toBeInTheDocument()
   })
 
-  it("lets the header field be typed into, committing on blur", async () => {
-    // The rendered value is derived (`parseHeaders` → `serializeHeaders`), so
-    // a per-keystroke commit would erase every partially-typed pair and the
-    // field could only ever be pasted into.
-    const user = userEvent.setup()
+  it("keeps OTLP authentication at the Host or Collector boundary", () => {
     render(<Harness />)
 
-    const field = screen.getByTestId("agent-trace-otlp-headers")
-    await user.type(field, "X-Env: prod")
-    expect(field).toHaveValue("X-Env: prod")
+    act(() => {
+      draft.setTransportDetail("agentTraceOtlpConfig", "preset", "self-hosted")
+    })
 
-    await user.tab()
-    expect(draft.transports.agentTraceOtlpConfig.headers).toEqual({ "X-Env": "prod" })
+    expect(screen.queryByTestId("agent-trace-otlp-headers")).not.toBeInTheDocument()
+    expect(screen.getByText(/configure authentication on the Host or Collector/i)).toBeVisible()
   })
 
-  it("drops a credential header pasted into the OTLP header field", async () => {
-    const user = userEvent.setup()
+  it("does not expose Grafana credentials without the secure desktop Host", () => {
+    mockIsTauri.mockReturnValue(false)
     render(<Harness />)
 
-    await user.type(
-      screen.getByTestId("agent-trace-otlp-headers"),
-      "X-Env: prod, Authorization: Bearer secret"
-    )
-    await user.tab()
+    act(() => {
+      draft.setTransportDetail("agentTraceOtlpConfig", "preset", "grafana-cloud")
+    })
 
-    expect(draft.transports.agentTraceOtlpConfig.headers).toEqual({ "X-Env": "prod" })
+    expect(screen.queryByTestId("agent-trace-otlp-grafana-instance-id")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("agent-trace-otlp-grafana-api-token")).not.toBeInTheDocument()
+    expect(screen.getByText(/require the secure desktop Host/i)).toBeVisible()
   })
 
   it("edits the agent-trace capture and retention settings", async () => {

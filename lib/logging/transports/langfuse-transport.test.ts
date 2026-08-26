@@ -1,229 +1,211 @@
-/**
- * @jest-environment jsdom
- */
+/** @jest-environment jsdom */
 
+import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 import type { StructuredLogEntry } from "@cognia/logging/types"
-import {
-  buildLangfuseIngestionBatch,
-  createLangfuseTransport,
-  LangfuseTransport,
-} from "./langfuse-transport"
 
-const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
-jest.mock("@cognia/redact", () => ({
-  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
-}))
+import { createLangfuseTransport, LangfuseTransport } from "./langfuse-transport"
 
-function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
+function makeSpan(overrides: Partial<AgentTraceSpan> = {}): AgentTraceSpan {
   return {
-    id: "log-1",
-    timestamp: "2026-04-30T10:00:00.000Z",
-    level: overrides.level ?? "warn",
-    message: "hello",
-    module: "test",
+    id: "1111222233334444",
+    traceId: "deadbeefdeadbeefdeadbeefdeadbeef",
+    spanId: "1111222233334444",
+    startTime: 1_700_000_000_000,
+    endTime: 1_700_000_000_100,
+    operationName: "chat",
+    providerName: "anthropic",
+    requestModel: "claude-sonnet-4-5",
+    sessionId: "session-1",
+    surface: "chat",
+    inputPreview: "model input",
+    outputPreview: "model output",
     ...overrides,
   }
 }
 
-describe("Langfuse ingestion serialization", () => {
-  it("groups entries into one trace and preserves configured metadata", () => {
-    const batch = buildLangfuseIngestionBatch(
-      [
-        makeEntry({
-          traceId: "trace-1",
-          data: { ok: true },
-          stack: "stack",
-          source: { file: "a.ts" },
-        }),
-        makeEntry({ id: "log-2", traceId: "trace-1", level: "error", message: "failed" }),
-      ],
-      { includeData: true, includeStack: true, eventPrefix: "cognia" }
-    )
-
-    expect(batch.batch.filter((item) => item.type === "trace-create")).toHaveLength(1)
-    const events = batch.batch.filter((item) => item.type === "event-create")
-    expect(events).toHaveLength(2)
-    expect(events[0].body).toMatchObject({
-      traceId: "trace-1",
-      name: "cognia.warn.test",
-      input: "hello",
-      level: "WARNING",
-      metadata: expect.objectContaining({ data: { ok: true }, stack: "stack" }),
-    })
-    expect(events[1].body).toMatchObject({ level: "ERROR", input: "failed" })
-  })
-})
+function ordinaryLog(): StructuredLogEntry {
+  return {
+    id: "log-1",
+    timestamp: "2026-08-26T00:00:00.000Z",
+    level: "error",
+    message: "ordinary application log",
+    module: "test",
+  }
+}
 
 describe("LangfuseTransport", () => {
-  beforeEach(() => {
-    mockHasNoLeakingPiiDeep.mockReturnValue(true)
-  })
-
-  it("uses the same serialized batch for the Tauri exporter without resolving a web secret", async () => {
-    const exportBatch = jest.fn(async () => undefined)
-    const resolveSecretKey = jest.fn(async () => "should-not-be-read")
-    const transport = new LangfuseTransport({
-      publicKey: "pk-native",
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch,
-      resolveSecretKey,
+  it("sends only AgentTrace spans through the Cognia Host", async () => {
+    const batches: unknown[] = []
+    const hostIngest = jest.fn(async (batch) => {
+      batches.push(batch)
+      return { status: 202 }
     })
-    transport.log(makeEntry({ traceId: "native-trace", level: "error" }))
+    const transport = new LangfuseTransport({
+      enabled: true,
+      baseUrl: "https://langfuse.example/",
+      publicKey: "pk-native",
+      secretKeyConfigured: true,
+      environment: "staging",
+      captureModelContent: false,
+      captureToolContent: false,
+      bufferSize: 99,
+      flushInterval: 0,
+      hostIngest,
+    })
 
+    transport.log(ordinaryLog())
+    transport.log(spanToLogEntry(makeSpan()))
     await transport.flush()
 
-    expect(exportBatch).toHaveBeenCalledWith({
-      batch: expect.arrayContaining([
-        expect.objectContaining({ type: "trace-create" }),
-        expect.objectContaining({ type: "event-create" }),
-      ]),
-    })
-    expect(resolveSecretKey).not.toHaveBeenCalled()
+    expect(hostIngest).toHaveBeenCalledTimes(1)
+    const body = JSON.stringify(batches)
+    expect(body).toContain('"schemaVersion":1')
+    expect(body).toContain('"operationName":"chat"')
+    expect(body).not.toContain("trace-create")
+    expect(body).not.toContain("event-create")
+    expect(body).not.toContain("ordinary application log")
+    expect(body).not.toContain("model input")
+    expect(body).not.toContain("model output")
     await transport.close()
   })
 
-  it("posts a Basic-authenticated ingestion batch on Web", async () => {
-    const fetchFn = jest.fn(async () => ({ ok: true, status: 200 }) as Response)
-    const resolveSecretKey = jest.fn(async () => "sk-secret")
-    const transport = new LangfuseTransport({
-      publicKey: "pk-public",
-      resolveSecretKey,
-      host: "https://langfuse.example/",
-      batchSize: 99,
-      flushInterval: 60_000,
-      fetchFn,
-    })
-    transport.log(makeEntry({ sessionId: "session-1", level: "error" }))
-
-    await transport.flush()
-
-    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
-    expect(fetchFn).toHaveBeenCalledWith(
-      "https://langfuse.example/api/public/ingestion",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Basic " + btoa("pk-public:sk-secret"),
-          "Content-Type": "application/json",
+  it.each([
+    [false, false, false, false],
+    [true, false, true, false],
+    [false, true, false, true],
+    [true, true, true, true],
+  ])(
+    "applies independent model/tool content consent (%s, %s)",
+    async (captureModelContent, captureToolContent, expectModel, expectTool) => {
+      const batches: unknown[] = []
+      const transport = createLangfuseTransport({
+        enabled: true,
+        baseUrl: "https://langfuse.example",
+        publicKey: "pk-native",
+        secretKeyConfigured: true,
+        environment: "test",
+        captureModelContent,
+        captureToolContent,
+        bufferSize: 99,
+        flushInterval: 0,
+        hostIngest: jest.fn(async (batch) => {
+          batches.push(batch)
+          return { status: 202 }
         }),
-        body: expect.stringContaining('"event-create"'),
       })
-    )
-    await transport.close()
-  })
+      transport.log(spanToLogEntry(makeSpan()))
+      transport.log(
+        spanToLogEntry(
+          makeSpan({
+            id: "2222333344445555",
+            spanId: "2222333344445555",
+            operationName: "execute_tool",
+            toolName: "search",
+            inputPreview: "tool input",
+            outputPreview: "tool output",
+          })
+        )
+      )
+      transport.log(
+        spanToLogEntry(
+          makeSpan({
+            id: "3333444455556666",
+            spanId: "3333444455556666",
+            operationName: "retrieval",
+            inputPreview: "private retrieval query",
+            outputPreview: "private retrieved documents",
+          })
+        )
+      )
 
-  it("re-buffers a failed batch within the existing bound", async () => {
-    const exportBatch = jest
-      .fn<Promise<void>, [unknown]>()
-      .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValue(undefined)
-    const transport = new LangfuseTransport({
-      publicKey: "pk-native",
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch: exportBatch as never,
-    })
-    transport.log(makeEntry({ level: "error" }))
+      await transport.flush()
 
-    await transport.flush()
-    await transport.flush()
+      const wire = JSON.stringify(batches)
+      expect(wire.includes("model input")).toBe(expectModel)
+      expect(wire.includes("model output")).toBe(expectModel)
+      expect(wire.includes("tool input")).toBe(expectTool)
+      expect(wire.includes("tool output")).toBe(expectTool)
+      expect(wire).not.toContain("private retrieval query")
+      expect(wire).not.toContain("private retrieved documents")
+      await transport.close()
+    }
+  )
 
-    expect(exportBatch).toHaveBeenCalledTimes(2)
-    expect(JSON.stringify(exportBatch.mock.calls[1][0])).toContain("hello")
-    await transport.close()
-  })
-
-  it("drops an empty-credential Web batch without retrying forever", async () => {
-    const fetchFn = jest.fn()
-    const resolveSecretKey = jest.fn(async () => null)
-    const transport = new LangfuseTransport({
-      publicKey: "pk-public",
-      resolveSecretKey,
-      batchSize: 99,
-      flushInterval: 60_000,
-      fetchFn: fetchFn as typeof fetch,
-    })
-    transport.log(makeEntry({ level: "error" }))
-
-    await transport.flush()
-    await transport.flush()
-
-    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
-    expect(fetchFn).not.toHaveBeenCalled()
-    await transport.close()
-  })
-
-  it("fails closed before either exporter when the serialized batch leaks PII", async () => {
-    const exportBatch = jest.fn(async () => undefined)
-    mockHasNoLeakingPiiDeep.mockReturnValue(false)
-    const transport = new LangfuseTransport({
-      publicKey: "pk-native",
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch,
-    })
-    transport.log(makeEntry({ level: "error", message: "alice@example.com" }))
-
-    await transport.flush()
-
-    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
-      batch: expect.arrayContaining([expect.objectContaining({ type: "event-create" })]),
-    })
-    expect(exportBatch).not.toHaveBeenCalled()
-    await transport.close()
-  })
-
-  it("does not call the native exporter or retry when its public key is empty", async () => {
-    const exportBatch = jest.fn(async () => undefined)
-    const transport = new LangfuseTransport({
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch,
-    })
-    transport.log(makeEntry({ level: "error" }))
-
-    await transport.flush()
-    await transport.flush()
-
-    expect(exportBatch).not.toHaveBeenCalled()
-    await transport.close()
-  })
-
-  it("keeps ingestion ids stable when a failed batch is retried", async () => {
-    const exported: unknown[] = []
-    const exportBatch = jest.fn(async (batch: unknown) => {
-      exported.push(batch)
-      if (exported.length === 1) throw new Error("response lost")
-    })
-    const transport = new LangfuseTransport({
-      publicKey: "pk-native",
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch,
-    })
-    transport.log(makeEntry({ id: "stable-log", traceId: "stable-trace", level: "error" }))
-
-    await transport.flush()
-    await transport.flush()
-
-    expect(exported).toHaveLength(2)
-    expect(exported[1]).toEqual(exported[0])
-    await transport.close()
-  })
-
-  it("filters below minLevel and supports the existing factory", async () => {
-    const exportBatch = jest.fn(async () => undefined)
+  it("deduplicates a completed span ID before export", async () => {
+    const batches: Array<{ schemaVersion: 1; spans: AgentTraceSpan[] }> = []
     const transport = createLangfuseTransport({
+      enabled: true,
+      baseUrl: "https://langfuse.example",
       publicKey: "pk-native",
-      minLevel: "error",
-      batchSize: 99,
-      flushInterval: 60_000,
-      exportBatch,
+      secretKeyConfigured: true,
+      environment: "test",
+      captureModelContent: false,
+      captureToolContent: false,
+      bufferSize: 99,
+      flushInterval: 0,
+      hostIngest: jest.fn(async (batch) => {
+        batches.push(batch)
+        return { status: 202 }
+      }),
     })
-    transport.log(makeEntry({ level: "warn" }))
+    const entry = spanToLogEntry(makeSpan())
+    transport.log(entry)
+    transport.log(entry)
+
+    await transport.flush()
+
+    expect(batches[0].spans).toHaveLength(1)
+    expect(transport.getHealth().droppedEntries).toBe(1)
     await transport.close()
-    expect(transport.name).toBe("langfuse")
-    expect(exportBatch).not.toHaveBeenCalled()
+  })
+
+  it("routes a versioned AgentTrace batch through the Cognia Host", async () => {
+    const hostIngest = jest.fn(async () => ({ status: 202 }))
+    const transport = createLangfuseTransport({
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-native",
+      secretKeyConfigured: true,
+      environment: "test",
+      captureModelContent: false,
+      captureToolContent: false,
+      bufferSize: 99,
+      flushInterval: 0,
+      hostIngest,
+    })
+    transport.log(spanToLogEntry(makeSpan()))
+
+    await transport.flush()
+
+    expect(hostIngest).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      spans: [expect.objectContaining({ traceId: makeSpan().traceId })],
+    })
+    expect(hostIngest.mock.calls[0][0].spans[0]).not.toHaveProperty("inputPreview")
+    const wire = JSON.stringify(hostIngest.mock.calls)
+    expect(wire).not.toMatch(/authorization|secretKey|endpoint/i)
+    await transport.close()
+  })
+
+  it("stays degraded and sends nothing until both project keys are configured", async () => {
+    const hostIngest = jest.fn(async () => ({ status: 202 }))
+    const transport = createLangfuseTransport({
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-native",
+      secretKeyConfigured: false,
+      environment: "test",
+      captureModelContent: false,
+      captureToolContent: false,
+      flushInterval: 0,
+      hostIngest,
+    })
+    transport.log(spanToLogEntry(makeSpan()))
+    await transport.flush()
+
+    expect(hostIngest).not.toHaveBeenCalled()
+    expect(transport.getHealth().status).toBe("degraded")
+    await transport.close()
   })
 })

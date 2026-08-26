@@ -14,6 +14,8 @@ import {
 import type { RemoteRetryQueueBatch, RemoteRetryQueueStore } from "./remote-retry-queue-store"
 import type { StructuredLogEntry } from "../types"
 
+let activeFetch: jest.Mock | undefined
+
 function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
   return {
     id: overrides.id ?? "log-1",
@@ -96,6 +98,7 @@ class FakeQueueStore implements RemoteRetryQueueStore {
 }
 
 beforeEach(() => {
+  activeFetch = undefined
   // Each test gets a fresh in-memory IDB factory (the default queue store
   // will use this if no explicit queueStore option is provided).
   const factory = new IDBFactory()
@@ -110,16 +113,11 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
-  // Restore a non-mocked fetch.
-  delete (globalThis as { fetch?: unknown }).fetch
-})
-
 function withFetch(
   responder: () => MinimalResponse | Promise<MinimalResponse> | Promise<never>
 ): jest.Mock {
   const fn = jest.fn(async () => responder())
-  ;(globalThis as { fetch: unknown }).fetch = fn as unknown as typeof fetch
+  activeFetch = fn
   return fn
 }
 
@@ -162,15 +160,28 @@ function makeTransport(opts: Partial<RemoteTransportOptions> = {}, store?: FakeQ
     maxRetries: opts.maxRetries ?? 0,
     retryDelay: opts.retryDelay ?? 1,
     timeout: opts.timeout ?? 5_000,
-    headers: opts.headers,
     transform: opts.transform,
+    privacyPredicate: opts.privacyPredicate ?? (() => true),
     diagnosticEmitter: opts.diagnosticEmitter,
+    fetchImpl: opts.fetchImpl ?? (activeFetch as typeof fetch | undefined),
     queueStore: store,
     diagnosticRateLimitMs: opts.diagnosticRateLimitMs,
   })
 }
 
 describe("RemoteTransport happy path", () => {
+  it("uses the injected platform sender instead of direct WebView fetch", async () => {
+    const platformFetch = jest.fn(async () => okResponse())
+    const directFetch = withFetch(() => Promise.reject(new Error("direct fetch must not run")))
+    const transport = makeTransport({ fetchImpl: platformFetch as typeof fetch })
+
+    transport.log(makeEntry())
+    await transport.flush()
+
+    expect(platformFetch).toHaveBeenCalledTimes(1)
+    expect(directFetch).not.toHaveBeenCalled()
+  })
+
   it("buffers and POSTs entries on flush", async () => {
     const store = new FakeQueueStore()
     const fetchMock = withFetch(() => okResponse())
@@ -207,15 +218,48 @@ describe("RemoteTransport happy path", () => {
     await t.close()
   })
 
-  it("merges custom headers", async () => {
+  it("fails closed at the final serialized-body privacy gate", async () => {
     const store = new FakeQueueStore()
     const fetchMock = withFetch(() => okResponse())
-    const t = makeTransport({ headers: { "X-Custom": "1" } }, store)
-    t.log(makeEntry())
+    const diagnosticEmitter = jest.fn()
+    const privacyPredicate = jest.fn((body: string) => !body.includes("alice@example.com"))
+    const t = makeTransport({ diagnosticEmitter, privacyPredicate }, store)
+    t.log(makeEntry({ message: "email alice@example.com" }))
     await t.flush()
-    const headers = fetchMock.mock.calls[0][1]?.headers as Record<string, string>
-    expect(headers["X-Custom"]).toBe("1")
-    expect(headers["Content-Type"]).toBe("application/json")
+
+    expect(privacyPredicate).toHaveBeenCalledWith(expect.stringContaining("alice@example.com"))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.batches).toHaveLength(0)
+    expect(t.getHealth()).toMatchObject({
+      droppedEntries: 1,
+      lastError: "Remote log payload rejected by privacy gate",
+    })
+    expect(diagnosticEmitter).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "logger.remote.privacy_rejected" })
+    )
+    await t.close()
+  })
+
+  it("drops only the leaking entry, not the clean ones batched beside it", async () => {
+    const store = new FakeQueueStore()
+    const fetchMock = withFetch(() => okResponse())
+    const t = makeTransport(
+      { privacyPredicate: (body: string) => !body.includes("alice@example.com") },
+      store
+    )
+    t.log(makeEntry({ message: "before" }))
+    t.log(makeEntry({ message: "email alice@example.com" }))
+    t.log(makeEntry({ message: "after" }))
+    await t.flush()
+
+    // The batch is deleted from the durable queue either way, so anything not
+    // shipped here is gone for good — the two clean entries must go out.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = String((fetchMock.mock.calls[0][1] as RequestInit).body)
+    expect(body).toContain("before")
+    expect(body).toContain("after")
+    expect(body).not.toContain("alice@example.com")
+    expect(t.getHealth()).toMatchObject({ droppedEntries: 1 })
     await t.close()
   })
 
@@ -276,6 +320,7 @@ describe("RemoteTransport failure modes", () => {
       flushInterval: 60_000,
       maxRetries: 0,
       retryDelay: 1,
+      privacyPredicate: () => true,
       maxQueueEntries: 1,
       diagnosticEmitter,
       diagnosticRateLimitMs: 250,
@@ -454,6 +499,20 @@ describe("RemoteTransport recovery", () => {
 })
 
 describe("RemoteTransport retry queue draining", () => {
+  it("re-applies the privacy gate and deletes an unsafe persisted replay", async () => {
+    const store = new FakeQueueStore()
+    await store.enqueueBatch([makeEntry({ message: "email alice@example.com" })])
+    const fetchMock = withFetch(() => okResponse())
+    const t = makeTransport({ privacyPredicate: () => false }, store)
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.batches).toHaveLength(0)
+    expect(t.getHealth().droppedEntries).toBe(1)
+    await t.close()
+  })
+
   it("stops draining the queue if a batch fails mid-drain", async () => {
     const store = new FakeQueueStore()
     await store.enqueueBatch([makeEntry({ id: "first" })])
@@ -504,7 +563,10 @@ describe("RemoteTransport flushTimer", () => {
 
 describe("createRemoteTransport factory", () => {
   it("returns a RemoteTransport instance", () => {
-    const t = createRemoteTransport({ endpoint: "https://example.com/logs" })
+    const t = createRemoteTransport({
+      endpoint: "https://example.com/logs",
+      privacyPredicate: () => true,
+    })
     expect(t).toBeInstanceOf(RemoteTransport)
     expect(t.name).toBe("remote")
     void t.close()

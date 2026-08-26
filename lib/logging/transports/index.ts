@@ -31,3 +31,8 @@ export {
   createOtlpHttpTransport,
   type OtlpHttpTransportOptions,
 } from "./otlp-http-transport"
+export {
+  OtlpLogTransport,
+  createOtlpLogTransport,
+  type OtlpLogTransportOptions,
+} from "./otlp-log-transport"

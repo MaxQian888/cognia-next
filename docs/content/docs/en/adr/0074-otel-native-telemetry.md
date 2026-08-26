@@ -100,6 +100,32 @@ resolves to one person; account, email, and hardware identifiers are prohibited.
 public ingestion tokens; Personal API Keys are rejected by policy and tokens are
 masked in UI, logs, and diagnostics.
 
+## 2026-08-26 amendment — Langfuse v4 is an independent AI-trace destination
+
+Langfuse no longer consumes ordinary `LogEntry` records. It consumes only the
+versioned `AgentTraceBatchV1` contract and exports traces to the fixed v4 OTLP
+path `/api/public/otel/v1/traces`. Generic OTLP, PostHog AI observability,
+PostHog product analytics, local agent-trace storage, native logging, and
+metrics remain independent destinations; enabling or disabling Langfuse does
+not replace or reconfigure them.
+
+The current authenticated Cognia account owns one BYO Langfuse project. Five
+narrow Host commands set, inspect, clear, test, and ingest traces. Secrets are
+write-only and account-scoped; ingest callers cannot submit an endpoint,
+headers, credentials, or an arbitrary OTLP document. Tauri exports directly
+from its Host, while paired Web and Capacitor clients use the same Companion
+transport. Standalone static Web keeps traces local.
+
+The sidecar keeps one `NodeSDK` with separate processors for generic OTLP,
+PostHog, and the official Langfuse v4 processor. AI SDK 7 generation and tool
+observations are restored under the renderer's W3C parent context; duplicate
+renderer provider/tool observations are filtered only at remote destinations,
+not from the local trace waterfall. Model content and tool content require
+separate opt-ins and both default off. Every outbound path applies bounded
+field-level content filtering and the Host PII gate. Prompt Management is not
+part of this decision; traces record only local prompt component identifiers,
+versions, and fingerprints.
+
 ## Alternatives rejected
 
 - Adding `https:` or runtime hosts to CSP: too broad and cannot express a

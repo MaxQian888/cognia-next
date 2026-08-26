@@ -14,7 +14,6 @@ import { clearSecret, getSecret, setSecret } from "@/lib/keyring"
 import {
   clearTelemetrySecret,
   extractLegacyTelemetrySecrets,
-  getTelemetrySecretForWeb,
   hasTelemetrySecret,
   persistLegacyTelemetrySecrets,
   persistTelemetrySecret,
@@ -77,7 +76,6 @@ describe("telemetry secret persistence", () => {
     invokeMock.mockResolvedValueOnce(undefined).mockResolvedValueOnce(true)
     await clearTelemetrySecret("langfuseSecretKey")
     await expect(hasTelemetrySecret("langfuseSecretKey")).resolves.toBe(true)
-    await expect(getTelemetrySecretForWeb("langfuseSecretKey")).resolves.toBeNull()
     expect(invokeMock).toHaveBeenNthCalledWith(1, "telemetry_secret_clear", {
       kind: "langfuseSecretKey",
     })
@@ -94,12 +92,20 @@ describe("telemetry secret persistence", () => {
     await persistTelemetrySecret("langfuseSecretKey", "sk-browser")
     await clearTelemetrySecret("langfuseSecretKey")
     await expect(hasTelemetrySecret("langfuseSecretKey")).resolves.toBe(true)
-    await expect(getTelemetrySecretForWeb("langfuseSecretKey")).resolves.toBe("sk-browser")
     expect(setSecret).toHaveBeenCalledWith(
       { namespace: "telemetry", key: "langfuse-secret-key" },
       "sk-browser"
     )
     expect(clearSecret).toHaveBeenCalled()
+  })
+
+  it("rejects Grafana credentials outside the secure desktop Host", async () => {
+    isTauriMock.mockReturnValue(false)
+
+    await expect(
+      persistTelemetrySecret("grafanaCloudApiToken", "glc_browser_secret")
+    ).rejects.toThrow(/secure desktop Host/)
+    expect(setSecret).not.toHaveBeenCalled()
   })
 
   it("persists every non-empty migrated secret", async () => {

@@ -195,20 +195,17 @@ unchanged keeps its live exporter across settings saves, so a re-apply never dro
 
 ## langfuse
 
-`langfuse-transport.ts` — an LLM-observability sink that groups entries into Langfuse traces. It
-lazy-imports `@/lib/ai/observability/langfuse-client`, buffers, and on flush groups by
-`traceId || sessionId || "default"`, creating one trace per group and one span per entry:
+`langfuse-transport.ts` accepts only completed `AgentTraceSpan` envelopes; ordinary application
+logs and metrics are ignored. It sanitizes and batches `AgentTraceBatchV1`, then calls the narrow
+Host ingest command. The Host resolves the authenticated account's write-only BYO credentials,
+revalidates schema, PII, consent, rate and size limits, deduplicates span IDs, and pins export to
+`/api/public/otel/v1/traces` with Langfuse ingestion version 4.
 
-```ts title="lib/logging/transports/langfuse-transport.ts:127"
-const traceKey = entry.traceId || entry.sessionId || "default"
-// → createChatTrace({ sessionId: traceKey, ... }); per entry:
-const spanName = `${eventPrefix||"log"}.${entry.level}.${entry.module}`
-const span = createSpan(trace, { name: spanName, input: entry.message,
-  level: mapLogLevelToLangfuse(entry.level) })
-```
-
-`minLevel` default `"warn"`. `mapLogLevelToLangfuse`: trace/debug→`DEBUG`, info→`DEFAULT`,
-warn→`WARNING`, error/fatal→`ERROR`.
+The sidecar's shared `NodeSDK` also owns the official Langfuse processor for AI SDK 7 generation
+and tool children. Generic OTLP and PostHog remain separate processors. Renderer roots keep the
+stable `chat.turn`, `agent.run`, and `workflow.run` names; duplicate manual provider/tool children
+are filtered only from remote destinations. Model and tool content have independent opt-ins,
+default off, and both pass bounded field-level filtering plus the Host PII gate.
 
 ## agent-trace
 
@@ -231,7 +228,7 @@ previews are truncated to `maxPreviewBytes` and gated through `hasNoLeakingPii`.
 | observability-spool | bounded local recovery spool | yes | diagnostics via the logger core |
 | breadcrumb | Rust crash-context ring | no | desktop best-effort |
 | otlp-http | OTLP `/v1/traces` | yes (32) | `degraded`(no endpoint \|\| lastError) / `healthy` |
-| langfuse | Langfuse SDK | yes (10) | none; minLevel warn |
+| langfuse | Cognia Host → Langfuse v4 OTLP traces | yes (32) | `degraded`(unconfigured \| lastError) / `healthy` |
 | agent-trace | Dexie `agentTraces` | yes (32) | `degraded`(lastError) / `healthy` |
 
 `getTransportHealthSnapshot()` (`core.ts:587`) pulls all transport snapshots at once; the log panel's

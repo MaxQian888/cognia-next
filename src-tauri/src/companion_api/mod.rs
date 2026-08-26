@@ -47,6 +47,7 @@ pub mod healthz;
 pub mod host_identity;
 pub mod idempotency;
 pub mod jwt;
+pub(crate) mod langfuse;
 pub mod lark_entry;
 pub mod locked_use_allow_list;
 pub mod maintenance;

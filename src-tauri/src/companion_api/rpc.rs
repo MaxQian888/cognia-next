@@ -267,7 +267,6 @@ impl RpcError {
     /// Wave 3.3 — 429 Too Many Requests with the wait time embedded in
     /// the message (`retry_after_seconds=N`). The flat envelope keeps
     /// the contract simple; phones can parse the integer.
-    #[cfg(test)]
     fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
         (
             StatusCode::TOO_MANY_REQUESTS,
@@ -449,6 +448,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_set_tool_rules",
     "adapter_update_policy",
     "app_settings_update",
+    // Account-scoped Langfuse v4 destination. Credentials remain inside the
+    // current Host and ingest accepts only AgentTraceBatchV1.
+    "langfuse_credentials_set",
+    "langfuse_credentials_status",
+    "langfuse_credentials_clear",
+    "langfuse_connection_test",
+    "langfuse_trace_ingest",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
     // ADR-0097 — what this host can do, answered by the host's own TS layer
@@ -1100,6 +1106,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "ocr_list_available_backends",
     "ocr_model_status",
     "automation_consent_pending",
+    "langfuse_credentials_status",
     // Sync-down (M4.7) is structurally idempotent: same `(table, since)`
     // returns the same delta. Skip the cache to avoid stalling phone clients
     // behind a 60-second TTL when the desktop has fresh writes.

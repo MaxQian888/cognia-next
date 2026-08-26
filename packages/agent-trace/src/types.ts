@@ -145,6 +145,29 @@ export interface AgentTraceSpan {
   metadata?: Record<string, unknown>
 }
 
+/** Versioned wire batch accepted by the Cognia Host Langfuse ingress. */
+export interface AgentTraceBatchV1 {
+  schemaVersion: 1
+  spans: AgentTraceSpan[]
+}
+
+/** Runtime-neutral context passed to AI SDK instrumentation at a call boundary. */
+export interface CogniaAiTelemetryContext {
+  sessionId: string
+  surface: SpanSurface
+  traceId?: string
+  parentSpanId?: string
+  traceparent?: string
+  runId?: string
+  turnId?: string
+  attemptId?: string
+  projectId?: string
+  feature?: string
+  promptComponentIds?: string[]
+  promptVersion?: string
+  promptFingerprint?: string
+}
+
 export const AGENT_TRACE_SPAN_KIND = "agent-trace-span" as const
 
 export interface AgentTraceSpanLogPayload {

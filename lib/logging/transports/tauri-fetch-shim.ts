@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core"
 export type TauriTelemetryCredential =
   | { kind: "none" }
   | { kind: "grafanaCloud"; instanceId: string }
-  | { kind: "langfuse"; publicKey: string }
   | { kind: "posthog"; projectToken: string }
 
 export interface TauriPostHogDestination {
@@ -110,7 +109,7 @@ export function createTauriOtlpFetch(options: TauriOtlpFetchOptions): typeof fet
   }
 }
 
-/** Native JSON POST used by desktop-only telemetry integrations such as Langfuse. */
+/** Native JSON POST used by desktop-only generic OTLP and PostHog integrations. */
 export async function postTauriTelemetryJson(
   endpoint: string,
   body: string,

@@ -13,7 +13,7 @@
  * so the assertions cannot drift the same way a second time.
  */
 
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 import {
   DEFAULT_RETENTION_SETTINGS,
@@ -34,6 +34,17 @@ import {
 
 const applyLoggingSettings = jest.fn()
 const configureSampling = jest.fn()
+const getLangfuseCredentialsStatus = jest.fn(async () => {
+  throw new Error("Host unavailable")
+})
+const testLangfuseConnection = jest.fn(async () => ({ connected: true, status: 200 }))
+
+jest.mock("@/lib/logging/langfuse-host", () => ({
+  clearLangfuseCredentials: jest.fn(async () => undefined),
+  setLangfuseCredentials: jest.fn(async () => undefined),
+  getLangfuseCredentialsStatus: () => getLangfuseCredentialsStatus(),
+  testLangfuseConnection: () => testLangfuseConnection(),
+}))
 
 jest.mock("@/lib/logging", () => {
   const actual = jest.requireActual("@/lib/logging")
@@ -62,6 +73,8 @@ beforeEach(() => {
   window.localStorage.clear()
   applyLoggingSettings.mockReset()
   configureSampling.mockReset()
+  getLangfuseCredentialsStatus.mockClear()
+  testLangfuseConnection.mockClear()
   saveAppSettings.mockClear()
   // `applyLoggingSettings` returns the settled state the hook re-seeds from.
   applyLoggingSettings.mockImplementation(
@@ -363,6 +376,34 @@ describe("useLogSettingsDraft", () => {
       config: { remoteEndpoint: string }
     }
     expect(payload.config.remoteEndpoint).toBe("https://logs.example.com")
+  })
+
+  it("hydrates Langfuse from the current account Host and tests its connection", async () => {
+    getLangfuseCredentialsStatus.mockResolvedValueOnce({
+      configured: true,
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-account",
+      environment: "staging",
+      captureModelContent: true,
+      captureToolContent: false,
+    })
+    const { result } = renderHook(() => useLogSettingsDraft())
+
+    await waitFor(() => expect(result.current.transports.langfuse).toBe(true))
+    expect(result.current.transports.langfuseConfig).toMatchObject({
+      secretKeyConfigured: true,
+      publicKey: "pk-account",
+      environment: "staging",
+      captureModelContent: true,
+      captureToolContent: false,
+    })
+
+    await act(async () => {
+      await result.current.testLangfuseConnection()
+    })
+    expect(testLangfuseConnection).toHaveBeenCalledTimes(1)
+    expect(result.current.langfuseConnectionStatus).toBe("connected")
   })
 
   it("surfaces a failed save instead of silently staying dirty", async () => {

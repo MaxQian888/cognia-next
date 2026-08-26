@@ -400,6 +400,15 @@ export function makeAiSdkAdapter(protocol) {
       const telemetryOptions = aiSdkTelemetry({
         sessionId: req.sessionId,
         traceId: req.traceId,
+        surface: req.surface,
+        runId: req.runId,
+        turnId: req.turnId,
+        attemptId: req.attemptId,
+        projectId: req.projectId,
+        feature: req.feature,
+        promptComponentIds: req.promptComponentIds,
+        promptVersion: req.promptVersion,
+        promptFingerprint: req.promptFingerprint,
         provider: providerId ?? protocol,
         traceparent: req.traceparent,
       })

@@ -3189,6 +3189,47 @@
         "message": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "LangfuseCredentialsStatus": {
+      "type": "object",
+      "required": [
+        "configured",
+        "enabled",
+        "baseUrl",
+        "publicKey",
+        "environment",
+        "captureModelContent",
+        "captureToolContent"
+      ],
+      "properties": {
+        "configured": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "baseUrl": { "type": ["string", "null"] },
+        "publicKey": { "type": ["string", "null"] },
+        "environment": { "type": ["string", "null"] },
+        "captureModelContent": { "type": "boolean" },
+        "captureToolContent": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "LangfuseConnectionStatus": {
+      "type": "object",
+      "required": ["connected", "status"],
+      "properties": {
+        "connected": { "type": "boolean" },
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 }
+      },
+      "additionalProperties": false
+    },
+    "LangfuseTraceIngestResult": {
+      "type": "object",
+      "required": ["acceptedSpans", "duplicateSpans", "status"],
+      "properties": {
+        "acceptedSpans": { "type": "integer", "minimum": 0 },
+        "duplicateSpans": { "type": "integer", "minimum": 0 },
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -4060,6 +4101,21 @@
     },
     "kill_external_agent": {
       "$ref": "#/$defs/NullResult"
+    },
+    "langfuse_connection_test": {
+      "$ref": "#/$defs/LangfuseConnectionStatus"
+    },
+    "langfuse_credentials_clear": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "langfuse_credentials_set": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "langfuse_credentials_status": {
+      "$ref": "#/$defs/LangfuseCredentialsStatus"
+    },
+    "langfuse_trace_ingest": {
+      "$ref": "#/$defs/LangfuseTraceIngestResult"
     },
     "lark_entry_issue": {
       "$ref": "#/$defs/LarkEntryToken"

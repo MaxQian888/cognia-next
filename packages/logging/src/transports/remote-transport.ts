@@ -28,10 +28,10 @@ export interface RemoteTransportOptions {
   retryDelay?: number
   /** Request timeout in milliseconds */
   timeout?: number
-  /** Custom headers */
-  headers?: Record<string, string>
   /** Transform entries before sending */
   transform?: (entries: StructuredLogEntry[]) => unknown
+  /** Dominating privacy gate applied to the final serialized request body. */
+  privacyPredicate: (serializedBody: string) => boolean
   /** Durable retry queue max entries */
   maxQueueEntries?: number
   /** Durable retry queue max serialized bytes */
@@ -42,6 +42,8 @@ export interface RemoteTransportOptions {
   diagnosticEmitter?: (event: TransportDiagnosticEvent) => void
   /** Optional custom queue store (primarily for testing) */
   queueStore?: RemoteRetryQueueStore
+  /** Platform-owned sender (Rust Host on Tauri, credentialless Collector on web/mobile). */
+  fetchImpl?: typeof fetch
 }
 
 const DEFAULT_OPTIONS: Omit<
@@ -77,6 +79,7 @@ export class RemoteTransport implements Transport {
   name = "remote"
   private readonly options: RemoteTransportOptions & typeof DEFAULT_OPTIONS
   private readonly queueStore: RemoteRetryQueueStore
+  private readonly fetchImpl: typeof fetch
   private readonly diagnosticCooldown = new Map<string, number>()
   private readonly ready: Promise<void>
 
@@ -110,6 +113,7 @@ export class RemoteTransport implements Transport {
         maxEntries: this.options.maxQueueEntries,
         maxBytes: this.options.maxQueueBytes,
       })
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init))
 
     this.queueStore.updateLimits({
       maxEntries: this.options.maxQueueEntries,
@@ -294,18 +298,22 @@ export class RemoteTransport implements Transport {
     }
 
     try {
-      const body = this.options.transform ? this.options.transform(entries) : entries
+      const serializedBody = this.serializeSafely(entries)
+      if (serializedBody === null) {
+        // Treat the batch as consumed so an unsafe persisted replay is deleted
+        // rather than retried forever.
+        return true
+      }
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), this.options.timeout)
 
-      const response = await fetch(this.options.endpoint, {
+      const response = await this.fetchImpl(this.options.endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...this.options.headers,
         },
-        body: JSON.stringify(body),
+        body: serializedBody,
         signal: controller.signal,
       })
 
@@ -339,6 +347,62 @@ export class RemoteTransport implements Transport {
       lastSuccessAt: new Date().toISOString(),
       lastError: undefined,
     })
+  }
+
+  /**
+   * Serialize `entries` for the wire, or `null` when nothing survives the gate.
+   *
+   * The whole batch is checked first, which is one pass and the only cost while
+   * nothing is leaking. Only when that fails is the offender worth isolating:
+   * a single log line carrying an email address must not take up to `batchSize`
+   * unrelated, PII-free entries down with it — and the batch is then permanently
+   * deleted from the durable queue, so those entries would be gone for good.
+   * `OtlpLogTransport` keeps the clean entries the same way.
+   */
+  private serializeSafely(entries: StructuredLogEntry[]): string | null {
+    const serialize = (rows: StructuredLogEntry[]): string =>
+      JSON.stringify(this.options.transform ? this.options.transform(rows) : rows)
+    const isSafe = (candidate: string): boolean => {
+      try {
+        return this.options.privacyPredicate(candidate)
+      } catch {
+        // A broken gate must fail closed.
+        return false
+      }
+    }
+
+    const whole = serialize(entries)
+    if (isSafe(whole)) return whole
+    if (entries.length === 1) {
+      this.onPrivacyRejected(1)
+      return null
+    }
+
+    const safeEntries = entries.filter((entry) => isSafe(serialize([entry])))
+    const rejected = entries.length - safeEntries.length
+    if (rejected > 0) this.onPrivacyRejected(rejected)
+    if (safeEntries.length === 0) return null
+
+    // A pattern that only appears once the survivors are joined back together
+    // still has to fail closed.
+    const remainder = serialize(safeEntries)
+    if (isSafe(remainder)) return remainder
+    this.onPrivacyRejected(safeEntries.length)
+    return null
+  }
+
+  private onPrivacyRejected(entryCount: number): void {
+    this.updateHealth({
+      droppedEntries: this.health.droppedEntries + entryCount,
+      lastFailureAt: new Date().toISOString(),
+      lastError: "Remote log payload rejected by privacy gate",
+    })
+    this.emitDiagnostic(
+      "logger.remote.privacy_rejected",
+      "Rejected remote logs at the outbound privacy gate.",
+      "warn",
+      { droppedEntries: entryCount }
+    )
   }
 
   private onSendFailure(error: unknown): void {

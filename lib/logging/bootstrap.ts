@@ -13,6 +13,7 @@ import {
   ObservabilitySpool,
   ObservabilitySpoolTransport,
   createObservabilitySpoolTransport,
+  installConsoleBridge,
   logContext,
 } from "@cognia/logging"
 import { DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
@@ -20,7 +21,7 @@ import type {
   LogLevel,
   UnifiedLoggerConfig,
   RemoteTransportDetailSettings,
-  LangfuseTransportDetailSettings,
+  LangfuseTraceSettings,
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
@@ -39,25 +40,27 @@ import {
   createLangfuseTransport,
   createNativeTransport,
   createOtlpHttpTransport,
+  createOtlpLogTransport,
   createRemoteTransport,
   IndexedDBTransport,
   OtlpHttpTransport,
+  OtlpLogTransport,
 } from "./transports"
 import { setPlatformLoggingConfig } from "@/lib/native/native-logging"
 import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
 import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
-import { isTauri } from "@/lib/platform/detect"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { ingestLangfuseTraceBatch, setLangfuseCredentials } from "@/lib/logging/langfuse-host"
 import {
   configureTauriSidecarTelemetry,
   createTauriOtlpFetch,
   postTauriTelemetryJson,
 } from "./transports/tauri-fetch-shim"
-import {
-  extractLegacyTelemetrySecrets,
-  getTelemetrySecretForWeb,
-  persistLegacyTelemetrySecrets,
-} from "./telemetry-secrets"
+import { extractLegacyTelemetrySecrets, persistLegacyTelemetrySecrets } from "./telemetry-secrets"
+import { isCredentiallessOtlpEndpoint, resolveOtlpEgressPolicy } from "./otlp-egress-policy"
 import {
   configureBehaviorEventExporters,
   createOtlpBehaviorEventExporter,
@@ -77,7 +80,7 @@ import {
 
 export type {
   RemoteTransportDetailSettings,
-  LangfuseTransportDetailSettings,
+  LangfuseTraceSettings,
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
@@ -94,21 +97,16 @@ export const LOGGING_SAMPLING_STORAGE_KEY = "cognia-logging-sampling"
 export const OBSERVABILITY_SPOOL_MAX_EVENTS = 50_000
 export const OBSERVABILITY_SPOOL_MAX_BYTES = 250 * 1024 * 1024
 
-// All 6 transports enabled by default per the Phase-6 product decision.
-// Remote / Langfuse / OpenTelemetry short-circuit silently when their
-// credentials/endpoints are blank — see `applyTransportSettings()` below
-// which gates remote attachment on a non-empty endpoint, the Langfuse
-// transport which sends direct ingestion batches and no-ops on missing keys, and the OTel
-// transport which guards POST against unreachable endpoints. Their
-// `enabled` flag stays true so the panel surfaces a `Degraded` health
-// badge until the user fills in the config in Settings → Observability.
+// Local sinks remain enabled by default. BYO Langfuse starts disabled because
+// enabling it is an explicit account-level data export consent decision.
 export const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   console: true,
   indexedDB: true,
   native: true,
   remote: true,
-  langfuse: true,
+  langfuse: false,
   agentTrace: true,
+  otlpLogs: false,
   nativeConfig: {
     minLevel: "warn",
     batchSize: 10,
@@ -122,10 +120,13 @@ export const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
     retryDelay: 1000,
   },
   langfuseConfig: {
+    enabled: false,
+    baseUrl: "https://cloud.langfuse.com",
     publicKey: "",
     secretKeyConfigured: false,
-    host: "https://cloud.langfuse.com",
-    minLevel: "warn",
+    environment: "production",
+    captureModelContent: false,
+    captureToolContent: false,
   },
   agentTraceOtlp: false,
   agentTraceConfig: {
@@ -213,6 +214,11 @@ const VALID_LOG_LEVELS: ReadonlySet<LogLevel> = new Set([
   "fatal",
 ])
 
+/** AI SDK 7 emits these observations from the sidecar's shared OTel runtime. */
+function isNotSidecarAutoObservation(span: AgentTraceSpan): boolean {
+  return span.operationName !== "chat" && span.operationName !== "execute_tool"
+}
+
 let hasBootstrapped = false
 let currentState: LoggingBootstrapState | null = null
 
@@ -221,12 +227,9 @@ function readStorageJSON<T>(key: string): Partial<T> | null {
     return null
   }
 
-  const raw = localStorage.getItem(key)
-  if (!raw) {
-    return null
-  }
-
   try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
     return JSON.parse(raw) as Partial<T>
   } catch {
     return null
@@ -250,10 +253,77 @@ function readTransportSettings(): LoggingTransportSettings {
     }
   }
 
+  const persistedOtlpConfig =
+    raw.agentTraceOtlpConfig && typeof raw.agentTraceOtlpConfig === "object"
+      ? (raw.agentTraceOtlpConfig as Partial<AgentTraceOtlpSettings>)
+      : undefined
+  if (persistedOtlpConfig?.headers && Object.keys(persistedOtlpConfig.headers).length > 0) {
+    raw = {
+      ...raw,
+      agentTraceOtlpConfig: { ...persistedOtlpConfig, headers: {} } as AgentTraceOtlpSettings,
+    }
+    try {
+      localStorage.setItem(LOGGING_TRANSPORTS_STORAGE_KEY, JSON.stringify(raw))
+    } catch {
+      // The in-memory copy is still credential-free when storage is unavailable.
+    }
+  }
+
   const migration = extractLegacyTelemetrySecrets(raw)
   if (Object.keys(migration.secrets).length > 0) {
     raw = migration.settings as Partial<LoggingTransportSettings>
-    void persistLegacyTelemetrySecrets(migration.secrets)
+    if (!isTauri()) {
+      try {
+        // A renderer must not retain plaintext telemetry credentials merely
+        // because a best-effort migration to encrypted browser storage fails.
+        localStorage.setItem(LOGGING_TRANSPORTS_STORAGE_KEY, JSON.stringify(migration.settings))
+      } catch {
+        // The sanitized in-memory settings still prevent credential egress.
+      }
+    }
+    const legacyLangfuse = migration.settings.langfuseConfig as Record<string, unknown> | undefined
+    const hasHost = isTauri() || isCapacitor() || hasWebCompanionTarget()
+    const publicKey =
+      typeof legacyLangfuse?.publicKey === "string" ? legacyLangfuse.publicKey.trim() : ""
+    const shouldEnableLangfuse =
+      migration.settings.langfuse === true &&
+      Boolean(migration.secrets.langfuseSecretKey && publicKey)
+    const writes: Promise<unknown>[] = [
+      persistLegacyTelemetrySecrets({
+        grafanaCloudApiToken: isTauri() ? migration.secrets.grafanaCloudApiToken : undefined,
+        // Dropped from the legacy store ONLY when the Host write below is
+        // actually carrying it into that account's credential record.
+        //
+        // Every other shape keeps it encrypted here. A hostless static Web
+        // runtime has nowhere else to put it (a later Host pairing requires an
+        // explicit credential save), and a Host whose legacy toggle was off —
+        // or whose public key is blank — is not migrating anything, so
+        // discarding the secret would erase a key the user cannot read back
+        // out of Langfuse.
+        langfuseSecretKey:
+          hasHost && shouldEnableLangfuse ? undefined : migration.secrets.langfuseSecretKey,
+      }),
+    ]
+    if (hasHost && shouldEnableLangfuse) {
+      const legacyBaseUrl =
+        typeof legacyLangfuse?.baseUrl === "string"
+          ? legacyLangfuse.baseUrl
+          : typeof legacyLangfuse?.host === "string"
+            ? legacyLangfuse.host
+            : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.baseUrl
+      writes.push(
+        setLangfuseCredentials({
+          enabled: true,
+          baseUrl: legacyBaseUrl,
+          publicKey,
+          secretKey: migration.secrets.langfuseSecretKey,
+          environment: "production",
+          captureModelContent: false,
+          captureToolContent: false,
+        })
+      )
+    }
+    void Promise.all(writes)
       .then(() => {
         // Erase plaintext only after every keyring write succeeds. A failed
         // migration must leave the source intact so the next boot can retry.
@@ -270,9 +340,15 @@ function readTransportSettings(): LoggingTransportSettings {
     raw.nativeConfig && typeof raw.nativeConfig === "object"
       ? (raw.nativeConfig as Partial<NativeTransportDetailSettings>)
       : {}
-  const langfuseConfig: Partial<LangfuseTransportDetailSettings> =
+  const langfuseConfig: Partial<LangfuseTraceSettings> & {
+    host?: unknown
+    minLevel?: unknown
+  } =
     raw.langfuseConfig && typeof raw.langfuseConfig === "object"
-      ? (raw.langfuseConfig as Partial<LangfuseTransportDetailSettings>)
+      ? (raw.langfuseConfig as Partial<LangfuseTraceSettings> & {
+          host?: unknown
+          minLevel?: unknown
+        })
       : {}
   const agentTraceConfig: Partial<AgentTraceTransportDetailSettings> =
     raw.agentTraceConfig && typeof raw.agentTraceConfig === "object"
@@ -284,20 +360,57 @@ function readTransportSettings(): LoggingTransportSettings {
       : {}
   const posthogConfig = sanitizePostHogConfig(raw.posthogConfig)
 
+  const hasNewLangfuseEnabled = typeof langfuseConfig.enabled === "boolean"
+  const legacyLangfuseRequested = raw.langfuse === true
+  const langfusePublicKey =
+    typeof langfuseConfig.publicKey === "string" ? langfuseConfig.publicKey : ""
+  const langfuseSecretConfigured = langfuseConfig.secretKeyConfigured === true
+  const langfuseEnabled = hasNewLangfuseEnabled
+    ? langfuseConfig.enabled === true
+    : legacyLangfuseRequested && langfusePublicKey.trim().length > 0 && langfuseSecretConfigured
+  const langfuseBaseUrl =
+    typeof langfuseConfig.baseUrl === "string" && langfuseConfig.baseUrl.trim().length > 0
+      ? langfuseConfig.baseUrl
+      : typeof langfuseConfig.host === "string" && langfuseConfig.host.trim().length > 0
+        ? langfuseConfig.host
+        : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.baseUrl
+
+  // Pre-v4 desktop builds may already have moved the secret out of localStorage
+  // into the old global telemetry namespace. Trigger the Host-only migration
+  // without ever reading that secret into the renderer.
+  if (
+    !hasNewLangfuseEnabled &&
+    !migration.secrets.langfuseSecretKey &&
+    legacyLangfuseRequested &&
+    langfusePublicKey.trim().length > 0 &&
+    langfuseSecretConfigured &&
+    (isTauri() || isCapacitor() || hasWebCompanionTarget())
+  ) {
+    void setLangfuseCredentials({
+      enabled: true,
+      baseUrl: langfuseBaseUrl,
+      publicKey: langfusePublicKey,
+      environment: "production",
+      captureModelContent: false,
+      captureToolContent: false,
+    }).catch(() => {})
+  }
+
   return {
     console: typeof raw.console === "boolean" ? raw.console : DEFAULT_TRANSPORT_SETTINGS.console,
     indexedDB:
       typeof raw.indexedDB === "boolean" ? raw.indexedDB : DEFAULT_TRANSPORT_SETTINGS.indexedDB,
     native: typeof raw.native === "boolean" ? raw.native : DEFAULT_TRANSPORT_SETTINGS.native,
     remote: typeof raw.remote === "boolean" ? raw.remote : DEFAULT_TRANSPORT_SETTINGS.remote,
-    langfuse:
-      typeof raw.langfuse === "boolean" ? raw.langfuse : DEFAULT_TRANSPORT_SETTINGS.langfuse,
+    langfuse: langfuseEnabled,
     agentTrace:
       typeof raw.agentTrace === "boolean" ? raw.agentTrace : DEFAULT_TRANSPORT_SETTINGS.agentTrace,
     agentTraceOtlp:
       typeof raw.agentTraceOtlp === "boolean"
         ? raw.agentTraceOtlp
         : DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlp,
+    otlpLogs:
+      typeof raw.otlpLogs === "boolean" ? raw.otlpLogs : DEFAULT_TRANSPORT_SETTINGS.otlpLogs,
     nativeConfig: {
       minLevel:
         typeof nativeConfig.minLevel === "string" &&
@@ -348,23 +461,17 @@ function readTransportSettings(): LoggingTransportSettings {
       ),
     },
     langfuseConfig: {
-      publicKey:
-        typeof langfuseConfig.publicKey === "string"
-          ? langfuseConfig.publicKey
-          : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.publicKey,
-      secretKeyConfigured:
-        typeof langfuseConfig.secretKeyConfigured === "boolean"
-          ? langfuseConfig.secretKeyConfigured
-          : false,
-      host:
-        typeof langfuseConfig.host === "string" && langfuseConfig.host.trim().length > 0
-          ? langfuseConfig.host
-          : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.host,
-      minLevel:
-        typeof langfuseConfig.minLevel === "string" &&
-        VALID_LOG_LEVELS.has(langfuseConfig.minLevel as LogLevel)
-          ? (langfuseConfig.minLevel as LogLevel)
-          : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.minLevel,
+      enabled: langfuseEnabled,
+      publicKey: langfusePublicKey,
+      secretKeyConfigured: langfuseSecretConfigured,
+      baseUrl: langfuseBaseUrl,
+      environment:
+        typeof langfuseConfig.environment === "string" &&
+        langfuseConfig.environment.trim().length > 0
+          ? langfuseConfig.environment
+          : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.environment,
+      captureModelContent: langfuseConfig.captureModelContent === true,
+      captureToolContent: langfuseConfig.captureToolContent === true,
     },
     agentTraceConfig: {
       captureContent:
@@ -460,21 +567,10 @@ function isValidOtlpPreset(value: unknown): value is AgentTraceOtlpSettings["pre
 }
 
 function sanitizeOtlpHeaders(raw: unknown): Record<string, string> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    const normalized = k.trim().toLowerCase()
-    if (
-      normalized.length > 0 &&
-      !["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"].includes(
-        normalized
-      ) &&
-      typeof v === "string"
-    ) {
-      out[k] = v
-    }
-  }
-  return out
+  void raw
+  // Renderer-owned headers cannot be proven credential-free. Authentication
+  // belongs at the Rust Host or Collector boundary, never in WebView state.
+  return {}
 }
 
 /**
@@ -806,10 +902,11 @@ function applyTransportSettings(
     removeTransport("breadcrumb")
   }
 
-  if (transports.remote && config.remoteEndpoint) {
+  const remoteEndpoint = transports.remoteConfig.endpoint || config.remoteEndpoint
+  if (transports.remote && remoteEndpoint && isCredentiallessOtlpEndpoint(remoteEndpoint)) {
     addTransport(
       createRemoteTransport({
-        endpoint: transports.remoteConfig.endpoint || config.remoteEndpoint,
+        endpoint: remoteEndpoint,
         batchSize: transports.remoteConfig.batchSize,
         flushInterval: transports.remoteConfig.flushInterval,
         maxRetries: transports.remoteConfig.maxRetries,
@@ -817,6 +914,10 @@ function applyTransportSettings(
         maxQueueEntries: config.remoteQueueMaxEntries,
         maxQueueBytes: config.remoteQueueMaxBytes,
         diagnosticRateLimitMs: config.diagnosticRateLimitMs,
+        privacyPredicate: hasNoLeakingPii,
+        fetchImpl: isTauri()
+          ? createTauriOtlpFetch({ credential: { kind: "none" } })
+          : globalThis.fetch.bind(globalThis),
         diagnosticEmitter: (event) => {
           emitLoggerDiagnostic({
             code: event.code,
@@ -833,27 +934,25 @@ function applyTransportSettings(
     removeTransport("remote")
   }
 
-  if (transports.langfuse) {
-    const langfuseHost = (transports.langfuseConfig.host || "https://cloud.langfuse.com").replace(
-      /\/$/,
-      ""
-    )
+  const langfuseRuntimeEnabled =
+    transports.langfuse &&
+    transports.langfuseConfig.enabled &&
+    process.env.NEXT_PUBLIC_LANGFUSE_TRACING_DISABLED !== "1"
+  const hasAiExecutionHost = isTauri() || isCapacitor() || hasWebCompanionTarget()
+  if (langfuseRuntimeEnabled && hasAiExecutionHost) {
     addTransport(
       createLangfuseTransport({
-        publicKey: transports.langfuseConfig.publicKey || undefined,
-        resolveSecretKey: () => getTelemetrySecretForWeb("langfuseSecretKey"),
-        exportBatch:
-          isTauri() && transports.langfuseConfig.secretKeyConfigured === true
-            ? async (batch) => {
-                await postTauriTelemetryJson(
-                  `${langfuseHost}/api/public/ingestion`,
-                  JSON.stringify(batch),
-                  { kind: "langfuse", publicKey: transports.langfuseConfig.publicKey }
-                )
-              }
-            : undefined,
-        host: transports.langfuseConfig.host || undefined,
-        minLevel: transports.langfuseConfig.minLevel,
+        enabled: true,
+        baseUrl: transports.langfuseConfig.baseUrl,
+        publicKey: transports.langfuseConfig.publicKey,
+        secretKeyConfigured: transports.langfuseConfig.secretKeyConfigured,
+        environment: transports.langfuseConfig.environment,
+        release: process.env.NEXT_PUBLIC_APP_VERSION,
+        captureModelContent: transports.langfuseConfig.captureModelContent,
+        captureToolContent: transports.langfuseConfig.captureToolContent,
+        maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+        spanFilter: isNotSidecarAutoObservation,
+        hostIngest: ingestLangfuseTraceBatch,
       })
     )
   } else {
@@ -885,30 +984,36 @@ function applyTransportSettings(
     setAgentTraceWriter(transports.agentTraceOtlp ? dispatchSpanToTransports : null)
   }
 
+  const genericOtlpMode = resolveOtlpEgressPolicy({
+    isTauri: isTauri(),
+    preset: transports.agentTraceOtlpConfig.preset,
+  })
+  const genericOtlpCredential =
+    transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+      ? {
+          kind: "grafanaCloud" as const,
+          instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
+        }
+      : ({ kind: "none" } as const)
+  const genericOtlpFetch =
+    genericOtlpMode === "host"
+      ? createTauriOtlpFetch({ credential: genericOtlpCredential })
+      : globalThis.fetch.bind(globalThis)
+  const configuredTraceEndpoint = transports.agentTraceOtlpConfig.endpoint
+  const genericTraceEndpoint =
+    genericOtlpMode === "blocked" || !isCredentiallessOtlpEndpoint(configuredTraceEndpoint)
+      ? ""
+      : configuredTraceEndpoint
+
   // OTLP exporter — independent toggle from the Dexie sink so users can run
   // either alone or both together (Dexie powers the in-app UI, OTLP feeds
   // Grafana / Tempo / Honeycomb / Datadog). Empty endpoint short-circuits
   // to a `degraded` health status inside the transport itself.
   if (transports.agentTraceOtlp) {
     const otlpExisting = getTransport<OtlpHttpTransport>("agent-trace-otlp")
-    const otlpHeaders = { ...transports.agentTraceOtlpConfig.headers }
-    const grafanaCredential = {
-      kind: "grafanaCloud" as const,
-      instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
-    }
-    const fetchImpl = isTauri()
-      ? createTauriOtlpFetch({
-          credential:
-            transports.agentTraceOtlpConfig.preset === "grafana-cloud"
-              ? grafanaCredential
-              : { kind: "none" },
-        })
-      : transports.agentTraceOtlpConfig.preset === "grafana-cloud"
-        ? createWebGrafanaFetch(transports.agentTraceOtlpConfig.grafanaCloud.instanceId)
-        : globalThis.fetch.bind(globalThis)
     const otlpOptions = {
-      endpoint: transports.agentTraceOtlpConfig.endpoint,
-      headers: otlpHeaders,
+      endpoint: genericTraceEndpoint,
+      headers: {},
       resource: {
         serviceName: transports.agentTraceOtlpConfig.serviceName,
         environment: transports.agentTraceOtlpConfig.environment || undefined,
@@ -916,7 +1021,8 @@ function applyTransportSettings(
       // Remote OTLP is metadata-only even when local agent-trace previews are enabled.
       captureContent: false,
       maxPreviewBytes: 0,
-      fetchImpl,
+      spanFilter: hasAiExecutionHost ? isNotSidecarAutoObservation : undefined,
+      fetchImpl: genericOtlpFetch,
     } as const
     if (otlpExisting && typeof otlpExisting.updateOptions === "function") {
       otlpExisting.updateOptions(otlpOptions)
@@ -930,6 +1036,32 @@ function applyTransportSettings(
     setAgentTraceWriter(dispatchSpanToTransports)
   } else {
     removeTransport("agent-trace-otlp")
+  }
+
+  // Ordinary application logs have a separate consent switch from traces.
+  // Both share the destination metadata, but use the OTLP Logs signal and
+  // therefore cannot silently expand trace consent into log export consent.
+  if (transports.otlpLogs) {
+    const endpoint = otlpLogsEndpoint(genericTraceEndpoint)
+    const options = {
+      endpoint,
+      resource: {
+        serviceName: transports.agentTraceOtlpConfig.serviceName || "cognia-renderer",
+        serviceVersion: process.env.NEXT_PUBLIC_APP_VERSION,
+        environment: transports.agentTraceOtlpConfig.environment || undefined,
+      },
+      fetchImpl: genericOtlpFetch,
+    } as const
+    const existing = getTransport<OtlpLogTransport>("otlp-logs")
+    if (existing) {
+      existing.updateOptions(options)
+      addTransport(existing)
+    } else {
+      addTransport(createOtlpLogTransport(options))
+    }
+  } else {
+    getTransport<OtlpLogTransport>("otlp-logs")?.discardPending()
+    removeTransport("otlp-logs")
   }
 
   for (const destination of posthogDestinations.filter((item) => item.aiObservability)) {
@@ -958,6 +1090,7 @@ function applyTransportSettings(
       // PostHog's OTLP intake rejects request bodies above 4 MB. The transport
       // recursively splits by serialized UTF-8 size before sending.
       maxRequestBytes: 4 * 1024 * 1024,
+      spanFilter: hasAiExecutionHost ? isNotSidecarAutoObservation : undefined,
       fetchImpl,
     } as const
     if (existing) {
@@ -977,17 +1110,15 @@ function applyTransportSettings(
 
   const hasPostHogAi = posthogDestinations.some((item) => item.aiObservability)
   setAgentTraceWriter(
-    transports.agentTrace || transports.agentTraceOtlp || hasPostHogAi
+    transports.agentTrace || transports.agentTraceOtlp || langfuseRuntimeEnabled || hasPostHogAi
       ? dispatchSpanToTransports
       : null
   )
   if (isTauri()) {
     void configureTauriSidecarTelemetry({
-      enabled: transports.agentTraceOtlp,
-      endpoint: transports.agentTraceOtlp
-        ? transports.agentTraceOtlpConfig.endpoint
-        : "http://localhost",
-      headers: transports.agentTraceOtlp ? { ...transports.agentTraceOtlpConfig.headers } : {},
+      enabled: transports.agentTraceOtlp && Boolean(genericTraceEndpoint),
+      endpoint: genericTraceEndpoint || "http://localhost",
+      headers: {},
       serviceName: "cognia-sidecar",
       environment: transports.agentTraceOtlp ? transports.agentTraceOtlpConfig.environment : "",
       credential:
@@ -1008,27 +1139,13 @@ function applyTransportSettings(
   // engineering trace transport toggle. It may reuse the configured OTLP
   // destination, but disabling traces must not disable behavior export.
   const behaviorExporters: BehaviorEventExporter[] = []
-  const behaviorEndpoint = otlpLogsEndpoint(transports.agentTraceOtlpConfig.endpoint)
+  const behaviorEndpoint = otlpLogsEndpoint(genericTraceEndpoint)
   if (behaviorEndpoint) {
-    const behaviorHeaders = { ...transports.agentTraceOtlpConfig.headers }
-    const behaviorFetch = isTauri()
-      ? createTauriOtlpFetch({
-          credential:
-            transports.agentTraceOtlpConfig.preset === "grafana-cloud"
-              ? {
-                  kind: "grafanaCloud",
-                  instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
-                }
-              : { kind: "none" },
-        })
-      : transports.agentTraceOtlpConfig.preset === "grafana-cloud"
-        ? createWebGrafanaFetch(transports.agentTraceOtlpConfig.grafanaCloud.instanceId)
-        : globalThis.fetch.bind(globalThis)
     behaviorExporters.push(
       createOtlpBehaviorEventExporter(async (body) => {
-        const response = await behaviorFetch(behaviorEndpoint, {
+        const response = await genericOtlpFetch(behaviorEndpoint, {
           method: "POST",
-          headers: { "content-type": "application/json", ...behaviorHeaders },
+          headers: { "content-type": "application/json" },
           body,
         })
         if (!response.ok) throw new Error(`OTLP logs export failed with ${response.status}`)
@@ -1122,16 +1239,6 @@ export function otlpLogsEndpoint(tracesEndpoint: string): string {
   return `${trimmed.replace(/\/$/, "")}/v1/logs`
 }
 
-function createWebGrafanaFetch(instanceId: string): typeof fetch {
-  return async (input, init) => {
-    const token = await getTelemetrySecretForWeb("grafanaCloudApiToken")
-    if (!token) throw new Error("Grafana Cloud API token is not configured")
-    const headers = new Headers(init?.headers)
-    headers.set("Authorization", `Basic ${globalThis.btoa(`${instanceId}:${token}`)}`)
-    return globalThis.fetch(input, { ...init, headers })
-  }
-}
-
 /** Emit a finished span as a synthetic `StructuredLogEntry` to every
  * registered transport. The trace transport recognises `data.kind ===
  * "agent-trace-span"` and persists the embedded span row; other transports
@@ -1158,6 +1265,10 @@ export function bootstrapLogger(config?: Partial<UnifiedLoggerConfig>): LoggingB
   const nextConfig: Partial<UnifiedLoggerConfig> = {
     ...persistedConfig,
     ...config,
+    enableConsole: transportSettings.console,
+    enableStorage: transportSettings.indexedDB,
+    enableRemote: transportSettings.remote,
+    maxStorageEntries: retentionSettings.maxEntries,
     ...(persistedConfig.redaction || config?.redaction
       ? {
           redaction: {
@@ -1179,6 +1290,10 @@ export function bootstrapLogger(config?: Partial<UnifiedLoggerConfig>): LoggingB
   const mergedConfig = getLoggerConfig()
   applyTransportSettings(transportSettings, retentionSettings, mergedConfig)
   applySamplingSettings(samplingSettings)
+  // Legacy runtime call sites still enter the same redaction, persistence,
+  // native, and remote pipeline. Tests install the bridge against an explicit
+  // console target so Jest module resets never leave global wrappers behind.
+  if (process.env.NODE_ENV !== "test") installConsoleBridge()
 
   currentState = {
     config: mergedConfig,
@@ -1205,9 +1320,19 @@ export function applyLoggingSettings(params: {
     retention: readRetentionSettings(),
   }
 
-  const nextTransports = {
+  const requestedTransports = params.transports || {}
+  const nextTransports: LoggingTransportSettings = {
     ...existing.transports,
-    ...(params.transports || {}),
+    ...requestedTransports,
+    ...(requestedTransports.agentTraceOtlpConfig
+      ? {
+          agentTraceOtlpConfig: {
+            ...existing.transports.agentTraceOtlpConfig,
+            ...requestedTransports.agentTraceOtlpConfig,
+            headers: sanitizeOtlpHeaders(requestedTransports.agentTraceOtlpConfig.headers),
+          },
+        }
+      : {}),
   }
   const nextRetention = {
     ...existing.retention,

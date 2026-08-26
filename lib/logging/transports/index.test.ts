@@ -39,6 +39,11 @@ describe("transports barrel exports", () => {
     expect(typeof transports.createNativeTransport).toBe("function")
   })
 
+  it("re-exports the privacy-gated OTLP Logs transport", () => {
+    expect(typeof transports.OtlpLogTransport).toBe("function")
+    expect(typeof transports.createOtlpLogTransport).toBe("function")
+  })
+
   it("re-exports remote retry queue store class + factory", () => {
     expect(typeof transports.IndexedDBRemoteRetryQueueStore).toBe("function")
     expect(typeof transports.createRemoteRetryQueueStore).toBe("function")

@@ -191,20 +191,15 @@ OTLP 构建 `Authorization: Basic …`。
 
 ## langfuse
 
-`langfuse-transport.ts` —— 一个 LLM 可观测性 sink，把条目分组进 Langfuse trace。它
-懒导入 `@/lib/ai/observability/langfuse-client`，缓冲，并在 flush 时按
-`traceId || sessionId || "default"` 分组，每组创建一个 trace、每条目创建一个 span：
+`langfuse-transport.ts` 只接受已完成的 `AgentTraceSpan` envelope；普通应用日志与 metrics 会被
+忽略。它清洗并批量提交 `AgentTraceBatchV1` 到窄 Host ingest command。Host 根据认证账户解析
+只写的 BYO credential，再次校验 schema、PII、授权、速率与大小限制，按 span ID 去重，并固定
+导出到 `/api/public/otel/v1/traces`，Langfuse ingestion version 为 4。
 
-```ts title="lib/logging/transports/langfuse-transport.ts:127"
-const traceKey = entry.traceId || entry.sessionId || "default"
-// → createChatTrace({ sessionId: traceKey, ... }); per entry:
-const spanName = `${eventPrefix||"log"}.${entry.level}.${entry.module}`
-const span = createSpan(trace, { name: spanName, input: entry.message,
-  level: mapLogLevelToLangfuse(entry.level) })
-```
-
-`minLevel` 默认 `"warn"`。`mapLogLevelToLangfuse`：trace/debug→`DEBUG`，info→`DEFAULT`，
-warn→`WARNING`，error/fatal→`ERROR`。
+Sidecar 的共享 `NodeSDK` 同时挂载官方 Langfuse processor，生成 AI SDK 7 的 generation/tool
+子 observation；通用 OTLP 与 PostHog 仍是独立 processor。Renderer 根节点保留稳定的
+`chat.turn`、`agent.run`、`workflow.run` 名称；重复的手写 provider/tool 子节点只在远程目的地
+过滤。模型内容与工具内容分别授权、默认关闭，并都经过有界字段级过滤与 Host PII gate。
 
 ## agent-trace
 
@@ -226,7 +221,7 @@ warn→`WARNING`，error/fatal→`ERROR`。
 | observability-spool | 有界本地恢复 spool | 是 | 通过 logger core 诊断 |
 | breadcrumb | Rust 崩溃上下文环 | 否 | 桌面 best-effort |
 | otlp-http | OTLP `/v1/traces` | 是（32） | `degraded`(无端点 \|\| lastError) / `healthy` |
-| langfuse | Langfuse SDK | 是（10） | 无；minLevel warn |
+| langfuse | Cognia Host → Langfuse v4 OTLP traces | 是（32） | `degraded`(未配置 \| lastError) / `healthy` |
 | agent-trace | Dexie `agentTraces` | 是（32） | `degraded`(lastError) / `healthy` |
 
 `getTransportHealthSnapshot()`（`core.ts:587`）一次性拉取所有 transport 快照；日志面板的

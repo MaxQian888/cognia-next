@@ -109,7 +109,6 @@ pub fn validate_traceparent(value: &str) -> Option<String> {
 pub enum TelemetryCredential {
     None,
     GrafanaCloud { instance_id: String },
-    Langfuse { public_key: String },
     Posthog { project_token: String },
 }
 
@@ -168,10 +167,33 @@ fn validate_endpoint(endpoint: &str) -> Result<url::Url, String> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("telemetry endpoint must not embed credentials".to_string());
     }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("telemetry endpoint must not include a query or fragment".to_string());
+    }
     if parsed.host_str().is_none() {
         return Err("telemetry endpoint must include a host".to_string());
     }
     Ok(parsed)
+}
+
+fn validate_credential_destination(
+    endpoint: &url::Url,
+    credential: &TelemetryCredential,
+) -> Result<(), String> {
+    if matches!(credential, TelemetryCredential::GrafanaCloud { .. }) {
+        let host = endpoint.host_str().unwrap_or_default().to_ascii_lowercase();
+        let path = endpoint.path().trim_end_matches('/');
+        if endpoint.scheme() != "https"
+            || !host.ends_with(".grafana.net")
+            || !matches!(path, "/otlp/v1/traces" | "/otlp/v1/logs")
+        {
+            return Err(
+                "Grafana Cloud credentials require an approved grafana.net OTLP endpoint"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn is_sensitive_header(name: &str) -> bool {
@@ -179,6 +201,72 @@ fn is_sensitive_header(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key"
     )
+}
+
+fn sanitize_renderer_headers(
+    headers: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    for (name, value) in headers {
+        if !name.eq_ignore_ascii_case("content-type")
+            || !value.eq_ignore_ascii_case("application/json")
+        {
+            return Err(format!(
+                "renderer-supplied telemetry header is not allowed: {name}"
+            ));
+        }
+    }
+    // The Host sets Content-Type itself. All authentication is injected below
+    // from a credential reference resolved inside the native secret store.
+    Ok(HashMap::new())
+}
+
+fn is_valid_otlp_id(value: &str, hex_length: usize, byte_length: usize) -> bool {
+    if value.len() == hex_length
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && value.bytes().any(|byte| byte != b'0')
+    {
+        return true;
+    }
+    BASE64
+        .decode(value)
+        .is_ok_and(|decoded| decoded.len() == byte_length && decoded.iter().any(|byte| *byte != 0))
+}
+
+fn telemetry_payload_has_no_leaking_pii(value: &serde_json::Value, field: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => {
+            match field {
+                "traceId" => return is_valid_otlp_id(text, 32, 16),
+                "spanId" | "parentSpanId" => return is_valid_otlp_id(text, 16, 8),
+                "timeUnixNano"
+                | "observedTimeUnixNano"
+                | "startTimeUnixNano"
+                | "endTimeUnixNano"
+                | "intValue" => {
+                    return text.parse::<i128>().is_ok();
+                }
+                _ => {}
+            }
+            if field == "api_key"
+                && text.starts_with("phc_")
+                && text.len() <= 512
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            {
+                return true;
+            }
+            cognia_net::outbound_pii::has_no_leaking_pii(&format!("{field}: {text}"))
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .all(|item| telemetry_payload_has_no_leaking_pii(item, field)),
+        serde_json::Value::Object(items) => items.iter().all(|(key, item)| {
+            cognia_net::outbound_pii::has_no_leaking_pii(key)
+                && telemetry_payload_has_no_leaking_pii(item, key)
+        }),
+        _ => true,
+    }
 }
 
 fn build_headers(
@@ -189,9 +277,6 @@ fn build_headers(
         TelemetryCredential::None => None,
         TelemetryCredential::GrafanaCloud { .. } => {
             cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, GRAFANA_API_TOKEN_KEY)?
-        }
-        TelemetryCredential::Langfuse { .. } => {
-            cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)?
         }
         TelemetryCredential::Posthog { .. } => None,
     };
@@ -229,16 +314,6 @@ fn build_headers_with_secret(
             let encoded = BASE64.encode(format!("{}:{token}", instance_id.trim()));
             out.insert("authorization".to_string(), format!("Basic {encoded}"));
         }
-        TelemetryCredential::Langfuse { public_key } => {
-            let secret = secret.filter(|value| !value.is_empty()).ok_or_else(|| {
-                "Langfuse secret key is not available in the secret store".to_string()
-            })?;
-            if public_key.trim().is_empty() {
-                return Err("Langfuse public key is required".to_string());
-            }
-            let encoded = BASE64.encode(format!("{}:{secret}", public_key.trim()));
-            out.insert("authorization".to_string(), format!("Basic {encoded}"));
-        }
         TelemetryCredential::Posthog { project_token } => {
             let project_token = project_token.trim();
             if !project_token.starts_with("phc_") || project_token.len() > 512 {
@@ -271,6 +346,17 @@ pub async fn telemetry_secret_clear(kind: TelemetrySecretKind) -> Result<(), Str
     cognia_secrets::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, kind.key())
 }
 
+/// Read the pre-v4 Langfuse secret only for the account-scoped Host migration.
+/// It is never exposed through a command or serialized back to the renderer.
+pub fn legacy_langfuse_secret() -> Result<Option<String>, String> {
+    cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)
+}
+
+/// Remove the pre-v4 secret after it has been committed to the account store.
+pub fn clear_legacy_langfuse_secret() -> Result<(), String> {
+    cognia_secrets::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)
+}
+
 #[tauri::command]
 pub async fn telemetry_otlp_export(
     request_id: String,
@@ -288,15 +374,26 @@ pub async fn telemetry_otlp_export(
     {
         return Err("telemetry request id is invalid".to_string());
     }
-    serde_json::from_str::<serde_json::Value>(&body)
+    let traceparent = match traceparent {
+        Some(value) => Some(
+            validate_traceparent(&value)
+                .ok_or_else(|| "telemetry traceparent is invalid".to_string())?,
+        ),
+        None => None,
+    };
+    let payload = serde_json::from_str::<serde_json::Value>(&body)
         .map_err(|error| format!("telemetry payload must be valid JSON: {error}"))?;
+    if !telemetry_payload_has_no_leaking_pii(&payload, "payload") {
+        return Err("telemetry payload rejected by outbound PII gate".to_string());
+    }
     let endpoint = validate_endpoint(&endpoint)?;
+    validate_credential_destination(&endpoint, &credential)?;
     if matches!(&credential, TelemetryCredential::Posthog { .. })
         && endpoint.path().trim_end_matches('/') != "/i/v0/ai/otel"
     {
         return Err("PostHog telemetry must use the /i/v0/ai/otel endpoint".to_string());
     }
-    let headers = build_headers(headers, credential)?;
+    let headers = build_headers(sanitize_renderer_headers(headers)?, credential)?;
     let builder = reqwest::Client::builder().timeout(EXPORT_TIMEOUT);
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
         .map_err(|error| error.to_string())?;
@@ -489,6 +586,13 @@ pub async fn telemetry_configure_sidecar(
     posthog_destinations: Option<Vec<PostHogDestinationConfig>>,
     installation_id: Option<String>,
 ) -> Result<bool, String> {
+    let headers = if enabled {
+        sanitize_renderer_headers(headers)?
+    } else {
+        // Disabling must always be possible, even when persisted legacy state
+        // still contains renderer-owned headers that are no longer accepted.
+        HashMap::new()
+    };
     let posthog_destinations = posthog_destinations.unwrap_or_default();
     for destination in &posthog_destinations {
         validate_endpoint(&destination.host)?;
@@ -504,7 +608,8 @@ pub async fn telemetry_configure_sidecar(
     let any_enabled = enabled || !posthog_destinations.is_empty();
     let next = if any_enabled {
         if enabled {
-            validate_endpoint(&endpoint)?;
+            let parsed_endpoint = validate_endpoint(&endpoint)?;
+            validate_credential_destination(&parsed_endpoint, &credential)?;
             // Validate both non-sensitive headers and the referenced keyring
             // credential before replacing the active sidecar configuration.
             let resolved_headers = build_headers(headers.clone(), credential.clone())?;
@@ -598,6 +703,23 @@ mod tests {
     fn rejects_non_http_endpoints_and_embedded_credentials() {
         assert!(validate_endpoint("file:///tmp/collector").is_err());
         assert!(validate_endpoint("https://user:pass@example.com/v1/traces").is_err());
+        assert!(validate_endpoint("https://example.com/v1/traces?api_key=secret").is_err());
+        assert!(validate_endpoint("https://example.com/v1/traces#secret").is_err());
+    }
+
+    #[test]
+    fn grafana_credentials_are_bound_to_approved_otlp_destinations() {
+        let credential = TelemetryCredential::GrafanaCloud {
+            instance_id: "1234567".to_string(),
+        };
+        let approved =
+            validate_endpoint("https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/logs")
+                .expect("approved endpoint");
+        let attacker =
+            validate_endpoint("https://attacker.example/otlp/v1/logs").expect("valid URL");
+
+        assert!(validate_credential_destination(&approved, &credential).is_ok());
+        assert!(validate_credential_destination(&attacker, &credential).is_err());
     }
 
     #[test]
@@ -637,6 +759,49 @@ mod tests {
     }
 
     #[test]
+    fn renderer_cannot_supply_vendor_or_custom_headers() {
+        assert!(sanitize_renderer_headers(HashMap::from([(
+            "X-Honeycomb-Team".to_string(),
+            "renderer-secret".to_string(),
+        )]))
+        .is_err());
+        assert!(sanitize_renderer_headers(HashMap::from([(
+            "Content-Type".to_string(),
+            "application/json".to_string(),
+        )]))
+        .expect("standard content type")
+        .is_empty());
+    }
+
+    #[test]
+    fn native_payload_gate_validates_structural_and_public_token_shapes() {
+        assert!(telemetry_payload_has_no_leaking_pii(
+            &serde_json::json!({
+                "traceId": "aabbccddeeff00112233445566778899",
+                "spanId": "aabbccddeeff0011",
+                "timeUnixNano": "1700000000000000000",
+                "api_key": "phc_public-project-token",
+            }),
+            "payload",
+        ));
+        assert!(!telemetry_payload_has_no_leaking_pii(
+            &serde_json::json!({ "traceId": "alice@example.com" }),
+            "payload",
+        ));
+        assert!(!telemetry_payload_has_no_leaking_pii(
+            &serde_json::json!({ "api_key": "phc_alice@example.com" }),
+            "payload",
+        ));
+        assert!(telemetry_payload_has_no_leaking_pii(
+            &serde_json::json!({
+                "traceId": "qrvM3e7/ABEiM0RVZneImQ==",
+                "spanId": "qrvM3e7/ABE=",
+            }),
+            "payload",
+        ));
+    }
+
+    #[test]
     fn grafana_authorization_is_injected_from_rust_secret() {
         let headers = build_headers_with_secret(
             HashMap::from([("X-Scope-OrgID".to_string(), "tenant-a".to_string())]),
@@ -652,22 +817,6 @@ mod tests {
             "Basic MTIzNDU2NzpnbGNfc2VjcmV0"
         );
         assert_eq!(headers.get("x-scope-orgid").expect("tenant"), "tenant-a");
-    }
-
-    #[test]
-    fn langfuse_authorization_is_injected_from_rust_secret() {
-        let headers = build_headers_with_secret(
-            HashMap::new(),
-            TelemetryCredential::Langfuse {
-                public_key: "pk-project".to_string(),
-            },
-            Some("sk-project"),
-        )
-        .expect("headers");
-        assert_eq!(
-            headers.get("authorization"),
-            Some(&format!("Basic {}", BASE64.encode("pk-project:sk-project")))
-        );
     }
 
     #[test]
@@ -766,6 +915,92 @@ mod tests {
         .await
         .expect_err("invalid payload");
         assert!(error.contains("valid JSON"));
+    }
+
+    #[tokio::test]
+    async fn native_export_rejects_invalid_traceparent_before_networking() {
+        let error = telemetry_otlp_export(
+            "request-invalid-traceparent".to_string(),
+            "http://127.0.0.1:1/v1/traces".to_string(),
+            r#"{"resourceSpans":[]}"#.to_string(),
+            HashMap::new(),
+            TelemetryCredential::None,
+            Some("not-a-traceparent".to_string()),
+        )
+        .await
+        .expect_err("invalid traceparent");
+        assert!(error.contains("traceparent is invalid"));
+    }
+
+    #[tokio::test]
+    async fn native_export_rejects_pii_before_networking() {
+        let error = telemetry_otlp_export(
+            "request-pii".to_string(),
+            "http://127.0.0.1:1/v1/logs".to_string(),
+            r#"{"message":"alice@example.com"}"#.to_string(),
+            HashMap::new(),
+            TelemetryCredential::None,
+            None,
+        )
+        .await
+        .expect_err("PII payload");
+        assert!(error.contains("PII gate"));
+    }
+
+    #[tokio::test]
+    async fn native_export_rejects_grafana_secret_repointing() {
+        let error = telemetry_otlp_export(
+            "request-attacker".to_string(),
+            "https://attacker.example/otlp/v1/logs".to_string(),
+            r#"{"resourceLogs":[]}"#.to_string(),
+            HashMap::new(),
+            TelemetryCredential::GrafanaCloud {
+                instance_id: "1234567".to_string(),
+            },
+            None,
+        )
+        .await
+        .expect_err("attacker destination");
+        assert!(error.contains("approved grafana.net"));
+    }
+
+    #[tokio::test]
+    async fn sidecar_config_rejects_grafana_secret_repointing() {
+        let error = telemetry_configure_sidecar(
+            true,
+            "https://attacker.example/otlp/v1/traces".to_string(),
+            HashMap::new(),
+            "cognia-sidecar".to_string(),
+            "test".to_string(),
+            TelemetryCredential::GrafanaCloud {
+                instance_id: "1234567".to_string(),
+            },
+            None,
+            None,
+        )
+        .await
+        .expect_err("attacker destination");
+        assert!(error.contains("approved grafana.net"));
+    }
+
+    #[tokio::test]
+    async fn disabling_sidecar_ignores_legacy_renderer_headers() {
+        telemetry_configure_sidecar(
+            false,
+            "http://localhost".to_string(),
+            HashMap::from([(
+                "Authorization".to_string(),
+                "Bearer legacy-renderer-secret".to_string(),
+            )]),
+            "cognia-sidecar".to_string(),
+            "".to_string(),
+            TelemetryCredential::None,
+            None,
+            None,
+        )
+        .await
+        .expect("disable telemetry");
+        assert!(sidecar_env().expect("environment").is_empty());
     }
 
     #[tokio::test]

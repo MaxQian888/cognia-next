@@ -4,6 +4,8 @@
 
 import "fake-indexeddb/auto"
 import { IDBFactory } from "fake-indexeddb"
+import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
+import { waitFor } from "@testing-library/react"
 
 import type { LangfuseTransport } from "./transports/langfuse-transport"
 
@@ -12,6 +14,19 @@ const mockPostTauriTelemetryJson = jest.fn<Promise<{ ok: boolean }>, unknown[]>(
   ok: true,
 }))
 const mockConfigureTauriSidecarTelemetry = jest.fn<Promise<void>, unknown[]>(async () => undefined)
+const mockIngestLangfuseTraceBatch = jest.fn(async () => ({
+  acceptedSpans: 1,
+  duplicateSpans: 0,
+  status: 202,
+}))
+const mockSetLangfuseCredentials = jest.fn(async () => undefined)
+const mockCreateTauriOtlpFetch = jest.fn(
+  (options: { credential: unknown }) =>
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      await mockPostTauriTelemetryJson(String(input), String(init?.body ?? ""), options.credential)
+      return { ok: true, status: 200, headers: { get: () => null } } as unknown as Response
+    }
+)
 
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
@@ -20,8 +35,12 @@ jest.mock("@/lib/platform/detect", () => ({
 jest.mock("./transports/tauri-fetch-shim", () => ({
   configureTauriSidecarTelemetry: (...args: unknown[]) =>
     mockConfigureTauriSidecarTelemetry(...args),
-  createTauriOtlpFetch: jest.fn(() => fetch),
+  createTauriOtlpFetch: (...args: unknown[]) => mockCreateTauriOtlpFetch(...(args as [never])),
   postTauriTelemetryJson: (...args: unknown[]) => mockPostTauriTelemetryJson(...args),
+}))
+jest.mock("@/lib/logging/langfuse-host", () => ({
+  ingestLangfuseTraceBatch: (...args: unknown[]) => mockIngestLangfuseTraceBatch(...args),
+  setLangfuseCredentials: (...args: unknown[]) => mockSetLangfuseCredentials(...args),
 }))
 
 // `bootstrap.ts` ships an IIFE-style `hasBootstrapped` flag at module scope.
@@ -45,6 +64,213 @@ jest.mock("@/lib/native/native-logging", () => ({
 }))
 
 describe("bootstrapLogger persistence + transport attach/detach", () => {
+  it("exports ordinary logs independently from Agent Trace through the Rust Host", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem("cognia-logging-config", JSON.stringify({ enableConsole: false }))
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        console: false,
+        indexedDB: false,
+        native: false,
+        remote: false,
+        langfuse: false,
+        agentTrace: false,
+        agentTraceOtlp: false,
+        otlpLogs: true,
+        agentTraceOtlpConfig: {
+          preset: "grafana-cloud",
+          endpoint: "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
+          headers: {},
+          serviceName: "cognia-renderer",
+          environment: "production",
+          grafanaCloud: { instanceId: "instance-01", apiTokenConfigured: true },
+        },
+      })
+    )
+
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { createLogger, getTransport } = await import("@cognia/logging")
+    expect(getTransport("console")).toBeUndefined()
+    expect(getTransport("agent-trace-otlp")).toBeUndefined()
+    createLogger("network:sync").error("Sync failed", new Error("offline"))
+    const logTransport = getTransport("otlp-logs") as {
+      flush: () => Promise<void>
+      getHealth: () => { status: string; lastError?: string }
+    }
+    await logTransport.flush()
+
+    expect(logTransport.getHealth()).toMatchObject({ status: "healthy" })
+
+    expect(mockCreateTauriOtlpFetch).toHaveBeenCalledWith({
+      credential: { kind: "grafanaCloud", instanceId: "instance-01" },
+    })
+    expect(mockPostTauriTelemetryJson).toHaveBeenCalledWith(
+      "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/logs",
+      expect.stringContaining('"severityText":"ERROR"'),
+      { kind: "grafanaCloud", instanceId: "instance-01" }
+    )
+  })
+
+  it("blocks credentialed OTLP export from a non-Tauri WebView", async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 200 }))
+    localStorage.setItem("cognia-logging-config", JSON.stringify({ enableConsole: false }))
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        console: false,
+        indexedDB: false,
+        native: false,
+        remote: false,
+        langfuse: false,
+        agentTrace: false,
+        agentTraceOtlp: false,
+        otlpLogs: true,
+        agentTraceOtlpConfig: {
+          preset: "grafana-cloud",
+          endpoint: "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
+          headers: {},
+          serviceName: "cognia-renderer",
+          environment: "production",
+          grafanaCloud: { instanceId: "instance-01", apiTokenConfigured: true },
+        },
+      })
+    )
+
+    try {
+      const mod = await import("./bootstrap")
+      mod.bootstrapLogger()
+      const { createLogger, getTransport } = await import("@cognia/logging/core")
+      const transport = getTransport("otlp-logs") as {
+        flush: () => Promise<void>
+        getHealth: () => { status: string }
+      }
+      createLogger("network:sync").warn("retry")
+      await transport.flush()
+
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(transport.getHealth().status).toBe("degraded")
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it("drops every renderer-owned OTLP header from programmatic settings updates", async () => {
+    const mod = await import("./bootstrap")
+    const initial = mod.bootstrapLogger()
+
+    const result = mod.applyLoggingSettings({
+      transports: {
+        agentTraceOtlpConfig: {
+          ...initial.transports.agentTraceOtlpConfig,
+          headers: {
+            "X-Environment": "staging",
+            Authorization: "Bearer renderer-secret",
+            "X-Api-Key": "renderer-secret",
+          },
+        },
+      },
+      persist: false,
+    })
+
+    expect(result.transports.agentTraceOtlpConfig.headers).toEqual({})
+  })
+
+  it("purges legacy renderer-owned OTLP headers from persisted settings", async () => {
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        agentTraceOtlpConfig: {
+          preset: "self-hosted",
+          endpoint: "https://collector.example/v1/traces",
+          headers: {
+            "X-Honeycomb-Team": "renderer-secret",
+            "X-Environment": "staging",
+          },
+        },
+      })
+    )
+
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+
+    expect(state.transports.agentTraceOtlpConfig.headers).toEqual({})
+    expect(localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY)).not.toContain(
+      "renderer-secret"
+    )
+  })
+
+  it("blocks credential-bearing generic Remote URLs in a WebView", async () => {
+    localStorage.setItem(
+      "cognia-logging-config",
+      JSON.stringify({
+        enableConsole: false,
+        enableRemote: true,
+        remoteEndpoint: "https://logs.example/ingest?api_key=renderer-secret",
+      })
+    )
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        console: false,
+        remote: true,
+        remoteConfig: {
+          endpoint: "https://logs.example/ingest?api_key=renderer-secret",
+        },
+      })
+    )
+
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { getTransport } = await import("@cognia/logging/core")
+
+    expect(getTransport("remote")).toBeUndefined()
+  })
+
+  it("applies the final-body PII gate to the generic Remote transport", async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 200 }))
+    localStorage.setItem(
+      "cognia-logging-config",
+      JSON.stringify({
+        enableConsole: false,
+        enableRemote: true,
+        remoteEndpoint: "https://logs.example/ingest",
+      })
+    )
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        console: false,
+        indexedDB: false,
+        remote: true,
+        remoteConfig: {
+          endpoint: "https://logs.example/ingest",
+          batchSize: 50,
+          flushInterval: 5000,
+          maxRetries: 0,
+          retryDelay: 0,
+        },
+      })
+    )
+
+    try {
+      const mod = await import("./bootstrap")
+      mod.bootstrapLogger()
+      const { createLogger, getTransport } = await import("@cognia/logging/core")
+      createLogger("privacy-test").warn("email alice@example.com")
+      await (getTransport("remote") as { flush: () => Promise<void> }).flush()
+
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
   it("derives the OTLP Logs endpoint from trace and collector base URLs", async () => {
     const { otlpLogsEndpoint, postHogAiEndpoint, resolvePostHogDestinations } =
       await import("./bootstrap")
@@ -165,10 +391,19 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(state.transports.console).toBe(true)
     expect(state.transports.indexedDB).toBe(true)
     expect(state.transports.native).toBe(true)
-    // Remote / Langfuse remain default-on; the dead OtelTransport was removed.
-    // short-circuit silently until credentials/endpoints are filled in.
+    // Remote remains available by default; BYO Langfuse requires explicit
+    // project credentials and therefore starts disabled.
     expect(state.transports.remote).toBe(true)
-    expect(state.transports.langfuse).toBe(true)
+    expect(state.transports.langfuse).toBe(false)
+    expect(state.transports.langfuseConfig).toEqual({
+      enabled: false,
+      baseUrl: "https://cloud.langfuse.com",
+      publicKey: "",
+      secretKeyConfigured: false,
+      environment: "production",
+      captureModelContent: false,
+      captureToolContent: false,
+    })
     expect(state.transports.posthogConfig).toEqual({
       managed: { productAnalytics: false, aiObservability: false },
       byo: {
@@ -186,7 +421,7 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(names).not.toContain("remote")
   })
 
-  it("wires the shared Langfuse ingestion batch through native credential injection", async () => {
+  it("migrates an enabled legacy destination to metadata-only OTLP v4", async () => {
     mockIsTauri.mockReturnValue(true)
     localStorage.setItem(
       "cognia-logging-transports",
@@ -206,28 +441,90 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     const transport = getTransport<InstanceType<typeof LangfuseTransport>>("langfuse")
     expect(transport).toBeDefined()
 
-    transport?.log({
-      id: "log-native",
-      timestamp: "2026-08-09T00:00:00.000Z",
-      level: "error",
-      message: "native failure",
-      module: "bootstrap-test",
-      traceId: "trace-native",
-    })
+    transport?.log(
+      spanToLogEntry({
+        id: "1111222233334444",
+        traceId: "deadbeefdeadbeefdeadbeefdeadbeef",
+        spanId: "1111222233334444",
+        startTime: Date.now(),
+        endTime: Date.now() + 1,
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "session-native",
+        surface: "chat",
+        inputPreview: "must stay local",
+      })
+    )
     await transport?.flush()
 
-    expect(mockPostTauriTelemetryJson).toHaveBeenCalledWith(
-      "https://langfuse.example/api/public/ingestion",
-      expect.stringContaining('"event-create"'),
-      { kind: "langfuse", publicKey: "pk-native" }
+    expect(mockIngestLangfuseTraceBatch).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      spans: [expect.objectContaining({ operationName: "invoke_agent" })],
+    })
+    const batch = mockIngestLangfuseTraceBatch.mock.calls[0][0]
+    expect(JSON.stringify(batch)).not.toContain("must stay local")
+    expect(JSON.stringify(batch)).not.toContain("trace-create")
+    expect(JSON.stringify(batch)).not.toContain("event-create")
+  })
+
+  it("moves an enabled legacy Langfuse secret into the account-scoped Host", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuse: true,
+        langfuseConfig: {
+          publicKey: "pk-legacy",
+          secretKey: "sk-legacy",
+          host: "https://langfuse.example",
+          minLevel: "warn",
+        },
+      })
     )
-    const body = JSON.parse(mockPostTauriTelemetryJson.mock.calls[0][1] as string)
-    expect(body.batch).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "trace-create" }),
-        expect.objectContaining({ type: "event-create" }),
-      ])
+
+    const mod = await import("./bootstrap")
+    mod.getLoggingBootstrapState()
+
+    expect(mockSetLangfuseCredentials).toHaveBeenCalledWith({
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-legacy",
+      secretKey: "sk-legacy",
+      environment: "production",
+      captureModelContent: false,
+      captureToolContent: false,
+    })
+    await waitFor(() =>
+      expect(localStorage.getItem("cognia-logging-transports")).not.toContain("sk-legacy")
     )
+  })
+
+  it("asks the Host to migrate a legacy secret that was already stored natively", async () => {
+    mockIsTauri.mockReturnValue(true)
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuse: true,
+        langfuseConfig: {
+          publicKey: "pk-legacy",
+          secretKeyConfigured: true,
+          host: "https://langfuse.example",
+          minLevel: "warn",
+        },
+      })
+    )
+
+    const mod = await import("./bootstrap")
+    mod.getLoggingBootstrapState()
+
+    expect(mockSetLangfuseCredentials).toHaveBeenCalledWith({
+      enabled: true,
+      baseUrl: "https://langfuse.example",
+      publicKey: "pk-legacy",
+      environment: "production",
+      captureModelContent: false,
+      captureToolContent: false,
+    })
   })
 
   it("does not attach the native exporter when the Rust Langfuse secret is absent", async () => {
@@ -239,8 +536,10 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
         langfuseConfig: {
           publicKey: "pk-native",
           secretKeyConfigured: false,
-          host: "https://langfuse.example/",
-          minLevel: "warn",
+          baseUrl: "https://langfuse.example/",
+          environment: "test",
+          captureModelContent: false,
+          captureToolContent: false,
         },
       })
     )
@@ -249,17 +548,22 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     const { getTransport } = await import("@cognia/logging/core")
     const transport = getTransport<InstanceType<typeof LangfuseTransport>>("langfuse")
 
-    transport?.log({
-      id: "log-native-no-secret",
-      timestamp: "2026-08-09T00:00:00.000Z",
-      level: "error",
-      message: "native failure",
-      module: "bootstrap-test",
-      traceId: "trace-native-no-secret",
-    })
+    transport?.log(
+      spanToLogEntry({
+        id: "1111222233334444",
+        traceId: "deadbeefdeadbeefdeadbeefdeadbeef",
+        spanId: "1111222233334444",
+        startTime: Date.now(),
+        endTime: Date.now() + 1,
+        operationName: "invoke_agent",
+        providerName: "anthropic",
+        sessionId: "session-native",
+        surface: "chat",
+      })
+    )
     await transport?.flush()
 
-    expect(mockPostTauriTelemetryJson).not.toHaveBeenCalled()
+    expect(mockIngestLangfuseTraceBatch).not.toHaveBeenCalled()
   })
 
   it("persists user-applied settings to localStorage and reads them back", async () => {
@@ -279,7 +583,7 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(config.minLevel).toBe("warn")
   })
 
-  it("preserves legacy plaintext for retry when secure persistence fails", async () => {
+  it("purges legacy telemetry plaintext from a hostless WebView", async () => {
     localStorage.setItem(
       "cognia-logging-transports",
       JSON.stringify({
@@ -291,11 +595,10 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     )
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()
-    expect(localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY)).toContain("sk-legacy")
     await new Promise((resolve) => setTimeout(resolve, 0))
     const persisted = localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY) ?? ""
-    expect(persisted).toContain("sk-legacy")
-    expect(persisted).toContain("glc_legacy")
+    expect(persisted).not.toContain("sk-legacy")
+    expect(persisted).not.toContain("glc_legacy")
     expect(state.transports.langfuseConfig.secretKeyConfigured).toBe(true)
     expect(state.transports.agentTraceOtlpConfig.grafanaCloud.apiTokenConfigured).toBe(true)
   })

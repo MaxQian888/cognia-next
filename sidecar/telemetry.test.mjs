@@ -71,6 +71,15 @@ test("AI SDK telemetry is enabled only after configuration and never records con
   const options = aiSdkTelemetry({
     sessionId: "session-1",
     traceId: "a".repeat(32),
+    surface: "chat",
+    runId: "run-1",
+    turnId: "turn-1",
+    attemptId: "attempt-1",
+    projectId: "project-1",
+    feature: "chat",
+    promptComponentIds: ["system.base", "mode.agent"],
+    promptVersion: "7",
+    promptFingerprint: "sha256:abc",
     provider: "openai",
   })
   // v7 removed both of these from the per-call options: telemetry is on by
@@ -87,6 +96,28 @@ test("AI SDK telemetry is enabled only after configuration and never records con
   assert.deepEqual(options.runtimeContext, {
     cogniaSessionId: "session-1",
     cogniaTraceId: "a".repeat(32),
+    cogniaSurface: "chat",
+    cogniaRunId: "run-1",
+    cogniaTurnId: "turn-1",
+    cogniaAttemptId: "attempt-1",
+    cogniaProjectId: "project-1",
+    cogniaFeature: "chat",
+    cogniaPromptComponentIds: ["system.base", "mode.agent"],
+    cogniaPromptVersion: "7",
+    cogniaPromptFingerprint: "sha256:abc",
+  })
+  assert.deepEqual(options.includeRuntimeContext, {
+    cogniaSessionId: true,
+    cogniaTraceId: true,
+    cogniaSurface: true,
+    cogniaRunId: true,
+    cogniaTurnId: true,
+    cogniaAttemptId: true,
+    cogniaProjectId: true,
+    cogniaFeature: true,
+    cogniaPromptComponentIds: true,
+    cogniaPromptVersion: true,
+    cogniaPromptFingerprint: true,
   })
 
   // A second init must not register the integration again — `registerTelemetry`
@@ -115,6 +146,152 @@ test("PostHog-only configuration initializes telemetry without a generic OTLP en
   const options = aiSdkTelemetry({ sessionId: "session-2", provider: "anthropic" })
   assert.equal(options.recordInputs, false)
   assert.equal(options.recordOutputs, false)
+  await shutdownTelemetry()
+})
+
+test("Langfuse-only configuration enables AI SDK content only after explicit consent", async () => {
+  const langfuseEnv = {
+    LANGFUSE_PUBLIC_KEY: "pk-test",
+    LANGFUSE_SECRET_KEY: "sk-test",
+    LANGFUSE_BASE_URL: "https://langfuse.example",
+    LANGFUSE_ENVIRONMENT: "test",
+    COGNIA_LANGFUSE_CAPTURE_MODEL_CONTENT: "false",
+    COGNIA_LANGFUSE_CAPTURE_TOOL_CONTENT: "true",
+  }
+  assert.equal(initializeTelemetry(langfuseEnv), true)
+  assert.equal(langfuseEnv.LANGFUSE_SECRET_KEY, undefined)
+  const options = aiSdkTelemetry({ sessionId: "session-3", provider: "openai" })
+  assert.equal(options.recordInputs, true)
+  assert.equal(options.recordOutputs, true)
+
+  const model = __TESTING__.sanitizeLangfuseReadableSpan({
+    attributes: {
+      "langfuse.observation.type": "generation",
+      "langfuse.observation.input": "model input",
+      "langfuse.observation.output": "model output",
+    },
+  })
+  const tool = __TESTING__.sanitizeLangfuseReadableSpan({
+    name: "tool.search",
+    status: { code: 2, message: "jane.doe@example.com" },
+    events: [{ name: "exception", attributes: { message: "private stack" } }],
+    attributes: {
+      "langfuse.observation.type": "tool",
+      "langfuse.observation.input": "tool input",
+      "langfuse.observation.output": "tool output",
+    },
+  })
+  assert.equal(model.attributes["langfuse.observation.input"], undefined)
+  assert.equal(model.attributes["langfuse.observation.output"], undefined)
+  assert.equal(tool.attributes["langfuse.observation.input"], "tool input")
+  assert.equal(tool.attributes["langfuse.observation.output"], "tool output")
+  assert.deepEqual(tool.status, { code: 2 })
+  assert.deepEqual(tool.events, [])
+  await shutdownTelemetry()
+})
+
+test("Langfuse model and tool message consent remain independent", async () => {
+  const messages = JSON.stringify([
+    { role: "user", content: [{ type: "text", text: "hello model" }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "model reply" },
+        { type: "tool-call", toolName: "lookup", arguments: { query: "tool query" } },
+      ],
+    },
+  ])
+  assert.equal(
+    initializeTelemetry({
+      LANGFUSE_PUBLIC_KEY: "pk-test",
+      LANGFUSE_SECRET_KEY: "sk-test",
+      LANGFUSE_BASE_URL: "https://langfuse.example",
+      COGNIA_LANGFUSE_CAPTURE_MODEL_CONTENT: "true",
+      COGNIA_LANGFUSE_CAPTURE_TOOL_CONTENT: "false",
+    }),
+    true
+  )
+  const modelOnly = __TESTING__.sanitizeLangfuseReadableSpan({
+    name: "llm.generate",
+    attributes: {
+      "langfuse.observation.type": "generation",
+      "gen_ai.system_instructions": "model system",
+      "gen_ai.input.messages": messages,
+    },
+  })
+  const modelMessages = modelOnly.attributes["gen_ai.input.messages"]
+  assert.match(modelMessages, /hello model/)
+  assert.doesNotMatch(modelMessages, /tool query|tool-call|toolName/)
+  assert.equal(modelOnly.attributes["gen_ai.system_instructions"], "model system")
+  await shutdownTelemetry()
+
+  assert.equal(
+    initializeTelemetry({
+      LANGFUSE_PUBLIC_KEY: "pk-test",
+      LANGFUSE_SECRET_KEY: "sk-test",
+      LANGFUSE_BASE_URL: "https://langfuse.example",
+      COGNIA_LANGFUSE_CAPTURE_MODEL_CONTENT: "false",
+      COGNIA_LANGFUSE_CAPTURE_TOOL_CONTENT: "true",
+    }),
+    true
+  )
+  const toolOnly = __TESTING__.sanitizeLangfuseReadableSpan({
+    name: "llm.generate",
+    attributes: {
+      "langfuse.observation.type": "generation",
+      "gen_ai.system_instructions": "model system",
+      "gen_ai.input.messages": messages,
+    },
+  })
+  const toolMessages = toolOnly.attributes["gen_ai.input.messages"]
+  assert.doesNotMatch(toolMessages, /hello model|model reply|model system/)
+  assert.match(toolMessages, /tool query|tool-call/)
+  assert.equal(toolOnly.attributes["gen_ai.system_instructions"], undefined)
+  await shutdownTelemetry()
+})
+
+test("preserves Cognia and PostHog correlation across the Langfuse AI SDK integration", async () => {
+  assert.equal(
+    initializeTelemetry({
+      COGNIA_POSTHOG_DESTINATIONS_JSON: JSON.stringify([
+        {
+          id: "managed",
+          host: "https://us.i.posthog.com",
+          projectToken: "phc_test",
+        },
+      ]),
+      COGNIA_OBSERVABILITY_INSTALLATION_ID: "installation-1",
+    }),
+    true
+  )
+  const attributes = {
+    "langfuse.observation.metadata.cogniaSessionId": "session-1",
+    "langfuse.observation.metadata.cogniaTraceId": "a".repeat(32),
+    "langfuse.observation.metadata.cogniaSurface": "chat",
+    "langfuse.observation.metadata.cogniaRunId": "run-1",
+    "langfuse.observation.metadata.cogniaTurnId": "turn-1",
+    "langfuse.observation.metadata.cogniaAttemptId": "attempt-1",
+    "langfuse.observation.metadata.cogniaProjectId": "project-1",
+  }
+  const processor = new __TESTING__.CogniaCorrelationSpanProcessor()
+  processor.onStart({
+    attributes,
+    setAttribute(key, value) {
+      attributes[key] = value
+    },
+  })
+
+  assert.equal(attributes["gen_ai.conversation.id"], "session-1")
+  assert.equal(attributes["cognia.trace_id"], "a".repeat(32))
+  assert.equal(attributes["cognia.surface"], "chat")
+  assert.equal(attributes["cognia.run.id"], "run-1")
+  assert.equal(attributes["cognia.turn.id"], "turn-1")
+  assert.equal(attributes["cognia.attempt.id"], "attempt-1")
+  assert.equal(attributes["cognia.project.id"], "project-1")
+  assert.equal(attributes["posthog.distinct_id"], "installation-1")
+
+  await processor.forceFlush()
+  await processor.shutdown()
   await shutdownTelemetry()
 })
 

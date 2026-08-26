@@ -3,6 +3,8 @@
  */
 
 import { ConsoleTransport, createConsoleTransport } from "./console-transport"
+import { installConsoleBridge } from "../console-bridge"
+import { CONSOLE_BRIDGE_MODULE } from "../console-bridge-state"
 import type { StructuredLogEntry } from "../types"
 
 function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
@@ -45,6 +47,22 @@ afterEach(() => {
 })
 
 describe("ConsoleTransport routing per level", () => {
+  it("writes through the original console method when the legacy bridge is installed", () => {
+    const bridgedLogger = { warn: jest.fn(), error: jest.fn() }
+    const cleanup = installConsoleBridge({
+      console,
+      logger: bridgedLogger as never,
+    })
+
+    try {
+      new ConsoleTransport({ useColors: false }).log(makeEntry({ level: "warn" }))
+      expect(spies.warn).toHaveBeenCalledTimes(1)
+      expect(bridgedLogger.warn).not.toHaveBeenCalled()
+    } finally {
+      cleanup()
+    }
+  })
+
   it("routes trace -> console.trace", () => {
     const t = new ConsoleTransport()
     t.log(makeEntry({ level: "trace" }))
@@ -171,5 +189,18 @@ describe("ConsoleTransport server-like fallback (compact + no data)", () => {
     t.log(makeEntry())
     const composed = String(spies.info.mock.calls[0][0])
     expect(composed).not.toContain("%c")
+  })
+})
+
+describe("console bridge entries", () => {
+  it("skips entries the console bridge already printed", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const transport = new ConsoleTransport()
+      transport.log(makeEntry({ level: "warn", module: CONSOLE_BRIDGE_MODULE }))
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

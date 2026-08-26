@@ -186,6 +186,16 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 
 公共导航和深度链接消耗了共享`SurfaceContract`注册表。因此，每条路由解析为可执行、远程、缓存只读、队列或显式局部恢复状态。主机构建ID仅用于诊断：兼容性通过协议范围和每个功能版本协商，未声明、不健康或未授权操作默认拒绝。
 
+### 2026-08-26 —— 账户级 Langfuse trace 出口
+
+云端 Langfuse tracing 复用现有 `cognia-server` + brain Host，不新增 relay。已配对的 Web 与
+Capacitor 客户端只通过 Companion RPC 提交 `AgentTraceBatchV1`；认证 principal 决定账户
+namespace，Host 再解析该账户只写的 BYO credential。没有 Host 的 standalone Web 不尝试远程
+Langfuse 导出。
+
+Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、PostHog processor 并存，
+永不接收应用日志或 metrics。
+
 ### 第三阶段 — 扩展（仅if/when多租户）
 
 `ExecBackend::Container`（每个工作空间运行者）→每个租户单位，采用gVisor/Kata → K8s编排+`ExecutionBroker`-backed配额→可观察性，符合服务惯例（Prometheus `/metrics` everywhere）。

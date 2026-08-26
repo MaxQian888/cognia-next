@@ -70,8 +70,35 @@ pub(super) const COMMANDS: &[&str] = &[
     "automation_consent_pending",
     "companion_can_control",
     "companion_endpoints",
+    "langfuse_credentials_set",
+    "langfuse_credentials_status",
+    "langfuse_credentials_clear",
+    "langfuse_connection_test",
+    "langfuse_trace_ingest",
     "app_settings_update",
 ];
+
+fn langfuse_account(account_id: Option<&str>) -> Result<&str, (StatusCode, Json<RpcError>)> {
+    account_id.ok_or_else(|| RpcError::forbidden("Langfuse requires an authenticated account"))
+}
+
+fn map_langfuse_ingest_error(detail: String) -> (StatusCode, Json<RpcError>) {
+    if detail.contains("rate limit") {
+        return RpcError::rate_limited(60);
+    }
+    if detail.contains("disabled for this account")
+        || detail.contains("credentials are not configured")
+    {
+        return RpcError::forbidden(detail);
+    }
+    if detail.starts_with("Langfuse trace export")
+        || detail.starts_with("Langfuse endpoint DNS")
+        || detail.starts_with("Langfuse client build")
+    {
+        return RpcError::service_unavailable(detail);
+    }
+    RpcError::validation_failed(detail)
+}
 
 pub(super) async fn dispatch(
     name: &str,
@@ -1161,6 +1188,81 @@ pub(super) async fn dispatch(
             ))
         }
 
+        // Langfuse is a narrow, account-bound AI trace destination. The
+        // authenticated principal determines the account; callers cannot
+        // select another namespace or supply export headers at ingest time.
+        "langfuse_credentials_set" => {
+            let account = langfuse_account(account_id)?;
+            let enabled: bool = required(&args, "enabled")?;
+            let base_url: String = required_aliased(&args, "base_url", "baseUrl")?;
+            let public_key: String = required_aliased(&args, "public_key", "publicKey")?;
+            let secret_key: Option<String> = optional_aliased(&args, "secret_key", "secretKey")?;
+            let environment: String = required(&args, "environment")?;
+            let capture_model_content: bool =
+                optional_aliased(&args, "capture_model_content", "captureModelContent")?
+                    .unwrap_or(false);
+            let capture_tool_content: bool =
+                optional_aliased(&args, "capture_tool_content", "captureToolContent")?
+                    .unwrap_or(false);
+            crate::companion_api::langfuse::credentials_set_for_account_async(
+                account.to_string(),
+                enabled,
+                base_url,
+                public_key,
+                secret_key,
+                environment,
+                capture_model_content,
+                capture_tool_content,
+            )
+            .await
+            .map_err(RpcError::validation_failed)?;
+            crate::claude::sidecar::restart_sidecar_for_config(host.sidecar_state())
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "langfuse_credentials_status" => {
+            let account = langfuse_account(account_id)?;
+            let status = crate::companion_api::langfuse::credentials_status_for_account_async(
+                account.to_string(),
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            to_json(status)
+        }
+
+        "langfuse_credentials_clear" => {
+            let account = langfuse_account(account_id)?;
+            crate::companion_api::langfuse::credentials_clear_for_account_async(
+                account.to_string(),
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            crate::claude::sidecar::restart_sidecar_for_config(host.sidecar_state())
+                .await
+                .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "langfuse_connection_test" => {
+            let account = langfuse_account(account_id)?;
+            let status = crate::companion_api::langfuse::connection_test_for_account(account)
+                .await
+                .map_err(RpcError::internal)?;
+            to_json(status)
+        }
+
+        "langfuse_trace_ingest" => {
+            let account = langfuse_account(account_id)?;
+            let batch: crate::companion_api::langfuse::AgentTraceBatchV1 =
+                required(&args, "batch")?;
+            let result = crate::companion_api::langfuse::trace_ingest_for_account(account, batch)
+                .await
+                .map_err(map_langfuse_ingest_error)?;
+            to_json(result)
+        }
+
         "app_settings_update" => {
             // Allowlist enforcement — phone may only mutate user-facing
             // preferences, never transport / sidecar / provider keys.
@@ -1199,5 +1301,11 @@ mod tests {
         assert!(!COMMANDS.is_empty());
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn langfuse_commands_require_the_authenticated_account_context() {
+        assert!(langfuse_account(None).is_err());
+        assert_eq!(langfuse_account(Some("account-1")).unwrap(), "account-1");
     }
 }

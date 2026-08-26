@@ -3,7 +3,7 @@
 /**
  * Logs → Transports.
  *
- * The seven sinks a log entry can reach, each with its own configuration and a
+ * The logging and AI-trace destinations, each with its own configuration and
  * live health badge. The remote retry-queue bounds moved in here from the old
  * `Advanced` tab: they are properties of the remote transport, and reading
  * "Remote Queue Size (MB)" three screens away from the endpoint that fills it
@@ -29,11 +29,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CONFIG_BOUNDS, type LogLevel } from "@/lib/logging"
+import { isTauri } from "@/lib/platform/detect"
 
 import { LOG_LEVELS } from "../log-levels"
 import { SliderField } from "../components/slider-field"
 import { TransportRow } from "../components/transport-row"
-import { parseHeaders, serializeHeaders } from "../otlp-headers"
 import {
   TRANSPORT_KEYS,
   type TransportKey,
@@ -56,6 +56,7 @@ const HEALTH_KEY: Record<TransportKey, string> = {
   langfuse: "langfuse",
   agentTrace: "agent-trace",
   agentTraceOtlp: "agent-trace-otlp",
+  otlpLogs: "otlp-logs",
 }
 
 const TRANSPORT_ICONS: Record<TransportKey, typeof MonitorIcon> = {
@@ -66,6 +67,7 @@ const TRANSPORT_ICONS: Record<TransportKey, typeof MonitorIcon> = {
   langfuse: CloudIcon,
   agentTrace: DatabaseIcon,
   agentTraceOtlp: CloudIcon,
+  otlpLogs: CloudIcon,
 }
 
 function LevelSelect({
@@ -125,12 +127,8 @@ function TextField({
   hint?: string
   action?: React.ReactNode
   /**
-   * Commit on blur / Enter rather than per keystroke. Required whenever the
-   * rendered `value` is a *derived* form of what is stored — the OTLP headers
-   * field round-trips through `parseHeaders`/`serializeHeaders`, so a
-   * per-keystroke commit erases every partially-typed pair (`X` parses to
-   * nothing, which serialises back to an empty field) and the control can only
-   * be pasted into, never typed into.
+   * Commit on blur / Enter rather than per keystroke. Use this for values that
+   * should not trigger an expensive settings update on every character.
    */
   deferred?: boolean
 }) {
@@ -173,12 +171,18 @@ export function LogsTransportsPanel({
   const t = useTranslations("logging")
   const { transports } = draft
   const otlp = transports.agentTraceOtlpConfig
+  const secureTelemetryHost = isTauri()
 
   const renderDetail = (key: TransportKey) => {
     switch (key) {
       case "console":
         return (
           <p className="text-xs text-muted-foreground">{t("settings.transports.consoleDetail")}</p>
+        )
+
+      case "otlpLogs":
+        return (
+          <p className="text-xs text-muted-foreground">{t("settings.transports.otlpLogsDetail")}</p>
         )
 
       case "indexedDB":
@@ -380,19 +384,83 @@ export function LogsTransportsPanel({
             />
             <div className="@md/settings-stack:col-span-2">
               <TextField
-                id="logs-langfuse-host"
-                label={t("settings.transports.langfuseHost")}
-                value={transports.langfuseConfig.host}
-                placeholder={t("settings.transports.langfuseHostPlaceholder")}
-                onChange={(value) => draft.setTransportDetail("langfuseConfig", "host", value)}
+                id="logs-langfuse-base-url"
+                label={t("settings.transports.langfuseBaseUrl")}
+                value={transports.langfuseConfig.baseUrl}
+                placeholder={t("settings.transports.langfuseBaseUrlPlaceholder")}
+                hint={t("settings.transports.langfuseBaseUrlHint")}
+                onChange={(value) => draft.setTransportDetail("langfuseConfig", "baseUrl", value)}
               />
             </div>
-            <LevelSelect
-              id="logs-langfuse-min-level"
-              label={t("settings.transports.langfuseMinLevel")}
-              value={transports.langfuseConfig.minLevel}
-              onChange={(level) => draft.setTransportDetail("langfuseConfig", "minLevel", level)}
+            <TextField
+              id="logs-langfuse-environment"
+              label={t("settings.transports.langfuseEnvironment")}
+              value={transports.langfuseConfig.environment}
+              placeholder={t("settings.transports.langfuseEnvironmentPlaceholder")}
+              onChange={(value) => draft.setTransportDetail("langfuseConfig", "environment", value)}
             />
+            <div className="flex items-center gap-3 @md/settings-stack:col-span-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={
+                  !transports.langfuseConfig.secretKeyConfigured ||
+                  draft.langfuseConnectionStatus === "testing"
+                }
+                onClick={() => void draft.testLangfuseConnection()}
+              >
+                {t(
+                  draft.langfuseConnectionStatus === "testing"
+                    ? "settings.transports.langfuseConnectionTesting"
+                    : "settings.transports.langfuseConnectionTest"
+                )}
+              </Button>
+              {draft.langfuseConnectionStatus !== "idle" &&
+                draft.langfuseConnectionStatus !== "testing" && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {t(
+                      draft.langfuseConnectionStatus === "connected"
+                        ? "settings.transports.langfuseConnectionSuccess"
+                        : "settings.transports.langfuseConnectionFailed"
+                    )}
+                  </p>
+                )}
+            </div>
+            <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <Label htmlFor="logs-langfuse-model-content" className="text-sm font-medium">
+                  {t("settings.transports.langfuseCaptureModelContent")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.transports.langfuseCaptureModelContentDesc")}
+                </p>
+              </div>
+              <Switch
+                id="logs-langfuse-model-content"
+                checked={transports.langfuseConfig.captureModelContent}
+                onCheckedChange={(checked) =>
+                  draft.setTransportDetail("langfuseConfig", "captureModelContent", checked)
+                }
+              />
+            </div>
+            <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <Label htmlFor="logs-langfuse-tool-content" className="text-sm font-medium">
+                  {t("settings.transports.langfuseCaptureToolContent")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.transports.langfuseCaptureToolContentDesc")}
+                </p>
+              </div>
+              <Switch
+                id="logs-langfuse-tool-content"
+                checked={transports.langfuseConfig.captureToolContent}
+                onCheckedChange={(checked) =>
+                  draft.setTransportDetail("langfuseConfig", "captureToolContent", checked)
+                }
+              />
+            </div>
           </div>
         )
 
@@ -465,7 +533,7 @@ export function LogsTransportsPanel({
                     <SelectItem value="off">
                       {t("panel.agentTraceOtlp.presetOptions.off")}
                     </SelectItem>
-                    <SelectItem value="grafana-cloud">
+                    <SelectItem value="grafana-cloud" disabled={!secureTelemetryHost}>
                       {t("panel.agentTraceOtlp.presetOptions.grafanaCloud")}
                     </SelectItem>
                     <SelectItem value="self-hosted">
@@ -503,7 +571,7 @@ export function LogsTransportsPanel({
                 }
               />
             </div>
-            {otlp.preset === "grafana-cloud" ? (
+            {otlp.preset === "grafana-cloud" && secureTelemetryHost ? (
               <>
                 <TextField
                   id="agent-trace-otlp-grafana-instance-id"
@@ -547,22 +615,15 @@ export function LogsTransportsPanel({
                   {t("panel.agentTraceOtlp.grafanaCloudHint")}
                 </p>
               </>
-            ) : (
-              <div className="@md/settings-stack:col-span-2">
-                <TextField
-                  id="agent-trace-otlp-headers"
-                  testid="agent-trace-otlp-headers"
-                  deferred
-                  label={t("panel.agentTraceOtlp.headers")}
-                  value={serializeHeaders(otlp.headers)}
-                  placeholder={t("panel.agentTraceOtlp.headersPlaceholder")}
-                  hint={t("panel.agentTraceOtlp.headersHint")}
-                  onChange={(value) =>
-                    draft.setTransportDetail("agentTraceOtlpConfig", "headers", parseHeaders(value))
-                  }
-                />
+            ) : otlp.preset === "grafana-cloud" ? (
+              <p className="text-xs text-muted-foreground @md/settings-stack:col-span-2">
+                {t("panel.agentTraceOtlp.grafanaHostRequired")}
+              </p>
+            ) : otlp.preset !== "off" ? (
+              <div className="text-xs text-muted-foreground @md/settings-stack:col-span-2">
+                {t("panel.agentTraceOtlp.collectorAuthHint")}
               </div>
-            )}
+            ) : null}
             <div className="@md/settings-stack:col-span-2">
               <TextField
                 id="agent-trace-otlp-environment"

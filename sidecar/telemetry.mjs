@@ -9,10 +9,51 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 let sdk = null
 let installationId = ""
+let captureModelContent = false
+let captureToolContent = false
+
+const LANGFUSE_METADATA_PREFIX = "langfuse.observation.metadata."
+
+/**
+ * Keep Cognia correlation attributes independent from any single AI SDK
+ * integration. Langfuse's official integration records runtime context as
+ * observation metadata; this processor mirrors the small, non-content subset
+ * that generic OTLP and PostHog already relied on.
+ */
+class CogniaCorrelationSpanProcessor {
+  onStart(span) {
+    const metadata = (key) => span.attributes?.[`${LANGFUSE_METADATA_PREFIX}${key}`]
+    const mapped = {
+      "gen_ai.conversation.id": metadata("cogniaSessionId"),
+      "cognia.trace_id": metadata("cogniaTraceId"),
+      "cognia.surface": metadata("cogniaSurface"),
+      "cognia.run.id": metadata("cogniaRunId"),
+      "cognia.turn.id": metadata("cogniaTurnId"),
+      "cognia.attempt.id": metadata("cogniaAttemptId"),
+      "cognia.project.id": metadata("cogniaProjectId"),
+    }
+    for (const [key, value] of Object.entries(mapped)) {
+      const bounded = boundedAttributeValue(value)
+      if (bounded !== undefined) span.setAttribute(key, bounded)
+    }
+    if (installationId) span.setAttribute("posthog.distinct_id", installationId.slice(0, 512))
+  }
+
+  onEnd() {}
+
+  forceFlush() {
+    return Promise.resolve()
+  }
+
+  shutdown() {
+    return Promise.resolve()
+  }
+}
 /**
  * AI SDK 7 moved OpenTelemetry span collection out of the `ai` package: it no
  * longer emits spans just because a call passes telemetry options. The
- * integration is registered once, PROCESS-WIDE, from `@ai-sdk/otel`.
+ * integration is registered once, PROCESS-WIDE, from Langfuse's official
+ * AI SDK 7 integration.
  *
  * Registration is deliberately tied to `sdk` being live: v7 telemetry is
  * opt-OUT once an integration exists, so registering with no OTLP endpoint
@@ -22,12 +63,15 @@ let installationId = ""
 let aiTelemetryRegistered = false
 
 /**
- * `ai` and `@ai-sdk/otel` are loaded LAZILY, and `@ai-sdk/otel` is a
- * sidecar-only dependency (it is not in the root manifest). A static import
- * would make this module unloadable from the renderer/root context, which does
- * import the adapter chain — `protocol-adapter-spec.parity.test.ts` reaches
- * `registry.mjs` → `ai-sdk-adapter.mjs` → here. Both packages are also ESM-only
- * in v7, so `createRequire` is not an option.
+ * Register before the first request; a duplicate process-global integration
+ * would produce duplicate generation and tool observations.
+ *
+ * `ai` and `@langfuse/vercel-ai-sdk` are loaded LAZILY, and the Langfuse
+ * integration is a sidecar-only dependency (it is not in the root manifest, and
+ * it pulls in ESM-only `@ai-sdk/otel`). A static import would make this module
+ * unloadable from the renderer/root context, which does import the adapter
+ * chain — `protocol-adapter-spec.parity.test.ts` reaches `registry.mjs` →
+ * `ai-sdk-adapter.mjs` → here.
  *
  * A failed load therefore means "not the sidecar process", where collecting AI
  * SDK spans would be meaningless anyway: swallow it and leave telemetry
@@ -40,19 +84,14 @@ let aiTelemetryRegistered = false
 function registerAiSdkTelemetry() {
   if (aiTelemetryRegistered) return
   // Set before awaiting so two calls in the same tick can't both register —
-  // `registerTelemetry` appends to a module-global list and a duplicate would
+  // `registerTelemetry` appends to a process-global list and a duplicate would
   // double every span.
   aiTelemetryRegistered = true
-  Promise.all([import("ai"), import("@ai-sdk/otel")])
-    .then(([{ registerTelemetry }, { OpenTelemetry }]) => {
+  Promise.all([import("ai"), import("@langfuse/vercel-ai-sdk")])
+    .then(([{ registerTelemetry }, { LangfuseVercelAiSdkIntegration }]) => {
       registerTelemetry(
-        new OpenTelemetry({
+        new LangfuseVercelAiSdkIntegration({
           tracer: trace.getTracer("cognia.sidecar.ai-sdk"),
-          enrichSpan: ({ runtimeContext }) => ({
-            "gen_ai.conversation.id": runtimeContext?.cogniaSessionId,
-            "cognia.trace_id": runtimeContext?.cogniaTraceId,
-            "posthog.distinct_id": installationId || undefined,
-          }),
         })
       )
     })
@@ -63,12 +102,200 @@ function registerAiSdkTelemetry() {
     })
 }
 
+const LANGFUSE_CONTENT_ATTRIBUTE =
+  /(?:^|[._])(?:input|output|inputs|outputs|prompt|completion|content|messages|instructions|arguments|result|tool_calls?)$/i
+
+function sanitizeLangfuseValue(value, maxStringBytes = 512) {
+  if (typeof value === "string") {
+    if (!hasNoLeakingPiiDeep(value)) return undefined
+    return value.slice(0, maxStringBytes)
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined
+  if (typeof value === "boolean") return value
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 32)
+      .map((item) => sanitizeLangfuseValue(item, maxStringBytes))
+      .filter((item) => item !== undefined)
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 64)
+        .flatMap(([key, item]) => {
+          if (!hasNoLeakingPiiDeep(key)) return []
+          const safe = sanitizeLangfuseValue(item, maxStringBytes)
+          return safe === undefined ? [] : [[key, safe]]
+        })
+    )
+  }
+  return undefined
+}
+
+function contentAllowed(kind) {
+  return kind === "tool" ? captureToolContent : captureModelContent
+}
+
+function semanticContentKind(value, inherited) {
+  if (!value || typeof value !== "object") return inherited
+  const role = String(value.role ?? "").toLowerCase()
+  const type = String(value.type ?? "").toLowerCase()
+  if (role === "tool" || type.includes("tool")) return "tool"
+  if (["system", "user", "assistant"].includes(role)) return "model"
+  if (/(?:text|reasoning|image|audio)/.test(type)) return "model"
+  return inherited
+}
+
+function sanitizeSemanticContent(value, inheritedKind) {
+  const kind = semanticContentKind(value, inheritedKind)
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return kind && contentAllowed(kind) ? sanitizeLangfuseValue(value, 4096) : undefined
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 32)
+      .map((item) => sanitizeSemanticContent(item, kind))
+      .filter((item) => item !== undefined)
+  }
+  if (!value || typeof value !== "object") return undefined
+  const safeObject = Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 64)
+      .flatMap(([key, item]) => {
+        if (!hasNoLeakingPiiDeep(key)) return []
+        const fieldKind = /(?:arguments?|args|results?|toolCallId|toolName)/i.test(key)
+          ? "tool"
+          : /(?:text|content|instructions?|prompt|completion)/i.test(key)
+            ? (kind ?? "model")
+            : kind
+        const safe = sanitizeSemanticContent(item, fieldKind)
+        return safe === undefined ? [] : [[key, safe]]
+      })
+  )
+  return Object.keys(safeObject).length > 0 ? safeObject : undefined
+}
+
+function sanitizeMixedLangfuseContent(value) {
+  let decoded = value
+  let wasJsonString = false
+  if (typeof value === "string") {
+    try {
+      decoded = JSON.parse(value)
+      wasJsonString = true
+    } catch {
+      // An opaque input/output string cannot prove it excludes the other
+      // consent class. Fail closed unless both classes were authorized.
+      return captureModelContent && captureToolContent
+        ? sanitizeLangfuseValue(value, 4096)
+        : undefined
+    }
+  }
+  const safe = sanitizeSemanticContent(decoded, undefined)
+  if (safe === undefined || !hasNoLeakingPiiDeep(safe)) return undefined
+  return wasJsonString ? JSON.stringify(safe) : safe
+}
+
+function sanitizeLangfuseContentAttribute(key, value, isToolObservation) {
+  if (isToolObservation || /(?:arguments?|args|results?|tool_calls?)(?:$|\.)/i.test(key)) {
+    return captureToolContent ? sanitizeLangfuseValue(value, 4096) : undefined
+  }
+  if (/(?:instructions?|prompt|completion)(?:$|\.)/i.test(key)) {
+    return captureModelContent ? sanitizeLangfuseValue(value, 4096) : undefined
+  }
+  return sanitizeMixedLangfuseContent(value)
+}
+
+function sanitizeLangfuseReadableSpan(span) {
+  const source = span.attributes ?? {}
+  const observationType = String(source["langfuse.observation.type"] ?? "").toLowerCase()
+  const operation = String(source["gen_ai.operation.name"] ?? "").toLowerCase()
+  const isTool = observationType === "tool" || operation === "execute_tool"
+  const captureContent = isTool ? captureToolContent : captureModelContent
+  const attributes = Object.fromEntries(
+    Object.entries(source).flatMap(([key, value]) => {
+      const isContent = LANGFUSE_CONTENT_ATTRIBUTE.test(key)
+      if (isContent && !captureContent && !(captureModelContent || captureToolContent)) return []
+      const safe = isContent
+        ? sanitizeLangfuseContentAttribute(key, value, isTool)
+        : sanitizeLangfuseValue(value, 512)
+      return safe === undefined ? [] : [[key, safe]]
+    })
+  )
+  const overrides = {
+    attributes,
+    resource: sanitizeResource(span.resource),
+    status: span.status ? { code: span.status.code } : span.status,
+    links: [],
+    events: [],
+    instrumentationScope: span.instrumentationScope
+      ? {
+          name: sanitizeLangfuseValue(span.instrumentationScope.name, 128) ?? "cognia.ai-sdk",
+          version: sanitizeLangfuseValue(span.instrumentationScope.version, 64),
+        }
+      : span.instrumentationScope,
+  }
+  const safeName = sanitizeLangfuseValue(span.name, 128) ?? "llm.generate"
+  const sanitized = new Proxy(span, {
+    get(target, property, receiver) {
+      if (property === "name") return safeName
+      if (Object.hasOwn(overrides, property)) return overrides[property]
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+  return isPrivacySafeReadableSpan(sanitized) ? sanitized : undefined
+}
+
+class LazyLangfuseSpanProcessor {
+  constructor(env) {
+    const config = {
+      publicKey: env.LANGFUSE_PUBLIC_KEY,
+      secretKey: env.LANGFUSE_SECRET_KEY,
+      baseUrl: env.LANGFUSE_BASE_URL,
+      environment: env.LANGFUSE_ENVIRONMENT,
+      release: env.LANGFUSE_RELEASE,
+    }
+    this.processor = import("@langfuse/otel").then(
+      ({ LangfuseSpanProcessor }) =>
+        new LangfuseSpanProcessor({
+          ...config,
+          exportMode: "batched",
+          mediaUploadEnabled: false,
+          mask: ({ data }) => sanitizeLangfuseValue(data, 4096),
+        })
+    )
+  }
+
+  onStart(span, parentContext) {
+    void this.processor.then((processor) => processor.onStart(span, parentContext))
+  }
+
+  onEnd(span) {
+    const sanitized = sanitizeLangfuseReadableSpan(span)
+    if (sanitized) void this.processor.then((processor) => processor.onEnd(sanitized))
+  }
+
+  forceFlush() {
+    return this.processor.then((processor) => processor.forceFlush())
+  }
+
+  shutdown() {
+    return this.processor.then((processor) => processor.shutdown())
+  }
+}
+
 export function initializeTelemetry(env = process.env) {
   const endpoint = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   const posthogDestinations = parsePostHogDestinations(env.COGNIA_POSTHOG_DESTINATIONS_JSON)
-  if ((!endpoint && posthogDestinations.length === 0) || sdk) return false
+  const langfuseEnabled =
+    env.COGNIA_LANGFUSE_TRACING_DISABLED !== "1" &&
+    env.NEXT_PUBLIC_LANGFUSE_TRACING_DISABLED !== "1" &&
+    Boolean(env.LANGFUSE_PUBLIC_KEY && env.LANGFUSE_SECRET_KEY && env.LANGFUSE_BASE_URL)
+  if ((!endpoint && posthogDestinations.length === 0 && !langfuseEnabled) || sdk) return false
   installationId = String(env.COGNIA_OBSERVABILITY_INSTALLATION_ID ?? "").trim()
-  const spanProcessors = []
+  captureModelContent = env.COGNIA_LANGFUSE_CAPTURE_MODEL_CONTENT === "true"
+  captureToolContent = env.COGNIA_LANGFUSE_CAPTURE_TOOL_CONTENT === "true"
+  const spanProcessors = [new CogniaCorrelationSpanProcessor()]
   if (endpoint) {
     spanProcessors.push(
       new BatchSpanProcessor(
@@ -98,6 +325,8 @@ export function initializeTelemetry(env = process.env) {
       )
     )
   }
+  if (langfuseEnabled) spanProcessors.push(new LazyLangfuseSpanProcessor(env))
+  scrubLangfuseSecretEnvironment(env)
   sdk = new NodeSDK({
     serviceName: env.OTEL_SERVICE_NAME || "cognia-sidecar",
     spanProcessors,
@@ -105,6 +334,11 @@ export function initializeTelemetry(env = process.env) {
   sdk.start()
   registerAiSdkTelemetry()
   return true
+}
+
+function scrubLangfuseSecretEnvironment(env) {
+  if (!env || typeof env !== "object") return
+  delete env.LANGFUSE_SECRET_KEY
 }
 
 const PRIVATE_ATTRIBUTE_KEYS = new Set([
@@ -298,6 +532,8 @@ export async function shutdownTelemetry() {
   const current = sdk
   sdk = null
   installationId = ""
+  captureModelContent = false
+  captureToolContent = false
   if (current) await current.shutdown()
 }
 
@@ -333,19 +569,53 @@ export function withTraceparent(traceparent, callback) {
   return context.with(parentContext(traceparent), callback)
 }
 
-export function aiSdkTelemetry({ sessionId, traceId, provider, traceparent }) {
+export function aiSdkTelemetry({
+  sessionId,
+  traceId,
+  surface,
+  runId,
+  turnId,
+  attemptId,
+  projectId,
+  feature,
+  promptComponentIds,
+  promptVersion,
+  promptFingerprint,
+  provider,
+  traceparent,
+}) {
   if (!sdk) return undefined
+  const runtimeContext = Object.fromEntries(
+    Object.entries({
+      cogniaSessionId: sessionId,
+      cogniaTraceId: traceId,
+      cogniaSurface: surface,
+      cogniaRunId: runId,
+      cogniaTurnId: turnId,
+      cogniaAttemptId: attemptId,
+      cogniaProjectId: projectId,
+      cogniaFeature: feature,
+      cogniaPromptComponentIds: promptComponentIds,
+      cogniaPromptVersion: promptVersion,
+      cogniaPromptFingerprint: promptFingerprint,
+    }).filter(([, value]) => value !== undefined)
+  )
   return {
     // `isEnabled: true` is gone: in v7 telemetry is on by default once an
     // integration is registered, and `initializeTelemetry` only registers when
-    // an OTLP endpoint exists. `tracer` is gone too — v7 removed it from the
-    // per-call options; the custom tracer now lives on the `OpenTelemetry`
-    // instance built at registration.
+    // at least one trace destination exists. `tracer` is gone too — v7 removed
+    // it from the per-call options; the custom tracer now lives on the
+    // integration built at process startup.
     functionId: `cognia.sidecar.${provider || "unknown"}`,
-    runtimeContext: { cogniaSessionId: sessionId, cogniaTraceId: traceId },
-    // Privacy contract, unchanged: prompts and completions never enter a span.
-    recordInputs: false,
-    recordOutputs: false,
+    runtimeContext,
+    includeRuntimeContext: Object.fromEntries(
+      Object.keys(runtimeContext).map((key) => [key, true])
+    ),
+    // Content enters spans only when either explicit Langfuse consent is on.
+    // Destination processors still enforce model/tool consent independently;
+    // generic OTLP and PostHog always strip content.
+    recordInputs: captureModelContent || captureToolContent,
+    recordOutputs: captureModelContent || captureToolContent,
     traceparent,
   }
 }
@@ -453,5 +723,8 @@ export const __TESTING__ = {
   parsePostHogDestinations,
   randomSpanId,
   PrivacyFilteringSpanExporter,
+  CogniaCorrelationSpanProcessor,
   sanitizeReadableSpan,
+  sanitizeLangfuseReadableSpan,
+  scrubLangfuseSecretEnvironment,
 }

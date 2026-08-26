@@ -6939,6 +6939,66 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "langfuse_connection_test",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "langfuse_credentials_clear",
+      "target": "execution",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "langfuse_credentials_set",
+      "target": "execution",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "langfuse_credentials_status",
+      "target": "execution",
+      "operation": "read",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "langfuse_trace_ingest",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "lark_entry_issue",
       "target": "service",
       "operation": "write",

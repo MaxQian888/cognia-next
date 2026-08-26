@@ -652,6 +652,14 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
         }
         Err(error) => log::warn!("sidecar telemetry configuration unavailable: {error}"),
     }
+    match crate::companion_api::langfuse::sidecar_env_for_current_account_async().await {
+        Ok(env) => {
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
+        }
+        Err(error) => log::warn!("sidecar Langfuse configuration unavailable: {error}"),
+    }
 
     // Inject the user's network proxy config so the Node sidecar's outbound
     // HTTP (Anthropic SDK + any provider relays) routes through the same
@@ -1035,6 +1043,14 @@ pub async fn kill_sidecar(state: SidecarState) {
     }
 }
 
+/// Serialize a configuration-driven restart against spawn and propagate any
+/// shutdown/reap failure to the settings command. The next request respawns the
+/// child with a fresh, already-committed environment.
+pub async fn restart_sidecar_for_config(state: SidecarState) -> Result<(), String> {
+    let _spawn_guard = state.spawn_lock.lock().await;
+    shutdown_sidecar(state.clone()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,6 +1199,13 @@ mod tests {
         let s = SidecarState::new();
         s.note_intentional_stop().await;
         assert!(!s.note_exit(Instant::now()).await);
+    }
+
+    #[tokio::test]
+    async fn configuration_restart_is_safe_without_a_running_child() {
+        restart_sidecar_for_config(SidecarState::new())
+            .await
+            .expect("restart");
     }
 
     #[tokio::test]

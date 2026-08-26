@@ -3,11 +3,7 @@
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 
 import { invoke } from "@tauri-apps/api/core"
-import {
-  configureTauriSidecarTelemetry,
-  createTauriOtlpFetch,
-  postTauriTelemetryJson,
-} from "./tauri-fetch-shim"
+import { configureTauriSidecarTelemetry, createTauriOtlpFetch } from "./tauri-fetch-shim"
 
 const invokeMock = invoke as jest.MockedFunction<typeof invoke>
 
@@ -116,21 +112,6 @@ describe("createTauriOtlpFetch", () => {
       fetchImpl("http://localhost", { method: "POST", signal: controller.signal })
     ).rejects.toMatchObject({ name: "AbortError" })
   })
-})
-
-it("posts Langfuse JSON through Rust without exposing its secret", async () => {
-  invokeMock.mockResolvedValue({ status: 207, accepted: true })
-  await postTauriTelemetryJson("https://cloud.langfuse.com/api/public/ingestion", '{"batch":[]}', {
-    kind: "langfuse",
-    publicKey: "pk-project",
-  })
-  expect(invokeMock).toHaveBeenCalledWith(
-    "telemetry_otlp_export",
-    expect.objectContaining({
-      credential: { kind: "langfuse", publicKey: "pk-project" },
-      body: '{"batch":[]}',
-    })
-  )
 })
 
 it("restarts the sidecar only when its telemetry environment changed", async () => {

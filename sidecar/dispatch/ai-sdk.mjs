@@ -1291,6 +1291,16 @@ export function dispatchAiSdk({
           sessionId,
           traceId: sendOptions.traceId,
           traceparent: sendOptions.traceparent,
+          surface: "chat",
+          runId: sendOptions.execution?.identity?.runId,
+          turnId: sendOptions.turnId,
+          attemptId: sendOptions.execution?.identity?.attemptId,
+          projectId: sendOptions.projectId,
+          feature: "chat",
+          promptComponentIds: sendOptions.execution?.composition?.presetId
+            ? [`agent-preset:${sendOptions.execution.composition.presetId}`]
+            : undefined,
+          promptFingerprint: sendOptions.execution?.composition?.compositionDigest,
           model,
           messages: messagesForSend,
           modelParams,

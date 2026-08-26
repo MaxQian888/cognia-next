@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-langfuse-connection-test"
+description = "Enables the langfuse_connection_test command without any pre-configured scope."
+commands.allow = ["langfuse_connection_test"]
+
+[[permission]]
+identifier = "deny-langfuse-connection-test"
+description = "Denies the langfuse_connection_test command without any pre-configured scope."
+commands.deny = ["langfuse_connection_test"]

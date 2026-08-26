@@ -57,6 +57,9 @@ export async function persistTelemetrySecret(
   value: string
 ): Promise<void> {
   if (!value) throw new Error("Telemetry secret must not be empty")
+  if (kind === "grafanaCloudApiToken" && !isTauri()) {
+    throw new Error("Grafana Cloud credentials require the secure desktop Host")
+  }
   if (isTauri()) {
     await invoke("telemetry_secret_set", { kind, value })
     return
@@ -77,12 +80,6 @@ export async function hasTelemetrySecret(kind: TelemetrySecretKind): Promise<boo
     return await invoke<boolean>("telemetry_secret_has", { kind })
   }
   return (await getSecret(SECRET_REFS[kind])) !== null
-}
-
-/** Browser/mobile exporter helper. Tauri exporters must never read secrets back into JS. */
-export async function getTelemetrySecretForWeb(kind: TelemetrySecretKind): Promise<string | null> {
-  if (isTauri()) return null
-  return getSecret(SECRET_REFS[kind])
 }
 
 export async function persistLegacyTelemetrySecrets(

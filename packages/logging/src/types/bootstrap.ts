@@ -13,13 +13,22 @@ export interface RemoteTransportDetailSettings {
   retryDelay: number
 }
 
-export interface LangfuseTransportDetailSettings {
+export interface LangfuseTraceSettings {
+  enabled: boolean
+  /** Langfuse project host; the exporter pins the path to OTLP traces. */
+  baseUrl: string
   publicKey: string
   /** Write-only secret lives in the platform secret store. */
   secretKeyConfigured: boolean
-  host: string
-  minLevel: LogLevel
+  environment: string
+  /** Consent to export model and root-observation previews. */
+  captureModelContent: boolean
+  /** Independent consent to export tool argument/result previews. */
+  captureToolContent: boolean
 }
+
+/** @deprecated Use LangfuseTraceSettings. */
+export type LangfuseTransportDetailSettings = LangfuseTraceSettings
 
 export interface NativeTransportDetailSettings {
   minLevel: LogLevel
@@ -57,7 +66,20 @@ export interface AgentTraceOtlpSettings {
   preset: OtlpExporterPreset["kind"]
   /** Full URL of the OTLP traces endpoint. Empty disables. */
   endpoint: string
-  /** Headers map sent on every batch. Auth token typically lives here. */
+  /**
+   * INERT. Always `{}` — nothing here ever reaches the wire.
+   *
+   * Renderer-held headers cannot be proven credential-free, so authentication
+   * moved to the Rust Host (desktop) or the Collector (web/mobile):
+   * `sanitizeOtlpHeaders()` in `lib/logging/bootstrap.ts` discards whatever is
+   * written here, `applyTransportSettings` sends `headers: {}`, and the settings
+   * panel no longer renders a field for it (pinned by
+   * `components/settings/logs/panels/transports-panel.test.tsx`).
+   *
+   * Kept on the type so a persisted legacy value still parses and is dropped on
+   * the next save rather than crashing the read. Do NOT wire an auth token
+   * through it — it will be silently discarded.
+   */
   headers: Record<string, string>
   /** Resource attribute `service.name`. */
   serviceName: string
@@ -99,9 +121,11 @@ export interface LoggingTransportSettings {
   langfuse: boolean
   agentTrace: boolean
   agentTraceOtlp: boolean
+  /** Export ordinary redacted StructuredLogEntry records through OTLP Logs. */
+  otlpLogs: boolean
   nativeConfig: NativeTransportDetailSettings
   remoteConfig: RemoteTransportDetailSettings
-  langfuseConfig: LangfuseTransportDetailSettings
+  langfuseConfig: LangfuseTraceSettings
   agentTraceConfig: AgentTraceTransportDetailSettings
   agentTraceOtlpConfig: AgentTraceOtlpSettings
   posthogConfig: PostHogTelemetrySettings

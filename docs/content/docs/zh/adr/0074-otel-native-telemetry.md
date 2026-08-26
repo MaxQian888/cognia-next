@@ -75,6 +75,23 @@ prompt、completion、system instruction、工具 schema/参数/结果、文件�
 使同一轮对话归属同一个 person；禁止账号、邮箱和硬件标识。
 PostHog project token 仅限公开 ingestion token；策略明确拒绝 Personal API Key，并在 UI、日志和诊断中掩码。
 
+## 2026-08-26 修订——Langfuse v4 是独立的 AI trace 目的地
+
+Langfuse 不再接收普通 `LogEntry`，只接收版本化 `AgentTraceBatchV1`，并固定导出到 v4 OTLP
+路径 `/api/public/otel/v1/traces`。通用 OTLP、PostHog AI 可观测性、PostHog 产品分析、本地
+agent-trace、原生日志与 metrics 都是独立目的地；启用或关闭 Langfuse 不会替换或重配它们。
+
+当前已认证 Cognia 账户绑定一个 BYO Langfuse 项目。五个窄 Host command 分别负责写入、
+查看状态、清除、连通性测试与 trace ingest。密钥只写、按账户隔离；ingest 调用方不能提交
+endpoint、header、credential 或任意 OTLP 文档。Tauri 由当前 Host 直接导出，已配对的 Web
+与 Capacitor 复用 Companion transport；standalone 静态 Web 只保留本地 trace。
+
+Sidecar 仍只有一个 `NodeSDK`，但通用 OTLP、PostHog 与官方 Langfuse v4 processor 相互独立。
+AI SDK 7 的 generation/tool observation 恢复 renderer 传入的 W3C 父上下文；重复的 renderer
+provider/tool observation 只在远程目的地过滤，不从本地 trace 瀑布删除。模型内容和工具内容
+分别授权，默认均关闭；所有出站路径都执行有界字段级过滤与 Host PII gate。本期不启用 Prompt
+Management，只记录本地 prompt component ID、版本和指纹。
+
 ## 未采用的方案
 
 - 给 CSP 添加 `https:` 或运行时 host：范围过宽，也无法安全表达用户自定义 endpoint。

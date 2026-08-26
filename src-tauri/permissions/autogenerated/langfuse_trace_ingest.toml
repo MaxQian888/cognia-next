@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-langfuse-trace-ingest"
+description = "Enables the langfuse_trace_ingest command without any pre-configured scope."
+commands.allow = ["langfuse_trace_ingest"]
+
+[[permission]]
+identifier = "deny-langfuse-trace-ingest"
+description = "Denies the langfuse_trace_ingest command without any pre-configured scope."
+commands.deny = ["langfuse_trace_ingest"]

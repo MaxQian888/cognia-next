@@ -24,7 +24,7 @@
  *   bufferSize, flushInterval and includeSource all differed).
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   applyLoggingSettings,
@@ -39,6 +39,12 @@ import {
   type LoggingTransportSettings,
   type UnifiedLoggerConfig,
 } from "@/lib/logging"
+import {
+  clearLangfuseCredentials,
+  getLangfuseCredentialsStatus,
+  setLangfuseCredentials,
+  testLangfuseConnection,
+} from "@/lib/logging/langfuse-host"
 import { clearTelemetrySecret, persistTelemetrySecret } from "@/lib/logging/telemetry-secrets"
 import { DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
 import {
@@ -78,6 +84,7 @@ export type SecretKind = "langfuseSecretKey" | "grafanaCloudApiToken"
 
 /** Matches `UnsavedBarStatus`; a failed save surfaces through `saveError`. */
 export type LogSettingsSaveStatus = "clean" | "dirty" | "saving" | "saved"
+export type LangfuseConnectionTestStatus = "idle" | "testing" | "connected" | "error"
 
 export const TRANSPORT_KEYS = [
   "console",
@@ -87,6 +94,7 @@ export const TRANSPORT_KEYS = [
   "langfuse",
   "agentTrace",
   "agentTraceOtlp",
+  "otlpLogs",
 ] as const
 
 export type TransportKey = (typeof TRANSPORT_KEYS)[number]
@@ -253,7 +261,10 @@ function normalizeTransports(transports: LoggingTransportSettings): LoggingTrans
     langfuseConfig: {
       ...transports.langfuseConfig,
       publicKey: transports.langfuseConfig.publicKey || "",
-      host: transports.langfuseConfig.host || "https://cloud.langfuse.com",
+      baseUrl: transports.langfuseConfig.baseUrl || "https://cloud.langfuse.com",
+      environment: transports.langfuseConfig.environment || "production",
+      captureModelContent: transports.langfuseConfig.captureModelContent === true,
+      captureToolContent: transports.langfuseConfig.captureToolContent === true,
     },
     nativeConfig: { ...transports.nativeConfig },
     agentTraceConfig: { ...transports.agentTraceConfig },
@@ -295,6 +306,7 @@ export interface UseLogSettingsDraftResult {
   status: LogSettingsSaveStatus
   /** True while the last save (or secret clear) is still showing as failed. */
   saveError: boolean
+  langfuseConnectionStatus: LangfuseConnectionTestStatus
 
   setConfig: <K extends keyof LogConfigDraft>(key: K, value: LogConfigDraft[K]) => void
   setRedaction: <K extends keyof NonNullable<LogConfigDraft["redaction"]>>(
@@ -331,6 +343,7 @@ export interface UseLogSettingsDraftResult {
   ) => void
   setSecretDraft: (kind: SecretKind, value: string) => void
   clearStoredSecret: (kind: SecretKind) => Promise<void>
+  testLangfuseConnection: () => Promise<void>
 
   save: () => Promise<void>
   /** Revert every field to the last saved baseline. */
@@ -366,6 +379,8 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
     grafanaCloudApiToken: "",
   })
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [langfuseConnectionStatus, setLangfuseConnectionStatus] =
+    useState<LangfuseConnectionTestStatus>("idle")
 
   // The last committed values, kept as state rather than a ref: the change
   // count is derived from it during render, and the React compiler's lint
@@ -377,6 +392,37 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
     samplingRules,
     behaviorTelemetry,
   }))
+
+  useEffect(() => {
+    let active = true
+    void getLangfuseCredentialsStatus()
+      .then((hostStatus) => {
+        if (!active) return
+        const mergeHostStatus = (current: LoggingTransportSettings): LoggingTransportSettings => ({
+          ...current,
+          langfuse: hostStatus.configured && hostStatus.enabled,
+          langfuseConfig: {
+            ...current.langfuseConfig,
+            enabled: hostStatus.configured && hostStatus.enabled,
+            secretKeyConfigured: hostStatus.configured,
+            baseUrl: hostStatus.baseUrl ?? current.langfuseConfig.baseUrl,
+            publicKey: hostStatus.publicKey ?? current.langfuseConfig.publicKey,
+            environment: hostStatus.environment ?? current.langfuseConfig.environment,
+            captureModelContent: hostStatus.captureModelContent,
+            captureToolContent: hostStatus.captureToolContent,
+          },
+        })
+        setTransports(mergeHostStatus)
+        setBaseline((previous) => ({
+          ...previous,
+          transports: mergeHostStatus(previous.transports),
+        }))
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   const fieldChanges = countChangedFields(baseline, {
     config,
@@ -428,7 +474,15 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
   }, [])
 
   const setTransportEnabled = useCallback((transport: TransportKey, enabled: boolean) => {
-    setTransports((previous) => ({ ...previous, [transport]: enabled }))
+    setTransports((previous) =>
+      transport === "langfuse"
+        ? {
+            ...previous,
+            langfuse: enabled,
+            langfuseConfig: { ...previous.langfuseConfig, enabled },
+          }
+        : { ...previous, [transport]: enabled }
+    )
   }, [])
 
   const setTransportDetail = useCallback<UseLogSettingsDraftResult["setTransportDetail"]>(
@@ -472,13 +526,19 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
 
   const clearStoredSecret = useCallback(async (kind: SecretKind) => {
     try {
-      await clearTelemetrySecret(kind)
+      if (kind === "langfuseSecretKey") await clearLangfuseCredentials()
+      else await clearTelemetrySecret(kind)
       setSecretDrafts((previous) => ({ ...previous, [kind]: "" }))
       setTransports((previous) =>
         kind === "langfuseSecretKey"
           ? {
               ...previous,
-              langfuseConfig: { ...previous.langfuseConfig, secretKeyConfigured: false },
+              langfuse: false,
+              langfuseConfig: {
+                ...previous.langfuseConfig,
+                enabled: false,
+                secretKeyConfigured: false,
+              },
             }
           : {
               ...previous,
@@ -494,6 +554,16 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
     } catch {
       setSaveStatus("error")
       setTimeout(() => setSaveStatus("idle"), 3000)
+    }
+  }, [])
+
+  const runLangfuseConnectionTest = useCallback(async () => {
+    setLangfuseConnectionStatus("testing")
+    try {
+      const result = await testLangfuseConnection()
+      setLangfuseConnectionStatus(result.connected ? "connected" : "error")
+    } catch {
+      setLangfuseConnectionStatus("error")
     }
   }, [])
 
@@ -515,17 +585,34 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
         await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetry.enabled })
       }
 
-      if (secretDrafts.langfuseSecretKey) {
-        await persistTelemetrySecret("langfuseSecretKey", secretDrafts.langfuseSecretKey)
-      }
       if (secretDrafts.grafanaCloudApiToken) {
         await persistTelemetrySecret("grafanaCloudApiToken", secretDrafts.grafanaCloudApiToken)
+      }
+
+      const langfuseConfigChanged =
+        JSON.stringify(transports.langfuseConfig) !==
+        JSON.stringify(baseline.transports.langfuseConfig)
+      if (
+        secretDrafts.langfuseSecretKey ||
+        (langfuseConfigChanged &&
+          (transports.langfuse || transports.langfuseConfig.secretKeyConfigured))
+      ) {
+        await setLangfuseCredentials({
+          enabled: transports.langfuse,
+          baseUrl: transports.langfuseConfig.baseUrl,
+          publicKey: transports.langfuseConfig.publicKey,
+          secretKey: secretDrafts.langfuseSecretKey || undefined,
+          environment: transports.langfuseConfig.environment,
+          captureModelContent: transports.langfuseConfig.captureModelContent,
+          captureToolContent: transports.langfuseConfig.captureToolContent,
+        })
       }
 
       const securedTransports: LoggingTransportSettings = {
         ...transports,
         langfuseConfig: {
           ...transports.langfuseConfig,
+          enabled: transports.langfuse,
           secretKeyConfigured:
             transports.langfuseConfig.secretKeyConfigured ||
             Boolean(secretDrafts.langfuseSecretKey),
@@ -570,6 +657,7 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
       setTimeout(() => setSaveStatus("idle"), 3000)
     }
   }, [
+    baseline.transports.langfuseConfig,
     behaviorTelemetry,
     config,
     retention,
@@ -609,6 +697,7 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
     changedCount,
     status,
     saveError: saveStatus === "error",
+    langfuseConnectionStatus,
     setConfig,
     setRedaction,
     setModuleLevel,
@@ -621,6 +710,7 @@ export function useLogSettingsDraft(): UseLogSettingsDraftResult {
     setBehaviorTelemetry,
     setSecretDraft,
     clearStoredSecret,
+    testLangfuseConnection: runLangfuseConnectionTest,
     save,
     discard,
     reset,

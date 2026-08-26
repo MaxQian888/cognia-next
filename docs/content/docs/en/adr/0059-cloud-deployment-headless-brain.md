@@ -244,6 +244,18 @@ it and the active one is chosen by an atomic per-account manifest
 The "cloud installs are bounded by brain memory" consequence below still holds:
 these rungs fix durability, not the in-memory dataset ceiling.
 
+### 2026-08-26 — Account-scoped Langfuse trace egress
+
+Cloud Langfuse tracing reuses the existing `cognia-server` + brain Host rather
+than adding a relay. Paired Web and Capacitor clients submit only
+`AgentTraceBatchV1` over Companion RPC; the authenticated principal selects the
+account namespace, and the Host resolves its write-only BYO credentials. A
+standalone Web runtime with no Host never attempts remote Langfuse export.
+
+Langfuse is an AI-trace destination only. It coexists with generic OTLP and
+PostHog processors in the brain's single NodeSDK and never receives application
+logs or metrics.
+
 ### Phase 3 — Scale-out (only if/when multi-tenant is wanted)
 
 `ExecBackend::Container` (per-workspace runners) → per-tenant units on gVisor/Kata → K8s orchestration + `ExecutionBroker`-backed quotas → observability per the services convention (Prometheus `/metrics` everywhere).

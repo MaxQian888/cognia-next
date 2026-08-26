@@ -8,6 +8,13 @@
 // declarative spec shape; a Jest parity test guards the two against drift.
 
 /**
+ * Canonical cross-runtime AI telemetry correlation fields. The property list
+ * on `NormalizedRequest` below mirrors this TypeScript contract because the
+ * sidecar itself remains plain ESM.
+ * @typedef {import("../../../packages/agent-trace/src/types").CogniaAiTelemetryContext} CogniaAiTelemetryContext
+ */
+
+/**
  * @typedef {Object} AdapterCredentials
  * @property {string} [apiKey]
  * @property {string} [baseURL]
@@ -38,6 +45,18 @@
  * @property {AdapterCredentials} [credentials]
  * @property {Function} [streamTextFn]            Injected `streamText` (tests).
  * @property {Function} [fetchFn]                 Injected `fetch` (tests; declarative adapters).
+ * @property {string} [sessionId]
+ * @property {string} [traceId]
+ * @property {string} [traceparent]
+ * @property {string} [surface]
+ * @property {string} [runId]
+ * @property {string} [turnId]
+ * @property {string} [attemptId]
+ * @property {string} [projectId]
+ * @property {string} [feature]
+ * @property {string[]} [promptComponentIds]
+ * @property {string} [promptVersion]
+ * @property {string} [promptFingerprint]
  */
 
 /**

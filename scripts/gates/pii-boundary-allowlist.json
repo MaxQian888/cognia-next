@@ -280,8 +280,8 @@
   },
   {
     "file": "sidecar/telemetry.mjs",
-    "boundaries": ["ai", "@ai-sdk/otel"],
-    "reason": "Registers the process-wide AI SDK OpenTelemetry integration when an OTLP endpoint is configured.",
-    "protection": "Per-call telemetry explicitly sets recordInputs and recordOutputs to false, so prompts and completions never enter exported spans."
+    "boundaries": ["ai", "@langfuse/vercel-ai-sdk"],
+    "reason": "Registers the process-wide official Langfuse AI SDK 7 telemetry integration before the first model call.",
+    "protection": "Per-call capture flags default off, Langfuse model and tool content policies are enforced independently, and generic OTLP/PostHog exporters always strip content."
   }
 ]

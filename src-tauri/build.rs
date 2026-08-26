@@ -37,6 +37,11 @@ fn main() {
         "telemetry_secret_has",
         "telemetry_secret_clear",
         "telemetry_configure_sidecar",
+        "langfuse_credentials_set",
+        "langfuse_credentials_status",
+        "langfuse_credentials_clear",
+        "langfuse_connection_test",
+        "langfuse_trace_ingest",
     ]));
 
     // Regenerate the "allow-all-app-commands" permission from the single source

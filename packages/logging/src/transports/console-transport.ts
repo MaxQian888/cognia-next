@@ -4,6 +4,7 @@
  */
 
 import type { StructuredLogEntry, Transport, LogLevel } from "../types"
+import { CONSOLE_BRIDGE_MODULE, getOriginalConsoleMethod } from "../console-bridge-state"
 
 /**
  * Console color codes for different log levels
@@ -71,6 +72,11 @@ export class ConsoleTransport implements Transport {
 
   log(entry: StructuredLogEntry): void {
     const { level, message, module, traceId, data, stack, timestamp } = entry
+    // The console bridge writes the caller's own args straight to the original
+    // console method before it ever reaches the logger, so printing the
+    // structured entry too would show every legacy `console.warn` twice. The
+    // entry still reaches storage / native / remote from here.
+    if (module === CONSOLE_BRIDGE_MODULE) return
     const opts = this.options
 
     // Build prefix parts
@@ -122,18 +128,18 @@ export class ConsoleTransport implements Transport {
   private getConsoleMethod(level: LogLevel): (...args: unknown[]) => void {
     switch (level) {
       case "trace":
-        return consoleApi.trace.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "trace")
       case "debug":
-        return consoleApi.debug.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "debug")
       case "info":
-        return consoleApi.info.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "info")
       case "warn":
-        return consoleApi.warn.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "warn")
       case "error":
       case "fatal":
-        return consoleApi.error.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "error")
       default:
-        return consoleApi.log.bind(consoleApi)
+        return getOriginalConsoleMethod(consoleApi, "log")
     }
   }
 }
