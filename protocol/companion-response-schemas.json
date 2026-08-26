@@ -421,6 +421,72 @@
       },
       "additionalProperties": false
     },
+    "ConnectorAttachmentCleanupReport": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentCleanupReport",
+      "required": ["deleted", "freedBytes", "failed"],
+      "properties": {
+        "deleted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freedBytes": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["cacheKey", "error"],
+            "properties": {
+              "cacheKey": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConnectorAttachmentEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentEntry",
+      "required": [
+        "cacheKey",
+        "sizeBytes",
+        "createdAt",
+        "lastAccessedAt",
+        "expiresAt",
+        "diskBytes"
+      ],
+      "properties": {
+        "cacheKey": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "lastAccessedAt": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": ["integer", "null"]
+        },
+        "diskBytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
     "ConnectorAttachmentRef": {
       "type": "object",
       "x-cognia-wire-source": "lib/connectors/tauri/commands.ts AttachmentRef",
@@ -3428,8 +3494,23 @@
     "connector_send": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "connectors_attachment_delete": {
+      "$ref": "#/$defs/ConnectorAttachmentCleanupReport"
+    },
+    "connectors_attachment_enforce_budget": {
+      "$ref": "#/$defs/ConnectorAttachmentCleanupReport"
+    },
+    "connectors_attachment_evict_adapter": {
+      "$ref": "#/$defs/ConnectorAttachmentCleanupReport"
+    },
     "connectors_attachment_fetch": {
       "$ref": "#/$defs/ConnectorAttachmentRef"
+    },
+    "connectors_attachment_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ConnectorAttachmentEntry"
+      }
     },
     "connectors_attachment_read": {
       "$ref": "#/$defs/NullableString"

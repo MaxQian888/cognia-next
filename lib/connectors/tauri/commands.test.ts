@@ -595,6 +595,72 @@ describe("runtime lease wrappers", () => {
     })
   })
 
+  /**
+   * Every wrapper here is reachable two ways: the desktop calls it over Tauri
+   * IPC, and the brain calls the SAME wrapper over companion RPC through
+   * `headlessConnectorInvoker` (lib/headless/runtimes/connector-runtime.ts),
+   * whose default arm forwards the name verbatim. A wrapper that is only a
+   * `#[tauri::command]` therefore fails on a headless host with
+   * `CompanionError: the requested command is not registered` — which is what
+   * the four `connectors_attachment_*` upkeep commands did, silently, on every
+   * housekeeping cycle. Nothing caught it: `audit:companion-command-manifest`
+   * checks descriptor↔handler, never wrapper↔remote-plane.
+   */
+  it("gives every connectors_* command it can send a remote dispatch arm", async () => {
+    const fs = await import("node:fs/promises")
+    const path = await import("node:path")
+    const repoRoot = path.join(__dirname, "..", "..", "..")
+    const rpcDir = path.join(repoRoot, "src-tauri", "src", "companion_api", "rpc")
+    const rpcRs = path.join(repoRoot, "src-tauri", "src", "companion_api", "rpc.rs")
+
+    const wrapperSource = await fs.readFile(path.join(__dirname, "commands.ts"), "utf8")
+    const sent = new Set(
+      [...wrapperSource.matchAll(/"(connectors_[a-z0-9_]+)"/g)].map((match) => match[1])
+    )
+    // A sweep that scanned nothing would pass vacuously.
+    expect(sent.size).toBeGreaterThan(30)
+
+    // The two names the headless invoker answers locally: the companion
+    // server's /connectors ingress is always mounted and the brain owns no
+    // local WS handles, so neither name ever crosses the wire.
+    for (const local of ["connectors_start_server", "connectors_stop_server"]) sent.delete(local)
+    // ...and the two it renames onto the current arms.
+    sent.delete("connectors_register_adapter")
+    sent.delete("connectors_unregister_adapter")
+    sent.add("connectors_register")
+    sent.add("connectors_unregister")
+
+    const known = await fs.readFile(rpcRs, "utf8")
+    const dispatchSources = await Promise.all(
+      (await fs.readdir(rpcDir))
+        // tests.rs names commands as fixtures; a fixture must not stand in for
+        // a production arm.
+        .filter((name) => name.endsWith(".rs") && name !== "tests.rs")
+        .map((name) => fs.readFile(path.join(rpcDir, name), "utf8"))
+    )
+    const dispatch = [known, ...dispatchSources].join("\n")
+
+    // A wrapper that genuinely cannot cross the wire is listed here WITH a
+    // reason, never dropped silently. A stale entry fails below.
+    const NOT_YET_REMOTE = new Map([
+      [
+        "connectors_ensure_server",
+        "ADR-0134 remote-document OAuth needs a plaintext loopback listener on a " +
+          "specific port to serve Google's redirect URI. A headless host binds only " +
+          "the TLS companion listener, so what `ensure` should return there is an " +
+          "open design question, not a missing arm.",
+      ],
+    ])
+
+    const unreachable = [...sent].filter(
+      (name) => !known.includes(`"${name}"`) || !new RegExp(`"${name}"\\s*=>`, "u").test(dispatch)
+    )
+    expect(unreachable.filter((name) => !NOT_YET_REMOTE.has(name))).toEqual([])
+    // Once a listed command gains an arm, delete its entry rather than leaving
+    // a note that describes a gap nobody has any more.
+    expect([...NOT_YET_REMOTE.keys()].filter((name) => !unreachable.includes(name))).toEqual([])
+  })
+
   it("routes through the swappable invoker so the brain reaches the same arms", async () => {
     const calls: string[] = []
     const previous = setConnectorCommandInvoker(async (name) => {

@@ -47,6 +47,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_reset_all_ws",
     "connectors_attachment_fetch",
     "connectors_attachment_read",
+    "connectors_attachment_list",
+    "connectors_attachment_delete",
+    "connectors_attachment_evict_adapter",
+    "connectors_attachment_enforce_budget",
     "connectors_media_upload",
     "connectors_matrix_crypto_init",
     "connectors_matrix_crypto_close",
@@ -837,6 +841,62 @@ pub(super) async fn dispatch(
             )
             .map_err(RpcError::internal)?;
             to_json(bytes)
+        }
+
+        // Cache upkeep — the sweep `lib/connectors/housekeeping-scheduler.ts`
+        // runs every cycle. Deliberately NOT gated on `host.headless()` the way
+        // the two arms above are: `crate::connectors::attachments` resolves its
+        // directory from `dirs::data_dir()` and takes no host handle — the
+        // desktop `#[tauri::command]` wrappers call these very functions with no
+        // AppHandle — so refusing a desktop host would deny a request it is
+        // perfectly able to serve. Reach is already bounded by
+        // SERVICE_ONLY_COMMANDS: only a loopback service token arrives here.
+        //
+        // Each helper walks and rewrites the cache directory synchronously, so
+        // it runs on the blocking pool rather than stalling the reactor — the
+        // same shape the Tauri wrappers use.
+        "connectors_attachment_list" => {
+            let entries =
+                tokio::task::spawn_blocking(crate::connectors::attachments::list_attachments)
+                    .await
+                    .map_err(|error| {
+                        RpcError::internal(format!("attachment list task failed: {error}"))
+                    })?
+                    .map_err(RpcError::internal)?;
+            to_json(entries)
+        }
+
+        "connectors_attachment_delete" => {
+            let cache_keys: Vec<String> = required_aliased(&args, "cache_keys", "cacheKeys")?;
+            let report = tokio::task::spawn_blocking(move || {
+                crate::connectors::attachments::delete_attachments(cache_keys)
+            })
+            .await
+            .map_err(|error| RpcError::internal(format!("attachment delete task failed: {error}")))?
+            .map_err(RpcError::internal)?;
+            to_json(report)
+        }
+
+        "connectors_attachment_evict_adapter" => {
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let report = tokio::task::spawn_blocking(move || {
+                crate::connectors::attachments::evict_adapter_attachments(&adapter_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(format!("attachment evict task failed: {error}")))?
+            .map_err(RpcError::internal)?;
+            to_json(report)
+        }
+
+        "connectors_attachment_enforce_budget" => {
+            let max_total_bytes: u64 = required_aliased(&args, "max_total_bytes", "maxTotalBytes")?;
+            let report = tokio::task::spawn_blocking(move || {
+                crate::connectors::attachments::enforce_cache_budget(max_total_bytes)
+            })
+            .await
+            .map_err(|error| RpcError::internal(format!("attachment budget task failed: {error}")))?
+            .map_err(RpcError::internal)?;
+            to_json(report)
         }
 
         "connectors_media_upload" => {

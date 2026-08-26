@@ -1701,6 +1701,45 @@
       },
       "additionalProperties": false
     },
+    "connectors_attachment_delete": {
+      "type": "object",
+      "required": [
+        "cacheKeys"
+      ],
+      "properties": {
+        "cacheKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_attachment_enforce_budget": {
+      "type": "object",
+      "required": [
+        "maxTotalBytes"
+      ],
+      "properties": {
+        "maxTotalBytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_attachment_evict_adapter": {
+      "type": "object",
+      "required": [
+        "adapterId"
+      ],
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "connectors_attachment_fetch": {
       "type": "object",
       "required": [
@@ -1726,6 +1765,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "connectors_attachment_list": {
+      "type": "object"
     },
     "connectors_attachment_read": {
       "type": "object",

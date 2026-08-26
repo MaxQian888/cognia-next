@@ -1125,6 +1125,11 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_reset_all_ws",
         "connectors_attachment_fetch",
         "connectors_attachment_read",
+        // The cache-upkeep arms the housekeeping sweep drives.
+        "connectors_attachment_list",
+        "connectors_attachment_delete",
+        "connectors_attachment_evict_adapter",
+        "connectors_attachment_enforce_budget",
         "connectors_media_upload",
         "connectors_matrix_crypto_init",
         "connectors_matrix_crypto_close",
@@ -1175,6 +1180,77 @@ async fn headless_plugin_js_status_dispatches_to_the_native_runtime() {
     .expect("headless status query must reach the native plugin runtime");
 
     assert_eq!(result, Value::Bool(false));
+}
+
+// ── Connector attachment-cache upkeep arms (ADR-0059 T-A5) ───────────────
+
+/// `lib/connectors/housekeeping-scheduler.ts` drives these every cycle. With
+/// no arms behind them the whole "Connector attachment cache upkeep" task
+/// failed each run with `the requested command is not registered`, so on a
+/// headless host the orphan sweep and the size ceiling never ran at all and
+/// the encrypted cache grew without a bound.
+#[tokio::test]
+async fn attachment_upkeep_arms_take_the_camel_case_shape_the_brain_sends() {
+    let state = test_state();
+
+    // An empty key list is a provable no-op — nothing on disk is read or
+    // written — so this pins the arm and its `cacheKeys` alias without
+    // depending on what the cache directory happens to hold.
+    let report = dispatch(
+        "connectors_attachment_delete",
+        json!({ "cacheKeys": [] }),
+        &state,
+        &headless_host(),
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect("the delete arm must be reachable");
+    assert_eq!(report["deleted"], json!([]));
+    assert_eq!(report["failed"], json!([]));
+    assert_eq!(report["freedBytes"], 0);
+
+    // The remaining two mutate the cache directory, so assert only that the
+    // argument they require reaches the arm: a 400 is raised inside the arm,
+    // which neither a missing dispatch arm (404) nor a missing host (503)
+    // could produce.
+    for name in [
+        "connectors_attachment_evict_adapter",
+        "connectors_attachment_enforce_budget",
+    ] {
+        let (status, _body) = dispatch(
+            name,
+            json!({}),
+            &state,
+            &headless_host(),
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("a missing required argument must be rejected by the arm");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+    }
+}
+
+/// The listing is read by every housekeeping cycle to find orphaned blobs, so
+/// it must never come back from the 60 s idempotency cache — a stale listing
+/// would name blobs a freshly written row already claims. The three mutators
+/// stay outside the read tier so a retried delete is still deduplicated.
+#[test]
+fn only_the_attachment_listing_sits_in_the_read_tier() {
+    assert!(
+        READ_ONLY_COMMANDS_SET.contains("connectors_attachment_list"),
+        "the orphan sweep must see a fresh listing on every cycle"
+    );
+    for name in [
+        "connectors_attachment_delete",
+        "connectors_attachment_evict_adapter",
+        "connectors_attachment_enforce_budget",
+    ] {
+        assert!(!READ_ONLY_COMMANDS_SET.contains(name), "{name} mutates");
+    }
 }
 
 // ── Connector ingress registry arms (ADR-0059 R12) ──────────────────────
