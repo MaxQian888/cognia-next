@@ -141,7 +141,62 @@ The rate-limit blocker keeps **two buckets** over a rolling 60-second window —
     }
 ```
 
-The built-in `defaultPrivateChatPolicy()` (`policy.ts:33`) uses a single `private-default` rule with a generous `30/60` rate-limit and `storeUnmatchedInDraftMode: true`; `defaultGroupChatPolicy()` (`policy.ts:41`) gates on `self-mention` / `reply-to-bot` / `/ask`+`/agent` slash-commands, with a tighter `5/20` rate-limit, a 3-second post-reply cooldown, and `storeUnmatchedInDraftMode: false`.
+### Default profiles
+
+Every profile carries the same rule set — `private-default` plus the three
+"addressed to us" rules (`self-mention`, `reply-to-bot`, `/ask`+`/agent`) — and
+they differ only in throttling and in what happens to unmatched chatter:
+
+| Profile | Rate limit | Post-reply cooldown | Unmatched messages |
+| --- | --- | --- | --- |
+| `defaultPrivateChatPolicy()` | `30/60` | — | kept as history |
+| `defaultGroupChatPolicy()` | `5/20` | 3 s | dropped |
+| `addressedOnlyChatPolicy()` | `5/20` | 3 s | kept as history |
+
+The rule sets used to be split — private-only for one profile, addressed-only
+for the other — which meant nine of the eleven platforms shipped a bot that
+could never answer in one of its chat scopes. An @-mention of a Telegram / Slack
+/ Discord / Lark bot in a group passed conversation admission and then matched
+no rule; a plain 1:1 message to a WeCom or OneBot bot hit neither the mention
+rule nor the reply rule, because those adapters set `selfMentioned` in groups
+only. Both were dropped unanswered.
+
+`addressedOnlyChatPolicy()` exists for a connector that speaks as a real
+person's account rather than a bot identity (today `wechat-personal`). It
+deliberately omits `private-default`: auto-answering every direct message sent
+to someone's own account is not a default anyone should acquire by connecting
+an account. Unmatched messages are kept, so nothing is lost while it is narrow.
+
+`defaultTriggerPolicyFor(kind)` (`types/connectors/policy.ts`) maps each
+platform to its profile; plugin-contributed kinds fall through to the private
+profile. The eleven create dialogs call it instead of choosing for themselves.
+
+### Where the policy is edited
+
+| Scope | Surface | Stored in |
+| --- | --- | --- |
+| Bot-wide | Settings → Connections → *bot* → Config → **When to answer** (`AdapterTriggerPolicy`) | `AdapterInstanceRow.trigger` |
+| Per conversation | Inbox → conversation → gear → **When to answer** (`ConversationTriggerOverride`) | `ConversationOverrideRow.trigger` |
+
+Both render the same `TriggerPolicyEditor`, which works on a
+`TriggerPolicyDraft` (`lib/connectors/trigger-policy-draft.ts`) — one slot per
+rule / blocker kind rather than an ordered list, since rules are OR-ed and
+blockers short-circuit, so order carries no meaning. Duplicates of a kind merge
+only where the merge is provably behaviour-preserving (union for lists, minimum
+for a rate limit, maximum for a cooldown); two `keyword` rules disagreeing on
+`caseInsensitive` have no single-rule equivalent and are preserved verbatim as
+`residualRules`.
+
+The conversation scope overrides the three parts of a policy independently,
+matching `mergeTrigger`'s REPLACE-if-defined semantics below: a chat can take
+over the conditions, the blockers, or `storeUnmatchedInDraftMode`, and keep
+following the bot for the rest.
+
+`triggerCoverageGaps` reports the chat scope a policy cannot match in, which is
+what an operator asking "why did the bot say nothing" needs; the editor also
+flags a switched-on condition with nothing to match against, and a rate limit
+below 1 — the evaluator blocks at `>= limit`, so that value silences the bot
+completely.
 
 ## Three-layer Binding Resolution
 

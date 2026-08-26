@@ -141,7 +141,53 @@ flowchart TD
     }
 ```
 
-内置的 `defaultPrivateChatPolicy()`（`policy.ts:33`）使用单条 `private-default` 规则，配宽松的 `30/60` 限速和 `storeUnmatchedInDraftMode: true`；`defaultGroupChatPolicy()`（`policy.ts:41`）基于 `self-mention` / `reply-to-bot` / `/ask`+`/agent` 斜杠命令门控，配更紧的 `5/20` 限速、3 秒回复后冷却，以及 `storeUnmatchedInDraftMode: false`。
+### 默认档位
+
+三个档位使用**同一套规则** —— `private-default` 加上三条「被点名」规则
+（`self-mention`、`reply-to-bot`、`/ask`+`/agent`）—— 只在限速与未命中消息的
+处理上不同：
+
+| 档位 | 限速 | 回复后冷却 | 未命中的消息 |
+| --- | --- | --- | --- |
+| `defaultPrivateChatPolicy()` | `30/60` | — | 作为历史保留 |
+| `defaultGroupChatPolicy()` | `5/20` | 3 秒 | 丢弃 |
+| `addressedOnlyChatPolicy()` | `5/20` | 3 秒 | 作为历史保留 |
+
+此前两个档位的规则是**割裂**的 —— 一个只有私聊规则，另一个只有被点名规则 ——
+结果 11 个平台里有 9 个的机器人在某一个会话场景下永远不会回复：在群里 @ 一个
+Telegram / Slack / Discord / Lark 机器人，会话准入放行之后却匹配不到任何规则；
+给 WeCom 或 OneBot 机器人发一条私聊，既不算 mention 也不算 reply（这两个适配器
+只在群里设置 `selfMentioned`）。两种情况都被静默丢弃。
+
+`addressedOnlyChatPolicy()` 是给「用真人账号说话」而非机器人身份的连接器准备的
+（目前是 `wechat-personal`）。它**刻意**不含 `private-default`：自动回复发给某个
+人自己账号的每一条私信，不该是连接账号就默认获得的行为。未命中的消息会被保留，
+所以策略窄的时候也不会丢东西。
+
+`defaultTriggerPolicyFor(kind)`（`types/connectors/policy.ts`）把每个平台映射到
+对应档位；插件贡献的 kind 落到私聊档位。11 个建号对话框调用它，而不再各自选择。
+
+### 在哪里编辑策略
+
+| 作用域 | 界面 | 存储于 |
+| --- | --- | --- |
+| 机器人级 | 设置 → 连接 → *机器人* → 配置 → **何时回复**（`AdapterTriggerPolicy`） | `AdapterInstanceRow.trigger` |
+| 会话级 | 收件箱 → 会话 → 齿轮 → **何时回复**（`ConversationTriggerOverride`） | `ConversationOverrideRow.trigger` |
+
+两者渲染同一个 `TriggerPolicyEditor`，它作用在
+`TriggerPolicyDraft`（`lib/connectors/trigger-policy-draft.ts`）上 —— 每种规则 /
+拦截各占一个开关位，而不是一张有序列表：规则是 OR、拦截是首个命中即短路，顺序
+本来就没有含义。同一种类的重复项只在**可证明保持行为**时才合并（列表取并集、
+限速取最小、冷却取最大）；两条 `caseInsensitive` 不一致的 `keyword` 规则没有等价
+的单条形式，会作为 `residualRules` 原样保留。
+
+会话级对策略的三个部分**独立**覆盖，与下面 `mergeTrigger` 的「定义即替换」语义
+一致：一个会话可以只接管触发条件、只接管拦截条件、或只接管
+`storeUnmatchedInDraftMode`，其余继续跟随机器人。
+
+`triggerCoverageGaps` 会指出策略在哪个会话场景下匹配不到任何东西 —— 这正是
+「机器人为什么不说话」需要的答案；编辑器同时会标出「开着但没有内容可匹配」的
+条件，以及小于 1 的限速 —— 求值器在 `>= 上限` 处拦截，这个值会让机器人完全静默。
 
 ## 三层绑定解析
 
