@@ -23,10 +23,13 @@ use uuid::Uuid;
 
 use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
 use crate::model::{
-    ActorError, ActorKind, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus,
+    ActorError, ActorKind, ArtifactError, CollabActor, Issue, IssueEvent, IssuePriority,
+    IssueStatus, Plan, PlanStatus, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind,
+    RunStatus,
 };
 use crate::store::{
-    IssuePatch, IssueQuery, NewIssue, Store, StoreError, Workspace, WorkspaceMember,
+    IssuePatch, IssueQuery, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch, PlanQuery,
+    PlanStepProgress, RunPatch, RunQuery, Store, StoreError, Workspace, WorkspaceMember,
 };
 
 /// How long a minted grant lives.
@@ -84,6 +87,13 @@ pub fn router(state: AppState) -> Router {
             "/v1/orgs/{org_id}/issues/{issue_id}/events",
             get(list_events).post(append_event),
         )
+        .route("/v1/orgs/{org_id}/plans", get(list_plans).post(create_plan))
+        .route(
+            "/v1/orgs/{org_id}/plans/{plan_id}",
+            get(get_plan).patch(patch_plan),
+        )
+        .route("/v1/orgs/{org_id}/runs", get(list_runs).post(create_run))
+        .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run))
         .with_state(state)
 }
 
@@ -107,6 +117,10 @@ enum Failure {
     Auth(AuthError),
     Store(StoreError),
     Actor(ActorError),
+    /// A run artifact the database would refuse anyway. Caught here so the
+    /// client gets a 400 naming the bad link instead of a 500 carrying a
+    /// constraint name.
+    Artifact(ArtifactError),
     BadRequest(String),
     /// The OIDC token itself did not verify.
     Oidc(cognia_tenant_auth::oidc::AuthError),
@@ -142,6 +156,7 @@ impl IntoResponse for Failure {
                 }
             },
             Self::Actor(error) => (StatusCode::BAD_REQUEST, error.to_string()),
+            Self::Artifact(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             Self::Oidc(error) => (StatusCode::UNAUTHORIZED, error.to_string()),
             Self::UnlinkedIdentity => (
@@ -166,6 +181,11 @@ impl From<StoreError> for Failure {
 impl From<ActorError> for Failure {
     fn from(error: ActorError) -> Self {
         Self::Actor(error)
+    }
+}
+impl From<ArtifactError> for Failure {
+    fn from(error: ArtifactError) -> Self {
+        Self::Artifact(error)
     }
 }
 
@@ -246,6 +266,122 @@ pub struct AppendEventBody {
     pub kind: String,
     #[serde(default)]
     pub payload: serde_json::Value,
+}
+
+// ── Plans and Runs (Batch 7c) ────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListPlansParams {
+    pub workspace_id: Option<String>,
+    pub status: Option<PlanStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlanStepBody {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub kind: PlanStepKind,
+    #[serde(default)]
+    pub status: Option<PlanStepStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlanBody {
+    pub workspace_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub status: Option<PlanStatus>,
+    /// Ordered. The index in this array becomes the step's order, so a
+    /// publisher does not have to keep a separate counter in step with it.
+    #[serde(default)]
+    pub steps: Vec<CreatePlanStepBody>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanStepProgressBody {
+    pub id: String,
+    pub status: PlanStepStatus,
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPlanBody {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub status: Option<PlanStatus>,
+    /// Progress for the named steps only. Absent steps keep what they had.
+    #[serde(default)]
+    pub steps: Vec<PlanStepProgressBody>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRunsParams {
+    pub workspace_id: Option<String>,
+    pub issue_id: Option<String>,
+    pub plan_id: Option<String>,
+    /// `?active=true` narrows to `queued`/`running`.
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactBody {
+    pub label: String,
+    pub href: String,
+}
+
+impl ArtifactBody {
+    fn into_artifact(self) -> Result<RunArtifact, ArtifactError> {
+        RunArtifact::new(self.label, self.href)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRunBody {
+    pub workspace_id: String,
+    /// Both optional and neither required — an ad-hoc dispatch attaches to
+    /// nothing. `title` is what makes it readable, so it is not optional.
+    #[serde(default)]
+    pub issue_id: Option<String>,
+    #[serde(default)]
+    pub plan_id: Option<String>,
+    pub title: String,
+    pub kind: RunKind,
+    #[serde(default)]
+    pub status: Option<RunStatus>,
+    #[serde(default)]
+    pub artifacts: Vec<ArtifactBody>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchRunBody {
+    #[serde(default)]
+    pub status: Option<RunStatus>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub summary: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub error: Option<Option<String>>,
+    /// Present replaces the whole set; absent leaves it alone.
+    #[serde(default)]
+    pub artifacts: Option<Vec<ArtifactBody>>,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -448,26 +584,7 @@ async fn list_issues(
     headers: HeaderMap,
 ) -> Result<Json<Vec<Issue>>, Failure> {
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
-
-    // Asking for one workspace is a targeted check. Asking for none returns the
-    // union of what the caller may read — an org member recruited into nothing
-    // gets an empty board, which is an answer, not an error.
-    let workspace_scope = match params.workspace_id.as_deref() {
-        Some(workspace) => {
-            authorize_workspace(
-                state.store.as_ref(),
-                &claims,
-                workspace,
-                WorkspaceCapability::Read,
-            )
-            .await?;
-            None
-        }
-        None => match readable_scope(state.store.as_ref(), &claims).await? {
-            WorkspaceScope::All => None,
-            WorkspaceScope::Only(workspaces) => Some(workspaces),
-        },
-    };
+    let workspace_scope = listing_scope(&state, &claims, params.workspace_id.as_deref()).await?;
 
     let issues = state
         .store
@@ -613,6 +730,301 @@ async fn append_event(
     };
     state.store.append_event(&org_id, event.clone()).await?;
     Ok((StatusCode::CREATED, Json(event)))
+}
+
+// ── Plans and Runs (Batch 7c) ────────────────────────────────────────────────
+
+/// Which workspaces a listing may draw from, given an optional target.
+///
+/// Naming one workspace is a targeted capability check; naming none returns
+/// the union of what this caller may read. Extracted because `list_issues`,
+/// `list_plans` and `list_runs` all need exactly this and getting it subtly
+/// different in one of them is how a board starts showing somebody else's rows.
+async fn listing_scope(
+    state: &AppState,
+    claims: &cognia_tenant_auth::grant::GrantClaims,
+    workspace_id: Option<&str>,
+) -> Result<Option<Vec<String>>, Failure> {
+    match workspace_id {
+        Some(workspace) => {
+            authorize_workspace(
+                state.store.as_ref(),
+                claims,
+                workspace,
+                WorkspaceCapability::Read,
+            )
+            .await?;
+            Ok(None)
+        }
+        None => match readable_scope(state.store.as_ref(), claims).await? {
+            WorkspaceScope::All => Ok(None),
+            WorkspaceScope::Only(workspaces) => Ok(Some(workspaces)),
+        },
+    }
+}
+
+async fn list_plans(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    Query(params): Query<ListPlansParams>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Plan>>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let workspace_scope = listing_scope(&state, &claims, params.workspace_id.as_deref()).await?;
+    Ok(Json(
+        state
+            .store
+            .list_plans(
+                &org_id,
+                PlanQuery {
+                    workspace_id: params.workspace_id,
+                    status: params.status,
+                    workspace_scope,
+                },
+            )
+            .await?,
+    ))
+}
+
+async fn get_plan(
+    State(state): State<AppState>,
+    Path((org_id, plan_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Plan>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let plan = state
+        .store
+        .get_plan(&org_id, &plan_id)
+        .await?
+        .ok_or(Failure::Store(StoreError::NotFound))?;
+    authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &plan.workspace_id,
+        WorkspaceCapability::Read,
+    )
+    .await?;
+    Ok(Json(plan))
+}
+
+async fn create_plan(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CreatePlanBody>,
+) -> Result<(StatusCode, Json<Plan>), Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let caller = authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &body.workspace_id,
+        WorkspaceCapability::Write,
+    )
+    .await?;
+
+    if body.title.trim().is_empty() {
+        return Err(Failure::BadRequest("a plan needs a title".into()));
+    }
+    if body.steps.iter().any(|step| step.title.trim().is_empty()) {
+        return Err(Failure::BadRequest("every step needs a title".into()));
+    }
+
+    // Step ids are assigned here, exactly as issue ids are: the plane's ids are
+    // the plane's. A publisher gets them back in the response and patches
+    // progress against them.
+    let steps = body
+        .steps
+        .into_iter()
+        .enumerate()
+        .map(|(index, step)| NewPlanStep {
+            id: format!("pstp_{}", Uuid::new_v4().simple()),
+            order: index as i32,
+            title: step.title,
+            description: step.description,
+            kind: step.kind,
+            status: step.status.unwrap_or(PlanStepStatus::Pending),
+        })
+        .collect();
+
+    let plan = state
+        .store
+        .create_plan(NewPlan {
+            id: format!("plan_{}", Uuid::new_v4().simple()),
+            org_id,
+            workspace_id: body.workspace_id,
+            title: body.title,
+            description: body.description,
+            status: body.status.unwrap_or(PlanStatus::Draft),
+            steps,
+            // Authorship is who authenticated, never a field on the request.
+            created_by: CollabActor::new(ActorKind::Human, caller.user_id, None)?,
+            now: (state.now)(),
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(plan)))
+}
+
+async fn patch_plan(
+    State(state): State<AppState>,
+    Path((org_id, plan_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PatchPlanBody>,
+) -> Result<Json<Plan>, Failure> {
+    // Read first, so the capability check runs against the workspace the plan
+    // actually lives in rather than one the caller names.
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let existing = state
+        .store
+        .get_plan(&org_id, &plan_id)
+        .await?
+        .ok_or(Failure::Store(StoreError::NotFound))?;
+    authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &existing.workspace_id,
+        WorkspaceCapability::Write,
+    )
+    .await?;
+
+    let plan = state
+        .store
+        .patch_plan(
+            &org_id,
+            &plan_id,
+            PlanPatch {
+                title: body.title,
+                description: body.description,
+                status: body.status,
+                steps: body
+                    .steps
+                    .into_iter()
+                    .map(|step| PlanStepProgress {
+                        id: step.id,
+                        status: step.status,
+                        result: step.result,
+                        error: step.error,
+                    })
+                    .collect(),
+            },
+            (state.now)(),
+        )
+        .await?;
+    Ok(Json(plan))
+}
+
+async fn list_runs(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    Query(params): Query<ListRunsParams>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Run>>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let workspace_scope = listing_scope(&state, &claims, params.workspace_id.as_deref()).await?;
+    Ok(Json(
+        state
+            .store
+            .list_runs(
+                &org_id,
+                RunQuery {
+                    workspace_id: params.workspace_id,
+                    issue_id: params.issue_id,
+                    plan_id: params.plan_id,
+                    active_only: params.active,
+                    workspace_scope,
+                },
+            )
+            .await?,
+    ))
+}
+
+async fn create_run(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CreateRunBody>,
+) -> Result<(StatusCode, Json<Run>), Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let caller = authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &body.workspace_id,
+        WorkspaceCapability::Write,
+    )
+    .await?;
+
+    if body.title.trim().is_empty() {
+        return Err(Failure::BadRequest("a run needs a title".into()));
+    }
+    let artifacts = body
+        .artifacts
+        .into_iter()
+        .map(ArtifactBody::into_artifact)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let run = state
+        .store
+        .create_run(NewRun {
+            id: format!("run_{}", Uuid::new_v4().simple()),
+            org_id,
+            workspace_id: body.workspace_id,
+            issue_id: body.issue_id,
+            plan_id: body.plan_id,
+            title: body.title,
+            kind: body.kind,
+            status: body.status.unwrap_or(RunStatus::Queued),
+            started_by: CollabActor::new(ActorKind::Human, caller.user_id, None)?,
+            artifacts,
+            now: (state.now)(),
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(run)))
+}
+
+async fn patch_run(
+    State(state): State<AppState>,
+    Path((org_id, run_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PatchRunBody>,
+) -> Result<Json<Run>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let existing = state
+        .store
+        .get_run(&org_id, &run_id)
+        .await?
+        .ok_or(Failure::Store(StoreError::NotFound))?;
+    authorize_workspace(
+        state.store.as_ref(),
+        &claims,
+        &existing.workspace_id,
+        WorkspaceCapability::Write,
+    )
+    .await?;
+
+    let artifacts = match body.artifacts {
+        Some(artifacts) => Some(
+            artifacts
+                .into_iter()
+                .map(ArtifactBody::into_artifact)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        None => None,
+    };
+
+    let run = state
+        .store
+        .patch_run(
+            &org_id,
+            &run_id,
+            RunPatch {
+                status: body.status,
+                summary: body.summary,
+                error: body.error,
+                artifacts,
+            },
+            (state.now)(),
+        )
+        .await?;
+    Ok(Json(run))
 }
 
 /// Fetch an issue for a route that needs its workspace before it can decide
@@ -1440,5 +1852,354 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{minted}");
+    }
+
+    // ── Plans and Runs (Batch 7c) ────────────────────────────────────────────
+
+    fn patch_request(path: &str, token: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("PATCH")
+            .uri(path)
+            .header("authorization", token)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn create_plan_as_ada(store: &InMemoryStore) -> serde_json::Value {
+        let (status, plan) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/plans"),
+                &token_for(&ada()),
+                serde_json::json!({
+                    "workspaceId": "proj-1",
+                    "title": "Migrate the store",
+                    "status": "executing",
+                    "steps": [
+                        { "title": "Read the schema", "kind": "agent_turn" },
+                        { "title": "Write the migration", "kind": "tool_call" },
+                    ],
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{plan}");
+        plan
+    }
+
+    async fn create_run_as_ada(
+        store: &InMemoryStore,
+        body: serde_json::Value,
+    ) -> serde_json::Value {
+        let (status, run) = call(
+            app(store.clone()),
+            post(&format!("/v1/orgs/{ORG}/runs"), &token_for(&ada()), body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{run}");
+        run
+    }
+
+    #[tokio::test]
+    async fn a_plan_is_created_with_server_assigned_step_ids_and_ordered_steps() {
+        let store = seeded();
+        let plan = create_plan_as_ada(&store).await;
+
+        assert_eq!(plan["totalSteps"], 2);
+        assert_eq!(plan["completedSteps"], 0);
+        // Authorship is who authenticated, not a field on the request.
+        assert_eq!(plan["createdBy"]["id"], ada().as_str());
+
+        let steps = plan["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["order"], 0);
+        assert_eq!(steps[1]["order"], 1);
+        for step in steps {
+            // The plane's ids are the plane's, exactly as an issue's are.
+            assert!(step["id"].as_str().unwrap().starts_with("pstp_"), "{step}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_plan_listing_omits_the_steps_a_detail_read_returns() {
+        let store = seeded();
+        create_plan_as_ada(&store).await;
+
+        let (status, listed) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/plans"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        let rows = listed.as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        // Absent, not `[]` — "not asked for" and "there are none" are different
+        // answers, and a panel that read `[]` would show an empty plan.
+        assert!(rows[0].get("steps").is_none(), "{listed}");
+        assert_eq!(rows[0]["totalSteps"], 2);
+
+        let id = rows[0]["id"].as_str().unwrap();
+        let (status, one) = call(
+            app(store),
+            get(&format!("/v1/orgs/{ORG}/plans/{id}"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{one}");
+        assert_eq!(one["steps"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn plan_progress_moves_the_counts_the_body_cannot_set() {
+        let store = seeded();
+        let plan = create_plan_as_ada(&store).await;
+        let id = plan["id"].as_str().unwrap();
+        let step = plan["steps"][0]["id"].as_str().unwrap();
+
+        let (status, patched) = call(
+            app(store),
+            patch_request(
+                &format!("/v1/orgs/{ORG}/plans/{id}"),
+                &token_for(&ada()),
+                serde_json::json!({
+                    "steps": [{ "id": step, "status": "completed", "result": "done" }],
+                    // Not a field the body has. If it ever becomes one, this
+                    // assertion is what catches the day a client can lie about
+                    // its own progress.
+                    "totalSteps": 99,
+                    "completedSteps": 99,
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{patched}");
+        assert_eq!(patched["totalSteps"], 2);
+        assert_eq!(patched["completedSteps"], 1);
+        assert_eq!(patched["steps"][0]["result"], "done");
+    }
+
+    #[tokio::test]
+    async fn a_plan_outside_the_callers_workspaces_is_invisible_and_unwritable() {
+        let store = seeded();
+        let plan = create_plan_as_ada(&store).await;
+        let id = plan["id"].as_str().unwrap();
+
+        // Bob is in the org but was never recruited into `proj-1`.
+        let (status, listed) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/plans"), &token_for(&bob())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed.as_array().unwrap().len(), 0, "{listed}");
+
+        let (status, _) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/plans/{id}"), &token_for(&bob())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = call(
+            app(store),
+            patch_request(
+                &format!("/v1/orgs/{ORG}/plans/{id}"),
+                &token_for(&bob()),
+                serde_json::json!({ "status": "cancelled" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_plan_needs_a_title_and_so_does_every_step() {
+        let store = seeded();
+        for body in [
+            serde_json::json!({ "workspaceId": "proj-1", "title": "   " }),
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "title": "Fine",
+                "steps": [{ "title": " ", "kind": "agent_turn" }],
+            }),
+        ] {
+            let (status, error) = call(
+                app(store.clone()),
+                post(&format!("/v1/orgs/{ORG}/plans"), &token_for(&ada()), body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_records_who_dispatched_it_and_what_it_produced() {
+        let store = seeded();
+        let run = create_run_as_ada(
+            &store,
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "issueId": "iss_1",
+                "title": "Fix the flake",
+                "kind": "agent-task",
+                "status": "running",
+                "artifacts": [{ "label": "PR #12", "href": "https://example.com/pr/12" }],
+            }),
+        )
+        .await;
+        assert_eq!(run["startedBy"]["id"], ada().as_str());
+        assert_eq!(run["kind"], "agent-task");
+        assert_eq!(run["artifacts"].as_array().unwrap().len(), 1);
+        assert!(run.get("endedAt").is_none(), "{run}");
+
+        let id = run["id"].as_str().unwrap();
+        let (status, settled) = call(
+            app(store),
+            patch_request(
+                &format!("/v1/orgs/{ORG}/runs/{id}"),
+                &token_for(&ada()),
+                serde_json::json!({ "status": "succeeded", "summary": "merged" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{settled}");
+        assert_eq!(settled["endedAt"], 1_000);
+        // Artifacts absent from the patch are left alone, not cleared.
+        assert_eq!(settled["artifacts"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_run_link_that_only_opens_on_one_machine_is_refused() {
+        // The href would publish the shape of somebody's home directory and
+        // open nothing on a colleague's screen.
+        let store = seeded();
+        let (status, error) = call(
+            app(store),
+            post(
+                &format!("/v1/orgs/{ORG}/runs"),
+                &token_for(&ada()),
+                serde_json::json!({
+                    "workspaceId": "proj-1",
+                    "title": "Fix the flake",
+                    "kind": "agent-task",
+                    "artifacts": [{ "label": "Worktree", "href": "file:///Users/ada/code" }],
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        assert!(
+            error["error"].as_str().unwrap().contains("http"),
+            "the refusal should name the rule: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_active_filter_answers_how_many_agents_are_working() {
+        let store = seeded();
+        create_run_as_ada(
+            &store,
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "title": "Running one",
+                "kind": "agent-task",
+                "status": "running",
+            }),
+        )
+        .await;
+        create_run_as_ada(
+            &store,
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "title": "Finished one",
+                "kind": "agent-team",
+                "status": "succeeded",
+            }),
+        )
+        .await;
+
+        let (status, all) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/runs"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(all.as_array().unwrap().len(), 2);
+
+        let (status, active) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/runs?active=true"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{active}");
+        let rows = active.as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["title"], "Running one");
+    }
+
+    #[tokio::test]
+    async fn an_unattached_run_is_still_listed_under_its_workspace() {
+        let store = seeded();
+        let run = create_run_as_ada(
+            &store,
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "title": "Ad-hoc sweep",
+                "kind": "agent-task",
+            }),
+        )
+        .await;
+        assert!(run.get("issueId").is_none(), "{run}");
+        assert!(run.get("planId").is_none(), "{run}");
+        // Queued by default: a dispatch nobody has picked up yet.
+        assert_eq!(run["status"], "queued");
+
+        let (status, listed) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/runs?workspaceId=proj-1"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn runs_outside_the_callers_workspaces_stay_invisible() {
+        let store = seeded();
+        let run = create_run_as_ada(
+            &store,
+            serde_json::json!({
+                "workspaceId": "proj-1",
+                "title": "Fix the flake",
+                "kind": "agent-task",
+            }),
+        )
+        .await;
+        let id = run["id"].as_str().unwrap();
+
+        let (status, listed) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/runs"), &token_for(&bob())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed.as_array().unwrap().len(), 0, "{listed}");
+
+        let (status, _) = call(
+            app(store),
+            patch_request(
+                &format!("/v1/orgs/{ORG}/runs/{id}"),
+                &token_for(&bob()),
+                serde_json::json!({ "status": "cancelled" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }
