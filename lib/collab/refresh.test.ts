@@ -5,6 +5,8 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listCollabIssues } from "@/lib/db/collab-issue-mirror"
 import { listWorkspaceRoster, resolvePersonStanding } from "@/lib/db/identity"
 import { listCollabWorkspaces } from "@/lib/db/collab-workspace-mirror"
+import { listCollabPlans } from "@/lib/db/collab-plan-mirror"
+import { listCollabRuns } from "@/lib/db/collab-run-mirror"
 import { saveCollabConnection, forgetCollabConnection } from "./connection"
 import { refreshCollabPlane, refreshCollabPlaneQuietly } from "./refresh"
 
@@ -21,6 +23,8 @@ beforeEach(async () => {
   await Promise.all([
     db.collabIssues.clear(),
     db.collabWorkspaces.clear(),
+    db.collabPlans.clear(),
+    db.collabRuns.clear(),
     db.orgMemberships.clear(),
     db.workspaceMemberships.clear(),
     db.users.clear(),
@@ -40,6 +44,8 @@ interface Routes {
   workspaces?: unknown[]
   /** Keyed by workspace id. A missing entry answers 403, like a revoked seat. */
   rosters?: Record<string, unknown[]>
+  plans?: unknown[]
+  runs?: unknown[]
 }
 
 /** jsdom's `Response` has no static `json`, so build the body by hand. */
@@ -74,6 +80,8 @@ function fetchReturning(routes: Routes) {
     if (input.endsWith("/workspaces")) {
       return jsonResponse(routes.workspaces ?? [])
     }
+    if (input.includes("/plans")) return jsonResponse(routes.plans ?? [])
+    if (input.includes("/runs")) return jsonResponse(routes.runs ?? [])
     return jsonResponse(routes.issues ?? [])
   }
   return { calls, impl }
@@ -341,5 +349,117 @@ describe("refreshCollabPlane — workspaces and their rosters", () => {
     // The workspace is still mirrored, and its roster was left alone.
     expect(await listCollabWorkspaces(ORG)).toHaveLength(1)
     expect(await listWorkspaceRoster("proj-1")).toHaveLength(1)
+  })
+})
+
+describe("refreshCollabPlane — plans and runs (Batch 7c)", () => {
+  it("mirrors plan headers and runs, and reports what it stored", async () => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    const { options, calls } = deps({
+      memberships: {
+        userId: ADA,
+        orgId: ORG,
+        orgRole: "member",
+        workspaces: [{ workspaceId: "proj-1", role: "member" }],
+      },
+      plans: [
+        {
+          id: "plan_1",
+          orgId: ORG,
+          workspaceId: "proj-1",
+          title: "Migrate the store",
+          status: "executing",
+          totalSteps: 3,
+          completedSteps: 1,
+          createdBy: { kind: "human", id: ADA },
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      runs: [
+        {
+          id: "run_1",
+          orgId: ORG,
+          workspaceId: "proj-1",
+          issueId: "iss_1",
+          title: "Fix the flake",
+          kind: "agent-task",
+          status: "running",
+          startedBy: { kind: "human", id: ADA },
+          startedAt: 5,
+          updatedAt: 5,
+          artifacts: [{ label: "PR #12", href: "https://example.com/pr/12" }],
+        },
+      ],
+    })
+
+    const result = await refreshCollabPlane(options)
+    expect(result).toMatchObject({ status: "refreshed", plans: 1, runs: 1 })
+
+    // One listing each — NOT one request per plan for its steps.
+    expect(calls.filter((url) => url.includes("/plans")).length).toBe(1)
+    expect(calls.filter((url) => url.includes("/runs")).length).toBe(1)
+
+    const [plan] = await listCollabPlans({ orgId: ORG })
+    expect(plan).toMatchObject({ id: "plan_1", totalSteps: 3, completedSteps: 1, fetchedAt: 1_000 })
+    // Headers only: a step list nothing renders is not worth a request per plan.
+    expect(plan).not.toHaveProperty("steps")
+
+    const [run] = await listCollabRuns({ orgId: ORG })
+    expect(run).toMatchObject({ id: "run_1", kind: "agent-task", status: "running" })
+    expect(run?.artifacts).toEqual([{ label: "PR #12", href: "https://example.com/pr/12" }])
+  })
+
+  it("files nothing another org's server answered with", async () => {
+    // Same defence the issue pull takes: a wrong answer must not be stored
+    // under the org that was asked.
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    const { options } = deps({
+      memberships: { userId: ADA, orgId: ORG, orgRole: "member", workspaces: [] },
+      plans: [
+        {
+          id: "plan_elsewhere",
+          orgId: "org_somewhere_else",
+          workspaceId: "proj-9",
+          title: "Not ours",
+          status: "draft",
+          totalSteps: 0,
+          completedSteps: 0,
+          createdBy: { kind: "human", id: ADA },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    })
+
+    expect(await refreshCollabPlane(options)).toMatchObject({ plans: 0 })
+    expect(await listCollabPlans()).toEqual([])
+  })
+
+  it("defaults a run with no artifacts key to an empty list", async () => {
+    // The wire field is `#[serde(default)]`; an undefined array here would
+    // break every `.map` the panel does.
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    const { options } = deps({
+      memberships: { userId: ADA, orgId: ORG, orgRole: "member", workspaces: [] },
+      runs: [
+        {
+          id: "run_bare",
+          orgId: ORG,
+          workspaceId: "proj-1",
+          title: "Ad-hoc sweep",
+          kind: "agent-task",
+          status: "queued",
+          startedBy: { kind: "human", id: ADA },
+          startedAt: 5,
+          updatedAt: 5,
+        },
+      ],
+    })
+
+    await refreshCollabPlane(options)
+    const [run] = await listCollabRuns({ orgId: ORG })
+    expect(run?.artifacts).toEqual([])
+    expect(run?.issueId).toBeUndefined()
   })
 })

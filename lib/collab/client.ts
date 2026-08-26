@@ -20,8 +20,10 @@
 
 import { normalizeServiceUrl } from "@/lib/diagnostic-service/client"
 
+import type { CollabRunKind } from "@/lib/db/collab-run-mirror-types"
+import type { PlanStatus } from "@/types/agent/plan"
 import type { OrgRole, WorkspaceRole } from "@/types/identity"
-import type { IssuePriority, IssueStatus } from "@/types/issues"
+import type { IssuePriority, IssueRunArtifact, IssueRunStatus, IssueStatus } from "@/types/issues"
 import type { CollabIssueActor } from "@/types/issues/collab"
 
 /** One issue as the collaboration plane returns it. */
@@ -86,6 +88,65 @@ export interface CollabWorkspaceMember {
   displayName: string
   role: WorkspaceRole
   orgMember: boolean
+}
+
+/**
+ * One plan as the plane knows it — ADR-0149 §6.
+ *
+ * `steps` is present only on a single-plan read. The listing omits it, and
+ * `undefined` here means "not asked for" rather than "there are none": a panel
+ * that read an empty array would render every plan as having no work in it.
+ */
+export interface CollabPlan {
+  id: string
+  orgId: string
+  workspaceId: string
+  title: string
+  description?: string
+  status: PlanStatus
+  /** Recomputed server-side from the steps; never a number a client stated. */
+  totalSteps: number
+  completedSteps: number
+  createdBy: CollabIssueActor
+  createdAt: number
+  updatedAt: number
+  endedAt?: number
+  steps?: CollabPlanStep[]
+}
+
+export interface CollabPlanStep {
+  id: string
+  planId: string
+  order: number
+  title: string
+  description?: string
+  kind: string
+  status: string
+  result?: string
+  error?: string
+  startedAt?: number
+  completedAt?: number
+}
+
+/** One dispatch as the plane knows it. */
+export interface CollabRun {
+  id: string
+  orgId: string
+  workspaceId: string
+  /** Both optional: an ad-hoc dispatch attaches to nothing. */
+  issueId?: string
+  planId?: string
+  title: string
+  kind: CollabRunKind
+  status: IssueRunStatus
+  startedBy: CollabIssueActor
+  startedAt: number
+  updatedAt: number
+  endedAt?: number
+  summary?: string
+  error?: string
+  /** Always http(s) — the server refuses anything else. */
+  artifacts?: IssueRunArtifact[]
 }
 
 interface MintedGrant {
@@ -189,6 +250,42 @@ export class CollabClient {
     )
   }
 
+  /** Plans this person can see in `orgId`, headers only, newest activity first. */
+  async listPlans(
+    orgId: string,
+    query: { workspaceId?: string; status?: PlanStatus } = {}
+  ): Promise<CollabPlan[]> {
+    return this.json<CollabPlan[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/plans${searchSuffix(query)}`
+    )
+  }
+
+  /**
+   * One plan WITH its steps.
+   *
+   * Not called by the refresh: the mirror stores headers, and fetching every
+   * plan's steps on every pull would be one request each to fill a detail view
+   * that does not exist yet. This is the seam that view will use.
+   */
+  async getPlan(orgId: string, planId: string): Promise<CollabPlan> {
+    return this.json<CollabPlan>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/plans/${encodeURIComponent(planId)}`
+    )
+  }
+
+  /** Runs in `orgId`, most recently started first. */
+  async listRuns(
+    orgId: string,
+    query: { workspaceId?: string; issueId?: string; planId?: string; active?: boolean } = {}
+  ): Promise<CollabRun[]> {
+    return this.json<CollabRun[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/runs${searchSuffix(query)}`
+    )
+  }
+
   async listEvents(orgId: string, issueId: string): Promise<CollabIssueEvent[]> {
     return this.json<CollabIssueEvent[]>(
       orgId,
@@ -242,6 +339,23 @@ export class CollabClient {
     }
     return readJson<T>(response)
   }
+}
+
+/**
+ * Build a `?a=b` suffix, dropping absent and falsy values.
+ *
+ * `false` is dropped along with `undefined` on purpose: every boolean here is
+ * a narrowing flag, and `?active=false` and no flag at all mean the same thing
+ * to the server. Sending the former would just be a longer way to ask.
+ */
+function searchSuffix(query: Record<string, string | boolean | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === false || value === "") continue
+    search.set(key, String(value))
+  }
+  const text = search.toString()
+  return text ? `?${text}` : ""
 }
 
 async function readJson<T>(response: Response): Promise<T> {

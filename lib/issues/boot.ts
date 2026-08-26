@@ -89,6 +89,8 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
       log.info("issue-tracker: collaboration plane refreshed", {
         issues: result.issues,
         workspaces: result.workspaces,
+        plans: result.plans,
+        runs: result.runs,
       })
     }
   })

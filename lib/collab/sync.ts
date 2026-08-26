@@ -15,6 +15,10 @@
 
 import { replaceCollabIssues } from "@/lib/db/collab-issue-mirror"
 import type { CollabIssueMirrorRow } from "@/lib/db/collab-issue-mirror-types"
+import { replaceCollabPlans } from "@/lib/db/collab-plan-mirror"
+import type { CollabPlanMirrorRow } from "@/lib/db/collab-plan-mirror-types"
+import { replaceCollabRuns } from "@/lib/db/collab-run-mirror"
+import type { CollabRunMirrorRow } from "@/lib/db/collab-run-mirror-types"
 import { replaceCollabWorkspaces } from "@/lib/db/collab-workspace-mirror"
 import type { CollabWorkspaceMirrorRow } from "@/lib/db/collab-workspace-mirror-types"
 import {
@@ -26,7 +30,7 @@ import {
   replaceWorkspaceRoster,
 } from "@/lib/db/identity"
 
-import type { CollabClient, CollabIssue } from "./client"
+import type { CollabClient, CollabIssue, CollabPlan, CollabRun } from "./client"
 
 export interface PullCollabIssuesResult {
   /** How many rows the mirror now holds for the pulled scope. */
@@ -245,4 +249,95 @@ export async function pullCollabWorkspaces(
   }
 
   return { workspaces: rows.length, members, fetchedAt }
+}
+
+export interface PullCollabActivityResult {
+  /** Plan headers the mirror now holds for this org. */
+  plans: number
+  /** Runs the mirror now holds for this org. */
+  runs: number
+  fetchedAt: number
+}
+
+/** Turn a server plan header into a mirror row. No reshaping beyond the stamp. */
+export function toPlanMirrorRow(plan: CollabPlan, fetchedAt: number): CollabPlanMirrorRow {
+  return {
+    id: plan.id,
+    orgId: plan.orgId,
+    workspaceId: plan.workspaceId,
+    title: plan.title,
+    ...(plan.description ? { description: plan.description } : {}),
+    status: plan.status,
+    totalSteps: plan.totalSteps,
+    completedSteps: plan.completedSteps,
+    createdBy: plan.createdBy,
+    createdAt: plan.createdAt,
+    updatedAt: plan.updatedAt,
+    ...(plan.endedAt === undefined ? {} : { endedAt: plan.endedAt }),
+    fetchedAt,
+  }
+}
+
+export function toRunMirrorRow(run: CollabRun, fetchedAt: number): CollabRunMirrorRow {
+  return {
+    id: run.id,
+    orgId: run.orgId,
+    workspaceId: run.workspaceId,
+    ...(run.issueId ? { issueId: run.issueId } : {}),
+    ...(run.planId ? { planId: run.planId } : {}),
+    title: run.title,
+    kind: run.kind,
+    status: run.status,
+    startedBy: run.startedBy,
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    ...(run.endedAt === undefined ? {} : { endedAt: run.endedAt }),
+    ...(run.summary ? { summary: run.summary } : {}),
+    ...(run.error ? { error: run.error } : {}),
+    // A server that sent no `artifacts` key at all means "none", not "unknown":
+    // the field is `#[serde(default)]` on the wire and always present in
+    // practice, and an undefined array here would break every `.map` downstream.
+    artifacts: run.artifacts ?? [],
+    fetchedAt,
+  }
+}
+
+/**
+ * Refresh one org's plans and runs — ADR-0149 §6, Batch 7c.
+ *
+ * # Two requests, not two per plan
+ *
+ * Plan headers and runs are one listing each. The steps of a plan are NOT
+ * pulled: they come from the single-plan route, so mirroring them would cost
+ * one request per plan on every refresh, and nothing renders them yet. That is
+ * the same call `pullCollabWorkspaces` had to make about rosters and reached
+ * the opposite answer, because a roster is what makes a guest visible to
+ * anybody and a step list currently makes nobody see anything.
+ *
+ * Both replaces are org-scoped, so a client in two orgs never has one pull
+ * delete the other's rows.
+ */
+export async function pullCollabActivity(
+  client: CollabClient,
+  scope: { orgId: string },
+  deps: PullCollabIssuesDeps = {}
+): Promise<PullCollabActivityResult> {
+  const now = deps.now ?? (() => Date.now())
+  const fetchedAt = now()
+
+  const plans = await client.listPlans(scope.orgId)
+  const planRows = plans
+    // Defensive, like the issue pull: a server answering about another org
+    // must not have its answer filed under this one.
+    .filter((plan) => plan.orgId === scope.orgId)
+    .map((plan) => toPlanMirrorRow(plan, fetchedAt))
+  await replaceCollabPlans(scope.orgId, planRows)
+
+  const runs = await client.listRuns(scope.orgId)
+  const runRows = runs
+    .filter((run) => run.orgId === scope.orgId)
+    .map((run) => toRunMirrorRow(run, fetchedAt))
+  await replaceCollabRuns(scope.orgId, runRows)
+
+  return { plans: planRows.length, runs: runRows.length, fetchedAt }
 }

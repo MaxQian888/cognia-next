@@ -34,7 +34,12 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import { CollabClient, type CollabFetch } from "./client"
 import { loadCollabConnection } from "./connection"
-import { pullCollabIssues, pullCollabMemberships, pullCollabWorkspaces } from "./sync"
+import {
+  pullCollabActivity,
+  pullCollabIssues,
+  pullCollabMemberships,
+  pullCollabWorkspaces,
+} from "./sync"
 
 const log = loggers.shell
 
@@ -58,6 +63,10 @@ export type RefreshCollabPlaneResult =
       /** People across every roster pulled — 0 until a roster is readable. */
       members: number
       orgMember: boolean
+      /** Plan headers mirrored for this org. */
+      plans: number
+      /** Runs mirrored for this org. */
+      runs: number
     }
 
 export interface RefreshCollabPlaneDeps {
@@ -124,6 +133,14 @@ export async function refreshCollabPlane(
     { orgId: binding.orgId },
     ...(deps.now ? [{ now: deps.now }] : [])
   )
+  // Last, because it is the only leg the board does not need. Issues are what
+  // a person opens the app for; plans and runs say what is happening TO them,
+  // and a slow activity listing must not delay the rows it annotates.
+  const activity = await pullCollabActivity(
+    client,
+    { orgId: binding.orgId },
+    ...(deps.now ? [{ now: deps.now }] : [])
+  )
 
   return {
     status: "refreshed",
@@ -133,6 +150,8 @@ export async function refreshCollabPlane(
     workspaces: memberships.workspaces,
     members: workspaces.members,
     orgMember: memberships.orgMember,
+    plans: activity.plans,
+    runs: activity.runs,
   }
 }
 
