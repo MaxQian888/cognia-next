@@ -616,6 +616,9 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0002_workspaces.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0003_plans_runs.sql"))
+            .await?;
         Ok(())
     }
 
