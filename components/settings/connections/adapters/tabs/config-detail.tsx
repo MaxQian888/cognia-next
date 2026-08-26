@@ -48,6 +48,7 @@ import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
 import { AdapterBehaviorDefaults } from "../../forms/adapter-behavior-defaults"
+import { AdapterTriggerPolicy } from "../../forms/adapter-trigger-policy"
 import { SlaEscalationDefaults } from "../../forms/sla-escalation-defaults"
 import { AdapterPermissions } from "../../forms/adapter-permissions"
 import { DispatchRules } from "../../forms/dispatch-rules"
@@ -134,6 +135,12 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
 
       <h3 className="pt-2 text-sm font-semibold">{t("sections.behavior")}</h3>
       <AdapterBehaviorDefaults adapterId={row.id} />
+
+      {/* When this bot answers at all. Mounted next to the behaviour defaults
+       * because the two answer adjacent questions — this one decides whether a
+       * turn runs, that one decides how it runs — and an operator who cannot
+       * find this one concludes the bot is broken. */}
+      <AdapterTriggerPolicy adapterId={row.id} />
 
       {/* Bot-wide response SLA + escalation chain defaults (slice 1B). */}
       <h3 className="pt-2 text-sm font-semibold">{t("sections.slaEscalation")}</h3>

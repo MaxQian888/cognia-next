@@ -4,6 +4,8 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "mx-new-id" })
 const mockKeyringGet = jest.fn().mockResolvedValue(null)
 const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)

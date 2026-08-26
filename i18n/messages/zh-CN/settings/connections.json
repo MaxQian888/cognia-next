@@ -1573,6 +1573,112 @@
     "webhookUrlTunnelOffHelp": "尚无可公网访问的 HTTPS 地址，Webhook 无法注册。请在「隧道」标签页启动隧道——隧道必须指向连接器服务，因为回调地址由它提供。"
   },
   "title": "平台连接",
+  "triggerPolicy": {
+    "adapterScopeHelp": "机器人级策略。每个会话都从这里开始，也可以单独覆盖。",
+    "addAria": "添加到",
+    "blockers": {
+      "channelBlocklist": {
+        "help": "永远不会收到回复的平台会话或频道 ID。",
+        "label": "会话在此名单中",
+        "listAria": "屏蔽的会话",
+        "placeholder": "C01ABCDEF"
+      },
+      "cooldown": {
+        "help": "避免同一会话里的两个机器人互相刷屏。",
+        "label": "机器人刚刚回复过",
+        "secs": "静默时长（秒）"
+      },
+      "keywordBlocklist": {
+        "help": "在文本任意位置匹配，区分大小写。",
+        "label": "消息包含指定词",
+        "listAria": "屏蔽词",
+        "placeholder": "机密"
+      },
+      "rateLimit": {
+        "help": "按最近一分钟统计。超出上限的消息只记录、不回复。",
+        "label": "消息来得太多",
+        "perChannel": "每会话 / 分钟",
+        "perTenant": "每工作区 / 分钟",
+        "perTenantHelp": "除非需要为同一个平台工作区设共享上限，否则留空。",
+        "perTenantPlaceholder": "不限",
+        "perUser": "每发送者 / 分钟"
+      },
+      "userBlocklist": {
+        "help": "永远不会收到回复的平台用户 ID。",
+        "label": "发送者在此名单中",
+        "listAria": "屏蔽的发送者",
+        "placeholder": "U01ABCDEF"
+      }
+    },
+    "blockersHelp": "拦截条件优先于上面所有条件。消息仍然会被记录。",
+    "blockersTitle": "满足以下任一条件时不回复",
+    "cancel": "取消",
+    "gaps": {
+      "group-mention": "群里的 @ 不会命中任何条件。若希望它在群里回复，请开启「机器人被 @ 到」。",
+      "no-rules": "没有开启任何条件，这个机器人不会回复任何消息。",
+      "plain-private": "未点名的私聊消息不会命中任何条件。若希望它回复一对一会话，请开启「任何私聊消息」。"
+    },
+    "removeAria": "移除",
+    "residual": "另有 {count} 条关键词条件按原样保留，未在上方展示。",
+    "restoreDefaults": "恢复推荐策略",
+    "rules": {
+      "channelAllowlist": {
+        "help": "平台会话或频道 ID。名单内会话中的一切都会被回复。",
+        "label": "会话在此名单中",
+        "listAria": "允许的会话",
+        "placeholder": "C01ABCDEF"
+      },
+      "keyword": {
+        "caseInsensitive": "忽略大小写",
+        "help": "在消息文本的任意位置匹配。",
+        "label": "消息包含关键词",
+        "listAria": "关键词",
+        "placeholder": "部署"
+      },
+      "privateDefault": {
+        "help": "一对一会话里的每条消息，无需被点名。",
+        "label": "任何私聊消息"
+      },
+      "replyToBot": {
+        "help": "回复机器人发出的消息，等同于向它说话。",
+        "label": "有人回复了机器人"
+      },
+      "selfMention": {
+        "help": "群里向机器人说话的常规方式。",
+        "label": "机器人被 @ 到"
+      },
+      "slashCommand": {
+        "help": "按开头匹配，因此 `/ask` 也会命中 `/ask 某某`。",
+        "label": "消息以命令开头",
+        "listAria": "命令前缀",
+        "placeholder": "/ask"
+      },
+      "userAllowlist": {
+        "help": "平台用户 ID。名单内的人在任何地方发言都会被回复。",
+        "label": "发送者在此名单中",
+        "listAria": "允许的发送者",
+        "placeholder": "U01ABCDEF"
+      }
+    },
+    "rulesHelp": "任何一条命中就会发起一轮。一条都不开，机器人永远不会回复。",
+    "rulesTitle": "满足以下任一条件时回复",
+    "save": "保存",
+    "storeUnmatched": {
+      "help": "开启时，未被回复的消息作为历史留在收件箱；关闭时直接丢弃。",
+      "label": "保留未命中的消息"
+    },
+    "title": "何时回复",
+    "warnings": {
+      "channel-allowlist-empty": "会话名单已开启但为空，因此永远不会命中。",
+      "channel-blocklist-empty": "屏蔽会话名单已开启但为空，因此不会拦截任何消息。",
+      "keyword-blocklist-empty": "屏蔽词名单已开启但为空，因此不会拦截任何消息。",
+      "keyword-empty": "关键词条件已开启但没有关键词，因此永远不会命中。",
+      "rate-limit-blocks-everything": "上限小于 1 会拦截每分钟的第一条消息，机器人将完全静默。",
+      "slash-command-empty": "命令条件已开启但没有前缀，因此永远不会命中。",
+      "user-allowlist-empty": "发送者名单已开启但为空，因此永远不会命中。",
+      "user-blocklist-empty": "屏蔽发送者名单已开启但为空，因此不会拦截任何消息。"
+    }
+  },
   "tunnel": {
     "copied": "已复制",
     "copiedCommand": "命令已复制",

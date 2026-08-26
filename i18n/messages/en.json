@@ -28615,6 +28615,19 @@
         "toggleArchive": "Toggle archive",
         "togglePin": "Toggle pin"
       },
+      "credentialField": {
+        "hideAria": "Hide value",
+        "loadingPlaceholder": "Loading…",
+        "retry": "Retry",
+        "revealAria": "Reveal value",
+        "statusError": "Could not read the saved value.",
+        "statusLoaded": "Saved — showing the stored value.",
+        "statusLoading": "Reading the saved value…",
+        "statusNew": "Nothing saved yet.",
+        "statusStored": "Saved on the host. It cannot be shown here; type a new value to replace it.",
+        "statusUnset": "Not set.",
+        "storedPlaceholder": "Saved — leave blank to keep it"
+      },
       "description": "Configure messaging platform adapters (Telegram, Discord, Slack, …) and manage the outbound delivery queue.",
       "dingtalk": {
         "adapterCreated": "DingTalk connector added",
@@ -29370,19 +29383,6 @@
         "placeholder": "ou_abc123, ou_def456",
         "title": "Run operators"
       },
-      "credentialField": {
-        "hideAria": "Hide value",
-        "loadingPlaceholder": "Loading…",
-        "retry": "Retry",
-        "revealAria": "Reveal value",
-        "statusError": "Could not read the saved value.",
-        "statusLoaded": "Saved — showing the stored value.",
-        "statusLoading": "Reading the saved value…",
-        "statusNew": "Nothing saved yet.",
-        "statusStored": "Saved on the host. It cannot be shown here; type a new value to replace it.",
-        "statusUnset": "Not set.",
-        "storedPlaceholder": "Saved — leave blank to keep it"
-      },
       "sendTest": {
         "advancedDescription": "Direct transport probe. This bypasses quiet hours, FIFO, retry, rate limits, and the circuit breaker; use it only to isolate adapter or credential faults.",
         "advancedTitle": "Advanced transport diagnostics",
@@ -29588,6 +29588,112 @@
         "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet, so the webhook cannot be registered. Start the tunnel on the Tunnel tab — it must point at the connector server, which is what serves this callback URL."
       },
       "title": "Platform Connections",
+      "triggerPolicy": {
+        "adapterScopeHelp": "The bot-wide policy. Every conversation starts from this and can override it individually.",
+        "addAria": "Add to",
+        "blockers": {
+          "channelBlocklist": {
+            "help": "Platform chat or channel ids that never get a reply.",
+            "label": "The chat is on this list",
+            "listAria": "blocked chats",
+            "placeholder": "C01ABCDEF"
+          },
+          "cooldown": {
+            "help": "Stops two bots in one chat from answering each other in a loop.",
+            "label": "The bot only just replied",
+            "secs": "Quiet period (seconds)"
+          },
+          "keywordBlocklist": {
+            "help": "Matched anywhere in the text, capitalisation included.",
+            "label": "The message contains a word",
+            "listAria": "blocked words",
+            "placeholder": "confidential"
+          },
+          "rateLimit": {
+            "help": "Counted over the last minute. Messages over the limit are recorded but not answered.",
+            "label": "Too many messages have arrived",
+            "perChannel": "Per chat / min",
+            "perTenant": "Per workspace / min",
+            "perTenantHelp": "Leave empty unless one platform workspace should have a shared ceiling.",
+            "perTenantPlaceholder": "No limit",
+            "perUser": "Per sender / min"
+          },
+          "userBlocklist": {
+            "help": "Platform user ids that never get a reply.",
+            "label": "The sender is on this list",
+            "listAria": "blocked senders",
+            "placeholder": "U01ABCDEF"
+          }
+        },
+        "blockersHelp": "A blocker wins over every condition above. The message is still recorded.",
+        "blockersTitle": "Never answer when",
+        "cancel": "Cancel",
+        "gaps": {
+          "group-mention": "An @-mention in a group matches nothing. Turn on “The bot is @-mentioned” if it should answer in groups.",
+          "no-rules": "No condition is on, so this bot will never answer anything.",
+          "plain-private": "A direct message that does not address the bot matches nothing. Turn on “Any direct message” if it should answer one-to-one chats."
+        },
+        "removeAria": "Remove",
+        "residual": "{count, plural, =1 {# extra keyword condition is kept as it was saved and is not shown above.} other {# extra keyword conditions are kept as they were saved and are not shown above.}}",
+        "restoreDefaults": "Restore the recommended policy",
+        "rules": {
+          "channelAllowlist": {
+            "help": "Platform chat or channel ids. Everything in a listed chat is answered.",
+            "label": "The chat is on this list",
+            "listAria": "allowed chats",
+            "placeholder": "C01ABCDEF"
+          },
+          "keyword": {
+            "caseInsensitive": "Ignore capitalisation",
+            "help": "Matched anywhere in the message text.",
+            "label": "The message contains a keyword",
+            "listAria": "keywords",
+            "placeholder": "deploy"
+          },
+          "privateDefault": {
+            "help": "Every message in a one-to-one chat, without needing to be addressed.",
+            "label": "Any direct message"
+          },
+          "replyToBot": {
+            "help": "A reply to a message this bot sent counts as addressing it.",
+            "label": "Someone replies to the bot"
+          },
+          "selfMention": {
+            "help": "How a person normally addresses a bot in a group.",
+            "label": "The bot is @-mentioned"
+          },
+          "slashCommand": {
+            "help": "Matches on the start of the text, so `/ask` also matches `/ask something`.",
+            "label": "The message starts with a command",
+            "listAria": "command prefixes",
+            "placeholder": "/ask"
+          },
+          "userAllowlist": {
+            "help": "Platform user ids. Anyone listed is answered wherever they write.",
+            "label": "The sender is on this list",
+            "listAria": "allowed senders",
+            "placeholder": "U01ABCDEF"
+          }
+        },
+        "rulesHelp": "Any condition that matches starts a turn. With none of them on, the bot never answers.",
+        "rulesTitle": "Answer when",
+        "save": "Save",
+        "storeUnmatched": {
+          "help": "On, unanswered messages stay in the inbox as history. Off, they are dropped.",
+          "label": "Keep messages that match nothing"
+        },
+        "title": "When to answer",
+        "warnings": {
+          "channel-allowlist-empty": "The chat list is on but empty, so it never matches.",
+          "channel-blocklist-empty": "The blocked-chat list is on but empty, so it blocks nothing.",
+          "keyword-blocklist-empty": "The blocked-word list is on but empty, so it blocks nothing.",
+          "keyword-empty": "The keyword condition is on but has no keywords, so it never matches.",
+          "rate-limit-blocks-everything": "A limit below 1 blocks the first message of every minute, so the bot goes silent.",
+          "slash-command-empty": "The command condition is on but has no prefixes, so it never matches.",
+          "user-allowlist-empty": "The sender list is on but empty, so it never matches.",
+          "user-blocklist-empty": "The blocked-sender list is on but empty, so it blocks nothing."
+        }
+      },
       "tunnel": {
         "copied": "Copied",
         "copiedCommand": "Command copied",

@@ -149,11 +149,20 @@ export async function updateAdapterInstance(
 }
 
 export type AdapterConfigSection =
-  "connection" | "behavior" | "responder" | "permissions" | "delivery" | "platform" | "promotion"
+  | "connection"
+  | "behavior"
+  /** The inbound trigger policy — when this bot answers and when it stays quiet. */
+  | "trigger"
+  | "responder"
+  | "permissions"
+  | "delivery"
+  | "platform"
+  | "promotion"
 
 export type AdapterConfigSource =
   | "settings"
   | "settings.adapter.behavior"
+  | "settings.adapter.trigger"
   | "settings.adapter.permissions"
   | "settings.adapter.responder"
   | "settings.adapter.sla-escalation"
