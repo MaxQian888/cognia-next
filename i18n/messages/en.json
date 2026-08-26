@@ -29338,6 +29338,19 @@
         "placeholder": "ou_abc123, ou_def456",
         "title": "Run operators"
       },
+      "credentialField": {
+        "hideAria": "Hide the secret",
+        "loadingPlaceholder": "Loading…",
+        "retry": "Retry",
+        "revealAria": "Show the secret",
+        "statusError": "Could not read the saved value.",
+        "statusLoaded": "Saved — showing the stored value.",
+        "statusLoading": "Reading the saved value…",
+        "statusNew": "Nothing saved yet.",
+        "statusStored": "Saved on the host. It cannot be shown here; type a new value to replace it.",
+        "statusUnset": "Not set.",
+        "storedPlaceholder": "Saved — leave blank to keep it"
+      },
       "sendTest": {
         "advancedDescription": "Direct transport probe. This bypasses quiet hours, FIFO, retry, rate limits, and the circuit breaker; use it only to isolate adapter or credential faults.",
         "advancedTitle": "Advanced transport diagnostics",

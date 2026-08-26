@@ -1323,6 +1323,19 @@
     "placeholder": "ou_abc123, ou_def456",
     "title": "运行操作员"
   },
+  "credentialField": {
+    "hideAria": "隐藏密钥",
+    "loadingPlaceholder": "读取中…",
+    "retry": "重试",
+    "revealAria": "显示密钥",
+    "statusError": "无法读取已保存的值。",
+    "statusLoaded": "已保存 —— 当前显示的就是已存的值。",
+    "statusLoading": "正在读取已保存的值…",
+    "statusNew": "尚未保存。",
+    "statusStored": "已保存在宿主上。此处无法查看；输入新值可覆盖。",
+    "statusUnset": "未设置。",
+    "storedPlaceholder": "已保存 —— 留空表示不修改"
+  },
   "sendTest": {
     "advancedDescription": "直接传输探测会绕过静默时段、FIFO、重试、限流和熔断器；仅用于定位适配器或凭证故障。",
     "advancedTitle": "高级传输诊断",

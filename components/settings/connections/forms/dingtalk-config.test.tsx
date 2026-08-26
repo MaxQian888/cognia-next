@@ -8,6 +8,10 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 const mockCreate = jest.fn().mockResolvedValue({ id: "dt-new" })
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockConnectorsHttpRequest = jest.fn()
 const mockRotated = jest.fn()
 
@@ -17,7 +21,13 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 }))
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...a: unknown[]) => mockKeyringSet(...a),
+  connectorsKeyringGet: (...a: unknown[]) => mockKeyringGet(...a),
+  connectorsKeyringDelete: (...a: unknown[]) => mockKeyringDelete(...a),
+  connectorsKeyringList: (...a: unknown[]) => mockKeyringList(...a),
   connectorsHttpRequest: (...a: unknown[]) => mockConnectorsHttpRequest(...a),
+}))
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...a: unknown[]) => mockCapability(...a),
 }))
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockRotated(...a),
@@ -42,6 +52,9 @@ function httpResp(status: number, body: unknown): TauriHttpResponse {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   clearDingTalkTokenCache("dingabc", "secret")
   clearDingTalkTokenCache("bad", "secret")
 })
@@ -136,5 +149,114 @@ describe("DingTalkConfigDialog", () => {
     expect(mockUpdate.mock.calls[0][1]).not.toHaveProperty("transportMode")
     expect(mockKeyringSet).toHaveBeenCalledWith("dt-1", "appKey", "rotated")
     expect(mockRotated).toHaveBeenCalledWith("dt-1")
+  })
+
+  describe("credential prefill", () => {
+    const existingRow = {
+      id: "dt-1",
+      type: "dingtalk",
+      displayName: "Existing",
+      enabled: true,
+      transportMode: "gateway",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["appKey", "appSecret"] },
+      trigger: {},
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 1,
+      updatedAt: 2,
+    } as unknown as AdapterInstanceRow
+
+    function openExisting() {
+      return render(<DingTalkConfigDialog open onOpenChange={jest.fn()} row={existingRow} />)
+    }
+
+    it("fills the stored values back into the fields, masking only the secret", async () => {
+      mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+        name === "appKey" ? "dingabc" : "s3cret"
+      )
+      openExisting()
+
+      const key = screen.getByLabelText(/app key/i) as HTMLInputElement
+      const secret = screen.getByLabelText(/app secret/i) as HTMLInputElement
+      await waitFor(() => expect(key.value).toBe("dingabc"))
+      expect(secret.value).toBe("s3cret")
+      // The identifier stays readable; the secret does not.
+      expect(key.type).toBe("text")
+      expect(secret.type).toBe("password")
+    })
+
+    // Prefilling puts real values in previously-empty boxes; the form must not
+    // read that as the operator having typed them.
+    it("does not look edited just because the values were read back", async () => {
+      mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+        name === "appKey" ? "dingabc" : "s3cret"
+      )
+      openExisting()
+      await waitFor(() =>
+        expect((screen.getByLabelText(/app key/i) as HTMLInputElement).value).toBe("dingabc")
+      )
+      expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+    })
+
+    it("saves an unrelated edit without rewriting the credentials", async () => {
+      mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+        name === "appKey" ? "dingabc" : "s3cret"
+      )
+      openExisting()
+      await waitFor(() =>
+        expect((screen.getByLabelText(/app key/i) as HTMLInputElement).value).toBe("dingabc")
+      )
+
+      fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+      await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+      expect(mockKeyringDelete).not.toHaveBeenCalled()
+    })
+
+    it("refuses to save a required credential the operator emptied", async () => {
+      mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+        name === "appKey" ? "dingabc" : "s3cret"
+      )
+      openExisting()
+      await waitFor(() =>
+        expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("s3cret")
+      )
+
+      fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "" } })
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+      expect(mockUpdate).not.toHaveBeenCalled()
+      expect(mockKeyringDelete).not.toHaveBeenCalled()
+    })
+
+    it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+      mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+      openExisting()
+
+      await waitFor(() =>
+        expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+      )
+      expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("")
+    })
+
+    it("still saves the rest of the form when the credentials could not be read", async () => {
+      mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+      openExisting()
+      await waitFor(() =>
+        expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+      )
+
+      fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
+      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+      await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
+      // Blank boxes here mean "I could not read them", never "delete them".
+      expect(mockKeyringDelete).not.toHaveBeenCalled()
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+    })
   })
 })

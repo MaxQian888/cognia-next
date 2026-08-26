@@ -19,14 +19,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getDingTalkAccessToken } from "@/lib/connectors/adapters/dingtalk/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+
+/** Keyring accounts this dialog owns. Both are required — Stream mode
+ * authenticates with the pair, so a bot missing either cannot connect. */
+const DINGTALK_CREDENTIALS = ["appKey", "appSecret"] as const
 
 interface DingTalkCredentialTestResult {
   ok: boolean
@@ -52,8 +57,13 @@ export function DingTalkConfigDialog({
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [appKey, setAppKey] = useState("")
-  const [appSecret, setAppSecret] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: DINGTALK_CREDENTIALS,
+    enabled: open,
+  })
+  const appKey = credentials.value("appKey")
+  const appSecret = credentials.value("appSecret")
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -65,8 +75,7 @@ export function DingTalkConfigDialog({
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    appKey.length > 0 ||
-    appSecret.length > 0 ||
+    credentials.dirty ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -96,7 +105,7 @@ export function DingTalkConfigDialog({
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && (!appKey.trim() || !appSecret.trim())) {
+    if (credentials.missingRequired(DINGTALK_CREDENTIALS).length > 0) {
       toast.error(t("credentialsRequired"))
       return
     }
@@ -120,7 +129,7 @@ export function DingTalkConfigDialog({
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["appKey", "appSecret"],
+            accounts: [...DINGTALK_CREDENTIALS],
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
@@ -138,8 +147,7 @@ export function DingTalkConfigDialog({
         })
       }
 
-      if (appKey.trim()) await connectorsKeyringSet(adapterId, "appKey", appKey.trim())
-      if (appSecret.trim()) await connectorsKeyringSet(adapterId, "appSecret", appSecret.trim())
+      await credentials.persist(adapterId)
 
       if (!isNew) emitCredentialsRotated(adapterId)
 
@@ -177,12 +185,15 @@ export function DingTalkConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appKeyHelp")}</p>
-            <Input
+            <CredentialInput
               id="dingtalk-app-key"
+              sensitive={false}
               value={appKey}
-              onChange={(e) => setAppKey(e.target.value)}
-              placeholder={isNew ? t("appKeyPlaceholder") : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("appKey", next)}
+              status={credentials.status("appKey")}
+              placeholder={t("appKeyPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5">
@@ -191,35 +202,32 @@ export function DingTalkConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appSecretHelp")}</p>
-            <div className="flex gap-2">
-              <Input
-                id="dingtalk-app-secret"
-                type="password"
-                autoComplete="new-password"
-                value={appSecret}
-                onChange={(e) => setAppSecret(e.target.value)}
-                placeholder={
-                  isNew ? t("appSecretPlaceholder") : t("credentialUnchangedPlaceholder")
-                }
-                disabled={saving}
-                className="min-w-0 flex-1"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleTest}
-                disabled={testing || saving || !desktop}
-                aria-label={t("testCredentialsAria")}
-                className="shrink-0"
-              >
-                {testing ? (
-                  <LoaderIcon data-icon="inline-start" className="animate-spin" />
-                ) : (
-                  t("testButtonLabel")
-                )}
-              </Button>
-            </div>
+            <CredentialInput
+              id="dingtalk-app-secret"
+              value={appSecret}
+              onChange={(next) => credentials.set("appSecret", next)}
+              status={credentials.status("appSecret")}
+              placeholder={t("appSecretPlaceholder")}
+              disabled={saving}
+              onRetry={credentials.retry}
+              trailing={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTest}
+                  disabled={testing || saving || !desktop}
+                  aria-label={t("testCredentialsAria")}
+                  className="shrink-0"
+                >
+                  {testing ? (
+                    <LoaderIcon data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    t("testButtonLabel")
+                  )}
+                </Button>
+              }
+            />
           </div>
         </div>
         {testResult !== null && (
