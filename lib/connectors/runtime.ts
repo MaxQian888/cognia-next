@@ -1106,6 +1106,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             // it acts" — which is the plan gate, and it now has a card to ask
             // on (`makeImPlanApprovalDelegate`). Holding the finished output
             // instead would review work already done.
+            //
+            // Read from the routing decision, not re-derived from the stored
+            // autonomy: the decision is what routing already concluded, and a
+            // second derivation can disagree with it (a recovery replay hands
+            // the handler a decision whose conversation row has since changed).
             ...(requireAcceptance ? { requirePlanApprovalFloor: true } : {}),
           })
           if (res.started && res.runId) {
