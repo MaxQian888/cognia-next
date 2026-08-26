@@ -20,6 +20,7 @@
 
 import { normalizeServiceUrl } from "@/lib/diagnostic-service/client"
 
+import type { OrgRole, WorkspaceRole } from "@/types/identity"
 import type { IssuePriority, IssueStatus } from "@/types/issues"
 import type { CollabIssueActor } from "@/types/issues/collab"
 
@@ -47,6 +48,20 @@ export interface CollabIssueEvent {
   ts: number
   actor: CollabIssueActor
   payload?: unknown
+}
+
+/**
+ * What the caller holds in one org, as the server reports it.
+ *
+ * Raw facts only. Whether this describes a guest — no org role, at least one
+ * workspace — is derived by `personStandingFrom`, and the server deliberately
+ * does not state it: two implementations of one rule is one too many.
+ */
+export interface CollabMemberships {
+  userId: string
+  orgId: string
+  orgRole?: OrgRole
+  workspaces: { workspaceId: string; role: WorkspaceRole }[]
 }
 
 interface MintedGrant {
@@ -122,6 +137,19 @@ export class CollabClient {
     }
     const suffix = search.toString() ? `?${search}` : ""
     return this.json<CollabIssue[]>(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/issues${suffix}`)
+  }
+
+  /**
+   * What this person holds in `orgId`.
+   *
+   * Not scoped to a workspace, and it must not be: asking which workspaces you
+   * belong to cannot require belonging to one.
+   */
+  async myMemberships(orgId: string): Promise<CollabMemberships> {
+    return this.json<CollabMemberships>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/memberships/me`
+    )
   }
 
   async listEvents(orgId: string, issueId: string): Promise<CollabIssueEvent[]> {

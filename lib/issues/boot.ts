@@ -21,6 +21,7 @@
 
 import { loggers } from "@cognia/logging"
 
+import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { seedBuiltinIssueLabels } from "@/lib/db/labels"
 import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
 import { installIssueNotifications, type IssueNotifyTranslate } from "@/lib/issues/notify"
@@ -75,6 +76,22 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
   // Adding a resource schedules it there and then; this covers the restart
   // case, where the binding survives but the scheduler row may not.
   await syncGithubIssueSchedule()
+  // ADR-0149 §6 — the pull that makes the collaboration mirror non-empty.
+  //
+  // Deliberately last, and deliberately quiet. It is the only step here that
+  // needs the network, and an unreachable collaboration server must not stop
+  // the board from booting: the local rows are the ones that matter most and
+  // they need no network at all. `refreshCollabPlaneQuietly` also returns
+  // `skipped` rather than throwing for the ordinary states — no server
+  // configured, nobody signed in — so those cost one localStorage read.
+  void refreshCollabPlaneQuietly().then((result) => {
+    if (result?.status === "refreshed") {
+      log.info("issue-tracker: collaboration plane refreshed", {
+        issues: result.issues,
+        workspaces: result.workspaces,
+      })
+    }
+  })
   return () => {
     disposeNotifications()
     disposeRunBridge()

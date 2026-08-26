@@ -1,26 +1,36 @@
 /**
- * Guest has no producer yet — pinned, so the day it gets one, this fails.
+ * `workspaceMemberships` has exactly one production writer — ADR-0149 §4.
  *
- * ADR-0149 §4 makes a guest a `User` holding Workspace membership WITHOUT Org
- * membership, and Batch 5 makes that state derivable (`resolvePersonStanding`)
- * and visible (the Feishu principals card's standing badge). What it does not
- * have is anything that WRITES a `workspaceMemberships` row in production:
- * the collaboration server owns those rows, and the client has no configured
- * endpoint to pull them from until the Workspace plane lands.
+ * # Why this test exists at all
  *
- * So the `guest` badge is currently unreachable outside tests. That is
- * deliberate and recorded in ADR-0149's Batch 5 notes — but "deliberate" rots
- * silently, so this test walks the tree instead of trusting the note. When a
- * producer appears, update the ADR note in the same change that makes this
- * fail.
+ * It was written in Batch 5 to pin the OPPOSITE: at that point nothing wrote
+ * these rows, so "guest" was a shape the code could describe and nothing could
+ * ever be in. The test walked the tree for a writer and asserted there was
+ * none, so the claim in the ADR could not rot into a stale comment.
+ *
+ * Batch 7 gave it one. `pullCollabMemberships` writes what the collaboration
+ * server says this person holds, which is what makes a guest reachable. The
+ * test survives, inverted: there must be exactly one writer, and it must be
+ * that one.
+ *
+ * # Why one, and not "at least one"
+ *
+ * ADR-0149 §6 makes the server authoritative for membership. A second writer
+ * would be a second opinion about who belongs where, and the local one would
+ * win whenever it ran last — which is how a revoked person keeps their access
+ * on one machine. If a second writer is ever right, it should be hard enough
+ * to add that somebody has to come here and say why.
  */
 
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 
-/** Source files that may legitimately call the writer. */
-const ALLOWED = [
-  // The accessor itself, and its own tests.
+/** The one module allowed to write a workspace membership. */
+const AUTHORIZED_WRITER = "lib/collab/sync.ts"
+
+/** Source files that are not production writers. */
+const EXEMPT = [
+  // The accessor itself.
   /^lib\/db\/identity\.ts$/,
   // Any test may seed one — the point is production callers.
   /\.test\.tsx?$/,
@@ -48,7 +58,7 @@ function trackedSources(): string[] {
 }
 
 describe("workspaceMemberships producers", () => {
-  it("has no production writer, so `guest` is not yet reachable", () => {
+  it("has exactly one production writer, and it is the collaboration pull", () => {
     const files = trackedSources()
     // A sweep that scanned nothing also passes an emptiness assertion.
     expect(files.length).toBeGreaterThan(500)
@@ -56,7 +66,7 @@ describe("workspaceMemberships producers", () => {
     let scanned = 0
     const callers: string[] = []
     for (const file of files) {
-      if (ALLOWED.some((pattern) => pattern.test(file))) continue
+      if (EXEMPT.some((pattern) => pattern.test(file))) continue
       scanned += 1
       let source: string
       try {
@@ -68,6 +78,6 @@ describe("workspaceMemberships producers", () => {
     }
 
     expect(scanned).toBeGreaterThan(500)
-    expect(callers).toEqual([])
+    expect(callers).toEqual([AUTHORIZED_WRITER])
   })
 })
