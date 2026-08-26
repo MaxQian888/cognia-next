@@ -25,7 +25,7 @@ import { probeWeComCredentials } from "@/lib/connectors/adapters/wecom/probe"
 import { preflightConnectorConfig } from "@/lib/connectors/config-preflight"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -168,7 +168,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
             keyringService: "com.cognia.platforms",
             accounts: [...WECOM_CREDENTIALS],
           },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("wecom"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

@@ -23,7 +23,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getQQAccessToken, getQQGatewayUrl } from "@/lib/connectors/adapters/qq-official/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -134,7 +134,7 @@ export function QQOfficialConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts: [...QQ_CREDENTIALS],
           },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("qq-official"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

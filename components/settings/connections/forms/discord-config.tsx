@@ -33,7 +33,7 @@ import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -215,7 +215,7 @@ export function DiscordConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts,
           },
-          trigger: defaultPrivateChatPolicy(),
+          trigger: defaultTriggerPolicyFor("discord"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

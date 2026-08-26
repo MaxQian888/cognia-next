@@ -25,7 +25,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getWechatOaAccessToken } from "@/lib/connectors/adapters/wechat-oa/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -165,7 +165,7 @@ export function WechatOaConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts: [...WECHAT_OA_CREDENTIALS],
           },
-          trigger: defaultPrivateChatPolicy(),
+          trigger: defaultTriggerPolicyFor("wechat-oa"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

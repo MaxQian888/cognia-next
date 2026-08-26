@@ -22,7 +22,7 @@ import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
 import { isTauri } from "@/lib/tauri"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
@@ -106,7 +106,7 @@ export function WeChatPersonalConfigDialog({
           transportMode: "longpoll",
           settings,
           credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("wechat-personal"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

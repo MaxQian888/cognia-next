@@ -32,7 +32,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { beginSlackOAuth } from "@/lib/connectors/adapters/slack/oauth-begin"
 import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
 import {
@@ -338,7 +338,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
               ...(transport === "socket-mode" ? ["appToken"] : []),
             ],
           },
-          trigger: defaultPrivateChatPolicy(),
+          trigger: defaultTriggerPolicyFor("slack"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

@@ -49,7 +49,7 @@ import {
 } from "@/lib/connectors/server-transport"
 import { resolveLarkApiBase } from "@/lib/connectors/lark-web/entry-client"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { refreshSelfBotOpenId } from "@/lib/connectors/adapter-registry"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import {
@@ -365,7 +365,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
             keyringService: "com.cognia.platforms",
             accounts: [...LARK_CREDENTIALS],
           },
-          trigger: defaultPrivateChatPolicy(),
+          trigger: defaultTriggerPolicyFor("lark"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

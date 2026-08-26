@@ -36,7 +36,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
-import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
@@ -204,7 +204,7 @@ export function TelegramConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts: credentialAccounts,
           },
-          trigger: defaultPrivateChatPolicy(),
+          trigger: defaultTriggerPolicyFor("telegram"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

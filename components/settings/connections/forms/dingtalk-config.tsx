@@ -23,7 +23,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getDingTalkAccessToken } from "@/lib/connectors/adapters/dingtalk/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -131,7 +131,7 @@ export function DingTalkConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts: [...DINGTALK_CREDENTIALS],
           },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("dingtalk"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,

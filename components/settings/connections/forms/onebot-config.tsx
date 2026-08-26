@@ -38,7 +38,7 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -199,7 +199,7 @@ export function OneBotConfigDialog({
               ...(wantUnauth ? ["onebotAllowUnauthenticated"] : []),
             ],
           },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("onebot"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           ...(transportMode === "reverse-ws" ? { deliveryReadiness: "unknown" as const } : {}),

@@ -24,7 +24,7 @@ import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -198,7 +198,7 @@ export function MatrixConfigDialog({
             keyringService: "com.cognia.platforms",
             accounts: refreshToken.trim() ? ["accessToken", "refreshToken"] : ["accessToken"],
           },
-          trigger: defaultGroupChatPolicy(),
+          trigger: defaultTriggerPolicyFor("matrix"),
           defaultMode: "auto",
           mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,
