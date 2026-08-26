@@ -39,6 +39,7 @@ import type { IssueProject, IssueStatus } from "@/types/issues"
 import { useProjectStore } from "@/stores/project/project-store"
 import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { WorkspaceCapabilities } from "./workspace-capabilities"
+import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 
 /** Trailing-separator-insensitive, matching `lib/db/trusted-workspaces.ts`. */
@@ -247,6 +248,10 @@ export function WorkspaceOverview() {
               <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
             )}
           </section>
+          {/* ADR-0149 §4 — the roster, and the only place a guest is visible
+              to anybody but themselves. Reads the projection, so it never
+              blocks on the network. */}
+          <WorkspaceMembers workspaceId={workspaceId} />
         </TabsContent>
 
         <TabsContent value="environments" className="mt-0" data-testid="workspace-environments">

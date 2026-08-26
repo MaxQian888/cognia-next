@@ -245,5 +245,17 @@
     "pinned": "已固定",
     "pinLabel": "将此面板固定到当前目录",
     "unpinLabel": "恢复跟随会话"
+  },
+  "members": {
+    "title": "成员",
+    "empty": "这个工作区还没有其他人。",
+    "guest": "访客",
+    "standingAria": "工作区身份",
+    "roleAria": "工作区角色",
+    "role": {
+      "maintainer": "维护者",
+      "member": "成员",
+      "viewer": "只读"
+    }
   }
 }

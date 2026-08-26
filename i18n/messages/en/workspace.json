@@ -245,5 +245,17 @@
     "pinned": "pinned",
     "pinLabel": "Pin this panel to the current folder",
     "unpinLabel": "Follow the conversation again"
+  },
+  "members": {
+    "title": "Members",
+    "empty": "Nobody else is in this workspace yet.",
+    "guest": "Guest",
+    "standingAria": "Workspace standing",
+    "roleAria": "Workspace role",
+    "role": {
+      "maintainer": "Maintainer",
+      "member": "Member",
+      "viewer": "Viewer"
+    }
   }
 }

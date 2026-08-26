@@ -44638,6 +44638,18 @@
       "trustedBadge": "Trusted",
       "untrustedBadge": "Untrusted"
     },
+    "members": {
+      "empty": "Nobody else is in this workspace yet.",
+      "guest": "Guest",
+      "role": {
+        "maintainer": "Maintainer",
+        "member": "Member",
+        "viewer": "Viewer"
+      },
+      "roleAria": "Workspace role",
+      "standingAria": "Workspace standing",
+      "title": "Members"
+    },
     "panelRoot": {
       "following": "following this conversation",
       "none": "No folder",

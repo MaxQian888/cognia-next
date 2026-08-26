@@ -44638,6 +44638,18 @@
       "trustedBadge": "已信任",
       "untrustedBadge": "未信任"
     },
+    "members": {
+      "empty": "这个工作区还没有其他人。",
+      "guest": "访客",
+      "role": {
+        "maintainer": "维护者",
+        "member": "成员",
+        "viewer": "只读"
+      },
+      "roleAria": "工作区角色",
+      "standingAria": "工作区身份",
+      "title": "成员"
+    },
     "panelRoot": {
       "following": "跟随当前会话",
       "none": "无目录",
