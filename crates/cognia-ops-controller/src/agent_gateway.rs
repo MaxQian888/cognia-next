@@ -190,7 +190,7 @@ async fn run_socket(
         tokio::select! {
             _ = poll.tick() => {
                 if let Some(operation_id) = active_operation {
-                    match state.store.heartbeat_operation(operation_id, &worker_id, AGENT_LEASE_SECONDS).await {
+                    match state.store.heartbeat_operation(&identity.tenant_id, operation_id, &worker_id, AGENT_LEASE_SECONDS).await {
                         Ok(true) => {}
                         _ => active_operation = None,
                     }
@@ -215,6 +215,7 @@ async fn run_socket(
                     }
                     Err(error) => {
                         let _ = state.store.transition_operation(
+                            &identity.tenant_id,
                             operation_id,
                             &worker_id,
                             OperationState::Failed,
@@ -239,7 +240,7 @@ async fn run_socket(
                             &identity.target_id,
                         ).await;
                         if let Some(operation_id) = heartbeat.operation_id.and_then(|id| Uuid::parse_str(&id).ok()) {
-                            let _ = state.store.heartbeat_operation(operation_id, &worker_id, AGENT_LEASE_SECONDS).await;
+                            let _ = state.store.heartbeat_operation(&identity.tenant_id, operation_id, &worker_id, AGENT_LEASE_SECONDS).await;
                         }
                     }
                     AgentToControllerMessage::Transition(transition) => {
@@ -254,6 +255,7 @@ async fn run_socket(
                         });
                         if transition.state == OperationState::Succeeded {
                             let verified = state.store.transition_operation(
+                                &identity.tenant_id,
                                 operation_id,
                                 &worker_id,
                                 OperationState::Verifying,
@@ -263,6 +265,7 @@ async fn run_socket(
                             if verified.is_err() { continue; }
                         }
                         let result = state.store.transition_operation(
+                            &identity.tenant_id,
                             operation_id,
                             &worker_id,
                             transition.state,
@@ -309,6 +312,7 @@ async fn prepare_operation(
     state
         .store
         .transition_operation(
+            &operation.tenant_id,
             operation.id,
             worker_id,
             OperationState::Preparing,
@@ -319,6 +323,7 @@ async fn prepare_operation(
     state
         .store
         .transition_operation(
+            &operation.tenant_id,
             operation.id,
             worker_id,
             OperationState::Executing,

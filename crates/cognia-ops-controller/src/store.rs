@@ -149,14 +149,24 @@ pub trait Store: Send + Sync {
         worker_id: &str,
         lease_seconds: i64,
     ) -> Result<Option<Operation>, StoreError>;
+    /// Renew an agent's lease on an operation.
+    ///
+    /// `tenant_id` is taken from the agent's authenticated identity, not from
+    /// the wire: it exists so the statement can run inside the tenant's own
+    /// row-level-security scope (ADR-0149 §8) rather than reaching an
+    /// operation id straight out of the pool.
     async fn heartbeat_operation(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         lease_seconds: i64,
     ) -> Result<bool, StoreError>;
+    /// Advance an operation an agent already holds the lease on. `tenant_id`
+    /// is the agent's authenticated tenant — see `heartbeat_operation`.
     async fn transition_operation(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         next: OperationState,
@@ -626,6 +636,7 @@ impl Store for InMemoryStore {
 
     async fn heartbeat_operation(
         &self,
+        _tenant_id: &str,
         operation_id: Uuid,
         _worker_id: &str,
         _lease_seconds: i64,
@@ -635,6 +646,7 @@ impl Store for InMemoryStore {
 
     async fn transition_operation(
         &self,
+        _tenant_id: &str,
         operation_id: Uuid,
         _worker_id: &str,
         next: OperationState,
@@ -660,6 +672,59 @@ impl Store for InMemoryStore {
         Ok(operation)
     }
 }
+
+/// Open a transaction with `app.tenant_id` bound — ADR-0149 §8.
+///
+/// Every tenant-scoped statement in `PgStore` runs inside one of these, so
+/// row-level security filters it whether or not the statement remembered its
+/// own `WHERE tenant_id = $1`. Before this the isolation was the `WHERE`
+/// clause, which meant one forgotten predicate in any of ~30 statements served
+/// another tenant's servers, logs and operations.
+///
+/// Transaction-local — the `true` in `set_config` — is the security property,
+/// not a detail. A session-level setting on a POOLED connection outlives the
+/// request and hands the next caller the previous caller's tenant, and it
+/// fails OPEN.
+async fn tenant_scope<'a>(
+    client: &'a mut deadpool_postgres::Client,
+    tenant_id: &str,
+) -> Result<deadpool_postgres::Transaction<'a>, StoreError> {
+    let transaction = client.transaction().await.map_err(database_error)?;
+    transaction
+        .execute(cognia_tenant_auth::rls::SET_TENANT_SQL, &[&tenant_id])
+        .await
+        .map_err(database_error)?;
+    Ok(transaction)
+}
+
+/// `app.cross_tenant`, the escape the policies in `0002_tenant_isolation.sql`
+/// honour.
+///
+/// Three statements need it, and each says so where it is used:
+///
+///   * `consume_enrollment` and `authenticate_agent` are CREDENTIAL lookups.
+///     The caller presents a secret and the row tells it which tenant it is
+///     in, so the tenant is the query's output — there is nothing to bind
+///     before running it.
+///   * `requeue_expired_leases` is a global sweep whose whole job is to cross
+///     tenants.
+///
+/// Nothing else may use this. Widening the list is widening the blast radius
+/// of a bug back to what it was before RLS.
+async fn cross_tenant_scope<'a>(
+    client: &'a mut deadpool_postgres::Client,
+) -> Result<deadpool_postgres::Transaction<'a>, StoreError> {
+    let transaction = client.transaction().await.map_err(database_error)?;
+    transaction
+        .execute(SET_CROSS_TENANT_SQL, &[])
+        .await
+        .map_err(database_error)?;
+    Ok(transaction)
+}
+
+/// Transaction-local, exactly like `SET_TENANT_SQL`, so the escape cannot
+/// outlive the statement that needed it.
+pub const SET_CROSS_TENANT_SQL: &str = "SELECT set_config('app.cross_tenant', 'on', true)";
 
 pub struct PgStore {
     pool: Pool,
@@ -705,6 +770,12 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0001_init.sql"))
             .await?;
+        // Applied after the tables exist, and separately, because it is DDL
+        // that changes how every later statement behaves — ADR-0149 §8. DDL is
+        // not itself row-level-security-gated, so this runs unscoped.
+        client
+            .batch_execute(include_str!("../migrations/0002_tenant_isolation.sql"))
+            .await?;
         Ok(())
     }
 
@@ -716,8 +787,9 @@ impl PgStore {
         lease_seconds: i64,
     ) -> Result<Option<Operation>, StoreError> {
         self.requeue_expired_leases().await?;
-        let client = self.client().await?;
-        let row = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let row = transaction
             .query_opt(
                 "WITH candidate AS (
                    SELECT o.id, o.tenant_id, o.target_id FROM operations o
@@ -743,6 +815,7 @@ impl PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         let Some(row) = row else {
             return Ok(None);
         };
@@ -751,12 +824,13 @@ impl PgStore {
 
     async fn heartbeat(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         lease_seconds: i64,
     ) -> Result<bool, StoreError> {
         let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let changed = transaction
             .execute(
                 "UPDATE operations SET lease_expires_at=now() + make_interval(secs => $3), updated_at=now()
@@ -782,7 +856,10 @@ impl PgStore {
 
     pub async fn requeue_expired_leases(&self) -> Result<u64, StoreError> {
         let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        // Cross-tenant on purpose: a lease expires on wall-clock time, not on
+        // whose tenant it belongs to, and a per-tenant sweep would need a list
+        // of tenants that only this query can produce.
+        let transaction = cross_tenant_scope(&mut client).await?;
         let changed = transaction
             .execute(
                 "UPDATE operations SET state='queued', lease_owner=NULL,
@@ -806,6 +883,7 @@ impl PgStore {
 
     async fn transition_claimed_operation(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         next: OperationState,
@@ -813,7 +891,7 @@ impl PgStore {
         error: Option<OpsErrorBody>,
     ) -> Result<Operation, StoreError> {
         let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let row = transaction
             .query_opt(
                 "SELECT * FROM operations WHERE id=$1 AND lease_owner=$2
@@ -950,7 +1028,7 @@ impl Store for PgStore {
             .map_err(|error| StoreError::Database(error.to_string()))?;
         let request_hash = hex::encode(Sha256::digest(config.to_string().as_bytes()));
         let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         transaction
             .query_one(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -1053,8 +1131,9 @@ impl Store for PgStore {
     }
 
     async fn list_servers(&self, tenant_id: &str) -> Result<Vec<ServerSummary>, StoreError> {
-        let client = self.client().await?;
-        let rows = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let rows = transaction
             .query(
                 "SELECT id, label, topology, public_url, health, release_digest, last_seen_at
                  FROM server_reports WHERE tenant_id=$1 ORDER BY label",
@@ -1062,6 +1141,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         rows.iter().map(server_from_row).collect()
     }
 
@@ -1070,8 +1150,9 @@ impl Store for PgStore {
         tenant_id: &str,
         target_id: &str,
     ) -> Result<Option<ServerDetail>, StoreError> {
-        let client = self.client().await?;
-        let row = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let row = transaction
             .query_opt(
                 "SELECT r.*, t.revision, t.production_certified, t.certification_issues
                  FROM server_reports r JOIN deployment_targets t
@@ -1081,6 +1162,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         row.map(|row| server_detail_from_row(&row)).transpose()
     }
 
@@ -1089,14 +1171,16 @@ impl Store for PgStore {
         tenant_id: &str,
         target_id: &str,
     ) -> Result<Option<DeploymentTarget>, StoreError> {
-        let client = self.client().await?;
-        let row = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let row = transaction
             .query_opt(
                 "SELECT config FROM deployment_targets WHERE tenant_id=$1 AND id=$2",
                 &[&tenant_id, &target_id],
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         row.map(|row| {
             serde_json::from_value(row.get("config"))
                 .map_err(|error| StoreError::Database(error.to_string()))
@@ -1110,9 +1194,10 @@ impl Store for PgStore {
         target_id: &str,
         limit: usize,
     ) -> Result<Vec<LogEntry>, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let limit = i64::try_from(limit.min(1000)).unwrap_or(1000);
-        let rows = client
+        let rows = transaction
             .query(
                 "SELECT id, target_id, timestamp, level, component, message FROM log_entries
                  WHERE tenant_id=$1 AND target_id=$2 ORDER BY id DESC LIMIT $3",
@@ -1120,6 +1205,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(rows
             .iter()
             .map(|row| LogEntry {
@@ -1138,8 +1224,9 @@ impl Store for PgStore {
         tenant_id: &str,
         target_id: &str,
     ) -> Result<Vec<RecoveryPoint>, StoreError> {
-        let client = self.client().await?;
-        let rows = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let rows = transaction
             .query(
                 "SELECT id, target_id, created_at, kind, manifest_sha256, size_bytes, verified
                  FROM recovery_points WHERE tenant_id=$1 AND target_id=$2 ORDER BY created_at DESC",
@@ -1147,12 +1234,13 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         rows.iter().map(recovery_point_from_row).collect()
     }
 
     async fn create_operation(&self, input: NewOperation) -> Result<Operation, StoreError> {
         let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(database_error)?;
+        let transaction = tenant_scope(&mut client, &input.tenant_id).await?;
         let kind = serde_json::to_value(input.kind)
             .map_err(|error| StoreError::Database(error.to_string()))?
             .as_str()
@@ -1220,16 +1308,17 @@ impl Store for PgStore {
         tenant_id: &str,
         idempotency_key: &str,
     ) -> Result<Option<Operation>, StoreError> {
-        let client = self.client().await?;
-        client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let row = transaction
             .query_opt(
                 "SELECT * FROM operations WHERE tenant_id=$1 AND idempotency_key=$2",
                 &[&tenant_id, &idempotency_key],
             )
             .await
-            .map_err(database_error)?
-            .map(|row| operation_from_row(&row))
-            .transpose()
+            .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
+        row.map(|row| operation_from_row(&row)).transpose()
     }
 
     async fn get_operation(
@@ -1237,25 +1326,27 @@ impl Store for PgStore {
         tenant_id: &str,
         id: Uuid,
     ) -> Result<Option<Operation>, StoreError> {
-        let client = self.client().await?;
-        client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let row = transaction
             .query_opt(
                 "SELECT * FROM operations WHERE tenant_id=$1 AND id=$2",
                 &[&tenant_id, &id],
             )
             .await
-            .map_err(database_error)?
-            .map(|row| operation_from_row(&row))
-            .transpose()
+            .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
+        row.map(|row| operation_from_row(&row)).transpose()
     }
 
     async fn cancel_operation(&self, tenant_id: &str, id: Uuid) -> Result<Operation, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         // The `state='queued'` predicate is the whole concurrency story: an
         // agent claim flips the row to `validating` in the same table, so a
         // cancel racing a claim loses here rather than double-transitioning.
         // `operations_append_event` writes the SSE event for the state change.
-        let row = client
+        let row = transaction
             .query_opt(
                 "UPDATE operations SET state='cancelled', updated_at=now()
                  WHERE tenant_id=$1 AND id=$2 AND state='queued' RETURNING *",
@@ -1264,11 +1355,12 @@ impl Store for PgStore {
             .await
             .map_err(database_error)?;
         if let Some(row) = row {
+            transaction.commit().await.map_err(database_error)?;
             return operation_from_row(&row);
         }
         // Nothing updated: separate "no such operation" from "an agent already
         // has it", because only the second one is worth explaining to the user.
-        let exists = client
+        let exists = transaction
             .query_opt(
                 "SELECT 1 FROM operations WHERE tenant_id=$1 AND id=$2",
                 &[&tenant_id, &id],
@@ -1276,6 +1368,7 @@ impl Store for PgStore {
             .await
             .map_err(database_error)?
             .is_some();
+        transaction.commit().await.map_err(database_error)?;
         Err(if exists {
             StoreError::InvalidTransition
         } else {
@@ -1289,10 +1382,11 @@ impl Store for PgStore {
         target_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Operation>, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         // `$2::text IS NULL` keeps one prepared statement for both the whole
         // fleet and a single target.
-        let rows = client
+        let rows = transaction
             .query(
                 "SELECT * FROM operations
                  WHERE tenant_id=$1 AND ($2::text IS NULL OR target_id=$2)
@@ -1301,6 +1395,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         rows.iter().map(operation_from_row).collect()
     }
 
@@ -1309,8 +1404,9 @@ impl Store for PgStore {
         tenant_id: &str,
         operation_id: Uuid,
     ) -> Result<Vec<OperationEvent>, StoreError> {
-        let client = self.client().await?;
-        let rows = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let rows = transaction
             .query(
                 "SELECT id, operation_id, target_id, state, created_at, message
                  FROM operation_events WHERE tenant_id=$1 AND operation_id=$2
@@ -1319,6 +1415,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         rows.iter().map(event_from_row).collect()
     }
 
@@ -1327,8 +1424,9 @@ impl Store for PgStore {
         tenant_id: &str,
         event_id: i64,
     ) -> Result<Vec<OperationEvent>, StoreError> {
-        let client = self.client().await?;
-        let rows = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let rows = transaction
             .query(
                 "SELECT id, operation_id, target_id, state, created_at, message
                  FROM operation_events WHERE tenant_id=$1 AND id>$2 ORDER BY id LIMIT 1000",
@@ -1336,6 +1434,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         rows.iter().map(event_from_row).collect()
     }
 
@@ -1347,12 +1446,13 @@ impl Store for PgStore {
         operation: OperationKind,
         ttl: Duration,
     ) -> Result<AdminLease, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let token = Uuid::new_v4().to_string();
         let token_hash = hash_token(&token);
         let expires_at = Utc::now() + ttl;
         let operation = operation_kind_string(operation);
-        client
+        transaction
             .execute(
                 "INSERT INTO admin_leases
                  (token_hash, tenant_id, subject, target_id, operation, expires_at)
@@ -1368,6 +1468,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(AdminLease { token, expires_at })
     }
 
@@ -1379,9 +1480,10 @@ impl Store for PgStore {
         operation: OperationKind,
         token: &str,
     ) -> Result<bool, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let operation = operation_kind_string(operation);
-        let row = client
+        let row = transaction
             .query_one(
                 "SELECT EXISTS(SELECT 1 FROM admin_leases
                  WHERE token_hash=$1 AND tenant_id=$2 AND subject=$3 AND target_id=$4
@@ -1396,6 +1498,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(row.get(0))
     }
 
@@ -1406,11 +1509,12 @@ impl Store for PgStore {
         created_by: &str,
         ttl: Duration,
     ) -> Result<EnrollmentToken, StoreError> {
-        let client = self.client().await?;
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
         let token = Uuid::new_v4().to_string();
         let token_hash = hash_token(&token);
         let expires_at = Utc::now() + ttl;
-        client
+        transaction
             .execute(
                 "INSERT INTO agent_enrollment_tokens
                  (token_hash, tenant_id, target_id, created_by, expires_at)
@@ -1425,12 +1529,17 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(EnrollmentToken { token, expires_at })
     }
 
     async fn consume_enrollment(&self, token: &str) -> Result<EnrollmentGrant, StoreError> {
-        let client = self.client().await?;
-        let row = client
+        let mut client = self.client().await?;
+        // A credential lookup: the enrollment token IS the secret, and the row
+        // is what tells us which tenant it belongs to. There is no tenant to
+        // bind before running it — see `cross_tenant_scope`.
+        let transaction = cross_tenant_scope(&mut client).await?;
+        let row = transaction
             .query_opt(
                 "UPDATE agent_enrollment_tokens SET consumed_at=now()
                  WHERE token_hash=$1 AND expires_at>now() AND consumed_at IS NULL
@@ -1440,6 +1549,7 @@ impl Store for PgStore {
             .await
             .map_err(database_error)?
             .ok_or(StoreError::NotFound)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(EnrollmentGrant {
             tenant_id: row.get("tenant_id"),
             target_id: row.get("target_id"),
@@ -1453,8 +1563,9 @@ impl Store for PgStore {
         certificate_fingerprint: &str,
         certificate_expires_at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
-        let client = self.client().await?;
-        client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, &grant.tenant_id).await?;
+        transaction
             .execute(
                 "INSERT INTO deploy_agents
                  (agent_id, tenant_id, target_id, certificate_fingerprint, certificate_expires_at)
@@ -1473,6 +1584,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(())
     }
 
@@ -1482,8 +1594,12 @@ impl Store for PgStore {
         target_id: &str,
         certificate_fingerprint: &str,
     ) -> Result<Option<AgentIdentity>, StoreError> {
-        let client = self.client().await?;
-        let row = client
+        let mut client = self.client().await?;
+        // The other credential lookup. The agent presents its certificate
+        // fingerprint and the row answers WHICH tenant it belongs to, so the
+        // tenant cannot be bound before the query — see `cross_tenant_scope`.
+        let transaction = cross_tenant_scope(&mut client).await?;
+        let row = transaction
             .query_opt(
                 "SELECT tenant_id, target_id, agent_id FROM deploy_agents
                  WHERE agent_id=$1 AND target_id=$2 AND certificate_fingerprint=$3
@@ -1492,6 +1608,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         Ok(row.map(|row| AgentIdentity {
             tenant_id: row.get("tenant_id"),
             target_id: row.get("target_id"),
@@ -1504,8 +1621,9 @@ impl Store for PgStore {
         tenant_id: &str,
         target_id: &str,
     ) -> Result<(), StoreError> {
-        let client = self.client().await?;
-        let updated = client
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let updated = transaction
             .execute(
                 "UPDATE server_reports SET health='healthy', last_seen_at=now()
                  WHERE tenant_id=$1 AND id=$2",
@@ -1513,6 +1631,7 @@ impl Store for PgStore {
             )
             .await
             .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
         if updated == 0 {
             return Err(StoreError::NotFound);
         }
@@ -1532,22 +1651,25 @@ impl Store for PgStore {
 
     async fn heartbeat_operation(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         lease_seconds: i64,
     ) -> Result<bool, StoreError> {
-        self.heartbeat(operation_id, worker_id, lease_seconds).await
+        self.heartbeat(tenant_id, operation_id, worker_id, lease_seconds)
+            .await
     }
 
     async fn transition_operation(
         &self,
+        tenant_id: &str,
         operation_id: Uuid,
         worker_id: &str,
         next: OperationState,
         result: Option<Value>,
         error: Option<OpsErrorBody>,
     ) -> Result<Operation, StoreError> {
-        self.transition_claimed_operation(operation_id, worker_id, next, result, error)
+        self.transition_claimed_operation(tenant_id, operation_id, worker_id, next, result, error)
             .await
     }
 }
@@ -1813,6 +1935,121 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    const INIT_SQL: &str = include_str!("../migrations/0001_init.sql");
+    const RLS_SQL: &str = include_str!("../migrations/0002_tenant_isolation.sql");
+
+    /// The production half of this file.
+    ///
+    /// Split at the test module, because every structural assertion below
+    /// searches for a string it also *contains* — scanning the whole file
+    /// would count the assertion itself as a use.
+    fn production_source() -> &'static str {
+        const SOURCE: &str = include_str!("store.rs");
+        SOURCE.split("#[cfg(test)]").next().expect("source prefix")
+    }
+
+    /// The migration with its `--` comments removed, for the same reason:
+    /// the comments name the mistakes the assertions look for.
+    fn rls_statements() -> String {
+        RLS_SQL
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn squeeze(value: &str) -> String {
+        value.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Table names declared in `0001_init.sql` that carry a `tenant_id`.
+    fn tenant_tables() -> Vec<String> {
+        let mut tables = Vec::new();
+        for block in INIT_SQL.split("CREATE TABLE IF NOT EXISTS ").skip(1) {
+            let (name, rest) = block.split_once(" (").expect("table header");
+            let body = rest.split("\n);").next().expect("table body");
+            if body.contains("tenant_id") {
+                tables.push(name.trim().to_string());
+            }
+        }
+        tables
+    }
+
+    /// ADR-0149 §8. The list is read from the schema, not hand-kept, so table
+    /// thirteen fails here on the day it is added rather than shipping without
+    /// a policy — which is the failure mode that looks fine in review.
+    #[test]
+    fn every_tenant_table_is_protected_by_row_level_security() {
+        let tables = tenant_tables();
+        // A sweep that found no tables would pass every assertion below.
+        assert!(tables.len() >= 12, "only found {tables:?}");
+        let statements = squeeze(&rls_statements());
+
+        for table in &tables {
+            assert!(
+                statements.contains(&format!("ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")),
+                "{table} is never ENABLEd"
+            );
+            assert!(
+                statements.contains(&format!("ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")),
+                // Without FORCE the table owner is exempt, and the controller
+                // connects as the owner: every policy would be silently off.
+                "{table} is ENABLEd but not FORCEd, so its policy does nothing"
+            );
+            assert!(
+                statements.contains(&format!("ON {table} USING (ops_tenant_visible(tenant_id))")),
+                "{table} has no tenant policy"
+            );
+        }
+    }
+
+    /// The predicate must not gain a `::uuid` cast copied from
+    /// `services/diagnostic-server`, whose `tenant_id` is a UUID. Here it is
+    /// TEXT, and a cast would raise per row — turning a clean deny into a 500.
+    #[test]
+    fn the_policy_does_not_cast_the_tenant_to_a_uuid() {
+        assert!(!rls_statements().contains("::uuid"));
+    }
+
+    /// Both settings must be transaction-local. A session-level setting on a
+    /// POOLED connection outlives the request, hands the next caller the
+    /// previous caller's tenant, and fails OPEN.
+    #[test]
+    fn both_scope_settings_are_transaction_local() {
+        assert!(cognia_tenant_auth::rls::SET_TENANT_SQL.ends_with(", true)"));
+        assert!(SET_CROSS_TENANT_SQL.ends_with(", true)"));
+    }
+
+    /// Only the three statements RLS cannot answer may bypass it. Widening
+    /// this list widens the blast radius of a bug back to what it was before
+    /// row-level security existed, so it is pinned rather than trusted.
+    #[test]
+    fn the_cross_tenant_escape_has_exactly_three_users() {
+        let uses = production_source()
+            .matches("cross_tenant_scope(&mut client).await?")
+            .count();
+        assert_eq!(
+            uses, 3,
+            "expected consume_enrollment, authenticate_agent and requeue_expired_leases"
+        );
+    }
+
+    /// Every pooled client in `PgStore` is immediately put into a scope. A
+    /// statement issued straight off `self.client()` would run with no
+    /// `app.tenant_id` bound — which under these policies returns nothing, so
+    /// the failure is a silently empty list rather than a leak. Still a bug.
+    #[test]
+    fn no_statement_runs_outside_a_scope() {
+        let source = production_source();
+        let acquisitions = source.matches("self.client().await?").count();
+        let scopes = source.matches("tenant_scope(&mut client").count();
+        assert!(acquisitions >= 20, "only found {acquisitions} acquisitions");
+        assert_eq!(
+            acquisitions, scopes,
+            "every acquired client must open a tenant or cross-tenant scope"
+        );
+    }
+
     #[tokio::test]
     async fn successful_backup_results_become_queryable_recovery_points() {
         let store = InMemoryStore::default();
@@ -1835,6 +2072,7 @@ mod tests {
             .expect("claimed operation");
         store
             .transition_operation(
+                "tenant-a",
                 operation.id,
                 "agent-1",
                 OperationState::Preparing,
@@ -1845,6 +2083,7 @@ mod tests {
             .unwrap();
         store
             .transition_operation(
+                "tenant-a",
                 operation.id,
                 "agent-1",
                 OperationState::Executing,
@@ -1855,6 +2094,7 @@ mod tests {
             .unwrap();
         store
             .transition_operation(
+                "tenant-a",
                 operation.id,
                 "agent-1",
                 OperationState::Verifying,
@@ -1865,6 +2105,7 @@ mod tests {
             .unwrap();
         store
             .transition_operation(
+                "tenant-a",
                 operation.id,
                 "agent-1",
                 OperationState::Succeeded,
