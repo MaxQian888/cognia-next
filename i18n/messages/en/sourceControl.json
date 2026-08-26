@@ -313,12 +313,51 @@
       "blocked": "This cannot be published from here."
     },
     "result": {
-      "upToDate": "Already up to date.",
-      "restacked": "{count, plural, =1 {# branch moved} other {# branches moved}}.",
+      "blocked": "Stopped at {branch}: {reason}.",
       "conflict": "{branch} hit a conflict. Resolve it in {worktree}, then continue.",
-      "refused": "Nothing was moved."
+      "forkOnly": "You can only push to a fork of {repository}, and a stack cannot cross a fork boundary. Nothing was published.",
+      "mergeConflict": "Landing stopped at {branch} — resolve the conflict in {worktree}, then run it again.",
+      "merged": "{count, plural, =1 {# layer landed} other {# layers landed}}.",
+      "published": "{created, plural, =0 {No new pull requests} =1 {# pull request opened} other {# pull requests opened}}, {retargeted, plural, =0 {none retargeted} =1 {# retargeted} other {# retargeted}}.",
+      "refused": "Nothing was moved.",
+      "restackRefused": "The layers above the one that landed could not be put back on the trunk.",
+      "restacked": "{count, plural, =1 {# branch moved} other {# branches moved}}.",
+      "unsupportedMethod": "This repository allows only {allowed}, and none of those suit this stack.",
+      "upToDate": "Already up to date.",
+      "weakLease": "Pushed with the weaker lease — this git has no --force-if-includes, so a background fetch could have satisfied it."
     },
-    "error": "Stack operation failed: {message}"
+    "error": "Stack operation failed: {message}",
+    "publish": "Publish",
+    "publishing": "Publishing…",
+    "land": "Land",
+    "restackAndPush": "Restack & push",
+    "pullRequest": "#{number}",
+    "undo": "Undo",
+    "undoTitle": "Put this branch back on the tip kept at {ref}",
+    "newLayer": "New layer",
+    "newLayerBase": "On top of",
+    "newLayerTitle": "What the layer does",
+    "newLayerTitlePlaceholder": "Extract the retry helper",
+    "newLayerBranch": "Branch name",
+    "create": "Create layer",
+    "forge": {
+      "noCredential": "No GitHub credential for {repository}. Sign in with `gh auth login` and try again.",
+      "noRemote": "This repository has no remote that hosts pull requests.",
+      "unsupportedHost": "{host} is not a forge Cognia can publish to yet — only github.com."
+    },
+    "mergeBlocked": {
+      "changesRequested": "a reviewer requested changes",
+      "ciFailing": "its checks are failing",
+      "ciPending": "its checks are still running",
+      "ciUnknown": "its checks could not be read",
+      "conflict": "it conflicts with its base",
+      "noPullRequest": "it has no open pull request",
+      "notMergeable": "GitHub does not consider it mergeable",
+      "reviewRequired": "it still needs a review"
+    },
+    "model": {
+      "branchPerLayer": "One branch per layer. Authoring a stack as one branch of commits is not available yet."
+    }
   },
   "stash": {
     "apply": "Apply",

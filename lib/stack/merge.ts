@@ -30,15 +30,26 @@ import type { Stack, StackLayer } from "./model"
 import type { ForgeMergeMethod, ForgeObservation, ForgeStackAdapter } from "./forge/types"
 import { restackStack, type RestackDeps, type RestackStackResult } from "./restack"
 
-export type MergeBlockReason =
-  | "noPullRequest"
-  | "ciFailing"
-  | "ciPending"
-  | "ciUnknown"
-  | "changesRequested"
-  | "reviewRequired"
-  | "conflict"
-  | "notMergeable"
+/**
+ * Every reason a layer can be refused, as a runtime list.
+ *
+ * A surface builds its message key from the reason (`mergeBlocked.${reason}`),
+ * which `lint:i18n` cannot see. A new reason without a sentence would render a
+ * raw key at the moment somebody's merge stopped, so the list is exported and
+ * a catalogue test checks it rather than a person remembering.
+ */
+export const MERGE_BLOCK_REASONS = [
+  "noPullRequest",
+  "ciFailing",
+  "ciPending",
+  "ciUnknown",
+  "changesRequested",
+  "reviewRequired",
+  "conflict",
+  "notMergeable",
+] as const
+
+export type MergeBlockReason = (typeof MERGE_BLOCK_REASONS)[number]
 
 /**
  * Whether this layer may be merged, or why not.

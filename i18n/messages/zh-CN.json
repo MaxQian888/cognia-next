@@ -36491,12 +36491,51 @@
         "blocked": "无法从这里发布。"
       },
       "result": {
-        "upToDate": "已经是最新的。",
-        "restacked": "已移动 {count} 个分支。",
+        "blocked": "停在 {branch}：{reason}。",
         "conflict": "{branch} 出现冲突。请在 {worktree} 中解决后继续。",
-        "refused": "没有移动任何分支。"
+        "forkOnly": "你只能推送到 {repository} 的 fork，而栈无法跨越 fork 边界。什么都没有发布。",
+        "mergeConflict": "合入停在 {branch}——先在 {worktree} 解决冲突，再重新运行。",
+        "merged": "合入了 {count} 层。",
+        "published": "打开了 {created} 个 Pull Request，重指了 {retargeted} 个。",
+        "refused": "没有移动任何分支。",
+        "restackRefused": "已合入的那层之上的分支没能重新放回主干。",
+        "restacked": "已移动 {count} 个分支。",
+        "unsupportedMethod": "这个仓库只允许 {allowed}，其中没有一种适合这个栈。",
+        "upToDate": "已经是最新的。",
+        "weakLease": "使用了较弱的租约推送——这个 git 没有 --force-if-includes，后台的一次 fetch 就能让租约形同虚设。"
       },
-      "error": "栈操作失败：{message}"
+      "error": "栈操作失败：{message}",
+      "publish": "发布",
+      "publishing": "发布中…",
+      "land": "合入",
+      "restackAndPush": "重排并推送",
+      "pullRequest": "#{number}",
+      "undo": "撤销",
+      "undoTitle": "把这个分支放回 {ref} 保留的旧顶点",
+      "newLayer": "新建层",
+      "newLayerBase": "基于",
+      "newLayerTitle": "这一层做什么",
+      "newLayerTitlePlaceholder": "抽出重试辅助函数",
+      "newLayerBranch": "分支名",
+      "create": "创建层",
+      "forge": {
+        "noCredential": "没有 {repository} 的 GitHub 凭据。先执行 `gh auth login` 再试。",
+        "noRemote": "这个仓库没有能托管 Pull Request 的远程。",
+        "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台——目前只支持 github.com。"
+      },
+      "mergeBlocked": {
+        "changesRequested": "有评审要求修改",
+        "ciFailing": "它的检查未通过",
+        "ciPending": "它的检查还在运行",
+        "ciUnknown": "读不到它的检查状态",
+        "conflict": "它与基分支冲突",
+        "noPullRequest": "它没有打开的 Pull Request",
+        "notMergeable": "GitHub 认为它不可合并",
+        "reviewRequired": "它还需要评审"
+      },
+      "model": {
+        "branchPerLayer": "每层一个分支。以「一条分支上的多个提交」的方式创作栈，暂未提供。"
+      }
     },
     "stash": {
       "apply": "应用",
@@ -36591,9 +36630,9 @@
       "pathPlaceholder": "选择一个空目录",
       "prune": "清理失效项",
       "pruned": "已清理失效的工作树记录",
+      "relativePathPlaceholder": "worktrees/feature-name",
       "registryProtected": "此工作树现已受 Workspace Registry 保护。",
       "registryUnavailable": "无法验证工作区所有权，已阻止移除。",
-      "relativePathPlaceholder": "worktrees/feature-name",
       "remove": "移除工作树",
       "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
       "removeTitle": "移除工作树？",
