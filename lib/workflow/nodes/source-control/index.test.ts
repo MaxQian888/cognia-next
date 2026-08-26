@@ -20,18 +20,28 @@ jest.mock("@/stores/git/git-store", () => ({
   useGitStore: { getState: () => ({ rootDir: mockRootDir }) },
 }))
 
+let mockProjects: Record<string, unknown> = {}
+const projectsGet = jest.fn(async (id: string) => mockProjects[id])
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ projects: { get: (id: string) => projectsGet(id) } }),
+}))
+
 import "."
 import { getExecutor } from "../registry"
 
-function run(kind: string, params: Record<string, unknown>) {
+function run(kind: string, params: Record<string, unknown>, projectId?: string) {
   const reg = getExecutor(kind as never, 1)
   if (!reg) throw new Error(`no executor for ${kind}`)
-  return reg.execute({ params } as unknown as StepExecutionContext)
+  return reg.execute({
+    params,
+    ...(projectId ? { projectId } : {}),
+  } as unknown as StepExecutionContext)
 }
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockRootDir = "/repo"
+  mockProjects = {}
 })
 
 describe("action.git.* node executors", () => {

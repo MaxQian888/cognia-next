@@ -711,6 +711,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 traceId,
                 lineage,
                 securityContext,
+                ...(projectId ? { projectId } : {}),
                 ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
             : await runStep({
@@ -729,6 +730,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
                 traceId,
                 lineage,
                 securityContext,
+                ...(projectId ? { projectId } : {}),
                 ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
               })
         stepOutputs.set(stepId, result.output)

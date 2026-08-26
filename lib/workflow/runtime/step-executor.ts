@@ -48,6 +48,8 @@ export interface RunStepInput {
   traceId?: string
   lineage?: WorkflowRunLineage
   securityContext?: WorkflowRunSecurityContext
+  /** Owning workspace, so executors can resolve a directory without a UI store. */
+  projectId?: string
   /** Formal-run provenance inherited by every node executor. */
   executionBinding?: WorkflowExecutionBinding
   /**
@@ -210,6 +212,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
     ...(input.lineage ? { lineage: input.lineage } : {}),
     ...(input.securityContext ? { securityContext: input.securityContext } : {}),
+    ...(input.projectId ? { projectId: input.projectId } : {}),
     params: resolvedParamRecord,
     upstream,
     trigger: input.trigger,

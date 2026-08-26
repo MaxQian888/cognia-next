@@ -82,6 +82,8 @@ export interface RunLoopContainerInput {
   traceId?: string
   lineage?: WorkflowRunLineage
   securityContext?: WorkflowRunSecurityContext
+  /** Owning workspace, threaded to every body step. */
+  projectId?: string
   executionBinding?: WorkflowExecutionBinding
 }
 
@@ -498,6 +500,7 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         ...(input.traceId ? { traceId: input.traceId } : {}),
         ...(input.lineage ? { lineage: input.lineage } : {}),
         ...(input.securityContext ? { securityContext: input.securityContext } : {}),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
         ...(input.executionBinding ? { executionBinding: input.executionBinding } : {}),
         extraUpstream: input.extraUpstream,
         staticData: input.staticData,

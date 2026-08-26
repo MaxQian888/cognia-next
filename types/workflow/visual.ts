@@ -1117,6 +1117,16 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   lineage?: WorkflowRunLineage
   securityContext?: WorkflowRunSecurityContext
   /**
+   * The workspace this run belongs to, stamped from the active project when the
+   * run was admitted (the same value as `WorkflowRunRow.projectId`).
+   *
+   * Threaded onto the step so an executor that needs a directory can ask the
+   * run rather than a UI store. A scheduled or headless run has no open panel,
+   * so a store read there is not a fallback — it is an empty value dressed up
+   * as one.
+   */
+  projectId?: string
+  /**
    * Optional run-scoped agent-trace id. When set (e.g. by the eval workflow
    * target), AI nodes emit their LLM spans under this trace so the run can be
    * assembled via `queryByTrace`. Undefined for normal runs.
