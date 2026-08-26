@@ -1,5 +1,6 @@
 /**
- * What a stack is, in the two ways people actually author one.
+ * What a stack is, and the two ways people author one — of which this codebase
+ * currently produces the first.
  *
  * # Two authoring models, one thing on the forge
  *
@@ -15,7 +16,9 @@
  * forge — a chain of real branches, each based on the one below — because that
  * is the only shape a forge understands, the only one branch protection can be
  * evaluated against, and the only one a merge queue can process. Everything
- * downstream of {@link resolveStack} therefore sees one model.
+ * downstream of a {@link Stack} therefore sees one shape.
+ *
+ * Only the first is implemented. See {@link StackAuthoringModel}.
  *
  * # Why not a synthetic base branch
  *
@@ -25,14 +28,41 @@
  * prevent, and is why ghstack's own issue about it has been open since 2021.
  */
 
-/** Where a layer's identity comes from. */
+/**
+ * Where a layer's identity comes from.
+ *
+ * ## `commitPerPullRequest` is declared, not implemented
+ *
+ * Nothing produces it. `discoverStacks` stamps `branchPerLayer`, the Stacks
+ * panel creates `branchPerLayer`, and Agent Team publishes `branchPerLayer`;
+ * the only code that reads the other member is {@link chooseMergeMethod}, which
+ * refuses to squash it. It is declared here because the merge rule genuinely
+ * differs and writing that rule against a model the type does not know is how
+ * it gets forgotten — but a stack in this member's shape cannot currently be
+ * authored, and the panel says so where someone would look for it
+ * (`sourceControl.stacks.model.branchPerLayer`).
+ *
+ * Building it means rewriting commits to carry {@link CHANGE_ID_TRAILER} and
+ * exploding one branch into the chain of real branches a forge needs. Both
+ * halves of that are absent. `model.test.ts` pins the absence so this comment
+ * cannot quietly become false.
+ */
 export type StackAuthoringModel =
   /** The branch name is the identity; the parent lives in git config. */
   | "branchPerLayer"
-  /** A `Cognia-Change-Id` commit trailer is the identity. */
+  /**
+   * A `Cognia-Change-Id` commit trailer is the identity.
+   *
+   * Inert — see the note above. No code path produces a stack with this model.
+   */
   | "commitPerPullRequest"
 
-/** The trailer that carries identity in the commit-per-pull-request model. */
+/**
+ * The trailer that carries identity in the commit-per-pull-request model.
+ *
+ * Inert alongside {@link StackAuthoringModel}: nothing writes it and nothing
+ * reads it back out of a commit.
+ */
 export const CHANGE_ID_TRAILER = "Cognia-Change-Id"
 
 export interface StackPullRequest {

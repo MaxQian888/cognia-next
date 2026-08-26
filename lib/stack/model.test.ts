@@ -1,3 +1,6 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { join, sep } from "node:path"
+
 import {
   DEFAULT_BRANCH_TEMPLATE,
   baseBranches,
@@ -67,5 +70,54 @@ describe("renderBranchName", () => {
     expect(slugifyBranchSegment("  Hello, World!! ")).toBe("hello-world")
     expect(slugifyBranchSegment("x".repeat(200))).toHaveLength(60)
     expect(slugifyBranchSegment("---")).toBe("")
+  })
+})
+
+describe("commit-per-pull-request is inert, on purpose", () => {
+  // Working Rule 7: intentional dormancy is documented at the type, labelled in
+  // the UI, and pinned by a test. This is the third axis. Without it the note
+  // in `model.ts` quietly becomes false the first time somebody half-wires the
+  // model and stops.
+  const ROOTS = ["app", "components", "hooks", "lib", "plugins", "stores"]
+  const ENGINE = join("lib", "stack") + sep
+
+  function walk(dir: string, onFile: (path: string) => void): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue
+        walk(path, onFile)
+        continue
+      }
+      if (/\.(ts|tsx)$/.test(entry.name) && !/\.test\.(ts|tsx)$/.test(entry.name)) onFile(path)
+    }
+  }
+
+  const scanned: string[] = []
+  const callers: string[] = []
+  for (const root of ROOTS) {
+    const dir = join(process.cwd(), root)
+    if (!existsSync(dir)) continue
+    walk(dir, (path) => {
+      const relative = path.slice(process.cwd().length + 1)
+      scanned.push(relative)
+      // The engine itself may name the model — `chooseMergeMethod` refuses to
+      // squash it, which is the whole reason the member is declared.
+      if (relative.startsWith(ENGINE)) return
+      const source = readFileSync(path, "utf8")
+      if (source.includes("commitPerPullRequest") || source.includes("CHANGE_ID_TRAILER")) {
+        callers.push(relative)
+      }
+    })
+  }
+
+  it("scanned the tree it claims to have scanned", () => {
+    // A sweep that walked nothing also reports no callers.
+    expect(scanned.length).toBeGreaterThan(2000)
+    expect(scanned).toContain(join("lib", "stack", "publish.ts"))
+  })
+
+  it("has no producer outside the engine", () => {
+    expect(callers).toEqual([])
   })
 })
