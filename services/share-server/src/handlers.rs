@@ -89,6 +89,32 @@ fn precheck(state: &AppState, peer: SocketAddr, headers: &HeaderMap) -> Option<R
     None
 }
 
+/// The org and person behind a verified grant — ADR-0149 §8.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller {
+    pub org_id: String,
+    pub user_id: String,
+}
+
+/// Verify the `Authorization: Bearer …` header as a collaboration-plane grant.
+///
+/// `None` covers every negative case on purpose — no header, no configured
+/// key, a bad signature, an expired grant. The caller's next move is the same
+/// for all of them (401 with a body that says nothing more), and separating
+/// them here would only invite a handler to leak which one it was.
+fn grant_caller(headers: &HeaderMap, state: &AppState) -> Option<Caller> {
+    let verifier = state.grants.as_ref()?;
+    let token = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())?
+        .strip_prefix("Bearer ")?;
+    let claims = verifier.verify(token, now_ms_i64() / 1000).ok()?;
+    Some(Caller {
+        org_id: claims.org_id,
+        user_id: claims.user_id,
+    })
+}
+
 /// Constant-time bearer check, mirroring the Worker's `isAuthorized`: an unset
 /// secret rejects everything.
 fn authorized(headers: &HeaderMap, secret: &str) -> bool {
@@ -121,7 +147,15 @@ fn generate_owner_token() -> String {
     out
 }
 
-fn owner_authorized(headers: &HeaderMap, meta: &ShareMeta, secret: &str) -> bool {
+fn owner_authorized(headers: &HeaderMap, meta: &ShareMeta, state: &AppState) -> bool {
+    // ADR-0149 §8 — an org grant reaches its own org's shares. This is the
+    // off-boarding case the ADR is for: revoking what a departing person
+    // shared cannot depend on still holding their per-share tokens.
+    if let (Some(org_id), Some(caller)) = (meta.org_id.as_deref(), grant_caller(headers, state)) {
+        if caller.org_id == org_id {
+            return true;
+        }
+    }
     if let Some(owner_token) = meta.owner_token.as_deref().filter(|s| !s.is_empty()) {
         let supplied = headers
             .get(OWNER_TOKEN_HEADER)
@@ -129,7 +163,7 @@ fn owner_authorized(headers: &HeaderMap, meta: &ShareMeta, secret: &str) -> bool
             .unwrap_or("");
         return timing_safe_eq(supplied, owner_token);
     }
-    authorized(headers, secret)
+    authorized(headers, &state.upload_secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +179,11 @@ pub async fn create(
     if let Some(resp) = precheck(&state, peer, &headers) {
         return resp;
     }
-    if !authorized(&headers, &state.upload_secret) {
+    // A grant first, the legacy secret second. Order matters: the grant is the
+    // credential that says WHO is asking, and a deployment that has both
+    // should attribute the share rather than fall back to the anonymous path.
+    let caller = grant_caller(&headers, &state);
+    if caller.is_none() && !authorized(&headers, &state.upload_secret) {
         state.metrics.rejected(RejectReason::Unauthorized);
         return err(StatusCode::UNAUTHORIZED, "unauthorized");
     }
@@ -216,6 +254,10 @@ pub async fn create(
         view_count: 0,
         revoked: false,
         owner_token: Some(owner_token.clone()),
+        // Both, or neither. They come from one verified grant, and half of
+        // them would be a claim nobody made.
+        org_id: caller.as_ref().map(|caller| caller.org_id.clone()),
+        creator_user_id: caller.as_ref().map(|caller| caller.user_id.clone()),
     };
 
     let store = state.store.clone();
@@ -234,6 +276,84 @@ pub async fn create(
     state.metrics.created();
     let payload = json!({ "code": code, "ownerToken": owner_token, "expiresAt": expires_at });
     json_response(StatusCode::CREATED, payload)
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/orgs/:org_id/shares          (grant-only)
+// DELETE /v1/orgs/:org_id/shares/:code (grant-only)
+//
+// ADR-0149 §8. Neither accepts the legacy upload secret, and that is the
+// point: one global bearer says nothing about which org is asking, so honouring
+// it here would let any holder list and delete every tenant's links.
+// ---------------------------------------------------------------------------
+
+/// The caller, if their grant is for the org named in the path.
+///
+/// A grant for a different org is refused identically to no grant at all. The
+/// alternative — a distinguishable "wrong org" — would confirm that the org in
+/// the path exists, which is exactly what an enumeration wants.
+fn org_caller(headers: &HeaderMap, state: &AppState, org_id: &str) -> Option<Caller> {
+    grant_caller(headers, state).filter(|caller| caller.org_id == org_id)
+}
+
+pub async fn list_org_shares(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(org_id): Path<String>,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    if org_caller(&headers, &state, &org_id).is_none() {
+        state.metrics.rejected(RejectReason::Unauthorized);
+        return err(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+
+    let now = now_ms_i64();
+    let store = state.store.clone();
+    let listed = tokio::task::spawn_blocking(move || store.list_by_org(&org_id, now)).await;
+    match listed {
+        Ok(Ok(shares)) => json_response(
+            StatusCode::OK,
+            json!({ "shares": serde_json::to_value(&shares).unwrap_or_else(|_| json!([])) }),
+        ),
+        other => {
+            tracing::error!(target: "share", ?other, "store.list_by_org failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+pub async fn delete_org_share(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((org_id, code)): Path<(String, String)>,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    if org_caller(&headers, &state, &org_id).is_none() {
+        state.metrics.rejected(RejectReason::Unauthorized);
+        return err(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+
+    let store = state.store.clone();
+    let deleted = tokio::task::spawn_blocking(move || store.delete_in_org(&org_id, &code)).await;
+    match deleted {
+        // A code in another org answers exactly like a code that never
+        // existed: anything else is an oracle for which codes are real.
+        Ok(Ok(true)) => json_response(StatusCode::OK, json!({ "ok": true })),
+        Ok(Ok(false)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            err(StatusCode::NOT_FOUND, "not found")
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.delete_in_org failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +409,7 @@ pub async fn stats(
     let result = tokio::task::spawn_blocking(move || store.stats(&code, now)).await;
     match result {
         Ok(Ok(Some(meta))) => {
-            if !owner_authorized(&headers, &meta, &state.upload_secret) {
+            if !owner_authorized(&headers, &meta, &state) {
                 state.metrics.rejected(RejectReason::Unauthorized);
                 return err(StatusCode::UNAUTHORIZED, "unauthorized");
             }
@@ -334,7 +454,7 @@ pub async fn delete(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
         }
     };
-    if !owner_authorized(&headers, &meta, &state.upload_secret) {
+    if !owner_authorized(&headers, &meta, &state) {
         state.metrics.rejected(RejectReason::Unauthorized);
         return err(StatusCode::UNAUTHORIZED, "unauthorized");
     }
@@ -425,6 +545,36 @@ mod tests {
         assert_ne!(token, generate_owner_token());
     }
 
+    /// A real `AppState` over a temp database, so the owner-authorization
+    /// tests exercise the same function the routes do rather than a
+    /// stand-in that could drift from it.
+    fn test_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("shares.sqlite");
+        let mut config = crate::server::Config::for_test(path.to_str().expect("utf8 path"));
+        config.upload_secret = "global".to_string();
+        (crate::server::build_state(&config).expect("state"), dir)
+    }
+
+    /// A grant signed with the test config's key, expiring well in the future.
+    fn grant_for(org_id: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        use hmac::{Hmac, KeyInit, Mac};
+        use sha2::Sha256;
+
+        let expires_at = now_ms_i64() / 1000 + 300;
+        let claims =
+            format!(r#"{{"userId":"usr_ada","orgId":"{org_id}","expiresAt":{expires_at}}}"#);
+        let payload = URL_SAFE_NO_PAD.encode(claims.as_bytes());
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"0123456789abcdef0123456789abcdef")
+            .expect("key length");
+        mac.update(payload.as_bytes());
+        format!(
+            "{payload}.{}",
+            URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+        )
+    }
+
     #[test]
     fn owner_authorized_prefers_share_token_over_global_secret() {
         let meta = ShareMeta {
@@ -435,12 +585,15 @@ mod tests {
             view_count: 0,
             revoked: false,
             owner_token: Some("owner-secret".to_string()),
+            org_id: None,
+            creator_user_id: None,
         };
+        let (state, _dir) = test_state();
         let mut h = HeaderMap::new();
         h.insert(AUTHORIZATION, "Bearer global".parse().unwrap());
-        assert!(!owner_authorized(&h, &meta, "global"));
+        assert!(!owner_authorized(&h, &meta, &state));
         h.insert(OWNER_TOKEN_HEADER, "owner-secret".parse().unwrap());
-        assert!(owner_authorized(&h, &meta, "global"));
+        assert!(owner_authorized(&h, &meta, &state));
     }
 
     #[test]
@@ -453,9 +606,63 @@ mod tests {
             view_count: 0,
             revoked: false,
             owner_token: None,
+            org_id: None,
+            creator_user_id: None,
         };
+        let (state, _dir) = test_state();
         let mut h = HeaderMap::new();
         h.insert(AUTHORIZATION, "Bearer global".parse().unwrap());
-        assert!(owner_authorized(&h, &meta, "global"));
+        assert!(owner_authorized(&h, &meta, &state));
+    }
+
+    fn owned_by(org_id: &str) -> ShareMeta {
+        ShareMeta {
+            created_at: 0,
+            expires_at: Some(1),
+            max_views: None,
+            burn_after_read: false,
+            view_count: 0,
+            revoked: false,
+            owner_token: Some("owner-secret".to_string()),
+            org_id: Some(org_id.to_string()),
+            creator_user_id: Some("usr_ada".to_string()),
+        }
+    }
+
+    /// ADR-0149 §8's motivating case: revoking what a person shared when they
+    /// leave, without still holding their per-share tokens.
+    #[test]
+    fn an_org_grant_reaches_its_own_org_s_share() {
+        let (state, _dir) = test_state();
+        let mut h = HeaderMap::new();
+        h.insert(
+            AUTHORIZATION,
+            format!("Bearer {}", grant_for("org_acme")).parse().unwrap(),
+        );
+        assert!(owner_authorized(&h, &owned_by("org_acme"), &state));
+    }
+
+    #[test]
+    fn an_org_grant_does_not_reach_another_org_s_share() {
+        let (state, _dir) = test_state();
+        let mut h = HeaderMap::new();
+        h.insert(
+            AUTHORIZATION,
+            format!("Bearer {}", grant_for("org_other"))
+                .parse()
+                .unwrap(),
+        );
+        assert!(!owner_authorized(&h, &owned_by("org_acme"), &state));
+    }
+
+    /// The legacy secret must not become an org credential by accident. It
+    /// proves nothing about who is asking, which is why ADR-0149 §8 calls it
+    /// out: one leak would otherwise be every tenant's leak.
+    #[test]
+    fn the_global_secret_does_not_reach_an_owned_share() {
+        let (state, _dir) = test_state();
+        let mut h = HeaderMap::new();
+        h.insert(AUTHORIZATION, "Bearer global".parse().unwrap());
+        assert!(!owner_authorized(&h, &owned_by("org_acme"), &state));
     }
 }

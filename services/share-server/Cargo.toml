@@ -48,6 +48,11 @@ parking_lot = "0.12"
 # Real end-to-end HTTP client for the integration tests (plain http, no TLS).
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tempfile = "3"
+# Minting a grant is not something this service does, so these are test-only:
+# they exist to produce the credential a test presents, never to issue one.
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"
 
 # This crate is the workspace root. `core/` is a member; the TypeScript
 # `worker/` and `pages/` directories have no Cargo.toml so cargo ignores them,

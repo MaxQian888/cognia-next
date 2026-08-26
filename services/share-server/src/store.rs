@@ -18,6 +18,25 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 type Pool = r2d2::Pool<SqliteConnectionManager>;
 
+/// One row of an org's share listing.
+///
+/// Deliberately not `ShareMeta`: the envelope is never here, and neither is
+/// the owner token — a listing is for an operator deciding what to revoke, and
+/// handing back the per-share secret would turn a read into a grant.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgShare {
+    pub code: String,
+    pub created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_views: Option<u64>,
+    pub view_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_user_id: Option<String>,
+}
+
 /// Result of a read attempt that has already applied the lifecycle decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadOutcome {
@@ -66,6 +85,7 @@ impl Store {
             )
             .context("create schema")?;
             ensure_owner_token_column(&conn).context("migrate owner token column")?;
+            ensure_tenancy_columns(&conn).context("migrate tenancy columns")?;
         }
         Ok(Self { pool })
     }
@@ -75,8 +95,9 @@ impl Store {
         let conn = self.pool.get()?;
         conn.execute(
             "INSERT INTO shares
-                (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count, revoked, owner_token)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (code, envelope, created_at, expires_at, max_views, burn_after_read, view_count,
+                 revoked, owner_token, org_id, creator_user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 code,
                 envelope,
@@ -87,6 +108,8 @@ impl Store {
                 meta.view_count as i64,
                 meta.revoked as i64,
                 meta.owner_token.as_deref(),
+                meta.org_id.as_deref(),
+                meta.creator_user_id.as_deref(),
             ],
         )?;
         Ok(())
@@ -114,6 +137,8 @@ impl Store {
                         view_count: r.get::<_, i64>(5)? as u64,
                         revoked: r.get::<_, i64>(6)? != 0,
                         owner_token: r.get(7)?,
+                        org_id: None,
+                        creator_user_id: None,
                     };
                     Ok((envelope, meta))
                 },
@@ -153,7 +178,8 @@ impl Store {
         let conn = self.pool.get()?;
         let meta = conn
             .query_row(
-                "SELECT created_at, expires_at, max_views, burn_after_read, view_count, revoked, owner_token
+                "SELECT created_at, expires_at, max_views, burn_after_read, view_count, revoked,
+                        owner_token, org_id, creator_user_id
                  FROM shares WHERE code = ?1",
                 [code],
                 |r| {
@@ -165,6 +191,8 @@ impl Store {
                         view_count: r.get::<_, i64>(4)? as u64,
                         revoked: r.get::<_, i64>(5)? != 0,
                         owner_token: r.get(6)?,
+                        org_id: r.get(7)?,
+                        creator_user_id: r.get(8)?,
                     })
                 },
             )
@@ -190,6 +218,51 @@ impl Store {
         Ok(())
     }
 
+    /// One org's live shares, newest first — ADR-0149 §8.
+    ///
+    /// Expired rows are filtered rather than deleted: a listing is a read, and
+    /// making it mutate would mean an operator opening a page could race the
+    /// reaper. The reaper still owns deletion.
+    ///
+    /// Never returns a share with no `org_id`. A pre-tenancy share belongs to
+    /// nobody the server can name, and folding it into whichever org happened
+    /// to ask would hand one tenant another's link.
+    pub fn list_by_org(&self, org_id: &str, now_ms: i64) -> anyhow::Result<Vec<OrgShare>> {
+        let conn = self.pool.get()?;
+        let mut statement = conn.prepare(
+            "SELECT code, created_at, expires_at, max_views, view_count, creator_user_id
+             FROM shares
+             WHERE org_id = ?1 AND (expires_at IS NULL OR expires_at > ?2)
+             ORDER BY created_at DESC
+             LIMIT 500",
+        )?;
+        let rows = statement.query_map(params![org_id, now_ms], |r| {
+            Ok(OrgShare {
+                code: r.get(0)?,
+                created_at: r.get(1)?,
+                expires_at: r.get(2)?,
+                max_views: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                view_count: r.get::<_, i64>(4)? as u64,
+                creator_user_id: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Hard-delete a share, but only if it belongs to `org_id`.
+    ///
+    /// Returns whether anything was deleted, so the caller can answer 404 for
+    /// a code in somebody else's org exactly as for a code that never existed
+    /// — otherwise the response is an oracle for which codes are real.
+    pub fn delete_in_org(&self, org_id: &str, code: &str) -> anyhow::Result<bool> {
+        let conn = self.pool.get()?;
+        let deleted = conn.execute(
+            "DELETE FROM shares WHERE code = ?1 AND org_id = ?2",
+            params![code, org_id],
+        )?;
+        Ok(deleted > 0)
+    }
+
     /// Delete every share whose `expires_at` is at/under `now_ms`. Returns the
     /// number reaped. Called periodically by the reaper task.
     pub fn reap_expired(&self, now_ms: i64) -> anyhow::Result<usize> {
@@ -210,13 +283,38 @@ impl Store {
 }
 
 fn ensure_owner_token_column(conn: &rusqlite::Connection) -> anyhow::Result<()> {
-    let has_column: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('shares') WHERE name = 'owner_token'",
+    add_column_if_missing(conn, "owner_token")
+}
+
+/// Give `shares` the ADR-0149 §8 tenancy columns.
+///
+/// Both nullable, and **nothing is backfilled**. Every share created before
+/// this — and every one created with the legacy global upload secret — was
+/// made by a caller who proved nothing about who they were, so there is no
+/// honest value to write. They stay readable by code and revocable by their
+/// owner token; they are simply invisible to org-scoped listing.
+///
+/// Idempotent, like its neighbour: `Store::open` runs it on every start.
+fn ensure_tenancy_columns(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    add_column_if_missing(conn, "org_id")?;
+    add_column_if_missing(conn, "creator_user_id")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_shares_org ON shares(org_id)",
         [],
+    )?;
+    Ok(())
+}
+
+fn add_column_if_missing(conn: &rusqlite::Connection, column: &str) -> anyhow::Result<()> {
+    let has_column: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('shares') WHERE name = ?1",
+        [column],
         |r| r.get(0),
     )?;
     if has_column == 0 {
-        conn.execute("ALTER TABLE shares ADD COLUMN owner_token TEXT", [])?;
+        // The column name is a compile-time literal at every call site, never
+        // request data — SQLite cannot parameterise an identifier.
+        conn.execute(&format!("ALTER TABLE shares ADD COLUMN {column} TEXT"), [])?;
     }
     Ok(())
 }
@@ -241,6 +339,8 @@ mod tests {
             view_count: 0,
             revoked: false,
             owner_token: Some("owner-token".to_string()),
+            org_id: None,
+            creator_user_id: None,
         }
     }
 

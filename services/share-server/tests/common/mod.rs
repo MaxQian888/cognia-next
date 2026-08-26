@@ -39,3 +39,28 @@ pub fn valid_envelope() -> serde_json::Value {
         "checksum": "deadbeef"
     })
 }
+
+/// Mint a grant the test server will accept, for `org_id`.
+///
+/// The service never mints one in production — it only verifies — so the
+/// primitives live here, in the test harness, rather than in the crate.
+pub fn grant_for(org_id: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64
+        + 300;
+    let claims = format!(r#"{{"userId":"usr_ada","orgId":"{org_id}","expiresAt":{expires_at}}}"#);
+    let payload = URL_SAFE_NO_PAD.encode(claims.as_bytes());
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(b"0123456789abcdef0123456789abcdef").expect("key length");
+    mac.update(payload.as_bytes());
+    format!(
+        "{payload}.{}",
+        URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    )
+}

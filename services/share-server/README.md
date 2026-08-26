@@ -73,6 +73,9 @@ All via environment variables (mirrors the `SIGNALING_*` convention):
 | `PORT` / `BIND_ADDR`         | `0.0.0.0:8787`        | Listen address (`BIND_ADDR` wins; PaaS injects `PORT`)            |
 | `SHARE_DB_PATH`              | `./shares.sqlite`     | SQLite database file                                              |
 | `SHARE_UPLOAD_SECRET`        | _(unset)_             | Bearer secret for create/delete/stats. **Unset ⇒ all writes 401** |
+| `SHARE_UPLOAD_SECRET_FILE`   | _(unset)_             | Read the bearer secret from a file instead of the environment     |
+| `SHARE_GRANT_KEY`            | _(unset)_             | Hex HMAC key shared with the collaboration server (ADR-0149 §8)   |
+| `SHARE_GRANT_KEY_FILE`       | _(unset)_             | Read the grant key from a file instead of the environment         |
 | `SHARE_MAX_BODY_BYTES`       | `10485760` (10 MiB)   | Max request body                                                  |
 | `SHARE_MAX_TTL_SECONDS`      | `2592000` (30 days)   | Hard lifetime ceiling; every share expires at or before this      |
 | `SHARE_ALLOWED_ORIGINS`      | _(unset = allow all)_ | Comma-separated `Origin` allowlist                                |
@@ -81,6 +84,36 @@ All via environment variables (mirrors the `SIGNALING_*` convention):
 | `SHARE_RATE_BURST`           | `40`                  | Per-IP burst bucket size                                          |
 | `SHARE_REAPER_INTERVAL_SECS` | `60`                  | TTL sweep interval                                                |
 | `RUST_LOG`                   | `info,share=info`     | Log filter                                                        |
+
+## Tenancy and identity (ADR-0149 §8)
+
+`SHARE_UPLOAD_SECRET` is one bearer for every caller. It says nothing about
+_who_ is asking, so a leak is a total leak and there is no way to answer "which
+org do these shares belong to" or "revoke everything that person shared".
+
+Setting `SHARE_GRANT_KEY` to the same HMAC key the collaboration server signs
+grants with adds the missing half:
+
+- `POST /v1/share` with `Authorization: Bearer <grant>` stamps the share with
+  the grant's org and person. With the legacy secret it stamps neither, because
+  the credential proves neither.
+- `GET /v1/orgs/{orgId}/shares` lists that org's live shares — code, counters
+  and creator, never the envelope or the per-share owner token.
+- `DELETE /v1/orgs/{orgId}/shares/{code}` revokes one without holding its owner
+  token, which is what off-boarding actually needs.
+
+Both org routes are **grant-only**: the legacy secret is never honoured there.
+A grant for a different org is refused exactly like no grant at all, and a code
+in another org answers 404 exactly like a code that never existed — neither
+response is an oracle.
+
+Shares created before this, or with the legacy secret, keep working: they are
+readable by code and revocable by their owner token. They are simply invisible
+to org listing, because nothing knows whose they are and guessing would be
+worse. Nothing is backfilled.
+
+Unset the key and the deployment has no collaboration plane — every grant is
+refused outright rather than falling through to the legacy secret.
 
 ## Deploy to Fly.io
 

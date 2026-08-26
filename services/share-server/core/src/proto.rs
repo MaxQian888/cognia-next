@@ -32,6 +32,20 @@ pub struct ShareMeta {
     /// secret so existing deployments remain manageable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_token: Option<String>,
+    /// The Org this share belongs to — ADR-0149 §8.
+    ///
+    /// `None` for every share created before tenancy, and for one created with
+    /// the legacy global upload secret, which proves nothing about who is
+    /// asking. Those shares stay readable by code and revocable by their owner
+    /// token; they are simply invisible to org-scoped listing, because nothing
+    /// knows whose they are and guessing would be worse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
+    /// The person who created it. Present exactly when {@link org_id} is:
+    /// both come from the same verified grant, and one without the other would
+    /// be a claim nobody made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_user_id: Option<String>,
 }
 
 /// Owner-only stats projection for `GET /v1/share/:code/stats`. Matches the
@@ -73,6 +87,8 @@ mod tests {
             view_count: 3,
             revoked: false,
             owner_token: None,
+            org_id: None,
+            creator_user_id: None,
         };
         let s = serde_json::to_string(&StatsView::from(&meta)).unwrap();
         assert!(s.contains("\"viewCount\":3"));
@@ -91,6 +107,8 @@ mod tests {
             view_count: 2,
             revoked: false,
             owner_token: Some("owner".to_string()),
+            org_id: None,
+            creator_user_id: None,
         };
         let s = serde_json::to_string(&StatsView::from(&meta)).unwrap();
         assert!(s.contains("\"expiresAt\":123"));
@@ -110,6 +128,8 @@ mod tests {
             view_count: 0,
             revoked: true,
             owner_token: Some("owner".to_string()),
+            org_id: None,
+            creator_user_id: None,
         };
         let v: serde_json::Value = serde_json::to_value(StatsView::from(&meta)).unwrap();
         assert!(v.get("viewCount").is_some());
@@ -128,6 +148,8 @@ mod tests {
             view_count: 1,
             revoked: false,
             owner_token: Some("owner-token".to_string()),
+            org_id: None,
+            creator_user_id: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         let back: ShareMeta = serde_json::from_str(&json).unwrap();

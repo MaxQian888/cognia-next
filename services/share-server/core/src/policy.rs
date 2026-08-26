@@ -111,6 +111,8 @@ mod tests {
             view_count,
             revoked,
             owner_token: None,
+            org_id: None,
+            creator_user_id: None,
         }
     }
 

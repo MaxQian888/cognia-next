@@ -15,6 +15,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use cognia_share_core::grant::GrantVerifier;
+
 use crate::handlers;
 use crate::ip_limits::IpRateLimiter;
 use crate::metrics::Metrics;
@@ -34,7 +36,16 @@ pub struct Config {
     /// Path to the SQLite database file.
     pub db_path: String,
     /// Bearer secret required for create / delete / stats. Empty ⇒ writes always 401.
+    ///
+    /// The legacy credential — one secret for every caller, which is why
+    /// ADR-0149 §8 lists this service as one that *must* gain real identity.
+    /// It stays supported so existing deployments keep working, but a share
+    /// created with it belongs to no org and is invisible to org listing.
     pub upload_secret: String,
+    /// Hex-encoded HMAC key shared with the collaboration server, so this
+    /// service can verify the grants it mints — ADR-0149 §8. Empty ⇒ no
+    /// grant is accepted and only the legacy bearer works.
+    pub grant_key_hex: String,
     /// Max request body bytes.
     pub max_body_bytes: usize,
     /// Hard ceiling on share TTL seconds. Every share gets at most this long.
@@ -63,6 +74,13 @@ impl Config {
                 std::env::var_os("SHARE_UPLOAD_SECRET_FILE").map(Into::into),
             )
             .unwrap_or_default(),
+            // Same inline-or-file shape as the upload secret: a key belongs in
+            // a mounted file on a real deployment, not in the process listing.
+            grant_key_hex: resolve_secret(
+                std::env::var("SHARE_GRANT_KEY").ok(),
+                std::env::var_os("SHARE_GRANT_KEY_FILE").map(Into::into),
+            )
+            .unwrap_or_default(),
             max_body_bytes: parse_usize_env("SHARE_MAX_BODY_BYTES")
                 .unwrap_or(DEFAULT_MAX_BODY_BYTES),
             max_ttl_seconds: parse_u64_env("SHARE_MAX_TTL_SECONDS")
@@ -81,6 +99,11 @@ impl Config {
         Self {
             db_path: db_path.into(),
             upload_secret: "test-secret".to_string(),
+            // 32 bytes, matching `GrantVerifier`'s floor, so the org-scoped
+            // routes are exercised by tests rather than only in production.
+            grant_key_hex: "30313233343536373839616263646566\
+                            30313233343536373839616263646566"
+                .to_string(),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             max_ttl_seconds: DEFAULT_MAX_TTL_SECONDS,
             allowed_origins: Vec::new(),
@@ -142,6 +165,10 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub rate: Arc<IpRateLimiter>,
     pub upload_secret: Arc<String>,
+    /// `None` when no grant key is configured. Absence means "this deployment
+    /// has no collaboration plane", not "authorize anyone" — every grant path
+    /// refuses outright rather than falling through to the legacy secret.
+    pub grants: Option<Arc<GrantVerifier>>,
     pub max_body_bytes: usize,
     pub max_ttl_seconds: u64,
     pub allowed_origins: Arc<Vec<String>>,
@@ -164,16 +191,44 @@ pub fn now_ms_f64() -> f64 {
 /// Build the [`AppState`] (opens the SQLite store) from a [`Config`].
 pub fn build_state(config: &Config) -> anyhow::Result<AppState> {
     let store = Arc::new(Store::open(&config.db_path)?);
+    let grants = build_grant_verifier(&config.grant_key_hex)?;
     Ok(AppState {
         store,
         metrics: Arc::new(Metrics::new()),
         rate: IpRateLimiter::new(config.rate_per_sec, config.rate_burst),
         upload_secret: Arc::new(config.upload_secret.clone()),
+        grants,
         max_body_bytes: config.max_body_bytes,
         max_ttl_seconds: config.max_ttl_seconds,
         allowed_origins: Arc::new(config.allowed_origins.clone()),
         trust_proxy_headers: config.trust_proxy_headers,
     })
+}
+
+/// Build the grant verifier from a hex key, or `None` when unconfigured.
+///
+/// A malformed or short key is a hard startup failure rather than a silent
+/// downgrade to "no grants": an operator who set the variable meant to turn
+/// this on, and a service that quietly ignored them would look configured and
+/// reject every collaboration-plane caller.
+fn build_grant_verifier(hex: &str) -> anyhow::Result<Option<Arc<GrantVerifier>>> {
+    let hex = hex.trim();
+    if hex.is_empty() {
+        return Ok(None);
+    }
+    if hex.len() % 2 != 0 {
+        anyhow::bail!("SHARE_GRANT_KEY must be hex, so it must have an even number of characters");
+    }
+    let mut key = Vec::with_capacity(hex.len() / 2);
+    for index in (0..hex.len()).step_by(2) {
+        key.push(
+            u8::from_str_radix(&hex[index..index + 2], 16)
+                .map_err(|_| anyhow::anyhow!("SHARE_GRANT_KEY is not valid hex"))?,
+        );
+    }
+    let verifier = GrantVerifier::new(&key)
+        .map_err(|error| anyhow::anyhow!("SHARE_GRANT_KEY is unusable: {error}"))?;
+    Ok(Some(Arc::new(verifier)))
 }
 
 /// Assemble the router. The per-route `fallback` returns `405` for known paths
@@ -200,6 +255,21 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/share/{code}/stats",
             get(handlers::stats)
+                .options(handlers::options)
+                .fallback(handlers::method_not_allowed),
+        )
+        // ADR-0149 §8 — the org-scoped plane. Grant-only: these are the two
+        // things the legacy bearer must never be able to do, because it says
+        // nothing about which org is asking.
+        .route(
+            "/v1/orgs/{org_id}/shares",
+            get(handlers::list_org_shares)
+                .options(handlers::options)
+                .fallback(handlers::method_not_allowed),
+        )
+        .route(
+            "/v1/orgs/{org_id}/shares/{code}",
+            axum::routing::delete(handlers::delete_org_share)
                 .options(handlers::options)
                 .fallback(handlers::method_not_allowed),
         )
