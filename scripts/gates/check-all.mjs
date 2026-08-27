@@ -227,6 +227,13 @@ const REGISTRY = [
   { script: "release:sync-keys:check", group: "sync" },
   { script: "version:sync:check", group: "sync" },
   { script: "config:sync:check", group: "sync" },
+  // `lib/icons/lucide-catalog.generated.json` is committed generator output
+  // that `lib/icons/lucide-catalog.tsx` imports directly, so a fresh clone
+  // builds against whatever was last committed. Nothing regenerates it during
+  // predev/prebuild — deliberately, since it only moves when `lucide-react` is
+  // bumped and rewriting 1.6k icons on every dev boot is pure churn — which
+  // leaves this check as the only thing that can notice the bump happened.
+  { script: "lucide:check", group: "sync" },
 
   // The gate tooling's own tests. A broken gate script that silently passes
   // is worse than no gate, so these are gates themselves.

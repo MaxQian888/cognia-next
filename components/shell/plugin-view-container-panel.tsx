@@ -10,7 +10,8 @@
 
 import { useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
-import { icons, PuzzleIcon, type LucideIcon } from "lucide-react"
+import { PuzzleIcon } from "lucide-react"
+import { lucideIcons } from "@/lib/icons/lucide-catalog"
 import {
   getViewContainerSnapshot,
   subscribeViewContainers,
@@ -29,12 +30,14 @@ import { resolveOptionalPluginLabel, resolvePluginLabel } from "@/lib/plugin/i18
 /**
  * Render a plugin-supplied lucide icon name (or the puzzle fallback). Module-
  * scope component with an early-return fallback so the resolved component is a
- * stable reference at the render site (mirrors `A2UIIcon`). The lookup is a
- * direct `icons[name]` index (not a function call) to satisfy the
- * `react-hooks/static-components` rule.
+ * stable reference at the render site (mirrors `A2UIIcon`). The catalog caches
+ * each generated component, so repeated names preserve component identity.
+ * The lookup stays an index (`lucideIcons[name]`, as it was `icons[name]`
+ * against `lucide-react`) rather than a `getLucideIcon()` call, which
+ * `react-hooks/static-components` reads as a component built during render.
  */
 export function ResolvedRailIcon({ name, className }: { name?: string; className?: string }) {
-  const Resolved = name ? (icons[name as keyof typeof icons] as LucideIcon | undefined) : undefined
+  const Resolved = name ? lucideIcons[name] : undefined
   if (!Resolved) return <PuzzleIcon className={className} />
   return <Resolved className={className} />
 }

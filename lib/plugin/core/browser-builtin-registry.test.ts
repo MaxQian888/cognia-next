@@ -58,17 +58,40 @@ describe("browser-builtin-registry", () => {
     ])
   })
 
-  it("every entry carries an explicit `load` function", () => {
+  it("every entry carries either a legacy loader or an external asset", () => {
     const entries = getBrowserBuiltinRegistry()
     for (const entry of entries) {
-      expect(typeof entry.load).toBe("function")
+      expect(typeof entry.load === "function" || Boolean(entry.asset)).toBe(true)
     }
   })
 
-  it("load() resolves a plugin definition for every entry", async () => {
+  it("legacy load() resolves a plugin definition", async () => {
     for (const entry of getBrowserBuiltinRegistry()) {
-      const def = await entry.load!()
+      if (!entry.load) continue
+      const def = await entry.load()
       expect(typeof def.activate === "function" || typeof def.manifest === "object").toBe(true)
+    }
+  })
+
+  it("keeps migrated heavy plugins out of the static module graph", () => {
+    for (const pluginId of [
+      "cognia-office",
+      "cognia-pdf",
+      "cognia-documents",
+      "cognia-presentations",
+      "cognia-visualize",
+    ]) {
+      const entry = getBrowserBuiltinRegistryEntry(pluginId)
+      expect(entry?.load).toBeUndefined()
+      expect(entry?.asset).toEqual(
+        expect.objectContaining({
+          url: expect.stringMatching(
+            new RegExp(`^/_cognia/builtin-plugins/${pluginId}/[a-f0-9]{64}\\.cjs$`)
+          ),
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          sharedModules: expect.any(Array),
+        })
+      )
     }
   })
 

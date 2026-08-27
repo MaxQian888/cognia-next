@@ -6,6 +6,7 @@
 
 import { PluginLoader } from "./loader"
 import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
+import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 
 jest.mock("./wasm-loader", () => ({
   __esModule: true,
@@ -30,6 +31,9 @@ jest.mock("../launcher/launchPluginJs", () => {
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
 }))
+jest.mock("./browser-builtin-assets", () => ({
+  fetchAndVerifyBrowserBuiltinAsset: jest.fn(),
+}))
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const wasmLoader = require("./wasm-loader") as {
   loadWasmDefinition: jest.Mock
@@ -49,6 +53,10 @@ const diagModule = require("../contracts/diagnostics-store") as {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const launcherModule = require("../launcher/launchPluginJs") as {
   launchPluginJs: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const builtinAssetModule = require("./browser-builtin-assets") as {
+  fetchAndVerifyBrowserBuiltinAsset: jest.Mock
 }
 
 // Mock document for script loading tests
@@ -213,6 +221,28 @@ describe("PluginLoader", () => {
       plugin.manifest.main = undefined
 
       await expect(loader.load(plugin)).rejects.toThrow("missing 'main' entry point")
+    })
+
+    it("fetches and evaluates a migrated builtin asset once", async () => {
+      const entry = getBrowserBuiltinRegistryEntry("cognia-office")!
+      builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset.mockResolvedValue(
+        "module.exports = { activate: function activate() {}, namedFactory: function namedFactory() {} }"
+      )
+      const plugin: Plugin = {
+        manifest: entry.manifest,
+        path: entry.path,
+        source: "builtin",
+        status: "installed",
+      }
+
+      const first = await loader.load(plugin)
+      const second = await loader.load(plugin)
+
+      expect(first).toBe(second)
+      expect(builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset).toHaveBeenCalledTimes(1)
+      expect(loader.getModuleExports(plugin.manifest.id)).toEqual(
+        expect.objectContaining({ namedFactory: expect.any(Function) })
+      )
     })
 
     it("rejects a traversing main entry before invoking the importer", async () => {

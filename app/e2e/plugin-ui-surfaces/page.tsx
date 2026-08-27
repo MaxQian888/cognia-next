@@ -1,3 +1,11 @@
+import { PluginSurfaceReferenceHarness } from "./plugin-surface-reference-harness"
+import { PluginRuntimeInitializer } from "@/components/providers/initializers/plugin-runtime-initializer"
+
 export default function PluginUiSurfacesE2EPage() {
-  return null
+  return (
+    <>
+      <PluginRuntimeInitializer onlyForPluginSurfaceE2E />
+      <PluginSurfaceReferenceHarness force />
+    </>
+  )
 }

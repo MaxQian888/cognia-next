@@ -11,8 +11,7 @@ import type {
   PluginResilienceConfig,
   PluginType,
 } from "@/types/plugin"
-import { icons as lucideIcons } from "lucide-react"
-
+import { hasLucideIcon } from "@/lib/icons/lucide-catalog"
 import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
 import { checkResilienceBudget, resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { loggers } from "./logger"
@@ -1129,7 +1128,7 @@ const NATIVE_LUCIDE_ICON_PATHS = [
 
 /** True when the name is a key `lucide-react` actually exports. */
 function isExportedLucideIcon(name: string): boolean {
-  return Object.prototype.hasOwnProperty.call(lucideIcons, name)
+  return hasLucideIcon(name)
 }
 
 function validateNativeLucideIcons(

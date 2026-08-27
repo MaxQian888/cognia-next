@@ -44,7 +44,18 @@ export function isSharedModuleSpecifier(specifier: string): specifier is PluginS
 }
 
 const registry = new Map<string, unknown>()
-let priming: Promise<void> | null = null
+const priming = new Map<PluginSharedModule, Promise<void>>()
+let allPriming: Promise<void> | null = null
+
+const sharedModuleLoaders: Record<PluginSharedModule, () => Promise<unknown>> = {
+  react: () => import("react"),
+  "react/jsx-runtime": () => import("react/jsx-runtime"),
+  "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
+  "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
+  "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
+  "lucide-react": () =>
+    import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),
+}
 
 /**
  * Load every shared module into a synchronous lookup table.
@@ -55,33 +66,31 @@ let priming: Promise<void> | null = null
  * must not deny the others, and the plugin that actually reaches for the
  * missing one gets a specific error at `require()` time instead.
  */
-export function primeSharedModules(): Promise<void> {
-  if (!priming) {
-    priming = (async () => {
-      const loaders: Array<[PluginSharedModule, () => Promise<unknown>]> = [
-        ["react", () => import("react")],
-        ["react/jsx-runtime", () => import("react/jsx-runtime")],
-        ["react/jsx-dev-runtime", () => import("react/jsx-dev-runtime")],
-        ["@cognia/plugin-sdk", () => import("@cognia/plugin-sdk")],
-        ["@cognia/plugin-ui", () => import("@cognia/plugin-ui")],
-        ["lucide-react", () => import("lucide-react")],
-      ]
+export function primeSharedModules(
+  specifiers: readonly PluginSharedModule[] = PLUGIN_SHARED_MODULES
+): Promise<void> {
+  if (specifiers === PLUGIN_SHARED_MODULES && allPriming) return allPriming
+  const result = Promise.all(
+    specifiers.map((specifier) => {
+      const existing = priming.get(specifier)
+      if (existing) return existing
 
-      await Promise.all(
-        loaders.map(async ([specifier, load]) => {
-          try {
-            registry.set(specifier, normalizeInterop(await load()))
-          } catch (error) {
-            sharedModuleLogger.warn("shared module unavailable", {
-              specifier,
-              error: error instanceof Error ? error.message : String(error),
-            })
-          }
-        })
-      )
-    })()
-  }
-  return priming
+      const pending = (async () => {
+        try {
+          registry.set(specifier, normalizeInterop(await sharedModuleLoaders[specifier]()))
+        } catch (error) {
+          sharedModuleLogger.warn("shared module unavailable", {
+            specifier,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      })()
+      priming.set(specifier, pending)
+      return pending
+    })
+  ).then(() => undefined)
+  if (specifiers === PLUGIN_SHARED_MODULES) allPriming = result
+  return result
 }
 
 /**
@@ -132,5 +141,6 @@ export function createPluginRequire(originalPath: string): (specifier: string) =
 /** Test seam — drops the primed table so a suite can re-prime with fresh mocks. */
 export function __resetSharedModulesForTest(): void {
   registry.clear()
-  priming = null
+  priming.clear()
+  allPriming = null
 }

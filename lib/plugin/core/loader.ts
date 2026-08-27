@@ -14,6 +14,7 @@ import type {
 import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
+import { fetchAndVerifyBrowserBuiltinAsset } from "./browser-builtin-assets"
 import { getWasmRuntimeGeneration, loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
 import {
   getVscodeRuntimeGeneration,
@@ -320,6 +321,17 @@ export class PluginLoader {
       const builtinRegistryEntry = pluginPath.startsWith("builtin://")
         ? getBrowserBuiltinRegistryEntry(manifest.id)
         : undefined
+      if (builtinRegistryEntry?.asset) {
+        const code = await fetchAndVerifyBrowserBuiltinAsset(builtinRegistryEntry.asset)
+        await primeSharedModules(builtinRegistryEntry.asset.sharedModules)
+        const moduleExports = this.evaluatePluginCode(code, builtinRegistryEntry.asset.url)
+        const definition = this.extractDefinition(moduleExports, manifest)
+        this.loadedModules.set(manifest.id, {
+          definition,
+          exports: moduleExports as Record<string, unknown>,
+        })
+        return definition
+      }
       if (builtinRegistryEntry?.load) {
         const definition = await builtinRegistryEntry.load()
         this.loadedModules.set(manifest.id, {

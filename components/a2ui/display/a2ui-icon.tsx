@@ -7,7 +7,8 @@
 
 import React, { memo } from "react"
 import { cn } from "@/lib/utils"
-import { icons, HelpCircle, type LucideIcon } from "lucide-react"
+import { HelpCircle } from "lucide-react"
+import { getLucideIcon } from "@/lib/icons/lucide-catalog"
 import type { A2UIComponentProps, A2UIIconComponent } from "@/types/a2ui/schema"
 
 export const A2UIIcon = memo(function A2UIIcon({
@@ -26,7 +27,7 @@ export const A2UIIcon = memo(function A2UIIcon({
   }
 
   const pascalName = formatIconName(iconName)
-  const IconComponent = icons[pascalName as keyof typeof icons] as LucideIcon | undefined
+  const IconComponent = getLucideIcon(pascalName)
 
   if (!IconComponent) {
     // Fallback to a default icon

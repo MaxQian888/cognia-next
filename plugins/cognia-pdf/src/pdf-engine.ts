@@ -56,12 +56,16 @@ interface PdfDocumentLike {
   destroy: () => Promise<void>
 }
 
+declare const __COGNIA_PDF_WORKER_URL__: string | undefined
+
+function resolvePdfWorkerUrl(): string {
+  if (typeof __COGNIA_PDF_WORKER_URL__ === "string") return __COGNIA_PDF_WORKER_URL__
+  return new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString()
+}
+
 async function loadPdf(bytes: Uint8Array, password?: string): Promise<PdfDocumentLike> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-    import.meta.url
-  ).toString()
+  pdfjs.GlobalWorkerOptions.workerSrc = resolvePdfWorkerUrl()
   const task = pdfjs.getDocument({ data: bytes.slice(), ...(password ? { password } : {}) })
   return (await task.promise) as unknown as PdfDocumentLike
 }

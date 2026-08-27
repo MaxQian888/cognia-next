@@ -38,6 +38,16 @@ describe("isLightweightRoute", () => {
     expect(isLightweightRoute(null)).toBe(false)
     expect(isLightweightRoute(undefined)).toBe(false)
   })
+
+  it("treats the plugin surface harness as lightweight only in E2E builds", () => {
+    const previous = process.env.NEXT_PUBLIC_E2E
+    process.env.NEXT_PUBLIC_E2E = "1"
+    expect(isLightweightRoute("/e2e/plugin-ui-surfaces")).toBe(true)
+    expect(isLightweightRoute("/e2e/plugin-ui-surfaces.html")).toBe(true)
+    process.env.NEXT_PUBLIC_E2E = "0"
+    expect(isLightweightRoute("/e2e/plugin-ui-surfaces")).toBe(false)
+    process.env.NEXT_PUBLIC_E2E = previous
+  })
 })
 
 describe("LightweightRouteShell", () => {

@@ -18,9 +18,25 @@ const LIGHTWEIGHT_ROUTE_PREFIXES = [
   "/tray-panel",
 ] as const
 
+/**
+ * Lightweight only under `NEXT_PUBLIC_E2E=1`.
+ *
+ * The plugin-UI surface harness mounts built-in plugins on a bare page, so it
+ * must skip the same boot the overlay routes do — but it is a test fixture, not
+ * a route the shipped app has, and it stays outside the list above so a
+ * production build cannot reach it.
+ */
+const E2E_LIGHTWEIGHT_ROUTE_PREFIXES = ["/e2e/plugin-ui-surfaces"] as const
+
+function lightweightRoutePrefixes(): readonly string[] {
+  return process.env.NEXT_PUBLIC_E2E === "1"
+    ? [...LIGHTWEIGHT_ROUTE_PREFIXES, ...E2E_LIGHTWEIGHT_ROUTE_PREFIXES]
+    : LIGHTWEIGHT_ROUTE_PREFIXES
+}
+
 export function isLightweightRoute(pathname: string | null | undefined): boolean {
   if (!pathname) return false
-  return LIGHTWEIGHT_ROUTE_PREFIXES.some(
+  return lightweightRoutePrefixes().some(
     (prefix) =>
       pathname === prefix ||
       pathname === `${prefix}.html` ||

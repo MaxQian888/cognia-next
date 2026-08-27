@@ -1,0 +1,296 @@
+{
+  "version": 1,
+  "entries": {
+    "cognia-office": {
+      "manifest": {
+        "id": "cognia-office",
+        "name": "Cognia Office",
+        "version": "0.1.0",
+        "description": "Plugin-owned native XLSX authoring, preview, validation, export, and Lark Sheets synchronization.",
+        "type": "frontend",
+        "capabilities": [
+          "tools"
+        ],
+        "main": "src/index.ts",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "artifact:read",
+          "artifact:write",
+          "filesystem:read",
+          "filesystem:write",
+          "builtin-skills:invoke"
+        ],
+        "builtInSkills": [
+          "lark.sheets.*"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "headless": {
+            "availability": "blocked",
+            "reason": "Office file open/save requires an interactive browser or Tauri file port."
+          },
+          "mobile": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Workbook creation, preview, and download are available; native file dialogs depend on the connected shell."
+          }
+        }
+      },
+      "path": "builtin://cognia-office",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-office/9369cad1f497d27160d8d6fdf2a7d7c299702d707e5f930a01f0c959cdaf8806.cjs",
+        "sha256": "9369cad1f497d27160d8d6fdf2a7d7c299702d707e5f930a01f0c959cdaf8806",
+        "sharedModules": []
+      }
+    },
+    "cognia-pdf": {
+      "manifest": {
+        "id": "cognia-pdf",
+        "name": "Cognia PDF",
+        "version": "0.1.0",
+        "description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
+        "type": "frontend",
+        "capabilities": [
+          "tools",
+          "importers",
+          "exporters"
+        ],
+        "main": "src/index.ts",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "artifact:read",
+          "artifact:write",
+          "filesystem:read",
+          "filesystem:write"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "headless": {
+            "availability": "blocked",
+            "reason": "PDF.js processing and preview require a browser Worker and UI shell."
+          },
+          "mobile": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "PDF operations and download are available; native preview depends on the connected WebView."
+          }
+        }
+      },
+      "path": "builtin://cognia-pdf",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-pdf/9e297772e5a8df09304c624e20216a0a30a2b380918f8d4741907f70c642be9e.cjs",
+        "sha256": "9e297772e5a8df09304c624e20216a0a30a2b380918f8d4741907f70c642be9e",
+        "sharedModules": []
+      }
+    },
+    "cognia-documents": {
+      "manifest": {
+        "id": "cognia-documents",
+        "name": "Cognia Documents",
+        "version": "0.1.0",
+        "description": "Plugin-owned native DOCX authoring, import, editing, review, preview, validation, and export.",
+        "type": "frontend",
+        "capabilities": [
+          "tools",
+          "importers",
+          "exporters"
+        ],
+        "main": "src/index.ts",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "artifact:read",
+          "artifact:write",
+          "filesystem:read",
+          "filesystem:write"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "headless": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring and validation are available; interactive preview and file pickers require a UI shell."
+          },
+          "mobile": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+          }
+        }
+      },
+      "path": "builtin://cognia-documents",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-documents/af61c88d0227aaf5234511ce4d16a64158a1d624bb661ab16060db4ea27e6ac4.cjs",
+        "sha256": "af61c88d0227aaf5234511ce4d16a64158a1d624bb661ab16060db4ea27e6ac4",
+        "sharedModules": []
+      }
+    },
+    "cognia-presentations": {
+      "manifest": {
+        "id": "cognia-presentations",
+        "name": "Cognia Presentations",
+        "version": "0.1.0",
+        "description": "Plugin-owned native PPTX authoring, import, preview, validation, and export.",
+        "type": "frontend",
+        "capabilities": [
+          "tools",
+          "importers",
+          "exporters"
+        ],
+        "main": "src/index.ts",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "artifact:read",
+          "artifact:write",
+          "filesystem:read",
+          "filesystem:write"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "headless": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring and PPTX validation are available; interactive preview and file pickers require a UI shell."
+          },
+          "mobile": {
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+          }
+        }
+      },
+      "path": "builtin://cognia-presentations",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-presentations/15e51607e3a59883bce84d8a7ce512235f6cae0ead53009f39a25daf60bd93b9.cjs",
+        "sha256": "15e51607e3a59883bce84d8a7ce512235f6cae0ead53009f39a25daf60bd93b9",
+        "sharedModules": []
+      }
+    },
+    "cognia-visualize": {
+      "manifest": {
+        "id": "cognia-visualize",
+        "name": "Cognia Visualize",
+        "version": "0.1.0",
+        "description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+        "type": "frontend",
+        "capabilities": [
+          "tools",
+          "exporters"
+        ],
+        "main": "src/index.ts",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "artifact:read",
+          "artifact:write",
+          "filesystem:write"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "headless": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          },
+          "mobile": {
+            "availability": "supported",
+            "entrypoint": "src/index.ts"
+          }
+        }
+      },
+      "path": "builtin://cognia-visualize",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-visualize/b65744c02c5c625987f22fddf4f4957b833f06626db332d73df711615f150c9d.cjs",
+        "sha256": "b65744c02c5c625987f22fddf4f4957b833f06626db332d73df711615f150c9d",
+        "sharedModules": []
+      }
+    }
+  }
+}

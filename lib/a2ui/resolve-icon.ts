@@ -3,8 +3,9 @@
  * Centralizes the pattern of resolving Lucide icon names to components
  */
 
-import { icons, type LucideIcon } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
+import { getLucideIcon } from "@/lib/icons/lucide-catalog"
 import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
 
 /**
@@ -18,7 +19,7 @@ import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
  */
 export function resolveIcon(iconName?: string): LucideIcon | null {
   if (!iconName) return null
-  const exact = icons[iconName as keyof typeof icons] as LucideIcon | undefined
+  const exact = getLucideIcon(iconName)
   if (exact) return exact
-  return (icons[toLucideIconName(iconName) as keyof typeof icons] as LucideIcon) ?? null
+  return getLucideIcon(toLucideIconName(iconName))
 }
