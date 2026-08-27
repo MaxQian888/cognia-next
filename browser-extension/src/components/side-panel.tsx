@@ -26,6 +26,7 @@ import {
   type CaptureRequest,
 } from "@ext/src/lib/capture/capture-request"
 import { normalizeCaptureUrl } from "@ext/src/lib/capture/normalize-url"
+import { clearDeviceKey } from "@ext/src/lib/device-key"
 import {
   createHostClient,
   pairWithHost,
@@ -76,6 +77,10 @@ export function SidePanel({
   const [includeFullUrl, setIncludeFullUrl] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // Assumed absent until proven otherwise. Over-explaining a prompt that does
+  // not appear is a smaller failure than a system dialog nobody was warned
+  // about.
+  const [hasPermission, setHasPermission] = useState(false)
   const clientRef = useRef<HostClient | null>(null)
 
   // Paint before anything else. The stored appearance is the Host's last
@@ -85,6 +90,10 @@ export function SidePanel({
     void api.read<unknown>(STORAGE_KEYS.appearance).then((stored) => {
       if (isAppliedAppearance(stored)) applyAppearance(document.documentElement, stored)
     })
+  }, [api])
+
+  useEffect(() => {
+    void api.hasLoopbackPermission().then(setHasPermission)
   }, [api])
 
   /**
@@ -163,7 +172,17 @@ export function SidePanel({
         setSubmitError(api.message("captureRestricted"))
         return
       }
-      const extracted = await api.extract(tab.id, whole)
+      let extracted
+      try {
+        extracted = await api.extract(tab.id, whole)
+      } catch {
+        // `activeTab` is granted to the gesture that invoked the extension, on
+        // the tab it was invoked from — and it lapses on navigation. Switching
+        // tabs with the panel open is the ordinary way to arrive here, so this
+        // is a instruction rather than an error.
+        setSubmitError(api.message("captureNoGrant"))
+        return
+      }
       const selection = clip(extracted.selection, BROWSER_CONTEXT_LIMITS.selectionBytes)
       const readable = clip(extracted.readableText, BROWSER_CONTEXT_LIMITS.readableTextBytes)
       setSubmitError(null)
@@ -310,6 +329,32 @@ export function SidePanel({
     }
   }, [api, instruction, state, wholePage, workspaceId])
 
+  /**
+   * Forget this browser entirely.
+   *
+   * The key goes first. If the two writes are interrupted between them, a
+   * missing key with a surviving pairing record reads as unpaired (the panel
+   * clears the stale record on next connect), whereas the reverse would leave
+   * an orphaned key that nothing can ever use or delete.
+   */
+  const disconnect = useCallback(async () => {
+    await clearDeviceKey()
+    await api.remove(Object.values(STORAGE_KEYS))
+    clientRef.current = null
+    setState({ kind: "unpaired" })
+  }, [api])
+
+  /**
+   * Forget the local conveniences but stay paired.
+   *
+   * The recent list is the Host's, not ours — it comes back on the next poll.
+   * What this clears is the cached appearance and the remembered workspace,
+   * which is what somebody handing over a laptop would want gone.
+   */
+  const clearLocal = useCallback(async () => {
+    await api.remove([STORAGE_KEYS.appearance, STORAGE_KEYS.lastWorkspaceId])
+  }, [api])
+
   if (state.kind === "loading") return <div className="p-4" data-testid="panel-loading" />
 
   if (state.kind === "unpaired" || state.kind === "pairing") {
@@ -317,6 +362,7 @@ export function SidePanel({
       <PairScreen
         api={api}
         busy={state.kind === "pairing"}
+        needsPermission={!hasPermission}
         failure={state.kind === "unpaired" ? state.failure : undefined}
         onSubmit={(code) => void onPair(code)}
       />
@@ -428,6 +474,28 @@ export function SidePanel({
             {api.message("captureEmpty")}
           </p>
         )}
+        {/* Always offered, captured or not. Re-capturing is how a user sends
+            the whole page after seeing that only their selection was picked
+            up, and how they refresh a capture after the page changed under
+            them. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={captured ? "outline" : "default"}
+            size="sm"
+            onClick={() => void runCapture(false)}
+            data-testid="capture-now"
+          >
+            {captured ? api.message("captureRecapture") : api.message("captureNow")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void runCapture(true)}
+            data-testid="capture-whole-page"
+          >
+            {api.message("captureWholePage")}
+          </Button>
+        </div>
         {submitError ? (
           <Alert variant="destructive" data-testid="submit-error">
             <AlertDescription>{submitError}</AlertDescription>
@@ -440,6 +508,33 @@ export function SidePanel({
           {api.message("recentTitle")}
         </h2>
         <RecentList api={api} items={state.recent} />
+      </section>
+
+      <section className="space-y-1 border-t border-border pt-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {api.message("settingsTitle")}
+        </h2>
+        <p className="font-mono text-[11px] text-muted-foreground" data-testid="diagnostics">
+          {api.message("diagnostics")}: {state.pairing.baseUrl}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void disconnect()}
+            data-testid="disconnect"
+          >
+            {api.message("disconnect")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void clearLocal()}
+            data-testid="clear-local"
+          >
+            {api.message("clearLocal")}
+          </Button>
+        </div>
       </section>
     </div>
   )

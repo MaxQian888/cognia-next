@@ -7,6 +7,16 @@ import type { PairFailure } from "@ext/src/lib/client"
 export interface PairScreenProps {
   api: BrowserApi
   busy: boolean
+  /**
+   * Whether connecting will also raise Chrome's host-permission prompt.
+   *
+   * It changes both the label and whether the notice appears, because "Connect"
+   * followed by an unexplained system dialog and "Grant access" followed by an
+   * explained one are different experiences — and after the first pairing on a
+   * profile, the permission is already held and the notice would be a warning
+   * about something that will not happen.
+   */
+  needsPermission: boolean
   failure?: PairFailure
   onSubmit: (code: string) => void
 }
@@ -36,7 +46,7 @@ function failureMessage(api: BrowserApi, failure: PairFailure): string {
   }
 }
 
-export function PairScreen({ api, busy, failure, onSubmit }: PairScreenProps) {
+export function PairScreen({ api, busy, needsPermission, failure, onSubmit }: PairScreenProps) {
   const [code, setCode] = useState("")
   return (
     <form
@@ -65,11 +75,20 @@ export function PairScreen({ api, busy, failure, onSubmit }: PairScreenProps) {
           disabled={busy}
         />
       </div>
-      {/* The permission is requested from this button's own handler: Chrome
-          rejects `permissions.request` outside a user gesture, and a prompt
-          that never appears is indistinguishable from one that was denied. */}
+      {/* Said before the click, not after it. Chrome's own prompt appears with
+          no explanation of who is asking or what for, and a user who has just
+          been told what is coming is a user who can answer it. */}
+      {needsPermission ? (
+        <p className="text-xs text-muted-foreground" data-testid="pair-permission-notice">
+          {api.message("pairPermissionNeeded")}
+        </p>
+      ) : null}
       <Button type="submit" disabled={busy || !code.trim()}>
-        {busy ? api.message("pairing") : api.message("pairSubmit")}
+        {busy
+          ? api.message("pairing")
+          : needsPermission
+            ? api.message("pairGrant")
+            : api.message("pairSubmit")}
       </Button>
       {failure ? (
         <Alert variant="destructive" data-testid="pair-failure">

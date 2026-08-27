@@ -12,26 +12,26 @@ const api = {
 describe("PairScreen", () => {
   it("submits the trimmed code", () => {
     const onSubmit = jest.fn()
-    render(<PairScreen api={api} busy={false} onSubmit={onSubmit} />)
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={onSubmit} />)
     fireEvent.change(screen.getByLabelText("pairPlaceholder"), {
       target: { value: "  cgnb1|abc  " },
     })
-    fireEvent.click(screen.getByRole("button", { name: "pairSubmit" }))
+    fireEvent.click(screen.getByRole("button", { name: "pairGrant" }))
     expect(onSubmit).toHaveBeenCalledWith("cgnb1|abc")
   })
 
   it("will not submit an empty code", () => {
     const onSubmit = jest.fn()
-    render(<PairScreen api={api} busy={false} onSubmit={onSubmit} />)
-    expect(screen.getByRole("button", { name: "pairSubmit" })).toBeDisabled()
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={onSubmit} />)
+    expect(screen.getByRole("button", { name: "pairGrant" })).toBeDisabled()
     fireEvent.change(screen.getByLabelText("pairPlaceholder"), { target: { value: "   " } })
-    expect(screen.getByRole("button", { name: "pairSubmit" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "pairGrant" })).toBeDisabled()
   })
 
   it("locks the form while a code is being redeemed", () => {
     // The code is single-use: a second submission spends nothing and reports a
     // failure for a pairing that may already be succeeding.
-    render(<PairScreen api={api} busy onSubmit={jest.fn()} />)
+    render(<PairScreen api={api} busy needsPermission onSubmit={jest.fn()} />)
     expect(screen.getByLabelText("pairPlaceholder")).toBeDisabled()
     expect(screen.getByRole("button", { name: "pairing" })).toBeDisabled()
   })
@@ -51,15 +51,29 @@ describe("PairScreen", () => {
     ]
     for (const [failure, expected] of cases) {
       const { unmount } = render(
-        <PairScreen api={api} busy={false} failure={failure} onSubmit={jest.fn()} />
+        <PairScreen api={api} busy={false} needsPermission failure={failure} onSubmit={jest.fn()} />
       )
       expect(screen.getByTestId("pair-failure")).toHaveTextContent(expected)
       unmount()
     }
   })
 
+  it("says Connect, with no warning, once the permission is already held", () => {
+    // After the first pairing on a profile the prompt does not appear, and a
+    // notice about it would be a warning about something that will not happen.
+    render(<PairScreen api={api} busy={false} needsPermission={false} onSubmit={jest.fn()} />)
+    expect(screen.getByRole("button", { name: "pairSubmit" })).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-permission-notice")).toBeNull()
+  })
+
+  it("says what the permission prompt will be for before it appears", () => {
+    // Chrome's own dialog names neither who is asking nor what for.
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={jest.fn()} />)
+    expect(screen.getByTestId("pair-permission-notice")).toHaveTextContent("pairPermissionNeeded")
+  })
+
   it("shows no failure until there is one", () => {
-    render(<PairScreen api={api} busy={false} onSubmit={jest.fn()} />)
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={jest.fn()} />)
     expect(screen.queryByTestId("pair-failure")).toBeNull()
   })
 })

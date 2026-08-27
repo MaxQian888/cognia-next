@@ -1,5 +1,9 @@
 /** @jest-environment jsdom */
-import { render, screen, waitFor } from "@testing-library/react"
+// `disconnect` clears the device key, which lives in IndexedDB — absent from
+// jsdom, so without this the button throws instead of unpairing.
+import "fake-indexeddb/auto"
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type {
   BrowserCompanionCapabilityV1,
@@ -200,5 +204,121 @@ describe("SidePanel", () => {
     // something that looks like it could.
     await screen.findByText("continueInCognia")
     expect(screen.queryByText(/approve/i)).toBeNull()
+  })
+})
+
+describe("SidePanel capture and settings", () => {
+  it("offers a capture button, because opening the panel captures nothing", async () => {
+    // The panel is visible constantly; reading the page just because it is
+    // there is the behaviour the design forbids. So the user asks.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    await screen.findByTestId("capture-now")
+    await screen.findByTestId("capture-whole-page")
+  })
+
+  it("captures the selection when asked, and previews it before sending", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    // The address the user is agreeing to, with the query string gone.
+    expect(screen.getByTestId("capture-url")).toHaveTextContent("https://example.com/a")
+    expect(screen.getByTestId("capture-url")).not.toHaveTextContent("x=1")
+  })
+
+  it("explains a missing activeTab grant instead of failing silently", async () => {
+    // Switching tabs with the panel open is the ordinary way to arrive here.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      api: {
+        extract: async () => {
+          throw new Error("Cannot access contents of the page")
+        },
+      } as never,
+    })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await waitFor(() =>
+      expect(screen.getByTestId("submit-error")).toHaveTextContent("captureNoGrant")
+    )
+  })
+
+  it("refuses to capture a page that is not http(s)", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      api: {
+        activeTab: async () => ({ id: 1, url: "chrome://settings", title: "Settings" }),
+      } as never,
+    })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await waitFor(() =>
+      expect(screen.getByTestId("submit-error")).toHaveTextContent("captureRestricted")
+    )
+    expect(screen.queryByTestId("capture-preview")).toBeNull()
+  })
+
+  it("submits the captured page and clears the draft", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), {
+      target: { value: "Summarise the pricing" },
+    })
+    fireEvent.click(screen.getByTestId("submit"))
+
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    const request = state.submitted[0] as Record<string, unknown>
+    expect(request.instruction).toBe("Summarise the pricing")
+    expect(request.workspaceId).toBe("ws-default")
+    // Cleared afterwards: a preview left on screen after a successful submit
+    // invites the user to send the same page twice.
+    await waitFor(() => expect(screen.queryByTestId("capture-preview")).toBeNull())
+  })
+
+  it("will not submit without an instruction", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    expect(screen.getByTestId("submit")).toBeDisabled()
+  })
+
+  it("remembers the chosen workspace for next time", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.store.get(STORAGE_KEYS.lastWorkspaceId)).toBe("ws-default"))
+  })
+
+  it("names the Host it is talking to", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    expect(await screen.findByTestId("diagnostics")).toHaveTextContent("http://127.0.0.1:27891")
+  })
+
+  it("forgets everything on disconnect", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("disconnect"))
+    await screen.findByText("pairTitle")
+    expect(state.store.get(STORAGE_KEYS.pairing)).toBeUndefined()
+  })
+
+  it("clears the local conveniences without unpairing", async () => {
+    // The recent list is the Host's and comes back on the next poll; what goes
+    // is the cached appearance and the remembered workspace.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    await screen.findByTestId("clear-local")
+    await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearance)).toBeDefined())
+    fireEvent.click(screen.getByTestId("clear-local"))
+    await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearance)).toBeUndefined())
+    expect(state.store.get(STORAGE_KEYS.pairing)).toBeDefined()
   })
 })
