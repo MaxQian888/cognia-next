@@ -110,6 +110,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
   const t = useTranslations("chat.composer.voice.live")
   const settings = useSettingsStore((store) => store.settings)
   const providerKeys = useSettingsStore((store) => store.providerKeys)
+  const ensureProviderKeys = useSettingsStore((store) => store.ensureProviderKeys)
   const saveSettings = useSettingsStore((store) => store.save)
   const sessionId = useChatStore((store) => store.activeSessionId)
   const chatStatus = useChatStore((store) => store.status)
@@ -158,8 +159,8 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     setActiveMicId(microphoneId)
   }
 
-  // Only the providers with a shipped adapter can consume a BYOK key; the
-  // relay-backed ones read their credentials in the host.
+  // Browser providers consume their BYOK values while native providers only
+  // use the in-memory keyring-presence marker for configuration gating.
   const apiKeys = useMemo(
     () => ({
       openai: providerKeys?.openai,
@@ -169,12 +170,23 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     [providerKeys?.openai, providerKeys?.google, providerKeys?.xai]
   )
 
+  useEffect(() => {
+    void ensureProviderKeys()
+  }, [ensureProviderKeys])
+
   const liveVoiceCandidates = useMemo(
     () => selectLiveVoiceCandidates(liveVoiceSettings),
     [liveVoiceSettings]
   )
+  const configuredCandidates = useMemo(
+    () =>
+      liveVoiceCandidates.filter(({ deployment }) =>
+        Boolean(providerKeys?.[deployment.provider]?.trim())
+      ),
+    [liveVoiceCandidates, providerKeys]
+  )
   const unavailableReason =
-    liveVoiceSettings?.enabled && liveVoiceCandidates.length === 0
+    liveVoiceSettings?.enabled && configuredCandidates.length === 0
       ? explainLiveVoiceUnavailability(liveVoiceSettings)
       : null
   const chatBusy = chatStatus === "streaming" || chatStatus === "awaiting_approval"
@@ -237,8 +249,8 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
           useChatStore.getState().upsertSessionMessages(meta.sessionId, messages)
         })
         .catch(() => {
-        // The conversation still happened; failing to archive it must not take
-        // the composer down with it.
+          // The conversation still happened; failing to archive it must not take
+          // the composer down with it.
         })
     }
 
@@ -275,7 +287,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     let next: LiveVoiceController | null = null
     let preflightStream: MediaStreamLike | null = null
     try {
-      const candidates = selectLiveVoiceCandidates(liveVoiceSettings)
+      const candidates = configuredCandidates
       if (candidates.length === 0) {
         throw new LiveVoiceUnavailableError(explainLiveVoiceUnavailability(liveVoiceSettings))
       }
@@ -452,6 +464,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     liveVoiceSettings,
     microphoneId,
     apiKeys,
+    configuredCandidates,
     sessionId,
     agentPermissions,
     alwaysAllowTools,

@@ -101,6 +101,7 @@ import {
   ORDERED_TTS_PROVIDERS,
   TTS_PROVIDER_SETTINGS,
   TTS_PROVIDERS,
+  normalizeTTSProvider,
   type SelectableTTSProvider,
 } from "@cognia/tts/types"
 import {
@@ -938,7 +939,9 @@ function CharacterRow({
           openingMessage: character.persona?.openingMessage ?? "",
           exemplarPromptsText: (character.persona?.exemplarPrompts ?? []).join("\n"),
           avatarImageDataUrl: character.avatarImage?.webDataUrl ?? "",
-          voiceProvider: character.voiceProfile?.provider ?? "none",
+          voiceProvider: character.voiceProfile
+            ? normalizeTTSProvider(character.voiceProfile.provider)
+            : "none",
           voiceId: character.voiceProfile?.voiceId ?? "",
           voiceRate: character.voiceProfile?.rate ?? 1,
           voicePitch: character.voiceProfile?.pitch ?? 1,
@@ -1569,7 +1572,7 @@ export type EditorState = {
   /** Avatar image as a web data URL ("" = none). */
   avatarImageDataUrl: string
   /** Voice profile — `"none"` means inherit the global TTS settings. */
-  voiceProvider: TTSProvider | "none"
+  voiceProvider: SelectableTTSProvider | "none"
   voiceId: string
   voiceRate: number
   voicePitch: number

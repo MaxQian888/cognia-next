@@ -51,9 +51,6 @@ export function isLiveVoiceProviderId(value: unknown): value is LiveVoiceProvide
   return typeof value === "string" && (LIVE_VOICE_PROVIDER_IDS as readonly string[]).includes(value)
 }
 
-/** Which region a provider may serve. `both` means it has CN and Global endpoints. */
-export type LiveVoiceProviderRegion = LiveVoiceRegion | "both"
-
 /**
  * What a provider's realtime transport actually supports.
  *
@@ -72,29 +69,41 @@ export interface LiveVoiceCapabilities {
   inputSampleRate: number
   /** Sample rate the provider emits for downlink PCM16, in Hz. */
   outputSampleRate: number
-  /**
-   * Whether the browser can reach this provider's socket directly. China
-   * providers need vendor auth headers on the WS handshake, which browsers
-   * cannot set, so they route through the Tauri relay and are desktop-only.
-   */
-  requiresRelay: boolean
+  /** Regions in which this exact provider transport may be selected. */
+  regions: readonly LiveVoiceRegion[]
+  /** Browser SDK socket or host-keyring native socket. */
+  transport: "browser" | "native"
 }
 
 /**
- * A minted, ready-to-dial session. `url` always comes from the adapter (or the
- * relay) — the renderer never hard-codes a provider's WebSocket address.
+ * A validated, ready-to-dial session. Browser providers carry an ephemeral
+ * URL/token; native providers carry only non-secret deployment metadata.
  */
-export interface PreparedRealtimeSession {
+interface PreparedRealtimeSessionBase {
   deploymentId: string
   provider: LiveVoiceProviderId
   region: LiveVoiceRegion
   modelOrResource: string
+  capabilities: LiveVoiceCapabilities
+}
+
+export interface PreparedEphemeralRealtimeSession extends PreparedRealtimeSessionBase {
+  connection: "ephemeral"
   token: string
   url: string
   /** Unix seconds. Ephemeral secrets are single-handshake; reconnect re-mints. */
   expiresAt?: number
-  capabilities: LiveVoiceCapabilities
 }
+
+export interface PreparedHostKeyringRealtimeSession extends PreparedRealtimeSessionBase {
+  connection: "host-keyring"
+  /** Validated non-secret deployment fields only. */
+  deployment: import("@cognia/agent-config-types").LiveVoiceDeployment
+}
+
+/** Renderer-visible connection data. Native sessions never contain a secret. */
+export type PreparedRealtimeSession =
+  PreparedEphemeralRealtimeSession | PreparedHostKeyringRealtimeSession
 
 /** Metadata stamped onto every persisted live-voice turn. */
 export interface LiveVoiceMessageMetadata {

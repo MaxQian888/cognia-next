@@ -24,6 +24,11 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => false),
+}))
+
 jest.mock("./api-key-input", () => ({
   ApiKeyInput: ({ provider }: { provider: string }) => (
     <div data-testid="api-key-provider">{provider}</div>
@@ -31,6 +36,9 @@ jest.mock("./api-key-input", () => ({
 }))
 
 import { LiveVoiceCard } from "./live-voice-card"
+import { isTauri } from "@/lib/platform/detect"
+
+const mockIsTauri = jest.mocked(isTauri)
 
 /** The last `liveVoice` block handed to the settings store. */
 function savedLiveVoice(): LiveVoiceSettings {
@@ -47,6 +55,7 @@ function enabledDeployment(
 beforeEach(() => {
   jest.clearAllMocks()
   currentLiveVoice = undefined
+  mockIsTauri.mockReturnValue(false)
 })
 
 describe("LiveVoiceCard — top-level controls", () => {
@@ -101,7 +110,7 @@ describe("LiveVoiceCard — providers", () => {
     expect(screen.getByLabelText("providers.xai")).toBeInTheDocument()
   })
 
-  it("does not offer a new CN configuration while no CN provider is implemented", () => {
+  it("keeps native-only China providers out of static web settings", () => {
     render(<LiveVoiceCard />)
 
     fireEvent.click(screen.getByLabelText("region"))
@@ -109,13 +118,14 @@ describe("LiveVoiceCard — providers", () => {
     expect(screen.queryByText("regionCn")).not.toBeInTheDocument()
   })
 
-  it("says so plainly when the region has no usable provider yet", () => {
-    // CN providers are all relay-backed and land with the Phase 2 relay; an
-    // empty list with no explanation reads as a broken screen.
+  it("offers every implemented China provider in Tauri", () => {
+    mockIsTauri.mockReturnValue(true)
     currentLiveVoice = { enabled: true, region: "cn" }
     render(<LiveVoiceCard />)
 
-    expect(screen.getByText("noProviders")).toBeInTheDocument()
+    expect(screen.getByLabelText("providers.qwen")).toBeInTheDocument()
+    expect(screen.getByLabelText("providers.doubao")).toBeInTheDocument()
+    expect(screen.getByLabelText("providers.baidu")).toBeInTheDocument()
     expect(screen.queryByLabelText("providers.openai")).not.toBeInTheDocument()
   })
 
@@ -200,6 +210,43 @@ describe("LiveVoiceCard — providers", () => {
     fireEvent.change(screen.getByLabelText("voice"), { target: { value: "cedar" } })
 
     expect(savedLiveVoice().deployments[0].voice).toBe("cedar")
+  })
+
+  it("drives China-provider fields from the shared descriptor registry", () => {
+    mockIsTauri.mockReturnValue(true)
+    currentLiveVoice = {
+      enabled: true,
+      region: "cn",
+      deployments: [enabledDeployment("qwen", "cn")],
+    }
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("workspaceId")).toBeInTheDocument()
+    expect(screen.getByLabelText("model")).toHaveAttribute(
+      "placeholder",
+      "qwen-audio-3.0-realtime-plus"
+    )
+    expect(screen.queryByLabelText("appId")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("workspaceId"), { target: { value: "ws-beijing" } })
+    expect(savedLiveVoice().deployments[0].workspaceId).toBe("ws-beijing")
+  })
+
+  it("stores Doubao App ID without exposing model controls", () => {
+    mockIsTauri.mockReturnValue(true)
+    currentLiveVoice = {
+      enabled: true,
+      region: "cn",
+      deployments: [enabledDeployment("doubao", "cn")],
+    }
+    render(<LiveVoiceCard />)
+
+    expect(screen.getByLabelText("appId")).toBeInTheDocument()
+    expect(screen.queryByLabelText("model")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("voice")).toHaveAttribute(
+      "placeholder",
+      "zh_female_vv_jupiter_bigtts"
+    )
   })
 })
 

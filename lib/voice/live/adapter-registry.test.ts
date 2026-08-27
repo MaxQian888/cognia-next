@@ -5,6 +5,7 @@ import {
   createLiveAdapter,
   getLiveVoiceCapabilities,
   isLiveVoiceProviderImplemented,
+  LIVE_VOICE_PROVIDER_DESCRIPTORS,
   type LiveAdapterLoader,
 } from "./adapter-registry"
 import { LIVE_VOICE_PROVIDER_IDS, type LiveVoiceProviderId } from "./types"
@@ -23,22 +24,27 @@ describe("LIVE_VOICE_CAPABILITIES", () => {
     expect(outputSampleRate).toBeGreaterThan(0)
   })
 
-  it("routes exactly the China providers through the relay", () => {
-    const relayed = LIVE_VOICE_PROVIDER_IDS.filter(
-      (id) => LIVE_VOICE_CAPABILITIES[id].requiresRelay
+  it("routes exactly the China providers through native transport", () => {
+    const native = LIVE_VOICE_PROVIDER_IDS.filter(
+      (id) => LIVE_VOICE_CAPABILITIES[id].transport === "native"
     )
 
-    expect(relayed.sort()).toEqual([...CHINA_PROVIDERS].sort())
+    expect(native.sort()).toEqual([...CHINA_PROVIDERS].sort())
+    expect(CHINA_PROVIDERS.every((id) => LIVE_VOICE_CAPABILITIES[id].regions.includes("cn"))).toBe(
+      true
+    )
   })
 
-  // Working Rule 7: intentional dormancy is pinned by a test, not just a comment.
-  it.each(["doubao", "baidu"] as const)("ships %s with tools dormant in v1", (provider) => {
-    expect(LIVE_VOICE_CAPABILITIES[provider].supportsTools).toBe(false)
+  it("omits unsupported tools only for Doubao", () => {
+    expect(LIVE_VOICE_CAPABILITIES.doubao.supportsTools).toBe(false)
   })
 
-  it.each(["openai", "google", "xai", "qwen"] as const)("enables tools for %s", (provider) => {
-    expect(LIVE_VOICE_CAPABILITIES[provider].supportsTools).toBe(true)
-  })
+  it.each(["openai", "google", "xai", "qwen", "baidu"] as const)(
+    "enables tools for %s",
+    (provider) => {
+      expect(LIVE_VOICE_CAPABILITIES[provider].supportsTools).toBe(true)
+    }
+  )
 
   it("expects 16 kHz uplink for Gemini Live, not the OpenAI 24 kHz default", () => {
     expect(LIVE_VOICE_CAPABILITIES.google.inputSampleRate).toBe(16_000)
@@ -52,13 +58,30 @@ describe("getLiveVoiceCapabilities", () => {
   })
 })
 
+describe("LIVE_VOICE_PROVIDER_DESCRIPTORS", () => {
+  it("drives native provider fields without dormant secret metadata", () => {
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.qwen.fields).toEqual(["workspaceId", "model", "voice"])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.qwen.requiredFields).toEqual(["workspaceId"])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.doubao.fields).toEqual(["appId", "voice"])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.doubao.requiredFields).toEqual(["appId"])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.baidu.fields).toEqual(["model", "voice"])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.baidu.requiredFields).toEqual([])
+    expect(LIVE_VOICE_PROVIDER_DESCRIPTORS.doubao.credential).toEqual({
+      keyringId: "doubao",
+      required: true,
+      kind: "accessKey",
+    })
+    expect(JSON.stringify(LIVE_VOICE_PROVIDER_DESCRIPTORS)).not.toMatch(/resourceId|appKey/)
+  })
+})
+
 describe("isLiveVoiceProviderImplemented", () => {
   it.each(IMPLEMENTED_LIVE_VOICE_PROVIDERS)("accepts %s", (provider) => {
     expect(isLiveVoiceProviderImplemented(provider)).toBe(true)
   })
 
-  it.each(CHINA_PROVIDERS)("rejects %s until the Phase 2 relay lands", (provider) => {
-    expect(isLiveVoiceProviderImplemented(provider)).toBe(false)
+  it("covers every known provider", () => {
+    expect(IMPLEMENTED_LIVE_VOICE_PROVIDERS).toEqual(LIVE_VOICE_PROVIDER_IDS)
   })
 })
 
@@ -91,19 +114,10 @@ describe("createLiveAdapter", () => {
     expect(openai).toHaveBeenCalledWith(request)
   })
 
-  it.each(CHINA_PROVIDERS)(
-    "throws a typed error for %s with the default loaders",
-    async (provider) => {
-      await expect(createLiveAdapter({ provider, modelId: "whatever" })).rejects.toBeInstanceOf(
-        LiveVoiceProviderUnavailableError
-      )
-    }
-  )
-
-  it("names the provider on the thrown error", async () => {
+  it("names a provider omitted from an injected loader registry", async () => {
     let error: LiveVoiceProviderUnavailableError | undefined
     try {
-      await createLiveAdapter({ provider: "doubao", modelId: "x" })
+      await createLiveAdapter({ provider: "doubao", modelId: "x" }, {})
     } catch (caught) {
       error = caught as LiveVoiceProviderUnavailableError
     }
@@ -133,6 +147,9 @@ describe("real AI SDK adapters", () => {
     openai: "gpt-realtime-2.1",
     google: "gemini-3.1-flash-live-preview",
     xai: "grok-voice-latest",
+    qwen: "qwen-audio-3.0-realtime-plus",
+    doubao: "service-selected",
+    baidu: "audio-realtime-near",
   }
 
   it.each(IMPLEMENTED_LIVE_VOICE_PROVIDERS)(

@@ -25,15 +25,8 @@
  * a browser or Capacitor WebView has — and, per the desktop-Host scope, is
  * exactly the behaviour those shells had before.
  *
- * ## The first-frame race
- *
- * `connectors_ws_open` completes the handshake and *then* returns the handle
- * id, so a listener can only be attached after the socket is already live. A
- * server that pushes a frame in the first microseconds can therefore have it
- * dropped. This is a property of the existing Rust contract, not something
- * introduced here; every current caller either waits for a hello it re-requests
- * on timeout, or sends first. Callers that cannot tolerate it must not use this
- * transport.
+ * The renderer preallocates the native handle id and subscribes before asking
+ * Rust to handshake, so a server's first event cannot race listener setup.
  */
 
 import { loggers } from "@cognia/logging"
@@ -75,7 +68,7 @@ export interface PlatformWebSocket {
   readonly id: string
   /** Which transport actually carried the connection. */
   readonly kind: "native" | "browser"
-  send(data: string): Promise<void>
+  send(data: string | Uint8Array): Promise<void>
   close(): Promise<void>
 }
 
@@ -97,14 +90,12 @@ function decodeBase64(value: string): Uint8Array {
 }
 
 async function openNative(
-  url: string,
-  options: PlatformWebSocketOptions
+  options: PlatformWebSocketOptions,
+  open: (handleId: string) => Promise<string>,
+  createHandleId: () => string,
+  onPrepared?: (socket: PlatformWebSocket) => void
 ): Promise<PlatformWebSocket> {
-  // Rust raises here when the target would be proxied but the user disabled
-  // WebSocket proxying. Surfacing that as a failure is the point: connecting
-  // direct instead would leak the connection around a proxy the user chose.
-  const id = await connectorsWsOpen(url, options.headers)
-
+  const id = createHandleId()
   const unlisteners: ConnectorUnlistenFn[] = []
   let closed = false
   const teardown = () => {
@@ -123,6 +114,7 @@ async function openNative(
       options.onMessage?.(event.payload)
     })
   )
+
   unlisteners.push(
     await connectorListen<string>(`connectors://ws/${id}/binary`, (event) => {
       options.onBinary?.(decodeBase64(event.payload))
@@ -145,7 +137,7 @@ async function openNative(
     })
   )
 
-  return {
+  const socket: PlatformWebSocket = {
     id,
     kind: "native",
     send: (data) => connectorsWsSend(id, data),
@@ -156,6 +148,22 @@ async function openNative(
       await connectorsWsClose(id)
     },
   }
+  onPrepared?.(socket)
+
+  try {
+    // Rust raises here when the target would be proxied but the user disabled
+    // WebSocket proxying. Every listener already exists before the handshake.
+    const openedId = await open(id)
+    if (openedId !== id) {
+      await connectorsWsClose(openedId).catch(() => undefined)
+      throw new Error("native WebSocket returned a different handle id")
+    }
+  } catch (error) {
+    teardown()
+    throw error
+  }
+
+  return socket
 }
 
 function openBrowser(
@@ -176,7 +184,18 @@ function openBrowser(
       resolve({
         id: "browser",
         kind: "browser",
-        send: async (data) => socket.send(data),
+        send: async (data) => {
+          if (typeof data === "string") {
+            socket.send(data)
+            return
+          }
+          // Copy into an ArrayBuffer-backed view. The shared contract accepts
+          // any Uint8Array, including one backed by SharedArrayBuffer, while
+          // the DOM WebSocket overload only accepts an ArrayBuffer-backed view.
+          const bytes = new Uint8Array(data.byteLength)
+          bytes.set(data)
+          socket.send(bytes.buffer)
+        },
         close: async () => {
           if (closed) return
           closed = true
@@ -228,10 +247,24 @@ function openBrowser(
 export async function createPlatformWebSocket(
   url: string,
   options: PlatformWebSocketOptions = {},
-  deps: { isTauri?: () => boolean; socketFactory?: (url: string) => WebSocket } = {}
+  deps: {
+    isTauri?: () => boolean
+    socketFactory?: (url: string) => WebSocket
+    nativeOpen?: (handleId: string) => Promise<string>
+    createHandleId?: () => string
+    onNativePrepared?: (socket: PlatformWebSocket) => void
+  } = {}
 ): Promise<PlatformWebSocket> {
   const onTauri = deps.isTauri ?? isTauri
-  if (onTauri()) return openNative(url, options)
+  if (onTauri()) {
+    const open = deps.nativeOpen ?? ((handleId) => connectorsWsOpen(url, options.headers, handleId))
+    return openNative(
+      options,
+      open,
+      deps.createHandleId ?? (() => crypto.randomUUID()),
+      deps.onNativePrepared
+    )
+  }
   const factory = deps.socketFactory ?? ((target: string) => new WebSocket(target))
   return openBrowser(url, options, factory)
 }

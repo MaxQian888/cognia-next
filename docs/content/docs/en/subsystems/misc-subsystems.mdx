@@ -8,7 +8,7 @@ description: TTS, Push, QR, Network Proxy, Connectivity Probes, Queue, Wallpaper
 This page collects several relatively small subsystems that would each be a noticeable gap if missing. Each section covers what it does, lists key files, and links to related docs. The structure is flatter than other subsystem pages — these modules are largely independent, so a single overarching model is unnecessary.
 
 <TLDR>
-  TTS (9 providers + Edge-TTS WSS bridge), Push (mobile push registration), QR (pairing QR + barcode
+  TTS (11 selectable providers), live voice (six providers), Push (mobile push registration), QR (pairing QR + barcode
   scanning), Network (proxy config), Connectivity (mDNS / LAN scan / tunnel), Queue (retryable send
   queue with backoff), Wallpaper (user wallpaper persistence), Proxy Config (Rust-side reverse proxy
   state), LaTeX (KaTeX cache), Monaco (editor options + workbench context), Media (plugin media
@@ -19,7 +19,8 @@ This page collects several relatively small subsystems that would each be a noti
 
 | Subsystem           | Role                                                | Locations                                       |
 | ------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| TTS                 | Text-to-speech, 9 providers + Edge WSS bridge       | `lib/tts/` · `src-tauri/src/tts/`               |
+| TTS                 | Text-to-speech, 11 selectable providers             | `packages/tts/` · `crates/cognia-tts/`          |
+| Live voice          | Full-duplex voice, browser + native host transports | `lib/voice/live/` · `src-tauri/src/voice_live.rs` |
 | Push                | Mobile push notifications (APNs/FCM)                | `lib/push/`                                     |
 | QR & Barcode        | Pairing QR + mobile scan                            | `lib/qr/`                                       |
 | Network             | Browser-side proxy config + proxy-aware fetch       | `lib/network/`                                  |
@@ -36,28 +37,26 @@ This page collects several relatively small subsystems that would each be a noti
 
 ## TTS
 
-Text-to-speech, 9 providers plus an Edge-TTS WebSocket bridge. Frontend lives in `lib/tts/`, Tauri side in `src-tauri/src/tts/`.
+Text-to-speech is owned by the shared `@cognia/tts` orchestrator. Eleven providers are selectable; the deprecated `edge` and `openai-realtime` ids are compatibility inputs that normalize to `system` and have no runtime transport.
 
 Provider overview (`types/media/tts.ts:TTS_PROVIDERS`):
 
-| Provider   | Entry File                | Notes                                        |
-| ---------- | ------------------------- | -------------------------------------------- |
-| OpenAI     | `providers/openai.ts`     | REST, requires API key                       |
-| Gemini     | `providers/gemini.ts`     | Google AI family                             |
-| ElevenLabs | `providers/elevenlabs.ts` | High-quality voice                           |
-| LMNT       | `providers/lmnt.ts`       | Low latency                                  |
-| Hume       | `providers/hume.ts`       | Includes emotion params                      |
-| Cartesia   | `providers/cartesia.ts`   | Sonic series                                 |
-| Deepgram   | `providers/deepgram.ts`   | TTS + STT same stack                         |
-| Xiaomi     | `providers/xiaomi.ts`     | Available in mainland China                  |
-| Edge       | `providers/edge.ts`       | Microsoft free tier; goes through WSS bridge |
-| System     | `providers/system.ts`     | Web Speech API fallback                      |
+| Provider | Notes |
+| --- | --- |
+| System | Web Speech API, no key |
+| OpenAI | REST neural speech |
+| Local OpenAI-compatible | Loopback-only endpoint; optional key, model and voice |
+| Gemini | Google AI speech |
+| ElevenLabs | Account voice discovery |
+| LMNT · Hume · Cartesia · Deepgram | Cloud speech adapters |
+| Xiaomi | Mainland-China REST provider |
+| Mistral | Voxtral speech output |
 
 `tts-orchestrator.ts` is a singleton orchestrator: receives `SpeechSettings` → selects provider → `preprocessTextForProvider` + applies pronunciation dictionary + `splitTextForTTS` chunking → checks cache (`tts-cache.ts`) for hit → calls the corresponding provider → concatenates playback queue. The `auto-play-gates.ts` function `canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading, isStreaming })` is the single "should we auto-play?" gate after a chat send completes.
 
 The orchestrator is wired into chat through three surfaces: a per-message **read-aloud button** (`components/chat/read-aloud-button.tsx`, gated on `ttsEnabled`, using the focused `useReadAloudStatus` selector so a virtualized list of buttons never re-renders on progress ticks), **auto-play** (`hooks/media/use-chat-auto-play-tts.ts` fires `canAutoPlayTTS` on the turn-completes edge), and a single global **now-playing bar** (`components/tts/tts-now-playing-bar.tsx`, mounted at the app root). All three resolve a per-character voice via `resolveCharacterVoice` (team `senderId` or the direct session character) and share one imperative entry point, `lib/tts/speak-chat-message.ts`. The orchestrator's `activeSourceId` tags which message owns the active playback.
 
-Edge-TTS is blocked by CORS in the browser, so it goes through the Tauri bridge (`src-tauri/src/tts/edge.rs`): the Rust side opens a WSS to `speech.platform.bing.com`, sends SSML, and streams binary MP3 frames back to the frontend. `src-tauri/src/tts/keyring.rs` uses the OS keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service) to store API keys for the other 8 providers; service name is `com.cognia.tts`, account is the provider id. `src-tauri/src/tts/proxy.rs` is a generic HTTP proxy for REST providers that are blocked by CORS.
+`crates/cognia-tts/src/keyring.rs` uses the OS keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service); service name is `com.cognia.tts`, account is the provider id. Its constrained proxy fetch keeps cloud credentials in the host. The UI-neutral `TTS_PROVIDER_SETTINGS` registry drives both desktop and mobile fields, so endpoint/model/voice support is not duplicated.
 
 `speech.ts` also provides a BCP-47 language table (`SPEECH_LANGUAGES`) for voice input, with 13 built-in languages (Chinese, English, Japanese, Korean, Spanish, French, German, Italian, Portuguese, Russian, Arabic), used by the composer's microphone button dropdown.
 
@@ -87,7 +86,7 @@ On write, expired entries are cleared first, then entries are evicted by `create
 
 ### Provider Metadata
 
-`types.ts:TTS_PROVIDERS` is a large table where each provider has:
+`TTS_PROVIDERS` carries compatibility metadata; `ORDERED_TTS_PROVIDERS` and `TTS_PROVIDER_SETTINGS` are the selectable runtime/settings sources:
 
 ```ts
 interface TTSProviderInfo {
@@ -103,7 +102,23 @@ interface TTSProviderInfo {
 
 `maxTextLength` is a hard upper bound for slicing — `tts-text-utils.ts:splitTextForTTS` splits by sentence / paragraph when exceeded; the upper layer concatenates audio fragments for playback, triggering the next chunk on `chunkended`, so the listening experience is uninterrupted.
 
-Key files: `lib/tts/{tts-orchestrator,tts-cache,tts-text-utils,speech-settings,auto-play-gates,keyring,speech,types}.ts` · `lib/tts/providers/*.ts` · `src-tauri/src/tts/{edge,keyring,proxy}.rs`.
+Key files: `packages/tts/src/{tts-orchestrator,tts-cache,tts-text-utils,speech-settings,types}.ts` · `packages/tts/src/providers/*.ts` · `lib/tts/{facade,keyring,speak-chat-message}.ts` · `crates/cognia-tts/src/{keyring,proxy}.rs`.
+
+## Live Voice
+
+The same `LiveVoiceDialog`, controller, capture, playback, persistence and
+transport serve all providers. OpenAI, Gemini and xAI use ephemeral browser
+sessions in the `global` region. Qwen, Doubao and Baidu are Tauri-only in the
+`cn` region: Rust reads their key from the existing host keyring, constructs a
+fixed official endpoint and headers, then delegates to the shared proxy-aware
+connector WebSocket. Qwen and Baidu use realtime JSON adapters; Doubao uses its
+gzip binary framing. The native socket accepts text and binary frames and uses
+a caller-preallocated handle so listeners exist before the handshake.
+
+The composer trigger follows the master switch, configuration readiness and
+text-chat busy state. Starting a session stops ordinary TTS; assistant messages
+already carrying audio modality are excluded from auto-TTS. Final user speech
+is persisted in the message timeline and copied to the composer exactly once.
 
 ## Push
 
@@ -404,7 +419,7 @@ Adjacent subsystems each section cares about:
 
 The following subsystems may warrant their own pages as the repo grows:
 
-- **TTS** — already has 9 providers + Edge bridge + auto-play gating + cache. Once STT (voice input) is also wired, plus multi-language pronunciation dictionaries, it could carry a standalone `voice-stack` page.
+- **Voice stack** — TTS, ordinary STT and six-provider live voice are fully wired; this can move to a standalone page when the misc page is next split.
 - **Connectivity & Push** — the Companion control plane owns discovery, pairing, and push; document future cross-device expansion under `mobile-architecture` or a dedicated `discovery-and-pairing` page.
 - **Monaco & Editor Workbench** — currently a shim; if cognia-next gains a full built-in code editing surface (more language servers, format-on-save, debug views), it could become a `code-editor` page.
 - **Wallpaper + Theme** — currently under `theming-and-i18n`; if animated/video wallpapers or a dynamic theme engine are introduced, it could become `appearance-engine`.
@@ -415,7 +430,7 @@ None of these need to split in the short term — keeping them on this page lets
 
 | Goal                        | Files                                                                                                            |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Add a new TTS provider      | `lib/tts/providers/<name>.ts` + `types.ts:TTS_PROVIDERS` registration + `tts-orchestrator.ts` switch             |
+| Add a new TTS provider      | `packages/tts/src/providers/<name>.ts` + selectable descriptor + provider registry                              |
 | Change proxy bypass rules   | `lib/network/proxy-config.ts:shouldBypass` + `src-tauri/src/proxy_config/mod.rs:should_bypass` (sync both sides) |
 | Tune queue backoff          | `lib/queue/retry-policy.ts:backoffDelayMs`                                                                       |
 | Add a KaTeX macro           | `lib/latex/config.ts:KATEX_MACROS`                                                                               |

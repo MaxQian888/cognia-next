@@ -13071,18 +13071,6 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "tts_edge_synthesize",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "tts_keyring_delete",
       "target": "client",
       "operation": "side-effect",
@@ -13144,30 +13132,6 @@
     },
     {
       "name": "tts_proxy_fetch",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "tts_realtime_cancel",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "tts_realtime_synthesize",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -13876,6 +13840,18 @@
     },
     {
       "name": "virtual_display_setup",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "voice_live_ws_open",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

@@ -211,6 +211,34 @@ describe("getSettings", () => {
     expect(s.liveVoice?.deployments).toEqual([])
   })
 
+  it("drops legacy live-voice resourceId and appKey fields", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      liveVoice: {
+        enabled: true,
+        region: "cn",
+        deployments: [
+          {
+            id: "qwen-cn",
+            provider: "qwen",
+            region: "cn",
+            enabled: true,
+            workspaceId: "workspace-1",
+            resourceId: "ambiguous-old-value",
+            appKey: "must-not-leave-settings",
+          },
+        ],
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    const deployment = (await getSettings()).liveVoice?.deployments[0]
+    expect(deployment).toMatchObject({ workspaceId: "workspace-1" })
+    expect(deployment).not.toHaveProperty("resourceId")
+    expect(deployment).not.toHaveProperty("appKey")
+  })
+
   it("defaults onboardingDismissedAt to undefined for fresh installs", async () => {
     const s = await getSettings()
     expect(s.onboardingDismissedAt).toBeUndefined()

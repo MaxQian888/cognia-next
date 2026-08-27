@@ -4,7 +4,7 @@
  *
  * The package is framework-agnostic: everything platform-specific — the Tauri
  * `tts_proxy_fetch` CORS/key-guarding proxy, the native-shell capability gate
- * for Edge/OpenAI-realtime synthesis, and user-visible failure toasts — is
+ * for proxied synthesis and user-visible failure toasts — is
  * supplied by the embedding app. In cognia-next the installer is
  * `lib/tts/host-bindings.ts`, imported by every app-side binding module so the
  * host is configured before any synthesis call. Unset fields degrade to the
@@ -25,7 +25,7 @@ export interface TtsHost {
   nativeProxyFetch?: (url: string, init: ProxyFetchInit) => Promise<ProxyFetchResult> | null
   /**
    * True when running inside a native shell whose bridges support the
-   * websocket/stream providers (Edge TTS, OpenAI realtime).
+   * provider-specific synthesis transports.
    */
   isNativeShell?: () => boolean
   /** Mobile playback always uses the device/browser system synthesizer. */

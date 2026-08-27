@@ -54,7 +54,22 @@ pub async fn open_ws(
     url: String,
     extra_headers: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
+    open_ws_with_handle(emitter, url, extra_headers, Uuid::new_v4().to_string()).await
+}
+
+/// Open a WebSocket using a caller-preallocated UUID handle.
+///
+/// The renderer can subscribe to every event topic before the handshake begins,
+/// which prevents a server's first frame from racing listener registration.
+pub async fn open_ws_with_handle(
+    emitter: Arc<dyn EventEmitter>,
+    url: String,
+    extra_headers: Option<HashMap<String, String>>,
+    id: String,
+) -> Result<String, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    Uuid::parse_str(&id).map_err(|_| "WS handle id must be a UUID".to_string())?;
 
     let mut request = url
         .as_str()
@@ -73,7 +88,6 @@ pub async fn open_ws(
         }
     }
 
-    let id = Uuid::new_v4().to_string();
     let proxy_cfg = proxy_config::current().map_err(|error| error.to_string())?;
     let route = proxy_cfg
         .websocket_route_for(&url)
@@ -213,6 +227,19 @@ pub async fn ws_send(handle_id: &str, data: String) -> Result<(), String> {
         .map_err(|e| format!("send failed: {e}"))
 }
 
+/// Send a binary message on the given handle.
+pub async fn ws_send_binary(handle_id: &str, data: Vec<u8>) -> Result<(), String> {
+    let tx = {
+        let map = handles().lock().unwrap();
+        map.get(handle_id)
+            .map(|h| h.tx.clone())
+            .ok_or_else(|| format!("WS handle '{handle_id}' not found"))?
+    };
+    tx.send(Message::Binary(data.into()))
+        .await
+        .map_err(|e| format!("send failed: {e}"))
+}
+
 /// Close the WebSocket connection.
 pub async fn ws_close(handle_id: &str) -> Result<(), String> {
     let tx = {
@@ -307,6 +334,7 @@ mod tests {
             Message,
         };
 
+        proxy_config::apply_current(Default::default()).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -323,9 +351,16 @@ mod tests {
         });
 
         let emitter = Arc::new(RecordingEmitter::default());
-        let handle_id = open_ws(emitter.clone(), format!("ws://{addr}"), None)
-            .await
-            .unwrap();
+        let expected_handle_id = "00000000-0000-4000-8000-000000000001".to_string();
+        let handle_id = open_ws_with_handle(
+            emitter.clone(),
+            format!("ws://{addr}"),
+            None,
+            expected_handle_id.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(handle_id, expected_handle_id);
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
@@ -360,6 +395,42 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn ws_send_binary_preserves_bytes() {
+        proxy_config::apply_current(Default::default()).unwrap();
+        let addr = spawn_echo_server().await;
+        let emitter = Arc::new(RecordingEmitter::default());
+        let handle_id = open_ws(emitter.clone(), format!("ws://{addr}"), None)
+            .await
+            .unwrap();
+
+        ws_send_binary(&handle_id, vec![1, 2, 255]).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if emitter.events.lock().iter().any(|(topic, payload)| {
+                    topic.ends_with("/binary")
+                        && payload == &serde_json::Value::String("AQL/".into())
+                }) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        ws_close(&handle_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn open_ws_rejects_non_uuid_preallocated_handle() {
+        let emitter = Arc::new(RecordingEmitter::default());
+        let error = open_ws_with_handle(emitter, "ws://localhost".into(), None, "guessable".into())
+            .await
+            .unwrap_err();
+        assert_eq!(error, "WS handle id must be a UUID");
     }
 
     #[test]

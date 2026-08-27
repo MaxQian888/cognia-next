@@ -199,6 +199,7 @@ pub use cognia_terminal::terminal_host_service;
 // ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
 // `crate::tts::…` (generate_handler!) resolves unchanged.
 pub use cognia_tts as tts;
+mod voice_live;
 // ADR-0021 — native ephemeral-TURN provisioning (CSP-bypassing).
 mod turn_provision;
 mod twin;
@@ -1270,6 +1271,7 @@ pub fn run() {
             connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
+            voice_live::voice_live_ws_open,
             connectors::commands::connectors_onebot_send,
             connectors::commands::connectors_lark_ws_open,
             connectors::commands::connectors_lark_ws_close,

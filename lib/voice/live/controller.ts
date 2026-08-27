@@ -705,10 +705,10 @@ export class LiveVoiceController {
     const abort = new AbortController()
     this.connectAbort = abort
     try {
-      await transport.connect(
-        { token: this.activeSession.token, url: this.activeSession.url },
-        { timeoutMs: this.options.connectTimeoutMs ?? 10_000, signal: abort.signal }
-      )
+      await transport.connect(this.activeSession, {
+        timeoutMs: this.options.connectTimeoutMs ?? 10_000,
+        signal: abort.signal,
+      })
     } finally {
       if (this.connectAbort === abort) this.connectAbort = null
     }

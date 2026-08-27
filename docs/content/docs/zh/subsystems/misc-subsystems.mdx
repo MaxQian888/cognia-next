@@ -10,7 +10,8 @@ description: TTS、推送、二维码、网络代理、连通性探测、队列�
 
 | 子系统              | 角色                                     | 涉及位置                                |
 | ------------------- | ---------------------------------------- | --------------------------------------- |
-| TTS                 | 文本转语音 9 provider + Edge WSS 桥      | `lib/tts/` · `src-tauri/src/tts/`       |
+| TTS                 | 文本转语音，11 个可选 provider          | `packages/tts/` · `crates/cognia-tts/`  |
+| 实时语音            | 全双工语音，浏览器与原生宿主传输        | `lib/voice/live/` · `src-tauri/src/voice_live.rs` |
 | Push                | 移动端推送通知（APNs/FCM）               | `lib/push/`                             |
 | QR & Barcode        | 配对二维码 + 移动端扫码                  | `lib/qr/`                               |
 | Network             | 浏览器侧代理配置 + proxy-aware fetch     | `lib/network/`                          |
@@ -25,28 +26,26 @@ description: TTS、推送、二维码、网络代理、连通性探测、队列�
 
 ## TTS
 
-文本转语音，9 个 provider 加一个 Edge-TTS WebSocket 桥。前端 `lib/tts/`，Tauri 侧 `src-tauri/src/tts/`。
+文本转语音由共享的 `@cognia/tts` orchestrator 统一负责。当前有 11 个可选 provider；已弃用的 `edge` 与 `openai-realtime` 只作为兼容输入保留，读取时归一化为 `system`，没有运行时传输。
 
 供应商一览（`types/media/tts.ts:TTS_PROVIDERS`）：
 
-| Provider   | 入口文件                  | 备注                |
-| ---------- | ------------------------- | ------------------- |
-| OpenAI     | `providers/openai.ts`     | REST，需 API key    |
-| Gemini     | `providers/gemini.ts`     | Google AI 系        |
-| ElevenLabs | `providers/elevenlabs.ts` | 高质量声纹          |
-| LMNT       | `providers/lmnt.ts`       | 低延迟              |
-| Hume       | `providers/hume.ts`       | 含情感参数          |
-| Cartesia   | `providers/cartesia.ts`   | Sonic 系列          |
-| Deepgram   | `providers/deepgram.ts`   | TTS + STT 同栈      |
-| Xiaomi     | `providers/xiaomi.ts`     | 国内可用            |
-| Edge       | `providers/edge.ts`       | 微软免费；走 WSS 桥 |
-| System     | `providers/system.ts`     | Web Speech API 兜底 |
+| Provider | 备注 |
+| --- | --- |
+| System | Web Speech API，无需密钥 |
+| OpenAI | REST 神经语音 |
+| 本地 OpenAI 兼容 | 仅回环 endpoint；可选密钥、模型和音色 |
+| Gemini | Google AI 语音 |
+| ElevenLabs | 账户音色发现 |
+| LMNT · Hume · Cartesia · Deepgram | 云端语音适配器 |
+| Xiaomi | 中国大陆 REST provider |
+| Mistral | Voxtral 语音输出 |
 
 `tts-orchestrator.ts` 是单例编排器：拿到 `SpeechSettings` → 选 provider → `preprocessTextForProvider` + 应用发音字典 + `splitTextForTTS` 分段 → 缓存（`tts-cache.ts`）查命中 → 调对应 provider → 串接播放队列。`auto-play-gates.ts` 的 `canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading, isStreaming })` 是聊天 send 完成后唯一的"该不该自动播"判定。
 
 编排器通过三个触点接入聊天：逐条消息的**朗读按钮**（`components/chat/read-aloud-button.tsx`，按 `ttsEnabled` 门控，用聚焦的 `useReadAloudStatus` 选择器，使虚拟化列表里的按钮不会被进度 tick 刷新）、**自动播放**（`hooks/media/use-chat-auto-play-tts.ts` 在回合完成的边沿触发 `canAutoPlayTTS`）、以及单实例全局**播放浮条**（`components/tts/tts-now-playing-bar.tsx`，挂在 app 根）。三者都经 `resolveCharacterVoice` 解析按角色声线（团队按 `senderId`，直聊用会话绑定角色），共用一个命令式入口 `lib/tts/speak-chat-message.ts`。编排器的 `activeSourceId` 标记当前由哪条消息持有播放。
 
-Edge-TTS 在浏览器里被 CORS 卡死，所以走 Tauri 桥（`src-tauri/src/tts/edge.rs`）：Rust 端开 WSS 到 `speech.platform.bing.com`，发 SSML，把二进制 MP3 帧拼回前端。`src-tauri/src/tts/keyring.rs` 用 OS keyring（macOS Keychain / Windows Credential Manager / Linux Secret Service）存其余 8 个 provider 的 API key；服务名 `com.cognia.tts`，account 是 provider id。`src-tauri/src/tts/proxy.rs` 是通用 HTTP 代理，给那些走 REST 但被 CORS 挡的 provider 用。
+`crates/cognia-tts/src/keyring.rs` 使用 OS keyring（macOS Keychain / Windows Credential Manager / Linux Secret Service）；服务名为 `com.cognia.tts`，account 是 provider id。受约束的宿主代理请求让云端凭据不进入渲染器。UI-neutral 的 `TTS_PROVIDER_SETTINGS` 注册表同时驱动桌面端和移动端设置，避免重复维护 endpoint、model 与 voice 字段。
 
 `speech.ts` 顺带提供语音输入的 BCP-47 语种表（`SPEECH_LANGUAGES`），13 种内置语言（中英日韩西法德意葡俄阿），给 composer 的麦克风按钮做下拉。
 
@@ -92,7 +91,13 @@ interface TTSProviderInfo {
 
 `maxTextLength` 是切片用的硬上限 —— `tts-text-utils.ts:splitTextForTTS` 在超过时按句号 / 段落切，保证每片单独可发；上层把音频片段串接播放，监听到 `chunkended` 触发下一片，听感不间断。
 
-关键文件：`lib/tts/{tts-orchestrator,tts-cache,tts-text-utils,speech-settings,auto-play-gates,keyring,speech,types}.ts` · `lib/tts/providers/*.ts` · `src-tauri/src/tts/{edge,keyring,proxy}.rs`。
+关键文件：`packages/tts/src/{tts-orchestrator,tts-cache,tts-text-utils,speech-settings,types}.ts` · `packages/tts/src/providers/*.ts` · `lib/tts/{facade,keyring,speak-chat-message}.ts` · `crates/cognia-tts/src/{keyring,proxy}.rs`。
+
+## 实时语音
+
+所有 provider 共用同一套 `LiveVoiceDialog`、controller、采集、播放、持久化与 transport。OpenAI、Gemini 和 xAI 在 `global` 地区使用浏览器临时会话；通义千问、豆包和百度仅在 Tauri 的 `cn` 地区可用：Rust 从现有宿主密钥环读取凭据，只构造固定官方 endpoint 与 header，再委托给共享且支持代理的 connector WebSocket。通义千问与百度使用 realtime JSON adapter，豆包使用 gzip 二进制帧。原生 socket 同时支持文本和二进制帧，并由调用方预分配 handle，保证监听器在握手前就已注册。
+
+输入框触发器受总开关、配置就绪状态及文本聊天忙碌状态控制。启动会话会停止普通 TTS；已经带音频模态的助手消息不会再次自动朗读。最终用户语音会写入消息时间线，并且只复制到输入框一次。
 
 ## Push
 
@@ -405,7 +410,7 @@ export function formatRelative(epochMs: number, now = Date.now()): string {
 
 下列子系统在仓库继续生长时可能值得独立成页：
 
-- **TTS** —— 当前已有 9 provider + Edge 桥 + auto-play 门控 + 缓存。一旦 STT（语音输入）也接入，加上多语种发音字典，能撑起一个独立 `voice-stack` 页。
+- **Voice stack** —— TTS、普通 STT 与六 provider 实时语音均已接线；下次拆分 misc 页面时可迁移到独立页面。
 - **Connectivity & Push** —— 发现、配对与推送统一由 Companion 控制面负责；后续跨设备扩展应记录到 `mobile-architecture` 或专门的 `discovery-and-pairing` 页面。
 - **Monaco & Editor Workbench** —— 当前是 shim；如果 cognia-next 真的内置完整的代码编辑表面（更多语言 server、format-on-save、调试视图），独立成 `code-editor` 页。
 - **Wallpaper + Theme** —— 现在归 `theming-and-i18n`，未来若引入动画/视频壁纸或动态主题引擎，独立成 `appearance-engine`。
@@ -416,7 +421,7 @@ export function formatRelative(epochMs: number, now = Date.now()): string {
 
 | 目标               | 文件                                                                                                       |
 | ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| 加新 TTS provider  | `lib/tts/providers/<name>.ts` + `types.ts:TTS_PROVIDERS` 注册 + `tts-orchestrator.ts` switch               |
+| 加新 TTS provider  | `packages/tts/src/providers/<name>.ts` + 可选 provider 描述符 + provider registry                        |
 | 改代理 bypass 规则 | `lib/network/proxy-config.ts:shouldBypass` + `src-tauri/src/proxy_config/mod.rs:should_bypass`（同步两侧） |
 | 调队列退避         | `lib/queue/retry-policy.ts:backoffDelayMs`                                                                 |
 | 加 KaTeX 宏        | `lib/latex/config.ts:KATEX_MACROS`                                                                         |

@@ -27,10 +27,12 @@ import type {
 import { isTauri as detectTauri } from "@/lib/platform/detect"
 
 import {
+  createLiveAdapter,
   getLiveVoiceCapabilities,
   isLiveVoiceProviderImplemented,
   LIVE_VOICE_DEFAULT_MODELS,
   LIVE_VOICE_DEFAULT_VOICES,
+  LIVE_VOICE_PROVIDER_DESCRIPTORS,
 } from "./adapter-registry"
 import { isLiveVoiceProviderEnabled } from "./feature-flags"
 import { mintLiveToken, type MintLiveTokenDeps } from "./token"
@@ -41,12 +43,13 @@ import type {
   LiveVoiceSettings,
   PreparedRealtimeSession,
 } from "./types"
+import { assertLiveVoicePayloadPiiSafe } from "./reducer"
 
 /** One deployment that passed every eligibility check, with its dial details resolved. */
 export interface LiveVoiceCandidate {
   deployment: LiveVoiceDeployment
   capabilities: LiveVoiceCapabilities
-  /** Model id, or the account-bound resource id for providers keyed that way. */
+  /** Resolved model id, including the descriptor default when omitted. */
   modelOrResource: string
   /** Omitted when the vendor should pick. */
   voice?: string
@@ -162,13 +165,19 @@ export function selectLiveVoiceCandidates(
     if (!isProviderEnabled(deployment.provider)) continue
 
     const capabilities = getLiveVoiceCapabilities(deployment.provider)
-    if (capabilities.requiresRelay && !isDesktop()) continue
+    if (!capabilities.regions.includes(deployment.region)) continue
+    if (capabilities.transport === "native" && !isDesktop()) continue
+    const descriptor = LIVE_VOICE_PROVIDER_DESCRIPTORS[deployment.provider]
+    if (
+      descriptor.requiredFields.some(
+        (field) => typeof deployment[field] !== "string" || !deployment[field]?.trim()
+      )
+    ) {
+      continue
+    }
 
     const modelOrResource =
-      deployment.model ??
-      deployment.resourceId ??
-      LIVE_VOICE_DEFAULT_MODELS[deployment.provider] ??
-      undefined
+      deployment.model ?? LIVE_VOICE_DEFAULT_MODELS[deployment.provider] ?? undefined
     // A provider whose ids are account-scoped has no safe default; dialling a
     // guessed one produces an opaque vendor error rather than a clear setup one.
     if (!modelOrResource) continue
@@ -228,6 +237,7 @@ export interface ResolveLiveVoiceSessionRequest {
 export interface ResolveLiveVoiceSessionDeps extends SelectLiveVoiceCandidatesDeps {
   mintToken?: typeof mintLiveToken
   mintDeps?: MintLiveTokenDeps
+  createAdapter?: typeof createLiveAdapter
   /** Reports a candidate that failed before the next one is tried. */
   onCandidateFailed?: (provider: LiveVoiceProviderId, error: Error) => void
 }
@@ -242,7 +252,13 @@ export async function resolveLiveVoiceSession(
   request: ResolveLiveVoiceSessionRequest,
   deps: ResolveLiveVoiceSessionDeps = {}
 ): Promise<ResolvedLiveVoiceSession> {
-  const { mintToken = mintLiveToken, mintDeps, onCandidateFailed, ...selectDeps } = deps
+  const {
+    mintToken = mintLiveToken,
+    mintDeps,
+    createAdapter = createLiveAdapter,
+    onCandidateFailed,
+    ...selectDeps
+  } = deps
 
   const candidates = selectLiveVoiceCandidates(request.settings, selectDeps)
   if (candidates.length === 0) {
@@ -259,6 +275,27 @@ export async function resolveLiveVoiceSession(
         tools: request.tools,
         resumptionHandle: request.resumptionHandle,
       })
+      assertLiveVoicePayloadPiiSafe(sessionConfig)
+      if (capabilities.transport === "native") {
+        const adapter = await createAdapter({
+          provider: deployment.provider,
+          modelId: modelOrResource,
+        })
+        return {
+          session: {
+            connection: "host-keyring",
+            deploymentId: deployment.id,
+            provider: deployment.provider,
+            region: deployment.region,
+            modelOrResource,
+            deployment: { ...deployment, model: modelOrResource, ...(voice ? { voice } : {}) },
+            capabilities,
+          },
+          adapter,
+          sessionConfig,
+          ...(voice ? { voice } : {}),
+        }
+      }
       const minted = await mintToken(
         {
           provider: deployment.provider,
@@ -272,6 +309,7 @@ export async function resolveLiveVoiceSession(
 
       return {
         session: {
+          connection: "ephemeral",
           deploymentId: deployment.id,
           provider: deployment.provider,
           region: deployment.region,

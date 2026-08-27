@@ -407,16 +407,20 @@ export async function connectorsHttpRequest(req: TauriHttpRequest): Promise<Taur
  */
 export async function connectorsWsOpen(
   url: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  handleId?: string
 ): Promise<string> {
-  return invoker<string>("connectors_ws_open", { url, headers })
+  return invoker<string>("connectors_ws_open", { url, headers, handleId })
 }
 
 /**
- * Send a text message on an open WebSocket identified by `handleId`.
+ * Send a text or binary message on an open WebSocket identified by `handleId`.
  */
-export async function connectorsWsSend(handleId: string, data: string): Promise<void> {
-  await invoker("connectors_ws_send", { handleId, data })
+export async function connectorsWsSend(handleId: string, data: string | Uint8Array): Promise<void> {
+  await invoker(
+    "connectors_ws_send",
+    typeof data === "string" ? { handleId, data } : { handleId, binary: Array.from(data) }
+  )
 }
 
 export async function connectorsWsClose(handleId: string): Promise<void> {

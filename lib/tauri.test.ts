@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { greet, isCapacitor, isTauri, transport } from "./tauri"
+import { greet, isCapacitor, isTauri, transport, voiceLiveWsOpen } from "./tauri"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 const CAPACITOR_KEY = "Capacitor"
@@ -75,6 +75,33 @@ describe("lib/tauri", () => {
     it("propagates rejection from transport.call", async () => {
       jest.spyOn(transport, "call").mockRejectedValueOnce(new Error("boom"))
       await expect(greet("X")).rejects.toThrow("boom")
+    })
+  })
+})
+
+describe("voiceLiveWsOpen", () => {
+  it("sends only native provider metadata and a preallocated handle", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce("handle-1")
+    const deployment = {
+      id: "qwen-cn",
+      provider: "qwen" as const,
+      region: "cn" as const,
+      enabled: true,
+      workspaceId: "workspace-1",
+      model: "qwen-model",
+      voice: "longanqian",
+    }
+
+    await expect(voiceLiveWsOpen("qwen", deployment, "handle-1")).resolves.toBe("handle-1")
+
+    expect(callSpy).toHaveBeenCalledWith("voice_live_ws_open", {
+      provider: "qwen",
+      deployment: {
+        workspaceId: "workspace-1",
+        model: "qwen-model",
+        voice: "longanqian",
+      },
+      handleId: "handle-1",
     })
   })
 })

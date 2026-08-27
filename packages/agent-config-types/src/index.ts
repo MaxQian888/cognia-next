@@ -2952,19 +2952,21 @@ export interface LiveVoiceDeployment {
   provider: LiveVoiceProviderId
   region: LiveVoiceRegion
   enabled: boolean
-  /** Model id, or the account-bound resource id for providers that use one. */
+  /** Provider model override; omitted to use the descriptor default. */
   model?: string
-  resourceId?: string
-  appKey?: string
   voice?: string
+  /** Qwen Beijing workspace id. Non-secret and used only to build the fixed host. */
+  workspaceId?: string
+  /** Doubao application id. The Access Key remains in the host keyring. */
+  appId?: string
 }
 
 /**
  * The `liveVoice` block of {@link AppSettings}.
  *
- * Deliberately separate from the flat `realtimeVoice` / `realtimeModel` /
- * `realtimeInstructions` keys below, which belong to the retired OpenAI
- * Realtime *TTS* provider and are still read by it.
+ * Deliberately separate from the legacy flat `realtimeVoice` /
+ * `realtimeModel` / `realtimeInstructions` keys below. Those keys remain only
+ * for settings compatibility after the OpenAI Realtime TTS path was removed.
  */
 export interface LiveVoiceSettings {
   enabled: boolean

@@ -89,20 +89,25 @@ describe("selectLiveVoiceCandidates — gating", () => {
     ).toEqual([])
   })
 
-  it("skips relay-only providers off the desktop", () => {
+  it("skips native-only providers off the desktop", () => {
     // Browsers cannot set the vendor auth headers those handshakes require.
     const s = settings({
       region: "cn",
-      deployments: [deployment({ provider: "qwen", region: "cn", model: "qwen-audio-realtime" })],
+      deployments: [
+        deployment({
+          provider: "qwen",
+          region: "cn",
+          workspaceId: "workspace-1",
+          model: "qwen-audio-realtime",
+        }),
+      ],
     })
 
     expect(selectLiveVoiceCandidates(s, selectDeps({ isDesktop: () => false }))).toEqual([])
     expect(selectLiveVoiceCandidates(s, selectDeps({ isDesktop: () => true }))).toHaveLength(1)
   })
 
-  it("skips a provider with no default model and no configured one", () => {
-    // Account-scoped ids have no safe default; dialling a guess produces an
-    // opaque vendor error instead of a clear setup error.
+  it("skips Qwen until its Beijing workspace is configured", () => {
     const s = settings({
       region: "cn",
       deployments: [deployment({ provider: "qwen", region: "cn" })],
@@ -130,15 +135,13 @@ describe("selectLiveVoiceCandidates — production defaults", () => {
     expect(explainLiveVoiceUnavailability(s)).toBe("no-deployments")
   })
 
-  it("excludes a provider whose adapter has not shipped", () => {
+  it("includes a configured native provider on Tauri", () => {
     const s = settings({
       region: "cn",
-      deployments: [
-        deployment({ provider: "doubao", region: "cn", model: "doubao-seed-realtimevoice" }),
-      ],
+      deployments: [deployment({ provider: "doubao", region: "cn", appId: "app-1" })],
     })
 
-    expect(selectLiveVoiceCandidates(s)).toEqual([])
+    expect(selectLiveVoiceCandidates(s, selectDeps())).toHaveLength(1)
   })
 })
 
@@ -159,13 +162,15 @@ describe("selectLiveVoiceCandidates — dial details", () => {
     )
   })
 
-  it("accepts an account-bound resource id in place of a model", () => {
+  it("keeps workspace identity separate from the provider model", () => {
     const s = settings({
       region: "cn",
-      deployments: [deployment({ provider: "qwen", region: "cn", resourceId: "res-42" })],
+      deployments: [deployment({ provider: "qwen", region: "cn", workspaceId: "workspace-42" })],
     })
 
-    expect(selectLiveVoiceCandidates(s, selectDeps())[0].modelOrResource).toBe("res-42")
+    const [candidate] = selectLiveVoiceCandidates(s, selectDeps())
+    expect(candidate.modelOrResource).toBe("qwen-audio-3.0-realtime-plus")
+    expect(candidate.deployment.workspaceId).toBe("workspace-42")
   })
 
   it("omits the voice for a provider with no default so the vendor picks", () => {
@@ -299,6 +304,7 @@ describe("resolveLiveVoiceSession", () => {
     )
 
     expect(resolved.session).toEqual({
+      connection: "ephemeral",
       deploymentId: "d-openai",
       provider: "openai",
       region: "global",
@@ -310,6 +316,36 @@ describe("resolveLiveVoiceSession", () => {
     })
     // The transport must parse events with the adapter that minted the token.
     expect(resolved.adapter).toBe(ADAPTER)
+  })
+
+  it("prepares native providers without minting or exposing credentials", async () => {
+    const mintToken = jest.fn()
+    const createAdapter = jest.fn().mockResolvedValue(ADAPTER)
+    const nativeSettings = settings({
+      region: "cn",
+      deployments: [deployment({ provider: "qwen", region: "cn", workspaceId: "workspace-1" })],
+    })
+
+    const resolved = await resolveLiveVoiceSession(
+      { settings: nativeSettings, apiKeys: { qwen: "renderer-secret-must-not-be-used" } },
+      resolveDeps({ mintToken, createAdapter })
+    )
+
+    expect(mintToken).not.toHaveBeenCalled()
+    expect(createAdapter).toHaveBeenCalledWith({
+      provider: "qwen",
+      modelId: "qwen-audio-3.0-realtime-plus",
+    })
+    expect(resolved.session).toMatchObject({
+      connection: "host-keyring",
+      provider: "qwen",
+      deployment: {
+        workspaceId: "workspace-1",
+        model: "qwen-audio-3.0-realtime-plus",
+      },
+    })
+    expect(resolved.session).not.toHaveProperty("token")
+    expect(JSON.stringify(resolved.session)).not.toContain("renderer-secret")
   })
 
   it("omits expiresAt when the provider reports none", async () => {

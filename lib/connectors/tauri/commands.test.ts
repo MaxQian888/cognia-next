@@ -25,6 +25,7 @@ import {
   connectorsKeyringDelete,
   connectorsKeyringList,
   connectorsHttpRequest,
+  connectorsWsOpen,
   connectorsWsSend,
   connectorsWsClose,
   connectorsResetAllWs,
@@ -280,6 +281,22 @@ describe("connectorsHttpRequest", () => {
 // Task 23 — WS client
 // ---------------------------------------------------------------------------
 
+describe("connectorsWsOpen", () => {
+  it("passes a caller-preallocated handle to the native handshake", async () => {
+    mockInvoke.mockResolvedValueOnce("handle-abc")
+
+    await expect(
+      connectorsWsOpen("wss://voice.example", { Authorization: "Bearer redacted" }, "handle-abc")
+    ).resolves.toBe("handle-abc")
+
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_ws_open", {
+      url: "wss://voice.example",
+      headers: { Authorization: "Bearer redacted" },
+      handleId: "handle-abc",
+    })
+  })
+})
+
 describe("connectorsWsSend", () => {
   it("invokes connectors_ws_send with handleId and data", async () => {
     mockInvoke.mockResolvedValueOnce(undefined)
@@ -287,6 +304,15 @@ describe("connectorsWsSend", () => {
     expect(mockInvoke).toHaveBeenCalledWith("connectors_ws_send", {
       handleId: "handle-abc",
       data: "ping",
+    })
+  })
+
+  it("invokes connectors_ws_send with binary bytes", async () => {
+    mockInvoke.mockResolvedValueOnce(undefined)
+    await connectorsWsSend("handle-abc", new Uint8Array([1, 2, 255]))
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_ws_send", {
+      handleId: "handle-abc",
+      binary: [1, 2, 255],
     })
   })
 })

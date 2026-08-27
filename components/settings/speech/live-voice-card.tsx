@@ -19,11 +19,12 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_LIVE_VOICE_SETTINGS, type LiveVoiceSettings } from "@cognia/agent-config-types"
 import {
   IMPLEMENTED_LIVE_VOICE_PROVIDERS,
-  LIVE_VOICE_CAPABILITIES,
   LIVE_VOICE_DEFAULT_MODELS,
   LIVE_VOICE_DEFAULT_VOICES,
+  LIVE_VOICE_PROVIDER_DESCRIPTORS,
 } from "@/lib/voice/live/adapter-registry"
 import { isLiveVoiceProviderEnabled } from "@/lib/voice/live/feature-flags"
+import { isTauri } from "@/lib/platform/detect"
 import type {
   LiveVoiceDeployment,
   LiveVoiceProviderId,
@@ -42,11 +43,6 @@ import { ApiKeyInput } from "./api-key-input"
  */
 function deploymentId(provider: LiveVoiceProviderId, region: LiveVoiceRegion): string {
   return `${provider}-${region}`
-}
-
-/** Which region a provider serves. Relay-backed vendors are CN-only for now. */
-function regionFor(provider: LiveVoiceProviderId): LiveVoiceRegion {
-  return LIVE_VOICE_CAPABILITIES[provider].requiresRelay ? "cn" : "global"
 }
 
 export function LiveVoiceCard() {
@@ -68,10 +64,14 @@ export function LiveVoiceCard() {
   // the selected region. Anything else would be a control that cannot connect.
   const available = useMemo(
     () =>
-      IMPLEMENTED_LIVE_VOICE_PROVIDERS.filter(
-        (provider) =>
-          isLiveVoiceProviderEnabled(provider) && regionFor(provider) === liveVoice.region
-      ),
+      IMPLEMENTED_LIVE_VOICE_PROVIDERS.filter((provider) => {
+        const descriptor = LIVE_VOICE_PROVIDER_DESCRIPTORS[provider]
+        return (
+          isLiveVoiceProviderEnabled(provider) &&
+          descriptor.regions.includes(liveVoice.region) &&
+          (descriptor.transport === "browser" || isTauri())
+        )
+      }),
     [liveVoice.region]
   )
 
@@ -139,11 +139,7 @@ export function LiveVoiceCard() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="global">{t("regionGlobal")}</SelectItem>
-                {liveVoice.region === "cn" && (
-                  <SelectItem disabled value="cn">
-                    {t("regionCn")}
-                  </SelectItem>
-                )}
+                {isTauri() && <SelectItem value="cn">{t("regionCn")}</SelectItem>}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">{t("regionHint")}</p>
@@ -178,6 +174,7 @@ export function LiveVoiceCard() {
           ) : (
             available.map((provider) => {
               const deployment = deploymentFor(provider)
+              const descriptor = LIVE_VOICE_PROVIDER_DESCRIPTORS[provider]
               return (
                 <div className="space-y-3 rounded-lg border p-3" key={provider}>
                   <div className="flex items-center justify-between gap-4">
@@ -194,30 +191,65 @@ export function LiveVoiceCard() {
 
                   {deployment?.enabled && (
                     <div className="space-y-3">
-                      <ApiKeyInput label={t("apiKey")} provider={provider} />
+                      <ApiKeyInput
+                        label={t(`credential.${descriptor.credential.kind}`)}
+                        provider={descriptor.credential.keyringId}
+                      />
+                      {descriptor.fields.includes("workspaceId") && (
+                        <div className="space-y-2">
+                          <Label htmlFor={`live-voice-${provider}-workspace-id`}>
+                            {t("workspaceId")}
+                          </Label>
+                          <Input
+                            id={`live-voice-${provider}-workspace-id`}
+                            onChange={(event) =>
+                              upsertDeployment(provider, { workspaceId: event.target.value })
+                            }
+                            placeholder={t("workspaceIdPlaceholder")}
+                            value={deployment.workspaceId ?? ""}
+                          />
+                        </div>
+                      )}
+                      {descriptor.fields.includes("appId") && (
+                        <div className="space-y-2">
+                          <Label htmlFor={`live-voice-${provider}-app-id`}>{t("appId")}</Label>
+                          <Input
+                            id={`live-voice-${provider}-app-id`}
+                            onChange={(event) =>
+                              upsertDeployment(provider, { appId: event.target.value })
+                            }
+                            placeholder={t("appIdPlaceholder")}
+                            value={deployment.appId ?? ""}
+                          />
+                        </div>
+                      )}
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor={`live-voice-${provider}-model`}>{t("model")}</Label>
-                          <Input
-                            id={`live-voice-${provider}-model`}
-                            onChange={(event) =>
-                              upsertDeployment(provider, { model: event.target.value })
-                            }
-                            placeholder={LIVE_VOICE_DEFAULT_MODELS[provider] ?? ""}
-                            value={deployment.model ?? ""}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`live-voice-${provider}-voice`}>{t("voice")}</Label>
-                          <Input
-                            id={`live-voice-${provider}-voice`}
-                            onChange={(event) =>
-                              upsertDeployment(provider, { voice: event.target.value })
-                            }
-                            placeholder={LIVE_VOICE_DEFAULT_VOICES[provider] ?? t("voiceDefault")}
-                            value={deployment.voice ?? ""}
-                          />
-                        </div>
+                        {descriptor.fields.includes("model") && (
+                          <div className="space-y-2">
+                            <Label htmlFor={`live-voice-${provider}-model`}>{t("model")}</Label>
+                            <Input
+                              id={`live-voice-${provider}-model`}
+                              onChange={(event) =>
+                                upsertDeployment(provider, { model: event.target.value })
+                              }
+                              placeholder={LIVE_VOICE_DEFAULT_MODELS[provider] ?? ""}
+                              value={deployment.model ?? ""}
+                            />
+                          </div>
+                        )}
+                        {descriptor.fields.includes("voice") && (
+                          <div className="space-y-2">
+                            <Label htmlFor={`live-voice-${provider}-voice`}>{t("voice")}</Label>
+                            <Input
+                              id={`live-voice-${provider}-voice`}
+                              onChange={(event) =>
+                                upsertDeployment(provider, { voice: event.target.value })
+                              }
+                              placeholder={LIVE_VOICE_DEFAULT_VOICES[provider] ?? t("voiceDefault")}
+                              value={deployment.voice ?? ""}
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

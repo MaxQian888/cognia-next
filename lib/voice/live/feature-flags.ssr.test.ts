@@ -21,7 +21,7 @@ beforeEach(() => {
 describe("live voice flags without a window", () => {
   it("still resolves defaults", () => {
     expect(getLiveVoiceFlags().liveVoiceOpenai).toBe(true)
-    expect(getLiveVoiceFlags().liveVoiceQwen).toBe(false)
+    expect(getLiveVoiceFlags().liveVoiceQwen).toBe(true)
   })
 
   it("still honours the environment layer", () => {
@@ -38,7 +38,7 @@ describe("live voice flags without a window", () => {
     // No storage layer means nothing changed, so subscribers are not misled
     // into re-reading a value that did not move.
     expect(listener).not.toHaveBeenCalled()
-    expect(isLiveVoiceFlagEnabled("liveVoiceQwen")).toBe(false)
+    expect(isLiveVoiceFlagEnabled("liveVoiceQwen")).toBe(true)
 
     unsubscribe()
   })

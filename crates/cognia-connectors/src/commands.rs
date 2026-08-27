@@ -276,15 +276,29 @@ pub async fn connectors_ws_open(
     app: tauri::AppHandle,
     url: String,
     headers: Option<std::collections::HashMap<String, String>>,
+    handle_id: Option<String>,
 ) -> Result<String, String> {
     let emitter = std::sync::Arc::new(super::axum_app::AppHandleEmitter(app));
-    super::ws_client::open_ws(emitter, url, headers).await
+    match handle_id {
+        Some(handle_id) => {
+            super::ws_client::open_ws_with_handle(emitter, url, headers, handle_id).await
+        }
+        None => super::ws_client::open_ws(emitter, url, headers).await,
+    }
 }
 
 #[tauri::command]
-pub async fn connectors_ws_send(handle_id: String, data: String) -> Result<(), String> {
+pub async fn connectors_ws_send(
+    handle_id: String,
+    data: Option<String>,
+    binary: Option<Vec<u8>>,
+) -> Result<(), String> {
     let _perf = cognia_instrument::guard("connector.ws_send");
-    super::ws_client::ws_send(&handle_id, data).await
+    match (data, binary) {
+        (Some(data), None) => super::ws_client::ws_send(&handle_id, data).await,
+        (None, Some(binary)) => super::ws_client::ws_send_binary(&handle_id, binary).await,
+        _ => Err("exactly one of data or binary must be provided".to_string()),
+    }
 }
 
 #[tauri::command]

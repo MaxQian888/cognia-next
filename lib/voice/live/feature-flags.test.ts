@@ -32,9 +32,9 @@ describe("live voice flag defaults", () => {
       liveVoiceOpenai: true,
       liveVoiceGoogle: true,
       liveVoiceXai: true,
-      liveVoiceQwen: false,
-      liveVoiceDoubao: false,
-      liveVoiceBaidu: false,
+      liveVoiceQwen: true,
+      liveVoiceDoubao: true,
+      liveVoiceBaidu: true,
     })
   })
 
@@ -47,7 +47,7 @@ describe("live voice flag defaults", () => {
 
   it("resolves a provider through its own flag", () => {
     expect(isLiveVoiceProviderEnabled("openai")).toBe(true)
-    expect(isLiveVoiceProviderEnabled("doubao")).toBe(false)
+    expect(isLiveVoiceProviderEnabled("doubao")).toBe(true)
   })
 })
 

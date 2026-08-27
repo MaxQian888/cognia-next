@@ -28,6 +28,9 @@ import {
   createPlatformWebSocket,
 } from "./platform-websocket"
 
+const HANDLE_ID = "00000000-0000-4000-8000-000000000001"
+const randomUUID = jest.spyOn(globalThis.crypto, "randomUUID")
+
 function emit(topic: string, payload: unknown): void {
   const handler = listeners.get(topic)
   if (!handler) throw new Error(`no listener for ${topic}`)
@@ -35,7 +38,8 @@ function emit(topic: string, payload: unknown): void {
 }
 
 beforeEach(() => {
-  connectorsWsOpen.mockReset().mockResolvedValue("handle-1")
+  randomUUID.mockReturnValue(HANDLE_ID)
+  connectorsWsOpen.mockReset().mockResolvedValue(HANDLE_ID)
   connectorsWsSend.mockReset().mockResolvedValue(undefined)
   connectorsWsClose.mockReset().mockResolvedValue(undefined)
   unlisten.mockReset()
@@ -49,11 +53,13 @@ describe("createPlatformWebSocket on Tauri", () => {
       headers: { Authorization: "Bearer t" },
     })
 
-    expect(connectorsWsOpen).toHaveBeenCalledWith("wss://agent.example.com/acp", {
-      Authorization: "Bearer t",
-    })
+    expect(connectorsWsOpen).toHaveBeenCalledWith(
+      "wss://agent.example.com/acp",
+      { Authorization: "Bearer t" },
+      HANDLE_ID
+    )
     expect(socket.kind).toBe("native")
-    expect(socket.id).toBe("handle-1")
+    expect(socket.id).toBe(HANDLE_ID)
   })
 
   it("surfaces text, binary and error frames on their own callbacks", async () => {
@@ -62,9 +68,9 @@ describe("createPlatformWebSocket on Tauri", () => {
     const onError = jest.fn()
     await createPlatformWebSocket("wss://agent.example.com/acp", { onMessage, onBinary, onError })
 
-    emit("connectors://ws/handle-1/message", '{"jsonrpc":"2.0"}')
-    emit("connectors://ws/handle-1/binary", Buffer.from([1, 2, 3]).toString("base64"))
-    emit("connectors://ws/handle-1/error", "read error")
+    emit(`connectors://ws/${HANDLE_ID}/message`, '{"jsonrpc":"2.0"}')
+    emit(`connectors://ws/${HANDLE_ID}/binary`, Buffer.from([1, 2, 3]).toString("base64"))
+    emit(`connectors://ws/${HANDLE_ID}/error`, "read error")
 
     expect(onMessage).toHaveBeenCalledWith('{"jsonrpc":"2.0"}')
     expect(onBinary).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]))
@@ -75,7 +81,7 @@ describe("createPlatformWebSocket on Tauri", () => {
     const onClose = jest.fn()
     await createPlatformWebSocket("wss://agent.example.com/acp", { onClose })
 
-    emit("connectors://ws/handle-1/close", { code: 1006, reason: "abnormal" })
+    emit(`connectors://ws/${HANDLE_ID}/close`, { code: 1006, reason: "abnormal" })
 
     expect(onClose).toHaveBeenCalledWith({ code: 1006, reason: "abnormal" })
     // A webview reload that leaks listeners is what makes duplicate inbound
@@ -88,7 +94,7 @@ describe("createPlatformWebSocket on Tauri", () => {
     const onClose = jest.fn()
     await createPlatformWebSocket("wss://agent.example.com/acp", { onClose })
 
-    emit("connectors://ws/handle-1/close", { code: null, reason: null })
+    emit(`connectors://ws/${HANDLE_ID}/close`, { code: null, reason: null })
 
     expect(onClose).toHaveBeenCalledWith({ code: null, reason: null })
   })
@@ -97,7 +103,7 @@ describe("createPlatformWebSocket on Tauri", () => {
     const onClose = jest.fn()
     await createPlatformWebSocket("wss://agent.example.com/acp", { onClose })
 
-    emit("connectors://ws/handle-1/close", undefined)
+    emit(`connectors://ws/${HANDLE_ID}/close`, undefined)
 
     expect(onClose).toHaveBeenCalledWith({ code: null, reason: null })
   })
@@ -106,7 +112,7 @@ describe("createPlatformWebSocket on Tauri", () => {
     const onClose = jest.fn()
     const socket = await createPlatformWebSocket("wss://agent.example.com/acp", { onClose })
 
-    emit("connectors://ws/handle-1/close", { code: 1000, reason: "bye" })
+    emit(`connectors://ws/${HANDLE_ID}/close`, { code: 1000, reason: "bye" })
     await socket.close()
 
     expect(connectorsWsClose).not.toHaveBeenCalled()
@@ -118,7 +124,28 @@ describe("createPlatformWebSocket on Tauri", () => {
 
     await socket.send("ping")
 
-    expect(connectorsWsSend).toHaveBeenCalledWith("handle-1", "ping")
+    expect(connectorsWsSend).toHaveBeenCalledWith(HANDLE_ID, "ping")
+  })
+
+  it("sends binary frames through the native command", async () => {
+    const socket = await createPlatformWebSocket("wss://agent.example.com/acp")
+    const bytes = new Uint8Array([1, 2, 3])
+
+    await socket.send(bytes)
+
+    expect(connectorsWsSend).toHaveBeenCalledWith(HANDLE_ID, bytes)
+  })
+
+  it("attaches listeners before the native handshake can emit its first frame", async () => {
+    const onMessage = jest.fn()
+    connectorsWsOpen.mockImplementationOnce(async (_url, _headers, handleId) => {
+      emit(`connectors://ws/${handleId}/message`, "first")
+      return handleId
+    })
+
+    await createPlatformWebSocket("wss://agent.example.com/acp", { onMessage })
+
+    expect(onMessage).toHaveBeenCalledWith("first")
   })
 
   it("propagates the native refusal when WebSocket proxying is disabled", async () => {
@@ -140,7 +167,7 @@ describe("createPlatformWebSocket off Tauri", () => {
     __message(data: unknown): void
     __close(code: number, reason: string): void
     __error(): void
-    sent: string[]
+    sent: unknown[]
     closeCalls: number
   }
 
@@ -150,9 +177,9 @@ describe("createPlatformWebSocket off Tauri", () => {
       onmessage: null as null | ((event: { data: unknown }) => void),
       onclose: null as null | ((event: { code: number; reason: string }) => void),
       onerror: null as null | (() => void),
-      sent: [] as string[],
+      sent: [] as unknown[],
       closeCalls: 0,
-      send(data: string) {
+      send(data: string | Uint8Array) {
         this.sent.push(data)
       },
       close() {
@@ -195,6 +222,10 @@ describe("createPlatformWebSocket off Tauri", () => {
 
     await handle.send("ping")
     expect(socket.sent).toEqual(["ping"])
+
+    const bytes = new Uint8Array([1, 2, 3])
+    await handle.send(bytes)
+    expect(new Uint8Array(socket.sent[1] as ArrayBuffer)).toEqual(bytes)
   })
 
   it("refuses handshake headers instead of dropping them", async () => {

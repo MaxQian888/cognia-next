@@ -43,18 +43,12 @@ description: 设置中的角色编辑器、聊天角色选择器、应用更新�
 语音编辑器由共享的 TTS 目录支撑——`system` 没有静态目录，因此其语音 id 是自由文本：
 
 ```typescript
-// components/settings/characters-section.tsx:139-149
-const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; name: string }>>> = {
-  openai: OPENAI_TTS_VOICES,
-  gemini: GEMINI_TTS_VOICES,
-  edge: EDGE_TTS_VOICES,
-  elevenlabs: ELEVENLABS_TTS_VOICES,
-  lmnt: LMNT_TTS_VOICES,
-  hume: HUME_TTS_VOICES,
-  cartesia: CARTESIA_TTS_VOICES,
-  deepgram: DEEPGRAM_TTS_VOICES,
-  xiaomi: XIAOMI_TTS_VOICES,
-}
+const VOICE_CATALOG = Object.fromEntries(
+  ORDERED_TTS_PROVIDERS.flatMap((provider) => {
+    const voices = TTS_PROVIDER_SETTINGS[provider].voices
+    return voices ? [[provider, voices]] : []
+  })
+)
 ```
 
 人设示例文本域通过 `parseLines()`（`editor-projection.ts:44–49`）往返；人设对象本身由 `buildPersona()`（61–73）重建，语音覆盖层由 `buildVoiceProfile()`（85–94）重建。

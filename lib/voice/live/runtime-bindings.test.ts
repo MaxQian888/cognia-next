@@ -12,7 +12,8 @@ const CAPABILITIES: LiveVoiceCapabilities = {
   supportsOutputTranscript: true,
   inputSampleRate: 24_000,
   outputSampleRate: 24_000,
-  requiresRelay: false,
+  regions: ["global"],
+  transport: "browser",
 }
 
 const LIMITS = { turnLimit: 12, characterLimit: 16_000 }

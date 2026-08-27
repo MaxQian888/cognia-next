@@ -29,6 +29,7 @@ const persistTurnsMock = jest.fn()
 const persistAppendMock = jest.fn()
 const persistFlushMock = jest.fn()
 const saveSettingsMock = jest.fn()
+const ensureProviderKeysMock = jest.fn()
 const stopTTSMock = jest.fn()
 const upsertSessionMessagesMock = jest.fn()
 /** The chat session the composer is mounted in; `undefined` = scratch pane. */
@@ -36,6 +37,7 @@ let currentSessionId: string | undefined = "chat-1"
 let currentChatStatus: "idle" | "streaming" | "awaiting_approval" | "error" = "idle"
 let currentLiveVoiceEnabled = true
 let currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
+let currentProviderKeys: Record<string, string> = { openai: "sk-user", xai: "xai-user" }
 let currentSelectedMicId: string | undefined = "mic-1"
 let currentToolRecords: unknown[] = []
 
@@ -148,6 +150,7 @@ jest.mock("@/stores/settings", () => ({
     selector: (state: {
       settings: Record<string, unknown>
       providerKeys: Record<string, string>
+      ensureProviderKeys: typeof ensureProviderKeysMock
       save: typeof saveSettingsMock
     }) => unknown
   ) =>
@@ -168,7 +171,8 @@ jest.mock("@/stores/settings", () => ({
           deployments: currentDeployments,
         },
       },
-      providerKeys: { openai: "sk-user", xai: "xai-user" },
+      providerKeys: currentProviderKeys,
+      ensureProviderKeys: ensureProviderKeysMock,
       save: saveSettingsMock,
     }),
 }))
@@ -239,6 +243,7 @@ beforeEach(() => {
   currentSelectedMicId = "mic-1"
   currentToolRecords = []
   currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
+  currentProviderKeys = { openai: "sk-user", xai: "xai-user" }
   buildBindingsMock.mockResolvedValue({ droppedTools: [] })
   persistTurnsMock.mockResolvedValue([])
 })
@@ -259,6 +264,18 @@ describe("LiveVoiceDialog — starting a session", () => {
     expect(trigger).toBeDisabled()
     await user.hover(trigger)
     expect(await screen.findByText("errors.noDeployments")).toBeInTheDocument()
+  })
+
+  it("loads credentials and disables an otherwise eligible provider without one", async () => {
+    currentProviderKeys = {}
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(ensureProviderKeysMock).toHaveBeenCalledTimes(1)
+    const trigger = screen.getByLabelText("startLive")
+    expect(trigger).toBeDisabled()
+    await user.hover(trigger)
+    expect(await screen.findByText("errors.noneEligible")).toBeInTheDocument()
   })
 
   it.each(["streaming", "awaiting_approval"] as const)(
@@ -304,6 +321,7 @@ describe("LiveVoiceDialog — starting a session", () => {
   })
 
   it("falls back after readiness failure while reusing the preflight microphone", async () => {
+    currentProviderKeys.google = "google-user"
     currentDeployments = [
       { id: "d1", provider: "openai", region: "global", enabled: true },
       { id: "d2", provider: "google", region: "global", enabled: true },
@@ -326,6 +344,7 @@ describe("LiveVoiceDialog — starting a session", () => {
   })
 
   it("falls back after readiness when the provider drops before the first audio frame", async () => {
+    currentProviderKeys.google = "google-user"
     currentDeployments = [
       { id: "d1", provider: "openai", region: "global", enabled: true },
       { id: "d2", provider: "google", region: "global", enabled: true },
@@ -959,9 +978,7 @@ describe("LiveVoiceDialog — archiving the conversation", () => {
 
     await user.click(screen.getByLabelText("end"))
 
-    await waitFor(() =>
-      expect(upsertSessionMessagesMock).toHaveBeenCalledWith("chat-1", projected)
-    )
+    await waitFor(() => expect(upsertSessionMessagesMock).toHaveBeenCalledWith("chat-1", projected))
   })
 
   it("queues each finalized turn before the session ends", async () => {

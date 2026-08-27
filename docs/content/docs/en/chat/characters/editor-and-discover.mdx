@@ -43,18 +43,12 @@ The form is grouped so the long field list stays scannable. Every field maps ont
 The voice editor is backed by the shared TTS catalogs — `system` has no static catalog so its voice id is free-text:
 
 ```typescript
-// components/settings/characters-section.tsx:139-149
-const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; name: string }>>> = {
-  openai: OPENAI_TTS_VOICES,
-  gemini: GEMINI_TTS_VOICES,
-  edge: EDGE_TTS_VOICES,
-  elevenlabs: ELEVENLABS_TTS_VOICES,
-  lmnt: LMNT_TTS_VOICES,
-  hume: HUME_TTS_VOICES,
-  cartesia: CARTESIA_TTS_VOICES,
-  deepgram: DEEPGRAM_TTS_VOICES,
-  xiaomi: XIAOMI_TTS_VOICES,
-}
+const VOICE_CATALOG = Object.fromEntries(
+  ORDERED_TTS_PROVIDERS.flatMap((provider) => {
+    const voices = TTS_PROVIDER_SETTINGS[provider].voices
+    return voices ? [[provider, voices]] : []
+  })
+)
 ```
 
 The persona exemplar textarea round-trips through `parseLines()` (`editor-projection.ts:44–49`); the persona object itself is rebuilt by `buildPersona()` (61–73) and the voice overlay by `buildVoiceProfile()` (85–94).

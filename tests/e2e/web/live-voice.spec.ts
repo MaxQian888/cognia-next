@@ -320,6 +320,8 @@ test.describe("web — live voice closed loop", () => {
     )
     await expect(page.getByText("first realtime turn", { exact: true })).toBeVisible()
     await expect(page.getByText("first realtime answer", { exact: true })).toBeVisible()
+    const composer = page.getByRole("textbox", { name: /message/i }).first()
+    await expect(composer).toHaveValue("first realtime turn")
 
     first.send(
       JSON.stringify({
@@ -344,7 +346,16 @@ test.describe("web — live voice closed loop", () => {
     await expect(page.getByText("Reconnecting…", { exact: true })).toBeVisible()
     await expect.poll(() => provider.sockets.length).toBe(2)
     await expect(page.getByText("Listening…", { exact: true })).toBeVisible()
+    provider.sockets[1].send(
+      JSON.stringify({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "user-1",
+        transcript: "first realtime turn",
+      })
+    )
     await expect(page.getByText("first realtime turn", { exact: true })).toBeVisible()
+    await expect(composer).toHaveValue("first realtime turn")
+    await expect(page.getByText("first realtime turn", { exact: true })).toHaveCount(1)
     expect(provider.sockets).toHaveLength(2)
   })
 

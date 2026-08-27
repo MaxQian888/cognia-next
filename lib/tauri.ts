@@ -1,4 +1,5 @@
 import { setTransport, transport } from "./tauri/transport-instance"
+import type { LiveVoiceDeployment, LiveVoiceProviderId } from "@cognia/agent-config-types"
 
 // Runtime detection delegates to the canonical, framework-free source of truth
 // in `lib/platform/detect`. Re-exported here so existing
@@ -21,6 +22,25 @@ export { transport, setTransport }
 
 export async function greet(name: string): Promise<string> {
   return transport.call<string>("greet", { name })
+}
+
+/** Open a policy-constrained live-voice socket without exposing its key. */
+export async function voiceLiveWsOpen(
+  provider: LiveVoiceProviderId,
+  deployment: LiveVoiceDeployment,
+  handleId: string
+): Promise<string> {
+  const nonSecretDeployment = {
+    ...(deployment.workspaceId ? { workspaceId: deployment.workspaceId } : {}),
+    ...(deployment.appId ? { appId: deployment.appId } : {}),
+    ...(deployment.model ? { model: deployment.model } : {}),
+    ...(deployment.voice ? { voice: deployment.voice } : {}),
+  }
+  return transport.call<string>("voice_live_ws_open", {
+    provider,
+    deployment: nonSecretDeployment,
+    handleId,
+  })
 }
 
 // Re-export every plugin wrapper as a named import surface. Consumers can do

@@ -70,8 +70,12 @@ jest.mock("@/components/ai-elements/mic-selector", () => ({
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (
-    selector: (s: { settings?: Record<string, unknown>; save: jest.Mock }) => unknown
-  ) => selector({ settings: undefined, save: jest.fn() }),
+    selector: (s: {
+      settings?: Record<string, unknown>
+      save: jest.Mock
+      ensureProviderKeys: jest.Mock
+    }) => unknown
+  ) => selector({ settings: undefined, save: jest.fn(), ensureProviderKeys: jest.fn() }),
 }))
 
 jest.mock("@cognia/tts/speech", () => ({

@@ -14,7 +14,8 @@
  *
  * Nothing turns on by accident regardless: `AppSettings.liveVoice.enabled`
  * defaults to `false` and no deployments are configured out of the box, so
- * these flags only decide which providers a user *may* select.
+ * these flags only decide which providers a user *may* select. All six now
+ * have production adapters; the China trio remains native-shell-only.
  */
 
 import { LIVE_VOICE_PROVIDER_IDS, type LiveVoiceProviderId } from "./types"
@@ -48,10 +49,10 @@ const DEFAULT_LIVE_VOICE_FLAGS: Record<LiveVoiceFlag, boolean> = {
   liveVoiceOpenai: true,
   liveVoiceGoogle: true,
   liveVoiceXai: true,
-  // No adapter until the Phase 2 relay lands; selecting one would only throw.
-  liveVoiceQwen: false,
-  liveVoiceDoubao: false,
-  liveVoiceBaidu: false,
+  // Native providers ship enabled; these remain opt-out kill switches.
+  liveVoiceQwen: true,
+  liveVoiceDoubao: true,
+  liveVoiceBaidu: true,
 }
 
 function parseFlagValue(raw: string | undefined): boolean | undefined {

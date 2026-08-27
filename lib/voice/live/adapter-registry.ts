@@ -28,12 +28,8 @@ import type { LiveVoiceCapabilities, LiveVoiceProviderId } from "./types"
 /**
  * Per-provider transport capabilities.
  *
- * Sample rates for OpenAI, Google and xAI are from their published realtime
- * docs. The China providers' rates are provisional: the Doubao framing model
- * (binary vs JSON) and whether Baidu exposes a single end-to-end speech socket
- * at all are both open questions the Phase 2 protocol POC has to settle. They
- * are marked `requiresRelay` because vendor auth rides on the WebSocket
- * handshake headers, which a browser cannot set.
+ * China providers use the native transport because their credentials belong in
+ * handshake headers that the browser WebSocket API cannot set.
  */
 export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveVoiceCapabilities>> =
   {
@@ -45,7 +41,8 @@ export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveV
       supportsOutputTranscript: true,
       inputSampleRate: 24_000,
       outputSampleRate: 24_000,
-      requiresRelay: false,
+      regions: ["global"],
+      transport: "browser",
     },
     google: {
       supportsTools: true,
@@ -56,7 +53,8 @@ export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveV
       // Gemini Live takes 16 kHz uplink and answers at 24 kHz.
       inputSampleRate: 16_000,
       outputSampleRate: 24_000,
-      requiresRelay: false,
+      regions: ["global"],
+      transport: "browser",
     },
     xai: {
       supportsTools: true,
@@ -66,7 +64,8 @@ export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveV
       supportsOutputTranscript: true,
       inputSampleRate: 24_000,
       outputSampleRate: 24_000,
-      requiresRelay: false,
+      regions: ["global"],
+      transport: "browser",
     },
     qwen: {
       supportsTools: true,
@@ -76,11 +75,11 @@ export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveV
       supportsOutputTranscript: true,
       inputSampleRate: 16_000,
       outputSampleRate: 24_000,
-      requiresRelay: true,
+      regions: ["cn"],
+      transport: "native",
     },
     doubao: {
-      // Dormant on purpose for the first release — the tool-call surface has not
-      // been validated against the vendor protocol yet.
+      // Doubao's documented realtime-dialogue protocol has no tool-call surface.
       supportsTools: false,
       supportsServerVad: true,
       supportsBargeIn: true,
@@ -88,18 +87,19 @@ export const LIVE_VOICE_CAPABILITIES: Readonly<Record<LiveVoiceProviderId, LiveV
       supportsOutputTranscript: true,
       inputSampleRate: 16_000,
       outputSampleRate: 24_000,
-      requiresRelay: true,
+      regions: ["cn"],
+      transport: "native",
     },
     baidu: {
-      // Dormant on purpose for the first release — see Doubao.
-      supportsTools: false,
+      supportsTools: true,
       supportsServerVad: true,
       supportsBargeIn: true,
       supportsInputTranscript: true,
       supportsOutputTranscript: true,
       inputSampleRate: 16_000,
       outputSampleRate: 24_000,
-      requiresRelay: true,
+      regions: ["cn"],
+      transport: "native",
     },
   }
 
@@ -111,10 +111,7 @@ export function getLiveVoiceCapabilities(provider: LiveVoiceProviderId): LiveVoi
 /**
  * Model to dial when a deployment names none.
  *
- * Sourced from `docs/research/2026-08-02-realtime-voice-models.md` and the AI
- * SDK's own model-id unions — not guessed. The China entries are `null` because
- * their ids are account-scoped: those deployments must carry an explicit
- * `model` or `resourceId`, and are skipped rather than dialled with a wrong id.
+ * Sourced from provider documentation and the AI SDK's model-id unions.
  */
 export const LIVE_VOICE_DEFAULT_MODELS: Readonly<Record<LiveVoiceProviderId, string | null>> = {
   openai: "gpt-realtime-2.1",
@@ -122,9 +119,9 @@ export const LIVE_VOICE_DEFAULT_MODELS: Readonly<Record<LiveVoiceProviderId, str
   // preview date that silently disappears.
   google: "gemini-2.5-flash-native-audio-latest",
   xai: "grok-voice-latest",
-  qwen: null,
-  doubao: null,
-  baidu: null,
+  qwen: "qwen-audio-3.0-realtime-plus",
+  doubao: "service-selected",
+  baidu: "audio-realtime-near",
 }
 
 /**
@@ -140,13 +137,69 @@ export const LIVE_VOICE_DEFAULT_VOICES: Readonly<Record<LiveVoiceProviderId, str
   openai: "marin",
   google: null,
   xai: null,
-  qwen: null,
-  doubao: null,
+  qwen: "longanqian",
+  doubao: "zh_female_vv_jupiter_bigtts",
   baidu: null,
 }
 
-/** Providers whose adapter exists today. Qwen/Doubao/Baidu arrive in Phase 2. */
-export const IMPLEMENTED_LIVE_VOICE_PROVIDERS = ["openai", "google", "xai"] as const
+export type LiveVoiceSettingField = "workspaceId" | "appId" | "model" | "voice"
+
+export interface LiveVoiceProviderDescriptor {
+  provider: LiveVoiceProviderId
+  regions: readonly ("cn" | "global")[]
+  transport: "browser" | "native"
+  credential: {
+    keyringId: LiveVoiceProviderId
+    required: true
+    kind: "apiKey" | "accessKey"
+  }
+  fields: readonly LiveVoiceSettingField[]
+  requiredFields: readonly LiveVoiceSettingField[]
+  supportsTools: boolean
+}
+
+/** One UI-neutral registry drives eligibility and every provider settings form. */
+export const LIVE_VOICE_PROVIDER_DESCRIPTORS: Readonly<
+  Record<LiveVoiceProviderId, LiveVoiceProviderDescriptor>
+> = Object.fromEntries(
+  (Object.keys(LIVE_VOICE_CAPABILITIES) as LiveVoiceProviderId[]).map((provider) => {
+    const capabilities = LIVE_VOICE_CAPABILITIES[provider]
+    const fields: readonly LiveVoiceSettingField[] =
+      provider === "qwen"
+        ? ["workspaceId", "model", "voice"]
+        : provider === "doubao"
+          ? ["appId", "voice"]
+          : ["model", "voice"]
+    const requiredFields: readonly LiveVoiceSettingField[] =
+      provider === "qwen" ? ["workspaceId"] : provider === "doubao" ? ["appId"] : []
+    return [
+      provider,
+      {
+        provider,
+        regions: capabilities.regions,
+        transport: capabilities.transport,
+        credential: {
+          keyringId: provider,
+          required: true,
+          kind: provider === "doubao" ? "accessKey" : "apiKey",
+        },
+        fields,
+        requiredFields,
+        supportsTools: capabilities.supportsTools,
+      },
+    ]
+  })
+) as unknown as Readonly<Record<LiveVoiceProviderId, LiveVoiceProviderDescriptor>>
+
+/** Every provider has a production adapter. */
+export const IMPLEMENTED_LIVE_VOICE_PROVIDERS = [
+  "openai",
+  "google",
+  "xai",
+  "qwen",
+  "doubao",
+  "baidu",
+] as const
 
 export type ImplementedLiveVoiceProvider = (typeof IMPLEMENTED_LIVE_VOICE_PROVIDERS)[number]
 
@@ -194,6 +247,18 @@ const DEFAULT_LOADERS: Readonly<Record<ImplementedLiveVoiceProvider, LiveAdapter
   xai: async ({ modelId, apiKey, baseURL, fetch }) => {
     const { createXai } = await import("@ai-sdk/xai")
     return createXai({ apiKey, baseURL, fetch }).experimental_realtime(modelId)
+  },
+  qwen: async ({ modelId }) => {
+    const { createQwenLiveAdapter } = await import("./china-json-adapters")
+    return createQwenLiveAdapter(modelId)
+  },
+  baidu: async ({ modelId }) => {
+    const { createBaiduLiveAdapter } = await import("./china-json-adapters")
+    return createBaiduLiveAdapter(modelId)
+  },
+  doubao: async ({ modelId }) => {
+    const { createDoubaoLiveAdapter } = await import("./doubao-adapter")
+    return createDoubaoLiveAdapter(modelId)
   },
 }
 

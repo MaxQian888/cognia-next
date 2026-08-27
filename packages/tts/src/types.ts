@@ -769,8 +769,8 @@ export function getApiKeyProvider(provider: TTSProvider): string | undefined {
   return TTS_PROVIDERS[provider].apiKeyProvider
 }
 
-/** Provider IDs that need an API key, in display order. */
-export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
+/** Selectable provider IDs that need an API key, in display order. */
+export const KEYED_TTS_PROVIDERS: SelectableTTSProvider[] = [
   "openai",
   "gemini",
   "elevenlabs",
@@ -780,7 +780,6 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
   "deepgram",
   "xiaomi",
   "mistral",
-  "openai-realtime",
 ]
 
 /**
@@ -792,17 +791,19 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
  *   token forged from a constant lifted out of the browser, plus a spoofed UA
  *   and `chrome-extension://` Origin). There is no acceptable terms of service
  *   and no key to request, and it returns 403 in mainland China — this
- *   product's market. The synthesis code stays one release before deletion.
+ *   product's market. Its synthesis implementation has been deleted.
  *
  * - `openai-realtime` (plan D2): a pure-TTS use of OpenAI's speech-to-speech
  *   Realtime model, at ~$64/1M audio output vs ~$12 for `gpt-4o-mini-tts`, and
  *   steered by a "read this verbatim" prompt to suppress the model's agency —
  *   the wrong tool. The `openai` provider already uses `gpt-4o-mini-tts` over
- *   REST, so that is the TTS path now. The Realtime s2s transport
- *   (`crates/cognia-tts/src/realtime.rs`, `providers/openai-realtime.ts`) is
- *   kept, reserved for a future real-time voice-conversation feature (O1).
+ *   REST, so that is the TTS path now. Its former WebSocket transport has been
+ *   deleted; live conversation uses the dedicated shared live-voice runtime.
  */
-export const RETIRED_TTS_PROVIDERS = ["edge", "openai-realtime"] as const satisfies readonly TTSProvider[]
+export const RETIRED_TTS_PROVIDERS = [
+  "edge",
+  "openai-realtime",
+] as const satisfies readonly TTSProvider[]
 
 const warnedRetiredProviders = new Set<string>()
 
@@ -855,10 +856,7 @@ export interface TTSProviderSettingsDescriptor {
 }
 
 /** UI-neutral settings metadata shared by desktop, mobile, and character editors. */
-export const TTS_PROVIDER_SETTINGS: Record<
-  SelectableTTSProvider,
-  TTSProviderSettingsDescriptor
-> = {
+export const TTS_PROVIDER_SETTINGS: Record<SelectableTTSProvider, TTSProviderSettingsDescriptor> = {
   system: {
     id: "system",
     voiceSettingKey: "systemVoice",

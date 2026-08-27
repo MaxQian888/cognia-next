@@ -3,18 +3,24 @@ import type {
   Experimental_RealtimeModelV4ServerEvent as RealtimeServerEvent,
 } from "@ai-sdk/provider"
 
-import { WS_OPEN, createLiveVoiceTransport, type WebSocketLike } from "./transport"
+import {
+  WS_OPEN,
+  createLiveVoiceTransport,
+  type LiveVoiceTransportOptions,
+  type WebSocketLike,
+} from "./transport"
+import type { PreparedRealtimeSession } from "./types"
 
 class FakeSocket implements WebSocketLike {
   readyState = WS_OPEN
-  sent: string[] = []
+  sent: Array<string | Uint8Array> = []
   closed: { code?: number; reason?: string } | null = null
   onopen: ((event: unknown) => void) | null = null
   onclose: ((event: { code?: number; reason?: string }) => void) | null = null
   onerror: ((event: unknown) => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
 
-  send(data: string) {
+  send(data: string | Uint8Array) {
     this.sent.push(data)
   }
   close(code?: number, reason?: string) {
@@ -40,7 +46,10 @@ function fakeAdapter(overrides: Partial<RealtimeModel> = {}): RealtimeModel {
   } as RealtimeModel
 }
 
-function harness(adapterOverrides: Partial<RealtimeModel> = {}) {
+function harness(
+  adapterOverrides: Partial<RealtimeModel> = {},
+  transportOverrides: Partial<LiveVoiceTransportOptions> = {}
+) {
   const socket = new FakeSocket()
   const events: RealtimeServerEvent[] = []
   const errors: Error[] = []
@@ -58,12 +67,59 @@ function harness(adapterOverrides: Partial<RealtimeModel> = {}) {
       created.push({ url, protocols })
       return socket
     },
+    ...transportOverrides,
   })
 
   return { transport, socket, events, errors, closes, opens, created }
 }
 
-const SESSION = { token: "ek_secret", url: "wss://provider.example/realtime" }
+const SESSION = {
+  connection: "ephemeral",
+  deploymentId: "global-1",
+  provider: "openai",
+  region: "global",
+  modelOrResource: "fake-realtime",
+  token: "ek_secret",
+  url: "wss://provider.example/realtime",
+  capabilities: {
+    supportsTools: true,
+    supportsServerVad: true,
+    supportsBargeIn: true,
+    supportsInputTranscript: true,
+    supportsOutputTranscript: true,
+    inputSampleRate: 24_000,
+    outputSampleRate: 24_000,
+    regions: ["global"],
+    transport: "browser",
+  },
+} satisfies PreparedRealtimeSession
+
+const HOST_SESSION = {
+  connection: "host-keyring",
+  deploymentId: "qwen-cn",
+  provider: "qwen",
+  region: "cn",
+  modelOrResource: "qwen-audio-3.0-realtime-plus",
+  deployment: {
+    id: "qwen-cn",
+    provider: "qwen",
+    region: "cn",
+    enabled: true,
+    workspaceId: "workspace-1",
+    model: "qwen-audio-3.0-realtime-plus",
+  },
+  capabilities: {
+    supportsTools: true,
+    supportsServerVad: true,
+    supportsBargeIn: true,
+    supportsInputTranscript: true,
+    supportsOutputTranscript: true,
+    inputSampleRate: 16_000,
+    outputSampleRate: 24_000,
+    regions: ["cn"],
+    transport: "native",
+  },
+} satisfies PreparedRealtimeSession
 
 /** Let the transport's internal send chain settle. */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -164,6 +220,55 @@ describe("connect", () => {
     h.socket.onerror?.({})
 
     expect(h.errors.map((error) => error.message)).toEqual(["live voice socket error"])
+  })
+
+  it("uses the host-keyring socket without asking the adapter for a renderer URL", async () => {
+    const getWebSocketConfig = jest.fn()
+    const nativeSocket = {
+      id: "native-1",
+      kind: "native" as const,
+      send: jest.fn().mockResolvedValue(undefined),
+      close: jest.fn().mockResolvedValue(undefined),
+    }
+    const openNativeSocket = jest.fn(async (_session, handlers) => {
+      handlers.onPrepared(nativeSocket)
+      return nativeSocket
+    })
+    const h = harness({ getWebSocketConfig }, { openNativeSocket })
+
+    await h.transport.connect(HOST_SESSION)
+
+    expect(openNativeSocket).toHaveBeenCalledWith(HOST_SESSION, expect.any(Object))
+    expect(getWebSocketConfig).not.toHaveBeenCalled()
+    expect(h.transport.isOpen).toBe(true)
+    expect(h.opens).toHaveLength(1)
+  })
+
+  it("can answer the native server's first binary event before open returns", async () => {
+    const response = new Uint8Array([9, 8, 7])
+    const nativeSocket = {
+      id: "native-1",
+      kind: "native" as const,
+      send: jest.fn().mockResolvedValue(undefined),
+      close: jest.fn().mockResolvedValue(undefined),
+    }
+    const h = harness(
+      {
+        getHealthCheckResponse: () => response,
+        parseServerEvent: jest.fn(),
+      },
+      {
+        openNativeSocket: async (_session, handlers) => {
+          handlers.onPrepared(nativeSocket)
+          handlers.onBinary(new Uint8Array([1, 2, 3]))
+          return nativeSocket
+        },
+      }
+    )
+
+    await h.transport.connect(HOST_SESSION)
+
+    expect(nativeSocket.send).toHaveBeenCalledWith(response)
   })
 })
 
@@ -277,6 +382,17 @@ describe("send", () => {
     expect(h.socket.sent).toEqual(["raw-frame"])
   })
 
+  it("passes a binary wire payload straight through", async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const h = harness({ serializeClientEvent: () => bytes })
+    h.transport.connect(SESSION)
+
+    h.transport.send({ type: "input-audio-append" } as never)
+    await flush()
+
+    expect(h.socket.sent).toEqual([bytes])
+  })
+
   it("preserves order when serialization is async and uneven", async () => {
     // Audio appends are high-rate; a reordered stream is unrecoverable.
     const delays: Record<string, number> = { first: 20, second: 1, third: 0 }
@@ -294,7 +410,7 @@ describe("send", () => {
     }
     await new Promise((resolve) => setTimeout(resolve, 60))
 
-    expect(h.socket.sent.map((payload) => JSON.parse(payload).id)).toEqual([
+    expect(h.socket.sent.map((payload) => JSON.parse(payload as string).id)).toEqual([
       "first",
       "second",
       "third",

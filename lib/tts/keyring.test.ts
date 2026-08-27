@@ -55,13 +55,14 @@ describe("keyringProviderFor", () => {
   it("returns null for free providers", () => {
     expect(keyringProviderFor("system")).toBeNull()
     expect(keyringProviderFor("edge")).toBeNull()
+    expect(keyringProviderFor("openai-realtime")).toBeNull()
   })
 })
 
 describe("KEYRING_PROVIDER_IDS", () => {
   it("lists every keyring account exactly once", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(11)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(11)
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(14)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(14)
   })
 
   it("carries xai, which is a live-voice account with no TTS provider", () => {
@@ -69,6 +70,7 @@ describe("KEYRING_PROVIDER_IDS", () => {
     // the TTS providers: `keyringProviderFor` never returns xai, but live voice
     // still needs somewhere to store the key.
     expect(KEYRING_PROVIDER_IDS).toContain("xai")
+    expect(KEYRING_PROVIDER_IDS).toEqual(expect.arrayContaining(["qwen", "doubao", "baidu"]))
   })
 })
 

@@ -63,7 +63,7 @@ jest.mock("./streaming/pcm-player", () => ({
 }))
 
 import { TTSOrchestrator, ttsOrchestrator } from "./tts-orchestrator"
-import { DEFAULT_SPEECH_SETTINGS } from "./types"
+import { DEFAULT_SPEECH_SETTINGS, type SpeechSettings } from "./types"
 import { getCachedOrGenerate } from "./tts-cache"
 import { generateOpenAITTS } from "./providers/openai"
 import { generateLocalOpenAICompatibleTTS } from "./providers/local-openai-compatible"

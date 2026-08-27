@@ -1,0 +1,20 @@
+{
+  "qwen": {
+    "inputTranscript": {
+      "type": "conversation.item.input_audio_transcription.completed",
+      "item_id": "qwen-user-1",
+      "transcript": "你好，Cognia"
+    }
+  },
+  "baidu": {
+    "audioDelta": {
+      "type": "response.audio.delta",
+      "response_id": "baidu-response-1",
+      "item_id": "baidu-item-1",
+      "delta": "AQID"
+    }
+  },
+  "doubao": {
+    "sessionStartedBase64": "EZUQAAAAAJYAAAACczEAAAACe30="
+  }
+}

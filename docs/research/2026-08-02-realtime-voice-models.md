@@ -70,6 +70,27 @@ These are valid solutions when the requirement is the product experience rather 
 3. **Nova 2 Sonic** when AWS governance and Bedrock integration dominate, provided its language list is sufficient.
 4. **Hume EVI** when emotional attunement matters more than broad language coverage or single-model purity.
 
+## Implementation validation (2026-08-28)
+
+The protocol POC is complete for the mainland-China shortlist. Cognia uses one
+normalized controller and transport while keeping provider framing inside thin
+adapters:
+
+- Qwen uses the Beijing workspace endpoint, DashScope Bearer key from the host
+  keyring, PCM16 at 16 kHz uplink / 24 kHz downlink, and documented function
+  calls. The default is `qwen-audio-3.0-realtime-plus` with `longanqian`.
+- Doubao uses the fixed realtime-dialogue endpoint, Resource ID and App Key;
+  only App ID is deployment metadata and only Access Key is stored as a secret.
+  Its V1 gzip binary frames carry lifecycle, server VAD, ASR, chat, interruption,
+  and 24 kHz PCM output. Tools are omitted because this protocol does not expose
+  function calling.
+- Baidu uses its documented realtime WebSocket with API-key Bearer auth, the
+  `audio-realtime-near` default, PCM16 audio, realtime-style events, and tools.
+
+All three are native-only, limited to the `cn` region, use the shared
+proxy-aware WebSocket, and remain unavailable in static web builds. Their public
+environment flags are opt-out kill switches rather than implementation gates.
+
 ## POC acceptance tests
 
 Vendor latency numbers are not directly comparable: some measure model first-token latency, others end-to-end speech onset under ideal networking. Run the same recordings and network conditions across candidates and measure:

@@ -196,7 +196,7 @@ mac-only `dirs`/`libc` deps (extracted on Windows where `scheduler/macos.rs` nev
 | `cognia-connectors` | 6.1k | webhook/WS ingress, sigverify, Matrix E2EE stack | `BusEventEmitter` impl (its one construction site) relocated to `companion_api::server` behind the crate's own `EventEmitter` trait |
 | `cognia-plugin-runtime` | 15.2k | plugin runtime; **wasmtime/cranelift** | `set_sidecar_dir_resolver` (claude::sidecar), registered in `run()`; canonical WIT stays at `src-tauri/wit/` (bindgen uses a relative path — the plugin-sdk sync/gate scripts depend on that location) |
 | `cognia-skills` | 2.1k | skills scan/install/registry | none (zero coupling) |
-| `cognia-tts` | 0.9k | Edge TTS, provider keyring, proxied fetch | none |
+| `cognia-tts` | 0.9k | provider keyring, proxied synthesis fetch | none |
 | `cognia-remote-control` (retired 2026-08-09) | — | Replaced by the Companion control plane | — |
 | `cognia-gateway` | 6.6k | OpenAI-compatible local gateway | none |
 | `cognia-ccswitch` | 2.4k | provider-relay switcher | none (uses cognia-subscription discovery) |

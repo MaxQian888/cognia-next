@@ -5,7 +5,11 @@ import type {
 } from "@ai-sdk/provider"
 
 import { createLiveVoiceController, type LiveVoiceControllerOptions } from "./controller"
-import type { LiveVoiceCapabilities, PreparedRealtimeSession } from "./types"
+import type {
+  LiveVoiceCapabilities,
+  PreparedEphemeralRealtimeSession,
+  PreparedRealtimeSession,
+} from "./types"
 
 const trackEventMock = jest.fn()
 
@@ -21,11 +25,15 @@ const CAPABILITIES: LiveVoiceCapabilities = {
   supportsOutputTranscript: true,
   inputSampleRate: 24_000,
   outputSampleRate: 24_000,
-  requiresRelay: false,
+  regions: ["global"],
+  transport: "browser",
 }
 
-function session(overrides: Partial<PreparedRealtimeSession> = {}): PreparedRealtimeSession {
+function session(
+  overrides: Partial<PreparedEphemeralRealtimeSession> = {}
+): PreparedRealtimeSession {
   return {
+    connection: "ephemeral",
     deploymentId: "d1",
     provider: "openai",
     region: "global",
@@ -39,9 +47,9 @@ function session(overrides: Partial<PreparedRealtimeSession> = {}): PreparedReal
 
 class FakeTransport {
   sent: RealtimeClientEvent[] = []
-  connected: { token: string; url: string } | null = null
+  connected: PreparedRealtimeSession | null = null
   closed: { code?: number; reason?: string } | null = null
-  connect(target: { token: string; url: string }) {
+  connect(target: PreparedRealtimeSession) {
     this.connected = target
   }
   send(event: RealtimeClientEvent) {
@@ -220,10 +228,7 @@ describe("start", () => {
 
     await h.controller.start()
 
-    expect(h.transport.connected).toEqual({
-      token: "ek_secret",
-      url: "wss://provider.example/realtime",
-    })
+    expect(h.transport.connected).toEqual(session())
     expect(h.controller.getSnapshot().phase).toBe("connecting")
   })
 

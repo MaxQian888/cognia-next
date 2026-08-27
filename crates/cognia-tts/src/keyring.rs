@@ -27,6 +27,9 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "mistral",
     "local-openai-compatible",
     "xai",
+    "qwen",
+    "doubao",
+    "baidu",
 ];
 
 fn validate_provider(provider: &str) -> Result<(), String> {
@@ -36,7 +39,7 @@ fn validate_provider(provider: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn get_provider_key(provider: &str) -> Result<Option<String>, String> {
+pub fn get_provider_key(provider: &str) -> Result<Option<String>, String> {
     validate_provider(provider)?;
     secret_store::get(SERVICE, provider)
 }

@@ -127,14 +127,31 @@ Live2D/SVG rig but never spoke.
   Provider tests disable fallback and the test action becomes Cancel while a
   request is active.
 
+### TTS consolidation and live voice completion (2026-08-28)
+
+- `edge` and `openai-realtime` remain accepted only as deprecated serialized
+  and plugin compatibility ids. Both normalize to `system`; they have no
+  selectable descriptor, adapter, Rust transport, Tauri command, or ACL grant.
+- `@cognia/tts` owns the provider-setting descriptor registry used by desktop
+  and mobile. Runtime registries and character packs accept only selectable
+  providers, including Mistral and local OpenAI-compatible configuration.
+- Real-time conversation is a separate shared live-voice subsystem. Global
+  providers use ephemeral browser sessions; Qwen, Doubao, and Baidu use one
+  proxy-aware native WebSocket with host-keyring credentials. The retired TTS
+  WebSocket paths are not reused or duplicated.
+- Starting live voice stops the singleton TTS orchestrator. Audio-modality
+  assistant messages are excluded from automatic TTS so a live reply is not
+  spoken twice; manual read-aloud remains available.
+
 ## Consequences
 
 Read-aloud narrates clean prose and starts sooner. Two structurally-unsound
 providers stop being offered, without breaking existing selections. The pet
 talks. Failures are actionable and retried sanely. The subsystem now has an
-owner of record, and its provider list has a single source of truth. The
-audio-ownership decision stays reversible because the Realtime transport was
-reserved rather than deleted.
+owner of record, and its provider list has a single source of truth. Live voice
+and read-aloud now have explicit audio arbitration, and the retired Realtime TTS
+transport was deleted after the dedicated live-voice path became the sole
+speech-to-speech runtime.
 
 ## Alternatives rejected
 

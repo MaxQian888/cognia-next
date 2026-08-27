@@ -11,7 +11,12 @@
     "showKey": "Show key"
   },
   "live": {
-    "apiKey": "API key",
+    "appId": "App ID",
+    "appIdPlaceholder": "Doubao App ID",
+    "credential": {
+      "accessKey": "Access Key",
+      "apiKey": "API key"
+    },
     "description": "Low-latency, full-duplex speech with automatic turn detection and interruption, across several providers.",
     "enabled": "Enable live voice",
     "enabledHint": "Adds the live voice button to the composer.",
@@ -24,10 +29,13 @@
     "preferred": "Primary provider",
     "preferredHint": "Tried first; others are fallbacks.",
     "preferredPlaceholder": "Pick a provider",
-    "privacy": "Microphone audio is streamed to the selected provider only while a live voice session is active. It cannot be redacted locally.",
+    "privacy": "Microphone audio is streamed to the selected provider only while a live voice session is active and cannot be redacted locally. On desktop, provider credentials remain in the host keyring.",
     "providers": {
+      "baidu": "Baidu",
+      "doubao": "Doubao",
       "google": "Gemini",
       "openai": "OpenAI",
+      "qwen": "Qwen",
       "xai": "Grok"
     },
     "providersTitle": "Providers",
@@ -37,7 +45,9 @@
     "regionHint": "Sessions never fall back across this boundary.",
     "title": "Live voice",
     "voice": "Voice",
-    "voiceDefault": "Provider default"
+    "voiceDefault": "Provider default",
+    "workspaceId": "Workspace ID",
+    "workspaceIdPlaceholder": "Qwen Beijing workspace ID"
   },
   "provider": {
     "apiKeyPlaceholder": {

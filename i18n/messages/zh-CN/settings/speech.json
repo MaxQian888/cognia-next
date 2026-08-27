@@ -11,7 +11,12 @@
     "showKey": "显示密钥"
   },
   "live": {
-    "apiKey": "API 密钥",
+    "appId": "App ID",
+    "appIdPlaceholder": "豆包 App ID",
+    "credential": {
+      "accessKey": "Access Key",
+      "apiKey": "API 密钥"
+    },
     "description": "低延迟、全双工语音，支持自动轮次检测与打断，可选多家服务商。",
     "enabled": "启用实时语音",
     "enabledHint": "在输入框中显示实时语音按钮。",
@@ -24,10 +29,13 @@
     "preferred": "首选服务商",
     "preferredHint": "优先使用，其余作为备选。",
     "preferredPlaceholder": "请选择服务商",
-    "privacy": "仅在实时语音会话进行期间，麦克风音频会直接传输至所选服务商，无法在本地脱敏。",
+    "privacy": "仅在实时语音会话进行期间，麦克风音频会直接传输至所选服务商，且无法在本地脱敏。桌面端的服务商凭据始终保留在宿主密钥环中。",
     "providers": {
+      "baidu": "百度",
+      "doubao": "豆包",
       "google": "Gemini",
       "openai": "OpenAI",
+      "qwen": "通义千问",
       "xai": "Grok"
     },
     "providersTitle": "服务商",
@@ -37,7 +45,9 @@
     "regionHint": "会话不会跨地区自动切换。",
     "title": "实时语音",
     "voice": "音色",
-    "voiceDefault": "服务商默认"
+    "voiceDefault": "服务商默认",
+    "workspaceId": "工作空间 ID",
+    "workspaceIdPlaceholder": "通义千问北京工作空间 ID"
   },
   "provider": {
     "apiKeyPlaceholder": {

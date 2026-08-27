@@ -8,7 +8,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
-import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@cognia/tts/types"
+import { KEYED_TTS_PROVIDERS, normalizeTTSProvider, type TTSProvider } from "@cognia/tts/types"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 
 /** Stable provider keys understood by the keyring backend. */
@@ -25,6 +25,9 @@ export type KeyringProviderId =
   | "local-openai-compatible"
   /** Live voice only — xAI has no TTS provider, so `keyringProviderFor` never returns it. */
   | "xai"
+  | "qwen"
+  | "doubao"
+  | "baidu"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",
@@ -38,6 +41,9 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "mistral",
   "local-openai-compatible",
   "xai",
+  "qwen",
+  "doubao",
+  "baidu",
 ]
 
 /** Presence-only marker used in the renderer for desktop keyring entries. */
@@ -47,7 +53,6 @@ export const HOST_KEY_PRESENT = "__cognia_host_key_present__"
 export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | null {
   switch (provider) {
     case "openai":
-    case "openai-realtime":
       return "openai"
     case "gemini":
       return "google"
@@ -147,9 +152,10 @@ export function isProviderKeyMissing(
   provider: TTSProvider,
   keys: Partial<Record<KeyringProviderId, string>>
 ): boolean {
-  const required = KEYED_TTS_PROVIDERS.includes(provider)
+  const normalized = normalizeTTSProvider(provider)
+  const required = KEYED_TTS_PROVIDERS.includes(normalized)
   if (!required) return false
-  const id = keyringProviderFor(provider)
+  const id = keyringProviderFor(normalized)
   if (!id) return true
   return !keys[id]
 }

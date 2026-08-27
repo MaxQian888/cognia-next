@@ -71,9 +71,9 @@ describe("getProviderRuntimeOptions", () => {
       model: s.openaiModel,
     })
     expect(getProviderRuntimeOptions(s, "edge")).toMatchObject({
-      voice: s.edgeVoice,
-      rate: s.edgeRate,
-      pitch: s.edgePitch,
+      voice: s.systemVoice,
+      rate: s.ttsRate,
+      pitch: s.ttsPitch,
     })
     expect(getProviderRuntimeOptions(s, "cartesia")).toMatchObject({
       voice: s.cartesiaVoice,
@@ -87,10 +87,13 @@ describe("getProviderRuntimeOptions", () => {
     expect(getProviderRuntimeOptions(s, "system")).toMatchObject({ lang: "fr-FR" })
   })
 
-  it("returns an empty object for an unknown provider id", () => {
+  it("normalizes an unknown provider id to system controls", () => {
     expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       getProviderRuntimeOptions(DEFAULT_SPEECH_SETTINGS, "bogus" as any)
-    ).toEqual({})
+    ).toMatchObject({
+      voice: DEFAULT_SPEECH_SETTINGS.systemVoice,
+      lang: DEFAULT_SPEECH_SETTINGS.sttLanguage,
+    })
   })
 })

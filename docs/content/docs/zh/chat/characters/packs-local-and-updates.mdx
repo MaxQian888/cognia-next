@@ -253,19 +253,7 @@ flowchart TD
 角色的可选 `voiceProfile` 投影为一个 `Partial<SpeechSettings>` 覆盖层，调用方在调用 `TTSOrchestrator.speak()` 之前将其展开到由 AppSettings 派生的语音设置之上。它绝不修改 `AppSettings`。
 
 ```ts
-// lib/plugin/character-pack/character-voice.ts:25-36
-const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
-  system: "systemVoice",
-  openai: "openaiVoice",
-  gemini: "geminiVoice",
-  edge: "edgeVoice",
-  elevenlabs: "elevenlabsVoice",
-  lmnt: "lmntVoice",
-  hume: "humeVoice",
-  cartesia: "cartesiaVoice",
-  deepgram: "deepgramVoice",
-  xiaomi: "xiaomiVoice",
-}
+const voiceField = TTS_PROVIDER_SETTINGS[profile.provider].voiceSettingKey
 ```
 
 ```ts

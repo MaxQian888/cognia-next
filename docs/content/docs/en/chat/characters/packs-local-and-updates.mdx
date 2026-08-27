@@ -253,19 +253,7 @@ A legacy v48 clone with no `pristineSnapshot` is the `noBaseline` case: we canno
 A character's optional `voiceProfile` projects to a `Partial<SpeechSettings>` overlay that the caller spreads onto the AppSettings-derived speech settings before calling `TTSOrchestrator.speak()`. It never mutates `AppSettings`.
 
 ```ts
-// lib/plugin/character-pack/character-voice.ts:25-36
-const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
-  system: "systemVoice",
-  openai: "openaiVoice",
-  gemini: "geminiVoice",
-  edge: "edgeVoice",
-  elevenlabs: "elevenlabsVoice",
-  lmnt: "lmntVoice",
-  hume: "humeVoice",
-  cartesia: "cartesiaVoice",
-  deepgram: "deepgramVoice",
-  xiaomi: "xiaomiVoice",
-}
+const voiceField = TTS_PROVIDER_SETTINGS[profile.provider].voiceSettingKey
 ```
 
 ```ts

@@ -79,7 +79,7 @@ description: "主应用是一个平坦编译单元（单一TSCONFIG程序，单�
 | --- | --- | --- | --- | --- | --- |
 | **E1** | `@cognia/redact` | `packages/redact/src/index.ts`（纯正则表达PII清除器） | **无** — 0 `@/`导入。兄弟`redaction-key.ts`（密钥环）有两个消费者，要么留在应用端，要么注入`KeyProvider` | **该死** | 81个站点共享的安全关键门禁（双站、目标站、连接器自动模式、Agent-Team、计划门禁）;可独立审计;sidecar可以采用真正的刷子 |
 | **E2** | `@cognia/web-search` | 全部`lib/search`（24个文件，11个 提供商 适配器） | 3个可注射泄漏：`useSettingsStore` → `SearchConfig`参数;`standalone-answer.ts:19-25` model/fetch → `{ model, fetch }`手柄 | M | 框架无关;今天只限应用。CLI没有网页搜索功能;有个包可以让它在多个壳层间重复使用，并且在对等 DEP 后面隐藏了 11 个第三方适配器 |
-| **E3** | `@cognia/tts` | `lib/tts`（25个文件）+ `types/media`叶子 | 原生桥接器限制在4个文件（`keyring`、`proxy-fetch`、`providers/edge`、`providers/openai-realtime`）→注入`{ fetch, getSecret }` | M | 手机通缉（Capacitor）+ sidecar;分离第三方TTS 提供商 |
+| **E3** | `@cognia/tts` | `lib/tts`（25个文件）+ `types/media`叶子 | 原生桥接仅保留 keyring 与 proxy-fetch 边界并注入 `{ fetch, getSecret }`；Edge/Realtime 退役传输已在 ADR-0075 的 2026-08-28 收敛中删除 | M | 移动端（Capacitor）+ sidecar；隔离第三方 TTS 提供商 |
 | **E4** | `@cognia/logging` | `lib/logging`核 + `types/logging`（近纯叶） | 平台传输隔离在5个bootstrap/transport文件→作为应用注册插件保存（已经可插拔） | M | **344个导入站点**（第二宽的枢纽）。CLI 自有 11 文件的日志→真实收敛目标;编译隔离集线器可以减少增量重建的扇出 |
 | **E5** | `@cognia/agent-config-types` | `lib/claude/types.ts`（`AppSettings` / `SendOptions` hub）——**not** `build-options.ts`（运行时胶水，贴在应用侧） | 仅有类型;抽取4种类型兄弟（`lib/search/types`——脱离E2;`types/pet`;`types/lsp/config`;`types/system/compression`） →作为对等离职者共同搬迁或重新导出 | **L**（代码mod） | **750个导入站点——仓库中最大的编译边界。** 编辑应用运行时代码停止使750个类型使用者失效;CLI的188 `@/lib/claude`伸缩，成为稳定的封装边缘。这是唯一值得TS项目参考优势的案例 |
 

@@ -311,7 +311,22 @@ export async function getSettings(): Promise<AppSettings> {
       ...(row.liveVoice ?? {}),
       // Deployments are a replace-not-merge list: spreading defaults under a
       // user's array would resurrect entries they deleted.
-      deployments: row.liveVoice?.deployments ?? DEFAULT_LIVE_VOICE_SETTINGS.deployments,
+      deployments: (row.liveVoice?.deployments ?? DEFAULT_LIVE_VOICE_SETTINGS.deployments).map(
+        (deployment) => {
+          // Legacy `resourceId` / `appKey` were never used by a production
+          // transport. Drop them at the persistence boundary so ambiguous
+          // values cannot reach the native policy command.
+          const {
+            resourceId: _resourceId,
+            appKey: _appKey,
+            ...active
+          } = deployment as typeof deployment & {
+            resourceId?: unknown
+            appKey?: unknown
+          }
+          return active
+        }
+      ),
     },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
