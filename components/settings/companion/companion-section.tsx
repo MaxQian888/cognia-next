@@ -45,6 +45,7 @@ import { LogtoLoginCard } from "./logto-login-card"
 import { CollaborationCard } from "./collaboration-card"
 import { RemoteBrowserCard } from "./remote-browser-card"
 import { BrowserAccessCard } from "./browser-access-card"
+import { BrowserCompanionCard } from "./browser-companion-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -246,6 +247,10 @@ export function CompanionSection() {
       </CompanionGroup>
       <CompanionGroup id="pairing" title={t("pairing")} defaultOpen>
         <PairDeviceCard />
+        {/* Under pairing, not under reachability: this mints a one-shot
+            credential, which is a pairing act. Browser Access above is the
+            transport switch it depends on. */}
+        <BrowserCompanionCard />
         <PairedDevicesSummary />
       </CompanionGroup>
       <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>

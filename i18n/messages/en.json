@@ -15391,6 +15391,26 @@
         "restartRequired": "Restart the Companion server to apply.",
         "title": "Browser access"
       },
+      "browserCompanion": {
+        "codeLabel": "Paste this into the extension's side panel",
+        "copied": "Copied",
+        "copy": "Copy code",
+        "copyFailed": "The code could not be copied. Select it and copy it by hand.",
+        "description": "Pair the Cognia browser extension with this computer. Once paired, a page you capture in your browser starts a new task here — nothing is read until you capture it.",
+        "expired": "This code has expired. Generate a new one.",
+        "expiresIn": "Expires in {minutes} min",
+        "generate": "Generate pairing code",
+        "generateFailed": "The pairing code could not be created.",
+        "generating": "Generating…",
+        "openDevices": "Open device console",
+        "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
+        "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
+        "pairedTitle": "Paired browsers",
+        "regenerate": "Generate a new code",
+        "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
+        "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
+        "title": "Browser Companion"
+      },
       "channels": {
         "blocked": {
           "loopbackOnly": "Bound to this machine only — switch the server to LAN.",

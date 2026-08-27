@@ -410,5 +410,25 @@
       "not-signed-in": "刷新前请先在上方登录——服务器通过该会话识别你的身份。",
       "no-org": "已登录，但这个账户不属于任何组织，因此没有可拉取的共享内容。"
     }
+  },
+  "browserCompanion": {
+    "title": "浏览器伴侣",
+    "description": "把 Cognia 浏览器扩展与这台电脑配对。配对之后，你在浏览器里捕获的页面会在这里开启一个新任务——不捕获就什么都不读。",
+    "requiresListener": "浏览器访问尚未开启，配对码没有可连接的对象。请先在上方开启，并重启 Companion 服务。",
+    "generate": "生成配对码",
+    "regenerate": "重新生成配对码",
+    "generating": "生成中…",
+    "generateFailed": "配对码创建失败。",
+    "codeLabel": "把它粘贴到扩展的侧边栏",
+    "copy": "复制配对码",
+    "copied": "已复制",
+    "copyFailed": "复制失败。请手动选中并复制。",
+    "expiresIn": "{minutes} 分钟后过期",
+    "expired": "配对码已过期，请重新生成。",
+    "singleUse": "仅可使用一次。扩展兑换后即刻作废，本身不携带任何凭据。",
+    "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入上方列表。扩展会在连接页面显示该来源。",
+    "pairedTitle": "已配对的浏览器",
+    "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
+    "openDevices": "打开设备控制台"
   }
 }

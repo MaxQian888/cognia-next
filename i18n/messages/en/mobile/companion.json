@@ -410,5 +410,25 @@
       "not-signed-in": "Sign in above before refreshing — the server identifies you by that session.",
       "no-org": "You are signed in, but this account belongs to no organisation, so there is nothing shared to pull."
     }
+  },
+  "browserCompanion": {
+    "title": "Browser Companion",
+    "description": "Pair the Cognia browser extension with this computer. Once paired, a page you capture in your browser starts a new task here — nothing is read until you capture it.",
+    "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
+    "generate": "Generate pairing code",
+    "regenerate": "Generate a new code",
+    "generating": "Generating…",
+    "generateFailed": "The pairing code could not be created.",
+    "codeLabel": "Paste this into the extension's side panel",
+    "copy": "Copy code",
+    "copied": "Copied",
+    "copyFailed": "The code could not be copied. Select it and copy it by hand.",
+    "expiresIn": "Expires in {minutes} min",
+    "expired": "This code has expired. Generate a new one.",
+    "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
+    "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
+    "pairedTitle": "Paired browsers",
+    "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
+    "openDevices": "Open device console"
   }
 }

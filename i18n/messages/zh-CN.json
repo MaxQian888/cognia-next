@@ -15391,6 +15391,26 @@
         "restartRequired": "重启 Companion 服务后生效。",
         "title": "浏览器访问"
       },
+      "browserCompanion": {
+        "codeLabel": "把它粘贴到扩展的侧边栏",
+        "copied": "已复制",
+        "copy": "复制配对码",
+        "copyFailed": "复制失败。请手动选中并复制。",
+        "description": "把 Cognia 浏览器扩展与这台电脑配对。配对之后，你在浏览器里捕获的页面会在这里开启一个新任务——不捕获就什么都不读。",
+        "expired": "配对码已过期，请重新生成。",
+        "expiresIn": "{minutes} 分钟后过期",
+        "generate": "生成配对码",
+        "generateFailed": "配对码创建失败。",
+        "generating": "生成中…",
+        "openDevices": "打开设备控制台",
+        "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入上方列表。扩展会在连接页面显示该来源。",
+        "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
+        "pairedTitle": "已配对的浏览器",
+        "regenerate": "重新生成配对码",
+        "requiresListener": "浏览器访问尚未开启，配对码没有可连接的对象。请先在上方开启，并重启 Companion 服务。",
+        "singleUse": "仅可使用一次。扩展兑换后即刻作废，本身不携带任何凭据。",
+        "title": "浏览器伴侣"
+      },
       "channels": {
         "blocked": {
           "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",
