@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { __resetThemeRegistryForTesting, registerPluginTheme } from "@/lib/theme/theme-registry"
 
@@ -24,6 +24,36 @@ jest.mock("next/navigation", () => ({
 // of @tauri-apps/plugin-fs at runtime — stub it out at module load.
 jest.mock("../vscode-import-dialog", () => ({
   VscodeImportDialog: () => null,
+}))
+
+// Radix DropdownMenu uses a portal + pointer-event flow that is brittle in
+// jsdom and keeps its content unmounted until opened. Same convention as
+// `custom-theme-tab.test.tsx`: thin pass-throughs so each card's menu items are
+// plain always-rendered buttons.
+jest.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    onSelect,
+  }: {
+    children: React.ReactNode
+    onClick?: () => void
+    onSelect?: () => void
+    className?: string
+  }) => (
+    <button
+      onClick={() => {
+        onClick?.()
+        onSelect?.()
+      }}
+    >
+      {children}
+    </button>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 const save = jest.fn()
@@ -275,6 +305,74 @@ describe("ThemeTab", () => {
     // Direct activation — no persistent clone row is created.
     expect(setActivePlugin).toHaveBeenCalledWith("p.violet")
     expect(createCustomTheme).not.toHaveBeenCalled()
+  })
+
+  describe("edit a copy", () => {
+    /**
+     * The navigation used to carry only `appearanceTab=custom`, so the editor
+     * had no idea which of the user's themes to open and showed a blank
+     * new-theme draft instead — the action looked like it had done nothing.
+     */
+    it("names the new row in the URL so the editor can open it", () => {
+      render(<ThemeTab />)
+      act(() => {
+        fireEvent.click(screen.getAllByText("menu.editCopy")[0])
+      })
+      expect(createCustomTheme).toHaveBeenCalledTimes(1)
+      expect(setActiveCustom).toHaveBeenCalledWith("ct_new")
+      expect(routerReplace).toHaveBeenCalledTimes(1)
+      const url = routerReplace.mock.calls[0][0] as string
+      expect(url).toContain("appearanceTab=custom")
+      expect(url).toContain("customThemeId=ct_new")
+    })
+
+    it("names the copy through i18n rather than a hardcoded English suffix", () => {
+      render(<ThemeTab />)
+      act(() => {
+        fireEvent.click(screen.getAllByText("menu.editCopy")[0])
+      })
+      const seed = createCustomTheme.mock.calls[0][0]!
+      // The i18n mock echoes `key:params`; the point is that it went through
+      // `t()` at all, where it used to be `` `${item.name} (copy)` ``.
+      expect(seed.name).toContain("customTheme.rail.copySuffix")
+    })
+
+    it("lifts a CSS-var plugin theme's known variables into structured tokens", () => {
+      registerPluginTheme({
+        id: "p.cssvars",
+        name: "Var Theme",
+        variables: { "--background": "#111111" },
+        cssVars: {
+          "--background": "#111111",
+          "--chart-1": "#ff0000",
+          "--wf-trigger": "#00ff00",
+          "--plugin-private": "#abcabc",
+        },
+        source: "plugin",
+        pluginId: "p",
+        pluginName: "Plugin P",
+        colors: { background: "#111111", foreground: "#eeeeee", primary: "#7c3aed" } as never,
+        isDark: true,
+      })
+      render(<ThemeTab />)
+      const card = screen.getByText("Var Theme").closest("[data-preset-card]")!
+      act(() => {
+        fireEvent.click(within(card as HTMLElement).getByText("menu.editCopy"))
+      })
+      const seed = createCustomTheme.mock.calls[0][0]!
+      // Recognised variables become editable tokens on the theme's own side...
+      expect(seed.tokens!.dark.chart1).toBe("#ff0000")
+      expect(seed.tokens!.dark.workflowTrigger).toBe("#00ff00")
+      expect(seed.tokens!.dark.background).toBe("#111111")
+      // ...and only there. The declarations describe a dark theme; folding them
+      // into the derived light variant would paint it dark.
+      expect(seed.tokens!.light.background).not.toBe("#111111")
+      expect(seed.tokens!.light.chart1).not.toBe("#ff0000")
+      // ...and only the genuinely private one stays as raw CSS. Keeping the
+      // recognised ones in `cssVars` meant the applier re-wrote them after the
+      // structured pass, painting over every edit the user made.
+      expect(seed.cssVars).toEqual({ "--plugin-private": "#abcabc" })
+    })
   })
 
   it("marks a directly-activated plugin card as active", () => {

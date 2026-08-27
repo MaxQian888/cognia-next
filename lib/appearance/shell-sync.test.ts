@@ -113,9 +113,30 @@ describe("getShellColors", () => {
       },
       "dark"
     )
+    // `background` is a non-empty string that no parser can read, so nothing
+    // upstream can rescue it and the shell's own fallback stands. `foreground`
+    // is blank, which `normalizeThemeColors` reads as "unset" — so it now
+    // resolves to the real dark default (`oklch(0.985 0 0)`) rather than
+    // reaching the shell constant. That is the better answer: the window chrome
+    // matches the page instead of a value only the shell knows about.
+    expect(result.backgroundHex).toBe("#0b1220")
+    expect(result.foregroundHex.toLowerCase()).toBe("#fafafa")
+    expect(result.isDark).toBe(true)
+  })
+
+  it("still falls back to the shell constant when every token is unreadable", () => {
+    const custom: CustomTheme = {
+      id: "broken",
+      name: "Broken",
+      isDark: true,
+      colors: { background: "not-a-color", foreground: "also-not-a-color" },
+    }
+    const result = getShellColors(
+      { colorTheme: "default", activeCustomThemeId: "broken", customThemes: [custom] },
+      "dark"
+    )
     expect(result.backgroundHex).toBe("#0b1220")
     expect(result.foregroundHex).toBe("#f1f5f9")
-    expect(result.isDark).toBe(true)
   })
 
   it("derives isDark from resolvedTheme, not from the custom theme's isDark flag", () => {

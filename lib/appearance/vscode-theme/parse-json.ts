@@ -135,7 +135,9 @@ export function vscodeThemeToCustomTheme(
   let matched = 0
   const out: Partial<ThemeColors> = {}
   for (const key of THEME_COLOR_KEYS) {
-    const candidates = VSCODE_COLOR_MAP[key]
+    // Partial by design: workflow / effort / brand tokens have no VSCode
+    // counterpart, so they simply aren't matched here.
+    const candidates = VSCODE_COLOR_MAP[key] ?? []
     let chosen: string | undefined
     for (const candidate of candidates) {
       const v = vsColors[candidate]
@@ -199,9 +201,20 @@ export function vscodeThemeToCustomTheme(
   if (!out.destructive) out.destructive = fallback.destructive
   if (!out.destructiveForeground) out.destructiveForeground = readableForeground(out.destructive)
 
+  // Advanced tokens. Status and chart colors are matched from the workbench
+  // palette above when the theme declares them; their foregrounds have no
+  // counterpart at all, so derive one that reads against the matched surface.
+  // Everything still unset here stays unset: `normalizeThemeColors` supplies
+  // the cognia default at read time, which beats inventing a workflow palette
+  // out of a syntax theme (ADR-0007 keeps `tokenColors` out of scope).
+  if (out.success && !out.successForeground) out.successForeground = readableForeground(out.success)
+  if (out.warning && !out.warningForeground) out.warningForeground = readableForeground(out.warning)
+  if (out.info && !out.infoForeground) out.infoForeground = readableForeground(out.info)
+
   const name = options.nameHint ?? source.name ?? "Imported Theme"
   return {
-    // The derivation block above guarantees all 27 ThemeColors keys are filled.
+    // The derivation block above guarantees all 27 required ThemeColors keys
+    // are filled; the optional 29 are sparse on purpose.
     theme: { name, isDark, colors: out as ThemeColors },
     emptyColors,
     matchedCount: matched,

@@ -85,7 +85,7 @@ describe("deriveOppositeVariant (whole palette)", () => {
     const derived = deriveOppositeVariant(seed, "light")
     for (const key of Object.keys(seed) as Array<keyof ThemeColors>) {
       expect(derived[key]).toBeDefined()
-      expect(derived[key].length).toBeGreaterThan(0)
+      expect(derived[key]!.length).toBeGreaterThan(0)
     }
   })
 

@@ -28,6 +28,9 @@ const FOREGROUND_PAIRS: ReadonlyArray<readonly [keyof ThemeColors, keyof ThemeCo
   ["accent", "accentForeground"],
   ["muted", "mutedForeground"],
   ["destructive", "destructiveForeground"],
+  ["success", "successForeground"],
+  ["warning", "warningForeground"],
+  ["info", "infoForeground"],
   ["sidebar", "sidebarForeground"],
   ["sidebarPrimary", "sidebarPrimaryForeground"],
   ["sidebarAccent", "sidebarAccentForeground"],
@@ -40,12 +43,16 @@ const FOREGROUND_PAIRS: ReadonlyArray<readonly [keyof ThemeColors, keyof ThemeCo
  * parsed / corrected — are left exactly as they were. When nothing needs
  * fixing the original object is returned unchanged (referential identity), so
  * the common case allocates nothing.
+ *
+ * Generic in the palette shape so a caller passing a fully-resolved palette
+ * gets one back — the correction only ever replaces existing values, never
+ * removes them.
  */
-export function ensureForegroundContrast(
-  tokens: ThemeColors,
+export function ensureForegroundContrast<T extends ThemeColors>(
+  tokens: T,
   targetRatio: number = AA_NORMAL_TEXT
-): ThemeColors {
-  let result: ThemeColors | null = null
+): T {
+  let result: T | null = null
   for (const [bgKey, fgKey] of FOREGROUND_PAIRS) {
     const bg = tokens[bgKey]
     const fg = tokens[fgKey]

@@ -156,13 +156,38 @@ describe("pluginThemeColors", () => {
       variables: {
         "--background": "#0a0a0a",
         "--sidebar-primary-foreground": "oklch(0.9 0 0)",
-        // Not a ThemeColors token — must not leak into the palette.
-        "--chart-1": "#ff0000",
       },
     })
     expect(read.background).toBe("#0a0a0a")
     expect(read.sidebarPrimaryForeground).toBe("oklch(0.9 0 0)")
     expect(Object.keys(read)).toHaveLength(2)
+  })
+
+  /**
+   * These used to fall through: the inversion walked the 27 required tokens, so
+   * a plugin's chart and workflow colours stayed stranded in an opaque blob
+   * that only the applier could paint and the editor could never show.
+   */
+  it("recovers the advanced tokens, hyphen-numbered and `--wf-` names included", () => {
+    const read = pluginThemeColors({
+      variables: {
+        "--chart-1": "#ff0000",
+        "--wf-trigger": "#00ff00",
+        "--wf-status-running": "#0000ff",
+        "--effort-ultra-muted": "oklch(0.5 0.2 300 / 30%)",
+        "--brand-wash": "#eeeeee",
+      },
+    })
+    expect(read.chart1).toBe("#ff0000")
+    expect(read.workflowTrigger).toBe("#00ff00")
+    expect(read.workflowStatusRunning).toBe("#0000ff")
+    expect(read.effortUltraMuted).toBe("oklch(0.5 0.2 300 / 30%)")
+    expect(read.brandWash).toBe("#eeeeee")
+  })
+
+  it("still refuses a variable that is not a token at all", () => {
+    const read = pluginThemeColors({ variables: { "--plugin-private": "#ff0000" } })
+    expect(read).toEqual({})
   })
 
   it("lets cssVars win over variables and drops blank declarations", () => {

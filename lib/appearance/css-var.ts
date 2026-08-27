@@ -1,19 +1,22 @@
 import type { ThemeColors } from "@/types/plugin/plugin"
-import { THEME_COLOR_KEYS } from "./vscode-theme/token-mapping"
+import { THEME_TOKEN_CSS_VARS, themeTokenCssVar } from "./theme-token-catalog"
 
 /**
- * Convert a ThemeColors key (camelCase) to its CSS custom-property name (kebab).
- * `primaryForeground` → `--primary-foreground`. The mapping is a direct
- * camel→kebab transform; the `app/globals.css` variable names match.
+ * Convert a ThemeColors key to its CSS custom-property name.
+ *
+ * A plain camel→kebab transform was right for the original 27 tokens and wrong
+ * for 18 of the 56: it turns `chart1` into `--chart1` and `workflowTrigger` into
+ * `--workflow-trigger`, neither of which any stylesheet reads. The real names
+ * are declared per-token in `theme-token-catalog.ts`; the transform survives
+ * only as the fallback for keys the catalog does not own (a plugin's extra
+ * `cssVariables`, an unknown key in an imported JSON).
  */
 export function themeKeyToCssVar(key: keyof ThemeColors | string): string {
-  // Use a positive lookbehind via the captured lowercase char so we never
-  // match at position 0 — `Primary` would otherwise become `---primary`.
-  const kebab = key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()
-  return `--${kebab}`
+  return themeTokenCssVar(key)
 }
 
-export const CSS_VAR_KEYS: readonly string[] = THEME_COLOR_KEYS.map(themeKeyToCssVar)
+/** Every custom property a theme owns — the applier's write and clear list. */
+export const CSS_VAR_KEYS: readonly string[] = THEME_TOKEN_CSS_VARS
 
 // ----------------------------------------------------------------------------
 // Sparse var/attr helpers shared by appearance appliers. All functions assume

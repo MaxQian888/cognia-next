@@ -1,6 +1,5 @@
 import {
   darken,
-  isHexColor,
   lighten,
   luminance,
   mix,
@@ -9,23 +8,6 @@ import {
   stripAlpha,
   toHex,
 } from "./color-utils"
-
-describe("isHexColor", () => {
-  it("accepts the four hex forms", () => {
-    expect(isHexColor("#abc")).toBe(true)
-    expect(isHexColor("#abcd")).toBe(true)
-    expect(isHexColor("#aabbcc")).toBe(true)
-    expect(isHexColor("#aabbccdd")).toBe(true)
-    expect(isHexColor("#A1B2C3")).toBe(true)
-  })
-  it("rejects non-hex inputs", () => {
-    expect(isHexColor("rgb(0,0,0)")).toBe(false)
-    expect(isHexColor("#xyzxyz")).toBe(false)
-    expect(isHexColor("aabbcc")).toBe(false)
-    expect(isHexColor("#aabbccdde")).toBe(false)
-    expect(isHexColor("")).toBe(false)
-  })
-})
 
 describe("parseHex", () => {
   it("parses 6-digit hex", () => {

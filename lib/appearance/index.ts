@@ -108,4 +108,20 @@ export {
 export type { ParsedTheme, VscodeThemeJson } from "./vscode-theme/parse-json"
 export { MAX_VSIX_BYTES, readVsix } from "./vscode-theme/parse-vsix"
 export type { VsixManifest, VsixThemeReady } from "./vscode-theme/parse-vsix"
-export { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "./vscode-theme/token-mapping"
+export { DEFAULT_FALLBACKS } from "./vscode-theme/token-mapping"
+export {
+  ADVANCED_THEME_COLOR_KEYS,
+  BASE_THEME_COLOR_KEYS,
+  DEFAULT_GROUP_OPEN,
+  THEME_COLOR_KEYS,
+  THEME_TOKEN_BY_KEY,
+  THEME_TOKEN_CATALOG,
+  THEME_TOKEN_CSS_VARS,
+  THEME_TOKEN_GROUPS,
+  THEME_TOKEN_GROUP_KEYS,
+  defaultThemeColors,
+  normalizeThemeColors,
+  pickKnownTokens,
+  themeTokenCssVar,
+} from "./theme-token-catalog"
+export type { ThemeTokenDef, ThemeTokenGroupKey, ThemeTokenKey } from "./theme-token-catalog"

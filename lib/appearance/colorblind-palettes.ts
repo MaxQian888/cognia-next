@@ -1,8 +1,17 @@
 // CVD-safe palette overrides applied after the base theme colors are resolved.
-// We deliberately *replace* the categorical tokens (`chart-1..5`, workflow
-// `--wf-*` tokens, plus a few signal colors) instead of mutating presets so
-// that switching back to "off" is a single token swap and so plugin themes
-// keep their original palette when the user has CVD mode off.
+// We deliberately *replace* the categorical tokens (`chart1..5`, the workflow
+// node tokens, plus a few signal colors) instead of mutating presets so that
+// switching back to "off" is a single token swap and so plugin themes keep
+// their original palette when the user has CVD mode off.
+//
+// These used to be two views — a `ThemeColors` patch for the signal colors and
+// a separate CSS-variable map for the categorical ones, written and cleared on
+// its own code path in `CustomThemeApplier`. Now that charts and workflow nodes
+// are real `ThemeColors` tokens there is one view: a single `Partial<ThemeColors>`
+// that layers inside `resolveAppPalette` like every other override. That also
+// removed a real ordering bug — the applier wrote the structured tokens first
+// and cleared the previous frame's categorical vars afterwards, so turning CVD
+// mode off would wipe the `--chart-*` values it had just written.
 //
 // Sources for the palettes:
 //   - Deuteranopia / Protanopia: Wong, B. (2011) "Color blindness." Nature
@@ -10,99 +19,83 @@
 //     plotting libraries. Adapted to oklch for cognia-next.
 //   - Tritanopia: Krzywinski/Birol (2024) "Visualizing biological data" —
 //     8-color tritan-safe palette. Re-encoded in oklch.
-//
-// Each entry is a partial override map keyed by `ThemeColors` field name OR
-// CSS custom property. We expose two views: `paletteAsThemeColors` (for the
-// CustomThemeApplier to merge before `themeKeyToCssVar` writes) and
-// `paletteAsCssVars` (for the chart / workflow tokens that don't live in
-// `ThemeColors`).
 
 import type { ThemeColors } from "@/types/plugin/plugin"
 import type { ColorblindMode } from "@/types/appearance"
 
-/** CSS custom-property names this module knows about, beyond ThemeColors. */
-export const COLORBLIND_EXTRA_VAR_KEYS = [
-  "--chart-1",
-  "--chart-2",
-  "--chart-3",
-  "--chart-4",
-  "--chart-5",
-  "--wf-trigger",
-  "--wf-action",
-  "--wf-ai",
-  "--wf-flow",
-  "--wf-data",
-  "--wf-io",
-] as const
+/**
+ * The categorical tokens every CVD palette re-colours. `workflowAnnotation` and
+ * the `workflowStatus*` set are deliberately absent: annotation is a neutral
+ * grey that carries no categorical meaning, and the statuses either alias a
+ * signal colour that is already patched (`running`/`succeeded`/`failed`) or are
+ * greys of their own.
+ */
+export const COLORBLIND_CATEGORICAL_KEYS = [
+  "chart1",
+  "chart2",
+  "chart3",
+  "chart4",
+  "chart5",
+  "workflowTrigger",
+  "workflowAction",
+  "workflowAi",
+  "workflowFlow",
+  "workflowData",
+  "workflowIo",
+] as const satisfies readonly (keyof ThemeColors)[]
 
-type ColorblindPaletteEntry = {
-  /** Categorical (chart / wf) tokens — keyed by CSS variable name. */
-  vars: Record<(typeof COLORBLIND_EXTRA_VAR_KEYS)[number], string>
-  /** Optional ThemeColors overrides for signal tokens (destructive / warning). */
-  themeOverrides?: Partial<ThemeColors>
-}
+type ColorblindPaletteEntry = Partial<ThemeColors> &
+  Record<(typeof COLORBLIND_CATEGORICAL_KEYS)[number], string>
 
 const DEUTERANOPIA_SAFE: ColorblindPaletteEntry = {
-  vars: {
-    // Wong 7-color palette, oklch-encoded (lightness 0.55–0.78 to keep both
-    // light- and dark-mode legibility).
-    "--chart-1": "oklch(0.6 0.18 220)", // blue
-    "--chart-2": "oklch(0.7 0.18 65)", // orange (replaces red — deut. confuses)
-    "--chart-3": "oklch(0.7 0.13 200)", // cyan
-    "--chart-4": "oklch(0.7 0.18 130)", // bluish-green
-    "--chart-5": "oklch(0.68 0.18 50)", // amber
-    "--wf-trigger": "oklch(0.7 0.18 130)",
-    "--wf-action": "oklch(0.6 0.18 220)",
-    "--wf-ai": "oklch(0.55 0.2 290)",
-    "--wf-flow": "oklch(0.7 0.18 65)",
-    "--wf-data": "oklch(0.68 0.18 50)",
-    "--wf-io": "oklch(0.7 0.13 200)",
-  },
-  themeOverrides: {
-    // Deuteranopes confuse red and green — push the destructive hue toward
-    // a pure orange so it stays distinct from the success/wf-trigger hue.
-    destructive: "oklch(0.62 0.22 35)",
-  },
+  // Wong 7-color palette, oklch-encoded (lightness 0.55–0.78 to keep both
+  // light- and dark-mode legibility).
+  chart1: "oklch(0.6 0.18 220)", // blue
+  chart2: "oklch(0.7 0.18 65)", // orange (replaces red — deut. confuses)
+  chart3: "oklch(0.7 0.13 200)", // cyan
+  chart4: "oklch(0.7 0.18 130)", // bluish-green
+  chart5: "oklch(0.68 0.18 50)", // amber
+  workflowTrigger: "oklch(0.7 0.18 130)",
+  workflowAction: "oklch(0.6 0.18 220)",
+  workflowAi: "oklch(0.55 0.2 290)",
+  workflowFlow: "oklch(0.7 0.18 65)",
+  workflowData: "oklch(0.68 0.18 50)",
+  workflowIo: "oklch(0.7 0.13 200)",
+  // Deuteranopes confuse red and green — push the destructive hue toward
+  // a pure orange so it stays distinct from the success/wf-trigger hue.
+  destructive: "oklch(0.62 0.22 35)",
 }
 
 const PROTANOPIA_SAFE: ColorblindPaletteEntry = {
-  vars: {
-    "--chart-1": "oklch(0.58 0.18 230)",
-    "--chart-2": "oklch(0.72 0.18 75)",
-    "--chart-3": "oklch(0.68 0.13 195)",
-    "--chart-4": "oklch(0.66 0.16 140)",
-    "--chart-5": "oklch(0.7 0.18 55)",
-    "--wf-trigger": "oklch(0.66 0.16 140)",
-    "--wf-action": "oklch(0.58 0.18 230)",
-    "--wf-ai": "oklch(0.55 0.2 290)",
-    "--wf-flow": "oklch(0.72 0.18 75)",
-    "--wf-data": "oklch(0.7 0.18 55)",
-    "--wf-io": "oklch(0.68 0.13 195)",
-  },
-  themeOverrides: {
-    destructive: "oklch(0.64 0.22 40)",
-  },
+  chart1: "oklch(0.58 0.18 230)",
+  chart2: "oklch(0.72 0.18 75)",
+  chart3: "oklch(0.68 0.13 195)",
+  chart4: "oklch(0.66 0.16 140)",
+  chart5: "oklch(0.7 0.18 55)",
+  workflowTrigger: "oklch(0.66 0.16 140)",
+  workflowAction: "oklch(0.58 0.18 230)",
+  workflowAi: "oklch(0.55 0.2 290)",
+  workflowFlow: "oklch(0.72 0.18 75)",
+  workflowData: "oklch(0.7 0.18 55)",
+  workflowIo: "oklch(0.68 0.13 195)",
+  destructive: "oklch(0.64 0.22 40)",
 }
 
 const TRITANOPIA_SAFE: ColorblindPaletteEntry = {
-  vars: {
-    // Tritans confuse blue and green — shift the blues toward purple and the
-    // greens toward yellow so the categorical separations survive.
-    "--chart-1": "oklch(0.55 0.2 290)",
-    "--chart-2": "oklch(0.66 0.19 25)",
-    "--chart-3": "oklch(0.6 0.13 250)",
-    "--chart-4": "oklch(0.74 0.18 100)",
-    "--chart-5": "oklch(0.68 0.18 55)",
-    "--wf-trigger": "oklch(0.74 0.18 100)",
-    "--wf-action": "oklch(0.55 0.2 290)",
-    "--wf-ai": "oklch(0.6 0.13 250)",
-    "--wf-flow": "oklch(0.66 0.19 25)",
-    "--wf-data": "oklch(0.68 0.18 55)",
-    "--wf-io": "oklch(0.55 0.13 200)",
-  },
-  themeOverrides: {
-    destructive: "oklch(0.62 0.22 18)",
-  },
+  // Tritans confuse blue and green — shift the blues toward purple and the
+  // greens toward yellow so the categorical separations survive.
+  chart1: "oklch(0.55 0.2 290)",
+  chart2: "oklch(0.66 0.19 25)",
+  chart3: "oklch(0.6 0.13 250)",
+  chart4: "oklch(0.74 0.18 100)",
+  chart5: "oklch(0.68 0.18 55)",
+  workflowTrigger: "oklch(0.74 0.18 100)",
+  workflowAction: "oklch(0.55 0.2 290)",
+  workflowAi: "oklch(0.6 0.13 250)",
+  workflowFlow: "oklch(0.66 0.19 25)",
+  workflowData: "oklch(0.68 0.18 55)",
+  workflowIo: "oklch(0.55 0.13 200)",
+  destructive: "oklch(0.62 0.22 18)",
 }
 
 const PALETTES: Record<Exclude<ColorblindMode, "off">, ColorblindPaletteEntry> = {
@@ -112,22 +105,14 @@ const PALETTES: Record<Exclude<ColorblindMode, "off">, ColorblindPaletteEntry> =
 }
 
 /**
- * Returns the CSS variable overrides for a given colorblind mode. `off`
- * yields an empty map so callers can unconditionally spread the result.
- */
-export function colorblindCssVars(mode: ColorblindMode): Record<string, string> {
-  if (mode === "off") return {}
-  return { ...PALETTES[mode].vars }
-}
-
-/**
- * Returns the `ThemeColors` field overrides for a given mode. Callers
- * merge these into the resolved palette *before* `themeKeyToCssVar` writes,
- * so the overrides correctly shadow the underlying preset / custom theme.
+ * The `ThemeColors` field overrides for a given mode — signal *and* categorical
+ * tokens in one patch. `off` yields an empty object so callers can spread it
+ * unconditionally. Layered inside `resolveAppPalette` before anything writes,
+ * so the overrides shadow the underlying preset / custom / plugin theme.
  */
 export function colorblindThemeOverrides(mode: ColorblindMode): Partial<ThemeColors> {
   if (mode === "off") return {}
-  return { ...(PALETTES[mode].themeOverrides ?? {}) }
+  return { ...PALETTES[mode] }
 }
 
 /**

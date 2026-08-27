@@ -1,18 +1,20 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
 }))
 
+import { normalizeThemeColors, THEME_TOKEN_GROUPS } from "@/lib/appearance"
 import { AppearancePreview } from "./appearance-preview"
-import type { ThemeColors } from "@/types/plugin/plugin"
+import type { ResolvedThemeColors, ThemeColors } from "@/types/plugin/plugin"
 
 // A complete token set — the component's contract is "never pass a sparse
 // object", so the fixture honors it. Values are deliberately distinguishable.
-const DRAFT: ThemeColors = {
+// Resolved so the 29 advanced tokens are present too; the type enforces it.
+const AUTHORED: Partial<ThemeColors> = {
   primary: "#ff0000",
   primaryForeground: "#ffffff",
   secondary: "#00ff00",
@@ -40,7 +42,13 @@ const DRAFT: ThemeColors = {
   sidebarAccent: "#008888",
   sidebarAccentForeground: "#ffffff",
   sidebarRing: "#88ff00",
+  // A couple of advanced tokens set by hand so the assertions below can tell
+  // "the theme's value" apart from "the resolved default".
+  chart1: "#aa1111",
+  workflowTrigger: "#22aa22",
 }
+
+const DRAFT: ResolvedThemeColors = normalizeThemeColors(AUTHORED, "dark")
 
 describe("AppearancePreview", () => {
   it("renders the sample surfaces", () => {
@@ -93,7 +101,11 @@ describe("AppearancePreview", () => {
     it("drops keys outside the ThemeColors allow-list", () => {
       // Drafts can come from importThemeFromJson, so an unknown key must not
       // reach the style object.
-      const tainted = { ...DRAFT, evilKey: "red", constructor: "boom" } as ThemeColors
+      const tainted = {
+        ...DRAFT,
+        evilKey: "red",
+        constructor: "boom",
+      } as unknown as ResolvedThemeColors
       render(<AppearancePreview colors={tainted} />)
       const root = screen.getByTestId("appearance-preview")
       expect(root.style.getPropertyValue("--evil-key")).toBe("")
@@ -112,6 +124,31 @@ describe("AppearancePreview", () => {
       for (const key of ["accent", "accentForeground", "ring", "popover", "popoverForeground"]) {
         expect(screen.getByTestId(`appearance-preview-swatch-${key}`)).toBeInTheDocument()
       }
+    })
+
+    /**
+     * The sample UI has no chart, no workflow canvas, and no Ultra badge — so
+     * without these strips two thirds of the editor's rows would look inert
+     * while the user drags them.
+     */
+    it.each(["status", "chart", "workflowNode", "workflowState", "productAccent"] as const)(
+      "renders a %s swatch for every token in the group",
+      (groupKey) => {
+        render(<AppearancePreview colors={DRAFT} />)
+        const strip = screen.getByTestId(`appearance-preview-group-${groupKey}`)
+        const tokens = THEME_TOKEN_GROUPS.find((g) => g.key === groupKey)!.tokens
+        for (const key of tokens) {
+          expect(within(strip).getByTestId(`appearance-preview-swatch-${key}`)).toBeInTheDocument()
+        }
+      }
+    )
+
+    it("writes the advanced tokens under their real custom-property names", () => {
+      render(<AppearancePreview colors={DRAFT} />)
+      const root = screen.getByTestId("appearance-preview")
+      expect(root.style.getPropertyValue("--chart-1")).toBe(DRAFT.chart1)
+      expect(root.style.getPropertyValue("--wf-trigger")).toBe(DRAFT.workflowTrigger)
+      expect(root.style.getPropertyValue("--chart1")).toBe("")
     })
 
     // globals.css declares `@custom-variant dark (&:is(.dark *))` — a descendant

@@ -24,6 +24,25 @@ export function isColorParsable(color: string): boolean {
   return toRgb(parse(color)) !== undefined
 }
 
+/**
+ * The nearest 6-digit hex to any CSS colour culori can read.
+ *
+ * The native `<input type="color">` speaks nothing but `#rrggbb`, while a theme
+ * token is routinely an `oklch()` — often with alpha. Rather than reject those
+ * (which is what the editor used to do, flagging every default value as
+ * invalid), the swatch shows this approximation and the text field keeps the
+ * author's exact notation. Returns `null` when the input is not a colour at all.
+ */
+export function toHexApprox(color: string): string | null {
+  const rgb = toRgb(parse(color))
+  if (!rgb) return null
+  const channel = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * 255)))
+      .toString(16)
+      .padStart(2, "0")
+  return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`
+}
+
 export function wcagContrast(fg: string, bg: string): number {
   const a = relLuminance(fg)
   const b = relLuminance(bg)

@@ -6,50 +6,59 @@ import {
   targetRatio,
 } from "./contrast-audit"
 import { wcagContrast } from "./contrast"
-import type { ThemeColors } from "@/types/plugin/plugin"
+import { normalizeThemeColors } from "./theme-token-catalog"
+import type { ResolvedThemeColors, ThemeColors } from "@/types/plugin/plugin"
 
 // Tokens chosen so every critical pair clears WCAG AA (4.5:1) by default.
 // Tailwind's mid-blue/red brand colors fail AA against white, so we use
 // the darker -700/-800 shades for the primary/destructive/accent surfaces
 // and a slate-700 muted foreground.
-function buildTokens(overrides: Partial<ThemeColors> = {}): ThemeColors {
-  return {
-    background: "#ffffff",
-    foreground: "#0f172a",
-    primary: "#1d4ed8",
-    primaryForeground: "#ffffff",
-    secondary: "#475569",
-    secondaryForeground: "#ffffff",
-    accent: "#1d4ed8",
-    accentForeground: "#ffffff",
-    muted: "#f1f5f9",
-    mutedForeground: "#334155",
-    card: "#ffffff",
-    cardForeground: "#0f172a",
-    popover: "#ffffff",
-    popoverForeground: "#0f172a",
-    input: "#e2e8f0",
-    border: "#e2e8f0",
-    ring: "#1d4ed8",
-    destructive: "#b91c1c",
-    destructiveForeground: "#ffffff",
-    sidebar: "#f8fafc",
-    sidebarForeground: "#0f172a",
-    sidebarPrimary: "#1d4ed8",
-    sidebarPrimaryForeground: "#ffffff",
-    sidebarAccent: "#f1f5f9",
-    sidebarAccentForeground: "#0f172a",
-    sidebarBorder: "#e2e8f0",
-    sidebarRing: "#1d4ed8",
-    ...overrides,
-  } as ThemeColors
+/**
+ * The audit takes a resolved palette, so the fixture resolves too: scoring a
+ * hand-written 27-token object would silently compare `undefined` against
+ * `undefined` on the three status pairs and report a plausible-looking 1:1.
+ */
+function buildTokens(overrides: Partial<ThemeColors> = {}): ResolvedThemeColors {
+  return normalizeThemeColors(
+    {
+      background: "#ffffff",
+      foreground: "#0f172a",
+      primary: "#1d4ed8",
+      primaryForeground: "#ffffff",
+      secondary: "#475569",
+      secondaryForeground: "#ffffff",
+      accent: "#1d4ed8",
+      accentForeground: "#ffffff",
+      muted: "#f1f5f9",
+      mutedForeground: "#334155",
+      card: "#ffffff",
+      cardForeground: "#0f172a",
+      popover: "#ffffff",
+      popoverForeground: "#0f172a",
+      input: "#e2e8f0",
+      border: "#e2e8f0",
+      ring: "#1d4ed8",
+      destructive: "#b91c1c",
+      destructiveForeground: "#ffffff",
+      sidebar: "#f8fafc",
+      sidebarForeground: "#0f172a",
+      sidebarPrimary: "#1d4ed8",
+      sidebarPrimaryForeground: "#ffffff",
+      sidebarAccent: "#f1f5f9",
+      sidebarAccentForeground: "#0f172a",
+      sidebarBorder: "#e2e8f0",
+      sidebarRing: "#1d4ed8",
+      ...overrides,
+    } as ThemeColors,
+    "light"
+  )
 }
 
 describe("auditThemeContrast", () => {
   it("returns no failures for a well-formed light palette", () => {
     const audit = auditThemeContrast(buildTokens())
     expect(audit.failureCount).toBe(0)
-    expect(audit.totalPairs).toBe(8)
+    expect(audit.totalPairs).toBe(11)
   })
 
   it("flags low-contrast foreground/background pair", () => {

@@ -35,6 +35,8 @@ import { PRESET_SWATCHES } from "@/lib/themes/preset-meta"
 import { BUILT_IN_VSCODE_THEMES } from "@/lib/appearance/built-in-vscode-themes"
 import { BUILT_IN_DESIGNED_THEMES } from "@/lib/themes/built-in-themes"
 import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
+import { THEME_TOKEN_CSS_VARS } from "@/lib/appearance"
+import { pluginThemeColors } from "@/lib/appearance/resolve-app-palette"
 import {
   listPluginThemes,
   subscribeThemeRegistry,
@@ -43,6 +45,10 @@ import {
 import { cn } from "@/lib/utils"
 import { PresetGrid, type PresetItem } from "./preset-grid"
 import { VscodeImportDialog } from "../vscode-import-dialog"
+
+/** Custom properties the catalog owns — anything else in a plugin's
+ * `cssVariables` map is genuinely private to that plugin and stays verbatim. */
+const KNOWN_TOKEN_CSS_VARS = new Set<string>(THEME_TOKEN_CSS_VARS)
 
 // Stable empty fallback — same rationale as `vscode-import-tab.tsx`.
 const EMPTY_PLUGIN_THEMES: PluginTheme[] = []
@@ -277,27 +283,53 @@ export function ThemeTab() {
   const handleEditCopy = (item: PresetItem) => {
     const baseVariant: "light" | "dark" = item.isDark ? "dark" : "light"
     const opposite: "light" | "dark" = baseVariant === "dark" ? "light" : "dark"
-    const tokens =
-      item.tokens ??
-      ({
-        [baseVariant]: item.colors,
-        [opposite]: deriveOppositeVariant(item.colors, baseVariant),
-      } as { light: ThemeColors; dark: ThemeColors })
+
+    // A CSS-var plugin theme carries its palette as raw `--*` declarations.
+    // Lift everything the catalog recognises into structured tokens the editor
+    // can actually show, and keep only the genuinely private leftovers in
+    // `cssVars`. Copying the map wholesale meant the applier re-wrote those
+    // variables *after* the structured pass, so every edit the user made to a
+    // recognised token was painted over by the value it was cloned from.
+    const structuredFromCss =
+      item.source === "plugin" && item.cssVars ? pluginThemeColors({ cssVars: item.cssVars }) : {}
+    const extraCssVars =
+      item.source === "plugin" && item.cssVars
+        ? Object.fromEntries(
+            Object.entries(item.cssVars).filter(([name]) => !KNOWN_TOKEN_CSS_VARS.has(name))
+          )
+        : undefined
+
+    // Those declarations describe the theme's OWN variant, so they merge into
+    // the base side only — folding them into both would overwrite the derived
+    // opposite variant with, say, a dark theme's colours under a light app.
+    const baseColors = { ...item.colors, ...structuredFromCss }
+    const tokens = item.tokens
+      ? ({
+          [baseVariant]: { ...item.tokens[baseVariant], ...structuredFromCss },
+          [opposite]: item.tokens[opposite],
+        } as { light: ThemeColors; dark: ThemeColors })
+      : ({
+          [baseVariant]: baseColors,
+          [opposite]: deriveOppositeVariant(baseColors, baseVariant),
+        } as { light: ThemeColors; dark: ThemeColors })
+
     const id = createCustomTheme({
-      name: `${item.name} (copy)`,
+      name: t("customTheme.rail.copySuffix", { name: item.name }),
       baseVariant,
       derivedVariant: item.tokens ? undefined : opposite,
       tokens,
       isDark: baseVariant === "dark",
-      colors: item.colors,
+      colors: baseColors,
       sourcePluginId: item.source === "plugin" ? item.pluginId : undefined,
-      // Preserve a CSS-var plugin theme's extra overrides in the copy so it
-      // renders identically to the live plugin theme.
-      cssVars: item.source === "plugin" ? item.cssVars : undefined,
+      cssVars: extraCssVars && Object.keys(extraCssVars).length > 0 ? extraCssVars : undefined,
     })
     void setActiveCustom(id)
     const next = new URLSearchParams(searchParams.toString())
     next.set("appearanceTab", "custom")
+    // Name the row. Without this the editor opened on a blank new-theme draft:
+    // it had no way to know which of the user's themes they had just asked to
+    // edit, and "edit a copy" looked like it had done nothing.
+    next.set("customThemeId", id)
     router.replace(`?${next.toString()}`, { scroll: false })
   }
 

@@ -121,7 +121,7 @@ describe("CustomThemeApplier", () => {
     expect(html.style.getPropertyValue("--accent")).toBe("")
   })
 
-  it("writes 27 CSS variables on <html> with matching values when a custom theme is active", async () => {
+  it("writes every theme CSS variable on <html> with matching values when a custom theme is active", async () => {
     const theme = makeCustomTheme()
     useSettingsStore.setState({
       activeCustomThemeId: theme.id,
@@ -140,12 +140,53 @@ describe("CustomThemeApplier", () => {
     expect(html.style.getPropertyValue("--sidebar-primary")).toBe("#ff00ff")
     expect(html.style.getPropertyValue("--sidebar-primary-foreground")).toBe("#000")
 
-    // Every key in the canonical list should be set to a non-empty value.
-    let written = 0
-    for (const cssVar of CSS_VAR_KEYS) {
-      if (html.style.getPropertyValue(cssVar) !== "") written++
-    }
-    expect(written).toBe(CSS_VAR_KEYS.length)
+    // Every key in the canonical list should be set to a non-empty value —
+    // all 56, not just the 27 a theme is required to author.
+    const blank = CSS_VAR_KEYS.filter((v) => html.style.getPropertyValue(v) === "")
+    expect(blank).toEqual([])
+    expect(CSS_VAR_KEYS.length).toBe(56)
+  })
+
+  /**
+   * A plain camel→kebab transform sends `chart1` to `--chart1` and
+   * `workflowTrigger` to `--workflow-trigger` — names no stylesheet reads. The
+   * catalog declares the real ones.
+   */
+  it("writes the real custom-property names for the hyphen-numbered and --wf- tokens", async () => {
+    const theme = makeCustomTheme({
+      colors: buildTokens({
+        chart1: "#ff0000",
+        workflowTrigger: "#00ff00",
+        workflowStatusSkipped: "#0000ff",
+        effortUltra: "#123456",
+      }),
+    })
+    useSettingsStore.setState({ activeCustomThemeId: theme.id, customThemes: [theme] })
+    await act(async () => {
+      render(<CustomThemeApplier />)
+    })
+    const html = document.documentElement
+    await waitFor(() => expect(html.style.getPropertyValue("--chart-1")).toBe("#ff0000"))
+    expect(html.style.getPropertyValue("--wf-trigger")).toBe("#00ff00")
+    expect(html.style.getPropertyValue("--wf-status-skipped")).toBe("#0000ff")
+    expect(html.style.getPropertyValue("--effort-ultra")).toBe("#123456")
+    expect(html.style.getPropertyValue("--chart1")).toBe("")
+    expect(html.style.getPropertyValue("--workflow-trigger")).toBe("")
+  })
+
+  it("derives the aliased and translucent tokens from the theme's own palette", async () => {
+    const theme = makeCustomTheme({
+      colors: buildTokens({ warning: "#abcdef", effortUltra: "#ff0000" }),
+    })
+    useSettingsStore.setState({ activeCustomThemeId: theme.id, customThemes: [theme] })
+    await act(async () => {
+      render(<CustomThemeApplier />)
+    })
+    const html = document.documentElement
+    // The running badge follows `warning` rather than the stock amber...
+    await waitFor(() => expect(html.style.getPropertyValue("--wf-status-running")).toBe("#abcdef"))
+    // ...and the muted effort accent keeps its alpha instead of going opaque.
+    expect(html.style.getPropertyValue("--effort-ultra-muted")).toContain("/")
   })
 
   it("clears previously-injected vars when the custom theme is deactivated", async () => {
@@ -265,8 +306,6 @@ describe("CustomThemeApplier — a11y layers", () => {
   }
 
   it("writes the categorical colorblind vars alongside the tokens", async () => {
-    // These live outside ThemeColors, so they are written by a separate pass that
-    // nothing else in this suite reaches.
     setA11y({ colorblindMode: "deuter" })
     await act(async () => {
       render(<CustomThemeApplier />)
@@ -289,6 +328,30 @@ describe("CustomThemeApplier — a11y layers", () => {
     })
 
     await waitFor(() => expect(html.style.getPropertyValue("--chart-1")).toBe(""))
+  })
+
+  /**
+   * Regression. Charts and workflow colours used to be written on a second,
+   * CSS-var-keyed path whose cleanup ran *after* the structured pass — so the
+   * frame in which a user turned colourblind mode off stripped the `--chart-*`
+   * values the active theme had just painted, leaving them blank until
+   * something else forced a repaint.
+   */
+  it("restores the theme's own categorical colours when colourblind mode is switched off", async () => {
+    const theme = makeCustomTheme({ colors: buildTokens({ chart1: "#ff0000" }) })
+    useSettingsStore.setState({ activeCustomThemeId: theme.id, customThemes: [theme] })
+    setA11y({ colorblindMode: "deuter" })
+    const { rerender } = render(<CustomThemeApplier />)
+    const html = document.documentElement
+    // The CVD palette wins while it is on.
+    await waitFor(() => expect(html.style.getPropertyValue("--chart-1")).toMatch(/^oklch/))
+
+    await act(async () => {
+      setA11y({ colorblindMode: "off" })
+      rerender(<CustomThemeApplier />)
+    })
+
+    await waitFor(() => expect(html.style.getPropertyValue("--chart-1")).toBe("#ff0000"))
   })
 
   it("paints the high-contrast palette inline, overriding the default preset", async () => {

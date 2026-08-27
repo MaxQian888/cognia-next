@@ -3,11 +3,11 @@
 import { useEffect, useRef } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
-import type { ThemeColors } from "@/types/plugin/plugin"
-import { themeKeyToCssVar, CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
+import type { ResolvedThemeColors } from "@/types/plugin/plugin"
+import { CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
 import { BOOT_MIRROR_KEYS } from "./boot-script"
 import { resolveAppPalette } from "./resolve-app-palette"
-import { COLORBLIND_EXTRA_VAR_KEYS, colorblindCssVars } from "./colorblind-palettes"
+import { THEME_TOKEN_CATALOG } from "./theme-token-catalog"
 
 /**
  * Mounts at the root layout and writes resolved theme tokens onto `<html>`
@@ -30,7 +30,6 @@ export function CustomThemeApplier(): null {
   const a11y = useSettingsStore((s) => s.settings?.a11y)
   const { resolvedTheme } = useTheme()
   const lastApplied = useRef(false)
-  const lastExtraVars = useRef<string[]>([])
   // Extra CSS vars carried by a cloned `cssVariables` plugin theme
   // (`CustomTheme.cssVars`), tracked separately so we can clear them cleanly
   // when the active theme changes or a plugin theme takes over.
@@ -55,10 +54,6 @@ export function CustomThemeApplier(): null {
       for (const key of BOOT_MIRROR_KEYS) {
         if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
       }
-      if (lastExtraVars.current.length > 0) {
-        removeCssVars(root, lastExtraVars.current)
-        lastExtraVars.current = []
-      }
       // Clear the cloned-theme extra CSS vars too (see cssVarsApplied ref).
       if (cssVarsApplied.current.length > 0) {
         removeCssVars(root, cssVarsApplied.current)
@@ -69,12 +64,18 @@ export function CustomThemeApplier(): null {
 
     // v47 — a11y overrides win, but only when explicitly enabled. The
     // high-contrast preset replaces the entire ThemeColors object; the
-    // colorblind layer then patches a few signal tokens and the categorical
-    // chart/workflow CSS vars. Layering order:
+    // colorblind layer then patches the signal and categorical tokens.
+    // Layering order:
     //   1. resolved base (preset / custom theme / VSCode import)
     //   2. high-contrast override (replaces ThemeColors when active)
-    //   3. colorblind theme overrides (patches destructive + a few extras)
-    //   4. colorblind CSS vars (chart-1..5 + --wf-*)
+    //   3. colorblind theme overrides (destructive + chart/workflow categoricals)
+    //   4. advanced-token fill, then AA foreground hardening
+    //
+    // Charts and workflow colours used to be written on a second, CSS-var-keyed
+    // path with its own clear-then-write ref. That ordering was a live bug:
+    // the structured pass wrote the tokens and the extra-var cleanup ran
+    // *after* it, so the frame in which a user turned colourblind mode off
+    // stripped the `--chart-*` values it had just painted. One pass now.
     const colorblind = a11y?.colorblindMode ?? "off"
 
     // Steps 1-4 live in `resolveAppPalette` so the native shell and the embedded
@@ -122,11 +123,6 @@ export function CustomThemeApplier(): null {
       for (const key of BOOT_MIRROR_KEYS) {
         if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
       }
-      // Also clear any prior categorical vars (e.g. user just turned cb off).
-      if (lastExtraVars.current.length > 0) {
-        removeCssVars(root, lastExtraVars.current)
-        lastExtraVars.current = []
-      }
       if (cssVarsApplied.current.length > 0) {
         removeCssVars(root, cssVarsApplied.current)
         cssVarsApplied.current = []
@@ -141,17 +137,6 @@ export function CustomThemeApplier(): null {
     // ever touches inline-applied palettes.
     applyTokens(root, tokens)
     lastApplied.current = true
-
-    // Extra categorical vars (chart + wf) live outside ThemeColors.
-    // Clear the previous set, then write the new one.
-    if (lastExtraVars.current.length > 0) {
-      removeCssVars(root, lastExtraVars.current)
-      lastExtraVars.current = []
-    }
-    const extraVars = colorblindCssVars(colorblind)
-    if (Object.keys(extraVars).length > 0) {
-      lastExtraVars.current = applyCssVars(root, extraVars)
-    }
 
     // A custom theme cloned from a `cssVariables` plugin theme carries the
     // author's extra `--*` overrides in `cssVars`. Apply them after the
@@ -180,14 +165,16 @@ export function CustomThemeApplier(): null {
   return null
 }
 
-function applyTokens(root: HTMLElement, tokens: ThemeColors): void {
-  for (const [key, value] of Object.entries(tokens)) {
+/**
+ * Walk the catalog rather than the palette's own keys: the catalog is what
+ * knows a token's real custom property (`chart1` → `--chart-1`,
+ * `workflowTrigger` → `--wf-trigger`), and iterating it also means an unknown
+ * key riding along in a palette never reaches `setProperty`.
+ */
+function applyTokens(root: HTMLElement, tokens: ResolvedThemeColors): void {
+  for (const def of THEME_TOKEN_CATALOG) {
+    const value = tokens[def.key]
     if (!value) continue
-    root.style.setProperty(themeKeyToCssVar(key), value)
+    root.style.setProperty(def.cssVar, value)
   }
-}
-
-/** Exposed for tests so they can sanity-check the extra-var keys list. */
-export const __INTERNALS__ = {
-  COLORBLIND_EXTRA_VAR_KEYS,
 }

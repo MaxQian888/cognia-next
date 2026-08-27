@@ -17,9 +17,9 @@ import {
 } from "./token-group"
 import type { ThemeColors } from "@/types/plugin/plugin"
 import type { ContrastAudit } from "@/lib/appearance/contrast-audit"
-import { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "@/lib/appearance"
+import { THEME_COLOR_KEYS, defaultThemeColors } from "@/lib/appearance"
 
-const baseAudit: ContrastAudit = { failures: [], totalPairs: 8, failureCount: 0 }
+const baseAudit: ContrastAudit = { failures: [], totalPairs: 11, failureCount: 0 }
 
 function failure(fg: keyof ThemeColors, bg: keyof ThemeColors): ContrastAudit["failures"][number] {
   return { pair: [fg, bg], ratio: 1.5 }
@@ -36,17 +36,29 @@ describe("TOKEN_GROUPS partition", () => {
     expect(flattenedGroupTokens()).toHaveLength(THEME_COLOR_KEYS.length)
   })
 
-  it("DEFAULT_GROUP_OPEN expands Surface/Text/Brand and collapses State/Sidebar", () => {
-    expect(DEFAULT_GROUP_OPEN.surface).toBe(true)
-    expect(DEFAULT_GROUP_OPEN.text).toBe(true)
+  it("DEFAULT_GROUP_OPEN expands the first three groups and collapses the rest", () => {
+    expect(DEFAULT_GROUP_OPEN.surfaceText).toBe(true)
     expect(DEFAULT_GROUP_OPEN.brand).toBe(true)
-    expect(DEFAULT_GROUP_OPEN.state).toBe(false)
+    expect(DEFAULT_GROUP_OPEN.status).toBe(true)
     expect(DEFAULT_GROUP_OPEN.sidebar).toBe(false)
+    expect(DEFAULT_GROUP_OPEN.chart).toBe(false)
+    expect(DEFAULT_GROUP_OPEN.workflowNode).toBe(false)
+    expect(DEFAULT_GROUP_OPEN.workflowState).toBe(false)
+    expect(DEFAULT_GROUP_OPEN.productAccent).toBe(false)
   })
 
-  it("TOKEN_GROUPS ordering is stable and 5 groups long", () => {
-    expect(TOKEN_GROUPS).toHaveLength(5)
-    expect(TOKEN_GROUPS.map((g) => g.key)).toEqual(["surface", "text", "brand", "state", "sidebar"])
+  it("TOKEN_GROUPS ordering is stable and 8 groups long", () => {
+    expect(TOKEN_GROUPS).toHaveLength(8)
+    expect(TOKEN_GROUPS.map((g) => g.key)).toEqual([
+      "surfaceText",
+      "brand",
+      "status",
+      "sidebar",
+      "chart",
+      "workflowNode",
+      "workflowState",
+      "productAccent",
+    ])
   })
 })
 
@@ -78,12 +90,12 @@ describe("countGroupFailures", () => {
 })
 
 describe("<TokenGroup />", () => {
-  const fallback = DEFAULT_FALLBACKS.light
+  const fallback = defaultThemeColors("light")
 
   function setup(overrides: Partial<React.ComponentProps<typeof TokenGroup>> = {}) {
     const props: React.ComponentProps<typeof TokenGroup> = {
-      groupKey: "surface",
-      label: "Surface",
+      groupKey: "surfaceText",
+      label: "Surface & text",
       tokens: ["background", "card"],
       defaultOpen: true,
       values: { background: "#fefefe" },
@@ -103,16 +115,16 @@ describe("<TokenGroup />", () => {
 
   it("renders header label, token count and is open by default when defaultOpen=true", () => {
     setup()
-    expect(screen.getByText("Surface")).toBeInTheDocument()
+    expect(screen.getByText("Surface & text")).toBeInTheDocument()
     expect(screen.getByText("2")).toBeInTheDocument()
-    expect(screen.getByTestId("token-group-surface-content")).toBeInTheDocument()
+    expect(screen.getByTestId("token-group-surfaceText-content")).toBeInTheDocument()
     expect(screen.getByTestId("color-token-background-swatch")).toBeInTheDocument()
     expect(screen.getByTestId("color-token-card-swatch")).toBeInTheDocument()
   })
 
   it("hides the failure badge when audit has no failures", () => {
     setup()
-    expect(screen.queryByTestId("token-group-surface-failures")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("token-group-surfaceText-failures")).not.toBeInTheDocument()
   })
 
   it("renders the failure badge with localised text when audit has failures", () => {
@@ -123,7 +135,7 @@ describe("<TokenGroup />", () => {
         failureCount: 1,
       },
     })
-    const badge = screen.getByTestId("token-group-surface-failures")
+    const badge = screen.getByTestId("token-group-surfaceText-failures")
     expect(badge).toHaveTextContent("1 fail")
   })
 
@@ -152,7 +164,7 @@ describe("<TokenGroup />", () => {
     setup({ defaultOpen: false })
     // Radix mounts CollapsibleContent but marks data-state=closed and hides it.
     // The trigger keeps a stable test id we can assert on.
-    const trigger = screen.getByTestId("token-group-surface-trigger")
+    const trigger = screen.getByTestId("token-group-surfaceText-trigger")
     expect(trigger.getAttribute("data-state")).toBe("closed")
   })
 })

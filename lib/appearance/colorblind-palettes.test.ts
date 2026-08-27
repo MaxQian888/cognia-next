@@ -1,34 +1,24 @@
+import { THEME_TOKEN_BY_KEY } from "./theme-token-catalog"
 import {
-  COLORBLIND_EXTRA_VAR_KEYS,
+  COLORBLIND_CATEGORICAL_KEYS,
   COLORBLIND_SIMULATOR_MATRICES,
-  colorblindCssVars,
   colorblindThemeOverrides,
 } from "./colorblind-palettes"
-
-describe("colorblindCssVars", () => {
-  it("returns an empty object for 'off'", () => {
-    expect(colorblindCssVars("off")).toEqual({})
-  })
-
-  it.each(["deuter", "protan", "tritan"] as const)("covers every extra var key for %s", (mode) => {
-    const map = colorblindCssVars(mode)
-    for (const key of COLORBLIND_EXTRA_VAR_KEYS) {
-      expect(map[key]).toMatch(/^oklch/)
-    }
-  })
-
-  it("returns a fresh object each call (callers may mutate)", () => {
-    const a = colorblindCssVars("deuter")
-    const b = colorblindCssVars("deuter")
-    expect(a).not.toBe(b)
-    expect(a).toEqual(b)
-  })
-})
 
 describe("colorblindThemeOverrides", () => {
   it("returns an empty object for 'off'", () => {
     expect(colorblindThemeOverrides("off")).toEqual({})
   })
+
+  it.each(["deuter", "protan", "tritan"] as const)(
+    "covers every categorical token for %s",
+    (mode) => {
+      const overrides = colorblindThemeOverrides(mode)
+      for (const key of COLORBLIND_CATEGORICAL_KEYS) {
+        expect(overrides[key]).toMatch(/^oklch/)
+      }
+    }
+  )
 
   it.each(["deuter", "protan", "tritan"] as const)(
     "%s shifts destructive away from the default red",
@@ -38,6 +28,35 @@ describe("colorblindThemeOverrides", () => {
       expect(overrides.destructive).toMatch(/^oklch/)
     }
   )
+
+  it("returns a fresh object each call (callers may mutate)", () => {
+    const a = colorblindThemeOverrides("deuter")
+    const b = colorblindThemeOverrides("deuter")
+    expect(a).not.toBe(b)
+    expect(a).toEqual(b)
+  })
+
+  /**
+   * The categorical set is a choice, not an oversight: annotation is a neutral
+   * grey with no categorical meaning, and the workflow statuses either alias a
+   * signal colour that is already patched or are greys of their own. Pinned so
+   * a future "we forgot these" edit has to be deliberate.
+   */
+  it("leaves annotation and the workflow statuses alone", () => {
+    const overrides = colorblindThemeOverrides("deuter")
+    expect(overrides.workflowAnnotation).toBeUndefined()
+    expect(overrides.workflowStatusIdle).toBeUndefined()
+    expect(overrides.workflowStatusRunning).toBeUndefined()
+    expect(overrides.workflowStatusSkipped).toBeUndefined()
+  })
+
+  it("only names tokens the catalog owns", () => {
+    for (const mode of ["deuter", "protan", "tritan"] as const) {
+      for (const key of Object.keys(colorblindThemeOverrides(mode))) {
+        expect(THEME_TOKEN_BY_KEY[key as keyof typeof THEME_TOKEN_BY_KEY]).toBeDefined()
+      }
+    }
+  })
 })
 
 describe("COLORBLIND_SIMULATOR_MATRICES", () => {

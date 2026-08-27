@@ -37,18 +37,18 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { THEME_COLOR_KEYS } from "@/lib/appearance"
-import { themeKeyToCssVar } from "@/lib/appearance/css-var"
+import { THEME_TOKEN_CATALOG, THEME_TOKEN_GROUPS } from "@/lib/appearance"
 import { cn } from "@/lib/utils"
-import type { ThemeColors } from "@/types/plugin/plugin"
+import type { ResolvedThemeColors } from "@/types/plugin/plugin"
 
 export interface AppearancePreviewProps {
   className?: string
   /**
    * Render these tokens instead of the applied theme. Must be complete — see
-   * the note above. Omit to preview whatever is currently applied.
+   * the note above; the type enforces it. Omit to preview whatever is currently
+   * applied.
    */
-  colors?: ThemeColors
+  colors?: ResolvedThemeColors
   /** Whether `colors` describes a dark theme. Ignored unless `colors` is set. */
   isDark?: boolean
 }
@@ -61,9 +61,9 @@ export function AppearancePreview({ className, colors, isDark }: AppearancePrevi
   const overrideStyle = useMemo(() => {
     if (!colors) return undefined
     const vars: Record<string, string> = {}
-    for (const key of THEME_COLOR_KEYS) {
-      const value = colors[key]
-      if (typeof value === "string" && value !== "") vars[themeKeyToCssVar(key)] = value
+    for (const def of THEME_TOKEN_CATALOG) {
+      const value = colors[def.key]
+      if (typeof value === "string" && value !== "") vars[def.cssVar] = value
     }
     // CSSProperties has no index signature for `--*`; React forwards such keys
     // to setProperty untouched.
@@ -172,33 +172,81 @@ export function AppearancePreview({ className, colors, isDark }: AppearancePrevi
   )
 }
 
-const SWATCH_TOKENS = [
-  { key: "accent", className: "bg-accent" },
-  { key: "accentForeground", className: "bg-accent-foreground" },
-  { key: "ring", className: "bg-ring" },
-  { key: "popover", className: "bg-popover" },
-  { key: "popoverForeground", className: "bg-popover-foreground" },
+/**
+ * Tokens no surface above ever paints statically — accent shows on hover, ring
+ * on focus-visible (every control here is `tabIndex={-1}`), popover not at all.
+ */
+const HIDDEN_BASE_TOKENS = [
+  "accent",
+  "accentForeground",
+  "ring",
+  "popover",
+  "popoverForeground",
 ] as const
+
+/**
+ * Groups whose tokens the sample UI cannot show either: there is no chart, no
+ * workflow canvas, and no Ultra badge in a 300px preview. Without these strips
+ * two thirds of the editor's rows would look inert while the user drags them.
+ */
+const SWATCH_GROUPS = ["status", "chart", "workflowNode", "workflowState", "productAccent"] as const
+
+/** Swatches paint through the catalog's real custom property, so a token added
+ * to the catalog shows up here without anyone remembering to add a class. */
+function Swatch({ cssVar, label, token }: { cssVar: string; label: string; token: string }) {
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      data-testid={`appearance-preview-swatch-${token}`}
+      className="size-4 rounded border"
+      style={{ background: `var(${cssVar})` }}
+    />
+  )
+}
 
 function TokenSwatchStrip() {
   const t = useTranslations("settings.appearance.preview")
   // Reuse the custom-theme editor's token names rather than minting parallel
   // copies — these are the same tokens the TokenGroup rows label.
   const tokenT = useTranslations("settings.appearance.customTheme.tokens")
+  const groupT = useTranslations("settings.appearance.customTheme.groups")
   return (
-    <div className="space-y-1" data-testid="appearance-preview-swatches">
-      <p className="text-[10px] text-muted-foreground">{t("tokensLabel")}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {SWATCH_TOKENS.map(({ key, className }) => (
-          <span
-            key={key}
-            title={tokenT(key)}
-            aria-label={tokenT(key)}
-            data-testid={`appearance-preview-swatch-${key}`}
-            className={cn("size-4 rounded border", className)}
-          />
-        ))}
+    <div className="space-y-2" data-testid="appearance-preview-swatches">
+      <div className="space-y-1">
+        <p className="text-[10px] text-muted-foreground">{t("tokensLabel")}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {HIDDEN_BASE_TOKENS.map((key) => (
+            <Swatch key={key} token={key} cssVar={THEME_TOKEN_BY_CSS[key]} label={tokenT(key)} />
+          ))}
+        </div>
       </div>
+      {SWATCH_GROUPS.map((groupKey) => {
+        const group = THEME_TOKEN_GROUPS.find((g) => g.key === groupKey)
+        if (!group) return null
+        return (
+          <div key={groupKey} className="space-y-1">
+            <p className="text-[10px] text-muted-foreground">{groupT(groupKey)}</p>
+            <div
+              className="flex flex-wrap gap-1.5"
+              data-testid={`appearance-preview-group-${groupKey}`}
+            >
+              {group.tokens.map((key) => (
+                <Swatch
+                  key={key}
+                  token={key}
+                  cssVar={THEME_TOKEN_BY_CSS[key]}
+                  label={tokenT(key)}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
+
+const THEME_TOKEN_BY_CSS: Record<string, string> = Object.fromEntries(
+  THEME_TOKEN_CATALOG.map((def) => [def.key, def.cssVar])
+)

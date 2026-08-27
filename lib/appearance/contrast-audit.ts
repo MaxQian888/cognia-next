@@ -1,4 +1,4 @@
-import type { ThemeColors } from "@/types/plugin/plugin"
+import type { ResolvedThemeColors, ThemeColors } from "@/types/plugin/plugin"
 import { adjustForegroundLightnessToTarget, wcagContrast } from "./contrast"
 import type { WcagTarget } from "@/types/appearance"
 
@@ -9,15 +9,20 @@ export interface AuditFailure {
 
 export interface ContrastAudit {
   failures: AuditFailure[]
-  /** Total pairs checked (currently 8). */
+  /** Total pairs checked (currently 11). */
   totalPairs: number
   /** Convenience: failures.length */
   failureCount: number
 }
 
 /**
- * The eight (foreground, background) pairs that determine how readable a
- * theme is in practice. Audited against WCAG AA (4.5:1).
+ * The eleven (foreground, background) pairs that determine how readable a theme
+ * is in practice. Audited against WCAG AA (4.5:1).
+ *
+ * Status text joined the list once success / warning / info became editable:
+ * a hand-picked amber `warning` with the default near-black `warningForeground`
+ * is exactly the pairing users get wrong, and it was previously unaudited.
+ * Non-text tokens (border, input, ring) stay out — they carry no glyphs.
  */
 const CRITICAL_PAIRS: ReadonlyArray<[keyof ThemeColors, keyof ThemeColors]> = [
   ["foreground", "background"],
@@ -28,9 +33,17 @@ const CRITICAL_PAIRS: ReadonlyArray<[keyof ThemeColors, keyof ThemeColors]> = [
   ["mutedForeground", "muted"],
   ["accentForeground", "accent"],
   ["sidebarForeground", "sidebar"],
+  ["successForeground", "success"],
+  ["warningForeground", "warning"],
+  ["infoForeground", "info"],
 ]
 
-export function auditThemeContrast(tokens: ThemeColors): ContrastAudit {
+/**
+ * Takes a *resolved* palette: the status pairs only mean something once the
+ * advanced tokens have values, and a partially-filled palette would silently
+ * score `undefined` against `undefined` as a plausible-looking 1:1.
+ */
+export function auditThemeContrast(tokens: ResolvedThemeColors): ContrastAudit {
   const failures: AuditFailure[] = []
   for (const [fg, bg] of CRITICAL_PAIRS) {
     const ratio = wcagContrast(tokens[fg], tokens[bg])
@@ -82,7 +95,7 @@ export interface AuditTokensResult {
  * built-in 4.5:1 threshold; AAA tightens to 7:1. `off` short-circuits with
  * an empty failure list.
  */
-export function auditTokens(tokens: ThemeColors, target: WcagTarget): AuditTokensResult {
+export function auditTokens(tokens: ResolvedThemeColors, target: WcagTarget): AuditTokensResult {
   const threshold = targetRatio(target)
   if (threshold === 0) {
     return { failures: [], totalPairs: CRITICAL_PAIRS.length, failureCount: 0, target }
@@ -102,7 +115,7 @@ export function auditTokens(tokens: ThemeColors, target: WcagTarget): AuditToken
 
 export interface AutoFixViolationsResult {
   /** Patched copy of the tokens. */
-  tokens: ThemeColors
+  tokens: ResolvedThemeColors
   /** Keys whose value the auto-fix actually changed. */
   movedKeys: Array<keyof ThemeColors>
   /** Pairs that could not be repaired (e.g. background unreachable). */
@@ -121,7 +134,7 @@ export interface AutoFixViolationsResult {
  * the pairs the adjuster couldn't solve.
  */
 export function autoFixViolations(
-  tokens: ThemeColors,
+  tokens: ResolvedThemeColors,
   target: WcagTarget
 ): AutoFixViolationsResult {
   const threshold = targetRatio(target)
@@ -143,7 +156,7 @@ export function autoFixViolations(
     byForeground.set(fg, list)
   }
 
-  const patched: ThemeColors = { ...tokens }
+  const patched: ResolvedThemeColors = { ...tokens }
   const movedKeys: Array<keyof ThemeColors> = []
   const unfixable: AuditFailure[] = []
 

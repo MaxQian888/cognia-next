@@ -61,3 +61,46 @@ describe("ColorTokenRow", () => {
     expect((screen.getByTestId("color-token-bg-hex") as HTMLInputElement).disabled).toBe(true)
   })
 })
+
+/**
+ * The field used to be hex-only. Every real token default is an `oklch()`, and
+ * two of them carry alpha — so opening the editor would have flagged most rows
+ * `aria-invalid` with a red border the moment the defaults became visible.
+ */
+describe("non-hex CSS colours", () => {
+  it.each([
+    ["oklch(0.62 0.17 145)"],
+    ["oklch(0.53 0.23 293 / 22%)"],
+    ["rgb(12 34 56)"],
+    ["rebeccapurple"],
+  ])("accepts %s", (value) => {
+    render(<ColorTokenRow tokenKey="warning" value={value} onChange={jest.fn()} />)
+    const field = screen.getByTestId("color-token-warning-hex")
+    expect(field).toHaveValue(value)
+    expect(field).toHaveAttribute("aria-invalid", "false")
+  })
+
+  it("shows the nearest hex in the native picker while the field keeps the notation", () => {
+    render(<ColorTokenRow tokenKey="warning" value="oklch(1 0 0)" onChange={jest.fn()} />)
+    expect(screen.getByTestId("color-token-warning-swatch")).toHaveValue("#ffffff")
+    expect(screen.getByTestId("color-token-warning-hex")).toHaveValue("oklch(1 0 0)")
+  })
+
+  it("still flags a value that is not a colour at all", () => {
+    render(<ColorTokenRow tokenKey="warning" value="not-a-colour" onChange={jest.fn()} />)
+    expect(screen.getByTestId("color-token-warning-hex")).toHaveAttribute("aria-invalid", "true")
+    // The picker has nothing honest to show, so it stays neutral.
+    expect(screen.getByTestId("color-token-warning-swatch")).toHaveValue("#888888")
+  })
+
+  it("falls back to neutral for a computed notation culori cannot resolve", () => {
+    render(
+      <ColorTokenRow
+        tokenKey="brandWash"
+        value="color-mix(in oklab, #35cedd 7%, #ffffff)"
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("color-token-brandWash-swatch")).toHaveValue("#888888")
+  })
+})

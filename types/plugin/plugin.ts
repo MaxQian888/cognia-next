@@ -3852,7 +3852,24 @@ export type ColorThemePreset =
   "default" | "ocean" | "forest" | "sunset" | "lavender" | "rose" | "slate" | "amber"
 
 /**
- * Theme colors structure
+ * Theme colors structure.
+ *
+ * Two tiers, and the split is load-bearing:
+ *
+ *  - The **27 required** fields below are the shadcn surface/text/brand set.
+ *    Every persisted theme, preset, and plugin contribution carries all of
+ *    them, so nothing has to guess.
+ *  - The **29 optional** fields after them are the rest of the palette the app
+ *    actually paints with — status, charts, workflow nodes and statuses, the
+ *    effort accent, the brand triple. They ship optional so that every existing
+ *    plugin, built-in theme, and already-persisted row keeps compiling and
+ *    running untouched; `normalizeThemeColors` fills whatever a theme left out
+ *    at read time (see `lib/appearance/theme-token-catalog.ts`). Code that needs
+ *    a guaranteed-complete palette asks for `ResolvedThemeColors` instead.
+ *
+ * The CSS custom property each key writes to is declared explicitly in the
+ * catalog — do NOT infer it by camel→kebab, which would turn `chart1` into
+ * `--chart1` and `workflowTrigger` into `--workflow-trigger`.
  */
 export interface ThemeColors {
   primary: string
@@ -3882,7 +3899,61 @@ export interface ThemeColors {
   sidebarAccent: string
   sidebarAccentForeground: string
   sidebarRing: string
+
+  // ----- Advanced tokens (optional; see the tier note above) -----
+
+  /** Status semantics. `--success` / `--warning` / `--info` and their text. */
+  success?: string
+  successForeground?: string
+  warning?: string
+  warningForeground?: string
+  info?: string
+  infoForeground?: string
+
+  /** Categorical chart series. Writes `--chart-1` … `--chart-5`. */
+  chart1?: string
+  chart2?: string
+  chart3?: string
+  chart4?: string
+  chart5?: string
+
+  /** Workflow node categories. Writes `--wf-trigger` … `--wf-annotation`. */
+  workflowTrigger?: string
+  workflowAction?: string
+  workflowAi?: string
+  workflowFlow?: string
+  workflowData?: string
+  workflowIo?: string
+  workflowAnnotation?: string
+
+  /** Workflow run statuses. Writes `--wf-status-idle` … `--wf-status-waiting`. */
+  workflowStatusIdle?: string
+  workflowStatusRunning?: string
+  workflowStatusSucceeded?: string
+  workflowStatusFailed?: string
+  workflowStatusSkipped?: string
+  workflowStatusWaiting?: string
+
+  /** The Ultra effort accent and its translucent companion. */
+  effortUltra?: string
+  effortUltraMuted?: string
+
+  /** Product brand triple shared with the marketing site. */
+  brandAction?: string
+  brandApproval?: string
+  brandWash?: string
 }
+
+/**
+ * A palette with every one of the 56 tokens resolved to a concrete value.
+ *
+ * `ThemeColors` is the *authoring* shape — advanced tokens are optional so a
+ * theme only records what it deliberately set. This is the *runtime* shape,
+ * produced by `normalizeThemeColors`, and it is what the DOM applier, the
+ * native shell, the Pro IDE, and the editor's preview all consume: none of them
+ * can act on "undefined, work it out yourself".
+ */
+export type ResolvedThemeColors = Required<ThemeColors>
 
 /**
  * Custom theme definition.
@@ -3932,7 +4003,7 @@ export interface CustomTheme {
   sourceBuiltinName?: string
 
   /**
-   * Extra CSS custom properties beyond the 27 standard `ThemeColors` tokens,
+   * Extra CSS custom properties beyond the 56 standard `ThemeColors` tokens,
    * carried verbatim from a plugin's `cssVariables` theme contribution
    * (ADR-0026 §3 §D). Applied inline after the structured token pass by
    * `CustomThemeApplier` so a cloned CSS-var plugin theme keeps ALL of its

@@ -1,8 +1,8 @@
 import { BUILT_IN_VSCODE_THEMES } from "./built-in-vscode-themes"
 
 describe("BUILT_IN_VSCODE_THEMES", () => {
-  it("contains four presets", () => {
-    expect(BUILT_IN_VSCODE_THEMES.length).toBe(4)
+  it("contains five presets", () => {
+    expect(BUILT_IN_VSCODE_THEMES.length).toBe(5)
   })
 
   it.each(BUILT_IN_VSCODE_THEMES.map((t) => [t.name, t] as const))(
@@ -31,6 +31,22 @@ describe("BUILT_IN_VSCODE_THEMES", () => {
     const githubLight = BUILT_IN_VSCODE_THEMES.find((t) => t.name === "GitHub Light Default")
     expect(dracula?.baseVariant).toBe("dark")
     expect(githubLight?.baseVariant).toBe("light")
+  })
+
+  it("keeps Night Owl aligned with the canonical VS Code workbench palette", () => {
+    const nightOwl = BUILT_IN_VSCODE_THEMES.find((t) => t.name === "Night Owl")
+
+    expect(nightOwl?.baseVariant).toBe("dark")
+    expect(nightOwl?.colors).toMatchObject({
+      background: "#011627",
+      foreground: "#d6deeb",
+      primary: "#7e57c2",
+      primaryForeground: "#ffffff",
+      accent: "#234d70",
+      accentForeground: "#ffffff",
+      sidebar: "#011627",
+      sidebarForeground: "#89a4bb",
+    })
   })
 
   it("populates legacy colors + isDark fields for rollback compatibility", () => {

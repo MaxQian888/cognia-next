@@ -1,6 +1,10 @@
 import { BUILT_IN_DESIGNED_THEMES } from "./built-in-themes"
 import { wcagContrast } from "@/lib/appearance/contrast"
-import { THEME_COLOR_KEYS } from "@/lib/appearance/vscode-theme/token-mapping"
+import {
+  BASE_THEME_COLOR_KEYS,
+  THEME_COLOR_KEYS,
+  normalizeThemeColors,
+} from "@/lib/appearance/theme-token-catalog"
 import { BUILT_IN_VSCODE_THEMES } from "@/lib/appearance/built-in-vscode-themes"
 
 describe("BUILT_IN_DESIGNED_THEMES", () => {
@@ -18,14 +22,34 @@ describe("BUILT_IN_DESIGNED_THEMES", () => {
   })
 
   it.each(BUILT_IN_DESIGNED_THEMES.map((t) => [t.name, t] as const))(
-    "%s carries a complete 27-token palette for both variants",
+    "%s hand-authors the full required palette for both variants",
     (_name, theme) => {
       expect(theme.tokens).toBeDefined()
       for (const variant of ["light", "dark"] as const) {
         const palette = theme.tokens![variant]
-        for (const key of THEME_COLOR_KEYS) {
+        for (const key of BASE_THEME_COLOR_KEYS) {
           expect(typeof palette[key]).toBe("string")
-          expect(palette[key].length).toBeGreaterThan(0)
+          expect(palette[key]!.length).toBeGreaterThan(0)
+        }
+      }
+    }
+  )
+
+  /**
+   * The advanced tokens are deliberately not hand-authored here. These palettes
+   * pair canonical community counterparts (Catppuccin Mocha ↔ Latte, and so on);
+   * inventing a chart ramp or a workflow palette for each would be nine sets of
+   * made-up colour, and the shared cognia defaults read correctly against every
+   * one of these surfaces. They resolve on read instead.
+   */
+  it.each(BUILT_IN_DESIGNED_THEMES.map((t) => [t.name, t] as const))(
+    "%s resolves to a complete 56-token palette",
+    (_name, theme) => {
+      for (const variant of ["light", "dark"] as const) {
+        const resolved = normalizeThemeColors(theme.tokens![variant], variant)
+        for (const key of THEME_COLOR_KEYS) {
+          expect(typeof resolved[key]).toBe("string")
+          expect(resolved[key].length).toBeGreaterThan(0)
         }
       }
     }

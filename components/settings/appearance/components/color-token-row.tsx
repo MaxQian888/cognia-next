@@ -1,15 +1,23 @@
 "use client"
 
-// One row of: label + color swatch picker + hex text input. Used by both
-// the new UI custom-theme tab and the (future) HTML export editor refactor.
-// Pure presentational — owns no state. Caller passes `value` and gets
-// `onChange` callbacks; the caller decides whether to debounce, validate,
-// etc.
+// One row of: label + color swatch picker + free-text color field. Used by the
+// custom-theme tab's `TokenGroup` clusters. Pure presentational — owns no
+// state. Caller passes `value` and gets `onChange` callbacks; the caller
+// decides whether to debounce, validate, etc.
+//
+// The field accepts any colour CSS understands, not just `#rrggbb`. It used to
+// be hex-only, which was survivable while the editor seeded drafts from a hex
+// fallback palette and untenable the moment the real token defaults — every one
+// of them an `oklch()`, two of them carrying alpha — became visible here: every
+// row would have opened flagged `aria-invalid` with a red border. So parsing is
+// culori's, the text field round-trips the author's exact notation, and the
+// native picker (which speaks nothing but 6-digit hex) shows the nearest
+// approximation of it.
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { isHexColor } from "@/lib/appearance/vscode-theme/color-utils"
+import { isColorParsable, toHexApprox } from "@/lib/appearance/contrast"
 
 export interface ColorTokenRowProps {
   /** Stable key — used for `htmlFor` and as a fallback display label. */
@@ -25,7 +33,7 @@ export interface ColorTokenRowProps {
   className?: string
   /** Pre-translated aria-label for the color swatch input. Falls back to "<label> swatch" if omitted. */
   swatchAriaLabel?: string
-  /** Pre-translated aria-label for the hex input. Falls back to "<label> hex" if omitted. */
+  /** Pre-translated aria-label for the text input. Falls back to "<label> hex" if omitted. */
   hexAriaLabel?: string
 }
 
@@ -40,11 +48,11 @@ export function ColorTokenRow({
   swatchAriaLabel,
   hexAriaLabel,
 }: ColorTokenRowProps) {
-  const hexValid = isHexColor(value)
-  // The native `<input type="color">` only accepts 6-digit hex; if the
-  // current value isn't valid we fall back to a neutral gray so the
-  // picker stays interactive.
-  const swatchValue = hexValid ? value : "#888888"
+  const valid = isColorParsable(value)
+  // `color-mix()` and other computed notations are legitimate CSS that culori
+  // cannot resolve; they stay editable but the picker has nothing to show, so
+  // it falls back to a neutral grey rather than lying about the colour.
+  const swatchValue = (valid ? toHexApprox(value) : null) ?? "#888888"
   return (
     <div
       className={cn(
@@ -58,7 +66,7 @@ export function ColorTokenRow({
       >
         {label ?? tokenKey}
       </Label>
-      <div className="flex flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Input
           id={`color-token-${tokenKey}`}
           type="color"
@@ -77,11 +85,11 @@ export function ColorTokenRow({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           className={cn(
-            "h-8 flex-1 font-mono text-[11px] @sm/appearance-pane:max-w-32",
-            !hexValid && "border-destructive text-destructive"
+            "h-8 min-w-0 flex-1 font-mono text-[11px] @sm/appearance-pane:max-w-40",
+            !valid && "border-destructive text-destructive"
           )}
           aria-label={hexAriaLabel ?? `${label ?? tokenKey} hex`}
-          aria-invalid={!hexValid}
+          aria-invalid={!valid}
           data-testid={`color-token-${tokenKey}-hex`}
         />
       </div>

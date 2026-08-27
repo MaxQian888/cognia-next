@@ -158,3 +158,85 @@ describe("importThemeFromJson", () => {
     expect(restored.name).toBe("Imported Theme")
   })
 })
+
+/**
+ * A theme file is user-supplied and its `cssVars` land in `style.setProperty`
+ * calls, so anything that is not a `--name: string` map is dropped rather than
+ * carried through.
+ */
+describe("cssVars round-trip", () => {
+  const base = {
+    $schema: "https://cognia.dev/schemas/custom-theme/v1.json",
+    formatVersion: "v1",
+    name: "Var Theme",
+    baseVariant: "dark" as const,
+    tokens: { light: { background: "#ffffff" }, dark: { background: "#000000" } },
+    exportedAt: "2026-01-01T00:00:00.000Z",
+  }
+
+  it("keeps a well-formed map and the source metadata", () => {
+    const parsed = importThemeFromJson(
+      JSON.stringify({
+        ...base,
+        cssVars: { "--plugin-private": "#abcabc" },
+        sourcePluginId: "p",
+        sourceBuiltinName: "Dracula",
+      })
+    )
+    expect(parsed.cssVars).toEqual({ "--plugin-private": "#abcabc" })
+    expect(parsed.sourcePluginId).toBe("p")
+    expect(parsed.sourceBuiltinName).toBe("Dracula")
+  })
+
+  it.each([
+    ["a string", "nope"],
+    ["null", null],
+    ["an array", ["--a"]],
+    ["an empty object", {}],
+    ["a name that is not a custom property", { color: "#fff" }],
+    ["a non-string value", { "--a": 5 }],
+    ["an empty value", { "--a": "" }],
+  ])("drops %s", (_label, cssVars) => {
+    const parsed = importThemeFromJson(JSON.stringify({ ...base, cssVars }))
+    expect(parsed.cssVars).toBeUndefined()
+  })
+
+  it("emits cssVars and metadata on export only when the theme has them", () => {
+    const withVars = JSON.parse(
+      exportThemeToJson({
+        id: "a",
+        name: "A",
+        baseVariant: "dark",
+        tokens: base.tokens as never,
+        cssVars: { "--x": "1px" },
+        sourcePluginId: "p",
+      })
+    )
+    expect(withVars.cssVars).toEqual({ "--x": "1px" })
+    expect(withVars.sourcePluginId).toBe("p")
+
+    const without = JSON.parse(
+      exportThemeToJson({ id: "b", name: "B", baseVariant: "dark", tokens: base.tokens as never })
+    )
+    expect(without).not.toHaveProperty("cssVars")
+    expect(without).not.toHaveProperty("sourcePluginId")
+    expect(without).not.toHaveProperty("sourceBuiltinName")
+  })
+
+  it("drops token keys the catalog does not own", () => {
+    const parsed = importThemeFromJson(
+      JSON.stringify({
+        ...base,
+        tokens: {
+          light: { background: "#ffffff", evilKey: "red" },
+          dark: { background: "#000000", chart1: "#ff0000" },
+        },
+      })
+    )
+    expect(parsed.tokens!.light).toEqual({ background: "#ffffff" })
+    expect(parsed.tokens!.dark).toEqual({ background: "#000000", chart1: "#ff0000" })
+    // The legacy mirror follows the base variant.
+    expect(parsed.colors).toEqual({ background: "#000000", chart1: "#ff0000" })
+    expect(parsed.isDark).toBe(true)
+  })
+})

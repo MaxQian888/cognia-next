@@ -21,7 +21,7 @@
 // context), not a module singleton, so tests can't leak state into each other.
 
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react"
-import type { ThemeColors } from "@/types/plugin/plugin"
+import type { ResolvedThemeColors } from "@/types/plugin/plugin"
 
 export interface AppearanceDraftSnapshot {
   /**
@@ -30,7 +30,7 @@ export interface AppearanceDraftSnapshot {
    * draft under a light app would render half-light. Publishers materialise
    * their sparse draft against the variant fallback first (`fillTokens`).
    */
-  colors: ThemeColors
+  colors: ResolvedThemeColors
   isDark: boolean
 }
 

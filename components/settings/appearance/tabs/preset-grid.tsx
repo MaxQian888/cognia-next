@@ -112,6 +112,7 @@ export function PresetGrid({
         return (
           <div
             key={item.key}
+            data-preset-card={item.key}
             className={cn(
               "group relative flex flex-col gap-1 rounded border p-2 text-left transition",
               "hover:bg-accent/50 focus-within:border-ring",

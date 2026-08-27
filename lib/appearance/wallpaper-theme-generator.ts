@@ -425,7 +425,9 @@ function deriveVariantTokens(base: ThemeColors, analysis: WallpaperThemeAnalysis
     hue: number
   ): void => {
     for (const [key, chroma] of entries) {
-      next[key] = tintTowardHue(next[key], hue, chroma)
+      const current = next[key]
+      if (typeof current !== "string") continue
+      next[key] = tintTowardHue(current, hue, chroma)
     }
   }
   if (accentHue !== null) tintAll(ACCENT_TINTED, accentHue)

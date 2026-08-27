@@ -6,6 +6,7 @@ import {
   stripJsonComments,
   vscodeThemeToCustomTheme,
 } from "./parse-json"
+import { BASE_THEME_COLOR_KEYS, normalizeThemeColors } from "../theme-token-catalog"
 import { THEME_COLOR_KEYS } from "./token-mapping"
 
 const fixtureDir = path.join(__dirname, "__fixtures__")
@@ -159,7 +160,7 @@ describe("vscodeThemeToCustomTheme", () => {
     expect(parsed.theme.colors.sidebar).not.toBe("#0f172a")
   })
 
-  it("populates all 27 ThemeColors keys (no holes after derivation)", () => {
+  it("populates every required ThemeColors key (no holes after derivation)", () => {
     const json = JSON.stringify({
       type: "dark",
       colors: {
@@ -168,10 +169,40 @@ describe("vscodeThemeToCustomTheme", () => {
       },
     })
     const parsed = importVscodeThemeJson(json)
-    for (const key of THEME_COLOR_KEYS) {
+    for (const key of BASE_THEME_COLOR_KEYS) {
       expect(parsed.theme.colors[key]).toBeDefined()
-      expect(parsed.theme.colors[key].length).toBeGreaterThan(0)
+      expect(parsed.theme.colors[key]!.length).toBeGreaterThan(0)
     }
+  })
+
+  it("leaves the advanced tokens for normalizeThemeColors to fill", () => {
+    const json = JSON.stringify({
+      type: "dark",
+      colors: { "editor.background": "#0b1220", "editor.foreground": "#f1f5f9" },
+    })
+    const parsed = importVscodeThemeJson(json)
+    // Nothing invented from a syntax theme...
+    expect(parsed.theme.colors.workflowTrigger).toBeUndefined()
+    expect(parsed.theme.colors.chart1).toBeUndefined()
+    // ...but the palette still resolves completely at read time.
+    const resolved = normalizeThemeColors(parsed.theme.colors, "dark")
+    for (const key of THEME_COLOR_KEYS) {
+      expect(resolved[key].length).toBeGreaterThan(0)
+    }
+  })
+
+  it("derives a readable foreground for a status colour it did match", () => {
+    const json = JSON.stringify({
+      type: "dark",
+      colors: {
+        "editor.background": "#0b1220",
+        "editor.foreground": "#f1f5f9",
+        "editorWarning.foreground": "#ffcc00",
+      },
+    })
+    const parsed = importVscodeThemeJson(json)
+    expect(parsed.theme.colors.warning).toBe("#ffcc00")
+    expect(parsed.theme.colors.warningForeground).toBeDefined()
   })
 
   it("flags themes with no colors object", () => {
@@ -259,10 +290,10 @@ describe("real VSCode themes parse without errors", () => {
     // No accent should be the hardcoded blue fallback after Task 10.
     expect(result.theme.colors.accent).not.toBe("#60a5fa")
     expect(result.theme.colors.accent).not.toBe("#3b82f6")
-    // All 27 keys populated.
-    for (const key of THEME_COLOR_KEYS) {
+    // All 27 required keys populated.
+    for (const key of BASE_THEME_COLOR_KEYS) {
       expect(result.theme.colors[key]).toBeDefined()
-      expect(result.theme.colors[key].length).toBeGreaterThan(0)
+      expect(result.theme.colors[key]!.length).toBeGreaterThan(0)
     }
   })
 })

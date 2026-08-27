@@ -279,14 +279,16 @@
     "audit": {
       "allPass": "Contrast: all pairs pass",
       "cancel": "Cancel",
-      "failuresCount": "{count} of {total} pairs fail WCAG AA",
+      "failuresBothVariants": "{count, plural, one {# pair fails} other {# pairs fail}} WCAG AA across both variants ({total} checked)",
       "lowContrast": "Low contrast",
       "saveAnyway": "Save anyway",
-      "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
+      "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check across the light and dark variants. Save anyway?",
       "saveWarningTitle": "Low-contrast theme"
     },
-    "darkLabel": "Dark variant",
     "deactivateButton": "Use color preset",
+    "defaultVariant": {
+      "label": "Opens in"
+    },
     "deleteButton": "Delete",
     "deleteDialog": {
       "body": "Delete \"{name}\"? This cannot be undone.",
@@ -303,11 +305,14 @@
     },
     "groupFailures": "{count, plural, one {# fails} other {# fail}}",
     "groups": {
-      "brand": "Brand",
+      "brand": "Brand & actions",
+      "chart": "Charts",
+      "productAccent": "Product accents",
       "sidebar": "Sidebar",
-      "state": "State",
-      "surface": "Surface",
-      "text": "Text"
+      "status": "Status feedback",
+      "surfaceText": "Surface & text",
+      "workflowNode": "Workflow nodes",
+      "workflowState": "Workflow states"
     },
     "import": {
       "failure": "Import failed: {message}",
@@ -324,8 +329,14 @@
       "lightSwatchAria": "Light variant swatch",
       "more": "More actions"
     },
+    "resetToken": "Reset to default",
     "saveButton": "Save",
     "savedLabel": "Saved themes",
+    "search": {
+      "ariaLabel": "Search theme tokens",
+      "noResults": "No token matches “{query}”.",
+      "placeholder": "Search tokens"
+    },
     "title": "Custom theme",
     "tokens": {
       "accent": "Accent",
@@ -336,11 +347,23 @@
       },
       "background": "Background",
       "border": "Border",
+      "brandAction": "Brand action",
+      "brandApproval": "Brand approval",
+      "brandWash": "Brand wash",
       "card": "Card",
       "cardForeground": "Card text",
+      "chart1": "Chart 1",
+      "chart2": "Chart 2",
+      "chart3": "Chart 3",
+      "chart4": "Chart 4",
+      "chart5": "Chart 5",
       "destructive": "Destructive",
       "destructiveForeground": "Destructive text",
+      "effortUltra": "Ultra effort",
+      "effortUltraMuted": "Ultra effort (muted)",
       "foreground": "Foreground",
+      "info": "Info",
+      "infoForeground": "Info text",
       "input": "Input",
       "muted": "Muted",
       "mutedForeground": "Muted text",
@@ -358,10 +381,32 @@
       "sidebarForeground": "Sidebar text",
       "sidebarPrimary": "Sidebar primary",
       "sidebarPrimaryForeground": "Sidebar primary text",
-      "sidebarRing": "Sidebar ring"
+      "sidebarRing": "Sidebar ring",
+      "success": "Success",
+      "successForeground": "Success text",
+      "warning": "Warning",
+      "warningForeground": "Warning text",
+      "workflowAction": "Action node",
+      "workflowAi": "AI node",
+      "workflowAnnotation": "Annotation node",
+      "workflowData": "Data node",
+      "workflowFlow": "Flow node",
+      "workflowIo": "Input / output node",
+      "workflowStatusFailed": "Failed",
+      "workflowStatusIdle": "Idle",
+      "workflowStatusRunning": "Running",
+      "workflowStatusSkipped": "Skipped",
+      "workflowStatusSucceeded": "Succeeded",
+      "workflowStatusWaiting": "Waiting",
+      "workflowTrigger": "Trigger node"
     },
     "unsavedBadge": "Unsaved changes",
-    "updateButton": "Update"
+    "updateButton": "Update",
+    "variant": {
+      "dark": "Dark",
+      "editingLabel": "Which variant to edit",
+      "light": "Light"
+    }
   },
   "description": "Tune the look and feel of the app. Changes are saved instantly.",
   "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
@@ -463,41 +508,41 @@
       "label": "Layout"
     },
     "markdown": {
-      "label": "Content rendering",
-      "math": {
-        "label": "Math (KaTeX)",
-        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source."
-      },
-      "mermaid": {
-        "label": "Mermaid diagrams",
-        "hint": "Render ```mermaid fences as diagrams; off shows the code."
-      },
-      "diff": {
-        "label": "Diff viewer",
-        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block."
-      },
       "codeLineNumbers": {
-        "label": "Code line numbers",
-        "hint": "Default for the line-number gutter; each block can still toggle it."
+        "hint": "Default for the line-number gutter; each block can still toggle it.",
+        "label": "Code line numbers"
       },
       "codeWrap": {
-        "label": "Wrap long code lines",
-        "hint": "Default for soft wrapping; each block can still toggle it."
+        "hint": "Default for soft wrapping; each block can still toggle it.",
+        "label": "Wrap long code lines"
       },
-      "mathCopy": {
-        "label": "Copy button on inline math",
-        "hint": "Show a copy affordance when hovering inline math."
+      "diff": {
+        "hint": "Render ```diff fences with the diff viewer; off shows a plain code block.",
+        "label": "Diff viewer"
       },
-      "mathFontScale": {
-        "label": "Math size",
-        "0_8": "Small",
-        "1": "Normal",
-        "1_2": "Large"
+      "label": "Content rendering",
+      "math": {
+        "hint": "Render $…$ and $$…$$ as typeset math; off shows the source.",
+        "label": "Math (KaTeX)"
       },
       "mathAlign": {
-        "label": "Display math alignment",
         "center": "Centered",
+        "label": "Display math alignment",
         "left": "Left"
+      },
+      "mathCopy": {
+        "hint": "Show a copy affordance when hovering inline math.",
+        "label": "Copy button on inline math"
+      },
+      "mathFontScale": {
+        "0_8": "Small",
+        "1": "Normal",
+        "1_2": "Large",
+        "label": "Math size"
+      },
+      "mermaid": {
+        "hint": "Render ```mermaid fences as diagrams; off shows the code.",
+        "label": "Mermaid diagrams"
       }
     },
     "metadata": {
@@ -667,6 +712,27 @@
     "title": "Reset appearance settings?"
   },
   "resetToDefault": "Reset {name} to default",
+  "stylePack": {
+    "packs": {
+      "sharp": {
+        "description": "Square everything that isn't a circle. No shadows, tighter density, monospace micro-labels.",
+        "name": "Sharp"
+      },
+      "soft": {
+        "description": "The default. Rounded corners, capsule badges, soft shadows.",
+        "name": "Soft"
+      },
+      "studio": {
+        "description": "Restrained corners and hairline rules, matching the Cognia website. No oversized pills.",
+        "name": "Studio"
+      }
+    },
+    "radiusFollowsPack": "Following the active pack. Move the slider to pin your own value.",
+    "radiusOverridesPack": "Overriding the active pack. Reset the slider to follow it again.",
+    "resetOverrides": "Reset to pack defaults",
+    "sectionHint": "Sets shape — corners, capsules, elevation, border weight, density. Independent of colour, so any pack works with any theme.",
+    "sectionLabel": "Style pack"
+  },
   "tabs": {
     "a11y": "Accessibility",
     "advanced": "Advanced",
@@ -891,26 +957,5 @@
     },
     "uploadHint": "Drop an image here or browse",
     "uploading": "Uploading…"
-  },
-  "stylePack": {
-    "sectionLabel": "Style pack",
-    "sectionHint": "Sets shape — corners, capsules, elevation, border weight, density. Independent of colour, so any pack works with any theme.",
-    "resetOverrides": "Reset to pack defaults",
-    "radiusFollowsPack": "Following the active pack. Move the slider to pin your own value.",
-    "radiusOverridesPack": "Overriding the active pack. Reset the slider to follow it again.",
-    "packs": {
-      "soft": {
-        "name": "Soft",
-        "description": "The default. Rounded corners, capsule badges, soft shadows."
-      },
-      "studio": {
-        "name": "Studio",
-        "description": "Restrained corners and hairline rules, matching the Cognia website. No oversized pills."
-      },
-      "sharp": {
-        "name": "Sharp",
-        "description": "Square everything that isn't a circle. No shadows, tighter density, monospace micro-labels."
-      }
-    }
   }
 }

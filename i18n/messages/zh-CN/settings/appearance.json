@@ -279,14 +279,16 @@
     "audit": {
       "allPass": "对比度：全部通过",
       "cancel": "取消",
-      "failuresCount": "{count} / {total} 组对未通过 WCAG AA",
+      "failuresBothVariants": "两个变体共 {count} 处未通过 WCAG AA（共检查 {total} 组）",
       "lowContrast": "对比度不足",
       "saveAnyway": "仍然保存",
-      "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
+      "saveWarningBody": "浅色与深色变体共有 {count} 组配色未通过 WCAG AA 对比度检查。仍要保存吗？",
       "saveWarningTitle": "对比度不足的主题"
     },
-    "darkLabel": "深色变体",
     "deactivateButton": "改用配色预设",
+    "defaultVariant": {
+      "label": "默认变体"
+    },
     "deleteButton": "删除",
     "deleteDialog": {
       "body": "确定删除“{name}”？此操作无法撤销。",
@@ -303,11 +305,14 @@
     },
     "groupFailures": "{count} 项未通过",
     "groups": {
-      "brand": "品牌",
+      "brand": "品牌与操作",
+      "chart": "图表",
+      "productAccent": "产品强调",
       "sidebar": "侧边栏",
-      "state": "状态",
-      "surface": "表面",
-      "text": "文字"
+      "status": "状态反馈",
+      "surfaceText": "表面与文字",
+      "workflowNode": "工作流节点",
+      "workflowState": "工作流状态"
     },
     "import": {
       "failure": "导入失败：{message}",
@@ -324,8 +329,14 @@
       "lightSwatchAria": "浅色变体色板",
       "more": "更多操作"
     },
+    "resetToken": "恢复默认",
     "saveButton": "保存",
     "savedLabel": "已保存的主题",
+    "search": {
+      "ariaLabel": "搜索主题色值点位",
+      "noResults": "没有匹配「{query}」的点位。",
+      "placeholder": "搜索色值点位"
+    },
     "title": "自定义主题",
     "tokens": {
       "accent": "强调色",
@@ -336,11 +347,23 @@
       },
       "background": "背景",
       "border": "边框",
+      "brandAction": "品牌主色",
+      "brandApproval": "品牌辅色",
+      "brandWash": "品牌底色",
       "card": "卡片",
       "cardForeground": "卡片文字",
+      "chart1": "图表 1",
+      "chart2": "图表 2",
+      "chart3": "图表 3",
+      "chart4": "图表 4",
+      "chart5": "图表 5",
       "destructive": "破坏性",
       "destructiveForeground": "破坏性文字",
+      "effortUltra": "Ultra 强度",
+      "effortUltraMuted": "Ultra 强度（淡色）",
       "foreground": "前景",
+      "info": "信息",
+      "infoForeground": "信息文字",
       "input": "输入框",
       "muted": "弱化色",
       "mutedForeground": "弱化色文字",
@@ -358,10 +381,32 @@
       "sidebarForeground": "侧栏文字",
       "sidebarPrimary": "侧栏主色",
       "sidebarPrimaryForeground": "侧栏主色文字",
-      "sidebarRing": "侧栏聚焦环"
+      "sidebarRing": "侧栏聚焦环",
+      "success": "成功",
+      "successForeground": "成功文字",
+      "warning": "警告",
+      "warningForeground": "警告文字",
+      "workflowAction": "动作节点",
+      "workflowAi": "AI 节点",
+      "workflowAnnotation": "批注节点",
+      "workflowData": "数据节点",
+      "workflowFlow": "流程节点",
+      "workflowIo": "输入输出节点",
+      "workflowStatusFailed": "已失败",
+      "workflowStatusIdle": "空闲",
+      "workflowStatusRunning": "运行中",
+      "workflowStatusSkipped": "已跳过",
+      "workflowStatusSucceeded": "已成功",
+      "workflowStatusWaiting": "等待中",
+      "workflowTrigger": "触发节点"
     },
     "unsavedBadge": "未保存的修改",
-    "updateButton": "更新"
+    "updateButton": "更新",
+    "variant": {
+      "dark": "深色",
+      "editingLabel": "正在编辑的变体",
+      "light": "浅色"
+    }
   },
   "description": "调整应用的视觉风格，所有改动会立即保存。",
   "fontScaleHint": "整体缩放界面。默认 16px。",
@@ -463,41 +508,41 @@
       "label": "布局"
     },
     "markdown": {
-      "label": "内容渲染",
-      "math": {
-        "label": "数学公式（KaTeX）",
-        "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。"
-      },
-      "mermaid": {
-        "label": "Mermaid 图表",
-        "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。"
-      },
-      "diff": {
-        "label": "Diff 视图",
-        "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。"
-      },
       "codeLineNumbers": {
-        "label": "代码行号",
-        "hint": "行号栏的默认值；每个代码块仍可单独切换。"
+        "hint": "行号栏的默认值；每个代码块仍可单独切换。",
+        "label": "代码行号"
       },
       "codeWrap": {
-        "label": "长代码行自动换行",
-        "hint": "软换行的默认值；每个代码块仍可单独切换。"
+        "hint": "软换行的默认值；每个代码块仍可单独切换。",
+        "label": "长代码行自动换行"
       },
-      "mathCopy": {
-        "label": "行内公式复制按钮",
-        "hint": "悬停行内公式时显示复制按钮。"
+      "diff": {
+        "hint": "用 diff 查看器渲染 ```diff 代码块；关闭则显示普通代码块。",
+        "label": "Diff 视图"
       },
-      "mathFontScale": {
-        "label": "公式字号",
-        "0_8": "小",
-        "1": "标准",
-        "1_2": "大"
+      "label": "内容渲染",
+      "math": {
+        "hint": "将 $…$ 与 $$…$$ 渲染为排版公式；关闭则显示源码。",
+        "label": "数学公式（KaTeX）"
       },
       "mathAlign": {
-        "label": "块级公式对齐",
         "center": "居中",
+        "label": "块级公式对齐",
         "left": "左对齐"
+      },
+      "mathCopy": {
+        "hint": "悬停行内公式时显示复制按钮。",
+        "label": "行内公式复制按钮"
+      },
+      "mathFontScale": {
+        "0_8": "小",
+        "1": "标准",
+        "1_2": "大",
+        "label": "公式字号"
+      },
+      "mermaid": {
+        "hint": "将 ```mermaid 代码块渲染为图表；关闭则显示代码。",
+        "label": "Mermaid 图表"
       }
     },
     "metadata": {
@@ -667,6 +712,27 @@
     "title": "确认重置外观设置？"
   },
   "resetToDefault": "将{name}恢复为默认",
+  "stylePack": {
+    "packs": {
+      "sharp": {
+        "description": "除真正的圆形外一律方化。没有阴影，密度更紧，微标签使用等宽字体。",
+        "name": "硬朗"
+      },
+      "soft": {
+        "description": "当前默认。圆润的边角、胶囊徽章与柔和阴影。",
+        "name": "柔和"
+      },
+      "studio": {
+        "description": "克制的圆角与发丝线，与 Cognia 官网一致。没有过大的胶囊。",
+        "name": "克制"
+      }
+    },
+    "radiusFollowsPack": "当前跟随风格包。拖动滑杆即可固定为你自己的值。",
+    "radiusOverridesPack": "当前覆盖了风格包。把滑杆重置即可重新跟随。",
+    "resetOverrides": "恢复风格包默认值",
+    "sectionHint": "决定形状——圆角、胶囊、层级阴影、边框粗细与密度。与配色相互独立，任意风格包都能搭配任意主题。",
+    "sectionLabel": "风格包"
+  },
   "tabs": {
     "a11y": "无障碍",
     "advanced": "高级",
@@ -891,26 +957,5 @@
     },
     "uploadHint": "把图片拖到这里或点击浏览",
     "uploading": "上传中…"
-  },
-  "stylePack": {
-    "sectionLabel": "风格包",
-    "sectionHint": "决定形状——圆角、胶囊、层级阴影、边框粗细与密度。与配色相互独立，任意风格包都能搭配任意主题。",
-    "resetOverrides": "恢复风格包默认值",
-    "radiusFollowsPack": "当前跟随风格包。拖动滑杆即可固定为你自己的值。",
-    "radiusOverridesPack": "当前覆盖了风格包。把滑杆重置即可重新跟随。",
-    "packs": {
-      "soft": {
-        "name": "柔和",
-        "description": "当前默认。圆润的边角、胶囊徽章与柔和阴影。"
-      },
-      "studio": {
-        "name": "克制",
-        "description": "克制的圆角与发丝线，与 Cognia 官网一致。没有过大的胶囊。"
-      },
-      "sharp": {
-        "name": "硬朗",
-        "description": "除真正的圆形外一律方化。没有阴影，密度更紧，微标签使用等宽字体。"
-      }
-    }
   }
 }

@@ -1,3 +1,4 @@
+import { pickKnownTokens } from "./theme-token-catalog"
 import type { CustomTheme } from "@/types/plugin/plugin"
 
 const SCHEMA_URL = "https://cognia.dev/schemas/custom-theme/v1.json"
@@ -10,6 +11,15 @@ interface ThemeJsonV1 {
   baseVariant: "light" | "dark"
   derivedVariant?: "light" | "dark"
   tokens: { light: Record<string, string>; dark: Record<string, string> }
+  /**
+   * Extra custom properties a CSS-var plugin theme contributed that no token
+   * covers. Dropped on the floor before — so exporting a plugin-derived theme
+   * and importing it back produced a visibly different theme.
+   */
+  cssVars?: Record<string, string>
+  /** Where the theme came from. Metadata only; badging, not behaviour. */
+  sourcePluginId?: string
+  sourceBuiltinName?: string
   exportedAt: string // ISO 8601
 }
 
@@ -37,6 +47,9 @@ export function exportThemeToJson(theme: CustomTheme): string {
       light: theme.tokens.light as unknown as Record<string, string>,
       dark: theme.tokens.dark as unknown as Record<string, string>,
     },
+    ...(theme.cssVars && Object.keys(theme.cssVars).length > 0 ? { cssVars: theme.cssVars } : {}),
+    ...(theme.sourcePluginId ? { sourcePluginId: theme.sourcePluginId } : {}),
+    ...(theme.sourceBuiltinName ? { sourceBuiltinName: theme.sourceBuiltinName } : {}),
     exportedAt: new Date().toISOString(),
   }
   return JSON.stringify(payload, null, 2)
@@ -45,6 +58,11 @@ export function exportThemeToJson(theme: CustomTheme): string {
 /**
  * Parse a previously-exported theme JSON back into a partial CustomTheme
  * (no id — caller assigns one via `createCustomTheme`).
+ *
+ * Token maps are filtered through the catalog. The file is user-supplied and
+ * these values end up in `style.setProperty` calls, so an unrecognised key is
+ * dropped rather than carried. A file written against the original 27-token
+ * format imports unchanged: the missing 29 resolve at read time.
  *
  * Throws on:
  * - Non-object input.
@@ -72,15 +90,36 @@ export function importThemeFromJson(text: string): Omit<CustomTheme, "id"> {
   if (o.baseVariant !== "light" && o.baseVariant !== "dark") {
     throw new Error("Theme JSON missing or invalid baseVariant")
   }
+  const baseVariant = o.baseVariant
   return {
     name: typeof o.name === "string" && o.name.length > 0 ? o.name : "Imported Theme",
-    baseVariant: o.baseVariant,
+    baseVariant,
     ...(o.derivedVariant === "light" || o.derivedVariant === "dark"
       ? { derivedVariant: o.derivedVariant }
       : {}),
     tokens: {
-      light: o.tokens.light as Record<string, string>,
-      dark: o.tokens.dark as Record<string, string>,
+      light: pickKnownTokens(o.tokens.light as Record<string, unknown>),
+      dark: pickKnownTokens(o.tokens.dark as Record<string, unknown>),
     } as never,
+    // Legacy mirror, same contract the editor writes.
+    colors: pickKnownTokens(o.tokens[baseVariant] as Record<string, unknown>),
+    isDark: baseVariant === "dark",
+    ...(isCssVarMap(o.cssVars) ? { cssVars: o.cssVars } : {}),
+    ...(typeof o.sourcePluginId === "string" ? { sourcePluginId: o.sourcePluginId } : {}),
+    ...(typeof o.sourceBuiltinName === "string" ? { sourceBuiltinName: o.sourceBuiltinName } : {}),
   }
+}
+
+/**
+ * A `--name: value` map of strings and nothing else. Names must look like
+ * custom properties for the same reason token keys are filtered: whatever
+ * survives here is written straight onto `document.documentElement`.
+ */
+function isCssVarMap(value: unknown): value is Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length === 0) return false
+  return entries.every(
+    ([name, v]) => /^--[a-zA-Z][\w-]*$/.test(name) && typeof v === "string" && v.length > 0
+  )
 }

@@ -4,7 +4,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
-import { THEME_COLOR_KEYS } from "@/lib/appearance"
+import {
+  ADVANCED_THEME_COLOR_KEYS,
+  BASE_THEME_COLOR_KEYS,
+  THEME_COLOR_KEYS,
+  THEME_TOKEN_GROUP_KEYS,
+} from "@/lib/appearance"
 import { AppearancePreviewDraftProvider, createPreviewDraftStore } from "../preview-draft-context"
 
 jest.mock("next-intl", () => ({
@@ -50,6 +55,17 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   ),
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+// The editor reads `?customThemeId=` to know which row "edit a copy" just made.
+// jest.setup's global mock hands back a fixed empty URLSearchParams, so override
+// it here where tests need to drive the deep link.
+let searchString = ""
+const routerReplace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: routerReplace, push: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/settings",
+  useSearchParams: () => new URLSearchParams(searchString),
 }))
 
 const createCustomTheme = jest.fn().mockReturnValue("ct-new")
@@ -120,6 +136,7 @@ const sampleTheme = (id: string, overrides: Partial<CustomTheme> = {}): CustomTh
 
 beforeEach(() => {
   jest.clearAllMocks()
+  searchString = ""
   storeState.settings = { customThemes: [], activeCustomThemeId: null }
 })
 
@@ -144,10 +161,21 @@ describe("CustomThemeTab", () => {
     const arg = createCustomTheme.mock.calls[0][0]
     expect(arg.name).toBe("Mine")
     expect(arg.baseVariant).toBe("dark")
-    // Dual-variant tokens are written directly (closes the Task 7 TODO).
-    expect(arg.tokens).toBeDefined()
+    // Both variants are written outright — neither side is a derivation any more.
     expect(arg.tokens.light).toBeDefined()
     expect(arg.tokens.dark).toBeDefined()
+    expect(arg.derivedVariant).toBeUndefined()
+    // Every required token is materialised...
+    for (const key of BASE_THEME_COLOR_KEYS) {
+      expect(typeof arg.tokens.dark[key]).toBe("string")
+      expect(arg.tokens.light[key].length).toBeGreaterThan(0)
+    }
+    // ...and nothing the user never touched is frozen into an advanced slot,
+    // which is what keeps the derived defaults tracking their source.
+    for (const key of ADVANCED_THEME_COLOR_KEYS) {
+      expect(arg.tokens.dark[key]).toBeUndefined()
+      expect(arg.tokens.light[key]).toBeUndefined()
+    }
     // Legacy fields kept one release for rollback safety.
     expect(arg.isDark).toBe(true)
     expect(arg.colors).toBeDefined()
@@ -278,10 +306,15 @@ describe("CustomThemeTab", () => {
     }
     render(<CustomThemeTab />)
     fireEvent.click(screen.getByText("Legacy Dark"))
-    expect(screen.getByLabelText("darkLabel")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("custom-theme-edit-dark")).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("color-token-background-hex")).toHaveValue("#111111")
+    // The row only ever stored one side; the other is promoted once so it is
+    // editable from here on rather than being re-derived at every save.
+    fireEvent.click(screen.getByTestId("custom-theme-edit-light"))
+    expect(screen.getByTestId("color-token-background-hex")).not.toHaveValue("#111111")
+
     fireEvent.click(screen.getByText("Legacy Light"))
-    expect(screen.getByLabelText("darkLabel")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("custom-theme-edit-light")).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("color-token-background-hex")).toHaveValue("#fefefe")
     fireEvent.click(screen.getByText("Bare"))
     expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Bare")
@@ -324,7 +357,7 @@ describe("CustomThemeTab", () => {
       expect(store.getSnapshot()?.colors.background).toBe("#222222")
     })
 
-    it("tracks the dark switch so the preview resolves dark: variants", () => {
+    it("follows the variant being edited so the preview resolves dark: variants", () => {
       const store = createPreviewDraftStore()
       render(
         <AppearancePreviewDraftProvider store={store}>
@@ -332,7 +365,7 @@ describe("CustomThemeTab", () => {
         </AppearancePreviewDraftProvider>
       )
       expect(store.getSnapshot()?.isDark).toBe(true)
-      fireEvent.click(screen.getByLabelText("darkLabel"))
+      fireEvent.click(screen.getByTestId("custom-theme-edit-light"))
       expect(store.getSnapshot()?.isDark).toBe(false)
     })
 
@@ -369,35 +402,146 @@ describe("CustomThemeTab", () => {
     expect(screen.getByPlaceholderText("namePlaceholder")).toBeInTheDocument()
   })
 
-  it("toggles light/dark draft", () => {
+  it("records the default variant independently of the side being edited", () => {
     render(<CustomThemeTab />)
-    const sw = screen.getByLabelText("darkLabel")
-    fireEvent.click(sw)
+    // Edit the light side...
+    fireEvent.click(screen.getByTestId("custom-theme-edit-light"))
+    fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+      target: { value: "#fdfdfd" },
+    })
+    // ...while the theme still opens in dark. The two used to be one switch,
+    // which is why a hand-tuned second variant was unreachable.
     fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
-      target: { value: "Light" },
+      target: { value: "Split" },
     })
     fireEvent.click(screen.getByRole("button", { name: /^saveButton$/ }))
-    expect(createCustomTheme).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Light", isDark: false, baseVariant: "light" })
-    )
+    const arg = createCustomTheme.mock.calls[0][0]
+    expect(arg.baseVariant).toBe("dark")
+    expect(arg.isDark).toBe(true)
+    expect(arg.tokens.light.background).toBe("#fdfdfd")
   })
 
-  it("renders the role-based token groups with State/Sidebar collapsed by default", () => {
+  it("edits both variants in one draft and saves them together", () => {
     render(<CustomThemeTab />)
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Both" },
+    })
+    fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+      target: { value: "#010101" },
+    })
+    fireEvent.click(screen.getByTestId("custom-theme-edit-light"))
+    fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+      target: { value: "#fefefe" },
+    })
+    // Switching back shows the dark edit again rather than re-interpreting the
+    // light one.
+    fireEvent.click(screen.getByTestId("custom-theme-edit-dark"))
+    expect(screen.getByTestId("color-token-background-hex")).toHaveValue("#010101")
+
+    fireEvent.click(screen.getByRole("button", { name: /^saveButton$/ }))
+    const arg = createCustomTheme.mock.calls[0][0]
+    expect(arg.tokens.dark.background).toBe("#010101")
+    expect(arg.tokens.light.background).toBe("#fefefe")
+  })
+
+  it("renders all eight token groups with the advanced ones collapsed by default", () => {
+    render(<CustomThemeTab />)
+    for (const group of THEME_TOKEN_GROUP_KEYS) {
+      expect(screen.getByTestId(`token-group-${group}-trigger`)).toBeInTheDocument()
+    }
     // Open groups expose their rows.
-    expect(screen.getByTestId("token-group-surface-trigger")).toHaveAttribute("data-state", "open")
-    expect(screen.getByTestId("token-group-brand-trigger")).toHaveAttribute("data-state", "open")
-    expect(screen.getByTestId("color-token-background-hex")).toBeInTheDocument()
-    // State / Sidebar start collapsed (Radix keeps the content mounted but
-    // hidden, so assert via the trigger's data-state).
-    expect(screen.getByTestId("token-group-state-trigger")).toHaveAttribute("data-state", "closed")
-    expect(screen.getByTestId("token-group-sidebar-trigger")).toHaveAttribute(
+    expect(screen.getByTestId("token-group-surfaceText-trigger")).toHaveAttribute(
       "data-state",
-      "closed"
+      "open"
     )
+    expect(screen.getByTestId("token-group-brand-trigger")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("token-group-status-trigger")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("color-token-background-hex")).toBeInTheDocument()
+    // The rest start collapsed (Radix keeps the content mounted but hidden, so
+    // assert via the trigger's data-state).
+    for (const group of ["sidebar", "chart", "workflowNode", "workflowState", "productAccent"]) {
+      expect(screen.getByTestId(`token-group-${group}-trigger`)).toHaveAttribute(
+        "data-state",
+        "closed"
+      )
+    }
     // Expanding works.
-    fireEvent.click(screen.getByTestId("token-group-state-trigger"))
-    expect(screen.getByTestId("token-group-state-trigger")).toHaveAttribute("data-state", "open")
+    fireEvent.click(screen.getByTestId("token-group-chart-trigger"))
+    expect(screen.getByTestId("token-group-chart-trigger")).toHaveAttribute("data-state", "open")
+  })
+
+  it("edits an advanced token and records only that one", () => {
+    render(<CustomThemeTab />)
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "Charty" },
+    })
+    fireEvent.click(screen.getByTestId("token-group-chart-trigger"))
+    fireEvent.change(screen.getByTestId("color-token-chart1-hex"), {
+      target: { value: "#ff00ff" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^saveButton$/ }))
+    const arg = createCustomTheme.mock.calls[0][0]
+    expect(arg.tokens.dark.chart1).toBe("#ff00ff")
+    expect(arg.tokens.dark.chart2).toBeUndefined()
+    expect(arg.tokens.light.chart1).toBeUndefined()
+  })
+
+  it("shows the resolved default for an untouched advanced token", () => {
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("token-group-workflowState-trigger"))
+    // Not blank, and not the camel-cased `--workflowStatusRunning` that a
+    // naive kebab transform would have produced: it mirrors `warning`.
+    const running = screen.getByTestId("color-token-workflowStatusRunning-hex")
+    expect(running).toHaveValue("oklch(0.82 0.18 85)")
+    expect(running).toHaveAttribute("aria-invalid", "false")
+  })
+
+  it("keeps a derived token following its source until it is set explicitly", () => {
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("token-group-workflowState-trigger"))
+    fireEvent.change(screen.getByTestId("color-token-warning-hex"), {
+      target: { value: "#abcdef" },
+    })
+    expect(screen.getByTestId("color-token-workflowStatusRunning-hex")).toHaveValue("#abcdef")
+    fireEvent.change(screen.getByTestId("color-token-workflowStatusRunning-hex"), {
+      target: { value: "#123123" },
+    })
+    fireEvent.change(screen.getByTestId("color-token-warning-hex"), {
+      target: { value: "#fedcba" },
+    })
+    expect(screen.getByTestId("color-token-workflowStatusRunning-hex")).toHaveValue("#123123")
+  })
+
+  it("resets an overridden token back to the derivation", () => {
+    render(<CustomThemeTab />)
+    fireEvent.click(screen.getByTestId("token-group-chart-trigger"))
+    expect(screen.queryByTestId("token-reset-chart1")).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("color-token-chart1-hex"), {
+      target: { value: "#ff00ff" },
+    })
+    fireEvent.click(screen.getByTestId("token-reset-chart1"))
+    expect(screen.getByTestId("color-token-chart1-hex")).toHaveValue("oklch(0.488 0.243 264.376)")
+  })
+
+  describe("token search", () => {
+    it("narrows to matching tokens and opens the group holding them", () => {
+      render(<CustomThemeTab />)
+      fireEvent.change(screen.getByTestId("custom-theme-token-search"), {
+        target: { value: "chart" },
+      })
+      expect(screen.getByTestId("token-group-chart-trigger")).toHaveAttribute("data-state", "open")
+      expect(screen.queryByTestId("token-group-sidebar-trigger")).not.toBeInTheDocument()
+      expect(screen.getByTestId("color-token-chart1-hex")).toBeInTheDocument()
+      expect(screen.queryByTestId("color-token-background-hex")).not.toBeInTheDocument()
+    })
+
+    it("says so when nothing matches", () => {
+      render(<CustomThemeTab />)
+      fireEvent.change(screen.getByTestId("custom-theme-token-search"), {
+        target: { value: "zzzz" },
+      })
+      expect(screen.getByTestId("token-search-empty")).toBeInTheDocument()
+    })
   })
 
   it("editing a token through a group updates the draft palette on save", () => {
@@ -417,12 +561,12 @@ describe("CustomThemeTab", () => {
     render(<CustomThemeTab />)
     // The default fallback palette is high-contrast, so audit.allPass shows.
     expect(screen.getByText("audit.allPass")).toBeInTheDocument()
-    expect(screen.queryByText(/audit\.failuresCount/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("custom-theme-audit-summary")).not.toBeInTheDocument()
   })
 
   it("shows a destructive badge with failure count for a low-contrast palette", () => {
-    // Editing an existing theme with grey-on-grey tokens forces the eight
-    // critical pairs to fall below WCAG AA.
+    // Editing an existing theme with grey-on-grey tokens forces the critical
+    // pairs to fall below WCAG AA.
     const greyTokens = buildTokens({
       background: "#888888",
       foreground: "#999999",
@@ -451,16 +595,20 @@ describe("CustomThemeTab", () => {
     }
     render(<CustomThemeTab />)
     fireEvent.click(screen.getByText("Theme low"))
-    // The failuresCount badge shows the count + total via the message
-    // formatter; our test mock embeds the vars as JSON.
-    const failureBadge = screen.getByText(/audit\.failuresCount/)
-    expect(failureBadge).toBeInTheDocument()
-    expect(failureBadge.textContent).toContain('"count":8')
-    expect(failureBadge.textContent).toContain('"total":8')
+    // The badge counts BOTH variants — a clean light side must not hide a dark
+    // one that fails. Our i18n mock embeds the vars as JSON.
+    const failureBadge = screen.getByTestId("custom-theme-audit-summary")
+    // Grey-on-grey on both sides: 8 of the 11 pairs fail, twice over. The three
+    // status pairs resolve to the shipped defaults and still pass.
+    expect(failureBadge.textContent).toContain('"count":16')
+    expect(failureBadge.textContent).toContain('"total":22')
     // Per-row chips appear next to flagged tokens in the open groups.
     expect(screen.getAllByText("audit.lowContrast").length).toBeGreaterThan(0)
     // Group headers surface their own failure counts.
-    expect(screen.getByTestId("token-group-surface-failures")).toBeInTheDocument()
+    expect(screen.getByTestId("token-group-surfaceText-failures")).toBeInTheDocument()
+    // And the per-variant tab badges say which side is at fault.
+    expect(screen.getByTestId("custom-theme-edit-light").textContent).toContain("8")
+    expect(screen.getByTestId("custom-theme-edit-dark").textContent).toContain("8")
   })
 
   it("export from the rail menu creates a download for the theme", () => {
@@ -593,14 +741,17 @@ describe("CustomThemeTab", () => {
     expect(createCustomTheme).toHaveBeenCalledTimes(1)
   })
 
-  it("preserves the existing opposite-variant tokens when saving an existing theme", () => {
-    // Both palettes need to be high-contrast so the audit passes and we
-    // hit performSave directly (no dialog). Light side has its own
-    // primary/background fingerprint we assert wasn't re-derived.
+  it("round-trips both variants verbatim when saving an existing theme", () => {
+    // Both palettes need to be high-contrast so the audit passes on both sides
+    // and we hit performSave directly (no dialog). The light side has its own
+    // primary/background fingerprint we assert was neither re-derived nor lost.
     const lightTokens = buildTokens({
       background: "#fefefe",
       foreground: "#000000",
       primary: "#aaaaaa",
+      // Both sides are audited now, so the light half needs a readable pairing
+      // of its own — a clean dark variant no longer covers for it.
+      primaryForeground: "#000000",
       card: "#fefefe",
       cardForeground: "#000000",
       popover: "#fefefe",
@@ -641,10 +792,76 @@ describe("CustomThemeTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /^updateButton$/ }))
     expect(updateCustomTheme).toHaveBeenCalledTimes(1)
     const [, updates] = updateCustomTheme.mock.calls[0]
-    // Opposite (light) side preserved verbatim, not re-derived.
+    expect(updates.derivedVariant).toBeUndefined()
+    // Both sides preserved verbatim — nothing is a derivation any more.
     expect(updates.tokens.light.primary).toBe("#aaaaaa")
     expect(updates.tokens.light.background).toBe("#fefefe")
     expect(updates.baseVariant).toBe("dark")
+  })
+
+  /**
+   * The whole point of the `customThemeId` param. Before it existed, "edit a
+   * copy" created the row, activated it, navigated to this panel — and the
+   * editor opened on a blank new-theme draft, because nothing here knew which
+   * row the user had just asked for.
+   */
+  describe("customThemeId deep link", () => {
+    it("opens the row the URL names", () => {
+      storeState.settings = {
+        customThemes: [
+          sampleTheme("ct-a", { name: "Alpha" }),
+          sampleTheme("ct-b", { name: "Beta" }),
+        ],
+        activeCustomThemeId: null,
+      }
+      searchString = "?appearanceTab=custom&customThemeId=ct-b"
+      render(<CustomThemeTab />)
+      expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Beta")
+      expect(screen.getByTestId("custom-theme-delete")).toBeInTheDocument()
+    })
+
+    it("beats an unsaved draft — the click was explicit", () => {
+      storeState.settings = {
+        customThemes: [sampleTheme("ct-b", { name: "Beta" })],
+        activeCustomThemeId: null,
+      }
+      searchString = "?customThemeId=ct-b"
+      render(<CustomThemeTab />)
+      expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("Beta")
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    })
+
+    it("drops a param that names a row which no longer exists, leaving the draft alone", async () => {
+      storeState.settings = { customThemes: [], activeCustomThemeId: null }
+      searchString = "?appearanceTab=custom&customThemeId=ct-gone"
+      render(<CustomThemeTab />)
+      await waitFor(() => expect(routerReplace).toHaveBeenCalled())
+      expect(routerReplace.mock.calls[0][0]).not.toContain("customThemeId")
+      expect(routerReplace.mock.calls[0][0]).toContain("appearanceTab=custom")
+      // The blank draft is untouched — no half-loaded theme, no thrown error.
+      expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("")
+    })
+
+    it("opens the applied theme when there is no deep link", () => {
+      storeState.settings = {
+        customThemes: [
+          sampleTheme("ct-a", { name: "Alpha" }),
+          sampleTheme("ct-on", { name: "OnNow" }),
+        ],
+        activeCustomThemeId: "ct-on",
+      }
+      render(<CustomThemeTab />)
+      expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("OnNow")
+    })
+
+    it("falls back to a blank draft when nothing is applied", () => {
+      storeState.settings = {
+        customThemes: [sampleTheme("ct-a", { name: "Alpha" })],
+        activeCustomThemeId: null,
+      }
+      render(<CustomThemeTab />)
+      expect(screen.getByPlaceholderText("namePlaceholder")).toHaveValue("")
+    })
   })
 
   it("shows the unsaved badge while dirty and clears it after save", () => {

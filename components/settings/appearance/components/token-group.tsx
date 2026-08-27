@@ -1,71 +1,41 @@
 "use client"
 
-// Collapsible group of color tokens for the custom theme editor. Replaces
-// the previous flat 27-row list with five role-based clusters (Surface /
-// Text / Brand / State / Sidebar) so users can navigate the palette by
-// purpose. Pure presentation — the parent owns draft state, audit results,
-// and i18n labels.
+// Collapsible group of color tokens for the custom theme editor. The eight
+// role-based clusters — surface & text, brand, status, sidebar, charts,
+// workflow nodes, workflow statuses, product accent — come straight from
+// `theme-token-catalog.ts` rather than being restated here, so a token added to
+// the catalog cannot go missing from the editor. Pure presentation: the parent
+// owns draft state, audit results, search, and i18n labels.
 
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, RotateCcwIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import type { ThemeColors } from "@/types/plugin/plugin"
-import { THEME_COLOR_KEYS } from "@/lib/appearance"
+import type { ResolvedThemeColors, ThemeColors } from "@/types/plugin/plugin"
+import {
+  DEFAULT_GROUP_OPEN,
+  THEME_COLOR_KEYS,
+  THEME_TOKEN_GROUPS,
+  type ThemeTokenGroupKey,
+} from "@/lib/appearance"
 import { type ContrastAudit, isFlaggedPair } from "@/lib/appearance/contrast-audit"
 import { cn } from "@/lib/utils"
 import { ColorTokenRow } from "./color-token-row"
 
-export type TokenGroupKey = "surface" | "text" | "brand" | "state" | "sidebar"
+export type TokenGroupKey = ThemeTokenGroupKey
 
-// Disjoint partition of `THEME_COLOR_KEYS` by visual role. The
-// `token-group.test.tsx` partition test asserts no token is missing and
-// none appears twice — adding a new token to `ThemeColors` will fail that
-// test until it's placed in a group, which is the intended forcing function.
+/**
+ * Disjoint partition of `THEME_COLOR_KEYS` by visual role, projected from the
+ * catalog. `theme-token-catalog.test.ts` asserts no token is missing and none
+ * appears twice — adding a token to `ThemeColors` without giving it a catalog
+ * entry fails that test, which is the intended forcing function.
+ */
 export const TOKEN_GROUPS: ReadonlyArray<{
   key: TokenGroupKey
   tokens: readonly (keyof ThemeColors)[]
-}> = [
-  {
-    key: "surface",
-    tokens: ["background", "card", "popover", "muted"],
-  },
-  {
-    key: "text",
-    tokens: [
-      "foreground",
-      "cardForeground",
-      "popoverForeground",
-      "mutedForeground",
-      "secondaryForeground",
-      "accentForeground",
-      "primaryForeground",
-      "destructiveForeground",
-      "sidebarForeground",
-      "sidebarPrimaryForeground",
-      "sidebarAccentForeground",
-    ],
-  },
-  {
-    key: "brand",
-    tokens: ["primary", "secondary", "accent"],
-  },
-  {
-    key: "state",
-    tokens: ["destructive", "border", "input", "ring"],
-  },
-  {
-    key: "sidebar",
-    tokens: ["sidebar", "sidebarPrimary", "sidebarAccent", "sidebarBorder", "sidebarRing"],
-  },
-]
+}> = THEME_TOKEN_GROUPS
 
-export const DEFAULT_GROUP_OPEN: Record<TokenGroupKey, boolean> = {
-  surface: true,
-  text: true,
-  brand: true,
-  state: false,
-  sidebar: false,
-}
+export { DEFAULT_GROUP_OPEN }
 
 /**
  * Count audit failures touching any of the supplied keys. The same pair
@@ -87,14 +57,26 @@ export function countGroupFailures(
 
 export interface TokenGroupProps {
   groupKey: TokenGroupKey
-  /** Localised group label (e.g., "Surface"). */
+  /** Localised group label (e.g., "Surface & text"). */
   label: string
   tokens: readonly (keyof ThemeColors)[]
-  /** Whether the group is initially expanded. */
+  /** Whether the group is initially expanded. Ignored while `open` is supplied. */
   defaultOpen: boolean
+  /**
+   * Controlled expansion. The editor drives this while a search is active so a
+   * group holding a match opens itself; left undefined the group is
+   * uncontrolled and remembers its own state.
+   */
+  open?: boolean
+  onOpenChange?: (next: boolean) => void
   /** Per-token current value (falls back to `fallback[key]`). */
   values: Partial<ThemeColors>
-  fallback: ThemeColors
+  /**
+   * The resolved palette behind the draft. A row with no explicit value shows
+   * this, so an untouched derived token displays the colour it will actually
+   * paint rather than a blank.
+   */
+  fallback: ResolvedThemeColors
   audit: ContrastAudit
   /** Localised label resolver for a single token row. */
   tokenLabel: (key: keyof ThemeColors) => string
@@ -107,6 +89,10 @@ export interface TokenGroupProps {
   /** Header badge text when `count > 0`. */
   failureBadgeLabel: (count: number) => string
   onChange: (key: keyof ThemeColors, next: string) => void
+  /** Drop a token's override so it falls back to the default / derivation. */
+  onReset?: (key: keyof ThemeColors) => void
+  /** Localised label for the per-row reset control. */
+  resetLabel?: string
 }
 
 export function TokenGroup({
@@ -114,6 +100,8 @@ export function TokenGroup({
   label,
   tokens,
   defaultOpen,
+  open,
+  onOpenChange,
   values,
   fallback,
   audit,
@@ -123,10 +111,18 @@ export function TokenGroup({
   auditChipLabel,
   failureBadgeLabel,
   onChange,
+  onReset,
+  resetLabel,
 }: TokenGroupProps) {
   const failureCount = countGroupFailures(audit, tokens)
+  if (tokens.length === 0) return null
   return (
-    <Collapsible defaultOpen={defaultOpen} data-token-group={groupKey}>
+    <Collapsible
+      defaultOpen={open === undefined ? defaultOpen : undefined}
+      open={open}
+      onOpenChange={onOpenChange}
+      data-token-group={groupKey}
+    >
       <CollapsibleTrigger
         className={cn(
           "group flex w-full items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-left",
@@ -166,10 +162,23 @@ export function TokenGroup({
                 label={tokenLabel(key)}
                 value={values[key] ?? fallback[key]}
                 onChange={(next) => onChange(key, next)}
-                className="flex-1"
+                className="min-w-0 flex-1"
                 swatchAriaLabel={swatchAriaLabel(key)}
                 hexAriaLabel={hexAriaLabel(key)}
               />
+              {onReset && values[key] !== undefined && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6 shrink-0"
+                  onClick={() => onReset(key)}
+                  aria-label={resetLabel ? `${resetLabel}: ${tokenLabel(key)}` : undefined}
+                  title={resetLabel}
+                  data-testid={`token-reset-${key}`}
+                >
+                  <RotateCcwIcon className="size-3" aria-hidden="true" />
+                </Button>
+              )}
               {isFlaggedPair(audit, key) && (
                 <Badge
                   variant="destructive"

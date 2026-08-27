@@ -72,6 +72,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
@@ -187,21 +188,22 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.545 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
   /* Status semantic tokens (added by canvas commit 6). Light-mode emerald
      and amber tuned to read as success / warning without clashing with the
      existing oklch palette. */
   --success: oklch(0.62 0.17 145);
-  --success-foreground: oklch(0.985 0 0);
+  --success-foreground: oklch(0.205 0 0);
   --warning: oklch(0.75 0.17 80);
   --warning-foreground: oklch(0.205 0 0);
   /* Informational accent (blue). Pairs with success/warning/destructive; used
      by ThinkingIndicator's "agent" variant and other info-level chrome. */
   --info: oklch(0.6 0.13 220);
-  --info-foreground: oklch(0.985 0 0);
+  --info-foreground: oklch(0.205 0 0);
   /* Workflow editor: per-category accent colors and runtime status hues.
      Light-mode values stay within the 0.55–0.7 lightness band so they
      read against the white card background. The .dark block below shifts
@@ -289,6 +291,7 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.145 0 0);
   --success: oklch(0.72 0.18 150);
   --success-foreground: oklch(0.145 0 0);
   --warning: oklch(0.82 0.18 85);
@@ -1117,6 +1120,25 @@ html[data-bg-preview="all"] [data-bg-target] {
   --surface-bg: var(--surface-bg-overlay);
 }
 
+/* The settings panel is flat: `Card` already drops its radius and its top/side
+   borders inside `[data-settings-panel]` (see `components/ui/card.tsx`), and it
+   asks for the tint to go with them via `[--surface-bg:transparent]`. That
+   utility sits in `@layer utilities`, and the three tier rules above are
+   UNLAYERED — an unlayered declaration beats every layered one regardless of
+   specificity — so the request silently lost and every settings section kept
+   painting `--card` over the page ground. Visible in dark mode as a stack of
+   tinted blocks where the rest of the panel is a plain sheet. Restating it here,
+   unlayered and one selector more specific, is what makes the fork take.
+
+   This clears the TIER only. The wallpaper stack in Section 2 paints cards with
+   a literal `background-color`, which no `--surface-bg` value can undo, so the
+   fork has a second half down there — search `[data-settings-panel]` again. Both
+   are needed; either one alone leaves the blocks visible in one of the two
+   states (wallpaper off / wallpaper on). */
+[data-settings-panel] [data-slot="card"] {
+  --surface-bg: transparent;
+}
+
 /* Retune the three tiers inside the active wallpaper scope. Fifteen selectors
    replace what Section 2 needs ~830 lines to say per `data-slot`, and every
    surface that adopts `<Surface>` is covered the moment it does — including the
@@ -1188,6 +1210,29 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot
   );
   backdrop-filter: blur(var(--surface-blur-subtle));
   -webkit-backdrop-filter: blur(var(--surface-blur-subtle));
+}
+
+/* ...except in the settings panel, which is flat. `Card` drops its radius, its
+   top/side borders and its tier tint there (see `[data-settings-panel]
+   [data-slot="card"]` in Section 1b), but the rule above paints
+   `background-color` DIRECTLY rather than through `--surface-bg`, so with a
+   wallpaper enabled every settings section went straight back to a stack of
+   tinted, blurred blocks floating over the image — the one thing the flattening
+   exists to prevent. The blur has to go with the tint: a transparent card that
+   still runs `backdrop-filter` blurs the wallpaper in a card-shaped rectangle,
+   which reads as a block even with no colour on it.
+
+   Alerts are deliberately NOT included. An alert is supposed to stand out from
+   the sheet it sits on, so it keeps its tint here exactly as it keeps its border
+   and radius. One attribute more specific than the rule above, so this does not
+   depend on source order. */
+body[data-bg-enabled="true"]
+  [data-bg-target]
+  [data-settings-panel]
+  [data-slot="card"][data-surface-layer="raised"] {
+  background-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* tabs-list — glass on --muted. */

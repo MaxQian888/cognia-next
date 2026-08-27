@@ -3,19 +3,22 @@ import { useState } from "react"
 import { fn } from "storybook/test"
 
 import { TokenGroup, TOKEN_GROUPS } from "./token-group"
-import { DEFAULT_FALLBACKS } from "@/lib/appearance"
+import { defaultThemeColors } from "@/lib/appearance"
 import { auditThemeContrast } from "@/lib/appearance/contrast-audit"
 import type { ThemeColors } from "@/types/plugin/plugin"
 
-// A collapsible cluster of `ColorTokenRow`s for one role group (Surface,
-// Primary, …). Drives a live contrast audit; flagged rows get a chip and the
+// A collapsible cluster of `ColorTokenRow`s for one role group (Surface & text,
+// Brand, …). Drives a live contrast audit; flagged rows get a chip and the
 // group header shows a failure badge. The stories keep local edits in state.
 const SURFACE_GROUP = TOKEN_GROUPS[0]
+// The resolved light palette — the same thing the editor hands the rows, so a
+// token the story never overrides still shows the colour it will paint.
+const LIGHT = defaultThemeColors("light")
 
 function Harness({ overrides }: { overrides: Partial<ThemeColors> }) {
   const [values, setValues] = useState<Partial<ThemeColors>>(overrides)
-  const fallback = DEFAULT_FALLBACKS.light
-  const merged = { ...fallback, ...values } as ThemeColors
+  const fallback = LIGHT
+  const merged = { ...fallback, ...values }
   const audit = auditThemeContrast(merged)
   return (
     <div className="max-w-xl">
@@ -60,8 +63,8 @@ const meta = {
     tokens: SURFACE_GROUP.tokens,
     defaultOpen: true,
     values: {},
-    fallback: DEFAULT_FALLBACKS.light,
-    audit: auditThemeContrast(DEFAULT_FALLBACKS.light),
+    fallback: LIGHT,
+    audit: auditThemeContrast(LIGHT),
     tokenLabel: (k) => String(k),
     swatchAriaLabel: (k) => `${String(k)} swatch`,
     hexAriaLabel: (k) => `${String(k)} hex`,

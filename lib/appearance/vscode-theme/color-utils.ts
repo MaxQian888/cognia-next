@@ -24,16 +24,6 @@ const HEX_SHORT = /^#([0-9a-f]{3})$/i
 const HEX_LONG_ALPHA = /^#([0-9a-f]{8})$/i
 const HEX_SHORT_ALPHA = /^#([0-9a-f]{4})$/i
 
-/** Returns true iff `value` is a parseable hex color in any of the four forms. */
-export function isHexColor(value: string): boolean {
-  return (
-    HEX_LONG.test(value) ||
-    HEX_SHORT.test(value) ||
-    HEX_LONG_ALPHA.test(value) ||
-    HEX_SHORT_ALPHA.test(value)
-  )
-}
-
 /**
  * Parse a hex string into RGB(A) components. Returns null for any input
  * that isn't a hex color — callers fall back to a default in that case.

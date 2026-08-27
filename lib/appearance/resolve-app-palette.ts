@@ -26,10 +26,15 @@ import { colorblindThemeOverrides } from "@/lib/appearance/colorblind-palettes"
 import { ensureForegroundContrast } from "@/lib/appearance/ensure-contrast"
 import { highContrastOverride } from "@/lib/appearance/high-contrast-presets"
 import { themeKeyToCssVar } from "@/lib/appearance/css-var"
-import { THEME_COLOR_KEYS } from "@/lib/appearance/vscode-theme/token-mapping"
+import { THEME_COLOR_KEYS, normalizeThemeColors } from "@/lib/appearance/theme-token-catalog"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import type { A11ySettings } from "@/types/appearance"
-import type { ColorThemePreset, CustomTheme, ThemeColors } from "@/types/plugin/plugin"
+import type {
+  ColorThemePreset,
+  CustomTheme,
+  ResolvedThemeColors,
+  ThemeColors,
+} from "@/types/plugin/plugin"
 
 /**
  * Minimal shape of a registered plugin theme this module can read. Structurally
@@ -64,7 +69,13 @@ export interface AppPaletteInput {
 }
 
 export interface ResolvedAppPalette {
-  colors: ThemeColors
+  /**
+   * All 56 tokens, concrete. Consumers outside the DOM (native shell, Pro IDE)
+   * have no stylesheet to defer to, and the editor needs a value to show in
+   * every swatch — "undefined, work it out yourself" is not an answer any of
+   * them can act on.
+   */
+  colors: ResolvedThemeColors
   variant: "light" | "dark"
   /** Which layer produced the base palette, before a11y patches. */
   source: "preset" | "custom" | "plugin" | "high-contrast"
@@ -82,6 +93,11 @@ export interface ResolvedAppPalette {
  * the map is keyed by exactly {@link themeKeyToCssVar}'s output, so inverting it
  * over {@link THEME_COLOR_KEYS} is lossless for every token the theme declared.
  * Tokens it didn't declare stay absent and the caller's baseline fills them.
+ *
+ * It now recognises all 56 tokens, not just the original 27 — which is what
+ * lets "edit a copy" of a CSS-var plugin theme lift the author's chart and
+ * workflow colours into structured tokens the editor can actually show,
+ * instead of leaving them stranded in an opaque `cssVars` blob.
  */
 export function pluginThemeColors(theme: PluginThemeSnapshot): Partial<ThemeColors> {
   if (theme.colors) return theme.colors
@@ -154,8 +170,14 @@ export function resolveAppPalette(input: AppPaletteInput): ResolvedAppPalette {
     colors = { ...colors, ...cbOverrides } as ThemeColors
   }
 
+  // Fill the advanced tokens last, so a derived one (the "running" workflow
+  // badge tracking `warning`, the brand wash tracking `brandAction` and
+  // `background`) is computed from the palette that actually won — including a
+  // high-contrast replacement or a colorblind patch, not the theme underneath.
+  const resolvedColors = normalizeThemeColors(colors, variant)
+
   return {
-    colors: ensureForegroundContrast(colors),
+    colors: ensureForegroundContrast(resolvedColors),
     variant,
     source,
     highContrast: hcOverride != null,

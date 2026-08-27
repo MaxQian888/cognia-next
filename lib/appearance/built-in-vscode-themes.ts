@@ -2,7 +2,7 @@
 // fixtures the import-dialog tests run against, inlined and pushed
 // through `vscodeThemeToCustomTheme` + OKLCH derivation at module
 // load. The result: users can apply Dracula / One Dark Pro / Tokyo
-// Night Dark / GitHub Light Default with one click, without ever
+// Night Dark / Night Owl / GitHub Light Default with one click, without ever
 // opening the import dialog. The list also serves as a runtime
 // regression for the parser pipeline — if parsing or derivation
 // regresses, these presets stop applying cleanly.
@@ -10,6 +10,7 @@
 import draculaJson from "./vscode-theme/__fixtures__/dracula.json"
 import oneDarkProJson from "./vscode-theme/__fixtures__/one-dark-pro.json"
 import tokyoNightJson from "./vscode-theme/__fixtures__/tokyo-night-dark.json"
+import nightOwlJson from "./vscode-theme/__fixtures__/night-owl.json"
 import githubLightJson from "./vscode-theme/__fixtures__/github-light-default.json"
 import { vscodeThemeToCustomTheme, type VscodeThemeJson } from "./vscode-theme/parse-json"
 import { deriveOppositeVariant } from "./derive-variant"
@@ -52,5 +53,6 @@ export const BUILT_IN_VSCODE_THEMES: ReadonlyArray<BuiltInVscodeTheme> = [
   build("Dracula", draculaJson),
   build("One Dark Pro", oneDarkProJson),
   build("Tokyo Night Dark", tokyoNightJson),
+  build("Night Owl", nightOwlJson),
   build("GitHub Light Default", githubLightJson),
 ]

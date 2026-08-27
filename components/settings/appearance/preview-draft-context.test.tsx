@@ -11,12 +11,12 @@ import {
   usePreviewDraftPublisher,
   type AppearanceDraftSnapshot,
 } from "./preview-draft-context"
-import type { ThemeColors } from "@/types/plugin/plugin"
+import type { ResolvedThemeColors } from "@/types/plugin/plugin"
 
-const COLORS = { primary: "#ff0000" } as unknown as ThemeColors
-const OTHER = { primary: "#00ff00" } as unknown as ThemeColors
+const COLORS = { primary: "#ff0000" } as unknown as ResolvedThemeColors
+const OTHER = { primary: "#00ff00" } as unknown as ResolvedThemeColors
 
-function snap(colors: ThemeColors, isDark = false): AppearanceDraftSnapshot {
+function snap(colors: ResolvedThemeColors, isDark = false): AppearanceDraftSnapshot {
   return { colors, isDark }
 }
 

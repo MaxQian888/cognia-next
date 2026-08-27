@@ -173,7 +173,10 @@ export function buildCodeServerColorCustomizations(
   const fallbacks = DEFAULT_FALLBACKS[variant]
   const out: Record<string, string> = {}
   for (const [key, source] of Object.entries(VSCODE_CHROME_MAP)) {
-    const hex = toHex6(colors[source.token], fallbacks[source.token])
+    const hex = toHex6(
+      colors[source.token] ?? fallbacks[source.token] ?? "",
+      fallbacks[source.token] ?? ""
+    )
     out[key] = source.alpha === undefined ? hex : withAlpha(hex, source.alpha)
   }
   return out
