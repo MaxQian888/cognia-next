@@ -35,8 +35,7 @@ import { listCollabPlans } from "@/lib/db/collab-plan-mirror"
 import type { CollabPlanMirrorRow } from "@/lib/db/collab-plan-mirror-types"
 import { listCollabRuns } from "@/lib/db/collab-run-mirror"
 import type { CollabRunMirrorRow } from "@/lib/db/collab-run-mirror-types"
-import type { PlanStatus } from "@/types/agent/plan"
-import type { IssueRunStatus } from "@/types/issues"
+import { PLAN_STATUS_VARIANT, RUN_STATUS_VARIANT } from "./workspace-activity-catalogue"
 
 /**
  * Which badge a status gets.
@@ -45,29 +44,6 @@ import type { IssueRunStatus } from "@/types/issues"
  * is a missing key TypeScript points at, instead of silently taking whatever
  * the final `else` branch was.
  */
-const PLAN_STATUS_VARIANT: Record<PlanStatus, "default" | "secondary" | "outline" | "destructive"> =
-  {
-    draft: "outline",
-    awaiting_approval: "secondary",
-    approved: "secondary",
-    executing: "default",
-    paused: "secondary",
-    completed: "secondary",
-    failed: "destructive",
-    cancelled: "outline",
-  }
-
-const RUN_STATUS_VARIANT: Record<
-  IssueRunStatus,
-  "default" | "secondary" | "outline" | "destructive"
-> = {
-  queued: "outline",
-  running: "default",
-  succeeded: "secondary",
-  failed: "destructive",
-  cancelled: "outline",
-}
-
 export function WorkspaceActivity({ workspaceId }: { workspaceId: string | null }) {
   const t = useTranslations("workspace.activity")
 

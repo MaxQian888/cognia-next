@@ -3,6 +3,7 @@ import {
   bindExecutionBundleTurn,
   canBypassEnvironmentSetup,
   createSessionExecutionContext,
+  repairManagedContextProjectId,
   transitionManagedWorktree,
 } from "./session-execution-context"
 
@@ -114,5 +115,49 @@ describe("session execution context", () => {
   it("allows interactive setup bypass but never scheduled bypass", () => {
     expect(canBypassEnvironmentSetup("interactive")).toBe(true)
     expect(canBypassEnvironmentSetup("scheduled")).toBe(false)
+  })
+})
+
+describe("repairManagedContextProjectId", () => {
+  const managed = (projectId: string) =>
+    createSessionExecutionContext({
+      sessionId: "s1",
+      projectId,
+      projectRoot: "",
+      requestedLocation: "managedWorktree",
+      isGitRepository: false,
+      managedWorkspaceId: "managed-workspace_s1",
+      now: 1,
+    })
+
+  it("fills an empty projectId from the session row", () => {
+    // The send path looks the project up by this id; `""` never matches, so the
+    // turn was refused as managed_project_unavailable before it started.
+    const repaired = repairManagedContextProjectId(managed(""), "project-default")
+    expect(repaired?.projectId).toBe("project-default")
+  })
+
+  it("keeps the managed binding while repairing", () => {
+    const repaired = repairManagedContextProjectId(managed(""), "project-default")
+    expect(repaired?.workspaceBinding).toEqual({
+      kind: "managed",
+      workspaceId: "managed-workspace_s1",
+    })
+    expect(repaired?.location).toBe("managedWorktree")
+  })
+
+  it("leaves a context that already names a project alone", () => {
+    const context = managed("project-real")
+    expect(repairManagedContextProjectId(context, "project-default")).toBe(context)
+  })
+
+  it("returns the context unchanged when there is nothing to repair from", () => {
+    const context = managed("")
+    expect(repairManagedContextProjectId(context, undefined)).toBe(context)
+    expect(repairManagedContextProjectId(context, "   ")).toBe(context)
+  })
+
+  it("passes an absent context straight through", () => {
+    expect(repairManagedContextProjectId(undefined, "project-default")).toBeUndefined()
   })
 })

@@ -86,7 +86,7 @@ const PROJECTION_FIELDS = [
   "permissionMode",
   "referencedPaths",
   "referencedWorkflowElements",
-  "referencedDocs",
+  "citedRefs",
   "contextSelections",
   "pendingCommandOverrides",
   "webSearchOnForNextSend",

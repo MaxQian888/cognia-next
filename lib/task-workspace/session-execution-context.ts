@@ -25,6 +25,35 @@ export interface CreateSessionExecutionContextInput {
 }
 
 /**
+ * Give a managed context back the project id it was created without.
+ *
+ * `createManagedWorkspaceContext` stamps `projectId: ""` on every rootless
+ * chat, and `materializeManagedWorkspace` carries that through verbatim. The
+ * send path then looks the project up by that id, `.find(c => c.id === "")`
+ * never matches, and the turn is refused as `managed_project_unavailable`
+ * before it starts — on desktop and on web alike.
+ *
+ * The right value was never a guess: `ChatSession.projectId` is already on the
+ * row and `resolveScopeProjectId` guarantees it is non-empty. `planSessionMove`
+ * already does exactly this for the same condition (a rootless destination
+ * keeps the real project id and takes the managed contract), so this brings the
+ * creation path in line with the move path rather than inventing a rule.
+ *
+ * Returns the context unchanged when there is nothing to repair, so callers can
+ * assign the result unconditionally.
+ */
+export function repairManagedContextProjectId<T extends SessionExecutionContext>(
+  context: T | undefined,
+  sessionProjectId: string | undefined
+): T | undefined {
+  if (!context) return context
+  if (context.projectId) return context
+  const repaired = sessionProjectId?.trim()
+  if (!repaired) return context
+  return { ...context, projectId: repaired }
+}
+
+/**
  * Create the durable binding for a new persisted chat. `managedWorktree`
  * describes the managed execution contract; Task Workspace chooses a Git
  * worktree or its non-Git shadow backend when it materializes that contract.

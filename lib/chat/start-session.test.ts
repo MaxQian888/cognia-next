@@ -18,6 +18,15 @@ jest.mock("@/lib/workspace/repo-declared", () => ({
   loadDeclaredWorkspace: (...args: unknown[]) => mockLoadDeclaredWorkspace(...(args as [])),
 }))
 
+const mockEnsureDefaultWorkspace = jest.fn(async () => ({
+  kind: "unavailable" as const,
+  reason: "no-local-filesystem" as const,
+}))
+jest.mock("@/lib/workspace/ensure-default-workspace", () => ({
+  ensureDefaultWorkspace: (...args: unknown[]) => mockEnsureDefaultWorkspace(...(args as [])),
+  defaultEnsureDefaultWorkspaceDeps: () => ({}),
+}))
+
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
 
 const dbFixture = createDbTestFixture()
@@ -28,6 +37,9 @@ beforeEach(async () => {
   await dbFixture.restore()
   emitMock.mockClear()
   mockLoadDeclaredWorkspace.mockReset().mockResolvedValue(null)
+  mockEnsureDefaultWorkspace
+    .mockReset()
+    .mockResolvedValue({ kind: "unavailable", reason: "no-local-filesystem" })
   useChatStore.getState().clear()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
 })
@@ -325,6 +337,76 @@ describe("startNewSession", () => {
     )
     await expect(getSession(session.id)).resolves.toMatchObject({
       executionContext: session.executionContext,
+    })
+  })
+
+  it("names the owning workspace on a rootless chat's managed context", async () => {
+    // The binding says "there is no checkout here"; the project id says which
+    // workspace the chat is attributable to. The send path looks the project up
+    // by that id before opening a bundle, so stamping "" refused every rootless
+    // chat as managed_project_unavailable before its first turn.
+    const session = await startNewSession()
+
+    expect(session.executionContext?.workspaceBinding?.kind).toBe("managed")
+    expect(session.executionContext?.projectId).toBe(session.projectId)
+    expect(session.executionContext?.projectId).toBeTruthy()
+  })
+
+  describe("when nothing on this device has a directory yet", () => {
+    function provisioned() {
+      const project = useProjectStore.getState().createProject({
+        name: "Cognia",
+        roots: [{ id: "root-auto", path: "/home/u/Projects/Cognia", isPrimary: true }],
+      })
+      mockEnsureDefaultWorkspace.mockResolvedValue({
+        kind: "created",
+        project,
+        path: "/home/u/Projects/Cognia",
+      } as never)
+      return project
+    }
+
+    it("binds the chat to the provisioned root instead of a managed identity", async () => {
+      const project = provisioned()
+      const session = await startNewSession()
+
+      expect(session.executionContext?.workspaceBinding).toEqual({
+        kind: "project",
+        projectId: project.id,
+      })
+      expect(session.executionContext?.projectId).toBe(project.id)
+      expect(session.executionContext?.execution?.roots?.[0]?.aliasPath).toBe(
+        "/home/u/Projects/Cognia"
+      )
+    })
+
+    it("re-attributes the conversation to the workspace it will run in", async () => {
+      // ADR-0144: the row's workspace and the workspace's session list must
+      // agree from the first turn, in both directions.
+      const project = provisioned()
+      const session = await startNewSession()
+
+      await expect(getSession(session.id)).resolves.toMatchObject({ projectId: project.id })
+      expect(
+        useProjectStore.getState().projects.find((p) => p.id === project.id)?.sessionIds
+      ).toContain(session.id)
+    })
+
+    it("remembers an explicit location on the provisioned workspace, not the old one", async () => {
+      const project = provisioned()
+      await startNewSession({ executionLocation: "local" })
+
+      expect(
+        useProjectStore.getState().projects.find((p) => p.id === project.id)
+          ?.defaultExecutionLocation
+      ).toBe("local")
+    })
+
+    it("keeps the managed identity when there is no local filesystem", async () => {
+      // A browser with no paired host: provisioning answers `unavailable` and
+      // the durable managed identity is still the right answer.
+      const session = await startNewSession()
+      expect(session.executionContext?.workspaceBinding?.kind).toBe("managed")
     })
   })
 

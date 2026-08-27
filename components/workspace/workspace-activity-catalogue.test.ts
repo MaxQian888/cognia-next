@@ -1,7 +1,12 @@
 import { OPEN_PLAN_STATUSES } from "@/types/agent/plan"
 import { ISSUE_RUN_STATUSES } from "@/types/issues"
 
-import { PLAN_STATUSES_FOR_TEST, RUN_STATUSES_FOR_TEST } from "./workspace-activity-catalogue"
+import {
+  PLAN_STATUS_VARIANT,
+  PLAN_STATUSES_FOR_TEST,
+  RUN_STATUS_VARIANT,
+  RUN_STATUSES_FOR_TEST,
+} from "./workspace-activity-catalogue"
 
 describe("workspace activity catalogue", () => {
   it("covers every open plan status without hand-listing them", () => {
@@ -21,5 +26,25 @@ describe("workspace activity catalogue", () => {
 
   it("is the run-status authority itself, not a copy of it", () => {
     expect(RUN_STATUSES_FOR_TEST).toBe(ISSUE_RUN_STATUSES)
+  })
+
+  it("draws every status it knows about", () => {
+    // The variant maps live here rather than in the panel so "which statuses
+    // exist" and "what each one looks like" cannot become two answers. The
+    // `Record<…>` types already fail a missing key at compile time; this
+    // catches a key whose value was left undefined at runtime.
+    for (const status of PLAN_STATUSES_FOR_TEST) {
+      expect(PLAN_STATUS_VARIANT[status]).toBeTruthy()
+    }
+    for (const status of RUN_STATUSES_FOR_TEST) {
+      expect(RUN_STATUS_VARIANT[status]).toBeTruthy()
+    }
+  })
+
+  it("reserves the loudest variant for the statuses that actually failed", () => {
+    expect(PLAN_STATUS_VARIANT.failed).toBe("destructive")
+    expect(RUN_STATUS_VARIANT.failed).toBe("destructive")
+    expect(PLAN_STATUS_VARIANT.executing).toBe("default")
+    expect(RUN_STATUS_VARIANT.running).toBe("default")
   })
 })

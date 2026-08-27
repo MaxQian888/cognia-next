@@ -5,6 +5,10 @@ import { useUIStore } from "@/stores/ui"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
+import {
+  defaultEnsureDefaultWorkspaceDeps,
+  ensureDefaultWorkspace,
+} from "@/lib/workspace/ensure-default-workspace"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { loadDeclaredWorkspace } from "@/lib/workspace/repo-declared"
 import { useSettingsStore } from "@/stores/settings"
@@ -84,7 +88,7 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   // Never null: with no active workspace `createSession` adopts (or creates)
   // Default, so the row is always attributed. Everything below binds to THAT
   // workspace rather than to the UI-active pointer.
-  const ownerProjectId = session.projectId ?? seededProjectId ?? null
+  let ownerProjectId = session.projectId ?? seededProjectId ?? null
   if (ownerProjectId) store.addSessionToProject(ownerProjectId, session.id)
 
   // The store can be a step behind Dexie here — `resolveScopeProjectId` may
@@ -103,10 +107,45 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   // where desktop APIs exist. Web/mobile receivers keep the explicit missing
   // state rather than guessing a directory.
   if (!partial?.executionContext) {
-    const project = ownerProjectId
+    let project = ownerProjectId
       ? projects.find((candidate) => candidate.id === ownerProjectId)
       : undefined
-    const root = project ? primaryRootOf(project) : undefined
+    let root = project ? primaryRootOf(project) : undefined
+    // Nothing on this device has a directory yet — the Default workspace ships
+    // with `roots: []` and the setup line is skippable. Provision one rather
+    // than handing the agent a workspace it cannot touch a file in. Off-desktop
+    // this answers `unavailable` and the managed identity below still applies.
+    if (!root) {
+      const ensured = await ensureDefaultWorkspace(
+        defaultEnsureDefaultWorkspaceDeps(useSettingsStore.getState().settings?.projectsRoot)
+      ).catch(() => null)
+      // `created` ONLY, never `existing`. `ensureDefaultWorkspace` answers
+      // "existing" for ANY rooted workspace on the device, which — since we are
+      // here precisely because the owner has no root — is by construction some
+      // OTHER workspace, and one nothing activated. Re-attributing to it would
+      // move the conversation out of the workspace the user is looking at and
+      // produce the very ADR-0144 divergence the re-attribution below exists to
+      // prevent. Only the `created` branch runs `openPathAsWorkspace`, so only
+      // there is the workspace both new and active. Otherwise we fall through
+      // to the managed identity, exactly as before provisioning existed.
+      if (ensured?.kind === "created" && primaryRootOf(ensured.project)) {
+        project = ensured.project
+        root = primaryRootOf(ensured.project)
+        // Re-attribute: a conversation names the workspace it runs in
+        // (ADR-0144), and `openPathAsWorkspace` has already activated it. Move
+        // the reverse link too, or the row's workspace and the workspace's
+        // session list disagree from the first turn.
+        if (ownerProjectId && ownerProjectId !== ensured.project.id) {
+          store.removeSessionFromProject(ownerProjectId, session.id)
+        }
+        store.addSessionToProject(ensured.project.id, session.id)
+        await updateSession(session.id, { projectId: ensured.project.id })
+        session = { ...session, projectId: ensured.project.id }
+        // Everything downstream that writes a remembered default keys off this,
+        // and it belongs to the workspace the conversation runs in.
+        ownerProjectId = ensured.project.id
+      }
+    }
     // What the repository declares, and only once the user has approved it.
     // It sits BELOW the workspace's own remembered default: the file changes on
     // every pull, and a setting that silently reverts is worse than one that
@@ -138,7 +177,12 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
             base: executionBase ?? declared?.base,
             now: Date.now(),
           })
-        : createManagedWorkspaceContext(session.id, Date.now())
+        : createManagedWorkspaceContext(
+            session.id,
+            Date.now(),
+            undefined,
+            ownerProjectId ?? undefined
+          )
     await updateSession(session.id, { executionContext })
     session = { ...session, executionContext }
     if (executionContext.workspaceBinding?.kind === "managed") {

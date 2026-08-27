@@ -1,5 +1,6 @@
 /**
- * The status vocabularies `WorkspaceActivity` renders, as runtime arrays.
+ * The status vocabularies `WorkspaceActivity` renders — as runtime arrays, and
+ * as the badge variant each status is drawn with.
  *
  * `PlanStatus` and `IssueRunStatus` are TypeScript unions, which vanish at
  * runtime — so a catalogue test cannot iterate them. These arrays are the
@@ -15,6 +16,35 @@
 
 import { OPEN_PLAN_STATUSES, type PlanStatus } from "@/types/agent/plan"
 import { ISSUE_RUN_STATUSES, type IssueRunStatus } from "@/types/issues"
+
+/** The Badge variants this module's statuses map onto. */
+type StatusVariant = "default" | "secondary" | "outline" | "destructive"
+
+/**
+ * How each plan status is drawn. Lives beside the vocabulary it keys on rather
+ * than in the component, so "which statuses exist" and "what each one looks
+ * like" cannot drift into two different answers — `Record<PlanStatus, …>`
+ * fails the moment the union gains a member the panel has no badge for.
+ */
+export const PLAN_STATUS_VARIANT: Record<PlanStatus, StatusVariant> = {
+  draft: "outline",
+  awaiting_approval: "secondary",
+  approved: "secondary",
+  executing: "default",
+  paused: "secondary",
+  completed: "secondary",
+  failed: "destructive",
+  cancelled: "outline",
+}
+
+/** How each issue-run status is drawn. */
+export const RUN_STATUS_VARIANT: Record<IssueRunStatus, StatusVariant> = {
+  queued: "outline",
+  running: "default",
+  succeeded: "secondary",
+  failed: "destructive",
+  cancelled: "outline",
+}
 
 /**
  * Every `PlanStatus`. Built from `OPEN_PLAN_STATUSES` plus the three terminal

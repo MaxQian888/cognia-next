@@ -68,14 +68,27 @@ function managedWorkspaceId(sessionId: string): string {
   return `managed-workspace:${sessionId}`
 }
 
+/**
+ * The durable identity for a chat whose workspace has no directory to bind to.
+ *
+ * `projectId` still names the workspace the chat belongs to even though the
+ * binding is `managed`: the two answer different questions. The binding says
+ * "there is no checkout here", the project id says "this conversation is
+ * ADR-0144-attributable to that workspace" — and the send path looks the
+ * project up by it before opening a bundle. Omitting it stamped `""`, which
+ * `.find(c => c.id === "")` never matches, so every rootless chat was refused
+ * as `managed_project_unavailable` before its first turn ran. `planSessionMove`
+ * has always kept the real id for the same condition; this matches it.
+ */
 export function createManagedWorkspaceContext(
   sessionId: string,
   now: number,
-  localRoot?: string
+  localRoot?: string,
+  projectId?: string
 ): SessionExecutionContext {
   return createSessionExecutionContext({
     sessionId,
-    projectId: "",
+    projectId: projectId?.trim() ?? "",
     projectRoot: localRoot ?? "",
     requestedLocation: "managedWorktree",
     isGitRepository: false,
