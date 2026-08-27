@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({ useLocale: () => "en" }))
@@ -61,14 +61,17 @@ describe("IncidentList", () => {
   it("offers both ways in when nothing is open", async () => {
     const props = renderList([])
     expect(screen.getByTestId("sre-incident-empty")).toBeInTheDocument()
+    // The empty state also mounts SourcesCard; settle its query before acting.
+    await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
     await userEvent.click(screen.getByTestId("sre-create-incident"))
     await userEvent.click(screen.getByTestId("sre-create-from-alert"))
     expect(props.onCreate).toHaveBeenCalledTimes(1)
     expect(props.onCreateFromAlert).toHaveBeenCalledTimes(1)
   })
 
-  it("disables session-scoped creation when there is no session in front", () => {
+  it("disables session-scoped creation when there is no session in front", async () => {
     renderList([], { canCreate: false })
+    await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
     expect(screen.getByTestId("sre-create-incident")).toBeDisabled()
     expect(screen.getByTestId("sre-create-from-alert")).toBeEnabled()
   })

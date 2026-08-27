@@ -29,12 +29,13 @@ describe("plugin i18n bundle", () => {
   })
 
   it("leaves no string untranslated", () => {
-    const untranslated = en.filter(
-      (key) =>
-        I18N_MESSAGES["zh-CN"][key as keyof (typeof I18N_MESSAGES)["zh-CN"]] ===
-        I18N_MESSAGES.en[key as keyof (typeof I18N_MESSAGES)["en"]]
-    )
-    expect(untranslated).toEqual([])
+    // Both sides are widened to `string` on purpose: the bundle is `as const`,
+    // so TypeScript proves the two literal unions cannot overlap and rejects
+    // the comparison outright — which would make this assertion unwritable
+    // even though it is exactly the runtime drift worth catching.
+    const zhBundle = I18N_MESSAGES["zh-CN"] as Record<string, string>
+    const enBundle = I18N_MESSAGES.en as Record<string, string>
+    expect(en.filter((key) => zhBundle[key] === enBundle[key])).toEqual([])
   })
 
   /**

@@ -21,8 +21,8 @@ describe("panel runtime bridge", () => {
 
   it("hands the panel what activate parked, and nothing after deactivate", () => {
     expect(peekSrePanelRuntime()).toBeNull()
-    setSrePanelRuntime({ runtime, dexie })
-    expect(peekSrePanelRuntime()).toEqual({ runtime, dexie })
+    setSrePanelRuntime({ runtime, dexie, contextPanels: null })
+    expect(peekSrePanelRuntime()).toEqual({ runtime, dexie, contextPanels: null })
     clearSrePanelRuntime()
     expect(peekSrePanelRuntime()).toBeNull()
   })
@@ -33,7 +33,7 @@ describe("panel runtime bridge", () => {
   })
 
   it("fans activity out to subscribers in order", () => {
-    setSrePanelRuntime({ runtime, dexie: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
     const seen: number[] = []
     const unsubscribe = subscribeSreToolActivity((latest) => seen.push(latest.length))
 
@@ -49,7 +49,7 @@ describe("panel runtime bridge", () => {
   })
 
   it("keeps only the most recent window of activity", () => {
-    setSrePanelRuntime({ runtime, dexie: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
     for (let index = 0; index < 60; index += 1) notifySreToolActivity(activity(index))
     const recent = recentSreToolActivity()
     expect(recent).toHaveLength(50)
@@ -57,14 +57,14 @@ describe("panel runtime bridge", () => {
   })
 
   it("forgets activity and listeners on deactivate", () => {
-    setSrePanelRuntime({ runtime, dexie: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
     const seen: number[] = []
     subscribeSreToolActivity((latest) => seen.push(latest.length))
     notifySreToolActivity(activity(1))
     clearSrePanelRuntime()
     expect(recentSreToolActivity()).toEqual([])
 
-    setSrePanelRuntime({ runtime, dexie: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
     notifySreToolActivity(activity(2))
     expect(seen).toEqual([1])
   })
