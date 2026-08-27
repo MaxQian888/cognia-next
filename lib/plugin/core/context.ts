@@ -620,10 +620,16 @@ function createUIAPI(pluginId: string): PluginUIAPI {
   return {
     showNotification: async (options: PluginNotification) => {
       try {
+        // `plugin_show_notification(app, args: ShowNotificationArgs)` takes a
+        // single struct parameter, so Tauri deserializes it from the `args`
+        // key — a flat payload leaves `args` absent and the required `title`
+        // unresolvable, which fails before the notification is ever built.
         await invoke("plugin_show_notification", {
-          title: options.title,
-          body: options.body ?? options.message ?? "",
-          icon: options.icon,
+          args: {
+            title: options.title,
+            body: options.body ?? options.message ?? "",
+            icon: options.icon,
+          },
         })
       } catch (error) {
         recordSilentFailure(

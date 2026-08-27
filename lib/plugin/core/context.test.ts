@@ -659,8 +659,33 @@ describe("createPluginContext", () => {
       })
 
       expect(invokeMock).toHaveBeenCalledWith("plugin_show_notification", {
-        title: "Reminder",
-        body: "Workspace SDK linked",
+        args: {
+          title: "Reminder",
+          body: "Workspace SDK linked",
+          icon: undefined,
+        },
+      })
+    })
+
+    it("should nest the notification payload under the args parameter name", async () => {
+      // `plugin_show_notification(app, args: ShowNotificationArgs)` takes one
+      // struct parameter; Tauri resolves it by parameter name. A flat payload
+      // leaves `args` absent, so the required `title` fails to deserialize and
+      // the notification never fires — silently, because the call site catches.
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      const invokeMock = invoke as jest.Mock
+
+      await context.ui.showNotification({ title: "Build finished", body: "3 plugins loaded" })
+
+      const lastCall = invokeMock.mock.calls[invokeMock.mock.calls.length - 1]
+      expect(lastCall[0]).toBe("plugin_show_notification")
+      // The whole point: `args` is the only top-level key. A flat payload would
+      // also satisfy a loose `objectContaining` check, so assert the keys.
+      expect(Object.keys(lastCall[1])).toEqual(["args"])
+      expect(lastCall[1].args).toEqual({
+        title: "Build finished",
+        body: "3 plugins loaded",
         icon: undefined,
       })
     })
