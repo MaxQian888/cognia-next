@@ -182,7 +182,7 @@ export function createHostClient({
         body: JSON.stringify(args),
       })
     )
-    return body as T
+    return unwrapRpcResult<T>(body)
   }
 
   return {
@@ -216,4 +216,25 @@ export async function restoreSigner(pairing: PairingRecord): Promise<DeviceSigne
   const privateKey = await loadDeviceKey()
   if (!privateKey) return null
   return signerFromCryptoKey(pairing.deviceId, privateKey)
+}
+
+/**
+ * The `result` out of a Companion RPC envelope.
+ *
+ * `POST /api/_rpc/<name>` does not answer with the command's result; it answers
+ * with `{ requestId, result }` (and `operationId` on a command that went
+ * through the durable operation ledger, which `browser_context_submit` does).
+ * Returning the envelope as if it were the result is not a type error anywhere
+ * — every field simply reads back `undefined` — so the first symptom is the
+ * panel deciding the Host speaks an unsupported schema version and refusing to
+ * do anything, which describes neither the cause nor the fix.
+ *
+ * The check is for the key rather than for its type: `result` may legitimately
+ * be `null`, and a command that answers with a bare value is still a value the
+ * envelope wraps. Anything without the key is passed through, which keeps this
+ * honest against a plane that does not wrap — `lib/tauri/transport-companion.ts`
+ * makes the same allowance for the same reason.
+ */
+function unwrapRpcResult<T>(body: Record<string, unknown>): T {
+  return (Object.hasOwn(body, "result") ? body.result : body) as T
 }
