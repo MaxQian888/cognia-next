@@ -46,7 +46,7 @@ extension 经 `pi.on("tool_call")` 拦截每一次 Pi 原生工具调用，把�
 - Windows 以及任何缺少可用沙箱 launcher 的主机无法本地运行 Pi，需经配对桌面或 headless host 接入，与其他外部智能体一致。
 - 隔离会在 Cognia 发起的会话中停用用户自己的 Pi 扩展栈。这正是目的：`pi-permission-system` 等社区权限引擎同样 hook `tool_call`，两套引擎拦截同一次调用会产生重复确认与不可预测的阻断。
 - Cognia 从不读取 Pi 的凭证。认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`；`--credentials`、`print-api-key`、`print-bearer-token` 一律禁用。
-- `pi-acp` 作为独立的 experimental 兼容 preset 保留。迁移是显式且可回滚的，原地更新配置以保住 team、scheduler 与 runtime 对 agent id 的引用，且不假定 ACP session id 能映射到 Pi session。
+- `pi-acp` 作为独立的 experimental 兼容 preset 保留。迁移是显式且可回滚的，原地更新配置以保住 team、scheduler 与 runtime 对 agent id 的引用，且不假定 ACP session id 能映射到 Pi session。**（2026-08-27 撤销 —— 该桥与其迁移已移除，见修订记录。）**
 
 ## 修订记录
 
@@ -86,3 +86,53 @@ settings / prompt template / subagent / skill / memory 导入；`VendorRoots.piA
 #### 已知限制
 
 Cognia 无法读取 Pi 各扩展包自己的配置文件，因此重叠检测只能依据人工整理的目录。具体地：`pi-permission-modes` 自带 Plan 模式，但推荐配置会把 `plan` 从它的 `cycleOrder` 中移除，让独立的 plan 包接管规划。因此目录中没有为它列出 `plan` —— 而若用户在那里重新启用 `plan`，将得不到任何重叠告警。
+
+
+### 2026-08-27 —— 移除 `pi-acp` 桥，并补上可诊断的凭证
+
+两项后续，其中一项撤销了本 ADR 原先做出的一个决定。
+
+#### 已撤销：「`pi-acp` 作为独立的 experimental 兼容 preset 保留」
+
+上文「影响」一节把社区桥与原生适配器并列保留，并提供显式、可回滚的迁移。该决定现予撤销。`pi-acp`
+runtime、它的 `pi` preset、它的 ecosystem surface、它的 `npx` 允许名单条目、它的能力精化，以及那套原地迁移
+（`lib/ai/agent/external/pi-migration.ts` 及其设置卡片）全部删除。
+
+这座桥已经换不来任何可度量的东西：
+
+- 它需要与原生适配器**完全相同**的强制沙箱和**完全相同**的 macOS/Linux 平台集合，因此从来不是
+  Windows 逃生口，也不是免沙箱通道；
+- 它内部桥到 `pi --mode rpc`，也就是 Cognia 现在直接讲的协议，所以它严格地只是通往同一处的更长路径，
+  且在执行路径上多塞了一个第三方进程；
+- 它唯一的功能差异是覆盖 Pi 0.80.4–0.84.0 —— 而本 ADR **本来就**在原生路径上以
+  `runtime_version_unsupported` 拒绝这个区间。用一个未钉版本的第三方进程，去支持产品自己声明不支持的
+  版本区间，这是不一致，不是特性。
+
+移除它同时把 `unpinnedLaunchWaivers` 从四条缩到三条。`pi-acp` 经 `npx -y pi-acp` 启动，每次启动都从网络
+重新解析该包。目录声明这份清单只能缩小、且条目只能通过钉住 distribution 来移除 —— 这里改为移除 runtime
+本身，以更直接的方式满足同一不变量。另外三条 waiver（`codex-acp`、`gemini-cli`、`qwen-code`）刻意不动：
+与 Pi 不同，那三个 agent 没有第一方替代，它们的 waiver 是承重的。
+
+「钉住 `pi-acp`」这条路被考虑过并否决。那会让 Cognia 事实上成为一个第三方桥的发行方 —— 拥有它的
+frozen lock、传递依赖树与 CVE 响应 —— 并且会拿我们本就想删掉的那个 runtime，去首次在生产中启用整套
+托管发行路径（lock 校验、provider 安装、回滚）。目录里从来没有任何一个 runtime 带过 `distributions` 条目。
+
+安全策略不再把 `pi-acp` 列入允许名单，因此仍指向它的手工配置会在启动时被拒绝，而不是静默地跑起一座
+未钉版本的桥。
+
+#### 已补上：本 ADR 规定过却从未实现的凭证诊断
+
+「影响」一节写明认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`。这条约束被写下来后
+从未实现 —— 未认证的 Pi 只会表现为第一次提示词失败，而不是一条诊断。现在
+`lib/ai/agent/external/pi-auth.ts` 与 agent 设置面板上的「Pi 凭证」卡片实现了它，且是对照 Pi 0.84.1 自带的
+`dist/cli/auth-check.d.ts` 实测确认，而非推断：
+
+- CLI 的 **exit code 不能主导分类**：`1` 在正常路径上是 `not_ready`，但同时也表示「参数解析失败」；
+  `2` 既覆盖真正的 `invalid` 判定，也覆盖用法错误。只有 stdout 上可解析的 JSON 才是权威；
+- **错误路径不认 `--json`** —— 参数与用法错误把散文写到 stderr，stdout 完全为空，因此没有判定的探针
+  归为 `unreadable`，绝不归为「未认证」；
+- `--no-refresh` 是承重的而非装饰：它让 Pi 以 `ReadOnlyAuthStorage` 打开凭证库，这才是「Cognia 的诊断
+  不可能刷新、轮换或过期用户自己的凭证」这一保证的来源。
+
+`print-api-key`、`print-bearer-token` 与 `--credentials` 仍然禁用，且现在是在 argv 构造处被拒绝，而不再
+只靠约定。

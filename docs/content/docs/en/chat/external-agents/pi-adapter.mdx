@@ -1,6 +1,6 @@
 ---
 title: Pi Native RPC Adapter
-description: PiRpcClientAdapter drives `pi --mode rpc` over Pi's own JSONL command/event protocol — replacing the community pi-acp bridge. Covers the strict LF codec and why readline could not be used, the per-session process model, the certified-version policy, the bundled permission extension, and the explicit migration off the bridge.
+description: PiRpcClientAdapter drives `pi --mode rpc` over Pi's own JSONL command/event protocol, and is now the only way Cognia runs Pi. Covers the strict LF codec and why readline could not be used, the per-session process model, the certified-version policy, the bundled permission extension, the credential diagnostic, and the removal of the community pi-acp bridge.
 ---
 
 # Pi Native RPC Adapter
@@ -13,7 +13,8 @@ description: PiRpcClientAdapter drives `pi --mode rpc` over Pi's own JSONL comma
   `{"type":"response", command, success, data}` — close enough to JSON-RPC to be mistaken for it,
   and different enough that reusing the JSON-RPC peer would mis-route every event. The adapter
   keeps thinking levels, the steering and follow-up queues, the compaction lifecycle, session forks
-  and usage detail that the community `pi-acp` bridge flattened away. See
+  and usage detail that the community `pi-acp` bridge flattened away (that bridge has since
+  been removed entirely). See
   [ADR-0119](../../adr/0119-pi-native-rpc-integration).
 </TLDR>
 
@@ -131,22 +132,26 @@ launcher is missing or the platform is not macOS/Linux the session is refused wi
 `sandbox_unavailable`. ADR-0077's "never falls back to an unsandboxed process" is unchanged, and
 the escape hatches considered during planning were all rejected.
 
-## Migrating off the bridge
+## The ACP bridge is gone
 
-`pi-acp` remains available as a separate compatibility preset. Nothing is rewritten automatically.
+Pi was originally reachable only through the community `pi-acp` adapter, and that preset was kept
+for a while as an experimental compatibility route alongside the native one. It has since been
+removed outright, together with its runtime-catalog entry, its `npx` allowlist entry, and the
+in-place migration that moved agents off it.
 
-Migration is offered only for a config that satisfies **all three** conditions — `metadata.preset`
-is `pi`, the protocol is `acp`, and the argv is `npx … pi-acp` — because any one alone produces
-false positives that would rewrite a config the user meant to keep.
+The reason is that it had stopped buying anything. `pi-acp` requires the same mandatory sandbox and
+the same macOS/Linux platforms as the native adapter, and it bridges to `pi --mode rpc` — the very
+protocol Cognia now speaks directly. Its only remaining difference was covering Pi 0.80.4–0.84.0,
+a range this integration already refuses natively with `runtime_version_unsupported`. Supporting a
+version band the product declares unsupported, through an unpinned third-party process on the
+execution path, was an inconsistency rather than a feature.
 
-It rewrites **in place** so the agent id survives; teams, the scheduler and the runtime all hold
-that id, and a create-then-delete would orphan every reference. The previous protocol, process and
-preset are captured in a versioned `metadata.piMigration` snapshot, so rollback restores exactly
-what was there rather than a reconstruction from defaults.
+Removing it also closed a recorded governance hole: `pi-acp` launched through `npx -y pi-acp`,
+which re-resolves the package from the network on every start, and was one of four entries in
+`unpinnedLaunchWaivers`. That list may only shrink; this is one of them shrinking.
 
-An ACP session id does not map onto a Pi session: the first run after migrating starts a fresh
-native session. Rollback restores the adapter config only — Pi session files and Cognia transcripts
-are user data and are left in place.
+The security policy no longer allowlists the `pi-acp` package, so a hand-written config pointing at
+it is refused at launch rather than silently running an unpinned bridge.
 
 ## Operations
 

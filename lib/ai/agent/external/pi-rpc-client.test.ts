@@ -21,6 +21,7 @@ import {
   processToolFloor,
   type PiRpcHost,
 } from "./pi-rpc-client"
+import { PI_AUTH_FORBIDDEN_FLAGS, PI_AUTH_FORBIDDEN_SUBCOMMANDS } from "./pi-auth"
 import { encodePiPermissionTitle } from "./pi-permission"
 import type {
   ExternalAgentConfig,
@@ -481,6 +482,114 @@ async function connected(host: FakeHost, version = PI_CERTIFIED_VERSION) {
   await connecting
   return adapter
 }
+
+describe("credential diagnostics", () => {
+  /**
+   * Drive one non-RPC probe: wait for its spawn, answer it, and hand back both
+   * the adapter's result and the argv it was actually launched with.
+   *
+   * The argv matters as much as the verdict here — the whole reason ADR-0119
+   * routes this through `pi auth check` is that the two sibling subcommands
+   * print the credential itself.
+   */
+  async function runProbe<T>(
+    start: (adapter: PiRpcClientAdapter) => Promise<T>,
+    match: (args: string[]) => boolean,
+    reply: { stdout: string; code?: number }
+  ): Promise<{ result: T; args: string[] }> {
+    const host = createFakeHost()
+    const adapter = new PiRpcClientAdapter({ host })
+    const connecting = adapter.connect(config)
+    await Promise.resolve()
+    host.emitVersion(
+      host.spawns.find((s) => s.args.includes("--version"))!.id,
+      PI_CERTIFIED_VERSION
+    )
+    await connecting
+
+    const pending = start(adapter)
+    await Promise.resolve()
+    const spawn = host.spawns.find((s) => match(s.args))!
+    expect(spawn).toBeDefined()
+    host.emitStdoutLines(spawn.id, reply.stdout)
+    host.emitExit(spawn.id, reply.code ?? 0)
+    return { result: await pending, args: spawn.args }
+  }
+
+  const authArgs = (args: string[]) => args[0] === "auth"
+
+  it("asks Pi about one provider, read-only, and reports the verdict", async () => {
+    const { result, args } = await runProbe(
+      (adapter) => adapter.checkProviderAuth("deepseek"),
+      authArgs,
+      { stdout: '{"status":"ready","provider":"deepseek","authType":"api_key"}', code: 0 }
+    )
+    expect(args).toEqual(["auth", "check", "--provider", "deepseek", "--json", "--no-refresh"])
+    expect(result).toEqual({ status: "ready", provider: "deepseek", authType: "api_key" })
+  })
+
+  it("never spawns a subcommand that prints the credential", async () => {
+    const { args } = await runProbe((adapter) => adapter.checkProviderAuth("anthropic"), authArgs, {
+      stdout: '{"status":"not_ready","provider":"anthropic","reason":"credentials_not_configured"}',
+      code: 1,
+    })
+    for (const banned of [...PI_AUTH_FORBIDDEN_SUBCOMMANDS, ...PI_AUTH_FORBIDDEN_FLAGS]) {
+      expect(args).not.toContain(banned)
+    }
+    // `--no-refresh` is the flag that makes Pi open its credential store
+    // read-only. Losing it would let a diagnostic rotate the user's tokens.
+    expect(args).toContain("--no-refresh")
+  })
+
+  it("keeps the requested provider when Pi answers without one", async () => {
+    const { result } = await runProbe((adapter) => adapter.checkProviderAuth("groq"), authArgs, {
+      stdout: '{"status":"ready"}',
+      code: 0,
+    })
+    expect(result).toEqual({ status: "ready", provider: "groq" })
+  })
+
+  it("reports a usage error as unreadable, not as missing credentials", async () => {
+    // Pi writes its argument errors to stderr and leaves stdout empty even
+    // under `--json`, while still exiting 1 — the exact shape that would read
+    // as `not_ready` if the exit code were trusted.
+    const { result } = await runProbe(
+      (adapter) => adapter.checkProviderAuth("deepseek"),
+      authArgs,
+      { stdout: "", code: 1 }
+    )
+    expect(result).toEqual({
+      status: "unreadable",
+      provider: "deepseek",
+      unreadableReason: "no_output",
+    })
+  })
+
+  it("lists the providers Pi can actually reach", async () => {
+    const { result, args } = await runProbe(
+      (adapter) => adapter.listModelProviders(),
+      (a) => a.includes("--list-models"),
+      {
+        stdout: [
+          "provider  model            context  max-out  thinking  images",
+          "deepseek  deepseek-v4-pro  1M       384K     yes       no",
+          "deepseek  deepseek-v4-flash  1M     384K     yes       no",
+        ].join("\n"),
+      }
+    )
+    expect(args).toEqual(["--list-models"])
+    expect(result).toEqual({ status: "ok", providers: ["deepseek"] })
+  })
+
+  it("refuses to guess when the adapter never connected", async () => {
+    const adapter = new PiRpcClientAdapter({ host: createFakeHost() })
+    // No spawn may happen: there is no resolved command to spawn.
+    await expect(adapter.checkProviderAuth("deepseek")).resolves.toMatchObject({
+      status: "unreadable",
+    })
+    await expect(adapter.listModelProviders()).resolves.toEqual({ status: "unreadable" })
+  })
+})
 
 describe("protocol registration", () => {
   /**

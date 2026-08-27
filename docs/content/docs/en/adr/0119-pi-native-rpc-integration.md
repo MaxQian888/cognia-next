@@ -46,7 +46,7 @@ The extension intercepts every native Pi tool call through `pi.on("tool_call")` 
 - Windows and any host without a working sandbox launcher cannot run Pi locally. They reach it through a paired desktop or headless host, the same as every other external agent.
 - Isolation disables the user's own Pi extension stack inside Cognia-run sessions. That is the point: community permission engines such as `pi-permission-system` also hook `tool_call`, and two engines intercepting the same call produce double prompts and unpredictable blocking.
 - Cognia never reads Pi's credentials. Authentication diagnostics call only `pi auth check --provider <id> --json --no-refresh`; `--credentials`, `print-api-key`, and `print-bearer-token` are forbidden.
-- `pi-acp` is retained as a separate experimental compatibility preset. Migration is explicit and reversible, updates the config in place so team, scheduler, and runtime references to the agent id survive, and does not assume an ACP session id maps onto a Pi session.
+- `pi-acp` is retained as a separate experimental compatibility preset. Migration is explicit and reversible, updates the config in place so team, scheduler, and runtime references to the agent id survive, and does not assume an ACP session id maps onto a Pi session. **(Withdrawn 2026-08-27 — the bridge and its migration are removed; see the revision log.)**
 
 ## Revision record
 
@@ -124,3 +124,62 @@ Plan mode, but the recommended configuration removes `plan` from its
 `cycleOrder` so the standalone plan package owns planning. The catalog therefore
 does not list `plan` for it — and a user who re-enables `plan` there gets no
 overlap warning.
+
+
+### 2026-08-27 — The `pi-acp` bridge is removed, and credentials are diagnosable
+
+Two follow-ups, one of which retires a decision this ADR originally made.
+
+#### Retired: "`pi-acp` is retained as a separate experimental compatibility preset"
+
+The Impact section above kept the community bridge alongside the native adapter, with an explicit,
+reversible migration between them. That decision is withdrawn. The `pi-acp` runtime, its `pi`
+preset, its ecosystem surface, its `npx` allowlist entry, its capability refinement, and the
+in-place migration (`lib/ai/agent/external/pi-migration.ts` plus its settings card) are all deleted.
+
+The bridge had stopped buying anything measurable:
+
+- it requires the **same** mandatory sandbox and the **same** macOS/Linux platform set as the
+  native adapter, so it was never a Windows or unsandboxed escape hatch;
+- it bridges to `pi --mode rpc`, the protocol Cognia now speaks directly, so it is strictly a
+  longer path to the same place with a third-party process added to the execution path;
+- its only functional difference was covering Pi 0.80.4–0.84.0 — a range this ADR *already*
+  refuses natively with `runtime_version_unsupported`. Supporting, through an unpinned third-party
+  process, a version band the product declares unsupported is an inconsistency, not a feature.
+
+Removing it also shrinks `unpinnedLaunchWaivers` from four entries to three. `pi-acp` launched via
+`npx -y pi-acp`, which re-resolves the package from the network on every start. The catalog says
+that list may only shrink and that an entry may only be removed by pinning a distribution — this
+removes the runtime instead, which satisfies the same invariant more directly. The other three
+waivers (`codex-acp`, `gemini-cli`, `qwen-code`) are deliberately untouched: unlike Pi, those
+agents have no first-party alternative, so their waivers are load-bearing.
+
+Pinning `pi-acp` was considered and rejected. It would have made Cognia the de-facto distributor of
+a third-party bridge — owning its frozen lock, its transitive tree and its CVE response — and would
+have commissioned the managed-distribution path (lock verification, provider install, rollback) for
+the first time in production on the one runtime we wanted to delete. No runtime in the catalog has
+ever carried a `distributions` entry.
+
+The security policy no longer allowlists the `pi-acp` package, so a hand-written config that still
+points at it is refused at launch rather than silently running an unpinned bridge.
+
+#### Added: the credential diagnostic this ADR specified but never built
+
+The Impact section states that authentication diagnostics call only
+`pi auth check --provider <id> --json --no-refresh`. That constraint was written down and never
+implemented — an unauthenticated Pi surfaced as a failed first prompt rather than as a diagnosis.
+`lib/ai/agent/external/pi-auth.ts` and a "Pi credentials" card on the agent's settings panel now
+implement it, verified against Pi 0.84.1's own `dist/cli/auth-check.d.ts` rather than inferred:
+
+- the CLI's **exit code cannot lead the classification**: `1` means `not_ready` on the happy path
+  but also means "the arguments failed to parse", and `2` covers both a genuine `invalid` verdict
+  and a usage error. Only parseable JSON on stdout is authoritative;
+- `--json` is **not honoured on the error paths** — argument and usage errors print prose to stderr
+  and leave stdout empty, so a probe with no verdict resolves to `unreadable`, never to
+  "not authenticated";
+- `--no-refresh` is load-bearing rather than cosmetic: it makes Pi open its credential store
+  through `ReadOnlyAuthStorage`, which is what guarantees a Cognia diagnostic cannot refresh,
+  rotate or expire the user's own credentials.
+
+`print-api-key`, `print-bearer-token` and `--credentials` remain banned, and are now refused at the
+argv builder rather than by convention.

@@ -1,7 +1,7 @@
 /**
  * Pi native RPC adapter (`pi --mode rpc`) — ADR-0119.
  *
- * Replaces the community `pi-acp` bridge with a direct client for Pi's own
+ * Replaced the community `pi-acp` bridge (since removed) with a direct client for Pi's own
  * protocol, so thinking levels, the steering/follow-up queues, the compaction
  * lifecycle, session forks and usage detail survive instead of being flattened
  * onto ACP's smaller vocabulary.
@@ -38,6 +38,13 @@ import type {
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { agentInvoke, agentListen } from "./agent-transport"
+import {
+  buildPiAuthCheckArgs,
+  classifyPiAuthProbe,
+  parsePiModelProviders,
+  type PiAuthVerdict,
+  type PiProviderListing,
+} from "./pi-auth"
 import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./pi-rpc-events"
 import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { PI_TOOL_POLICY_ENV, encodePiToolPolicy, resolvePiToolPolicy } from "./pi-permission"
@@ -441,37 +448,75 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * be caught before it can start a session.
    */
   private async probeVersion(config: ExternalAgentConfig): Promise<PiVersionVerdict> {
+    const { stdout } = await this.runCliProbe(config, ["--version"], "version", 15000)
+    return classifyPiVersion(stdout.trim().split("\n").filter(Boolean).pop() ?? null)
+  }
+
+  /**
+   * Run a short-lived, non-RPC `pi` invocation through the same sandboxed spawn
+   * path a session uses, and return what it printed.
+   *
+   * Shared by the version probe and the credential diagnostic. Both need the
+   * identical thing — spawn, collect stdout, wait for exit, always unsubscribe —
+   * and the version probe's original inline copy leaked its exit listener: it
+   * pushed the unsubscribe onto a shared array from inside a `.then()`, so a
+   * probe that finished first ran its cleanup against an empty array and left
+   * the listener attached for the life of the adapter. Awaiting the listen
+   * handle in `finally` closes that without moving the spawn.
+   *
+   * `stderr` is deliberately not captured. Pi writes prose there on its error
+   * paths, and the only consumer of this output classifies stdout; forwarding
+   * stderr would create the one path on which CLI text could reach a log.
+   */
+  private async runCliProbe(
+    config: ExternalAgentConfig,
+    args: string[],
+    label: string,
+    timeoutMs: number
+  ): Promise<{ stdout: string; exitCode: number | null }> {
     const command = config.process?.command ?? "pi"
-    const probeId = `${config.id}:version-probe:${Date.now()}`
-    let output = ""
+    const probeId = `${config.id}:${label}-probe:${Date.now()}`
+    let stdout = ""
+    let exitCode: number | null = null
 
     const offStdout = await this.host.listen<{ agentId: string; data: string }>(
       "external-agent://stdout",
       (payload) => {
-        if (payload.agentId === probeId) output += `${payload.data}\n`
+        if (payload.agentId === probeId) stdout += `${payload.data}\n`
       }
     )
+    let resolveExit: () => void = () => {}
     const exited = new Promise<void>((resolve) => {
-      void this.host
-        .listen<{ agentId: string }>("external-agent://exit", (payload) => {
-          if (payload.agentId === probeId) resolve()
-        })
-        .then((off) => this.probeCleanup.push(off))
+      resolveExit = resolve
     })
+    // Started but deliberately NOT awaited before the spawn: the version probe
+    // has always subscribed to `exit` this way, and adding an await here shifts
+    // the spawn by a microtask against a real host's IPC. The bug worth fixing
+    // is the teardown, not the ordering — see the `finally`.
+    const exitHandle = this.host.listen<{ agentId: string; code?: number | null }>(
+      "external-agent://exit",
+      (payload) => {
+        if (payload.agentId !== probeId) return
+        exitCode = payload.code ?? null
+        resolveExit()
+      }
+    )
 
     try {
       await this.host.invoke("spawn_external_agent", {
-        config: { id: probeId, command, args: ["--version"], cwd: config.process?.cwd },
+        config: { id: probeId, command, args, cwd: config.process?.cwd },
       })
-      await Promise.race([exited, delay(15000)])
-      return classifyPiVersion(output.trim().split("\n").filter(Boolean).pop() ?? null)
+      await Promise.race([exited, delay(timeoutMs)])
+      return { stdout, exitCode }
     } finally {
       offStdout()
-      for (const off of this.probeCleanup.splice(0)) off()
+      // Await the handle rather than reading it out of a shared array. The
+      // original pushed the unsubscribe from inside a `.then()`, so a probe
+      // that finished first ran its cleanup against an empty array and left the
+      // listener attached for the life of the adapter.
+      await exitHandle.then((off) => off()).catch(() => {})
     }
   }
-
-  private readonly probeCleanup: Array<() => void> = []
 
   // ---------------------------------------------------------------- sessions
 
@@ -1242,6 +1287,53 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         // The process may already be gone; the kill below is the guarantee.
       }
     }
+  }
+
+  // ------------------------------------------------------- credential checks
+
+  /**
+   * Ask Pi whether one provider's credentials resolve (ADR-0119).
+   *
+   * The whole point of routing this through `pi auth check` is that Cognia
+   * never opens Pi's credential files: Pi answers with a status, and
+   * `--no-refresh` makes it open its own store read-only, so a Cognia
+   * diagnostic cannot refresh, rotate or expire the user's credentials as a
+   * side effect of being run.
+   *
+   * A probe that produces no parseable verdict resolves to `unreadable`, never
+   * to `not_ready` — see `pi-auth.ts` for why the exit code cannot be trusted
+   * to tell those apart.
+   */
+  async checkProviderAuth(provider: string): Promise<PiAuthVerdict> {
+    const config = this._config
+    if (!config) return { status: "unreadable", provider: null, unreadableReason: "no_output" }
+    const { stdout, exitCode } = await this.runCliProbe(
+      config,
+      buildPiAuthCheckArgs({ provider }),
+      "auth",
+      15000
+    )
+    const verdict = classifyPiAuthProbe({ stdout, exitCode })
+    // Pi echoes the provider it resolved; when it answered without one, keep
+    // the id we asked about so the caller can still label the row.
+    return verdict.provider ? verdict : { ...verdict, provider }
+  }
+
+  /**
+   * The providers Pi can actually reach right now, via `pi --list-models`.
+   *
+   * `auth check` has no "check everything" form, so the diagnostic needs a set
+   * to iterate, and this is the honest source: Pi filters the listing down to
+   * providers whose credentials resolve. An `unreadable` result is distinct
+   * from an empty one on purpose — an empty list is the real diagnosis ("Pi has
+   * no usable model"), while unreadable means the listing itself failed and
+   * must not be shown as if Pi had answered.
+   */
+  async listModelProviders(): Promise<PiProviderListing> {
+    const config = this._config
+    if (!config) return { status: "unreadable" }
+    const { stdout } = await this.runCliProbe(config, ["--list-models"], "models", 20000)
+    return parsePiModelProviders(stdout)
   }
 
   async healthCheck(): Promise<boolean> {

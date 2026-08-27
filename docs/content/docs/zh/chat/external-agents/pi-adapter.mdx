@@ -1,6 +1,6 @@
 ---
 title: Pi 原生 RPC 适配器
-description: PiRpcClientAdapter 经 Pi 自身的 JSONL 命令/事件协议驱动 `pi --mode rpc`，取代社区 pi-acp 桥。涵盖严格 LF codec 与不能使用 readline 的原因、每会话独占进程模型、认证版本策略、随包权限扩展，以及从桥接方式的显式迁移。
+description: PiRpcClientAdapter 经 Pi 自身的 JSONL 命令/事件协议驱动 `pi --mode rpc`，取代并最终移除了社区 pi-acp 桥。涵盖严格 LF codec 与不能使用 readline 的原因、每会话独占进程模型、认证版本策略、随包权限扩展，以及从桥接方式的显式迁移。
 ---
 
 # Pi 原生 RPC 适配器
@@ -10,7 +10,7 @@ description: PiRpcClientAdapter 经 Pi 自身的 JSONL 命令/事件协议驱动
 <TLDR>
   Cognia 通过 **Pi 自身的协议**驱动 Pi，而非 ACP。`pi --mode rpc` 讲一套 JSONL 命令/事件流，
   帧是裸的 `{type, id}` 对象，应答为 `{"type":"response", command, success, data}`——像到足以被误认为
-  JSON-RPC，又不同到复用 JSON-RPC peer 会把每个事件都路由错。该适配器保住了社区 `pi-acp` 桥所压平的
+  JSON-RPC，又不同到复用 JSON-RPC peer 会把每个事件都路由错。该适配器保住了社区 `pi-acp` 桥（现已移除）所压平的
   thinking 等级、steering 与 follow-up 队列、compaction 生命周期、会话分叉与 usage 明细。
   参见 [ADR-0119](../../adr/0119-pi-native-rpc-integration)。
 </TLDR>
@@ -112,19 +112,21 @@ Pi 内建的 `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` 在 Pi 
 会话以 `sandbox_unavailable` 被拒。ADR-0077 的"从不回退到无沙箱进程"原样保持，规划期间考虑过的逃生通道
 全部否决。
 
-## 从桥接方式迁移
+## ACP 桥已移除
 
-`pi-acp` 作为独立兼容 preset 保留。任何配置都不会被自动改写。
+Pi 最初只能经社区 `pi-acp` 适配器接入，原生适配器上线后该 preset 曾作为实验性兼容路径保留一段时间。
+现已连同它的 runtime 目录条目、`npx` 允许名单条目，以及把 agent 迁离它的原地迁移一并删除。
 
-迁移仅对**同时**满足三个条件的配置提供——`metadata.preset` 为 `pi`、协议为 `acp`、argv 为
-`npx … pi-acp`——因为其中任一条件单独成立都会产生误判，改写用户本想保留的配置。
+理由是它已经不再换来任何东西。`pi-acp` 需要与原生适配器**完全相同**的强制沙箱和 macOS/Linux 平台，
+而它内部又是桥到 `pi --mode rpc`——正是 Cognia 现在直接讲的那个协议。它唯一剩下的差别是覆盖
+Pi 0.80.4–0.84.0，而这个区间本集成在原生路径上已经以 `runtime_version_unsupported` 明确拒绝。
+用执行路径上一个未钉版本的第三方进程，去支持一个产品自己声明不支持的版本区间，这是不一致，不是特性。
 
-迁移**原地**改写以保住 agent id；team、scheduler 与 runtime 都持有该 id，create-then-delete 会让所有
-引用成为孤儿。此前的 protocol、process 与 preset 会写入版本化的 `metadata.piMigration` 快照，因此回滚
-恢复的是当时的原样，而不是按默认值重建。
+移除它同时关闭了一个记录在案的治理漏洞：`pi-acp` 经 `npx -y pi-acp` 启动，每次启动都会从网络重新解析
+该包，它是 `unpinnedLaunchWaivers` 四条中的一条。那个清单只能缩小，这就是缩小的一次。
 
-ACP session id 并不映射到 Pi session：迁移后的首次运行会新建一个原生会话。回滚只恢复适配器配置——
-Pi 的 session 文件与 Cognia 的记录属于用户数据，原样保留。
+安全策略不再把 `pi-acp` 列入允许名单，因此手工指向它的配置会在启动时被拒绝，而不是静默地跑起一座
+未钉版本的桥。
 
 ## 运维
 
