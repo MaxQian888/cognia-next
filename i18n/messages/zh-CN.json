@@ -28068,7 +28068,8 @@
         "cancel": "取消",
         "enterField": "输入 {label}",
         "save": "保存",
-        "saving": "保存中…"
+        "saving": "保存中…",
+        "secretUnavailable": "此表单未接入凭据存储，无法在这里填写该值。"
       },
       "adapterFormSections": {
         "cancel": "取消",
@@ -28675,7 +28676,8 @@
         "statusNew": "尚未保存。",
         "statusStored": "已保存在宿主上。此处无法查看；输入新值可覆盖。",
         "statusUnset": "未设置。",
-        "storedPlaceholder": "已保存 —— 留空表示不修改"
+        "storedPlaceholder": "已保存 —— 留空表示不修改",
+        "unlock": "解锁"
       },
       "description": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站投递队列。",
       "dingtalk": {

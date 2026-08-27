@@ -94,21 +94,28 @@ Relayed writes that reach a process which no longer owns the runtime throw `conn
 
 The relay is why "this shell cannot configure a bot" and "this shell cannot use
 one" are different sentences, and why the settings page says so. Inbox writes
-travel as four named companion RPCs; the connector *admin* surface — register
-an adapter, test a token, probe the bot identity, send a test message,
-reconnect, start the tunnel — calls the `connectors_*` command family, whose
-42 entries are all `target: service` with an empty `transports` list. A paired
-browser has a route to the first set and none to the second.
+travel as four named companion RPCs. The connector *admin* surface splits in
+two: the four `connectors_keyring_*` arms are on the device plane behind an
+admin lease (ADR-0152), so a paired shell reads back and writes credentials;
+everything else — register an adapter, test a token, probe the bot identity,
+send a test message, reconnect, start the tunnel — is `target: service` with an
+empty `transports` list and talks to the runtime process, which a browser has
+no route to.
 
 `connectorControlReach` (`lib/connectors/control-reach.ts`) is what the
 settings controls gate on, and its three blocks are the three real answers:
 
-| Host | Inbox writes | Connector controls | What the screen says |
-| --- | --- | --- | --- |
-| Desktop | local | yes | nothing — everything works |
-| Cloud / mobile companion | relayed | no | `runs-on-host` — the bot runs on the paired host; replying and per-conversation settings keep working here |
-| Standalone browser / unpaired phone | refused | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
-| Headless | local | yes (no UI today) | — |
+| Host | Inbox writes | Credentials | Other connector controls | What the screen says |
+| --- | --- | --- | --- | --- |
+| Desktop | local | local | yes | nothing — everything works |
+| Cloud / mobile companion | relayed | leased | no | `runs-on-host` — the bot runs on the paired host; replying, per-conversation settings and credential editing keep working here |
+| Standalone browser / unpaired phone | refused | no | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
+| Headless | local | local | yes (no UI today) | — |
+
+A leased credential read is not silent: the lease covers all four operations
+at once and lasts until it expires, so the operator is asked once per session
+rather than once per field. A field the shell has not been granted renders
+`stored` with an unlock beside it.
 
 Three controls answer `needs-desktop-shell` on every host but the desktop,
 including headless: the cloudflared child process, personal-WeChat QR login and

@@ -28068,7 +28068,8 @@
         "cancel": "Cancel",
         "enterField": "Enter {label}",
         "save": "Save",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "secretUnavailable": "This form has no credential store wired up, so the value cannot be entered here."
       },
       "adapterFormSections": {
         "cancel": "Cancel",
@@ -28675,7 +28676,8 @@
         "statusNew": "Nothing saved yet.",
         "statusStored": "Saved on the host. It cannot be shown here; type a new value to replace it.",
         "statusUnset": "Not set.",
-        "storedPlaceholder": "Saved — leave blank to keep it"
+        "storedPlaceholder": "Saved — leave blank to keep it",
+        "unlock": "Unlock"
       },
       "description": "Configure messaging platform adapters (Telegram, Discord, Slack, …) and manage the outbound delivery queue.",
       "dingtalk": {

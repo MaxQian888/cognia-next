@@ -5,6 +5,14 @@
  * __mocks__/tauri-api.js, which exports `invoke: jest.fn()`.
  */
 import { invoke } from "@tauri-apps/api/core"
+
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: jest.fn(() => "desktop"),
+}))
+import { transport } from "@/lib/tauri/transport-instance"
+import { detectHostProfile } from "@/lib/platform/capabilities"
+import { setConnectorDeviceLease } from "@/lib/connectors/device-plane"
 import {
   setConnectorCommandInvoker,
   connectorsRegisterAdapter,
@@ -51,9 +59,16 @@ import {
 } from "./commands"
 
 const mockInvoke = invoke as jest.Mock
+const mockProfile = detectHostProfile as jest.Mock
 
 beforeEach(() => {
   mockInvoke.mockReset()
+  setConnectorDeviceLease(null)
+  // The default invoker is no longer unconditional: the four keyring arms
+  // ADR-0152 put on the device plane go over the companion transport on a
+  // paired shell. Everything below asserts the host-side behaviour unless it
+  // says otherwise.
+  mockProfile.mockReturnValue("desktop")
 })
 
 // ---------------------------------------------------------------------------
@@ -140,14 +155,12 @@ describe("connectorsKeyringSet", () => {
 describe("connectorsKeyringGet", () => {
   it("returns the stored value", async () => {
     mockInvoke.mockResolvedValueOnce("secret")
-    const result = await connectorsKeyringGet("tg-personal", "botToken")
-    expect(result).toBe("secret")
+    await expect(connectorsKeyringGet("tg-personal", "botToken")).resolves.toBe("secret")
   })
 
   it("returns null when not set", async () => {
     mockInvoke.mockResolvedValueOnce(null)
-    const result = await connectorsKeyringGet("tg-personal", "missing")
-    expect(result).toBeNull()
+    await expect(connectorsKeyringGet("tg-personal", "missing")).resolves.toBeNull()
   })
 })
 
@@ -175,6 +188,69 @@ describe("connectorsKeyringList", () => {
       adapterId: "slack-work",
       accounts: ["userToken", "botToken", "signingSecret"],
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-0152 — the keyring arms on the device plane
+// ---------------------------------------------------------------------------
+
+describe("keyring wrappers on a paired shell", () => {
+  let call: jest.SpyInstance
+
+  beforeEach(() => {
+    mockProfile.mockReturnValue("cloud-companion")
+    call = jest.spyOn(transport, "call").mockResolvedValue(undefined as never)
+  })
+
+  afterEach(() => call.mockRestore())
+
+  it("routes the read over the transport rather than Tauri invoke", async () => {
+    call.mockResolvedValueOnce("secret")
+
+    await expect(connectorsKeyringGet("tg-1", "botToken")).resolves.toBe("secret")
+
+    expect(call).toHaveBeenCalledWith("connectors_keyring_get", {
+      adapterId: "tg-1",
+      credential: "botToken",
+    })
+    // The direct import is what used to fail here with a bare
+    // `__TAURI_INTERNALS__` error on every companion shell.
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("attaches the admin lease the step-up gate reads", async () => {
+    setConnectorDeviceLease("lease-token")
+
+    await connectorsKeyringSet("tg-1", "botToken", "secret")
+
+    expect(call).toHaveBeenCalledWith("connectors_keyring_set", {
+      adapterId: "tg-1",
+      credential: "botToken",
+      value: "secret",
+      adminLease: "lease-token",
+    })
+  })
+
+  it("sends the call without a lease rather than failing locally", async () => {
+    // The host answers REMOTE_CONSENT_REQUIRED, which the form turns into
+    // "stored, unlock to read" — a local short-circuit could not tell that
+    // apart from "no such credential".
+    await connectorsKeyringList("slack-1", ["botToken"])
+
+    expect(call).toHaveBeenCalledWith("connectors_keyring_list", {
+      adapterId: "slack-1",
+      accounts: ["botToken"],
+    })
+  })
+
+  it("leaves the runtime-process commands on Tauri invoke", async () => {
+    mockInvoke.mockResolvedValueOnce(undefined)
+
+    await connectorsStopServer()
+
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_stop_server")
+    expect(call).not.toHaveBeenCalled()
   })
 })
 

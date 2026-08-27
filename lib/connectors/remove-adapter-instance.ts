@@ -32,6 +32,7 @@
 
 import { hasCapability, serverBackedCapabilities } from "@/lib/platform/capabilities"
 import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
+import { ensureCredentialLease } from "@/lib/connectors/credential-lease"
 import { pruneAttachmentsForAdapter } from "@/lib/connectors/attachment-fetcher"
 import { reapAdapterResidue, type AdapterResidueReport } from "@/lib/connectors/adapter-residue"
 import { deleteAdapterInstance } from "@/lib/db/adapter-instances"
@@ -75,6 +76,10 @@ export async function removeAdapterInstance(
     hasCapability("connector-runtime") || serverBackedCapabilities().includes("connector-runtime")
 
   if (connectorRuntime) {
+    // The purge is the one write in this function that leaves something behind
+    // when it is refused, so it gets the lease the device plane asks for
+    // (ADR-0152). A no-op wherever the keyring is local.
+    await ensureCredentialLease()
     for (const account of row.credentialsRef?.accounts ?? []) {
       try {
         await connectorsKeyringDelete(row.id, account)

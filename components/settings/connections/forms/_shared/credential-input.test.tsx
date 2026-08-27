@@ -114,6 +114,37 @@ describe("CredentialInput", () => {
     expect(screen.queryByText("Retry")).not.toBeInTheDocument()
   })
 
+  it("offers an unlock on a stored value the host could still be asked for", () => {
+    // ADR-0152 made "cannot be shown here" one consent away on a companion
+    // shell. Without this the state was a dead end whose only offer was to
+    // overwrite a working credential blind.
+    const onRetry = jest.fn()
+    const { unmount } = renderInput({ status: "stored", onRetry })
+
+    fireEvent.click(screen.getByText("Unlock"))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    unmount()
+
+    renderInput({ status: "stored" })
+    expect(screen.queryByText("Unlock")).not.toBeInTheDocument()
+  })
+
+  it("keeps the unlock and the retry distinct", () => {
+    // Same handler, different promises: one re-runs a call that errored, the
+    // other asks a host for permission it has not granted.
+    const { unmount } = renderInput({ status: "stored", onRetry: jest.fn() })
+    expect(screen.queryByText("Retry")).not.toBeInTheDocument()
+    unmount()
+
+    renderInput({ status: "error", onRetry: jest.fn() })
+    expect(screen.queryByText("Unlock")).not.toBeInTheDocument()
+  })
+
+  it("does not offer an unlock while the field is disabled", () => {
+    renderInput({ status: "stored", onRetry: jest.fn(), disabled: true })
+    expect(screen.getByText("Unlock").closest("button")).toBeDisabled()
+  })
+
   it("swaps the placeholder for the states where the caller's hint would lie", () => {
     const { unmount } = renderInput({ status: "new", placeholder: "paste the app secret" })
     expect(document.getElementById("cred")).toHaveAttribute("placeholder", "paste the app secret")

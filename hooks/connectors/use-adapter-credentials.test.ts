@@ -14,6 +14,11 @@ jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: jest.fn(() => true),
 }))
 
+jest.mock("@/lib/connectors/credential-lease", () => ({
+  ensureCredentialLease: jest.fn(async () => "not-required"),
+  clearCredentialLease: jest.fn(),
+}))
+
 import {
   connectorsKeyringDelete,
   connectorsKeyringGet,
@@ -21,6 +26,7 @@ import {
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import { useCapability } from "@/hooks/use-host-profile"
+import { clearCredentialLease, ensureCredentialLease } from "@/lib/connectors/credential-lease"
 import { isCredentialReadRefused, useAdapterCredentials } from "./use-adapter-credentials"
 
 const mockGet = connectorsKeyringGet as jest.Mock
@@ -28,6 +34,8 @@ const mockList = connectorsKeyringList as jest.Mock
 const mockSet = connectorsKeyringSet as jest.Mock
 const mockDelete = connectorsKeyringDelete as jest.Mock
 const mockCapability = useCapability as jest.Mock
+const mockEnsureLease = ensureCredentialLease as jest.Mock
+const mockClearLease = clearCredentialLease as jest.Mock
 
 /** Stored keyring contents for the current test. */
 function stored(values: Record<string, string | null>): void {
@@ -39,6 +47,7 @@ beforeEach(() => {
   mockCapability.mockReturnValue(true)
   stored({})
   mockList.mockResolvedValue([])
+  mockEnsureLease.mockResolvedValue("not-required")
 })
 
 function renderCreds(
@@ -54,6 +63,51 @@ function renderCreds(
 }
 
 describe("useAdapterCredentials", () => {
+  // `dirty` is gated on `!loading`, so the Save button is inert for as long as
+  // the read takes. Sequentially awaiting one `connectorsKeyringGet` per field
+  // made that the SUM of every round trip — five for Slack, and each one a
+  // network request rather than a local IPC over the companion transport.
+  it("reads every credential in one pass, not one round trip at a time", async () => {
+    let inFlight = 0
+    let peak = 0
+    const release: Array<() => void> = []
+    mockGet.mockImplementation(async (_id: string, name: string) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise<void>((resolve) => release.push(resolve))
+      inFlight -= 1
+      return `${name}-value`
+    })
+
+    const { result } = renderCreds({ accounts: ["a", "b", "c", "d"] })
+    await waitFor(() => expect(release.length).toBe(4))
+    await act(async () => {
+      release.forEach((resolve) => resolve())
+    })
+
+    // All four were open at once; a sequential loop would never exceed 1.
+    expect(peak).toBe(4)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.value("c")).toBe("c-value")
+  })
+
+  // Each field still keeps its own outcome — one refused read must not cost
+  // the others their prefilled values.
+  it("keeps per-field outcomes when one read of the batch is refused", async () => {
+    mockGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "appSecret") throw new Error("403 missing_capability")
+      return "readable"
+    })
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.value("appKey")).toBe("readable")
+    expect(result.current.status("appKey")).toBe("loaded")
+    expect(result.current.status("appSecret")).toBe("stored")
+    expect(result.current.refused).toBe(true)
+  })
+
   it("reads nothing for a create dialog", async () => {
     const { result } = renderCreds({ adapterId: null })
     expect(result.current.status("appSecret")).toBe("new")
@@ -267,7 +321,7 @@ describe("useAdapterCredentials", () => {
     expect(mockGet).toHaveBeenCalledTimes(2)
 
     stored({ appKey: "k", appSecret: "s" })
-    act(() => result.current.retry())
+    act(() => result.current.retry?.())
     await waitFor(() => expect(result.current.status("appSecret")).toBe("loaded"))
     expect(result.current.value("appSecret")).toBe("s")
   })
@@ -322,5 +376,74 @@ describe("isCredentialReadRefused", () => {
   it("survives a non-Error rejection", () => {
     expect(isCredentialReadRefused(undefined)).toBe(false)
     expect(isCredentialReadRefused("remote_control_forbidden")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-0152 — the admin lease a remote shell reads credentials behind
+// ---------------------------------------------------------------------------
+
+describe("admin lease", () => {
+  it("acquires the lease before the first read, not after it fails", async () => {
+    // Ordering is the whole point: a read issued first is refused, and the
+    // form would show "stored, cannot read" on a shell that was one prompt
+    // away from showing the value.
+    const order: string[] = []
+    mockEnsureLease.mockImplementation(async () => {
+      order.push("lease")
+      return "held"
+    })
+    mockGet.mockImplementation(async () => {
+      order.push("get")
+      return "value"
+    })
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(order[0]).toBe("lease")
+    expect(order).toContain("get")
+  })
+
+  it("re-acquires before a save so an expired window does not eat the write", async () => {
+    stored({ appKey: "old" })
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    mockEnsureLease.mockClear()
+
+    act(() => result.current.set("appKey", "new"))
+    await act(async () => {
+      await result.current.persist("adp_1")
+    })
+
+    expect(mockEnsureLease).toHaveBeenCalledTimes(1)
+    expect(mockSet).toHaveBeenCalledWith("adp_1", "appKey", "new")
+  })
+
+  it("clears the lease on an explicit retry so the operator is asked again", async () => {
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    act(() => result.current.retry?.())
+
+    expect(mockClearLease).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+  })
+
+  it("offers no retry where nothing could come of asking", async () => {
+    // No runtime anywhere: rendering an unlock affordance would be an offer
+    // the shell cannot honour.
+    mockCapability.mockReturnValue(false)
+    const { result } = renderCreds()
+
+    expect(result.current.retry).toBeUndefined()
+    expect(result.current.status("appKey")).toBe("stored")
+  })
+
+  it("offers no retry on a create dialog", async () => {
+    const { result } = renderCreds({ adapterId: null })
+
+    expect(result.current.retry).toBeUndefined()
+    expect(result.current.status("appKey")).toBe("new")
   })
 })

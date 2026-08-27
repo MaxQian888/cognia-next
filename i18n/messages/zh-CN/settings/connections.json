@@ -3,7 +3,8 @@
     "cancel": "取消",
     "enterField": "输入 {label}",
     "save": "保存",
-    "saving": "保存中…"
+    "saving": "保存中…",
+    "secretUnavailable": "此表单未接入凭据存储，无法在这里填写该值。"
   },
   "adapterFormSections": {
     "cancel": "取消",
@@ -1364,7 +1365,8 @@
     "statusNew": "尚未保存。",
     "statusStored": "已保存在宿主上。此处无法查看；输入新值可覆盖。",
     "statusUnset": "未设置。",
-    "storedPlaceholder": "已保存 —— 留空表示不修改"
+    "storedPlaceholder": "已保存 —— 留空表示不修改",
+    "unlock": "解锁"
   },
   "sendTest": {
     "advancedDescription": "直接传输探测会绕过静默时段、FIFO、重试、限流和熔断器；仅用于定位适配器或凭证故障。",

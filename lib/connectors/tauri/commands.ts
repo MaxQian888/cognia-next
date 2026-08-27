@@ -1,16 +1,26 @@
 /**
  * Typed wrappers around the connectors_* Tauri commands.
  *
- * By default all functions call `invoke` from `@tauri-apps/api/core` — in
- * web mode (no Tauri host) these will throw. Callers should guard with
- * `isTauri()` from `@/lib/tauri` before invoking.
+ * On a Tauri host every function calls `invoke` from `@tauri-apps/api/core`.
+ * Off one, the four arms ADR-0152 raised onto the device plane go over the
+ * companion `transport` instead — that is the only route a paired browser or
+ * phone has to them, and it is how a remote operator configures a bot at all.
+ * The other thirty-eight remain runtime-process commands with no device route;
+ * callers gate them with `lib/connectors/control-reach.ts`, which explains
+ * which host they need rather than letting them fail as a transport error.
  *
- * The transport is swappable via `setConnectorCommandInvoker` so the
- * headless brain (ADR-0059 T-A5) can route the SAME wrappers over the
- * companion `_rpc` arms instead of Tauri IPC — one implementation of every
- * command wrapper, two hosts.
+ * The whole surface is swappable via `setConnectorCommandInvoker` so the
+ * headless brain (ADR-0059 T-A5) can route the SAME wrappers over its
+ * in-process `_rpc` arms — one implementation of every command wrapper,
+ * three hosts.
  */
 import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri/transport-instance"
+import {
+  connectorCommandsNeedTransport,
+  connectorDeviceLease,
+  isDevicePlaneConnectorCommand,
+} from "@/lib/connectors/device-plane"
 import type { MatrixEncryptedFile } from "@/types/connectors/segment"
 import type { RuntimeLeaseAcquireResult } from "@/lib/connectors/runtime-lease"
 
@@ -30,18 +40,36 @@ export type ConnectorCommandInvoker = <T>(
 const tauriInvoker: ConnectorCommandInvoker = (name, args) =>
   args === undefined ? invoke(name) : invoke(name, args)
 
-let invoker: ConnectorCommandInvoker = tauriInvoker
+/**
+ * Host-neutral default: local IPC where there is one, the companion transport
+ * for the commands a device is allowed to reach.
+ *
+ * The lease rides along as an argument rather than a header because that is
+ * where `rpc.rs`'s step-up gate reads it from, and because it must survive the
+ * WebRTC DataChannel path, which has no headers at all. A missing lease is not
+ * an error here: the host answers `REMOTE_CONSENT_REQUIRED`, which the caller
+ * surfaces as "stored, not readable from this shell" plus a way to ask.
+ */
+const defaultInvoker: ConnectorCommandInvoker = (name, args) => {
+  if (connectorCommandsNeedTransport() && isDevicePlaneConnectorCommand(name)) {
+    const lease = connectorDeviceLease()
+    return transport.call(name, lease ? { ...(args ?? {}), adminLease: lease } : args)
+  }
+  return tauriInvoker(name, args)
+}
+
+let invoker: ConnectorCommandInvoker = defaultInvoker
 
 /**
- * Swap the transport behind every connectors_* wrapper. Pass `null` to
- * restore the default Tauri `invoke`. Returns the previously-active invoker
- * so callers can restore it on teardown.
+ * Swap the transport behind every connectors_* wrapper. Pass `null` to restore
+ * the host-neutral default. Returns the previously-active invoker so callers
+ * can restore it on teardown.
  */
 export function setConnectorCommandInvoker(
   fn: ConnectorCommandInvoker | null
 ): ConnectorCommandInvoker {
   const previous = invoker
-  invoker = fn ?? tauriInvoker
+  invoker = fn ?? defaultInvoker
   return previous
 }
 

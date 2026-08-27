@@ -51,6 +51,7 @@ import {
   connectorsKeyringList,
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
+import { clearCredentialLease, ensureCredentialLease } from "@/lib/connectors/credential-lease"
 import { useCapability } from "@/hooks/use-host-profile"
 // Type-only: the hook produces exactly the states the field renders, and
 // sharing the union is what stops the two from drifting apart.
@@ -100,8 +101,11 @@ export interface UseAdapterCredentialsResult {
   derivedPresence: (account: string) => boolean | undefined
   /** True while the initial read is in flight. */
   loading: boolean
-  /** Re-run the read after a failure. */
-  retry: () => void
+  /**
+   * Re-run the read, asking the host for consent again. Absent when there is
+   * nothing to re-read — a create dialog, or a shell with no runtime to ask.
+   */
+  retry?: () => void
   /**
    * Set when the host refused the read rather than failing — the form shows
    * this instead of the generic "saved on the host" line.
@@ -129,13 +133,16 @@ interface EditState {
 
 /**
  * Refusals are policy, not faults, and must not render as an error the
- * operator could retry their way out of.
+ * operator could retry their way out of — though some of them the operator
+ * CAN consent their way out of, which is what the unlock affordance is for.
  *
- * The connector keyring arms are `target: service`, so a device-scoped caller
- * is rejected by the transport gate, the service-scope gate or the capability
- * gate depending on which plane it came in on — and a browser with no host at
- * all fails inside `@tauri-apps/api`. All of them mean the same thing to a
- * form: a value exists that this shell may not see.
+ * Since ADR-0152 the keyring arms are `target: host-admin`, so a paired device
+ * is turned away by the admin-lease gate (`REMOTE_CONSENT_REQUIRED`) rather
+ * than by the service-scope gate — but the older shapes stay listed, because
+ * a device talking to a host that predates the change still meets them, as
+ * does a browser with no host at all failing inside `@tauri-apps/api`. All of
+ * them mean the same thing to a form: a value exists that this shell may not
+ * see.
  */
 export function isCredentialReadRefused(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? "")
@@ -194,21 +201,41 @@ export function useAdapterCredentials({
     let cancelled = false
 
     void (async () => {
+      // Before the first read, not after a failure: on a companion the reads
+      // below are device-plane RPCs, and without a lease every one of them
+      // comes back refused. `ensureCredentialLease` is a cache hit for the
+      // second dialog and a no-op wherever the keyring is local.
+      await ensureCredentialLease()
+
       const fields: Record<string, FieldState> = {}
       let refused = false
 
-      for (const name of accountList) {
-        try {
-          const stored = await connectorsKeyringGet(adapterId, name)
-          fields[name] =
-            stored === null || stored === ""
-              ? { original: null, status: "unset" }
-              : { original: stored, status: "loaded" }
-        } catch (err) {
-          const denied = isCredentialReadRefused(err)
-          refused ||= denied
-          fields[name] = { original: null, status: denied ? "stored" : "error" }
-        }
+      // One pass, not one round trip per field. The reads are independent, and
+      // `dirty` is gated on `!loading`, so a sequential loop left Save inert
+      // for the SUM of five round trips on Slack and four on Lark — seconds of
+      // it over the companion transport, where each hop is a network request
+      // rather than a local IPC. Each field keeps its own try/catch, so one
+      // refused read still lands as `stored` next to four that loaded.
+      const results = await Promise.all(
+        accountList.map(async (name): Promise<[string, FieldState, boolean]> => {
+          try {
+            const stored = await connectorsKeyringGet(adapterId, name)
+            return [
+              name,
+              stored === null || stored === ""
+                ? { original: null, status: "unset" }
+                : { original: stored, status: "loaded" },
+              false,
+            ]
+          } catch (err) {
+            const denied = isCredentialReadRefused(err)
+            return [name, { original: null, status: denied ? "stored" : "error" }, denied]
+          }
+        })
+      )
+      for (const [name, state, denied] of results) {
+        fields[name] = state
+        refused ||= denied
       }
 
       let derived: Record<string, boolean> = {}
@@ -266,6 +293,10 @@ export function useAdapterCredentials({
     [accountList, intentFor]
   )
 
+  // Re-reading only means something when there is a stored value to re-read
+  // and a runtime that could serve it.
+  const retryable = Boolean(adapterId) && connectorRuntime
+
   const missingRequired = useCallback(
     (required: readonly string[]) =>
       required.filter((name) => {
@@ -295,6 +326,10 @@ export function useAdapterCredentials({
 
   const persist = useCallback(
     async (targetId: string) => {
+      // A form can sit open longer than a lease lives; re-acquiring here costs
+      // nothing when the cached one is still good and is the difference
+      // between a save that lands and one that is refused at the gate.
+      await ensureCredentialLease()
       for (const name of accountList) {
         const decision = intentFor(name)
         if (decision === "set") await connectorsKeyringSet(targetId, name, typed[name].trim())
@@ -314,7 +349,19 @@ export function useAdapterCredentials({
     persist,
     derivedPresence: (account) => resolved?.derived[account],
     loading,
-    retry: () => setAttempt((n) => n + 1),
+    // Undefined rather than a no-op when nothing could change: a standalone
+    // browser has no host to ask, and offering "unlock" there would be an
+    // affordance that cannot work. Every form spreads this straight onto
+    // `CredentialInput.onRetry`, so the control simply is not rendered.
+    retry: retryable
+      ? () => {
+          // An explicit retry is the operator asking again, so it must clear
+          // the refusal cooldown as well as the token — otherwise the second
+          // click would be answered from cache for the next thirty seconds.
+          clearCredentialLease()
+          setAttempt((n) => n + 1)
+        }
+      : undefined,
     refused: resolved?.refused ?? false,
   }
 }

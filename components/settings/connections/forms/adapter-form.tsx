@@ -59,9 +59,12 @@ export interface AdapterFormProps {
   /** Field names that hold secrets — rendered as `CredentialInput`. */
   secretFields?: string[]
   /**
-   * Keyring-backed state for the secret fields. Required whenever
-   * `secretFields` is non-empty: the form deliberately has no local secret
-   * state, so there is no path on which a secret reaches `values`.
+   * Keyring-backed state for the secret fields. Needed whenever `secretFields`
+   * is non-empty: the form deliberately has no local secret state, so there is
+   * no path on which a secret reaches `values`. Optional only so a schema with
+   * no secrets can omit it — a secret field without a controller renders
+   * DISABLED rather than falling back to the plain input, which would write the
+   * value into `values` and persist it into the row.
    */
   credentials?: UseAdapterCredentialsResult
   onSubmit: (values: Record<string, unknown>) => void | Promise<void>
@@ -188,15 +191,22 @@ export function AdapterForm({
             {prop.description && (
               <p className="text-xs text-muted-foreground">{prop.description}</p>
             )}
-            {isSecret && credentials ? (
+            {isSecret ? (
+              // A secret NEVER falls back to the plain input below: that branch
+              // writes through `updateValue`, so an omitted `credentials` would
+              // put the value into `values` and persist it unencrypted into
+              // `AdapterInstanceRow.settings`. Without a controller there is
+              // nowhere safe to keep it, so the field renders inert instead.
               <CredentialInput
                 id={fieldId}
                 sensitive
-                value={credentials.value(key)}
-                status={credentials.status(key)}
-                onChange={(next) => credentials.set(key, next)}
-                disabled={disabled || submitting}
+                value={credentials ? credentials.value(key) : ""}
+                status={credentials ? credentials.status(key) : "stored"}
+                onChange={(next) => credentials?.set(key, next)}
+                disabled={disabled || submitting || !credentials}
                 placeholder={t("enterField", { label })}
+                unavailableReason={credentials ? undefined : t("secretUnavailable")}
+                onRetry={credentials?.retry}
               />
             ) : (
               <Input

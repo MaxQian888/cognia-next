@@ -41,6 +41,7 @@ import {
   CheckCircle2Icon,
   EyeIcon,
   EyeOffIcon,
+  KeyRoundIcon,
   LoaderIcon,
   LockIcon,
   RotateCwIcon,
@@ -83,7 +84,12 @@ export interface CredentialInputProps {
    * when `status === "stored"`; a generic line is used when omitted.
    */
   unavailableReason?: string
-  /** Retry affordance for `status === "error"`. */
+  /**
+   * Ask the host again — a retry for `status === "error"`, and an unlock for
+   * `status === "stored"`, where the value exists but this shell has not been
+   * granted a look at it. Omit when nothing could come of asking (no adapter
+   * yet, or no runtime anywhere); the control is then not rendered at all.
+   */
   onRetry?: () => void
   className?: string
 }
@@ -217,6 +223,24 @@ function CredentialStatusLine({
       <p id={id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <LockIcon className="size-3 shrink-0" aria-hidden />
         <span className="min-w-0">{unavailableReason ?? t("statusStored")}</span>
+        {/*
+          A remote shell reaches the keyring behind an admin lease (ADR-0152),
+          so "cannot be shown here" is frequently one consent away rather than
+          a permanent fact. Without this the state was a dead end: the value
+          was there, the operator could have been allowed to see it, and the
+          only offer on screen was to overwrite it blind.
+        */}
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={disabled}
+            className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2 disabled:opacity-50"
+          >
+            <KeyRoundIcon className="size-3" aria-hidden />
+            {t("unlock")}
+          </button>
+        ) : null}
       </p>
     )
   }

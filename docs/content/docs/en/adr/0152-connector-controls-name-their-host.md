@@ -101,6 +101,30 @@ The rest of the connector plane stays service-only. Nothing an operator does
 in Settings needs to open a raw websocket or drive Matrix crypto, and widening
 the whole family would trade a real boundary for nothing.
 
+**7. Only the raised arms are routed, and only on a paired profile.**
+`lib/connectors/device-plane.ts` holds the list of `connectors_*` commands a
+device may reach — the four above and nothing else — and the default invoker
+sends exactly those over `transport` when `detectHostProfile()` says the
+keyring lives on a paired host. The other thirty-eight keep calling Tauri
+`invoke`, because routing them would replace `control-reach.ts`'s precise
+"this control talks to the runtime process" with a 403.
+
+The predicate is the host profile rather than `!isTauri()` deliberately: a
+`web-standalone` browser has no host to reach and a `headless` brain replaces
+the whole invoker with its own, so both keep local behaviour and neither makes
+a doomed round trip. It is also the same predicate `credentialLeaseRequired`
+uses, so "route it there" and "it needs a lease" cannot disagree.
+
+**8. One lease per session, taken on an operator gesture, released by time.**
+`lib/connectors/credential-lease.ts` acquires a single lease covering all four
+operations and caches it until it expires. A Slack form reads five credentials
+and writes up to five more; ten prompts would train an operator to approve
+without reading. A refusal is remembered briefly so a re-mounting dialog cannot
+queue a prompt per paint, and an explicit retry clears it — which is what the
+new unlock affordance on a `stored` field does. The lease rides in the
+arguments rather than a header because that is where `rpc.rs` reads it and
+because the WebRTC DataChannel path has no headers.
+
 ## Consequences
 
 - The web-mode banner no longer claims the Inbox is read-only on a companion.
@@ -111,15 +135,20 @@ the whole family would trade a real boundary for nothing.
   one.
 - OneBot's Verify and Probe buttons render disabled instead of disappearing,
   matching the rule the capability surfaces adopted: render, disable, explain.
-- The four keyring arms are reachable from a device *at the protocol level*,
-  and are not yet usable from one: `lib/connectors/tauri/commands.ts` still
-  calls Tauri `invoke` rather than the routed `transport`, so the call never
-  leaves a browser, and no form requests the lease those arms now demand. The
-  door moved from "impossible" to "needs a lease you cannot yet obtain" —
-  strictly closed either way, which is why it is safe to land first. The UI
-  keeps saying `runs-on-host`, so nothing on screen claims otherwise. Routing
-  the wrappers costs ~21 adapter suites that mock `invoke` and would start
-  meeting the web stub's rejection; that is its own unit of work.
+- A paired browser or phone can now read back and write connector credentials.
+  Everything else in the connector settings section still says `runs-on-host`,
+  which remains true: testing a token or probing a bot identity talks to the
+  runtime process, and that has not moved.
+- A credential a shell may not read is no longer a dead end. `stored` renders
+  an unlock next to it, and the only thing the state used to offer — overwrite
+  it blind — is no longer the only thing.
+- Removing an adapter from a companion now destroys its secrets instead of
+  reporting them under `failedCredentials`. The purge is the one step in that
+  path whose refusal leaves something behind.
+- The predicted ~21-suite cost of routing did not materialise: it was a
+  consequence of routing on `!isTauri()`, which makes every node-env test look
+  like a companion. Keying on the profile left the adapter suites untouched and
+  needed changes in one.
 - The generated mirrors (`host-command-catalog.json`, the OpenAPI specs, the
   headless contract hash) are NOT regenerated: `companion-api:gen` exits 1 on
   `dev` because eleven `git_stack_*` commands have no canonical dispatch arm.
@@ -134,6 +163,17 @@ the whole family would trade a real boundary for nothing.
 capability is true on a companion, so every control would enable and then fail
 with a Tauri transport error. A precise message beats an enabled button that
 does not work.
+
+**Route every `connectors_*` wrapper through `transport`.** One rule instead of
+a list, but thirty-eight of the forty-two would then reach a transport gate
+that 403s before the RPC layer sees them. The list is pinned against
+`protocol/companion-commands.json` in both directions, so a future manifest
+change that opens another command fails a test rather than rotting.
+
+**Mint the lease lazily inside the invoker.** It would need no call sites, and
+it would make any background credential read — a runtime bootstrap, a health
+probe — silently request elevated access. The acquisition sits with the two
+callers that represent an operator at a form instead.
 
 **Give plugins a `secretFields` array on `PluginConnectorDef`.** It is wire
 format in the plugin SDK, so adding a field is a breaking-ish change for a

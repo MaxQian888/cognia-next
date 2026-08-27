@@ -15,6 +15,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
 }))
 
+const mockEnsureLease = jest.fn().mockResolvedValue("not-required")
+jest.mock("@/lib/connectors/credential-lease", () => ({
+  ensureCredentialLease: () => mockEnsureLease(),
+}))
+
 const mockPrune = jest.fn().mockResolvedValue(0)
 jest.mock("@/lib/connectors/attachment-fetcher", () => ({
   pruneAttachmentsForAdapter: (...args: unknown[]) => mockPrune(...args),
@@ -45,6 +50,7 @@ beforeEach(() => {
   mockHasCapability.mockReturnValue(true)
   mockServerBacked.mockReturnValue([])
   mockKeyringDelete.mockResolvedValue(undefined)
+  mockEnsureLease.mockResolvedValue("not-required")
   mockPrune.mockResolvedValue(0)
   mockDelete.mockResolvedValue(undefined)
   mockReap.mockResolvedValue({ reaped: {}, failed: [] })
@@ -136,5 +142,35 @@ describe("removeAdapterInstance", () => {
     expect(mockPrune).toHaveBeenCalledWith("orphan")
     expect(mockDelete).toHaveBeenCalledWith("orphan")
     expect(result.purgedCredentials).toEqual([])
+  })
+})
+
+describe("device-plane purge", () => {
+  it("takes an admin lease before deleting a remote keyring entry", async () => {
+    // The purge is the one step whose refusal leaves something behind — an
+    // orphaned secret under a `failedCredentials` nobody reads. Asking for the
+    // lease first is what makes a removal from a phone actually destroy it.
+    const order: string[] = []
+    mockEnsureLease.mockImplementation(async () => {
+      order.push("lease")
+      return "held"
+    })
+    mockKeyringDelete.mockImplementation(async () => {
+      order.push("delete")
+    })
+
+    await removeAdapterInstance(ROW)
+
+    expect(order).toEqual(["lease", "delete", "delete"])
+  })
+
+  it("does not ask for a lease when there is no runtime to purge against", async () => {
+    mockHasCapability.mockReturnValue(false)
+    mockServerBacked.mockReturnValue([])
+
+    await removeAdapterInstance(ROW)
+
+    expect(mockEnsureLease).not.toHaveBeenCalled()
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })
