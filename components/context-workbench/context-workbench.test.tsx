@@ -2207,4 +2207,56 @@ describe("ContextWorkbench — header projection", () => {
       outlet.remove()
     }
   })
+
+  it("brings the header home while the focus takeover covers the outlet", () => {
+    const outlet = document.createElement("div")
+    document.body.appendChild(outlet)
+    try {
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbench
+            workbenchInstanceId="window-a"
+            resource={resource}
+            panels={panels}
+            headerOutlet={outlet}
+          />
+        </NextIntlClientProvider>
+      )
+      expect(outlet).toContainElement(screen.getByTestId("context-workbench-header"))
+
+      fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+
+      // The takeover is `fixed inset-0 z-50` and marks every sibling branch
+      // inert — a header left in the host's outlet was drawn *under* it and
+      // could not be clicked, so a maximized workbench had no visible way back
+      // to narrow or wide at all.
+      const header = screen.getByTestId("context-workbench-header")
+      expect(outlet).not.toContainElement(header)
+      expect(screen.getByTestId("context-workbench")).toContainElement(header)
+      expect(header.tagName).toBe("HEADER")
+
+      // And the way out actually works from there.
+      fireEvent.click(screen.getByRole("button", { name: "Narrow mode" }))
+      expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-mode", "narrow")
+    } finally {
+      outlet.remove()
+    }
+  })
+  it("dismisses the takeover from the lit Focus button", () => {
+    renderWorkbench(panels)
+    const focusButton = screen.getByRole("button", { name: "Focus mode" })
+    expect(focusButton).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(focusButton)
+    expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-mode", "focus")
+    expect(screen.getByRole("button", { name: "Focus mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    // It used to re-select the mode it was already in, so the lit button was
+    // the one control on the takeover that did nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+    expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-mode", "narrow")
+  })
 })

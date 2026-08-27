@@ -95,6 +95,14 @@ const log = loggers.ui
 
 const NARROW_QUERY = "(max-width: 760px)"
 
+/**
+ * Smallest share of the bar the centre zone may be squeezed to by the column
+ * outlets. Half: the centre carries the route history, the workspace pill, the
+ * search / palette pill and the command centre *plus* the projected chat header
+ * — the outlets carry one column header each and right-align it.
+ */
+const TITLE_BAR_MIN_CENTRE_RATIO = 0.5
+
 // Override classes applied at the call site of every MenubarContent /
 // DropdownMenuContent inside the title bar. The shadcn primitives ship with
 // `animate-in` / `animate-out` enter+exit keyframes plus a soft `shadow-md`,
@@ -240,8 +248,10 @@ export function TitleBar() {
   const sidebarPx = useShellColumnsStore((s) => s.widths.sidebar)
   const dockPx = useShellColumnsStore((s) => s.widths.dock)
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
+  const barRef = useRef<HTMLElement | null>(null)
   const leftChromeRef = useRef<HTMLDivElement | null>(null)
   const rightChromeRef = useRef<HTMLDivElement | null>(null)
+  const barPx = useElementWidth(barRef)
   const leftChromePx = useElementWidth(leftChromeRef)
   const rightChromePx = useElementWidth(rightChromeRef)
   const terminalOpen = useTerminalStore((s) => s.panelOpen)
@@ -343,12 +353,41 @@ export function TitleBar() {
   const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarPx : 0
   // Must match the header's `pl-20` / `pl-2` below.
   const barPaddingLeftPx = isMac ? 80 : 8
-  const startOutletPx = projected.start
+  const columnStartPx = projected.start
     ? Math.max(0, railLeftPx + sidebarPx - barPaddingLeftPx - leftChromePx)
     : 0
-  const endOutletPx = projected.end
+  const columnEndPx = projected.end
     ? Math.max(0, railRightPx + sidebarRightPx + dockPx - rightChromePx)
     : 0
+  // Tracking the columns exactly is right until a column is wide enough to
+  // starve the bar's own row. A workbench opened to its `wide` preset is half
+  // the window, and the end outlet then reserved half the bar for a header
+  // that is four right-aligned icons — the conversation title next to it
+  // truncated to a single character with ~700px of empty outlet beside it.
+  //
+  // So the centre keeps a floor, and what it borrows comes off the projected
+  // outlets: the end one first (its content is right-aligned against the bar's
+  // trailing chrome, so shrinking the outlet moves nothing that is drawn — only
+  // the empty leading part of it), then the start one. `barPx === 0` is "not
+  // measured yet", which must not shave anything.
+  const centreFloorPx = barPx > 0 ? Math.round(barPx * TITLE_BAR_MIN_CENTRE_RATIO) : 0
+  const centreUnclampedPx =
+    barPx > 0
+      ? barPx - barPaddingLeftPx - leftChromePx - rightChromePx - columnStartPx - columnEndPx
+      : 0
+  const centreDeficitPx = barPx > 0 ? Math.max(0, centreFloorPx - centreUnclampedPx) : 0
+  const endOutletPx = Math.max(0, columnEndPx - centreDeficitPx)
+  const startOutletPx = Math.max(0, columnStartPx - Math.max(0, centreDeficitPx - columnEndPx))
+  // While the centre is being *held* at that floor there is no slack to centre
+  // anything in, and the counterweight below would only take the room back off
+  // the projected chat header. It stands down for exactly that case — which is
+  // the deficit having actually been taken off an outlet, not the raw centre
+  // width. A bar with nothing projected beside it (or one narrow enough that
+  // the chrome alone puts the centre under half) has no outlet to reclaim from,
+  // so shaving nothing while dropping the counterweight would only shove the
+  // cluster off-centre — the very thing the counterweight exists to prevent.
+  const reclaimedFromOutletsPx = Math.min(centreDeficitPx, columnStartPx + columnEndPx)
+  const centreHasSlack = barPx === 0 || reclaimedFromOutletsPx === 0
   // With the conversation rail's header in the bar the Windows/Linux menubar
   // would sit over that column and push its header off its own rail, so the
   // menus fold into the hamburger whenever the start zone is projected — the
@@ -632,6 +671,7 @@ export function TitleBar() {
   return (
     <>
       <header
+        ref={barRef}
         data-tauri-drag-region
         data-app-chrome
         data-testid="title-bar"
@@ -1354,8 +1394,11 @@ export function TitleBar() {
               centred on every route *except* inside a conversation. Mirroring
               the outlet's flex weight on the far side keeps the cluster centred
               in the chat column either way. Rendered only while the outlet is,
-              so the un-projected bar keeps the exact layout it had. */}
-          {projected.center ? (
+              so the un-projected bar keeps the exact layout it had — and only
+              while the centre is above its floor (`centreHasSlack`): an equal
+              share of *no* slack is not centring, it is taking half of what is
+              left off the conversation title. */}
+          {projected.center && centreHasSlack ? (
             <div
               aria-hidden
               data-tauri-drag-region

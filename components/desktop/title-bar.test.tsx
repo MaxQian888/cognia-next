@@ -1850,6 +1850,22 @@ function renderProjecting(zones: Array<"start" | "center" | "end">) {
   )
 }
 
+/**
+ * jsdom measures every element at 0, which is exactly the "not measured yet"
+ * case the bar treats as "do not clamp anything". Give the elements named here
+ * a width so the clamp is exercised at all.
+ */
+function stubMeasuredWidths(widths: Record<string, number>): () => void {
+  const original = Element.prototype.getBoundingClientRect
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const width = widths[this.getAttribute("data-testid") ?? ""] ?? 0
+    return { ...new DOMRect(0, 0, width, 0).toJSON(), width, toJSON: () => ({}) } as DOMRect
+  }
+  return () => {
+    Element.prototype.getBoundingClientRect = original
+  }
+}
+
 describe("column-header projection", () => {
   beforeEach(() => {
     act(() =>
@@ -1984,6 +2000,68 @@ describe("column-header projection", () => {
     // Rail is on the left by default, so nothing offsets the right edge; the
     // chrome after the outlet measures zero in jsdom.
     expect(end).toHaveStyle({ width: "420px" })
+  })
+
+  test("stops reserving the dock's full width once the centre would fall below half the bar", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    const restore = stubMeasuredWidths({ "title-bar": 1200 })
+    try {
+      act(() => useShellColumnsStore.getState().setColumnWidth("dock", 900))
+      renderProjecting(["center", "end"])
+      const end = await screen.findByTestId("title-bar-outlet-end")
+      // A workbench opened to its `wide` preset is half the window. Tracking it
+      // exactly left the bar's own row 292px for the route history, the
+      // workspace pill, the search pill AND the projected conversation title —
+      // which truncated to one character beside ~600px of empty outlet. The
+      // centre keeps half the bar (600), and the 308px it is short comes off
+      // the end outlet: 900 - 308.
+      await waitFor(() => expect(end).toHaveStyle({ width: "592px" }))
+      // Nothing that is drawn moves — the dock header is right-aligned against
+      // the bar's trailing chrome, so only the empty leading part is given up.
+      expect(end).toContainElement(screen.getByTestId("projected-end"))
+      // And an equal share of no slack is not centring, it is taking half of
+      // what is left off the header beside it.
+      expect(screen.queryByTestId("title-bar-center-counterweight")).toBeNull()
+    } finally {
+      restore()
+    }
+  })
+
+  test("keeps the counterweight when the floor has no outlet to reclaim from", async () => {
+    isTauriMock.mockReturnValue(true)
+    // macOS reserves 80px for the traffic lights, so a small window puts the
+    // centre under half the bar on padding alone — with no projected column
+    // beside it, and therefore nothing for the floor to take back.
+    setPlatform("MacIntel")
+    const restore = stubMeasuredWidths({ "title-bar": 150 })
+    try {
+      renderProjecting(["center"])
+      await screen.findByTestId("title-bar")
+      // Dropping the counterweight here would shove the cluster off-centre for
+      // no gain: the floor is only worth enforcing when an outlet is actually
+      // giving room up.
+      await waitFor(() =>
+        expect(screen.getByTestId("title-bar-center-counterweight")).toBeInTheDocument()
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  test("a dock the bar can afford is still tracked exactly, counterweight and all", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    const restore = stubMeasuredWidths({ "title-bar": 1200 })
+    try {
+      act(() => useShellColumnsStore.getState().setColumnWidth("dock", 300))
+      renderProjecting(["center", "end"])
+      const end = await screen.findByTestId("title-bar-outlet-end")
+      await waitFor(() => expect(end).toHaveStyle({ width: "300px" }))
+      expect(screen.getByTestId("title-bar-center-counterweight")).toBeInTheDocument()
+    } finally {
+      restore()
+    }
   })
 
   test("without a provider (mobile shell) headers stay inline and the bar is unaffected", async () => {

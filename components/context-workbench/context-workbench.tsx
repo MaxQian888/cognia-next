@@ -1353,6 +1353,14 @@ export function ContextWorkbench({
   const widthMode: ContextWorkbenchMode =
     layout.mode === "focus" ? "focus" : (resolvedMode ?? layout.mode)
   const isFocus = layout.mode === "focus"
+  // Where the takeover lands when it is dismissed by its own button. The host's
+  // width if it has one, and never narrow while a split is open — narrow has no
+  // room for two panes, so leaving focus into it would silently destroy the
+  // layout the takeover was holding (the same rule `handleExpand` follows).
+  //
+  // No `resolvedMode === "focus"` arm: per the invariant `widthMode` above
+  // relies on, a host's `resolvedMode` only ever speaks for narrow vs wide.
+  const exitFocusMode: ContextPanelMode = layout.splitPanelId ? "wide" : (resolvedMode ?? "narrow")
   const focusExiting = useFocusExitAnimation(isFocus)
   // The takeover owns the viewport for the entrance, the whole time it is held,
   // and now the exit too.
@@ -1511,12 +1519,18 @@ export function ContextWorkbench({
             >
               <Rows3Icon className="size-4" />
             </Button>
+            {/* A toggle, not a one-way door. Pressing the lit Focus button did
+                nothing — `selectMode("focus")` while already focused — so the
+                only ways out of the takeover were Escape and picking a width.
+                `aria-pressed` says which way it will go without needing a
+                second label for the same control. */}
             <Button
               type="button"
               size="icon-sm"
               variant={layout.mode === "focus" ? "secondary" : "ghost"}
+              aria-pressed={layout.mode === "focus"}
               aria-label={t("contextWorkbench.actions.focus")}
-              onClick={() => selectMode("focus")}
+              onClick={() => selectMode(layout.mode === "focus" ? exitFocusMode : "focus")}
             >
               <FocusIcon className="size-4" />
             </Button>
@@ -1619,27 +1633,33 @@ export function ContextWorkbench({
       ) : null}
     </>
   )
-  const headerRow = headerOutlet ? (
-    createPortal(
-      <div
+  // A focus takeover is `fixed inset-0 z-50` — it covers the title bar, and with
+  // it the outlet this header portals into. Projected there it was drawn *under*
+  // the takeover: a full-screen workbench with no visible narrow / wide / focus
+  // buttons and no way back short of Escape. The header comes home for as long
+  // as the surface owns the viewport, exit animation included.
+  const headerRow =
+    headerOutlet && !focusTakeover ? (
+      createPortal(
+        <div
+          data-testid="context-workbench-header"
+          className="@container/wb-header flex h-full min-w-0 flex-1 items-center gap-1 px-2"
+          // The activity rail keeps its column inside the dock, so the projected
+          // row starts where the header used to: past it.
+          style={{ paddingLeft: WORKBENCH_RAIL_WIDTH_PX + 8 }}
+        >
+          {headerContent}
+        </div>,
+        headerOutlet
+      )
+    ) : (
+      <header
         data-testid="context-workbench-header"
-        className="@container/wb-header flex h-full min-w-0 flex-1 items-center gap-1 px-2"
-        // The activity rail keeps its column inside the dock, so the projected
-        // row starts where the header used to: past it.
-        style={{ paddingLeft: WORKBENCH_RAIL_WIDTH_PX + 8 }}
+        className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2"
       >
         {headerContent}
-      </div>,
-      headerOutlet
+      </header>
     )
-  ) : (
-    <header
-      data-testid="context-workbench-header"
-      className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2"
-    >
-      {headerContent}
-    </header>
-  )
 
   return (
     <ContextWorkbenchContext.Provider value={value}>
