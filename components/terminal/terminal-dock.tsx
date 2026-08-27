@@ -88,6 +88,7 @@ import { TerminalSearchOverlay } from "./terminal-search-overlay"
 import { TerminalShareDialog } from "./terminal-share-dialog"
 import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
+import type { TabColorPreset, TabIconPreset } from "@/lib/terminal/tab-appearance"
 import { TerminalTabStrip } from "./terminal-tab-strip"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { messagePermalinkQuery } from "@/lib/chat/message-permalink"
@@ -101,6 +102,7 @@ export function TerminalDock() {
   const splitPanes = useTerminalStore((s) => s.splitPanes)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
   const renameSession = useTerminalStore((s) => s.renameSession)
+  const setTabAppearance = useTerminalStore((s) => s.setTabAppearance)
   const setAgentTrusted = useTerminalStore((s) => s.setAgentTrusted)
   const addPaneToGroup = useTerminalStore((s) => s.addPaneToGroup)
 
@@ -431,6 +433,17 @@ export function TerminalDock() {
     setRenameTarget(id)
   }, [])
 
+  // The tab colour/icon grids live in the context menu's own submenu, so there
+  // is no dialog to open and nothing to hold: the change is committed straight
+  // to the store, and `terminal-tab.tsx` already paints `tabColorBorderClass`
+  // from the row.
+  const handleChangeAppearance = useCallback(
+    (id: string, appearance: { color?: TabColorPreset; icon?: TabIconPreset }) => {
+      setTabAppearance(id, appearance)
+    },
+    [setTabAppearance]
+  )
+
   const commitRename = useCallback(
     (id: string, value: string | null) => {
       renameSession(id, value)
@@ -462,6 +475,7 @@ export function TerminalDock() {
         onCloseOthers={handleCloseOthers}
         onToggleAgentTrust={handleToggleTrust}
         onLocateInChat={handleLocateInChat}
+        onChangeAppearance={handleChangeAppearance}
       >
         {tab}
       </TerminalTabContextMenu>
@@ -473,6 +487,7 @@ export function TerminalDock() {
       handleCloseOthers,
       handleToggleTrust,
       handleLocateInChat,
+      handleChangeAppearance,
     ]
   )
 
@@ -702,6 +717,7 @@ export function TerminalDock() {
               onCloseOthers={handleCloseOthers}
               onToggleAgentTrust={handleToggleTrust}
               onLocateInChat={handleLocateInChat}
+              onChangeAppearance={handleChangeAppearance}
               onCopy={() => void focusedHandleRef.current?.copySelection()}
               onPaste={() => void focusedHandleRef.current?.pasteFromClipboard()}
               onSelectAll={() => focusedHandleRef.current?.selectAll()}

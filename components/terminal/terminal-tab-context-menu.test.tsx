@@ -155,4 +155,23 @@ describe("TerminalTabContextMenu", () => {
     fireEvent.click(screen.getByTestId("terminal-tab-menu-find"))
     expect(onFind).toHaveBeenCalledTimes(1)
   })
+
+  it("hides the appearance submenu when the caller cannot commit one", () => {
+    renderMenu()
+    expect(screen.queryByTestId("terminal-tab-menu-appearance")).not.toBeInTheDocument()
+  })
+
+  it("commits a colour straight from the submenu, for this row", () => {
+    // The submenu holds the grids directly, so there is no dialog to open and
+    // nothing to hold: the pick is the commit.
+    const onChangeAppearance = jest.fn()
+    renderMenu({ onChangeAppearance })
+    // Keyboard rather than hover: Radix opens a submenu on `pointermove`,
+    // which jsdom never synthesises from a click.
+    const trigger = screen.getByTestId("terminal-tab-menu-appearance")
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: "ArrowRight" })
+    fireEvent.click(screen.getByTestId("tab-color-red"))
+    expect(onChangeAppearance).toHaveBeenCalledWith("s-1", { color: "red" })
+  })
 })

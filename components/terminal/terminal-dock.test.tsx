@@ -285,6 +285,22 @@ describe("TerminalDock", () => {
     expect(empty.getAttribute("data-variant")).toBe("desktop")
   })
 
+  it("commits a tab appearance change from the context menu to the store", async () => {
+    // The store, the row fields, the tab's border class, both locales' strings
+    // and the menu item all shipped; this connection did not, so the item
+    // never rendered and the picker had no importer at all.
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+
+    fireEvent.contextMenu(screen.getAllByTestId("terminal-tab")[0])
+    const trigger = await screen.findByTestId("terminal-tab-menu-appearance")
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: "ArrowRight" })
+    fireEvent.click(await screen.findByTestId("tab-color-red"))
+
+    expect(useTerminalStore.getState().sessions["s-1"].tabColor).toBe("red")
+  })
+
   it("renders a tab per session belonging to the active project", () => {
     const project = seedProjectAndSession({ sessionId: "s-1" })
     useTerminalStore.getState().registerSession({

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { TerminalTabAppearancePicker } from "./terminal-tab-appearance-picker"
 
 const messages = {
@@ -46,39 +47,46 @@ function renderPicker(
     onChange: jest.fn(),
     ...props,
   }
-  return render(
+  // Mounted inside a real, open context menu: the swatches are `ContextMenuItem`s
+  // so that Radix's roving focus and typeahead can reach them (a plain button in
+  // a `role="radiogroup"` is invisible to both), and those require a menu
+  // context. This is also the only surface that renders the picker.
+  const result = render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <TerminalTabAppearancePicker {...defaultProps} />
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button data-testid="trigger">tab</button>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <TerminalTabAppearancePicker {...defaultProps} />
+        </ContextMenuContent>
+      </ContextMenu>
     </NextIntlClientProvider>
   )
+  fireEvent.contextMenu(screen.getByTestId("trigger"))
+  return result
 }
 
 describe("TerminalTabAppearancePicker", () => {
-  it("renders a trigger button", () => {
+  it("renders its grids inline, with no surface of its own", () => {
+    // It used to wrap itself in a Popover with a colour-dot trigger. The tab
+    // context menu embeds it in a submenu, which is already a positioned,
+    // dismissable surface — a nested Popover only fights it for focus.
     renderPicker()
-    expect(screen.getByTestId("tab-appearance-trigger")).toBeInTheDocument()
+    expect(screen.getByTestId("tab-appearance-grids")).toBeInTheDocument()
+    expect(screen.queryByTestId("tab-appearance-trigger")).not.toBeInTheDocument()
   })
 
-  it("opens the popover when trigger is clicked", async () => {
+  it("renders all 9 color options", () => {
     renderPicker()
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    expect(await screen.findByTestId("tab-appearance-popover")).toBeInTheDocument()
-  })
-
-  it("renders all 9 color options", async () => {
-    renderPicker()
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
     const colors = ["none", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"]
     for (const color of colors) {
       expect(screen.getByTestId(`tab-color-${color}`)).toBeInTheDocument()
     }
   })
 
-  it("renders all 9 icon options", async () => {
+  it("renders all 9 icon options", () => {
     renderPicker()
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
     const icons = [
       "none",
       "terminal",
@@ -95,47 +103,27 @@ describe("TerminalTabAppearancePicker", () => {
     }
   })
 
-  it("calls onChange with color when a color is clicked", async () => {
+  it("reports a colour and an icon independently", () => {
+    // Partial by design: the store's `setTabAppearance` leaves an omitted
+    // field alone, so picking a colour must not reset the icon.
     const onChange = jest.fn()
     renderPicker({ onChange })
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
     fireEvent.click(screen.getByTestId("tab-color-red"))
     expect(onChange).toHaveBeenCalledWith({ color: "red" })
-  })
 
-  it("calls onChange with icon when an icon is clicked", async () => {
-    const onChange = jest.fn()
-    renderPicker({ onChange })
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
     fireEvent.click(screen.getByTestId("tab-icon-database"))
-    expect(onChange).toHaveBeenCalledWith({ icon: "database" })
+    expect(onChange).toHaveBeenLastCalledWith({ icon: "database" })
   })
 
-  it("marks the current color as checked", async () => {
+  it("marks the current color as checked", () => {
     renderPicker({ color: "blue" })
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
-    const blueBtn = screen.getByTestId("tab-color-blue")
-    expect(blueBtn).toHaveAttribute("aria-checked", "true")
-    const redBtn = screen.getByTestId("tab-color-red")
-    expect(redBtn).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("tab-color-blue")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("tab-color-red")).toHaveAttribute("aria-checked", "false")
   })
 
-  it("marks the current icon as checked", async () => {
+  it("marks the current icon as checked", () => {
     renderPicker({ icon: "rocket" })
-    fireEvent.click(screen.getByTestId("tab-appearance-trigger"))
-    await screen.findByTestId("tab-appearance-popover")
-    const rocketBtn = screen.getByTestId("tab-icon-rocket")
-    expect(rocketBtn).toHaveAttribute("aria-checked", "true")
-    const noneBtn = screen.getByTestId("tab-icon-none")
-    expect(noneBtn).toHaveAttribute("aria-checked", "false")
-  })
-
-  it("renders a custom trigger when provided", () => {
-    renderPicker({ trigger: <button data-testid="custom-trigger">Custom</button> })
-    expect(screen.getByTestId("custom-trigger")).toBeInTheDocument()
-    expect(screen.queryByTestId("tab-appearance-trigger")).not.toBeInTheDocument()
+    expect(screen.getByTestId("tab-icon-rocket")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("tab-icon-none")).toHaveAttribute("aria-checked", "false")
   })
 })

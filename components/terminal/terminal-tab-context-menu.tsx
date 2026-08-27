@@ -14,6 +14,11 @@
  *   * Restart      — kills + respawns with the same shell + cwd + agent.
  *   * Close        — calls onClose (same as ×).
  *   * Close Others — closes every other tab in the same project.
+ *   * Appearance   — a submenu holding the colour + icon grids. A submenu
+ *                    rather than an item that opens a popover: a `Popover`
+ *                    nested inside a Radix context menu fights it for focus
+ *                    and for the dismiss gesture, and the menu already
+ *                    provides a positioned, keyboard-navigable surface.
  *   * Trust Agent  — toggles `agentTrusted` (Wave 3D consumes this).
  */
 
@@ -27,9 +32,15 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import type { TerminalSessionRow } from "@/stores/terminal/terminal-store"
+import type { TabColorPreset, TabIconPreset } from "@/lib/terminal/tab-appearance"
+
+import { TerminalTabAppearancePicker } from "./terminal-tab-appearance-picker"
 
 export interface TerminalTabContextMenuProps {
   row: TerminalSessionRow
@@ -40,8 +51,15 @@ export interface TerminalTabContextMenuProps {
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
   onToggleAgentTrust: (id: string, trusted: boolean) => void
-  /** Open the appearance picker for the tab. */
-  onChangeAppearance?: (id: string) => void
+  /**
+   * Commit a colour / icon change for this tab. Omit to drop the submenu —
+   * the body menu on the terminal instance offers it too, so both mounts pass
+   * it and there is no surface where the row is unknown.
+   */
+  onChangeAppearance?: (
+    id: string,
+    appearance: { color?: TabColorPreset; icon?: TabIconPreset }
+  ) => void
   /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
   onLocateInChat?: (chatSessionId: string, messageId?: string | null) => void
   /**
@@ -116,12 +134,18 @@ export function TerminalTabContextMenu({
           {t("rename")}
         </ContextMenuItem>
         {onChangeAppearance ? (
-          <ContextMenuItem
-            onSelect={() => onChangeAppearance(row.id)}
-            data-testid="terminal-tab-menu-appearance"
-          >
-            {t("appearance")}
-          </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger data-testid="terminal-tab-menu-appearance">
+              {t("appearance")}
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="p-0">
+              <TerminalTabAppearancePicker
+                color={row.tabColor}
+                icon={row.tabIcon}
+                onChange={(appearance) => onChangeAppearance(row.id, appearance)}
+              />
+            </ContextMenuSubContent>
+          </ContextMenuSub>
         ) : null}
         <ContextMenuItem onSelect={() => onRestart(row.id)} data-testid="terminal-tab-menu-restart">
           {t("restart")}
