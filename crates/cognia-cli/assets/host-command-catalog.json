@@ -63,6 +63,11 @@
       "category": "system"
     },
     {
+      "id": "agent",
+      "title": "Agent",
+      "category": "agents"
+    },
+    {
       "id": "agent-config",
       "title": "Agent Configuration",
       "category": "development"
@@ -181,6 +186,11 @@
       "id": "integration-ingress",
       "title": "Integration Ingress",
       "category": "connectors"
+    },
+    {
+      "id": "langfuse-tracing",
+      "title": "Langfuse Tracing",
+      "category": "system"
     },
     {
       "id": "language-servers",
@@ -419,6 +429,254 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "connectors"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_close_session",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_close_session (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_compact",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_compact (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "focus": {
+            "type": "string"
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_interrupt",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_interrupt (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_send",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_send (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "prompt": {},
+          "options": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -7353,14 +7611,14 @@
       "name": "connectors_keyring_delete",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "host-admin",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "host.admin",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
-      "summary": "connectors_keyring_delete (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_keyring_delete (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -7406,14 +7664,14 @@
       "name": "connectors_keyring_get",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "host-admin",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "host.admin",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
-      "summary": "connectors_keyring_get (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_keyring_get (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -7462,14 +7720,14 @@
       "name": "connectors_keyring_list",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "host-admin",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "host.admin",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
-      "summary": "connectors_keyring_list (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_keyring_list (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -7521,14 +7779,14 @@
       "name": "connectors_keyring_set",
       "category": "connectors",
       "resource": "connectors",
-      "target": "service",
+      "target": "host-admin",
       "operation": "write",
-      "capability": "service.internal",
+      "capability": "host.admin",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
-      "summary": "connectors_keyring_set (service.internal)",
-      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "summary": "connectors_keyring_set (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -11732,6 +11990,65 @@
       "outputTyped": true
     },
     {
+      "name": "git_default_branch",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_default_branch (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "remote": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "cognia-git::branch::DefaultBranch",
+        "required": [
+          "branch",
+          "source",
+          "exists"
+        ],
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "remoteHead",
+              "remoteBranch",
+              "localBranch",
+              "guess"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "git_delete_branch",
       "category": "development",
       "resource": "git",
@@ -13050,6 +13367,52 @@
       "outputTyped": true
     },
     {
+      "name": "git_read_blob_at_ref",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_read_blob_at_ref (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "gitRef",
+          "path"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "gitRef": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "x-cognia-wire-source": "Option<String> — null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
+      },
+      "outputTyped": true
+    },
+    {
       "name": "git_rebase",
       "category": "development",
       "resource": "git",
@@ -13743,6 +14106,482 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_capabilities",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_stack_capabilities (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "cognia-git::stack::StackCapabilities",
+        "required": [
+          "version",
+          "replay",
+          "replayRefAction",
+          "forceIfIncludes"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "replay": {
+            "type": "boolean"
+          },
+          "replayRefAction": {
+            "type": "boolean"
+          },
+          "forceIfIncludes": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_history",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_stack_history (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "branch"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "branch": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_parents",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_stack_parents (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_push",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "git_stack_push (git.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "remote",
+          "branches"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "remote": {
+            "type": "string",
+            "example": ""
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": []
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "cognia-git::stack::StackPushOutcome",
+        "required": [
+          "pushed",
+          "forceIfIncludes"
+        ],
+        "properties": {
+          "pushed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "forceIfIncludes": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_restack",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "git_stack_restack (git.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "onto",
+          "branches"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "onto": {
+            "type": "string",
+            "example": ""
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": []
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "cognia-git::stack::RestackOutcome",
+        "required": [
+          "method",
+          "updates",
+          "conflict"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "rebase"
+            ]
+          },
+          "updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "cognia-git::stack::StackRefUpdate",
+              "required": [
+                "branch",
+                "from",
+                "to",
+                "historyRef"
+              ],
+              "properties": {
+                "branch": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "historyRef": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "conflict": {
+            "oneOf": [
+              {
+                "type": "object",
+                "x-cognia-wire-source": "cognia-git::stack::StackConflict",
+                "required": [
+                  "branch",
+                  "worktree"
+                ],
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "worktree": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_revert",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "git_stack_revert (git.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "branch",
+          "historyRef"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "branch": {
+            "type": "string",
+            "example": ""
+          },
+          "historyRef": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_set_parent",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "git_stack_set_parent (git.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "branch"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "branch": {
+            "type": "string",
+            "example": ""
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_stack_validate",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "git_stack_validate (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "repoPath",
+          "branches"
+        ],
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "example": ""
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": []
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "cognia-git::stack::StackLayerState",
+          "required": [
+            "branch",
+            "parent",
+            "head",
+            "containsParent",
+            "checkedOutIn"
+          ],
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "parent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "head": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "containsParent": {
+              "type": "boolean"
+            },
+            "checkedOutIn": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -16132,6 +16971,300 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "langfuse_connection_test",
+      "category": "system",
+      "resource": "langfuse-tracing",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "langfuse_connection_test (secret.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "connected",
+          "status"
+        ],
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "langfuse_credentials_clear",
+      "category": "system",
+      "resource": "langfuse-tracing",
+      "target": "execution",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "langfuse_credentials_clear (secret.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "langfuse_credentials_set",
+      "category": "system",
+      "resource": "langfuse-tracing",
+      "target": "execution",
+      "operation": "write",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "langfuse_credentials_set (secret.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "environment"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": false
+          },
+          "base_url": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `baseUrl`."
+          },
+          "public_key": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `publicKey`."
+          },
+          "secret_key": {
+            "type": "string",
+            "description": "Also accepted as `secretKey`."
+          },
+          "environment": {
+            "type": "string",
+            "example": ""
+          },
+          "capture_model_content": {
+            "type": "boolean",
+            "description": "Also accepted as `captureModelContent`."
+          },
+          "capture_tool_content": {
+            "type": "boolean",
+            "description": "Also accepted as `captureToolContent`."
+          },
+          "baseUrl": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `baseUrl`."
+          },
+          "publicKey": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `publicKey`."
+          },
+          "secretKey": {
+            "type": "string",
+            "description": "Also accepted as `secretKey`."
+          },
+          "captureModelContent": {
+            "type": "boolean",
+            "description": "Also accepted as `captureModelContent`."
+          },
+          "captureToolContent": {
+            "type": "boolean",
+            "description": "Also accepted as `captureToolContent`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "base_url"
+                ]
+              },
+              {
+                "required": [
+                  "baseUrl"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "public_key"
+                ]
+              },
+              {
+                "required": [
+                  "publicKey"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "langfuse_credentials_status",
+      "category": "system",
+      "resource": "langfuse-tracing",
+      "target": "execution",
+      "operation": "read",
+      "capability": "secret.manage",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "langfuse_credentials_status (secret.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "configured",
+          "enabled",
+          "baseUrl",
+          "publicKey",
+          "environment",
+          "captureModelContent",
+          "captureToolContent"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "publicKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "captureModelContent": {
+            "type": "boolean"
+          },
+          "captureToolContent": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "langfuse_trace_ingest",
+      "category": "system",
+      "resource": "langfuse-tracing",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "langfuse_trace_ingest (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "batch"
+        ],
+        "properties": {
+          "batch": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "acceptedSpans",
+          "duplicateSpans",
+          "status"
+        ],
+        "properties": {
+          "acceptedSpans": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicateSpans": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -35718,5 +36851,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "6e63ad58c528b1279c4e398c166f80e9609d484b7fecec17d1bb5fb95ace65d5"
+  "catalogHash": "09534a7b036487068ae61397c95d7f2b0f9175647bc3802780619137a6101a56"
 }

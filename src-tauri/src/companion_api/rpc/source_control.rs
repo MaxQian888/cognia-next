@@ -402,6 +402,21 @@ pub(super) const COMMANDS: &[&str] = &[
     "git_set_identity",
     "git_ignore_add",
     "git_merge",
+    // Branch stacks (ADR-0151). The Stacks panel, the `action.stack.*`
+    // workflow nodes and the Agent Team delivery adapter all reach these
+    // through `lib/git/commands.ts`, on a surface whose contract is
+    // `companion: "remote"` — so they have to cross the wire like every
+    // other git command here.
+    "git_default_branch",
+    "git_read_blob_at_ref",
+    "git_stack_capabilities",
+    "git_stack_parents",
+    "git_stack_set_parent",
+    "git_stack_validate",
+    "git_stack_restack",
+    "git_stack_history",
+    "git_stack_revert",
+    "git_stack_push",
     "git_workspace_list",
 ];
 
@@ -975,6 +990,93 @@ pub(super) async fn dispatch(
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        // ── Branch stacks (ADR-0151) ────────────────────────────────────────
+        // `repoPath` is rewritten to the resolved workspace path by
+        // `prepare_remote_args`'s default branch before we get here, so these
+        // read exactly like their desktop counterparts.
+        "git_read_blob_at_ref" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let git_ref: String = required(&args, "gitRef")?;
+            let path: String = required(&args, "path")?;
+            crate::git::commands::git_read_blob_at_ref(repo_path, git_ref, path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_default_branch" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let remote: Option<String> = optional(&args, "remote")?;
+            crate::git::commands::git_default_branch(repo_path, remote)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_capabilities" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_stack_capabilities(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_parents" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            crate::git::commands::git_stack_parents(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_set_parent" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let branch: String = required(&args, "branch")?;
+            let parent: Option<String> = optional(&args, "parent")?;
+            crate::git::commands::git_stack_set_parent(repo_path, branch, parent)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_stack_validate" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let branches: Vec<String> = required(&args, "branches")?;
+            crate::git::commands::git_stack_validate(repo_path, branches)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_restack" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let onto: String = required(&args, "onto")?;
+            let branches: Vec<String> = required(&args, "branches")?;
+            crate::git::commands::git_stack_restack(repo_path, onto, branches)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_history" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let branch: String = required(&args, "branch")?;
+            crate::git::commands::git_stack_history(repo_path, branch)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_revert" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let branch: String = required(&args, "branch")?;
+            let history_ref: String = required(&args, "historyRef")?;
+            crate::git::commands::git_stack_revert(repo_path, branch, history_ref)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
+        }
+        "git_stack_push" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let remote: String = required(&args, "remote")?;
+            let branches: Vec<String> = required(&args, "branches")?;
+            crate::git::commands::git_stack_push(repo_path, remote, branches)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json)
         }
         "git_workspace_list" => {
             let account_id = account_id

@@ -207,13 +207,13 @@
     },
     {
       "name": "agent_close_session",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
-      "capability": "client.local",
+      "capability": "agent.run",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -231,25 +231,25 @@
     },
     {
       "name": "agent_compact",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
-      "capability": "client.local",
+      "capability": "agent.run",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
       "name": "agent_interrupt",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
-      "capability": "client.local",
+      "capability": "agent.run",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -267,13 +267,13 @@
     },
     {
       "name": "agent_send",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
-      "capability": "client.local",
+      "capability": "agent.run",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -5560,9 +5560,9 @@
     },
     {
       "name": "git_clone_guarded",
-      "target": "execution",
+      "target": "client",
       "operation": "side-effect",
-      "capability": "git.write",
+      "capability": "client.local",
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
@@ -5926,7 +5926,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6118,7 +6118,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6130,7 +6130,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6142,7 +6142,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6154,7 +6154,7 @@
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6166,7 +6166,7 @@
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6178,7 +6178,7 @@
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6190,7 +6190,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -6202,7 +6202,7 @@
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
-      "transports": ["internal"],
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },

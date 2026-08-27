@@ -41,6 +41,87 @@
       },
       "additionalProperties": false
     },
+    "agent_close_session": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `sessionId`."
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_compact": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `sessionId`."
+        },
+        "focus": {
+          "type": "string"
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_interrupt": {
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `sessionId`."
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_send": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "prompt"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `sessionId`."
+        },
+        "prompt": {},
+        "options": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
+        }
+      },
+      "additionalProperties": false
+    },
     "agent_task_cancel": {
       "type": "object",
       "required": [
@@ -3377,6 +3458,25 @@
       },
       "additionalProperties": false
     },
+    "git_default_branch": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "remote": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "git_delete_branch": {
       "type": "object",
       "required": [
@@ -3949,6 +4049,32 @@
       },
       "additionalProperties": false
     },
+    "git_read_blob_at_ref": {
+      "type": "object",
+      "required": [
+        "gitRef",
+        "path",
+        "workspaceId"
+      ],
+      "properties": {
+        "gitRef": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "git_rebase": {
       "type": "object",
       "required": [
@@ -4324,6 +4450,206 @@
         "adminLease": {
           "type": "string",
           "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_capabilities": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_history": {
+      "type": "object",
+      "required": [
+        "branch",
+        "workspaceId"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string",
+          "example": ""
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_parents": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_push": {
+      "type": "object",
+      "required": [
+        "remote",
+        "branches",
+        "workspaceId",
+        "adminLease"
+      ],
+      "properties": {
+        "remote": {
+          "type": "string",
+          "example": ""
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": []
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_restack": {
+      "type": "object",
+      "required": [
+        "onto",
+        "branches",
+        "workspaceId",
+        "adminLease"
+      ],
+      "properties": {
+        "onto": {
+          "type": "string",
+          "example": ""
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": []
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_revert": {
+      "type": "object",
+      "required": [
+        "branch",
+        "historyRef",
+        "workspaceId",
+        "adminLease"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string",
+          "example": ""
+        },
+        "historyRef": {
+          "type": "string",
+          "example": ""
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_set_parent": {
+      "type": "object",
+      "required": [
+        "branch",
+        "workspaceId"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string",
+          "example": ""
+        },
+        "parent": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_validate": {
+      "type": "object",
+      "required": [
+        "branches",
+        "workspaceId"
+      ],
+      "properties": {
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": []
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -5254,6 +5580,77 @@
       "properties": {
         "agent_id": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "langfuse_connection_test": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "langfuse_credentials_clear": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "langfuse_credentials_set": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "base_url",
+        "public_key",
+        "environment"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "example": false
+        },
+        "base_url": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `baseUrl`."
+        },
+        "public_key": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `publicKey`."
+        },
+        "secret_key": {
+          "type": "string",
+          "description": "Also accepted as `secretKey`."
+        },
+        "environment": {
+          "type": "string",
+          "example": ""
+        },
+        "capture_model_content": {
+          "type": "boolean",
+          "description": "Also accepted as `captureModelContent`."
+        },
+        "capture_tool_content": {
+          "type": "boolean",
+          "description": "Also accepted as `captureToolContent`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "langfuse_credentials_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "langfuse_trace_ingest": {
+      "type": "object",
+      "required": [
+        "batch"
+      ],
+      "properties": {
+        "batch": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
         }
       },
       "additionalProperties": false

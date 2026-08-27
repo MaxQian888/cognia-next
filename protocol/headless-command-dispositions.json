@@ -197,12 +197,7 @@
         "acp_terminal_release",
         "acp_terminal_wait_for_exit",
         "acp_terminal_write",
-        "agent_close_session",
         "agent_command_telemetry",
-        "agent_compact",
-        "agent_interrupt",
-        "agent_resolve_permission",
-        "agent_send",
         "agent_session_api",
         "agent_status",
         "anthropic_oauth_discover",
@@ -808,9 +803,11 @@
       "disposition": "unexposed-gap",
       "reason": "Triaged against the source and found to have no local dependency and no covering surface. The audit's rule was that an unreasoned absence counts as a defect, so this records a known gap rather than implying a decision nobody made. Each entry names the already-exposed sibling whose dispatch pattern exposure would follow.",
       "commands": [
+        "agent_resolve_permission",
         "agent_vendor_roots",
         "fleet_opencode_outbox_repair",
         "fleet_opencode_outbox_status",
+        "git_clone_guarded",
         "read_project_mcp_config",
         "task_workspace_restore_snapshot"
       ],
@@ -818,7 +815,9 @@
         "task_workspace_restore_snapshot": "Takes no Tauri parameter at all — `pub async fn task_workspace_restore_snapshot(run_id: String)` resolves through the process-global task_workspace::service(), whose module doc reads 'Shared task-workspace command surface for desktop and headless runtimes'. Every sibling in its mutation class is already dispatched remotely from that same global: task_workspace_apply, undo, pin, prune and resolve_conflict all live in companion_api/rpc/filesystem.rs:494. No property of the code explains the omission. Exposure would follow the task_workspace_undo arm exactly, at capability workspace.write.",
         "fleet_opencode_outbox_status": "A read-only diagnostic on the process-global fleet runtime, taking no Tauri parameter. companion_api/rpc/diagnostics.rs:99 documents that the fleet arms 'reach the process-global fleet runtime directly (no AppHandle / desktop_writes_bridge), so they also serve a headless server', and fleet_get_snapshot is already exposed there at host.observe. Nothing in the body is local.",
         "fleet_opencode_outbox_repair": "Quarantines a corrupt OpenCode outbox and creates a clean one. Its own doc comment calls this 'a deliberate operator action', kept separate from status so recovery can never destroy queued commands silently — which is the definition of something an operator needs and cannot currently do remotely. Structurally identical to fleet_opencode_send_message, which diagnostics.rs:242 already dispatches at workspace.write. Because it discards durable state, exposure should carry an admin-tier capability rather than reusing workspace.write unexamined.",
+        "agent_resolve_permission": "The canonical half of `claude_approve`, which rpc/chat.rs already dispatches at agent.run — the impl is the shared `claude_approve_impl_with_id`, with no renderer or desktop dependency. It is not exposed because exposing the command alone would not work: the remote `claude_approve` arm requires a `remoteExecutionContext` minted by the send that opened the turn and consumed via `remote_execution::validate_and_consume`, and the canonical caller — `resolvePermission` in lib/ai/agent/execution/agent-execution-handle.ts — threads no such context (only `approveTool` in lib/claude/ipc.ts does, from `remoteApprovalContexts`). Exposure therefore needs that context threaded through the execution handle first, plus the `interrupt` flag the alias arm does not carry; it is a design step, not a dispatch arm. Until then a remote turn resolves its permission prompts through `claude_approve`.",
         "agent_vendor_roots": "Zero arguments, no State, no AppHandle: it reads CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_* plus the standard home/config/data dirs. Both file-siblings that operate on those roots — read_agent_config and write_agent_config — are already in KNOWN_COMMANDS, and the renderer already calls this one through the remote-capable transport (lib/agent-roots/index.ts:167), degrading to an env-blind fallback when it fails. The CLI resolves the same values from its own process env in-process, which is host branching, not a remote route, so it does not qualify as coverage under this ledger's own rule.",
+        "git_clone_guarded": "Takes remoteUrl / destination / guards and clones under guard rails — no State, AppHandle or Window, so nothing in the body is local. Its already-exposed sibling git_clone shows the dispatch pattern exposure would follow: companion_api/rpc/source_control.rs maps destinationRelativePath onto the resolved workspace root in prepare_remote_args and redacts the host path back out in sanitize_remote_result. PRECONDITION FOR EXPOSURE: its only caller, lib/plugin/workspace/acquire.ts, sources the destination from plugin_workspace_repo_dir, which has no descriptor at all — so the chain fails one step earlier on any remote plane, and lib/git/commands.ts:105-117 normalizes an opaque workspace target for git_clone only. Expose the repo-dir command and extend that normalization first, or a remote caller sends a raw host path.",
         "read_project_mcp_config": "No State, AppHandle or Window: it joins cwd/.mcp.json, reads it, and returns the parsed result. read_agent_config — same file class, same read-and-parse contract, same return type — is already exposed. Nothing is broken today only because the single caller gates itself on isTauri(), which puts the restriction in the caller rather than the command. PRECONDITION FOR EXPOSURE: the cwd argument must be gated through authorize_workspace_root the way companion_api/rpc/codex_app.rs:14 gates its own cwd params, or it becomes an arbitrary-path read."
       }
     }

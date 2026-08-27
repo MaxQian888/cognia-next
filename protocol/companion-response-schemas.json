@@ -870,6 +870,24 @@
         "$ref": "#/$defs/GitConflict"
       }
     },
+    "GitDefaultBranch": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::branch::DefaultBranch",
+      "required": ["branch", "source", "exists"],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["remoteHead", "remoteBranch", "localBranch", "guess"]
+        },
+        "exists": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "GitDiff": {
       "type": "object",
       "x-cognia-wire-source": "cognia-git::types::GitDiff",
@@ -1084,6 +1102,146 @@
         "operationInProgress": {
           "type": ["string", "null"],
           "enum": ["merge", "rebase", "cherryPick", "revert", null]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitRestackOutcome": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::RestackOutcome",
+      "required": ["method", "updates", "conflict"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["replay", "rebase"]
+        },
+        "updates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitStackRefUpdate"
+          }
+        },
+        "conflict": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/GitStackConflict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStackBranchPairList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "GitStackCapabilities": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::StackCapabilities",
+      "required": ["version", "replay", "replayRefAction", "forceIfIncludes"],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "replayRefAction": {
+          "type": "boolean"
+        },
+        "forceIfIncludes": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStackConflict": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::StackConflict",
+      "required": ["branch", "worktree"],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStackLayerState": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::StackLayerState",
+      "required": ["branch", "parent", "head", "containsParent", "checkedOutIn"],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "parent": {
+          "type": ["string", "null"]
+        },
+        "head": {
+          "type": ["string", "null"]
+        },
+        "containsParent": {
+          "type": "boolean"
+        },
+        "checkedOutIn": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStackLayerStateList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitStackLayerState"
+      }
+    },
+    "GitStackPushOutcome": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::StackPushOutcome",
+      "required": ["pushed", "forceIfIncludes"],
+      "properties": {
+        "pushed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "forceIfIncludes": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GitStackRefUpdate": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia-git::stack::StackRefUpdate",
+      "required": ["branch", "from", "to", "historyRef"],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "historyRef": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1539,6 +1697,10 @@
     },
     "NullableString": {
       "type": ["string", "null"]
+    },
+    "NullableStringResult": {
+      "type": ["string", "null"],
+      "x-cognia-wire-source": "Option<String> — null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
     },
     "PerfFrame": {
       "type": "object",
@@ -3236,6 +3398,18 @@
     "adapter_update_policy": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "agent_close_session": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_compact": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_interrupt": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_send": {
+      "$ref": "#/$defs/NullResult"
+    },
     "agent_task_cancel": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -3850,6 +4024,9 @@
     "git_create_tag": {
       "$ref": "#/$defs/NullResult"
     },
+    "git_default_branch": {
+      "$ref": "#/$defs/GitDefaultBranch"
+    },
     "git_delete_branch": {
       "$ref": "#/$defs/NullResult"
     },
@@ -3919,6 +4096,9 @@
     "git_push_tag": {
       "$ref": "#/$defs/NullResult"
     },
+    "git_read_blob_at_ref": {
+      "$ref": "#/$defs/NullableStringResult"
+    },
     "git_rebase": {
       "$ref": "#/$defs/NullResult"
     },
@@ -3963,6 +4143,30 @@
     },
     "git_set_identity": {
       "$ref": "#/$defs/NullResult"
+    },
+    "git_stack_capabilities": {
+      "$ref": "#/$defs/GitStackCapabilities"
+    },
+    "git_stack_history": {
+      "$ref": "#/$defs/GitStackBranchPairList"
+    },
+    "git_stack_parents": {
+      "$ref": "#/$defs/GitStackBranchPairList"
+    },
+    "git_stack_push": {
+      "$ref": "#/$defs/GitStackPushOutcome"
+    },
+    "git_stack_restack": {
+      "$ref": "#/$defs/GitRestackOutcome"
+    },
+    "git_stack_revert": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "git_stack_set_parent": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "git_stack_validate": {
+      "$ref": "#/$defs/GitStackLayerStateList"
     },
     "git_stage": {
       "$ref": "#/$defs/NullResult"

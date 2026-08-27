@@ -350,6 +350,13 @@ async fn ensure_terminal_rpc_authorized(
 /// `match name` arms in `dispatch()` below — drift means unknown names
 /// silently bypass the 404 path.
 const KNOWN_COMMANDS: &[&str] = &[
+    // ADR-0090 canonical names. They share the `claude_*` arms below and are
+    // deliberately absent from `CONTROL_COMMANDS` for the same reason those
+    // are: this is the paired device's own chat path, not an escalation.
+    "agent_send",
+    "agent_interrupt",
+    "agent_compact",
+    "agent_close_session",
     "claude_send",
     "claude_interrupt",
     "claude_compact",
@@ -722,6 +729,19 @@ const KNOWN_COMMANDS: &[&str] = &[
     "git_set_identity",
     "git_ignore_add",
     "git_merge",
+    // Branch stacks (ADR-0151). The Stacks panel, the `action.stack.*`
+    // workflow nodes and the Agent Team delivery adapter all reach these
+    // through `lib/git/commands.ts`, on a surface whose contract is remote.
+    "git_default_branch",
+    "git_read_blob_at_ref",
+    "git_stack_capabilities",
+    "git_stack_parents",
+    "git_stack_set_parent",
+    "git_stack_validate",
+    "git_stack_restack",
+    "git_stack_history",
+    "git_stack_revert",
+    "git_stack_push",
     // ── Filesystem ──────────────────────────────────────────────────────────
     // Both the raw absolute-path ops (no sandbox — writes are control-gated and
     // the OpenAPI description flags the unrestricted-FS risk) and the sandboxed
@@ -1190,6 +1210,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "git_tags",
     "git_worktree_list",
     "git_rebase_commits",
+    "git_default_branch",
+    "git_read_blob_at_ref",
+    "git_stack_capabilities",
+    "git_stack_parents",
+    "git_stack_validate",
+    "git_stack_history",
     "git_identity",
     // Filesystem reads.
     "read_text_file",
@@ -1410,6 +1436,12 @@ const CONTROL_COMMANDS: &[&str] = &[
     "git_set_identity",
     "git_ignore_add",
     "git_merge",
+    // Stack writes move branches and force-push with a lease, so they are
+    // control-gated exactly like `git_commit` / `git_push` above.
+    "git_stack_set_parent",
+    "git_stack_restack",
+    "git_stack_revert",
+    "git_stack_push",
     // Filesystem writes (raw absolute + sandboxed).
     "write_text_file",
     "write_text_file_confined",
