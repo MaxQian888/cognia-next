@@ -49,9 +49,20 @@ export interface SreIncidentAlert {
   requestId?: string
 }
 
+/**
+ * What the panel can honestly say about agent work on this incident.
+ *
+ * `toolCalls`, not turns: the plugin observes the SRE subagent through its own
+ * tool executions (`panel-runtime`'s activity bus) and has no view of the
+ * agent's turn counter. `maxTurns` is the budget the subagent is DECLARED with
+ * in `plugin.json`, kept as context for the reader — it is not a denominator
+ * for `toolCalls`, and the panel never renders the two as a fraction.
+ */
 export interface SreIncidentAgentRun {
   running: boolean
-  turn: number
+  /** Evidence queries observed since this incident was opened. */
+  toolCalls: number
+  /** The subagent's declared turn budget. Context only — see above. */
   maxTurns: number
   startedAt?: string
   finishedAt?: string
@@ -95,7 +106,7 @@ export interface SreConcludeCheck {
   blocker?: SreConcludeBlocker
 }
 
-const IDLE_RUN: SreIncidentAgentRun = { running: false, turn: 0, maxTurns: 15 }
+const IDLE_RUN: SreIncidentAgentRun = { running: false, toolCalls: 0, maxTurns: 15 }
 
 /** Minutes of context kept on either side of an alert's own timestamp. */
 const ALERT_WINDOW_LEAD_MS = 60_000

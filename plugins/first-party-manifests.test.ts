@@ -163,6 +163,11 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // plugin (the manager only materializes `manifest.tools` for WASM).
   screenshot: ["field_missing:tools"],
   "skill-recorder": ["field_missing:tools"],
+  // Class 1, same shape as prompt-templates: the incident panel is registered
+  // through `ctx.contextPanels.register` in `activate()` because a
+  // `builtin://` plugin has no fetchable install path for the separate entry
+  // module `manifest.contextPanels` would import the renderer from.
+  "sre-agent": ["field_missing:context-panel"],
   "stagehand-mcp": ["field_missing:mcp-server-preset"],
   "test-lsp-contribution": [],
   "wasm-example-formatter": [],

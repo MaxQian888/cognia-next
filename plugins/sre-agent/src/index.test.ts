@@ -7,11 +7,11 @@ describe("sre-agent plugin entrypoint", () => {
   it("exposes the plugin manifest with tools and subagent contributions", () => {
     expect(manifest).toMatchObject({
       id: "sre-agent",
-      capabilities: expect.arrayContaining(["tools", "subagent"]),
+      capabilities: expect.arrayContaining(["tools", "subagent", "context-panel"]),
     })
     expect(manifest.subagents).toHaveLength(1)
     expect(manifest.tools).toHaveLength(4)
-    expect(manifest.permissions).toEqual([])
+    expect(manifest.permissions).toEqual(["extension:ui", "session:read"])
     expect(findPluginManifestParityIssues(packagedManifest as never, manifest)).toEqual([])
   })
 

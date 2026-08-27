@@ -67,7 +67,7 @@ describe("createIncident", () => {
       timeline: [],
       validation: null,
     })
-    expect(incident.agentRun).toEqual({ running: false, turn: 0, maxTurns: 15 })
+    expect(incident.agentRun).toEqual({ running: false, toolCalls: 0, maxTurns: 15 })
     expect(incident.createdAt).toBe(NOW)
     expect(incident.updatedAt).toBe(NOW)
   })
@@ -270,15 +270,15 @@ describe("canConclude / concludeIncident", () => {
 
 describe("setAgentRun", () => {
   it("patches only what it is given and stamps the incident", () => {
-    const running = setAgentRun(base(), { running: true, turn: 7, startedAt: NOW }, LATER)
+    const running = setAgentRun(base(), { running: true, toolCalls: 7, startedAt: NOW }, LATER)
     expect(running.agentRun).toEqual({
       running: true,
-      turn: 7,
+      toolCalls: 7,
       maxTurns: 15,
       startedAt: NOW,
     })
     const stopped = setAgentRun(running, { running: false, error: "aborted" }, LATER)
-    expect(stopped.agentRun).toMatchObject({ running: false, turn: 7, error: "aborted" })
+    expect(stopped.agentRun).toMatchObject({ running: false, toolCalls: 7, error: "aborted" })
   })
 })
 
