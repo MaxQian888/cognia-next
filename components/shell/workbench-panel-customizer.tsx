@@ -28,7 +28,11 @@ import { useWorkbenchPanelLayout } from "./use-workbench-panel-layout"
 import { WORKBENCH_ACTIVITY_ICONS } from "@/lib/shell/workbench-rail"
 import type { WorkbenchPanelCatalogItem } from "@/lib/shell/workbench-panels"
 import type { CanonicalContextActivity } from "@/types/context-workbench"
-import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
+import {
+  CANONICAL_CONTEXT_ACTIVITIES,
+  CONTEXT_ACTIVITY_RAIL_ORDER,
+} from "@/types/context-workbench"
+import { resolveWorkbenchPanelLabel } from "@/lib/context-workbench/panel-label"
 import { PlugIcon } from "lucide-react"
 
 /** Activity order for the sections, matching the rail's own default order. */
@@ -49,15 +53,26 @@ export function WorkbenchPanelCustomizer(): React.ReactElement {
    * label when they ship no translation.
    */
   const labelOf = React.useCallback(
-    (item: WorkbenchPanelCatalogItem): string => {
-      if (!item.pluginId) return panelT(item.labelKey as never)
-      const key = `plugin.${item.pluginId}.${item.labelKey}`
-      const has = (panelT as typeof panelT & { has?: (candidate: string) => boolean }).has
-      return typeof has === "function" && has(key)
-        ? panelT(key as never)
-        : (item.label ?? item.labelKey)
-    },
+    (item: WorkbenchPanelCatalogItem): string => resolveWorkbenchPanelLabel(panelT, item, item.id),
     [panelT]
+  )
+
+  /**
+   * Heading for one section.
+   *
+   * Only the host's own activities have a `contextWorkbench.activities.*` key.
+   * A plugin invents its activity id at runtime, so that lookup throws
+   * MISSING_MESSAGE and takes the whole customizer down — the section is named
+   * after the panel that created it instead, matching the rail button.
+   */
+  const activityHeading = React.useCallback(
+    (activity: string, items: WorkbenchPanelCatalogItem[]): string =>
+      (CANONICAL_CONTEXT_ACTIVITIES as readonly string[]).includes(activity)
+        ? activityT(activity as never)
+        : items[0]
+          ? labelOf(items[0])
+          : activity,
+    [activityT, labelOf]
   )
 
   const toItems = (items: WorkbenchPanelCatalogItem[]): CustomizerItem[] =>
@@ -94,7 +109,9 @@ export function WorkbenchPanelCustomizer(): React.ReactElement {
       <p className="text-xs text-muted-foreground">{t("panelsHint")}</p>
       {sections.map(([activity, group]) => (
         <div key={activity} className="space-y-2" data-testid={`workbench-panels-${activity}`}>
-          <p className="text-xs font-medium">{activityT(activity as never)}</p>
+          <p className="text-xs font-medium">
+            {activityHeading(activity, [...group.visible, ...group.hidden])}
+          </p>
           <CustomizerLists
             testIdPrefix={`workbench-panel-list-${activity}`}
             pinned={toItems(group.visible)}

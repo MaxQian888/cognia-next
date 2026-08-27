@@ -163,6 +163,31 @@ describe("PanelQuickSwitch", () => {
     expect(screen.getByText("my-plugin")).toBeInTheDocument()
   })
 
+  it("names a plugin-invented activity after its panel instead of a missing key", () => {
+    // `contextWorkbench.activities.sre-incidents` cannot exist — the host does
+    // not know a plugin's activity ids at build time — and looking it up logged
+    // MISSING_MESSAGE and rendered the raw key path as the group heading.
+    const onError = jest.spyOn(console, "error").mockImplementation(() => {})
+    mockGetActiveWorkbenchPanels.mockReturnValue([
+      {
+        id: "sre-agent:incidents",
+        activity: "sre-incidents",
+        labelKey: "panel.incidents",
+        label: "Incidents",
+        pluginId: "sre-agent",
+      },
+    ])
+    renderWithProviders(<PanelQuickSwitch />)
+    const handler = (globalThis as Record<string, unknown>).__quickSwitchHandler as () => void
+    act(() => handler())
+
+    const text = screen.getByRole("dialog").textContent ?? ""
+    expect(text).toContain("Incidents")
+    expect(text).not.toContain("contextWorkbench.activities")
+    expect(onError).not.toHaveBeenCalled()
+    onError.mockRestore()
+  })
+
   it("groups panels in canonical activity order", () => {
     mockGetActiveWorkbenchPanels.mockReturnValue([
       { id: "chat", activity: "ai", labelKey: "chat", label: "Chat" },

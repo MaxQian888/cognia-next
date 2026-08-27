@@ -34,6 +34,7 @@ import { CustomizerLists, type CustomizerItem } from "./customizer-list"
 import { useWorkbenchRailLayout, useWorkbenchRailPersistent } from "./use-workbench-rail-layout"
 import { mergeVisibleOrder } from "@/lib/shell/bar-items"
 import type { WorkbenchRailCatalogItem } from "@/lib/shell/workbench-rail"
+import { resolvePluginWorkbenchLabel } from "@/lib/context-workbench/panel-label"
 
 /** A modelled-but-unbuilt customization: disabled control, badge, and a reason. */
 function PlannedRow({
@@ -78,18 +79,14 @@ export function WorkbenchCustomizer(): React.ReactElement {
    * Label one catalog row.
    *
    * Canonical activities translate from their id. A plugin-contributed one has
-   * no `contextWorkbench.activities.*` key at all, so it resolves its panel's
-   * own key the way `WorkbenchPanelCustomizer.labelOf` does and falls back to
-   * the literal label the plugin registered.
+   * no `contextWorkbench.activities.*` key at all, so it goes through the shared
+   * resolver in `lib/context-workbench/panel-label.ts` — plugin overlay key
+   * first, then the literal label the plugin registered.
    */
-  const labelOf = (item: WorkbenchRailCatalogItem): string => {
-    if (!item.pluginId) return activityT(item.id as never)
-    const key = `plugin.${item.pluginId}.${item.labelKey}`
-    const has = (panelT as typeof panelT & { has?: (candidate: string) => boolean }).has
-    return typeof has === "function" && has(key)
-      ? panelT(key as never)
-      : (item.label ?? String(item.id))
-  }
+  const labelOf = (item: WorkbenchRailCatalogItem): string =>
+    item.pluginId
+      ? resolvePluginWorkbenchLabel(panelT, item, String(item.id))
+      : activityT(item.id as never)
 
   const toItems = (items: WorkbenchRailCatalogItem[]): CustomizerItem[] =>
     items.map((i) => ({ id: i.id, Icon: i.Icon, label: labelOf(i) }))

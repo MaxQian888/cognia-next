@@ -32,14 +32,9 @@ import {
   subscribeActiveContext,
 } from "@/lib/context-workbench/active-context"
 import type { ActiveContextPanel } from "@/lib/context-workbench/active-context"
+import { resolveWorkbenchPanelLabel } from "@/lib/context-workbench/panel-label"
 import type { ContextActivity } from "@/types/context-workbench"
-import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
-
-/** Activity order used for grouping panels in the palette. */
-function activitySortIndex(activity: ContextActivity): number {
-  const index = CONTEXT_ACTIVITY_RAIL_ORDER.indexOf(activity)
-  return index === -1 ? CONTEXT_ACTIVITY_RAIL_ORDER.length : index
-}
+import { CANONICAL_CONTEXT_ACTIVITIES, contextActivityRailIndex } from "@/types/context-workbench"
 
 /** Groups panels by activity, ordered by the canonical rail order. */
 function groupByActivity(
@@ -52,8 +47,13 @@ function groupByActivity(
     map.set(panel.activity, group)
   }
   return [...map.entries()]
-    .sort(([a], [b]) => activitySortIndex(a) - activitySortIndex(b))
+    .sort(([a], [b]) => contextActivityRailIndex(a) - contextActivityRailIndex(b))
     .map(([activity, grouped]) => ({ activity, panels: grouped }))
+}
+
+/** Whether the host owns this activity's name, or a plugin invented it. */
+function isCanonicalActivity(activity: ContextActivity): boolean {
+  return (CANONICAL_CONTEXT_ACTIVITIES as readonly string[]).includes(activity)
 }
 
 export function PanelQuickSwitch() {
@@ -80,6 +80,26 @@ export function PanelQuickSwitch() {
     revealActiveWorkbenchPanel(panelId)
   }, [])
 
+  const panelLabel = useCallback(
+    (panel: ActiveContextPanel) => resolveWorkbenchPanelLabel(t, panel, panel.id),
+    [t]
+  )
+
+  /**
+   * Heading for one group.
+   *
+   * A plugin-contributed activity has no `contextWorkbench.activities.*` key —
+   * the host cannot know a plugin's activity ids at build time — so the group
+   * is named after the panel that created it, which is also what the rail
+   * button beside it reads.
+   */
+  const groupHeading = (activity: ContextActivity, groupPanels: ActiveContextPanel[]): string =>
+    isCanonicalActivity(activity)
+      ? tContextWorkbench(`activities.${activity}` as never)
+      : groupPanels[0]
+        ? panelLabel(groupPanels[0])
+        : activity
+
   return (
     <CommandDialog
       open={open}
@@ -94,15 +114,15 @@ export function PanelQuickSwitch() {
       <CommandList>
         <CommandEmpty>{tQuickSwitch("empty")}</CommandEmpty>
         {groups.map(({ activity, panels: groupPanels }) => (
-          <CommandGroup key={activity} heading={tContextWorkbench(`activities.${activity}`)}>
+          <CommandGroup key={activity} heading={groupHeading(activity, groupPanels)}>
             {groupPanels.map((panel) => (
               <CommandItem
                 key={panel.id}
-                value={`${panel.label ?? panel.labelKey} ${activity} ${panel.id}`}
+                value={`${panelLabel(panel)} ${activity} ${panel.id}`}
                 onSelect={() => handleSelect(panel.id)}
                 data-testid={`panel-quick-switch-item-${panel.id}`}
               >
-                <span className="truncate">{panel.label ?? t(panel.labelKey as never)}</span>
+                <span className="truncate">{panelLabel(panel)}</span>
                 {panel.pluginId && (
                   <span className="ml-auto truncate text-xs text-muted-foreground">
                     {panel.pluginId}

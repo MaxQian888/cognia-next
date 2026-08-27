@@ -75,6 +75,7 @@ import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 import { useResourceWorkbenchSession } from "@/hooks/chat/use-resource-workbench-session"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { resolveWorkbenchPanelLabel } from "@/lib/context-workbench/panel-label"
 import {
   notifyActiveContextHostVisibility,
   publishActiveContextPanels,
@@ -724,14 +725,7 @@ export function ContextWorkbench({
   }, [resource.kind])
 
   const getPanelLabel = useCallback(
-    (panel: ContextPanelDefinition) => {
-      if (!panel.pluginId) return t(panel.labelKey as never)
-      const key = `plugin.${panel.pluginId}.${panel.labelKey}`
-      const hasTranslation = (t as typeof t & { has?: (candidate: string) => boolean }).has
-      return typeof hasTranslation === "function" && hasTranslation(key)
-        ? t(key as never)
-        : (panel.label ?? panel.labelKey)
-    },
+    (panel: ContextPanelDefinition) => resolveWorkbenchPanelLabel(t, panel, panel.labelKey),
     [t]
   )
 

@@ -2,12 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { WorkbenchPanelCustomizer } from "./workbench-panel-customizer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { WorkbenchPanelLayout } from "@/types/shell/workbench-panels"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 
 jest.mock("next-intl", () => ({
   // Echo the key so assertions target stable strings. This component uses both
@@ -52,6 +53,31 @@ describe("WorkbenchPanelCustomizer", () => {
     expect(
       screen.getByTestId("workbench-panel-list-preview-run-pinned-preview")
     ).toBeInTheDocument()
+  })
+
+  it("names a plugin-invented activity section after its panel", () => {
+    // `contextWorkbench.activities.<pluginActivity>` cannot exist, so the
+    // heading used to render as the raw key path (and log MISSING_MESSAGE in
+    // the running app). Named after the panel instead, like the rail button.
+    const dispose = contextPanelRegistry.register({
+      id: "sre-agent:incidents",
+      activity: "sre-incidents",
+      labelKey: "panel.incidents",
+      label: "Incidents",
+      pluginId: "sre-agent",
+      resourceKinds: ["session"],
+      render: () => null,
+    } as never)
+    try {
+      renderCustomizer()
+      const section = screen.getByTestId("workbench-panels-sre-incidents")
+      expect(section.textContent).toContain("Incidents")
+      expect(section.textContent).not.toContain("contextWorkbench.activities")
+    } finally {
+      // The registry notifies its subscribers synchronously, so tearing the
+      // panel down while the customizer is still mounted is a state update.
+      act(() => dispose())
+    }
   })
 
   it("orders sections the way the rail orders its icons", () => {
