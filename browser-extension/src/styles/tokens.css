@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
 /*
+ * The shared component package is outside this workspace, so Tailwind's
+ * automatic source detection — which scans outward from this file and stops at
+ * the project it belongs to — never sees it. Without this line every utility
+ * that ONLY `@cognia/plugin-ui` uses is absent from the bundle, and the
+ * symptom is not an error: components that carry text still lay out roughly
+ * right, while a class-sized element with no children (a checkbox is exactly
+ * that) collapses to a zero-height box that is present in the DOM, has its
+ * ARIA state, and cannot be seen or clicked.
+ */
+@source "../../../packages/plugin-ui/src";
+
+/*
  * The side panel's fallback palette.
  *
  * Deliberately only a fallback. Once paired, the Host sends its *resolved*
