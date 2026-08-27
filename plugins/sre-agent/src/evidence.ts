@@ -103,6 +103,20 @@ const API_KEY_VALUE_RE = /\bak_[A-Za-z0-9_-]+\b/g
 const SUBJECT_ID_VALUE_RE = /\b(?:t|u)-\d+\b/gi
 const IPV4_VALUE_RE = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g
 
+/**
+ * Is this a field NAME the plugin must never group, facet, or aggregate by?
+ *
+ * `redactSensitiveValue` masks a sensitive field's VALUE wherever it appears in
+ * a record, which is enough while evidence only flows outward as records. A
+ * facet is different: `facets(["tenant_id"])` over redacted values still leaks
+ * the CARDINALITY of the tenant set, and a facet named after a secret is not a
+ * useful product surface in the first place. The analysis seam drops those
+ * fields before the provider ever sees them.
+ */
+export function isSensitiveFieldName(field: string): boolean {
+  return SENSITIVE_KEY_RE.test(field)
+}
+
 /** Redact secret, subject-identifier, and IPv4 values from free-form evidence text. */
 export function redactSensitiveText(text: string): string {
   return text

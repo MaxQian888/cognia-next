@@ -1,16 +1,8 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
 import {
-  FIXTURE_END,
-  FIXTURE_REQUEST_ID,
-  FIXTURE_START,
-  FIXTURE_TRACE_ID,
-  LOG_EVIDENCE,
-  METRIC_EVIDENCE,
-  RUNBOOK_EVIDENCE,
-  TRACE_EVIDENCE,
-} from "./fixtures"
-import {
   evidenceText,
+  isSensitiveFieldName,
+  redactSensitiveText,
   redactSensitiveValue,
   type SreEvidence,
   type SreLogEvidence,
@@ -21,46 +13,64 @@ import {
   type SreValidationResult,
 } from "./evidence"
 import { validateTimelineDraft } from "./validator"
+import { createFixtureProvider } from "./providers/fixture-provider"
+import type {
+  SreFacet,
+  SreHistogramBucket,
+  SreIngestSource,
+  SreLogFilter,
+  SreLogPattern,
+  SreLogProvider,
+  SreMetricFilter,
+  SreProviderKind,
+  SreTraceFilter,
+} from "./providers/types"
 
 export interface SrePluginContext {
   pluginId: string
   logger?: FullPluginContext["logger"]
 }
 
-export interface SreQueryLogsInput extends SreTimeRange {
-  environment: string
-  services?: string[]
-  traceId?: string
-  requestId?: string
-  keywords?: string[]
-}
-
-export interface SreQueryTraceInput {
-  environment: string
-  traceId?: string
-  requestId?: string
-  startTime?: string
-  endTime?: string
-}
-
-export interface SreQueryMetricsInput extends SreTimeRange {
-  environment: string
-  jobs?: string[]
-  metrics?: string[]
-  labels?: Record<string, string>
-}
+/**
+ * Public aliases for the tool-facing input names.
+ *
+ * The shapes moved to `providers/types.ts` when the backend seam was cut; these
+ * names are what `tools.ts` and the plugin's tests have always imported, and
+ * renaming them would have been churn with no reader benefit.
+ */
+export type SreQueryLogsInput = SreLogFilter
+export type SreQueryTraceInput = SreTraceFilter
+export type SreQueryMetricsInput = SreMetricFilter
 
 export interface SreQueryResult<T extends SreEvidence> {
   ok: true
   records: T[]
   evidenceIds: string[]
-  fixture: string
+  /** Id of the backend that answered, whatever kind it is. */
+  provider: string
+  /**
+   * The fixture corpus behind the answer — present only when a fixture actually
+   * answered. A remote provider leaves it off rather than naming a corpus that
+   * is not there, which the old unconditional `fixture` field could not express.
+   */
+  fixture?: string
+}
+
+export interface SreProviderInfo {
+  id: string
+  kind: SreProviderKind
+  coverage: SreTimeRange | null
 }
 
 export interface SreRuntime {
+  provider(): SreProviderInfo
   queryLogs(input: SreQueryLogsInput): Promise<SreQueryResult<SreLogEvidence>>
   queryTrace(input: SreQueryTraceInput): Promise<SreQueryResult<SreTraceSpanEvidence>>
   queryMetrics(input: SreQueryMetricsInput): Promise<SreQueryResult<SreMetricEvidence>>
+  histogram(input: SreQueryLogsInput, bucketCount: number): Promise<SreHistogramBucket[]>
+  patterns(input: SreQueryLogsInput, baseline?: SreTimeRange): Promise<SreLogPattern[]>
+  facets(input: SreQueryLogsInput, fields: readonly string[], limit?: number): Promise<SreFacet[]>
+  sources(): Promise<SreIngestSource[]>
   validateTimeline(input: SreTimelineDraft): Promise<SreValidationResult>
   evidenceSnapshot(): SreEvidence[]
 }
@@ -81,6 +91,7 @@ function assertRange(startTime: string, endTime: string): void {
   if (start > end) throw new Error("startTime must be before endTime")
 }
 
+/** Validate a window that either is fully absent or fully present. */
 function optionalRange(
   startTime: string | undefined,
   endTime: string | undefined
@@ -94,48 +105,46 @@ function optionalRange(
   return range
 }
 
-function inRange(time: string | undefined, startTime: string, endTime: string): boolean {
-  if (!time) return true
-  const ts = Date.parse(time)
-  return ts >= Date.parse(startTime) && ts <= Date.parse(endTime)
+/** Validate the window every log/metric query must carry. Returns the trimmed pair. */
+function assertWindow(input: { environment: string; startTime: string; endTime: string }): void {
+  requireNonEmpty(input.environment, "environment")
+  requireNonEmpty(input.startTime, "startTime")
+  requireNonEmpty(input.endTime, "endTime")
+  assertRange(input.startTime, input.endTime)
 }
 
-function rangesOverlap(
-  leftStart: string,
-  leftEnd: string,
-  rightStart: string,
-  rightEnd: string
-): boolean {
-  return (
-    Date.parse(leftStart) <= Date.parse(rightEnd) && Date.parse(leftEnd) >= Date.parse(rightStart)
-  )
+/**
+ * The default window to investigate.
+ *
+ * A bounded backend (the fixture) names its own coverage — opening the panel on
+ * "now minus an hour" against a corpus recorded in 2026-08 would render an
+ * empty investigation and look broken. An unbounded backend gets the last hour.
+ */
+export function defaultIncidentWindow(
+  provider: SreLogProvider = createFixtureProvider()
+): SreTimeRange {
+  const coverage = provider.coverage()
+  if (coverage) return coverage
+  const end = new Date()
+  return {
+    startTime: new Date(end.getTime() - 60 * 60 * 1000).toISOString(),
+    endTime: end.toISOString(),
+  }
 }
 
-function normalizedTraceId(value: string | undefined): string | undefined {
-  return value?.trim().toLowerCase()
-}
-
-function textIncludesAll(haystack: string, keywords: string[] | undefined): boolean {
-  if (!keywords || keywords.length === 0) return true
-  const lower = haystack.toLowerCase()
-  return keywords.every((keyword) => lower.includes(keyword.toLowerCase()))
-}
-
-function labelsMatch(
-  labels: Record<string, string>,
-  wanted: Record<string, string> | undefined
-): boolean {
-  if (!wanted) return true
-  return Object.entries(wanted).every(([key, value]) => labels[key] === value)
-}
-
-/** Return the deterministic incident window used by the bundled mock provider. */
-export function defaultIncidentWindow(): SreTimeRange {
-  return { startTime: FIXTURE_START, endTime: FIXTURE_END }
-}
-
-/** Create an isolated, read-only evidence runtime for one plugin activation. */
-export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
+/**
+ * Create an isolated, read-only evidence runtime for one plugin activation.
+ *
+ * The runtime owns everything that must not vary by backend: input validation
+ * (its error strings are the tool contract), PII redaction on the way out, the
+ * evidence pool the timeline validator resolves ids against, and the
+ * sensitive-field gate on aggregates. The provider owns only "where records
+ * come from".
+ */
+export function createSreRuntime(
+  _ctx: SrePluginContext,
+  provider: SreLogProvider = createFixtureProvider()
+): SreRuntime {
   const evidencePool = new Map<string, SreEvidence>()
   const remember = <T extends SreEvidence>(records: T[]): SreQueryResult<T> => {
     const redacted = records.map((record) => redactSensitiveValue(record) as T)
@@ -144,72 +153,93 @@ export function createSreRuntime(_ctx: SrePluginContext): SreRuntime {
       ok: true,
       records: redacted,
       evidenceIds: redacted.map((record) => record.id),
-      fixture: "qwen-timeout-fallback",
+      provider: provider.id,
+      ...(provider.kind === "fixture" ? { fixture: provider.id } : {}),
     }
   }
 
+  /** Aggregate reads validate the same way queries do, minus the pool write. */
+  const readFilter = (input: SreQueryLogsInput): SreLogFilter => {
+    assertWindow(input)
+    return input
+  }
+
   return {
+    provider: () => ({ id: provider.id, kind: provider.kind, coverage: provider.coverage() }),
+
     queryLogs: async (input) => {
-      requireNonEmpty(input.environment, "environment")
-      requireNonEmpty(input.startTime, "startTime")
-      requireNonEmpty(input.endTime, "endTime")
-      assertRange(input.startTime, input.endTime)
-      const services = new Set(input.services ?? [])
-      const traceId = normalizedTraceId(input.traceId)
-      const requestId = input.requestId?.trim()
-      const records = LOG_EVIDENCE.filter((record) => {
-        if (!inRange(record.time, input.startTime, input.endTime)) return false
-        if (services.size > 0 && !services.has(record.service ?? "")) return false
-        if (traceId && normalizedTraceId(record.traceId) !== traceId) return false
-        if (requestId && record.requestId !== requestId) return false
-        return textIncludesAll(evidenceText(record), input.keywords)
-      })
-      return remember(records)
+      assertWindow(input)
+      return remember(await provider.fetchLogs(input))
     },
+
     queryTrace: async (input) => {
       requireNonEmpty(input.environment, "environment")
-      const traceId = normalizedTraceId(input.traceId)
+      const traceId = input.traceId?.trim()
       const requestId = input.requestId?.trim()
       if (!traceId && !requestId) throw new Error("traceId or requestId is required")
       const range = optionalRange(input.startTime, input.endTime)
-      let records =
-        traceId === normalizedTraceId(FIXTURE_TRACE_ID) || requestId === FIXTURE_REQUEST_ID
-          ? TRACE_EVIDENCE
-          : []
-      if (range) {
-        records = records.filter((record) =>
-          rangesOverlap(
-            record.startTime,
-            record.endTime ?? record.startTime,
-            range.startTime,
-            range.endTime
-          )
-        )
-      }
-      return remember(records)
+      return remember(
+        await provider.fetchTrace({
+          environment: input.environment,
+          traceId,
+          requestId,
+          startTime: range?.startTime,
+          endTime: range?.endTime,
+        })
+      )
     },
+
     queryMetrics: async (input) => {
-      requireNonEmpty(input.environment, "environment")
-      requireNonEmpty(input.startTime, "startTime")
-      requireNonEmpty(input.endTime, "endTime")
-      assertRange(input.startTime, input.endTime)
-      const jobs = new Set(input.jobs ?? [])
-      const metrics = new Set(input.metrics ?? [])
-      const records = METRIC_EVIDENCE.filter((record) => {
-        if (
-          !rangesOverlap(record.timeRange[0], record.timeRange[1], input.startTime, input.endTime)
-        ) {
-          return false
-        }
-        if (jobs.size > 0 && !jobs.has(record.job)) return false
-        if (metrics.size > 0 && !metrics.has(record.metric)) return false
-        if (!labelsMatch(record.labels, input.labels)) return false
-        return true
-      })
-      return remember(records)
+      assertWindow(input)
+      return remember(await provider.fetchMetrics(input))
     },
+
+    histogram: async (input, bucketCount) => provider.histogram(readFilter(input), bucketCount),
+
+    patterns: async (input, baseline) => {
+      const filter = readFilter(input)
+      if (baseline) assertRange(baseline.startTime, baseline.endTime)
+      const patterns = await provider.patterns(filter, baseline)
+      // A template is built from raw record text, so it can carry an unmasked
+      // value the record-level redaction would have caught. Same exit rule.
+      return patterns.map((pattern) => ({
+        ...pattern,
+        template: redactSensitiveText(pattern.template),
+      }))
+    },
+
+    facets: async (input, fields, limit = 8) => {
+      const filter = readFilter(input)
+      const safeFields = fields.filter((field) => !isSensitiveFieldName(field))
+      if (safeFields.length === 0) return []
+      const facets = await provider.facets(filter, safeFields, limit)
+      return facets.map((facet) => ({
+        ...facet,
+        values: facet.values.map((entry) => ({
+          ...entry,
+          value: redactSensitiveText(entry.value),
+        })),
+      }))
+    },
+
+    sources: async () => {
+      const sources = await provider.sources()
+      return sources.map((source) => ({
+        ...source,
+        label: redactSensitiveText(source.label),
+        pipeline: redactSensitiveText(source.pipeline),
+      }))
+    },
+
     validateTimeline: async (input) => validateTimelineDraft(input, evidencePool.values()),
+
     evidenceSnapshot: () =>
-      redactSensitiveValue([...evidencePool.values(), ...RUNBOOK_EVIDENCE]) as SreEvidence[],
+      redactSensitiveValue([
+        ...evidencePool.values(),
+        ...provider.ambientEvidence(),
+      ]) as SreEvidence[],
   }
 }
+
+/** Re-exported so callers keep one import for the evidence-serialisation helper. */
+export { evidenceText }

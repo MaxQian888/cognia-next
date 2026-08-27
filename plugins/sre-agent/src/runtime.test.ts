@@ -1,5 +1,6 @@
 import { EXPECTED_TIMELINE, FIXTURE_END, FIXTURE_START, FIXTURE_TRACE_ID } from "./fixtures"
 import { createSreRuntime, defaultIncidentWindow } from "./runtime"
+import type { SreLogProvider } from "./providers/types"
 
 function runtime() {
   return createSreRuntime({ pluginId: "sre-agent" })
@@ -208,5 +209,147 @@ describe("SRE mock runtime", () => {
     })
 
     expect(result).toMatchObject({ ok: true, issues: [] })
+  })
+})
+
+describe("SRE runtime over the provider seam", () => {
+  const WINDOW = { startTime: FIXTURE_START, endTime: FIXTURE_END }
+  const QUERY = { environment: "prod", ...WINDOW }
+
+  function stubProvider(overrides: Partial<SreLogProvider> = {}): SreLogProvider {
+    return {
+      id: "stub",
+      kind: "remote",
+      coverage: () => null,
+      fetchLogs: async () => [],
+      fetchTrace: async () => [],
+      fetchMetrics: async () => [],
+      ambientEvidence: () => [],
+      histogram: async () => [],
+      patterns: async () => [],
+      facets: async () => [],
+      sources: async () => [],
+      ...overrides,
+    }
+  }
+
+  it("reports which backend answered", () => {
+    expect(runtime().provider()).toEqual({
+      id: "qwen-timeout-fallback",
+      kind: "fixture",
+      coverage: WINDOW,
+    })
+  })
+
+  it("names the fixture corpus only when a fixture answered", async () => {
+    await expect(runtime().queryLogs(QUERY)).resolves.toMatchObject({
+      provider: "qwen-timeout-fallback",
+      fixture: "qwen-timeout-fallback",
+    })
+    const remote = await createSreRuntime({ pluginId: "sre-agent" }, stubProvider()).queryLogs(
+      QUERY
+    )
+    expect(remote.provider).toBe("stub")
+    expect(remote).not.toHaveProperty("fixture")
+  })
+
+  it("falls back to the last hour when the backend is unbounded", () => {
+    const window = defaultIncidentWindow(stubProvider())
+    const span = Date.parse(window.endTime) - Date.parse(window.startTime)
+    expect(span).toBe(60 * 60 * 1000)
+  })
+
+  it("buckets the window and validates it like a query does", async () => {
+    const buckets = await runtime().histogram(QUERY, 4)
+    expect(buckets).toHaveLength(4)
+    expect(buckets.reduce((sum, bucket) => sum + bucket.total, 0)).toBe(9)
+    await expect(runtime().histogram({ ...QUERY, startTime: "nope" }, 4)).rejects.toThrow(
+      "valid ISO timestamps"
+    )
+  })
+
+  it("rejects an invalid baseline window before querying patterns", async () => {
+    await expect(
+      runtime().patterns(QUERY, { startTime: FIXTURE_END, endTime: FIXTURE_START })
+    ).rejects.toThrow("startTime must be before endTime")
+  })
+
+  it("redacts a template that carried an unmasked secret", async () => {
+    const rt = createSreRuntime(
+      { pluginId: "sre-agent" },
+      stubProvider({
+        patterns: async () => [
+          {
+            id: "tpl_1",
+            template: "auth failed key=ak_live1 from 10.1.2.3",
+            count: 3,
+            baselineCount: null,
+            changeRatio: null,
+            services: ["gateway"],
+            levels: ["error"],
+            firstSeen: FIXTURE_START,
+            lastSeen: FIXTURE_END,
+            evidenceIds: ["log_x"],
+          },
+        ],
+      })
+    )
+    const [pattern] = await rt.patterns(QUERY)
+    expect(pattern.template).toBe("auth failed key=ak_[redacted] from [ip-redacted]")
+  })
+
+  it("drops sensitive facet fields before the backend sees them", async () => {
+    const seen: string[][] = []
+    const rt = createSreRuntime(
+      { pluginId: "sre-agent" },
+      stubProvider({
+        facets: async (_filter, fields) => {
+          seen.push([...fields])
+          return fields.map((field) => ({ field, total: 0, values: [] }))
+        },
+      })
+    )
+
+    await rt.facets(QUERY, ["service", "tenant_id", "api_key_id", "user_id", "client_ip"])
+    expect(seen).toEqual([["service"]])
+    await expect(rt.facets(QUERY, ["tenant_id"])).resolves.toEqual([])
+    expect(seen).toHaveLength(1)
+  })
+
+  it("redacts facet values and source descriptions on the way out", async () => {
+    const rt = createSreRuntime(
+      { pluginId: "sre-agent" },
+      stubProvider({
+        facets: async () => [
+          { field: "peer", total: 2, values: [{ value: "10.1.2.3", count: 2 }] },
+        ],
+        sources: async () => [
+          {
+            id: "s1",
+            label: "collector u-42",
+            pipeline: "syslog from 10.0.0.9",
+            status: "healthy",
+            lagMs: 1200,
+            recordCount: 10,
+            bytes24h: 42,
+          },
+        ],
+      })
+    )
+
+    await expect(rt.facets(QUERY, ["peer"])).resolves.toEqual([
+      { field: "peer", total: 2, values: [{ value: "[ip-redacted]", count: 2 }] },
+    ])
+    await expect(rt.sources()).resolves.toMatchObject([
+      { label: "collector [subject-redacted]", pipeline: "syslog from [ip-redacted]" },
+    ])
+  })
+
+  it("keeps ambient runbook evidence in the snapshot", () => {
+    expect(
+      runtime()
+        .evidenceSnapshot()
+        .map((entry) => entry.source)
+    ).toEqual(["runbook"])
   })
 })
