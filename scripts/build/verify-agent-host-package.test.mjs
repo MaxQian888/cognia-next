@@ -33,6 +33,9 @@ function fixture(target, executable) {
     fs.writeFileSync(helper, `${helperName} helper`)
     if (target !== "win32-x64") fs.chmodSync(helper, 0o755)
   }
+  const claude = path.join(packageRoot, "bin", target === "win32-x64" ? "claude.exe" : "claude")
+  fs.writeFileSync(claude, "claude runtime")
+  if (target !== "win32-x64") fs.chmodSync(claude, 0o755)
 
   const resources = {
     "sidecar/pi-extension/cognia-pi-extension.ts": "extension",
@@ -110,6 +113,28 @@ test("blocks packing a host without the external agent launcher", () => {
     populate(packageRoot, "cognia-agent", seal)
     fs.rmSync(path.join(packageRoot, "bin", "cognia-external-agent-launcher"))
     assert.throws(() => verifyAgentHostPackage(root, "darwin-arm64"), /external agent/)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("blocks packing a full host without its target-native Claude runtime", () => {
+  const { root, packageRoot, seal } = fixture("darwin-arm64", "cognia-agent")
+  try {
+    populate(packageRoot, "cognia-agent", seal)
+    fs.rmSync(path.join(packageRoot, "bin", "claude"))
+    assert.throws(() => verifyAgentHostPackage(root, "darwin-arm64"), /Claude runtime/)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("requires the Windows Claude runtime suffix", () => {
+  const { root, packageRoot, seal } = fixture("win32-x64", "cognia-agent.exe")
+  try {
+    populate(packageRoot, "cognia-agent.exe", seal, { mode: 0o644 })
+    fs.renameSync(path.join(packageRoot, "bin", "claude.exe"), path.join(packageRoot, "bin", "claude"))
+    assert.throws(() => verifyAgentHostPackage(root, "win32-x64"), /claude\.exe.*Claude runtime/s)
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }

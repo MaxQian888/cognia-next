@@ -98,6 +98,56 @@ test("handshakes with the embedded run-code role over IPC", async () => {
   assert.deepEqual(sent, [{ kind: "start", source: "return 6 * 7", toolNames: [] }])
 })
 
+test("smokes slim Claude resolution with an injected runtime and a sanitized failure", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-bun-smoke-"))
+  const slimExecutable = path.join(root, "cli/dist/bin/cognia-agent-macos-arm64-slim/cognia-agent")
+  const externalClaude = path.join(root, "cli/dist/bin/cognia-agent-macos-arm64/claude")
+  fs.mkdirSync(path.dirname(slimExecutable), { recursive: true })
+  fs.mkdirSync(path.dirname(externalClaude), { recursive: true })
+  fs.writeFileSync(slimExecutable, "host")
+  fs.writeFileSync(externalClaude, "claude")
+  fs.chmodSync(slimExecutable, 0o755)
+  fs.chmodSync(externalClaude, 0o755)
+  const calls = []
+  const responses = [
+    { status: 0, stdout: "cognia-agent 1.0.0\n", stderr: "" },
+    { status: 0, stdout: "2.1.227 (Claude Code)\n", stderr: "" },
+    {
+      status: 1,
+      stdout: "",
+      stderr: "Claude runtime is unavailable; set COGNIA_CLAUDE_EXECUTABLE",
+    },
+    { status: 0, stdout: '{"ok":true}\n', stderr: "" },
+    { status: 0, stdout: '{"type":"ready"}\n', stderr: "" },
+    {
+      status: 1,
+      stdout: '{"ok":false,"error":{"message":"Invalid job.mode: undefined"}}\n',
+      stderr: "",
+    },
+    { status: 1, stdout: "", stderr: "missing COGNIA_TOOLHOST_SOCKET" },
+    { status: 1, stdout: "", stderr: "invalid MCP relay configuration" },
+  ]
+
+  try {
+    assert.equal(
+      smokeCliArtifact(root, "darwin-arm64", {
+        variant: "slim",
+        externalClaudeExecutable: externalClaude,
+        spawnSyncImpl(command, args, options) {
+          calls.push({ command, args, options })
+          return responses.shift()
+        },
+      }),
+      slimExecutable
+    )
+    assert.equal(calls[1].options.env.COGNIA_CLAUDE_EXECUTABLE, externalClaude)
+    assert.equal(calls[2].options.env.PATH, "")
+    assert.equal("COGNIA_CLAUDE_EXECUTABLE" in calls[2].options.env, false)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("fails with the role name and subprocess diagnostics", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-bun-smoke-"))
   const executable = path.join(root, "cli/dist/bin/cognia-agent-linux-x64/cognia-agent")

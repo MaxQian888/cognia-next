@@ -22,7 +22,7 @@ const targets = {
   },
 }
 
-const requested = process.argv.slice(2)
+const requested = process.argv.slice(2).filter((arg) => arg !== "--")
 const selected = requested.length > 0 ? requested : Object.keys(targets)
 for (const key of selected) {
   const target = targets[key]

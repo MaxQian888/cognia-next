@@ -1,9 +1,10 @@
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { cliTarget, hostTargetName } from "../build/cli-bun-contract.mjs"
+import { cliLayoutName, cliTarget, hostTargetName } from "../build/cli-bun-contract.mjs"
 
 function parseJsonLine(output, label) {
   try {
@@ -13,20 +14,32 @@ function parseJsonLine(output, label) {
   }
 }
 
-export function smokeCliArtifact(root, targetName, { spawnSyncImpl = spawnSync } = {}) {
+export function smokeCliArtifact(
+  root,
+  targetName,
+  { variant = "full", externalClaudeExecutable, spawnSyncImpl = spawnSync } = {}
+) {
   const target = cliTarget(targetName)
-  const executable = path.join(root, "cli/dist/bin", target.dist, target.executable)
+  const executable = path.join(
+    root,
+    "cli/dist/bin",
+    cliLayoutName(target, variant),
+    target.executable
+  )
   if (!fs.statSync(executable, { throwIfNoEntry: false })?.isFile()) {
     throw new Error(`missing Bun CLI artifact: ${path.relative(root, executable)}`)
   }
 
   const run = (label, args, options = {}, expectedStatus = 0) => {
+    const { unsetEnv = [], ...spawnOptions } = options
+    const env = { ...process.env, ...spawnOptions.env }
+    for (const name of unsetEnv) delete env[name]
     const result = spawnSyncImpl(executable, args, {
       cwd: root,
       encoding: "utf8",
       timeout: 30_000,
-      ...options,
-      env: { ...process.env, ...options.env },
+      ...spawnOptions,
+      env,
     })
     if (result.status !== expectedStatus) {
       throw new Error(
@@ -39,11 +52,47 @@ export function smokeCliArtifact(root, targetName, { spawnSyncImpl = spawnSync }
   const version = run("CLI version smoke", ["--version"]).stdout ?? ""
   if (!version.trim()) throw new Error("CLI version smoke emitted no version")
 
-  const claudeVersion =
-    run("embedded Claude probe", [], {
-      env: { COGNIA_ROLE: "claude-probe" },
-    }).stdout ?? ""
-  if (!claudeVersion.trim()) throw new Error("embedded Claude probe emitted no version")
+  let claudeVersion = ""
+  if (variant === "full") {
+    const claudeTmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-claude-probe-"))
+    try {
+      claudeVersion =
+        run("adjacent Claude probe", [], {
+          env: { COGNIA_ROLE: "claude-probe", CLAUDE_CODE_TMPDIR: claudeTmpdir },
+          unsetEnv: ["COGNIA_CLAUDE_EXECUTABLE"],
+        }).stdout ?? ""
+      const extracted = fs.readdirSync(claudeTmpdir)
+      if (extracted.length > 0) {
+        throw new Error(`adjacent Claude probe extracted a duplicate: ${extracted.join(", ")}`)
+      }
+    } finally {
+      fs.rmSync(claudeTmpdir, { recursive: true, force: true })
+    }
+  } else {
+    if (!externalClaudeExecutable) {
+      throw new Error("slim smoke requires an external Claude executable")
+    }
+    claudeVersion =
+      run("external Claude probe", [], {
+        env: {
+          COGNIA_ROLE: "claude-probe",
+          COGNIA_CLAUDE_EXECUTABLE: externalClaudeExecutable,
+        },
+      }).stdout ?? ""
+    const missing = run(
+      "missing external Claude probe",
+      [],
+      {
+        env: { COGNIA_ROLE: "claude-probe", PATH: "" },
+        unsetEnv: ["COGNIA_CLAUDE_EXECUTABLE"],
+      },
+      1
+    )
+    if (!/COGNIA_CLAUDE_EXECUTABLE/.test(missing.stderr ?? "")) {
+      throw new Error(`missing external Claude probe was not actionable: ${missing.stderr ?? ""}`)
+    }
+  }
+  if (!claudeVersion.trim()) throw new Error("Claude probe emitted no version")
 
   const codegraph = parseJsonLine(
     run("embedded codegraph probe", [], {
@@ -161,10 +210,25 @@ export function smokeRunCodeRole(executable, { spawnImpl = spawn } = {}) {
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : ""
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "../..")
-  const targetName = process.argv[2] ?? hostTargetName(process.platform, process.arch)
-  const executable = smokeCliArtifact(root, targetName)
-  await smokeRunCodeRole(executable)
-  process.stdout.write(
-    `Bun CLI ${targetName} artifact smoke passed: ${path.relative(root, executable)}\n`
-  )
+  const args = process.argv.slice(2)
+  const targetName =
+    args.find((arg) => !arg.startsWith("--")) ?? hostTargetName(process.platform, process.arch)
+  const variantArg = args.find((arg) => arg.startsWith("--variant="))
+  const requestedVariant = variantArg?.slice("--variant=".length) ?? "full"
+  const variants = requestedVariant === "all" ? ["full", "slim"] : [requestedVariant]
+  const target = cliTarget(targetName)
+  for (const variant of variants) {
+    const externalClaudeExecutable =
+      variant === "slim"
+        ? path.join(root, "cli/dist/bin", cliLayoutName(target, "full"), target.claudeBinary)
+        : undefined
+    const executable = smokeCliArtifact(root, targetName, {
+      variant,
+      externalClaudeExecutable,
+    })
+    await smokeRunCodeRole(executable)
+    process.stdout.write(
+      `Bun CLI ${targetName}/${variant} artifact smoke passed: ${path.relative(root, executable)}\n`
+    )
+  }
 }

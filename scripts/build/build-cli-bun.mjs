@@ -5,6 +5,14 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 import {
+  buildCliArtifactManifest,
+  verifyCliArtifactLayout,
+  writeCliArtifactManifest,
+} from "./cli-artifact-integrity.mjs"
+import { assertCliArtifactSizes } from "./cli-artifact-size.mjs"
+import {
+  cliArchiveName,
+  cliLayoutName,
   cliTarget,
   hostTargetName,
   parseCliBuildArgs,
@@ -26,8 +34,9 @@ if (buildArgs.layoutOnly) {
 
 const target = cliTarget(buildArgs.targetName)
 const binDir = path.join(root, "cli/dist/bin")
-const outdir = path.join(binDir, target.dist)
-const outfile = path.join(outdir, target.executable)
+const variants = buildArgs.variant === "all" ? ["full", "slim"] : [buildArgs.variant]
+const coreDir = path.join(binDir, `.core-${target.dist}`)
+const coreExecutable = path.join(coreDir, target.executable)
 
 const [bunMajor, bunMinor] = Bun.version.split(".").map(Number)
 if (bunMajor < 1 || (bunMajor === 1 && bunMinor < 4)) {
@@ -63,11 +72,10 @@ function findPnpmPackageDir(packageName) {
   return path.join(store, entryName, "node_modules", scope, name)
 }
 
-const claudeBinary = path.join(
-  findPnpmPackageDir(target.claudePackage),
-  target.claudeBinary
-)
-if (!fs.statSync(claudeBinary, { throwIfNoEntry: false })?.isFile()) {
+const claudeBinary = variants.includes("full")
+  ? path.join(findPnpmPackageDir(target.claudePackage), target.claudeBinary)
+  : undefined
+if (claudeBinary && !fs.statSync(claudeBinary, { throwIfNoEntry: false })?.isFile()) {
   throw new Error(`build-cli-bun: missing Claude executable ${claudeBinary}`)
 }
 
@@ -221,30 +229,6 @@ const embeddedMulticallRolesPlugin = {
   },
 }
 
-const embeddedClaudeExecutablePlugin = {
-  name: "embedded-claude-executable",
-  setup(build) {
-    build.onLoad(
-      { filter: /[\\/]sidecar[\\/]dispatch[\\/]claude-executable\.mjs$/ },
-      () => ({
-        contents: `
-          import embeddedClaudePath from ${JSON.stringify(claudeBinary)} with { type: "file" };
-          import { extractFromBunfs } from "@anthropic-ai/claude-agent-sdk/extract";
-          let extractedClaudePath;
-          export function resolveEmbeddedClaudeExecutable() {
-            return extractedClaudePath ??= extractFromBunfs(embeddedClaudePath);
-          }
-          export function applyEmbeddedClaudeExecutable(options, resolveExecutable = resolveEmbeddedClaudeExecutable) {
-            const executable = resolveExecutable();
-            return executable ? { ...options, pathToClaudeCodeExecutable: executable } : options;
-          }
-        `,
-        loader: "js",
-      })
-    )
-  },
-}
-
 const dynamicRequireCompatPlugin = {
   name: "dynamic-require-compat",
   setup(build) {
@@ -358,28 +342,32 @@ const zodCommonJsPlugin = {
   },
 }
 
-fs.rmSync(outdir, { recursive: true, force: true })
-fs.mkdirSync(outdir, { recursive: true })
+fs.rmSync(coreDir, { recursive: true, force: true })
+fs.mkdirSync(coreDir, { recursive: true })
 
 const result = await Bun.build({
   entrypoints: [entry],
   target: "bun",
   format: "esm",
   sourcemap: "none",
-  minify: false,
+  minify: {
+    syntax: true,
+    whitespace: true,
+    identifiers: false,
+  },
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    "globalThis.__COGNIA_COMPILED_HOST__": "true",
   },
   compile: {
     target: target.bunTarget,
-    outfile,
+    outfile: coreExecutable,
     autoloadDotenv: false,
     autoloadBunfig: false,
   },
   plugins: [
     createCliExternalAgentAliasPlugin(root),
     embeddedMulticallRolesPlugin,
-    embeddedClaudeExecutablePlugin,
     dynamicRequireCompatPlugin,
     createTsconfigPathsPlugin(),
     bundleAgentProtocolDependenciesPlugin,
@@ -404,66 +392,155 @@ function copyRequired(source, destination, { executable = false } = {}) {
   if (executable && target.name !== "win32-x64") fs.chmodSync(destination, 0o755)
 }
 
-copyRequired(externalHostLauncher, path.join(outdir, externalHostLauncherName), {
-  executable: true,
-})
-copyRequired(workspaceHelper, path.join(outdir, workspaceHelperName), { executable: true })
-copyRequired(
-  path.join(root, "sidecar/pi-extension/cognia-pi-extension.ts"),
-  path.join(outdir, "sidecar/pi-extension/cognia-pi-extension.ts")
-)
-copyRequired(
-  path.join(root, "sidecar/pi-extension/integrity.json"),
-  path.join(outdir, "sidecar/pi-extension/integrity.json")
-)
-copyRequired(
-  path.join(root, "sidecar/node_modules/web-tree-sitter/tree-sitter.wasm"),
-  path.join(outdir, "tree-sitter.wasm")
-)
-fs.cpSync(
-  path.join(root, "sidecar/builtin-tools/code/grammars"),
-  path.join(outdir, "grammars"),
-  { recursive: true }
-)
+if (target.name !== "win32-x64") fs.chmodSync(coreExecutable, 0o755)
 
-if (target.name !== "win32-x64") fs.chmodSync(outfile, 0o755)
+function directoryBytes(directory) {
+  let bytes = 0
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name)
+    bytes += entry.isDirectory() ? directoryBytes(file) : fs.statSync(file).size
+  }
+  return bytes
+}
 
-const signingMode = signCliArtifacts({
-  targetName: target.name,
-  executable: outfile,
-  nativeHelpers: [
-    path.join(outdir, externalHostLauncherName),
-    path.join(outdir, workspaceHelperName),
-  ],
-  entitlements: path.join(root, "scripts/build/bun-entitlements.plist"),
-  identity: process.env.APPLE_SIGNING_IDENTITY ?? "",
-})
+async function archiveLayout(layoutRoot, variant) {
+  const archiveFile = path.join(binDir, cliArchiveName(target, variant))
+  fs.rmSync(archiveFile, { force: true })
+  if (!buildArgs.archive) return undefined
 
-const { TarArchive, ZipArchive } = await import("archiver")
-const archiveFile = path.join(binDir, `${target.dist}.${target.archive}`)
-fs.rmSync(archiveFile, { force: true })
-await new Promise((resolve, reject) => {
-  const output = fs.createWriteStream(archiveFile)
-  const archive =
-    target.archive === "zip"
-      ? new ZipArchive({ zlib: { level: 9 } })
-      : new TarArchive({ gzip: true, gzipOptions: { level: 9 } })
-  output.on("close", resolve)
-  archive.on("warning", (error) => (error.code === "ENOENT" ? undefined : reject(error)))
-  archive.on("error", reject)
-  archive.pipe(output)
-  archive.directory(outdir, target.dist, (entry) => {
-    if (target.archive !== "zip" && path.basename(entry.name) === target.executable) {
-      entry.mode = 0o755
-    }
-    return entry
+  const { TarArchive, ZipArchive } = await import("archiver")
+  await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(archiveFile)
+    const archive =
+      target.archive === "zip"
+        ? new ZipArchive({ zlib: { level: 9 } })
+        : new TarArchive({ gzip: true, gzipOptions: { level: 9 } })
+    output.on("close", resolve)
+    archive.on("warning", (error) => (error.code === "ENOENT" ? undefined : reject(error)))
+    archive.on("error", reject)
+    archive.pipe(output)
+    archive.directory(layoutRoot, cliLayoutName(target, variant), (entry) => {
+      const nativeNames = new Set([
+        target.executable,
+        target.claudeBinary,
+        externalHostLauncherName,
+        workspaceHelperName,
+      ])
+      if (target.archive !== "zip" && nativeNames.has(path.basename(entry.name))) {
+        entry.mode = 0o755
+      }
+      return entry
+    })
+    void archive.finalize()
   })
-  void archive.finalize()
-})
+  return archiveFile
+}
 
-const sizeMiB = (fs.statSync(outfile).size / 1024 / 1024).toFixed(1)
-console.log(
-  `build-cli-bun: Bun ${Bun.version} wrote ${path.relative(root, outfile)} (${sizeMiB} MiB)`
-)
+const sizeReport = {
+  schemaVersion: 1,
+  target: target.name,
+  bunVersion: Bun.version,
+  variants: {},
+}
+let signingMode = false
+
+for (const variant of variants) {
+  const layoutName = cliLayoutName(target, variant)
+  const layoutRoot = path.join(binDir, layoutName)
+  fs.rmSync(layoutRoot, { recursive: true, force: true })
+  fs.mkdirSync(layoutRoot, { recursive: true })
+
+  const executable = path.join(layoutRoot, target.executable)
+  const launcher = path.join(layoutRoot, externalHostLauncherName)
+  const worker = path.join(layoutRoot, workspaceHelperName)
+  copyRequired(coreExecutable, executable, { executable: true })
+  copyRequired(externalHostLauncher, launcher, { executable: true })
+  copyRequired(workspaceHelper, worker, { executable: true })
+  copyRequired(
+    path.join(root, "sidecar/pi-extension/cognia-pi-extension.ts"),
+    path.join(layoutRoot, "sidecar/pi-extension/cognia-pi-extension.ts")
+  )
+  copyRequired(
+    path.join(root, "sidecar/pi-extension/integrity.json"),
+    path.join(layoutRoot, "sidecar/pi-extension/integrity.json")
+  )
+  copyRequired(
+    path.join(root, "sidecar/node_modules/web-tree-sitter/tree-sitter.wasm"),
+    path.join(layoutRoot, "tree-sitter.wasm")
+  )
+  fs.cpSync(
+    path.join(root, "sidecar/builtin-tools/code/grammars"),
+    path.join(layoutRoot, "grammars"),
+    { recursive: true }
+  )
+
+  const nativeArtifacts = [launcher, worker]
+  let packagedClaude
+  if (variant === "full") {
+    packagedClaude = path.join(layoutRoot, target.claudeBinary)
+    copyRequired(claudeBinary, packagedClaude, { executable: true })
+    nativeArtifacts.push(packagedClaude)
+  }
+
+  signingMode = signCliArtifacts({
+    targetName: target.name,
+    executable,
+    nativeHelpers: nativeArtifacts,
+    entitlements: path.join(root, "scripts/build/bun-entitlements.plist"),
+    identity: process.env.APPLE_SIGNING_IDENTITY ?? "",
+  }) || signingMode
+
+  writeCliArtifactManifest(
+    layoutRoot,
+    buildCliArtifactManifest(layoutRoot, target.name, variant)
+  )
+  verifyCliArtifactLayout(layoutRoot, target.name, variant)
+
+  const archiveFile = await archiveLayout(layoutRoot, variant)
+  const executableBytes = fs.statSync(executable).size
+  const claudeRuntimeBytes = packagedClaude ? fs.statSync(packagedClaude).size : 0
+  const unpackedLayoutBytes = directoryBytes(layoutRoot)
+  if (packagedClaude && executableBytes >= claudeRuntimeBytes) {
+    throw new Error(
+      "build-cli-bun: core executable is unexpectedly large enough to contain the Claude file asset"
+    )
+  }
+  sizeReport.variants[variant] = {
+    layout: layoutName,
+    archive: archiveFile ? path.basename(archiveFile) : null,
+    executableBytes,
+    claudeRuntimeBytes,
+    helperResourceBytes: unpackedLayoutBytes - executableBytes - claudeRuntimeBytes,
+    unpackedLayoutBytes,
+    archiveBytes: archiveFile ? fs.statSync(archiveFile).size : null,
+    embeddedClaudeFileAsset: false,
+  }
+}
+
+let sizeAcceptanceError
+if (buildArgs.archive) {
+  try {
+    assertCliArtifactSizes(sizeReport)
+  } catch (error) {
+    sizeAcceptanceError = error
+  }
+}
+
+const sizeReportFile = path.join(binDir, `${target.dist}-size-report.json`)
+fs.writeFileSync(sizeReportFile, `${JSON.stringify(sizeReport, null, 2)}\n`)
+fs.rmSync(coreDir, { recursive: true, force: true })
+
+for (const [variant, measurements] of Object.entries(sizeReport.variants)) {
+  const sizeMiB = (measurements.executableBytes / 1024 / 1024).toFixed(1)
+  console.log(
+    `build-cli-bun: Bun ${Bun.version} wrote ${measurements.layout}/${target.executable} (${sizeMiB} MiB, ${variant})`
+  )
+  if (measurements.archive) console.log(`build-cli-bun: archived ${measurements.archive}`)
+}
 if (signingMode) console.log(`build-cli-bun: ${signingMode} signed macOS artifacts`)
-console.log(`build-cli-bun: archived ${path.relative(root, archiveFile)}`)
+console.log(`build-cli-bun: wrote ${path.relative(root, sizeReportFile)}`)
+if (sizeAcceptanceError) {
+  throw new Error(`build-cli-bun: ${sizeAcceptanceError.message}`, {
+    cause: sizeAcceptanceError,
+  })
+}

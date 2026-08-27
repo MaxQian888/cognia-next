@@ -4,6 +4,8 @@ import fs from "node:fs"
 import path from "node:path"
 
 import {
+  cliArchiveName,
+  cliLayoutName,
   cliTarget,
   hostTargetName,
   parseCliBuildArgs,
@@ -36,16 +38,41 @@ test("build arguments select one explicit target and support Docker layout mode"
   assert.deepEqual(parseCliBuildArgs(["--target", "linux-x64"], "darwin-arm64"), {
     targetName: "linux-x64",
     layoutOnly: false,
+    variant: "full",
+    archive: false,
   })
-  assert.deepEqual(parseCliBuildArgs(["--target=win32-x64"], "darwin-arm64"), {
+  assert.deepEqual(parseCliBuildArgs([
+    "--target=win32-x64",
+    "--variant=all",
+    "--archive",
+  ], "darwin-arm64"), {
     targetName: "win32-x64",
     layoutOnly: false,
+    variant: "all",
+    archive: true,
   })
   assert.deepEqual(parseCliBuildArgs(["--layout-only"], "linux-x64"), {
     targetName: "linux-x64",
     layoutOnly: true,
+    variant: "full",
+    archive: false,
+  })
+  assert.deepEqual(parseCliBuildArgs(["--variant", "slim"], "linux-x64"), {
+    targetName: "linux-x64",
+    layoutOnly: false,
+    variant: "slim",
+    archive: false,
   })
   assert.throws(() => parseCliBuildArgs(["--target", "freebsd-x64"], "darwin-arm64"), /unknown CLI target/)
+  assert.throws(() => parseCliBuildArgs(["--variant", "tiny"], "darwin-arm64"), /unknown CLI variant/)
+})
+
+test("full artifact names stay stable while slim names are explicit", () => {
+  const target = cliTarget("darwin-arm64")
+  assert.equal(cliLayoutName(target, "full"), "cognia-agent-macos-arm64")
+  assert.equal(cliArchiveName(target, "full"), "cognia-agent-macos-arm64.tar.gz")
+  assert.equal(cliLayoutName(target, "slim"), "cognia-agent-macos-arm64-slim")
+  assert.equal(cliArchiveName(target, "slim"), "cognia-agent-macos-arm64-slim.tar.gz")
 })
 
 test("default Bun release scripts prepare every generated runtime dependency", () => {
@@ -58,6 +85,15 @@ test("default Bun release scripts prepare every generated runtime dependency", (
   assert.match(manifest.scripts["cli:release:prepare"], /sidecar:vscode:build/)
   assert.match(manifest.scripts["cli:release:prepare"], /cli:native-hosts:build/)
   assert.equal(manifest.scripts["precli:build:binary"], "pnpm run cli:release:prepare")
+})
+
+test("the compiled core does not embed or extract the Claude executable", () => {
+  const buildScript = fs.readFileSync(
+    path.resolve(import.meta.dirname, "build-cli-bun.mjs"),
+    "utf8"
+  )
+  assert.doesNotMatch(buildScript, /extractFromBunfs|embeddedClaudePath|type:\s*["']file["']/)
+  assert.match(buildScript, /copyRequired\(claudeBinary, packagedClaude/)
 })
 
 test("tagged macOS host publishing fails closed before Developer ID signing", () => {
@@ -82,4 +118,9 @@ test("tagged macOS host publishing fails closed before Developer ID signing", ()
   ]) {
     assert.match(workflow, new RegExp(`${secret}: \\\${\\{ secrets\\.${secret} \\}\\}`))
   }
+  assert.match(workflow, /cli:build:binary -- --target \$\{\{ matrix\.target \}\} --variant all --archive/)
+  assert.match(workflow, /cli:smoke:bun -- \$\{\{ matrix\.target \}\} --variant=all/)
+  assert.match(workflow, /gh release upload.*-slim/s)
+  assert.match(workflow, /notarytool submit.*cognia-agent-full\.zip.*--wait/s)
+  assert.match(workflow, /notarytool submit.*cognia-agent-slim\.zip.*--wait/s)
 })

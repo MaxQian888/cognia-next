@@ -4,9 +4,21 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const TARGETS = {
-  "darwin-arm64": { packageDir: "agent-host-darwin-arm64", executable: "cognia-agent" },
-  "linux-x64": { packageDir: "agent-host-linux-x64", executable: "cognia-agent" },
-  "win32-x64": { packageDir: "agent-host-win32-x64", executable: "cognia-agent.exe" },
+  "darwin-arm64": {
+    packageDir: "agent-host-darwin-arm64",
+    executable: "cognia-agent",
+    claude: "claude",
+  },
+  "linux-x64": {
+    packageDir: "agent-host-linux-x64",
+    executable: "cognia-agent",
+    claude: "claude",
+  },
+  "win32-x64": {
+    packageDir: "agent-host-win32-x64",
+    executable: "cognia-agent.exe",
+    claude: "claude.exe",
+  },
 }
 
 const REQUIRED_RESOURCES = [
@@ -208,6 +220,10 @@ export function verifyAgentHostPackage(root, targetName) {
     `run pnpm cli:build:binary and pnpm agent:host:package -- ${targetName}`
   )
   requireExecutable(root, executable, targetName)
+
+  const claude = path.join(packageRoot, "bin", target.claude)
+  requireFile(root, claude, "the full agent host requires its adjacent Claude runtime")
+  requireExecutable(root, claude, targetName)
 
   for (const [helperBaseName, purpose] of [
     ["cognia-external-agent-launcher", "external agent dispatch requires its native launcher"],

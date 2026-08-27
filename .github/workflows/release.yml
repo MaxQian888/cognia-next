@@ -58,9 +58,9 @@ jobs:
 
   publish-agent-hosts:
     name: Publish Agent host (${{ matrix.target }})
-    needs: [quality, test]
+    needs: [quality, test, build-tauri]
     permissions:
-      contents: read
+      contents: write
       id-token: write
     strategy:
       fail-fast: false
@@ -69,12 +69,18 @@ jobs:
           - runner: macos-14
             target: darwin-arm64
             package: agent-host-darwin-arm64
+            artifact: cognia-agent-macos-arm64
+            archive: tar.gz
           - runner: ubuntu-latest
             target: linux-x64
             package: agent-host-linux-x64
+            artifact: cognia-agent-linux-x64
+            archive: tar.gz
           - runner: windows-latest
             target: win32-x64
             package: agent-host-win32-x64
+            artifact: cognia-agent-win-x64
+            archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -97,9 +103,8 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.release.outputs.publish == 'true' && matrix.target == 'darwin-arm64'
+      - run: pnpm install --frozen-lockfile
+      - if: matrix.target == 'darwin-arm64'
         name: Require Developer ID release signing
         run: node scripts/ci/require-macos-release-signing.mjs
         env:
@@ -109,17 +114,37 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - if: steps.release.outputs.publish == 'true' && matrix.target == 'darwin-arm64'
+      - if: matrix.target == 'darwin-arm64'
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm cli:build:binary -- --target ${{ matrix.target }}
+      - run: pnpm cli:build:binary -- --target ${{ matrix.target }} --variant all --archive
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.target == 'darwin-arm64' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-      - if: steps.release.outputs.publish == 'true'
-        run: pnpm cli:smoke:bun -- ${{ matrix.target }}
+      - if: matrix.target == 'darwin-arm64'
+        name: Notarize full and slim CLI layouts
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent cli/dist/bin/cognia-agent-macos-arm64 "$RUNNER_TEMP/cognia-agent-full.zip"
+          ditto -c -k --keepParent cli/dist/bin/cognia-agent-macos-arm64-slim "$RUNNER_TEMP/cognia-agent-slim.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/cognia-agent-full.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun notarytool submit "$RUNNER_TEMP/cognia-agent-slim.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+      - run: pnpm cli:smoke:bun -- ${{ matrix.target }} --variant=all
+      - name: Upload full and slim standalone archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          "cli/dist/bin/${{ matrix.artifact }}.${{ matrix.archive }}"
+          "cli/dist/bin/${{ matrix.artifact }}-slim.${{ matrix.archive }}"
+          "cli/dist/bin/${{ matrix.artifact }}-size-report.json"
+          --clobber
       - if: steps.release.outputs.publish == 'true'
         run: pnpm agent:host:package -- ${{ matrix.target }}
       - if: steps.release.outputs.publish == 'true'

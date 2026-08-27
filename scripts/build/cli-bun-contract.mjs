@@ -44,13 +44,38 @@ export function hostTargetName(platform, arch) {
   throw new Error(`unsupported CLI release host: ${name}`)
 }
 
+export function cliLayoutName(target, variant) {
+  if (variant === "full") return target.dist
+  if (variant === "slim") return `${target.dist}-slim`
+  throw new Error(`unknown CLI variant: ${variant}`)
+}
+
+export function cliArchiveName(target, variant) {
+  return `${cliLayoutName(target, variant)}.${target.archive}`
+}
+
 export function parseCliBuildArgs(argv, defaultTargetName) {
   let targetName = defaultTargetName
   let layoutOnly = false
+  let variant = "full"
+  let archive = false
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
     if (arg === "--layout-only") {
       layoutOnly = true
+      continue
+    }
+    if (arg === "--archive") {
+      archive = true
+      continue
+    }
+    if (arg === "--variant") {
+      variant = argv[++index]
+      if (!variant) throw new Error("--variant requires a value")
+      continue
+    }
+    if (arg.startsWith("--variant=")) {
+      variant = arg.slice("--variant=".length)
       continue
     }
     if (arg === "--target") {
@@ -65,5 +90,11 @@ export function parseCliBuildArgs(argv, defaultTargetName) {
     throw new Error(`unknown build argument: ${arg}`)
   }
   cliTarget(targetName)
-  return { targetName, layoutOnly }
+  if (!["full", "slim", "all"].includes(variant)) {
+    throw new Error(`unknown CLI variant: ${variant}`)
+  }
+  if (layoutOnly && (variant !== "full" || archive)) {
+    throw new Error("--layout-only cannot be combined with --variant or --archive")
+  }
+  return { targetName, layoutOnly, variant, archive }
 }

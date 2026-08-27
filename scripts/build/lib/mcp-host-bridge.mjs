@@ -1,3 +1,5 @@
+import { renameSync, rmSync, writeFileSync } from "node:fs"
+
 const HOST_BRIDGED_IMPORTS = new Set([
   "@/lib/db/wiki-articles",
   "@/lib/db/skills",
@@ -77,4 +79,3 @@ export function writeCheckedMcpSidecarOutput(result, outfile) {
     rmSync(temporaryOutfile, { force: true })
   }
 }
-import { renameSync, rmSync, writeFileSync } from "node:fs"

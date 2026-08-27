@@ -46,6 +46,9 @@ export function signCliArtifacts({
     signer,
     executable,
   ])
+  for (const helper of nativeHelpers) {
+    runCodesign(["--verify", "--verbose=3", helper])
+  }
   runCodesign(["--verify", "--verbose=3", executable])
   return signingMode
 }

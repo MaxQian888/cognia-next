@@ -8,7 +8,7 @@ test("signs native helpers and the Bun executable with JIT entitlements on macOS
   assert.equal(signCliArtifacts({
     targetName: "darwin-arm64",
     executable: "/dist/cognia-agent",
-    nativeHelpers: ["/dist/launcher", "/dist/worker"],
+    nativeHelpers: ["/dist/launcher", "/dist/worker", "/dist/claude"],
     entitlements: "/repo/scripts/build/bun-entitlements.plist",
     identity: "Developer ID Application: Cognia",
     spawnSyncImpl(command, args) {
@@ -45,6 +45,18 @@ test("signs native helpers and the Bun executable with JIT entitlements on macOS
     [
       "codesign",
       [
+        "--force",
+        "--options",
+        "runtime",
+        "--timestamp",
+        "--sign",
+        "Developer ID Application: Cognia",
+        "/dist/claude",
+      ],
+    ],
+    [
+      "codesign",
+      [
         "--deep",
         "--force",
         "--options",
@@ -57,6 +69,9 @@ test("signs native helpers and the Bun executable with JIT entitlements on macOS
         "/dist/cognia-agent",
       ],
     ],
+    ["codesign", ["--verify", "--verbose=3", "/dist/launcher"]],
+    ["codesign", ["--verify", "--verbose=3", "/dist/worker"]],
+    ["codesign", ["--verify", "--verbose=3", "/dist/claude"]],
     ["codesign", ["--verify", "--verbose=3", "/dist/cognia-agent"]],
   ])
 })

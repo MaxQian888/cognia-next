@@ -4,7 +4,8 @@ import os from "node:os"
 import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../..")
-const target = process.argv[2] ?? `${process.platform}-${process.arch}`
+const target =
+  process.argv.slice(2).find((arg) => arg !== "--") ?? `${process.platform}-${process.arch}`
 const packageName = `agent-host-${target}`
 const packageRoot = path.join(root, "packages", packageName)
 if (!fs.existsSync(packageRoot)) throw new Error(`unsupported agent host target: ${target}`)
