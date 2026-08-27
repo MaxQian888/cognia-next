@@ -123,6 +123,22 @@ describe("BrowserToolbar address bar", () => {
     expect(screen.getByTestId("browser-url-display")).toHaveTextContent("example.com/docs")
   })
 
+  // Focusing selects the whole address, and a selection under a transparent
+  // input is painted by the browser regardless — straight over the overlay.
+  it("drops the overlay while the field has focus", () => {
+    renderToolbar({
+      url: "https://www.example.com/docs",
+      addressDisplay: addressDisplayParts("https://www.example.com/docs"),
+    })
+    const field = screen.getByLabelText("http://localhost:3000")
+    fireEvent.focus(field)
+    expect(screen.queryByTestId("browser-url-display")).toBeNull()
+    expect(field).not.toHaveClass("text-transparent")
+    fireEvent.blur(field)
+    expect(screen.getByTestId("browser-url-display")).toBeInTheDocument()
+    expect(field).toHaveClass("text-transparent")
+  })
+
   it("shows a half-typed draft verbatim", () => {
     renderToolbar({ url: "exa", addressDisplay: null })
     expect(screen.queryByTestId("browser-url-display")).toBeNull()

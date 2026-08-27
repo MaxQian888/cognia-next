@@ -18,7 +18,7 @@
  * park the webview off-screen.
  */
 
-import { type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { type FormEvent, type KeyboardEvent, type ReactNode, type RefObject, useState } from "react"
 import { GlobeIcon, LockIcon, MoreHorizontalIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -97,7 +97,11 @@ export interface BrowserToolbarProps {
   onUrlFocus?: () => void
   onUrlBlur?: () => void
   urlInputRef?: RefObject<HTMLInputElement | null>
-  /** Paint the read-mode address over the field. Callers suppress it mid-edit. */
+  /**
+   * Paint the read-mode address over the field. The toolbar drops it on its own
+   * while the field has focus — otherwise the overlay sits on top of the text the
+   * focus handler just selected, and the two render over each other.
+   */
   addressDisplay?: { host: string; rest: string; secure: boolean } | null
   /** Draw the indeterminate progress bar along the bottom edge. */
   loading?: boolean
@@ -130,7 +134,13 @@ export function BrowserToolbar({
 }: BrowserToolbarProps) {
   const t = useTranslations("browser")
   const tier = toolbarTier(useElementWidth(toolbarRef))
-  const SchemeIcon = addressDisplay?.secure ? LockIcon : GlobeIcon
+  // Editing always wins over the read-mode paint, whatever the caller passes:
+  // `onFocus` selects the whole address, and a live selection under a
+  // `text-transparent` input is exactly the case where the browser paints the
+  // real value anyway — on top of, and offset from, the overlay.
+  const [urlFocused, setUrlFocused] = useState(false)
+  const display = urlFocused ? null : addressDisplay
+  const SchemeIcon = display?.secure ? LockIcon : GlobeIcon
   // Each tier renders the identical control roster, only in a different
   // container, so nothing mounts twice and no action becomes unreachable.
   const hasOverflow = !!overflowExtras || !!inspectActions || !!pageActions
@@ -165,10 +175,14 @@ export function BrowserToolbar({
             value={url}
             onChange={(event) => onUrlChange(event.target.value)}
             onFocus={(event) => {
+              setUrlFocused(true)
               onUrlFocus?.()
               event.target.select()
             }}
-            onBlur={onUrlBlur}
+            onBlur={() => {
+              setUrlFocused(false)
+              onUrlBlur?.()
+            }}
             onKeyDown={onUrlKeyDown}
             placeholder={t("url.placeholder")}
             aria-label={t("url.placeholder")}
@@ -177,10 +191,10 @@ export function BrowserToolbar({
               // Read mode paints the pretty form over the field instead of
               // rewriting `value`, so copying still yields the real URL and
               // focusing reveals it without a reformat flicker.
-              addressDisplay && "text-transparent"
+              display && "text-transparent"
             )}
           />
-          {addressDisplay && (
+          {display && (
             <div
               aria-hidden
               data-testid="browser-url-display"
@@ -189,10 +203,8 @@ export function BrowserToolbar({
               className="pointer-events-none absolute inset-0 flex items-center border border-transparent pl-8 pr-3"
             >
               <span className="min-w-0 truncate text-sm">
-                {addressDisplay.host}
-                {addressDisplay.rest && (
-                  <span className="text-muted-foreground">{addressDisplay.rest}</span>
-                )}
+                {display.host}
+                {display.rest && <span className="text-muted-foreground">{display.rest}</span>}
               </span>
             </div>
           )}

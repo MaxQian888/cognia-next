@@ -666,8 +666,13 @@ export function BrowserPreviewPane({
 
   // Read-mode address: only while the field still mirrors the live location.
   // An uncommitted draft is never rewritten under the user's cursor.
-  const addressDisplay =
-    editingUrl || urlInput !== (currentUrl ?? "") ? null : addressDisplayParts(urlInput)
+  //
+  // No focus term here. `BrowserToolbar` drops the overlay itself whenever the
+  // field has focus, for every caller — repeating the rule here would be a
+  // second copy of it that the toolbar's would silently overrule anyway.
+  // `editingUrl` still guards the live-location sync above, which is a
+  // different question.
+  const addressDisplay = urlInput !== (currentUrl ?? "") ? null : addressDisplayParts(urlInput)
 
   // Every control below that issues a `browserClient` command needs the lease:
   // without it the native side answers "owner token does not match", and most
