@@ -6,10 +6,18 @@ import type { PairFailure } from "@ext/src/lib/client"
 import { PairScreen } from "./pair-screen"
 
 const api = {
+  extensionOrigin: () => "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
   message: (key: string, subs?: string[]) => (subs ? `${key}:${subs.join(",")}` : key),
 } as BrowserApi
 
 describe("PairScreen", () => {
+  it("shows the extension origin that must be allowlisted before pairing", () => {
+    render(<PairScreen api={api} busy={false} needsPermission onSubmit={jest.fn()} />)
+    expect(screen.getByTestId("pair-extension-origin")).toHaveTextContent(
+      "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+    )
+  })
+
   it("submits the trimmed code", () => {
     const onSubmit = jest.fn()
     render(<PairScreen api={api} busy={false} needsPermission onSubmit={onSubmit} />)

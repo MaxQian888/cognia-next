@@ -7,6 +7,7 @@
  * This module keeps them in memory only, which is also what makes it safe for
  * a browser extension: nothing token-shaped ever reaches `chrome.storage`.
  */
+import { base64UrlToText } from "./base64url"
 import { createDeviceProof } from "./dpop"
 import type { DeviceSigner } from "./device-signer"
 import { expectCompanionJson } from "./errors"
@@ -134,11 +135,11 @@ export function createCompanionSession({
 function readJwtId(accessToken: string): string {
   const segments = accessToken.split(".")
   if (segments.length !== 3) throw new Error("access token is malformed")
-  const padded = segments[1].replace(/-/g, "+").replace(/_/g, "/")
-  const claims = JSON.parse(atob(padded + "=".repeat((4 - (padded.length % 4)) % 4))) as Record<
-    string,
-    unknown
-  >
+  // `base64UrlToText`, not a local `atob`: `atob` yields one char per byte, so
+  // any non-ASCII claim in the payload is mangled before `JSON.parse` sees it.
+  // Only `jti` is read today and a UUID is ASCII, but a second hand-rolled copy
+  // of the padding arithmetic is a copy that can drift from the tested one.
+  const claims = JSON.parse(base64UrlToText(segments[1])) as Record<string, unknown>
   if (typeof claims.jti !== "string") throw new Error("access token is missing jti")
   return claims.jti
 }

@@ -60,6 +60,15 @@ export function PairScreen({ api, busy, needsPermission, failure, onSubmit }: Pa
         <h1 className="text-sm font-semibold">{api.message("pairTitle")}</h1>
         <p className="text-xs text-muted-foreground">{api.message("pairIntro")}</p>
       </div>
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">{api.message("pairOriginLabel")}</p>
+        <code
+          className="block break-all rounded-control bg-muted px-2 py-1.5 font-mono text-[11px]"
+          data-testid="pair-extension-origin"
+        >
+          {api.extensionOrigin()}
+        </code>
+      </div>
       <div className="space-y-1.5">
         <Label htmlFor="cognia-pair-code" className="text-xs">
           {api.message("pairPlaceholder")}

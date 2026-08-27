@@ -40,6 +40,7 @@ const CAPABILITY: BrowserCompanionCapabilityV1 = {
 interface Harness {
   api: BrowserApi
   store: Map<string, unknown>
+  submitAttempts: unknown[]
   submitted: unknown[]
   recent: BrowserContextSubmissionSummaryV1[]
   capabilityError?: unknown
@@ -49,6 +50,7 @@ interface Harness {
 function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: never } {
   const store = new Map<string, unknown>(overrides.store ?? [])
   const state: Harness = {
+    submitAttempts: [],
     submitted: [],
     recent: [],
     ...overrides,
@@ -91,6 +93,7 @@ function clientFactory(state: Harness) {
       return CAPABILITY
     },
     submit: async (request: unknown) => {
+      state.submitAttempts.push(request)
       if (state.submitError) throw state.submitError
       state.submitted.push(request)
       return {
@@ -278,6 +281,53 @@ describe("SidePanel capture and settings", () => {
     // Cleared afterwards: a preview left on screen after a successful submit
     // invites the user to send the same page twice.
     await waitFor(() => expect(screen.queryByTestId("capture-preview")).toBeNull())
+  })
+
+  it("submits the same URL shown after the full-address toggle changes", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.click(screen.getByTestId("capture-full-url"))
+    expect(screen.getByTestId("capture-url")).toHaveTextContent("https://example.com/a?x=1")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect((state.submitted[0] as { context: { url: string } }).context.url).toBe(
+      "https://example.com/a?x=1"
+    )
+  })
+
+  it("reuses the submission id when the user retries the same draft", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: new Error("response lost"),
+    })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(1))
+
+    state.submitError = undefined
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(2))
+    expect(
+      state.submitAttempts.map((attempt) => (attempt as { submissionId: string }).submissionId)
+    ).toEqual([
+      (state.submitAttempts[0] as { submissionId: string }).submissionId,
+      (state.submitAttempts[0] as { submissionId: string }).submissionId,
+    ])
+  })
+
+  it("shows a recoverable error when extension storage cannot be read", async () => {
+    const state = harness({
+      api: { read: async () => Promise.reject(new Error("storage unavailable")) } as never,
+    })
+    renderPanel(state)
+    expect(await screen.findByTestId("panel-storage-error")).toBeInTheDocument()
   })
 
   it("will not submit without an instruction", async () => {

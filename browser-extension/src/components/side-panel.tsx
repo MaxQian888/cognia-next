@@ -82,14 +82,18 @@ export function SidePanel({
   // about.
   const [hasPermission, setHasPermission] = useState(false)
   const clientRef = useRef<HostClient | null>(null)
+  const pendingSubmissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
 
   // Paint before anything else. The stored appearance is the Host's last
   // answer, so a panel reopened offline still looks like the app rather than
   // flashing the fallback palette and then correcting itself.
   useEffect(() => {
-    void api.read<unknown>(STORAGE_KEYS.appearance).then((stored) => {
-      if (isAppliedAppearance(stored)) applyAppearance(document.documentElement, stored)
-    })
+    void api
+      .read<unknown>(STORAGE_KEYS.appearance)
+      .then((stored) => {
+        if (isAppliedAppearance(stored)) applyAppearance(document.documentElement, stored)
+      })
+      .catch(() => undefined)
   }, [api])
 
   useEffect(() => {
@@ -109,16 +113,26 @@ export function SidePanel({
     state: PanelState
     workspaceId?: string | null
   }> => {
-    const pairing = await api.read<PairingRecord>(STORAGE_KEYS.pairing)
-    if (!pairing) return { state: { kind: "unpaired" } }
-    const signer = await restoreSigner(pairing)
-    if (!signer) {
-      // The public record survived but the key did not — a profile copied
-      // between machines, or IndexedDB cleared. Treat it as unpaired rather
-      // than as an error: the remedy is the same and the state is honest.
-      await api.remove([STORAGE_KEYS.pairing])
-      return { state: { kind: "unpaired" } }
+    let connection: {
+      pairing: PairingRecord
+      signer: NonNullable<Awaited<ReturnType<typeof restoreSigner>>>
     }
+    try {
+      const pairing = await api.read<PairingRecord>(STORAGE_KEYS.pairing)
+      if (!pairing) return { state: { kind: "unpaired" } }
+      const signer = await restoreSigner(pairing)
+      if (!signer) {
+        // The public record survived but the key did not — a profile copied
+        // between machines, or IndexedDB cleared. Treat it as unpaired rather
+        // than as an error: the remedy is the same and the state is honest.
+        await api.remove([STORAGE_KEYS.pairing])
+        return { state: { kind: "unpaired" } }
+      }
+      connection = { pairing, signer }
+    } catch {
+      return { state: { kind: "storage-error" } }
+    }
+    const { pairing, signer } = connection
     const client = makeClient({ pairing, signer })
     clientRef.current = client
     try {
@@ -302,31 +316,52 @@ export function SidePanel({
 
   const onSubmit = useCallback(async () => {
     if (state.kind !== "ready" || !state.captured || !workspaceId) return
-    const captured = state.captured
+    const captured = withDisplayUrl(state.captured, includeFullUrl)
     const mode: BrowserCaptureMode = captureModeFor(captured, wholePage)
     setSubmitting(true)
     setSubmitError(null)
-    // Minted once and reused across retries: a fresh id per attempt is exactly
-    // what would turn one user action into two sessions.
-    const submissionId = crypto.randomUUID()
+    const draft = {
+      workspaceId,
+      instruction: instruction.trim(),
+      context: {
+        schemaVersion: 1 as const,
+        captureMode: mode,
+        url: captured.url,
+        title: captured.title,
+        capturedAt: captured.capturedAt,
+        ...(mode !== "metadata" && captured.selection ? { selection: captured.selection } : {}),
+        ...(mode === "readable-page" && captured.readableText
+          ? { readableText: captured.readableText }
+          : {}),
+      },
+    }
+    // Cheap discriminators, not the payload. `readableText` runs to the
+    // whole-page ceiling, so hashing the draft serialized hundreds of KB on the
+    // main thread on every press — and then `submit` serialized the same object
+    // again for the request body, a visible hitch on the click for nothing.
+    // What decides "same capture" is the page, the moment it was taken, the
+    // mode, the ask and the target; the two content lengths catch a
+    // re-extraction of the same URL.
+    const fingerprint = JSON.stringify([
+      workspaceId,
+      draft.instruction,
+      mode,
+      captured.url,
+      captured.capturedAt,
+      captured.selection?.text.length ?? -1,
+      captured.readableText?.text.length ?? -1,
+    ])
+    const submissionId =
+      pendingSubmissionRef.current?.fingerprint === fingerprint
+        ? pendingSubmissionRef.current.submissionId
+        : crypto.randomUUID()
+    pendingSubmissionRef.current = { fingerprint, submissionId }
     try {
       await clientRef.current?.submit({
         submissionId,
-        workspaceId,
-        instruction: instruction.trim(),
-        context: {
-          schemaVersion: 1,
-          captureMode: mode,
-          url: captured.url,
-          title: captured.title,
-          capturedAt: captured.capturedAt,
-          ...(mode === "metadata" ? {} : {}),
-          ...(mode !== "metadata" && captured.selection ? { selection: captured.selection } : {}),
-          ...(mode === "readable-page" && captured.readableText
-            ? { readableText: captured.readableText }
-            : {}),
-        },
+        ...draft,
       })
+      pendingSubmissionRef.current = null
       void api.write(STORAGE_KEYS.lastWorkspaceId, workspaceId)
       setInstruction("")
       setState((current) => (current.kind === "ready" ? { ...current, captured: null } : current))
@@ -343,7 +378,7 @@ export function SidePanel({
     } finally {
       setSubmitting(false)
     }
-  }, [api, instruction, state, wholePage, workspaceId])
+  }, [api, includeFullUrl, instruction, state, wholePage, workspaceId])
 
   /**
    * Forget this browser entirely.
@@ -372,6 +407,18 @@ export function SidePanel({
   }, [api])
 
   if (state.kind === "loading") return <div className="p-4" data-testid="panel-loading" />
+
+  if (state.kind === "storage-error") {
+    return (
+      <Notice
+        testId="panel-storage-error"
+        title={api.message("storageError")}
+        detail={api.message("storageErrorHint")}
+        action={api.message("retry")}
+        onAction={() => void connect()}
+      />
+    )
+  }
 
   if (state.kind === "unpaired" || state.kind === "pairing") {
     return (

@@ -23,6 +23,9 @@
   "pairIntro": {
     "message": "在这台电脑上打开 Cognia，进入 设置 → Companion → 浏览器伴侣，生成一个配对码。"
   },
+  "pairOriginLabel": {
+    "message": "连接前，请先把这个扩展来源加入浏览器访问白名单"
+  },
   "pairPlaceholder": {
     "message": "粘贴配对码"
   },
@@ -157,6 +160,12 @@
   },
   "hostOfflineHint": {
     "message": "请打开应用，检查 设置 → Companion → 浏览器访问。"
+  },
+  "storageError": {
+    "message": "扩展无法读取本地数据。"
+  },
+  "storageErrorHint": {
+    "message": "请重试；如果问题持续，请在浏览器扩展设置中重新加载此扩展。"
   },
   "revoked": {
     "message": "这个浏览器已不再与 Cognia 配对。"

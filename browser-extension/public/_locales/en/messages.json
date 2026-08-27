@@ -23,6 +23,9 @@
   "pairIntro": {
     "message": "Open Cognia on this computer, go to Settings → Companion → Browser Companion, and generate a pairing code."
   },
+  "pairOriginLabel": {
+    "message": "Add this extension origin to Browser Access before connecting"
+  },
   "pairPlaceholder": {
     "message": "Paste the pairing code"
   },
@@ -157,6 +160,12 @@
   },
   "hostOfflineHint": {
     "message": "Open the app and check Settings → Companion → Browser access."
+  },
+  "storageError": {
+    "message": "The extension could not read its local data."
+  },
+  "storageErrorHint": {
+    "message": "Try again. If this continues, reload the extension from the browser's extension settings."
   },
   "revoked": {
     "message": "This browser is no longer paired with Cognia."

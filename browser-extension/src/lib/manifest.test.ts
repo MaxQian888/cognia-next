@@ -103,6 +103,21 @@ describe("the extension manifest", () => {
     expect(raw).toContain('minimum_chrome_version: "116"')
   })
 
+  it("ships the product icon for both the extension and its toolbar action", async () => {
+    const source = await declaredConfig()
+    const { raw } = await manifestBlock()
+    expect(raw).toContain("icons: extensionIcons")
+    expect(raw).toContain("default_icon: extensionIcons")
+
+    for (const size of [16, 32, 48, 128]) {
+      expect(source).toContain(`${size}: "/icon-${size}.png"`)
+      const icon = await readFile(`browser-extension/public/icon-${size}.png`)
+      expect(icon.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      expect(icon.readUInt32BE(16)).toBe(size)
+      expect(icon.readUInt32BE(20)).toBe(size)
+    }
+  })
+
   it("ships both locales with identical key sets", async () => {
     const [en, zh] = await Promise.all(
       ["en", "zh_CN"].map(async (locale) =>

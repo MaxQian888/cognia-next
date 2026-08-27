@@ -47,6 +47,8 @@ import { BROWSER_CAPTURE_MODES, BROWSER_CONTEXT_LIMITS } from "@/types/browser-c
 import { utf8ByteLength } from "@cognia/companion-client"
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 
+import { sha256Hex } from "@/lib/share/hash"
+
 import { buildBrowserContextPrompt, sourceHostOf } from "./build-prompt"
 import { validateBrowserSubmission, type BrowserSubmissionRejection } from "./limits"
 
@@ -120,6 +122,7 @@ export async function submitBrowserContext(
   // a repeated Idempotency-Key, so reaching here twice means the ledger was
   // cleared or the key was reused across restarts — either way, a second
   // session for one user action is the failure this exists to prevent.
+  const urlFingerprint = await sha256Hex(request.context.url)
   const existing = await deps.readSubmission(request.submissionId)
   if (existing) {
     if (existing.deviceId !== deviceId) {
@@ -128,11 +131,36 @@ export async function submitBrowserContext(
         "this submission id belongs to another device"
       )
     }
+    if (existing.status === "submitting") {
+      const { prompt, derivedTitle } = buildBrowserContextPrompt(
+        request.context,
+        request.instruction,
+        request.suggestedTitle
+      )
+      // The submission id is the caller's, so "the row is still mid-flight"
+      // does not on its own make this the same capture. Redriving a *different*
+      // page onto the session the first one created would put page B in a
+      // transcript whose session title, deep link and side-note row all still
+      // describe page A — and nothing downstream could ever tell they had
+      // diverged. Same id, different capture is a client bug, not a retry.
+      if (!describesSameCapture(existing, request, derivedTitle, urlFingerprint)) {
+        throw new BrowserCompanionError(
+          "submission_payload_mismatch",
+          "this submission id was already accepted for a different capture"
+        )
+      }
+      await deps.enqueueMessage({
+        sessionId: existing.sessionId,
+        messageId: `browser-${request.submissionId}`,
+        text: prompt,
+      })
+      await deps.recordSubmission({ ...existing, status: "queued", updatedAt: deps.now() })
+    }
     return {
       submissionId: existing.submissionId,
       sessionId: existing.sessionId,
       acceptedAt: existing.submittedAt,
-      status: existing.status,
+      status: existing.status === "submitting" ? "queued" : existing.status,
       deepLink: browserSubmissionDeepLink(existing.sessionId),
     }
   }
@@ -160,25 +188,24 @@ export async function submitBrowserContext(
   })
 
   const now = deps.now()
-  // The row lands before the turn starts. A crash between the two leaves a
-  // recorded submission whose session exists and whose turn HostState will
-  // redrive on recovery; the reverse order would leave a running turn the
-  // panel has no record of and cannot show the user.
-  await deps.recordSubmission({
+  // Persist the recoverable intent first, then mark it queued only after
+  // HostState accepts the stable message id. A retry can redrive a submission
+  // left in `submitting` without creating another session or transcript item.
+  const submission: BrowserSubmissionRow = {
     submissionId: request.submissionId,
     deviceId,
     sessionId: session.id,
     title: derivedTitle,
     sourceHost: sourceHostOf(request.context.url),
+    urlFingerprint,
     captureMode: request.context.captureMode,
     contentBytes: capturedContentBytes(request),
-    truncated:
-      Boolean(request.context.selection?.truncated) ||
-      Boolean(request.context.readableText?.truncated),
-    status: "queued",
+    truncated: capturedTruncated(request),
+    status: "submitting",
     submittedAt: now,
     updatedAt: now,
-  })
+  }
+  await deps.recordSubmission(submission)
 
   await deps.enqueueMessage({
     sessionId: session.id,
@@ -188,6 +215,7 @@ export async function submitBrowserContext(
     messageId: `browser-${request.submissionId}`,
     text: prompt,
   })
+  await deps.recordSubmission({ ...submission, status: "queued", updatedAt: deps.now() })
 
   return {
     submissionId: request.submissionId,
@@ -264,6 +292,52 @@ async function currentStatus(
   } catch {
     return row.status
   }
+}
+
+/**
+ * Whether an in-flight row and a fresh request describe the same capture.
+ *
+ * The URL settles it: `urlFingerprint` is the digest of the exact captured URL,
+ * so two different pages cannot agree on it however alike they otherwise look.
+ * The remaining fields — derived title, source host, capture mode, byte count,
+ * truncation flags — then catch the same URL captured differently (a selection
+ * vs the whole page, a page that changed between attempts).
+ *
+ * Host alone was not enough, which is why the fingerprint exists: two paths on
+ * one host with the same derived title, mode and byte count are one capture as
+ * far as `sourceHost` can tell, and redriving page B onto page A's session is
+ * exactly what this check is here to refuse.
+ *
+ * A row from before the field existed has no fingerprint. It is compared on
+ * everything else, as it was: the alternative — refusing every retry of an
+ * older row — would break the recovery path this whole branch exists to serve,
+ * to avoid a collision no wider than the one that shipped.
+ *
+ * The instruction is deliberately not compared. It is the user's question about
+ * the page rather than the page itself, the row does not record it, and a retry
+ * that rewords it is still a retry of the same capture.
+ */
+function describesSameCapture(
+  row: BrowserSubmissionRow,
+  request: BrowserContextSubmitRequestV1,
+  derivedTitle: string,
+  urlFingerprint: string
+): boolean {
+  if (row.urlFingerprint && row.urlFingerprint !== urlFingerprint) return false
+  return (
+    row.title === derivedTitle &&
+    row.sourceHost === sourceHostOf(request.context.url) &&
+    row.captureMode === request.context.captureMode &&
+    row.contentBytes === capturedContentBytes(request) &&
+    row.truncated === capturedTruncated(request)
+  )
+}
+
+function capturedTruncated(request: BrowserContextSubmitRequestV1): boolean {
+  return (
+    Boolean(request.context.selection?.truncated) ||
+    Boolean(request.context.readableText?.truncated)
+  )
 }
 
 function capturedContentBytes(request: BrowserContextSubmitRequestV1): number {

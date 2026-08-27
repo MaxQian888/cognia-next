@@ -25,6 +25,22 @@ export interface BrowserSubmissionRow {
   title: string
   /** Hostname only — never the path or the query. */
   sourceHost: string
+  /**
+   * SHA-256 of the exact captured URL, for the redrive equality check only.
+   *
+   * The one thing `sourceHost` cannot answer: two pages on the same host are
+   * the same host. A retry that carries a different page under an already-used
+   * submission id has to be refused, and without this the check falls back to
+   * host + title + mode + byte count, which two different paths can match.
+   *
+   * A digest rather than the URL because of the note above: the path and query
+   * are deliberately not stored here, and a digest is not a second copy of
+   * them — it only answers "is this the same URL as last time".
+   *
+   * Optional because a row written before this field existed does not have
+   * one; see `describesSameCapture` for what happens then.
+   */
+  urlFingerprint?: string
   captureMode: BrowserCaptureMode
   /** Bytes of page content sent, for the local diagnostics line. */
   contentBytes: number

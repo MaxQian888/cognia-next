@@ -1,7 +1,7 @@
 /**
  * What the side panel is showing, as a value rather than a tangle of booleans.
  *
- * There are eight distinguishable situations here and they demand different
+ * There are nine distinguishable situations here and they demand different
  * copy and different controls. Modelled as a union because the alternative —
  * `loading`, `paired`, `error`, `offline` flags — makes states like "paired,
  * offline, and also revoked" representable, and someone eventually renders one.
@@ -32,6 +32,8 @@ export interface CapturedPage {
 export type PanelState =
   /** Before storage has been read. Renders nothing rather than a wrong answer. */
   | { kind: "loading" }
+  /** The extension could not read or repair its own local pairing data. */
+  | { kind: "storage-error" }
   /** No pairing on this browser. */
   | { kind: "unpaired"; failure?: PairFailure }
   /** A code is being redeemed. */

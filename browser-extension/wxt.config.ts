@@ -5,6 +5,13 @@ import { defineConfig } from "wxt"
 
 const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
 
+const extensionIcons = {
+  16: "/icon-16.png",
+  32: "/icon-32.png",
+  48: "/icon-48.png",
+  128: "/icon-128.png",
+}
+
 /**
  * Cognia Browser Companion — Chrome MV3, Edge on the same package.
  *
@@ -44,12 +51,13 @@ export default defineConfig({
   manifest: {
     name: "__MSG_extensionName__",
     description: "__MSG_extensionDescription__",
+    icons: extensionIcons,
     default_locale: "en",
     minimum_chrome_version: "116",
     permissions: ["sidePanel", "storage", "activeTab", "scripting", "contextMenus"],
     optional_host_permissions: ["http://127.0.0.1/*"],
     incognito: "not_allowed",
-    action: { default_title: "__MSG_actionTitle__" },
+    action: { default_title: "__MSG_actionTitle__", default_icon: extensionIcons },
     commands: {
       "capture-page": {
         suggested_key: { default: "Alt+Shift+C" },

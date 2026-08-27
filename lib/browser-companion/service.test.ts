@@ -146,6 +146,117 @@ describe("submitBrowserContext", () => {
     expect(h.enqueued).toHaveLength(1)
   })
 
+  it("redrives the same message when the first enqueue did not finish", async () => {
+    let fail = true
+    const attempts: string[] = []
+    const h = harness({
+      enqueueMessage: async ({ messageId }) => {
+        attempts.push(messageId)
+        if (fail) throw new Error("HostState unavailable")
+      },
+    })
+
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
+      "HostState unavailable"
+    )
+    expect(h.rows.get("sub-1")?.status).toBe("submitting")
+
+    fail = false
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).resolves.toMatchObject({
+      sessionId: "session-1",
+      status: "queued",
+    })
+    expect(h.createdSessions).toHaveLength(1)
+    expect(attempts).toEqual(["browser-sub-1", "browser-sub-1"])
+    expect(h.rows.get("sub-1")?.status).toBe("queued")
+  })
+
+  it("refuses to redrive an in-flight submission id with a different capture", async () => {
+    const h = harness({
+      enqueueMessage: async () => {
+        throw new Error("HostState unavailable")
+      },
+    })
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
+      "HostState unavailable"
+    )
+    expect(h.rows.get("sub-1")?.status).toBe("submitting")
+
+    // Same id, a different page. Letting it through would enqueue page B into
+    // the session created (and titled) for page A, while the row kept
+    // reporting A's host and byte count.
+    const other = payload({
+      context: {
+        schemaVersion: 1,
+        captureMode: "selection",
+        url: "https://evil.test/other",
+        title: "Other",
+        capturedAt: 1_699_000_000_000,
+        selection: { text: "something else entirely", truncated: false },
+      },
+    })
+    await expect(submitBrowserContext(h.deps, "browser-a", other)).rejects.toMatchObject({
+      code: "submission_payload_mismatch",
+    })
+    expect(h.rows.get("sub-1")).toMatchObject({
+      sourceHost: "example.com",
+      status: "submitting",
+    })
+    expect(h.createdSessions).toHaveLength(1)
+  })
+
+  it("refuses a redrive of a different page on the same host", async () => {
+    // The narrow case host + title + mode + byte count cannot separate: one
+    // host, two paths, and a payload sized to match. Only the URL tells them
+    // apart, which is what `urlFingerprint` is for.
+    const h = harness({
+      enqueueMessage: async () => {
+        throw new Error("HostState unavailable")
+      },
+    })
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
+      "HostState unavailable"
+    )
+    const first = h.rows.get("sub-1")
+    expect(first).toMatchObject({ sourceHost: "example.com", status: "submitting" })
+    expect(first?.urlFingerprint).toEqual(expect.any(String))
+
+    const samePayload = payload()
+    const sameHostOtherPage = payload({
+      context: {
+        ...(samePayload as { context: Record<string, unknown> }).context,
+        url: "https://example.com/a-different-page",
+      },
+    })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", sameHostOtherPage)
+    ).rejects.toMatchObject({
+      code: "submission_payload_mismatch",
+    })
+    expect(h.createdSessions).toHaveLength(1)
+  })
+
+  it("still redrives a row written before urlFingerprint existed", async () => {
+    // Refusing every retry of an older row would break the recovery path this
+    // branch exists for, over a collision no wider than the one that shipped.
+    const h = harness({
+      enqueueMessage: async () => {
+        throw new Error("HostState unavailable")
+      },
+    })
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
+      "HostState unavailable"
+    )
+    const legacy = h.rows.get("sub-1")!
+    delete (legacy as { urlFingerprint?: string }).urlFingerprint
+
+    h.deps.enqueueMessage = async () => {}
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).resolves.toMatchObject({
+      status: "queued",
+    })
+    expect(h.createdSessions).toHaveLength(1)
+  })
+
   it("refuses to replay another device's submission id", async () => {
     const h = harness()
     await submitBrowserContext(h.deps, "browser-a", payload())
@@ -202,7 +313,7 @@ describe("submitBrowserContext", () => {
       },
     })
     await submitBrowserContext(h.deps, "browser-a", payload())
-    expect(order).toEqual(["record", "enqueue"])
+    expect(order).toEqual(["record", "enqueue", "record"])
   })
 
   it("stores only the hostname and the byte count, never the page text", async () => {
