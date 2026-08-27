@@ -3467,6 +3467,7 @@
       "rejectAll": "全部拒绝",
       "removeSelectionAria": "移除选区 {title}",
       "selectionChipCommentLabel": "{title} · 批注",
+      "selectionChipEntityLabel": "{kind}：{title}",
       "selectionChipExternalAppLabel": "{app}",
       "selectionChipExternalLabel": "{app} · {title}",
       "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
@@ -5027,9 +5028,18 @@
       "attachMenu": {
         "attachGroup": "附加",
         "capabilitiesGroup": "能力",
+        "cloudDocs": "云文档",
+        "extendGroup": "扩展",
+        "externalServices": "外部服务（{count}）",
         "file": "上传文件",
         "folder": "添加文件夹",
-        "trigger": "添加附件"
+        "goal": "设定目标",
+        "planMode": "计划模式",
+        "recordSkill": "录制技能",
+        "records": "引用记录",
+        "slashCommands": "斜杠命令",
+        "trigger": "添加附件",
+        "turnGroup": "本轮"
       },
       "attachments": {
         "analyzing": "正在解析图片…",
@@ -5169,6 +5179,7 @@
           "error": "润色提示词失败。",
           "noModel": "请在设置中配置模型后再润色提示词。",
           "noOutput": "没有可改进的建议。",
+          "openSettings": "打开设置",
           "pii": "草稿包含敏感信息——已跳过润色。"
         },
         "trigger": "润色提示词"
@@ -5316,6 +5327,18 @@
           "workflow": "工作流"
         },
         "comingSoon": "即将上线",
+        "entityEmpty": "「{title}」没有可读内容，可能已被删除。",
+        "entityFailed": "读取「{title}」失败：{reason}",
+        "entityKinds": {
+          "artifact": "产物",
+          "issue": "Issue",
+          "memory": "记忆",
+          "plan": "计划",
+          "session": "会话"
+        },
+        "entityStaged": "已把「{title}」附加到下一条消息。",
+        "entityTitle": "引用一条记录",
+        "entityUnavailable": "「{title}」已无法在这里引用。",
         "fileTitle": "引用文件或文件夹",
         "filesSection": "文件",
         "memoryTitle": "追加到 memory",
@@ -5324,6 +5347,8 @@
         "noArgumentMatches": "没有匹配“{query}”的参数选项。",
         "noCommandMatches": "没有匹配「/{query}」的命令。",
         "noCommands": "暂无可用命令。",
+        "noEntities": "没有可用的{kind}。",
+        "noEntityMatches": "没有匹配“{query}”的{kind}。",
         "noFiles": "没有匹配「{query}」的文件。",
         "noPresetMatches": "没有匹配「{query}」的预设。",
         "noPresets": "暂无可用预设。",
@@ -5353,7 +5378,8 @@
         "wfEdgeTitle": "引用一条连线",
         "wfNodeTitle": "引用一个节点",
         "workspaceEmpty": "工作区为空。",
-        "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
+        "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。",
+        "workspaceUnreachable": "文件引用需要已配对的设备，连接后即可看到文件。"
       },
       "presets": {
         "applied": "已套用预设「{name}」。",
@@ -5388,6 +5414,11 @@
         "templateDescription": "描述",
         "title": "存为模板",
         "trigger": "存为模板"
+      },
+      "scheduleSuggestion": {
+        "accept": "去创建",
+        "dismiss": "忽略这条建议",
+        "prompt": "看起来是一件重复的事——要设成定时任务吗？"
       },
       "screenshot": {
         "captureAria": "截图",
@@ -7806,6 +7837,7 @@
       "cancel": "取消",
       "clearSearch": "清空搜索",
       "collapseSidebar": "折叠会话列表",
+      "collapseTeams": "折叠团队列表",
       "compactDensity": "紧凑行距",
       "conversationsTitle": "会话",
       "deleteFolder": "删除文件夹",
@@ -7820,6 +7852,7 @@
       "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
       "expandSidebar": "展开会话列表",
+      "expandTeams": "展开团队列表",
       "folderActions": "文件夹操作",
       "globalSearch": "全局搜索",
       "globalSearchHint": "用这些词搜索全部会话、命令和文件（⌘/Ctrl+Enter）",
@@ -7956,6 +7989,8 @@
       "me": "我的",
       "memory": "记忆",
       "more": "更多",
+      "moveTeamDown": "下移",
+      "moveTeamUp": "上移",
       "navigation": "导航",
       "openSettings": "打开设置",
       "performance": "性能",
@@ -8707,6 +8742,7 @@
       "copyReport": "复制报告",
       "dismiss": "忽略",
       "exportCrashLog": "导出崩溃日志",
+      "interruptTurn": "停止这一轮",
       "jumpToNode": "跳转到节点",
       "locateBinary": "指定可执行文件",
       "openExternal": "查看文档",
@@ -8822,6 +8858,14 @@
       "documentedOnly": {
         "hint": "Cognia 无法直接驱动该智能体——请按其官方流程使用，或改用内置智能体。",
         "label": "仅提供文档"
+      },
+      "environmentSetupFailed": {
+        "hint": "环境找到了，但它的准备步骤没有完成——可以重试，并在日志里查看失败的那一步。",
+        "label": "环境准备失败"
+      },
+      "environmentUnavailable": {
+        "hint": "这个会话运行所在的环境已不存在——请在「Agent 运行时」设置里另选一个，或重试。",
+        "label": "环境不可用"
       },
       "eventChannelLost": {
         "hint": "Cognia 已收不到桌面后端的更新，部分界面会像卡住一样——请重新加载以恢复连接。",
@@ -9047,6 +9091,10 @@
         "hint": "运行外部智能体需要桌面端应用——在浏览器中请使用内置智能体。",
         "label": "需要桌面端应用"
       },
+      "turnSilent": {
+        "hint": "这一轮已经跑了一段时间，期间没有任何回报。长时间的工具调用从这里看是一样的——先看日志，再决定要不要停止。",
+        "label": "还没有任何响应"
+      },
       "unauthorized": {
         "hint": "身份验证失败——请在设置中检查 API 密钥或令牌。",
         "label": "未授权"
@@ -9054,6 +9102,14 @@
       "unknown": {
         "hint": "发生了 Cognia 无法识别的错误——下方详情有助于我们定位问题。",
         "label": "意外错误"
+      },
+      "workspaceBundleFailed": {
+        "hint": "为这一轮准备工作副本失败——可以重试；日志里写了供给器拒绝的原因。",
+        "label": "无法打开工作区"
+      },
+      "workspaceUnavailable": {
+        "hint": "本设备上解析不到这个会话的工作区——可以重试，或在会话的工作区面板里绑定一个目录。",
+        "label": "工作区不可用"
       }
     },
     "detail": {
@@ -9432,6 +9488,10 @@
     },
     "label": "飞书云文档",
     "labelGoogle": "Google 文档",
+    "name": {
+      "google": "Google Workspace",
+      "lark": "飞书文档"
+    },
     "picker": {
       "accountLabel": "账号",
       "attached": "已附加「{title}」",
@@ -10466,6 +10526,7 @@
         "none": "无证据",
         "probe": "运行时探测所得",
         "protocol-spec": "来自协议规范",
+        "user-declared": "你声明的",
         "vendor-certified": "厂商认证"
       },
       "level": {
@@ -10481,12 +10542,14 @@
         "adapterMethodMissing": "Cognia 适配器尚未实现该方法",
         "advertisedCompactCommand": "Agent 提供了 /compact 命令",
         "agentOwned": "由外部 Agent 自行处理",
+        "attachmentStoreUnavailable": "该运行时没有可接收附件字节的存储",
         "cancelKillsRuntime": "取消会结束整个运行时，而不只是当前回合",
         "codexOptionsChannel": "通过 Codex options 通道传递",
         "cogniaDispatchAgent": "由 Cognia 的 dispatch_agent 工具提供",
         "cogniaHookRuntime": "由 Cognia Hook 运行时包裹该回合",
         "committedRepliesOnly": "该通道只上报已提交的回复",
         "launchTimeAuthorityOnly": "权限只在启动时授予，运行中无法更改",
+        "modelVariantOverlay": "以模型变体（variant）的形式下发",
         "nativeSummarizeRoute": "由服务方自带的 summarize 路径提供",
         "negotiatedLoadSession": "Agent 声明支持加载会话",
         "negotiatedNoLoadSession": "Agent 声明不支持加载会话",
@@ -10508,7 +10571,8 @@
         "notNegotiated": "Agent 在 initialize 阶段未声明该能力",
         "perThreadConfigOverride": "通过每个线程的配置覆盖传递",
         "pluginUndeclared": "提供该协议的插件未声明能力",
-        "sidecarOnly": "只有内建 Agent 会上报这一项"
+        "sidecarOnly": "只有内建 Agent 会上报这一项",
+        "userDeclared": "这是你为该 agent 声明的"
       }
     },
     "commandDefaultArgs": "参数",
@@ -10776,6 +10840,11 @@
       "connectionFailed": "连接失败",
       "customConfiguration": "自定义配置",
       "cwdPlaceholder": "留空使用当前目录",
+      "declaredWebSearch": "自带联网搜索",
+      "declaredWebSearchAuto": "交给我们判断",
+      "declaredWebSearchDesc": "这个 agent 自己能不能联网。协议层面回答不了——取决于你装的是哪个版本、什么套餐——所以要么你告诉我们，要么交给我们判断，Cognia 会在能供给时提供搜索工具。",
+      "declaredWebSearchNative": "是——它自己会搜",
+      "declaredWebSearchNone": "否——由 Cognia 提供搜索",
       "deepseekHarness": {
         "approvalNotice": "该传输层无法在对话进行中申请授权，因此权限在运行时启动时就已确定。",
         "cancelNotice": "取消对话会关闭整个运行时：该传输层没有单次对话取消能力。",
@@ -10921,6 +10990,26 @@
       "permissionDefault": "默认（每次操作询问）",
       "permissionDontAsk": "不询问（未预先批准则拒绝）",
       "permissionPlan": "计划模式（不执行）",
+      "piAuth": {
+        "authType": {
+          "api_key": "API 密钥",
+          "oauth": "OAuth"
+        },
+        "configureHint": "缺失的提供方需要在 Pi 自身中配置——Cognia 无法代你登录。",
+        "listingUnreadable": "读不到 Pi 的模型列表，因此无从检查。这与你的凭证是否有效无关。",
+        "noProviders": "Pi 报告没有任何可用模型。请先在 Pi 中登录一个提供方，再发送提示词。",
+        "notConnected": "连接该智能体后，可查看 Pi 能通过认证的提供方。",
+        "readOnlyNote": "Cognia 只向 Pi 询问状态，从不读取、刷新或保存你的 Pi 凭证。",
+        "refresh": "重新检查凭证",
+        "status": {
+          "invalid": "无效",
+          "not_ready": "未登录",
+          "ready": "可用",
+          "unreadable": "无法检查"
+        },
+        "title": "Pi 凭证",
+        "unknownProvider": "未知提供方"
+      },
       "piExtensionPolicyGlobal": "加载我的全局 Pi 扩展",
       "piExtensionPolicyHint": "隔离模式下运行 Pi 时不加载你自己的扩展、技能与提示模板，AGENTS.md 与 CLAUDE.md 仍会加载。社区权限扩展同样会拦截工具调用，与 Cognia 的权限链同时启用可能产生重复确认。",
       "piExtensionPolicyIsolated": "隔离（推荐）",
@@ -10928,22 +11017,6 @@
       "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
       "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",
       "piManagePackages": "管理 Pi 扩展包",
-      "piMigration": {
-        "blocker": {
-          "command_missing": "未安装 Pi，或其不在 PATH 中。",
-          "runtime_version_unsupported": "已安装的 Pi 版本低于所支持的版本。",
-          "sandbox_unavailable": "本机沙箱不可用，因此无法在此运行 Pi。"
-        },
-        "continuityNote": "你的设置与该智能体的 ID 会保留。切换后的首次运行会新建一个 Pi 会话，当前对话不会延续。",
-        "legacyDescription": "此智能体通过社区 pi-acp 桥运行。切换到 Pi 原生协议后可使用思考等级、实时引导、上下文压缩与会话分叉。",
-        "migrateAction": "切换到原生 Pi",
-        "migratedDescription": "此智能体已运行在 Pi 原生协议上。",
-        "rollbackAction": "切回桥接方式",
-        "rollbackNote": "切回只会恢复之前的连接设置，会话与记录都会保留。",
-        "statusLegacy": "社区 ACP 桥",
-        "statusNative": "原生 RPC",
-        "title": "Pi 连接方式"
-      },
       "piSandboxNote": "Pi 始终在严格沙箱内运行，且仅支持 macOS 与 Linux，不存在无沙箱回退。",
       "piSectionTitle": "Pi 运行时",
       "presetGalleryEmpty": "暂无可用预设。",
@@ -12258,10 +12331,19 @@
         "providers": "允许的供应商",
         "revoke": "撤销"
       },
+      "mediaGrantUnavailable": {
+        "nextStep": "待该机器人可用后重新打开本对话框。",
+        "reason": "无法读取本会话所属的机器人，此处的授权将无法指定服务方。"
+      },
       "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
       "reset": "取消",
       "save": "保存",
-      "saving": "正在保存…"
+      "saving": "正在保存…",
+      "triggerUnavailable": {
+        "nextStep": "待该机器人可用后重新打开本对话框。",
+        "reason": "无法读取本会话所属的机器人，因此没有可覆盖的策略。",
+        "title": "本会话何时回复"
+      }
     },
     "conversationRow": {
       "draftCount": "{count, plural, other {# 条草稿}}",
@@ -13218,6 +13300,8 @@
       "autoRefreshOff": "关闭",
       "autoRefreshOn": "开启",
       "autoRefreshStatus": "自动刷新",
+      "detailDescription": "查看该崩溃日志条目及随其采集的诊断快照。",
+      "detailTitle": "崩溃详情",
       "diagnostics": {
         "runtime": "运行时诊断",
         "title": "诊断快照",
@@ -13253,8 +13337,10 @@
         "title": "分享前注意"
       },
       "refreshing": "刷新中...",
+      "resizeDetail": "调整诊断详情面板宽度",
       "searchPlaceholder": "搜索崩溃日志...",
       "sourceCount": "个来源",
+      "sourceLabel": "来源筛选",
       "sources": {
         "all": "全部来源",
         "diagnostic": "诊断",
@@ -14216,6 +14302,7 @@
         }
       },
       "views": {
+        "diagnostics": "诊断",
         "incidents": "事故",
         "logs": "日志",
         "service": "服务",
@@ -15286,6 +15373,24 @@
         "title": "允许运行 Agent",
         "toggleAria": "切换 {label} 的运行 Agent 权限"
       },
+      "browserAccess": {
+        "description": "浏览器无法验证本机的自签名证书，所以常用的 HTTPS 端口在标签页里根本连不上。这里打开的是一个明文 http://127.0.0.1 监听器——浏览器无需证书就信任的唯一地址。它只在本机，不会离开这台电脑。",
+        "enable": "启用浏览器访问",
+        "listening": "正在监听 {url}",
+        "loadFailed": "无法读取浏览器访问设置。",
+        "notListening": "未监听",
+        "origins": {
+          "add": "添加来源",
+          "description": "只有这些完全一致的来源可以访问本机，其余一律拒绝——包括同一地址的不同端口。",
+          "empty": "还没有添加任何来源，此时启用浏览器访问不会有任何效果。",
+          "placeholder": "http://localhost:3000",
+          "revoke": "移除 {origin}",
+          "suggested": "建议：",
+          "title": "允许的浏览器来源"
+        },
+        "restartRequired": "重启 Companion 服务后生效。",
+        "title": "浏览器访问"
+      },
       "channels": {
         "blocked": {
           "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",
@@ -15677,7 +15782,8 @@
       "file": "文件",
       "permissionDeniedCamera": "需要相机权限。",
       "permissionDeniedMic": "需要麦克风权限。",
-      "toggleAria": "附件菜单",
+      "sheetDescription": "附加媒体、调整本轮的能力，或接入其他工具。",
+      "toggleAria": "添加内容",
       "unsupported": "当前平台不支持此功能。",
       "voice": "语音",
       "voiceCannotStart": "无法开始录音",
@@ -16548,6 +16654,7 @@
       "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
       "baseUrlLabel": "服务器地址",
       "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+      "brandMark": "Cognia",
       "checkingTitle": "正在重新检查链路",
       "codeError": {
         "invalid_pair_code": "配对码必须是 6 位数字。",
@@ -16618,6 +16725,7 @@
         "copyDiagnostics": "复制诊断信息",
         "diagnosticsCopied": "诊断信息已复制",
         "invitationSpent": "该邀请码已被 Host 消费，无法再次使用。请重新生成一个再试；重复提交同一串字符不会成功。",
+        "moreOptions": "更多办法",
         "remedy": {
           "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
           "checkHostLogs": "查看 Host 日志中对应的错误。",
@@ -16671,6 +16779,14 @@
         "refresh": "刷新状态",
         "server": "服务器"
       },
+      "hostProbe": {
+        "absent": "这台机器上没有 Host 应答。",
+        "blocked": "这台机器上有 Host 在运行，但它拒绝了这个浏览器。把这个来源加进它的允许列表：",
+        "copyOrigin": "复制这个来源",
+        "originCopied": "来源已复制",
+        "reachable": "Host 在 {host} · v{version}",
+        "searching": "正在这台机器上寻找 Host…"
+      },
       "httpError": {
         "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
         "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
@@ -16679,6 +16795,15 @@
         "generic": "配对失败（HTTP {status}）。"
       },
       "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "invitationCard": {
+        "replace": "更换",
+        "showRaw": "查看邀请原文",
+        "state": {
+          "failed": "服务端 v{version} · 仍然有效至 {expiresAt, time, short}",
+          "ready": "服务端 v{version} · 有效期至 {expiresAt, time, short}",
+          "spent": "已被使用 —— Host 已经消费掉它。请重新签发一份。"
+        }
+      },
       "invitationSummary": {
         "description": "服务器 v{version} · {expiresAt, time, short} 过期",
         "title": "已识别 {host} 的配对邀请"
@@ -16687,6 +16812,16 @@
       "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
       "loadingTitle": "正在检查既有配对…",
       "manualDivider": "或手动粘贴",
+      "narration": {
+        "absent": "还没有任何回应。在右侧粘贴邀请码，它会告诉你这份邀请指向哪里。",
+        "armed": "邀请校验通过。完成配对会注册这台客户端的密钥，并把这份邀请用掉。",
+        "blocked": "确实有东西在监听，但在 Host 上放行这个来源之前，它不会和这个浏览器通话。",
+        "failed": "这次没有成功。右侧写着下一步该做什么。",
+        "paired": "这台客户端已经有了自己的密钥，之后会自行重连。",
+        "pairing": "正在向 Host 注册这台客户端的密钥，稍等一下。",
+        "reachable": "Host 就在那里。它还需要给你一份一次性邀请，这台客户端才能连上。",
+        "searching": "正在确认这台客户端能够到达的地方是否有 cognia Host 在监听。"
+      },
       "networkError": {
         "browserBlocked": "浏览器阻止了连接。请检查服务器的 HTTPS 证书，以及 CORS 或私有网络访问（PNA）设置。",
         "browserPolicy": "浏览器因 CORS 或私有网络访问（PNA）策略阻止了请求。请在服务器上允许当前网页来源后重试。",
@@ -16737,6 +16872,16 @@
         "unsupported": "本设备不支持扫码，请在下方手动粘贴配对令牌。"
       },
       "scanning": "扫描中…",
+      "scene": {
+        "absent": "没有找到 Host",
+        "armed": "邀请已就绪，等待兑换",
+        "blocked": "有 Host 拒绝了这个浏览器",
+        "failed": "配对失败",
+        "paired": "已与 Host 配对",
+        "pairing": "正在兑换邀请",
+        "reachable": "Host 可达",
+        "searching": "正在寻找 Host"
+      },
       "signOut": {
         "cardDescription": "退出登录并清除设备 JWT，需要重新扫码才能再次连接。",
         "cardTitle": "断开连接",
@@ -16777,6 +16922,7 @@
         },
         "copyCommand": "复制 Headless 配对命令",
         "deploymentCommandHint": "请在目标 Host 实例内部执行。多租户或多副本部署中，请把 namespace 和 Pod 名替换为浏览器实际要连接的 Host。如果输出 cgnp2，请先更新部署镜像并重启或 rollout 该 Host。",
+        "developmentCommandHint": "在 `pnpm dev:web-headless` 运行时，于另一个终端执行此命令，然后把输出的邀请粘贴到下方。它会把邀请指向 {port} 端口的回环监听器——那是浏览器无需证书就能访问的唯一地址；单独运行 `pnpm dev:headless` 不会开启该端口。",
         "formCardDescription": "粘贴 Cognia 服务器签发的一次性 cgnp3 配对邀请。",
         "formCardTitle": "配对此浏览器",
         "headlessDescription": "保持 Headless 服务运行，在另一个终端执行此命令，然后把输出的 cgnp3 邀请粘贴到下方。",
@@ -23808,6 +23954,7 @@
     "action": "操作",
     "actionApp": "应用",
     "actionCommand": "命令",
+    "actionFailed": "无法更新“{name}”",
     "actionScript": "脚本",
     "active": "活跃",
     "activePlugins": "{count} 个插件",
@@ -23929,6 +24076,8 @@
     "bulkDelete": "删除",
     "bulkDeleteDescription": "将跨所有类型删除 {n} 个任务，此操作不可撤销。",
     "bulkDeleteTitle": "删除已选任务？",
+    "bulkPartialFailure": "{count, plural, other {# 个条目未能更新}}",
+    "bulkPartialFailureMore": "{hidden, plural, other {等另外 # 个}}",
     "bulkPause": "暂停",
     "bulkResume": "恢复",
     "bulkSelect": "多选",
@@ -23942,6 +24091,7 @@
       "today": "今天"
     },
     "cancel": "取消",
+    "cancelRun": "取消",
     "cancelSelect": "取消",
     "catchupWindow": {
       "help": "超过该时长的错过运行将被跳过而不是补跑。0 表示不限制。",
@@ -23951,7 +24101,8 @@
     "cleanupOldExecutions": "清理旧执行记录（30天）",
     "clearSearch": "清空搜索",
     "clearSelection": "清除选择",
-    "cloneSuccess": "任务克隆成功",
+    "cloneFailed": "无法创建该任务的副本",
+    "cloneSuccess": "已创建副本“{name}”",
     "cloneTask": "克隆任务",
     "close": "关闭",
     "code": "代码：",
@@ -24147,6 +24298,7 @@
       "remote": "远程主机"
     },
     "hostBar": {
+      "localKindsStay": "下面的备份 / 工作流 / 系统 / 连接器条目仍属于本设备",
       "localOnlyWhileOpen": "仅在应用打开时运行",
       "localSuspended": "已挂起——由云端主机接管",
       "managing": "正在管理：{host}",
@@ -24236,6 +24388,7 @@
     "logs": "日志",
     "maxMissedRuns": "最大补跑次数",
     "maxRetries": "最大重试次数",
+    "maxRetryDelayMs": "最大重试间隔（毫秒）",
     "mcp": {
       "disabledNote": "已禁用",
       "empty": "尚未配置 MCP 服务器。",
@@ -24309,6 +24462,8 @@
       "never": "从不",
       "successOnly": "仅成功时"
     },
+    "notifyOnProgress": "进度更新时通知",
+    "notifyOnProgressHint": "只有会上报中途进度的任务类型才会触发（目前是插件任务）。",
     "notifyOnStart": "开始时通知",
     "occurrenceList": {
       "moreTimes": "另有 {count} 次",
@@ -24513,6 +24668,8 @@
       "agentAutoCreate": "代理自动创建",
       "agentAutoCreateDesc": "允许 AI 代理在不弹出确认对话框的情况下创建定时任务",
       "allowAgentAutoCreate": "允许代理自动创建任务",
+      "autoRefreshInterval": "自动刷新间隔（秒）",
+      "autoRefreshIntervalDesc": "定时任务页面重新读取任务和执行记录的间隔，0 表示关闭。",
       "confirmationRequired": "需要确认",
       "confirmationRequiredDesc": "代理创建以下类型的任务时，始终需要用户明确确认",
       "description": "控制代理和插件对定时任务的操作权限",
@@ -24703,6 +24860,7 @@
       "nextRun": "下次运行"
     },
     "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
+    "sourceLoadFailed": "无法加载：{kinds}",
     "stackTrace": "堆栈跟踪",
     "startedAt": "开始时间",
     "statistics": "统计",
@@ -26621,14 +26779,16 @@
         "audit": {
           "allPass": "对比度：全部通过",
           "cancel": "取消",
-          "failuresCount": "{count} / {total} 组对未通过 WCAG AA",
+          "failuresBothVariants": "两个变体共 {count} 处未通过 WCAG AA（共检查 {total} 组）",
           "lowContrast": "对比度不足",
           "saveAnyway": "仍然保存",
-          "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
+          "saveWarningBody": "浅色与深色变体共有 {count} 组配色未通过 WCAG AA 对比度检查。仍要保存吗？",
           "saveWarningTitle": "对比度不足的主题"
         },
-        "darkLabel": "深色变体",
         "deactivateButton": "改用配色预设",
+        "defaultVariant": {
+          "label": "默认变体"
+        },
         "deleteButton": "删除",
         "deleteDialog": {
           "body": "确定删除“{name}”？此操作无法撤销。",
@@ -26645,11 +26805,14 @@
         },
         "groupFailures": "{count} 项未通过",
         "groups": {
-          "brand": "品牌",
+          "brand": "品牌与操作",
+          "chart": "图表",
+          "productAccent": "产品强调",
           "sidebar": "侧边栏",
-          "state": "状态",
-          "surface": "表面",
-          "text": "文字"
+          "status": "状态反馈",
+          "surfaceText": "表面与文字",
+          "workflowNode": "工作流节点",
+          "workflowState": "工作流状态"
         },
         "import": {
           "failure": "导入失败：{message}",
@@ -26666,8 +26829,14 @@
           "lightSwatchAria": "浅色变体色板",
           "more": "更多操作"
         },
+        "resetToken": "恢复默认",
         "saveButton": "保存",
         "savedLabel": "已保存的主题",
+        "search": {
+          "ariaLabel": "搜索主题色值点位",
+          "noResults": "没有匹配「{query}」的点位。",
+          "placeholder": "搜索色值点位"
+        },
         "title": "自定义主题",
         "tokens": {
           "accent": "强调色",
@@ -26678,11 +26847,23 @@
           },
           "background": "背景",
           "border": "边框",
+          "brandAction": "品牌主色",
+          "brandApproval": "品牌辅色",
+          "brandWash": "品牌底色",
           "card": "卡片",
           "cardForeground": "卡片文字",
+          "chart1": "图表 1",
+          "chart2": "图表 2",
+          "chart3": "图表 3",
+          "chart4": "图表 4",
+          "chart5": "图表 5",
           "destructive": "破坏性",
           "destructiveForeground": "破坏性文字",
+          "effortUltra": "Ultra 强度",
+          "effortUltraMuted": "Ultra 强度（淡色）",
           "foreground": "前景",
+          "info": "信息",
+          "infoForeground": "信息文字",
           "input": "输入框",
           "muted": "弱化色",
           "mutedForeground": "弱化色文字",
@@ -26700,10 +26881,32 @@
           "sidebarForeground": "侧栏文字",
           "sidebarPrimary": "侧栏主色",
           "sidebarPrimaryForeground": "侧栏主色文字",
-          "sidebarRing": "侧栏聚焦环"
+          "sidebarRing": "侧栏聚焦环",
+          "success": "成功",
+          "successForeground": "成功文字",
+          "warning": "警告",
+          "warningForeground": "警告文字",
+          "workflowAction": "动作节点",
+          "workflowAi": "AI 节点",
+          "workflowAnnotation": "批注节点",
+          "workflowData": "数据节点",
+          "workflowFlow": "流程节点",
+          "workflowIo": "输入输出节点",
+          "workflowStatusFailed": "已失败",
+          "workflowStatusIdle": "空闲",
+          "workflowStatusRunning": "运行中",
+          "workflowStatusSkipped": "已跳过",
+          "workflowStatusSucceeded": "已成功",
+          "workflowStatusWaiting": "等待中",
+          "workflowTrigger": "触发节点"
         },
         "unsavedBadge": "未保存的修改",
-        "updateButton": "更新"
+        "updateButton": "更新",
+        "variant": {
+          "dark": "深色",
+          "editingLabel": "正在编辑的变体",
+          "light": "浅色"
+        }
       },
       "description": "调整应用的视觉风格，所有改动会立即保存。",
       "fontScaleHint": "整体缩放界面。默认 16px。",
@@ -28094,9 +28297,16 @@
       }
     },
     "composerAssistance": {
+      "assistanceModel": {
+        "description": "这些辅助功能调用哪个模型。默认走聊天供应商上的便宜模型——如果那个供应商没存 API key，在这里另选一个。",
+        "heading": "辅助模型",
+        "model": "模型",
+        "provider": "供应商",
+        "useDefault": "跟随聊天默认"
+      },
       "description": "用 LLM 帮你撰写消息——润色、行内补全与建议。",
       "enhance": {
-        "hint": "在 composer 工具栏用模型改写或生成草稿的多个版本。",
+        "hint": "用输入框里的魔杖按钮改写草稿或生成多个版本。",
         "label": "提示词润色"
       },
       "followUps": {
@@ -29211,7 +29421,6 @@
         "homeserverRequired": "Homeserver 地址不能为空",
         "passwordLogin": {
           "credentialsRequired": "请输入用户名和密码",
-          "desktopOnly": "仅桌面端",
           "help": "用用户名和密码换取访问令牌；密码不会被保存。",
           "loginButton": "登录",
           "passwordLabel": "密码",
@@ -30051,6 +30260,7 @@
         "adjustLabel": "微调",
         "adjustLockedHint": "“经典”保持与现在完全一致，因此不接受微调。需要自定义请先换一种风格。",
         "description": "选择输入框的排布方式。每种风格都能触及全部控件，区别只在于哪些直接摆在行上、哪些收起来。",
+        "followsPack": "当前跟随所选风格包。选一种风格即可固定为你自己的选择。",
         "monoHint": "用代码字体而非界面字体输入。",
         "monoLabel": "等宽输入",
         "paddingLabel": "内边距",
@@ -30069,8 +30279,8 @@
             "label": "宽松"
           },
           "classic": {
-            "hint": "就是你现在看到的输入框。默认选项，保持原样。",
-            "label": "经典（当前外观）"
+            "hint": "风格功能出现之前的输入框。不接受微调。",
+            "label": "经典"
           },
           "dense": {
             "hint": "方正紧凑，框内带一条安静的等宽状态行。",
@@ -31138,7 +31348,6 @@
         "title": "Sidecar 重启"
       },
       "tabs": {
-        "crashLogs": "崩溃日志",
         "label": "诊断分区",
         "nativeReports": "原生报告",
         "system": "系统"
@@ -38618,6 +38827,8 @@
     "webCardTitle": "网络",
     "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
     "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
+    "webPreferCogniaDesc": "即使模型所在 runtime 自带联网，也改用 Cognia 的多服务商搜索（Tavily / Brave / Exa…）。关闭时优先用 runtime 自带的原生搜索——不需要 API key，且带引用。需要先配置搜索服务商。",
+    "webPreferCogniaTitle": "优先用 Cognia 的联网搜索",
     "webclone": "网页快照",
     "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"
   },

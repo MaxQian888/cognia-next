@@ -3467,6 +3467,7 @@
       "rejectAll": "Reject all",
       "removeSelectionAria": "Remove selection {title}",
       "selectionChipCommentLabel": "{title} · comment",
+      "selectionChipEntityLabel": "{kind}: {title}",
       "selectionChipExternalAppLabel": "{app}",
       "selectionChipExternalLabel": "{app} · {title}",
       "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",
@@ -5027,9 +5028,18 @@
       "attachMenu": {
         "attachGroup": "Attach",
         "capabilitiesGroup": "Capabilities",
+        "cloudDocs": "Cloud document",
+        "extendGroup": "Extend",
+        "externalServices": "External services ({count})",
         "file": "Upload files",
         "folder": "Add folder",
-        "trigger": "Attach"
+        "goal": "Set a goal",
+        "planMode": "Plan mode",
+        "recordSkill": "Record a skill",
+        "records": "Reference a record",
+        "slashCommands": "Slash commands",
+        "trigger": "Attach",
+        "turnGroup": "This turn"
       },
       "attachments": {
         "analyzing": "Analyzing image…",
@@ -5169,6 +5179,7 @@
           "error": "Couldn't enhance the prompt.",
           "noModel": "Configure a model in Settings to enhance prompts.",
           "noOutput": "No improvement suggested.",
+          "openSettings": "Open settings",
           "pii": "Draft contains sensitive data — enhancement skipped."
         },
         "trigger": "Enhance prompt"
@@ -5316,6 +5327,18 @@
           "workflow": "Workflow"
         },
         "comingSoon": "Coming soon",
+        "entityEmpty": "“{title}” has nothing to read — it may have been deleted.",
+        "entityFailed": "Could not read “{title}”: {reason}",
+        "entityKinds": {
+          "artifact": "artifact",
+          "issue": "issue",
+          "memory": "memory",
+          "plan": "plan",
+          "session": "conversation"
+        },
+        "entityStaged": "Attached “{title}” to your next message.",
+        "entityTitle": "Reference a record",
+        "entityUnavailable": "“{title}” can no longer be referenced here.",
         "fileTitle": "Reference a file or folder",
         "filesSection": "Files",
         "memoryTitle": "Append to memory",
@@ -5324,6 +5347,8 @@
         "noArgumentMatches": "No parameter options match \"{query}\".",
         "noCommandMatches": "No commands match \"/{query}\".",
         "noCommands": "No commands available.",
+        "noEntities": "No {kind} available.",
+        "noEntityMatches": "No {kind} matches \"{query}\".",
         "noFiles": "No files match \"{query}\".",
         "noPresetMatches": "No presets match \"{query}\".",
         "noPresets": "No presets available.",
@@ -5353,7 +5378,8 @@
         "wfEdgeTitle": "Reference an edge",
         "wfNodeTitle": "Reference a node",
         "workspaceEmpty": "Workspace is empty.",
-        "workspaceMissing": "Set a working directory in session settings to use @-references."
+        "workspaceMissing": "Set a working directory in session settings to use @-references.",
+        "workspaceUnreachable": "File references need a paired device. Files appear once one is connected."
       },
       "presets": {
         "applied": "Applied preset \"{name}\".",
@@ -5388,6 +5414,11 @@
         "templateDescription": "Description",
         "title": "Save as template",
         "trigger": "Save as template"
+      },
+      "scheduleSuggestion": {
+        "accept": "Schedule",
+        "dismiss": "Dismiss suggestion",
+        "prompt": "Looks like a recurring task — schedule it?"
       },
       "screenshot": {
         "captureAria": "Capture screenshot",
@@ -7806,6 +7837,7 @@
       "cancel": "Cancel",
       "clearSearch": "Clear search",
       "collapseSidebar": "Collapse conversation list",
+      "collapseTeams": "Collapse teams",
       "compactDensity": "Compact rows",
       "conversationsTitle": "Conversations",
       "deleteFolder": "Delete folder",
@@ -7820,6 +7852,7 @@
       "emptySearch": "No conversations match “{query}”.",
       "emptyTeam": "No conversations yet. Start one above.",
       "expandSidebar": "Expand conversation list",
+      "expandTeams": "Expand teams",
       "folderActions": "Folder actions",
       "globalSearch": "Search everywhere",
       "globalSearchHint": "Search every conversation, command and file with these words (⌘/Ctrl+Enter)",
@@ -7956,6 +7989,8 @@
       "me": "Me",
       "memory": "Memory",
       "more": "More",
+      "moveTeamDown": "Move down",
+      "moveTeamUp": "Move up",
       "navigation": "Navigation",
       "openSettings": "Open settings",
       "performance": "Performance",
@@ -8707,6 +8742,7 @@
       "copyReport": "Copy report",
       "dismiss": "Dismiss",
       "exportCrashLog": "Export crash log",
+      "interruptTurn": "Stop this turn",
       "jumpToNode": "Go to node",
       "locateBinary": "Locate binary",
       "openExternal": "Open docs",
@@ -8822,6 +8858,14 @@
       "documentedOnly": {
         "hint": "Cognia can't drive this agent directly — follow its own product workflow, or use the built-in agent.",
         "label": "Documentation only"
+      },
+      "environmentSetupFailed": {
+        "hint": "The environment was found but its setup did not finish — retry, and check the log for the failing step.",
+        "label": "Environment setup failed"
+      },
+      "environmentUnavailable": {
+        "hint": "The environment this conversation runs in no longer exists — pick another one in Agent Runtime settings, or retry.",
+        "label": "Environment unavailable"
       },
       "eventChannelLost": {
         "hint": "Cognia stopped receiving updates from the desktop backend, so parts of the app will look frozen — reload to reconnect.",
@@ -9047,6 +9091,10 @@
         "hint": "Running an external agent needs the desktop app — in the browser, use the built-in agent.",
         "label": "Needs the desktop app"
       },
+      "turnSilent": {
+        "hint": "This turn has been running a while without reporting anything. A long tool call looks the same from here, so check the log before stopping it.",
+        "label": "No response yet"
+      },
       "unauthorized": {
         "hint": "Authentication failed — check your API key or token in Settings.",
         "label": "Unauthorized"
@@ -9054,6 +9102,14 @@
       "unknown": {
         "hint": "Something went wrong that Cognia doesn't recognise — the details below help us diagnose it.",
         "label": "Unexpected error"
+      },
+      "workspaceBundleFailed": {
+        "hint": "Preparing the working copy for this turn failed — retry; the log says what the provisioner refused.",
+        "label": "Couldn't open the workspace"
+      },
+      "workspaceUnavailable": {
+        "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel.",
+        "label": "Workspace unavailable"
       }
     },
     "detail": {
@@ -9432,6 +9488,10 @@
     },
     "label": "Feishu Docs",
     "labelGoogle": "Google Workspace",
+    "name": {
+      "google": "Google Workspace",
+      "lark": "Feishu Docs"
+    },
     "picker": {
       "accountLabel": "Account",
       "attached": "Attached “{title}”",
@@ -10466,6 +10526,7 @@
         "none": "no evidence",
         "probe": "observed by a live probe",
         "protocol-spec": "from the protocol specification",
+        "user-declared": "you told us",
         "vendor-certified": "certified by the vendor"
       },
       "level": {
@@ -10481,12 +10542,14 @@
         "adapterMethodMissing": "Cognia's adapter does not implement it",
         "advertisedCompactCommand": "the agent advertises a /compact command",
         "agentOwned": "the external agent runs this itself",
+        "attachmentStoreUnavailable": "this runtime has no attachment store to hand the bytes to",
         "cancelKillsRuntime": "cancelling ends the whole runtime, not just the turn",
         "codexOptionsChannel": "carried on the Codex options channel",
         "cogniaDispatchAgent": "served by Cognia's dispatch_agent tool",
         "cogniaHookRuntime": "Cognia's hook runtime wraps the turn",
         "committedRepliesOnly": "this channel reports committed replies only",
         "launchTimeAuthorityOnly": "authority is granted at launch and cannot change mid-run",
+        "modelVariantOverlay": "carried as a named model variant",
         "nativeSummarizeRoute": "served by the provider's own summarize route",
         "negotiatedLoadSession": "the agent advertised session loading",
         "negotiatedNoLoadSession": "the agent advertised no session loading",
@@ -10508,7 +10571,8 @@
         "notNegotiated": "the agent did not advertise it during initialize",
         "perThreadConfigOverride": "carried as a per-thread config override",
         "pluginUndeclared": "the contributing plugin declares no capabilities",
-        "sidecarOnly": "only the built-in agent reports this"
+        "sidecarOnly": "only the built-in agent reports this",
+        "userDeclared": "you declared this for this agent"
       }
     },
     "commandDefaultArgs": "Arguments",
@@ -10776,6 +10840,11 @@
       "connectionFailed": "Connection failed",
       "customConfiguration": "Custom configuration",
       "cwdPlaceholder": "Leave empty for current directory",
+      "declaredWebSearch": "Brings its own web search",
+      "declaredWebSearchAuto": "Work it out",
+      "declaredWebSearchDesc": "Whether this agent build reaches the web on its own. Nothing in the protocol says — it depends on the binary and plan you installed — so tell us, or leave it to us and Cognia supplies web search when it can.",
+      "declaredWebSearchNative": "Yes — it searches the web itself",
+      "declaredWebSearchNone": "No — Cognia should supply search",
       "deepseekHarness": {
         "approvalNotice": "This transport cannot ask for approval while a turn is running, so authority is fixed when the runtime starts.",
         "cancelNotice": "Cancelling a turn closes the runtime: this transport has no mid-turn cancel.",
@@ -10921,6 +10990,26 @@
       "permissionDefault": "Default (Ask for each action)",
       "permissionDontAsk": "Don't Ask (Deny unless pre-approved)",
       "permissionPlan": "Plan Mode (No execution)",
+      "piAuth": {
+        "authType": {
+          "api_key": "API key",
+          "oauth": "OAuth"
+        },
+        "configureHint": "Configure the missing providers in Pi itself — Cognia cannot sign in on your behalf.",
+        "listingUnreadable": "Could not read Pi's model list, so there is nothing to check. This says nothing about your credentials.",
+        "noProviders": "Pi reports no usable model. Sign in to a provider in Pi before sending a prompt.",
+        "notConnected": "Connect the agent to check which providers Pi can authenticate.",
+        "readOnlyNote": "Cognia asks Pi for a status only. It never reads, refreshes or stores your Pi credentials.",
+        "refresh": "Re-check credentials",
+        "status": {
+          "invalid": "Invalid",
+          "not_ready": "Not signed in",
+          "ready": "Ready",
+          "unreadable": "Could not check"
+        },
+        "title": "Pi credentials",
+        "unknownProvider": "Unknown provider"
+      },
       "piExtensionPolicyGlobal": "Load my global Pi extensions",
       "piExtensionPolicyHint": "Isolated runs Pi without your own extensions, skills or prompt templates. AGENTS.md and CLAUDE.md still load. Community permission extensions also intercept tool calls, so loading them alongside Cognia's can produce duplicate prompts.",
       "piExtensionPolicyIsolated": "Isolated (recommended)",
@@ -10928,22 +11017,6 @@
       "piExtensionPolicyTrustedProject": "Also trust project-local files",
       "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",
       "piManagePackages": "Manage Pi packages",
-      "piMigration": {
-        "blocker": {
-          "command_missing": "Pi is not installed, or not on PATH.",
-          "runtime_version_unsupported": "The installed Pi is older than the supported version.",
-          "sandbox_unavailable": "The sandbox is unavailable on this machine, so Pi cannot run here."
-        },
-        "continuityNote": "Your settings and this agent's ID are kept. The first run after switching starts a new Pi session — the current conversation is not carried across.",
-        "legacyDescription": "This agent runs through the community pi-acp bridge. Switching to Pi's native protocol adds thinking levels, steering, compaction and session forks.",
-        "migrateAction": "Switch to native Pi",
-        "migratedDescription": "This agent runs on Pi's native protocol.",
-        "rollbackAction": "Switch back to the bridge",
-        "rollbackNote": "Switching back restores the previous connection settings only. Sessions and transcripts are kept.",
-        "statusLegacy": "Community ACP bridge",
-        "statusNative": "Native RPC",
-        "title": "Pi connection"
-      },
       "piSandboxNote": "Pi always runs inside the strict sandbox, on macOS and Linux only. There is no unsandboxed fallback.",
       "piSectionTitle": "Pi runtime",
       "presetGalleryEmpty": "No presets available.",
@@ -12258,10 +12331,19 @@
         "providers": "Allowed providers",
         "revoke": "Revoke"
       },
+      "mediaGrantUnavailable": {
+        "nextStep": "Reopen this dialog once the conversation's bot is available.",
+        "reason": "This chat's bot could not be read, so a grant here could not name a provider."
+      },
       "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
       "reset": "Cancel",
       "save": "Save",
-      "saving": "Saving…"
+      "saving": "Saving…",
+      "triggerUnavailable": {
+        "nextStep": "Reopen this dialog once the conversation's bot is available.",
+        "reason": "This chat's bot could not be read, so there is no policy to override from.",
+        "title": "When this conversation answers"
+      }
     },
     "conversationRow": {
       "draftCount": "{count, plural, =1 {1 draft} other {# drafts}}",
@@ -13218,6 +13300,8 @@
       "autoRefreshOff": "Off",
       "autoRefreshOn": "On",
       "autoRefreshStatus": "Auto Refresh",
+      "detailDescription": "Inspect the crash log entry and the diagnostic snapshot captured with it.",
+      "detailTitle": "Crash detail",
       "diagnostics": {
         "runtime": "Runtime Diagnostics",
         "title": "Diagnostic Snapshots",
@@ -13253,8 +13337,10 @@
         "title": "Before You Share"
       },
       "refreshing": "Refreshing...",
+      "resizeDetail": "Resize diagnostics detail pane",
       "searchPlaceholder": "Search crash logs...",
       "sourceCount": "sources",
+      "sourceLabel": "Source filter",
       "sources": {
         "all": "All Sources",
         "diagnostic": "Diagnostic",
@@ -14216,6 +14302,7 @@
         }
       },
       "views": {
+        "diagnostics": "Diagnostics",
         "incidents": "Incidents",
         "logs": "Logs",
         "service": "Service",
@@ -15286,6 +15373,24 @@
         "title": "Allow running agents",
         "toggleAria": "Toggle agent control for {label}"
       },
+      "browserAccess": {
+        "description": "A browser can't verify this computer's self-signed certificate, so the usual HTTPS port is unreachable from a tab. This opens a plain http://127.0.0.1 listener — the one address a browser trusts without a certificate. It stays on this machine and never leaves it.",
+        "enable": "Enable browser access",
+        "listening": "Listening on {url}",
+        "loadFailed": "Browser access settings could not be read.",
+        "notListening": "Not listening",
+        "origins": {
+          "add": "Add origin",
+          "description": "Only these exact origins may reach this computer. Anything else is refused — including the same address on a different port.",
+          "empty": "No origin is allowed yet, so browser access does nothing until you add one.",
+          "placeholder": "http://localhost:3000",
+          "revoke": "Remove {origin}",
+          "suggested": "Suggested:",
+          "title": "Allowed browser origins"
+        },
+        "restartRequired": "Restart the Companion server to apply.",
+        "title": "Browser access"
+      },
       "channels": {
         "blocked": {
           "loopbackOnly": "Bound to this machine only — switch the server to LAN.",
@@ -15677,7 +15782,8 @@
       "file": "File",
       "permissionDeniedCamera": "Camera permission required.",
       "permissionDeniedMic": "Microphone permission required.",
-      "toggleAria": "Attachments",
+      "sheetDescription": "Attach media, change what this turn can do, or reach another tool.",
+      "toggleAria": "Add to this message",
       "unsupported": "Not supported on this platform.",
       "voice": "Voice",
       "voiceCannotStart": "Cannot start recording",
@@ -16548,6 +16654,7 @@
       "accountContextMissing": "An active local account is required before pairing a Host.",
       "baseUrlLabel": "Server URL",
       "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
+      "brandMark": "Cognia",
       "checkingTitle": "Re-checking link",
       "codeError": {
         "invalid_pair_code": "Pair code must be exactly 6 digits.",
@@ -16618,6 +16725,7 @@
         "copyDiagnostics": "Copy diagnostics",
         "diagnosticsCopied": "Diagnostics copied",
         "invitationSpent": "This invitation is now spent — the Host consumed it. Issue a fresh one before trying again; re-submitting the same string cannot work.",
+        "moreOptions": "More options",
         "remedy": {
           "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
           "checkHostLogs": "Check the Host's logs for the matching error.",
@@ -16671,6 +16779,14 @@
         "refresh": "Refresh status",
         "server": "Server"
       },
+      "hostProbe": {
+        "absent": "No Host answered on this computer.",
+        "blocked": "A Host is running here, but it refuses this browser. Add this origin to its allowed origins:",
+        "copyOrigin": "Copy this origin",
+        "originCopied": "Origin copied",
+        "reachable": "Host on {host} · v{version}",
+        "searching": "Looking for a Host on this computer…"
+      },
       "httpError": {
         "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
         "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
@@ -16679,6 +16795,15 @@
         "generic": "Pairing failed (HTTP {status})."
       },
       "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "invitationCard": {
+        "replace": "Replace",
+        "showRaw": "Show the invitation string",
+        "state": {
+          "failed": "Server v{version} · still valid until {expiresAt, time, short}",
+          "ready": "Server v{version} · valid until {expiresAt, time, short}",
+          "spent": "Already spent — this Host consumed it. Issue a fresh one."
+        }
+      },
       "invitationSummary": {
         "description": "Server v{version} · expires at {expiresAt, time, short}",
         "title": "Invitation ready for {host}"
@@ -16687,6 +16812,16 @@
       "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
       "loadingTitle": "Checking for an existing pairing…",
       "manualDivider": "or paste manually",
+      "narration": {
+        "absent": "Nothing answered yet. Paste an invitation below and it will tell you exactly where it points.",
+        "armed": "The invitation checks out. Completing the pairing registers this client's key and spends it.",
+        "blocked": "Something is listening, but it will not talk to this browser until you allow this origin on the Host.",
+        "failed": "The attempt did not go through. What to do next is on the right.",
+        "paired": "This client holds its own key now. It reconnects on its own from here.",
+        "pairing": "Registering this client's key with the Host. This takes a moment.",
+        "reachable": "The Host is there. It still needs to hand you a one-time invitation before this client can connect.",
+        "searching": "Checking whether a cognia Host is listening where this client can reach it."
+      },
       "networkError": {
         "browserBlocked": "The browser blocked the connection. Check the server's HTTPS certificate and its CORS or Private Network Access settings.",
         "browserPolicy": "The browser blocked the request because of its CORS or Private Network Access policy. Allow this web origin on the server, then try again.",
@@ -16737,6 +16872,16 @@
         "unsupported": "This device can't scan QR codes. Paste the pair token manually below."
       },
       "scanning": "Scanning…",
+      "scene": {
+        "absent": "No Host found",
+        "armed": "An invitation is ready to redeem",
+        "blocked": "A Host refused this browser",
+        "failed": "Pairing failed",
+        "paired": "Paired with the Host",
+        "pairing": "Redeeming the invitation",
+        "reachable": "A Host is reachable",
+        "searching": "Looking for a Host"
+      },
       "signOut": {
         "cardDescription": "Sign out and clear the device JWT. You'll need to scan a fresh QR to reconnect.",
         "cardTitle": "Disconnect",
@@ -16777,6 +16922,7 @@
         },
         "copyCommand": "Copy headless pairing command",
         "deploymentCommandHint": "Run this inside the target Host instance. In a multi-tenant or multi-replica deployment, replace the namespace and Pod name with the exact Host the browser should connect to. If it prints cgnp2, update the deployed image and restart or roll out that Host before retrying.",
+        "developmentCommandHint": "Run this in a second terminal while `pnpm dev:web-headless` is running, then paste the printed invitation below. It aims the invitation at the loopback listener on port {port} — the only address a browser reaches without a certificate. `pnpm dev:headless` on its own does not open that port.",
         "formCardDescription": "Paste the one-time cgnp3 invitation issued by your cognia server.",
         "formCardTitle": "Pair this browser",
         "headlessDescription": "Run this in a second terminal while the headless server is running, then paste the printed cgnp3 invitation below.",
@@ -23808,6 +23954,7 @@
     "action": "Action",
     "actionApp": "App",
     "actionCommand": "Command",
+    "actionFailed": "Could not update “{name}”",
     "actionScript": "Script",
     "active": "active",
     "activePlugins": "{count} plugin(s)",
@@ -23929,6 +24076,8 @@
     "bulkDelete": "Delete",
     "bulkDeleteDescription": "This will delete {n} selected tasks across all kinds. This action cannot be undone.",
     "bulkDeleteTitle": "Delete selected tasks?",
+    "bulkPartialFailure": "{count, plural, =1 {1 item could not be updated} other {# items could not be updated}}",
+    "bulkPartialFailureMore": "{hidden, plural, =1 {and 1 more} other {and # more}}",
     "bulkPause": "Pause",
     "bulkResume": "Resume",
     "bulkSelect": "Select",
@@ -23942,6 +24091,7 @@
       "today": "Today"
     },
     "cancel": "Cancel",
+    "cancelRun": "Cancel",
     "cancelSelect": "Cancel",
     "catchupWindow": {
       "help": "Missed runs older than this are skipped instead of re-run. 0 = no limit.",
@@ -23951,7 +24101,8 @@
     "cleanupOldExecutions": "Cleanup old executions (30d)",
     "clearSearch": "Clear search",
     "clearSelection": "Clear selection",
-    "cloneSuccess": "Task cloned successfully",
+    "cloneFailed": "Could not duplicate this task",
+    "cloneSuccess": "Duplicated as “{name}”",
     "cloneTask": "Clone Task",
     "close": "Close",
     "code": "code:",
@@ -24147,6 +24298,7 @@
       "remote": "Remote host"
     },
     "hostBar": {
+      "localKindsStay": "backup / workflow / system / connector rows below stay on this device",
       "localOnlyWhileOpen": "runs only while this app is open",
       "localSuspended": "suspended — taken over by the cloud host",
       "managing": "Managing: {host}",
@@ -24236,6 +24388,7 @@
     "logs": "Logs",
     "maxMissedRuns": "Max Missed Runs",
     "maxRetries": "Max Retries",
+    "maxRetryDelayMs": "Max Retry Delay (ms)",
     "mcp": {
       "disabledNote": "disabled",
       "empty": "No MCP servers configured.",
@@ -24309,6 +24462,8 @@
       "never": "Never",
       "successOnly": "Success Only"
     },
+    "notifyOnProgress": "Notify on progress",
+    "notifyOnProgressHint": "Only task types that report mid-run progress raise this (plugin tasks today).",
     "notifyOnStart": "Notify on start",
     "occurrenceList": {
       "moreTimes": "+{count} more",
@@ -24513,6 +24668,8 @@
       "agentAutoCreate": "Agent Auto-Create",
       "agentAutoCreateDesc": "Allow AI agents to create scheduled tasks without user confirmation dialog",
       "allowAgentAutoCreate": "Allow agents to auto-create tasks",
+      "autoRefreshInterval": "Auto-refresh (seconds)",
+      "autoRefreshIntervalDesc": "How often the scheduler page re-reads tasks and runs. 0 turns it off.",
       "confirmationRequired": "Confirmation Required",
       "confirmationRequiredDesc": "Task types that always require explicit user confirmation before creation by agents",
       "description": "Control what agents and plugins can do with scheduled tasks",
@@ -24703,6 +24860,7 @@
       "nextRun": "Next Run"
     },
     "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
+    "sourceLoadFailed": "Could not load: {kinds}",
     "stackTrace": "Stack trace",
     "startedAt": "Started at",
     "statistics": "Statistics",
@@ -26621,14 +26779,16 @@
         "audit": {
           "allPass": "Contrast: all pairs pass",
           "cancel": "Cancel",
-          "failuresCount": "{count} of {total} pairs fail WCAG AA",
+          "failuresBothVariants": "{count, plural, one {# pair fails} other {# pairs fail}} WCAG AA across both variants ({total} checked)",
           "lowContrast": "Low contrast",
           "saveAnyway": "Save anyway",
-          "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
+          "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check across the light and dark variants. Save anyway?",
           "saveWarningTitle": "Low-contrast theme"
         },
-        "darkLabel": "Dark variant",
         "deactivateButton": "Use color preset",
+        "defaultVariant": {
+          "label": "Opens in"
+        },
         "deleteButton": "Delete",
         "deleteDialog": {
           "body": "Delete \"{name}\"? This cannot be undone.",
@@ -26645,11 +26805,14 @@
         },
         "groupFailures": "{count, plural, one {# fails} other {# fail}}",
         "groups": {
-          "brand": "Brand",
+          "brand": "Brand & actions",
+          "chart": "Charts",
+          "productAccent": "Product accents",
           "sidebar": "Sidebar",
-          "state": "State",
-          "surface": "Surface",
-          "text": "Text"
+          "status": "Status feedback",
+          "surfaceText": "Surface & text",
+          "workflowNode": "Workflow nodes",
+          "workflowState": "Workflow states"
         },
         "import": {
           "failure": "Import failed: {message}",
@@ -26666,8 +26829,14 @@
           "lightSwatchAria": "Light variant swatch",
           "more": "More actions"
         },
+        "resetToken": "Reset to default",
         "saveButton": "Save",
         "savedLabel": "Saved themes",
+        "search": {
+          "ariaLabel": "Search theme tokens",
+          "noResults": "No token matches “{query}”.",
+          "placeholder": "Search tokens"
+        },
         "title": "Custom theme",
         "tokens": {
           "accent": "Accent",
@@ -26678,11 +26847,23 @@
           },
           "background": "Background",
           "border": "Border",
+          "brandAction": "Brand action",
+          "brandApproval": "Brand approval",
+          "brandWash": "Brand wash",
           "card": "Card",
           "cardForeground": "Card text",
+          "chart1": "Chart 1",
+          "chart2": "Chart 2",
+          "chart3": "Chart 3",
+          "chart4": "Chart 4",
+          "chart5": "Chart 5",
           "destructive": "Destructive",
           "destructiveForeground": "Destructive text",
+          "effortUltra": "Ultra effort",
+          "effortUltraMuted": "Ultra effort (muted)",
           "foreground": "Foreground",
+          "info": "Info",
+          "infoForeground": "Info text",
           "input": "Input",
           "muted": "Muted",
           "mutedForeground": "Muted text",
@@ -26700,10 +26881,32 @@
           "sidebarForeground": "Sidebar text",
           "sidebarPrimary": "Sidebar primary",
           "sidebarPrimaryForeground": "Sidebar primary text",
-          "sidebarRing": "Sidebar ring"
+          "sidebarRing": "Sidebar ring",
+          "success": "Success",
+          "successForeground": "Success text",
+          "warning": "Warning",
+          "warningForeground": "Warning text",
+          "workflowAction": "Action node",
+          "workflowAi": "AI node",
+          "workflowAnnotation": "Annotation node",
+          "workflowData": "Data node",
+          "workflowFlow": "Flow node",
+          "workflowIo": "Input / output node",
+          "workflowStatusFailed": "Failed",
+          "workflowStatusIdle": "Idle",
+          "workflowStatusRunning": "Running",
+          "workflowStatusSkipped": "Skipped",
+          "workflowStatusSucceeded": "Succeeded",
+          "workflowStatusWaiting": "Waiting",
+          "workflowTrigger": "Trigger node"
         },
         "unsavedBadge": "Unsaved changes",
-        "updateButton": "Update"
+        "updateButton": "Update",
+        "variant": {
+          "dark": "Dark",
+          "editingLabel": "Which variant to edit",
+          "light": "Light"
+        }
       },
       "description": "Tune the look and feel of the app. Changes are saved instantly.",
       "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
@@ -28094,9 +28297,16 @@
       }
     },
     "composerAssistance": {
+      "assistanceModel": {
+        "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
+        "heading": "Assistance model",
+        "model": "Model",
+        "provider": "Provider",
+        "useDefault": "Use chat default"
+      },
       "description": "LLM help for writing your messages — enhancement, inline completion, and suggestions.",
       "enhance": {
-        "hint": "Rewrite or vary your draft with a model from the composer toolbar.",
+        "hint": "Rewrite or vary your draft with a model, from the wand in the message box.",
         "label": "Prompt enhancement"
       },
       "followUps": {
@@ -29211,7 +29421,6 @@
         "homeserverRequired": "Homeserver URL is required",
         "passwordLogin": {
           "credentialsRequired": "Enter a username and password",
-          "desktopOnly": "Desktop only",
           "help": "Exchange a username and password for an access token. The password is never stored.",
           "loginButton": "Sign in",
           "passwordLabel": "Password",
@@ -30051,6 +30260,7 @@
         "adjustLabel": "Adjust",
         "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
         "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
+        "followsPack": "Following the active style pack. Pick a style to pin your own.",
         "monoHint": "Type in the code font instead of the interface font.",
         "monoLabel": "Monospace input",
         "paddingLabel": "Padding",
@@ -30069,8 +30279,8 @@
             "label": "Airy"
           },
           "classic": {
-            "hint": "The composer as it is today. This is the default and stays untouched.",
-            "label": "Classic (current look)"
+            "hint": "The composer as it was before styles existed. It takes no adjustments.",
+            "label": "Classic"
           },
           "dense": {
             "hint": "Tight and squared, with a quiet monospace status line inside the box.",
@@ -31138,7 +31348,6 @@
         "title": "Sidecar restarts"
       },
       "tabs": {
-        "crashLogs": "Crash logs",
         "label": "Diagnostics sections",
         "nativeReports": "Native reports",
         "system": "System"
@@ -38618,6 +38827,8 @@
     "webCardTitle": "Web",
     "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
     "webNativeAnthropicTitle": "Use native Anthropic web tools",
+    "webPreferCogniaDesc": "Use Cognia's multi-provider search (Tavily / Brave / Exa …) even when the model's own runtime brings web search. Off means the runtime's native search is used where it exists — it needs no API key and returns citations. Needs a configured search provider.",
+    "webPreferCogniaTitle": "Prefer Cognia's web search",
     "webclone": "Web page snapshot",
     "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."
   },
