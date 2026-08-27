@@ -2,7 +2,10 @@
 
 use axum::{
     extract::{rejection::JsonRejection, ConnectInfo, Path, Request, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{
+        header::{AUTHORIZATION, ORIGIN},
+        HeaderMap, StatusCode,
+    },
     middleware::{from_fn, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -26,7 +29,7 @@ use super::{
     host_identity,
     middleware::DeviceContext,
     replay_cache::ReplayCache,
-    security_store::{security_store, SecurityStore, SecurityStoreError},
+    security_store::{security_store, AuthorizationSnapshot, SecurityStore, SecurityStoreError},
     SharedState,
 };
 
@@ -251,6 +254,7 @@ fn authenticate_owner_request(
             "an active Owner device is required",
         ));
     }
+    enforce_bound_origin(&snapshot, request.headers())?;
     let proof = request
         .headers()
         .get("dpop")
@@ -930,6 +934,40 @@ fn execution_error_body(error: super::remote_execution::ExecutionError) -> Value
     json!({ "error": detail })
 }
 
+/// Refuse a request that does not present the origin its device registered from.
+///
+/// A browser companion is definitionally a browser, so every one of its
+/// requests must carry the extension origin it registered from.
+///
+/// `WebOriginPolicy` cannot express this. It classifies a request with no
+/// `Origin` header at all as `Native` and allows it — the right default for a
+/// native client, and the wrong one here, because any other local process can
+/// omit the header too. The check is scoped to devices that actually carry a
+/// bound origin, so no other device class changes behaviour.
+///
+/// It lives here rather than inline in `authenticate_device_request` because
+/// the invariant is a property of the *snapshot*, not of one entry point:
+/// every path that authenticates on an `AuthorizationSnapshot` — the device
+/// middleware, the Owner middleware, and the socket-ticket exchange — has to
+/// apply it, or a device that is bound on one door is unbound on the next.
+fn enforce_bound_origin(
+    snapshot: &AuthorizationSnapshot,
+    headers: &HeaderMap,
+) -> Result<(), ApiError> {
+    let Some(bound_origin) = snapshot.bound_origin.as_deref() else {
+        return Ok(());
+    };
+    let presented = headers.get(ORIGIN).and_then(|value| value.to_str().ok());
+    if presented != Some(bound_origin) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "device_origin_mismatch",
+            "the request did not come from the extension this device registered from",
+        ));
+    }
+    Ok(())
+}
+
 fn authenticate_device_request(
     _state: &SharedState,
     request: &Request,
@@ -954,28 +992,7 @@ fn authenticate_device_request(
             "the access token is not bound to the active device key",
         ));
     }
-    // A browser companion is definitionally a browser, so every one of its
-    // requests must carry the extension origin it registered from.
-    //
-    // `WebOriginPolicy` cannot express this. It classifies a request with no
-    // `Origin` header at all as `Native` and allows it — the right default for
-    // a native client, and the wrong one here, because an MV3 service worker's
-    // `fetch` may omit the header and because any other local process can. The
-    // check is scoped to devices that actually carry a bound origin, so no
-    // other device class changes behaviour.
-    if let Some(bound_origin) = snapshot.bound_origin.as_deref() {
-        let presented = request
-            .headers()
-            .get("origin")
-            .and_then(|value| value.to_str().ok());
-        if presented != Some(bound_origin) {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "device_origin_mismatch",
-                "the request did not come from the extension this device registered from",
-            ));
-        }
-    }
+    enforce_bound_origin(&snapshot, request.headers())?;
 
     let path = request.uri().path();
     if let Some(command_name) = path
@@ -1490,20 +1507,16 @@ async fn browser_register_handler(
     // consumed: a bad origin here would otherwise burn the single-use
     // enrollment and leave the user with a code that no longer works and no
     // explanation of why.
-    let extension_origin =
-        super::extension_origin::normalize_browser_plane_origin(&request.extension_origin)
-            .filter(|origin| {
-                url::Url::parse(origin)
-                    .ok()
-                    .is_some_and(|url| super::extension_origin::is_cognia_extension_origin(&url))
-            })
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_extension_origin",
-                    "extensionOrigin must be a bare chrome-extension:// origin",
-                )
-            })?;
+    let extension_origin = super::extension_origin::normalize_extension_origin(
+        &request.extension_origin,
+    )
+    .ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_extension_origin",
+            "extensionOrigin must be a bare chrome-extension:// origin",
+        )
+    })?;
     let tenant_id = request_tenant(request.tenant_id)?;
     let _ = verify_device_proof(
         &request.public_key_pem,
@@ -1841,6 +1854,7 @@ async fn socket_ticket_handler(
             "the access token is not bound to the active device key",
         ));
     }
+    enforce_bound_origin(&snapshot, &headers)?;
     let proof = headers
         .get("dpop")
         .and_then(|value| value.to_str().ok())
@@ -2216,6 +2230,67 @@ mod tests {
             rate_limiter: super::super::rate_limit::RateLimiter::with_defaults(),
             push_tokens: super::super::push::PushTokenRegistry::new(),
         })
+    }
+
+    fn snapshot_with_bound_origin(bound_origin: Option<&str>) -> AuthorizationSnapshot {
+        AuthorizationSnapshot {
+            public_key_pem: "pem".into(),
+            key_thumbprint: "thumb".into(),
+            capabilities: Vec::new(),
+            bound_origin: bound_origin.map(str::to_string),
+        }
+    }
+
+    fn headers_with_origin(origin: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Some(origin) = origin {
+            headers.insert(ORIGIN, origin.parse().expect("a valid header value"));
+        }
+        headers
+    }
+
+    const BOUND: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+
+    #[test]
+    fn a_bound_device_must_present_exactly_the_origin_it_registered_from() {
+        let snapshot = snapshot_with_bound_origin(Some(BOUND));
+        assert!(enforce_bound_origin(&snapshot, &headers_with_origin(Some(BOUND))).is_ok());
+
+        for wrong in [
+            // Another extension the user happens to have installed.
+            Some("chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba"),
+            // A page, rather than the extension.
+            Some("https://app.example.com"),
+            // The bound origin with something appended — the comparison is
+            // equality, never a prefix.
+            Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop.evil.test"),
+            // No `Origin` at all: `WebOriginPolicy` would classify this as a
+            // native client and allow it, which is precisely the hole this
+            // check exists to close.
+            None,
+        ] {
+            assert!(
+                matches!(
+                    enforce_bound_origin(&snapshot, &headers_with_origin(wrong)),
+                    Err(error) if error.code == "device_origin_mismatch"
+                ),
+                "{wrong:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_device_with_no_bound_origin_is_left_alone() {
+        // The scoping claim the comment makes: an ordinary paired device sends
+        // no `Origin` (native) or any `Origin` (the web client) and neither is
+        // this check's business.
+        let snapshot = snapshot_with_bound_origin(None);
+        for presented in [None, Some("https://app.example.com"), Some(BOUND)] {
+            assert!(
+                enforce_bound_origin(&snapshot, &headers_with_origin(presented)).is_ok(),
+                "{presented:?} should be allowed through"
+            );
+        }
     }
 
     /// ADR-0127: with no Tauri app handle (headless server) the pairing event

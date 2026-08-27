@@ -128,11 +128,17 @@ pub async fn enforce(
     let workflow_embed_token = request.uri().path().starts_with("/api/apps/")
         && request.uri().path().ends_with("/embed-token");
     let decision = if workflow_embed_token {
+        // This branch does not consult the allowlist: an embed is admitted on
+        // the shape of the origin it presents, and *which* embed origins a
+        // release accepts is the release policy's answer, not this layer's.
+        // Which is exactly why it takes the web-only rule and not the browser
+        // plane's union — the union would hand `/api/apps/*/embed-token` to
+        // every extension the user happens to have installed.
         request
             .headers()
             .get(header::ORIGIN)
             .and_then(|value| value.to_str().ok())
-            .and_then(normalize_allowed_origin)
+            .and_then(super::extension_origin::normalize_web_origin)
             .map(OriginDecision::AllowedCrossOrigin)
             .unwrap_or(OriginDecision::Denied)
     } else {
@@ -236,6 +242,21 @@ fn normalize_allowed_origin(raw: &str) -> Option<String> {
     super::extension_origin::normalize_browser_plane_origin(raw)
 }
 
+/// The origin this request was addressed to, canonicalized the way an
+/// allowlist entry is.
+///
+/// `evaluate` compares this to the `Origin` header by string equality, so
+/// formatting `{scheme}://{host}` by hand walks into the trap the entry
+/// canonicalization exists to close: a proxy sending `Host: brain.example:443`,
+/// a mixed-case `Host`, or an IDN host in its unicode form each produce a
+/// string no browser will ever send. The request is then not recognized as
+/// same-origin and answers 403 unless the operator happened to allowlist it
+/// too.
+///
+/// A host the transport predicate does not admit (plaintext off loopback) keeps
+/// its raw form rather than being dropped: this function reports what the
+/// request was addressed to, and narrowing which deployments are allowed is
+/// `WebOriginPolicy`'s decision, not a side effect of a comparison.
 fn request_origin(headers: &HeaderMap) -> Option<String> {
     let scheme = headers
         .get("x-forwarded-proto")
@@ -246,7 +267,8 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
         .or_else(|| headers.get(header::HOST))?
         .to_str()
         .ok()?;
-    Some(format!("{scheme}://{host}"))
+    let raw = format!("{scheme}://{host}");
+    Some(super::extension_origin::normalize_web_origin(&raw).unwrap_or(raw))
 }
 
 fn preflight_is_valid(headers: &HeaderMap) -> bool {
@@ -307,6 +329,30 @@ mod tests {
         );
         assert_eq!(
             policy.evaluate(&headers(Some("https://web.example"), "brain.example")),
+            OriginDecision::Denied
+        );
+    }
+
+    #[test]
+    fn same_origin_survives_a_host_header_the_browser_spells_differently() {
+        // `evaluate` compares the Host-derived origin to `Origin` by string
+        // equality, so the Host side has to be canonicalized too. Each of these
+        // is the same origin the browser is on; each used to miss the
+        // same-origin path and 403 on a policy with no allowlist.
+        let policy = WebOriginPolicy::default();
+        for host in ["brain.example:443", "Brain.Example", "BRAIN.EXAMPLE:443"] {
+            assert_eq!(
+                policy.evaluate(&headers(Some("https://brain.example"), host)),
+                OriginDecision::SameOrigin,
+                "Host: {host} should still read as same-origin"
+            );
+        }
+        // A non-default port is part of the origin and must still have to match.
+        assert_eq!(
+            policy.evaluate(&headers(
+                Some("https://brain.example"),
+                "brain.example:8443"
+            )),
             OriginDecision::Denied
         );
     }
@@ -498,6 +544,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(insecure.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn embed_token_refuses_an_extension_origin() {
+        // The embed-token branch admits whatever the request presents, without
+        // an allowlist. It therefore takes the web-only rule: the browser
+        // plane's union would hand this route to every extension installed in
+        // the user's browser, which no release policy ever asked for.
+        let response = test_router(WebOriginPolicy::default())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/apps/review/embed-token")
+                    .header(header::HOST, "brain.example")
+                    .header(
+                        header::ORIGIN,
+                        "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn an_allowlisted_extension_origin_still_reaches_the_browser_plane() {
+        // The narrowing above is scoped to the embed-token branch: the
+        // allowlist path is still the union, or the Browser Companion could
+        // not talk to the Host at all.
+        let policy = WebOriginPolicy::from_values(
+            Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop"),
+            None,
+        );
+        let response = test_router(policy)
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/events")
+                    .header(header::HOST, "brain.example")
+                    .header(
+                        header::ORIGIN,
+                        "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        );
     }
 
     #[tokio::test]

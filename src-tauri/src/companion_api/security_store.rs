@@ -70,6 +70,61 @@ pub struct AuthorizationSnapshot {
     pub bound_origin: Option<String>,
 }
 
+/// One enrollable device class: its own token table, and what consuming a
+/// token from it grants.
+///
+/// The tables stay separate on purpose. The two classes consume into different
+/// capability sets, and a token that could be spent on either would make the
+/// device class a property of whichever endpoint happened to receive it —
+/// exactly the client-chosen label the registration path refuses to trust.
+/// What is shared is the *procedure*, not the token space.
+struct EnrollmentClass {
+    /// Table name, interpolated into SQL because a table name cannot be bound
+    /// as a parameter. Safe by construction: the only values are the two
+    /// private constants below, never anything reaching this from a request.
+    table: &'static str,
+    /// Granted on registration, and nothing else is.
+    capabilities: &'static [&'static str],
+    created_audit: &'static str,
+    registered_audit: &'static str,
+}
+
+/// A least-privilege execution worker: agent work, and no ordinary agent
+/// control, terminal, remote control or Owner authority.
+const WORKER_ENROLLMENT: EnrollmentClass = EnrollmentClass {
+    table: "worker_enrollments",
+    capabilities: &["agent.worker"],
+    created_audit: "worker_enrollment.created",
+    registered_audit: "worker.registered",
+};
+
+/// A Cognia browser companion extension.
+///
+/// A browser device never receives `host.observe`, `agent.run`, `workspace.*`,
+/// `terminal.open`, `process.spawn` or Owner authority. The two it does hold
+/// name one closed effect each — submit a captured page as a new task, and read
+/// back the submissions this same device made.
+const BROWSER_ENROLLMENT: EnrollmentClass = EnrollmentClass {
+    table: "browser_enrollments",
+    capabilities: &["browser.submit", "browser.read-own"],
+    created_audit: "browser_enrollment.created",
+    registered_audit: "browser.registered",
+};
+
+/// The device half of a registration, gathered so the shared path does not take
+/// nine positional `&str`s that are trivial to transpose.
+struct EnrolledDevice<'a> {
+    tenant_id: &'a str,
+    enrollment: &'a str,
+    challenge_id: &'a str,
+    challenge_nonce: &'a str,
+    device_id: &'a str,
+    display_name: &'a str,
+    public_key_pem: &'a str,
+    public_key_thumbprint: &'a str,
+    now: i64,
+}
+
 /// The sentinel namespace for a binding that predates any local account.
 ///
 /// Mirrors `DEFAULT_ACCOUNT_NAMESPACE` in the client credential book, and for
@@ -406,14 +461,36 @@ impl SecurityStore {
         now: i64,
         ttl_secs: i64,
     ) -> Result<String, SecurityStoreError> {
+        self.create_enrollment(&WORKER_ENROLLMENT, tenant_id, actor_id, now, ttl_secs)
+    }
+
+    /// Mint a one-time enrollment secret into `class`'s own table.
+    ///
+    /// The class is a parameter rather than the tables being merged: which
+    /// table a token lives in *is* the device class, and that is what lets
+    /// [`Self::register_enrolled_device`] assert the class instead of trusting
+    /// a label the client chose. What the two classes share — the two-UUID
+    /// secret, the hash-at-rest, the TTL, the audit row — is shared here so a
+    /// fix to any of it cannot land on only one of them.
+    fn create_enrollment(
+        &self,
+        class: &EnrollmentClass,
+        tenant_id: &str,
+        actor_id: &str,
+        now: i64,
+        ttl_secs: i64,
+    ) -> Result<String, SecurityStoreError> {
         let secret = format!("{}.{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
         let enrollment_id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock();
         let tx = conn.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO worker_enrollments
+            &format!(
+                "INSERT INTO {}
              (id, tenant_id, token_hash, expires_at, created_by, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                class.table
+            ),
             params![
                 enrollment_id,
                 tenant_id,
@@ -427,7 +504,7 @@ impl SecurityStore {
             &tx,
             tenant_id,
             actor_id,
-            "worker_enrollment.created",
+            class.created_audit,
             &enrollment_id,
             now,
         )?;
@@ -553,6 +630,51 @@ impl SecurityStore {
         public_key_thumbprint: &str,
         now: i64,
     ) -> Result<(), SecurityStoreError> {
+        self.register_enrolled_device(
+            &WORKER_ENROLLMENT,
+            EnrolledDevice {
+                tenant_id,
+                enrollment,
+                challenge_id,
+                challenge_nonce,
+                device_id,
+                display_name,
+                public_key_pem,
+                public_key_thumbprint,
+                now,
+            },
+            |_tx| Ok(()),
+        )
+    }
+
+    /// Consume `class`'s enrollment and register the device it names.
+    ///
+    /// One transaction, in this order and no other: consume the challenge,
+    /// find the enrollment, consume the enrollment, write the device, write its
+    /// key, grant exactly `class.capabilities`, audit. Every step is a
+    /// single-row `UPDATE` whose affected count is checked, so a replay of
+    /// either secret loses the race rather than registering a second device.
+    ///
+    /// `extra` writes whatever the class needs beyond a device — the browser
+    /// class's bound origin — inside the same transaction, so a device can
+    /// never exist without it.
+    fn register_enrolled_device(
+        &self,
+        class: &EnrollmentClass,
+        device: EnrolledDevice<'_>,
+        extra: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<(), SecurityStoreError>,
+    ) -> Result<(), SecurityStoreError> {
+        let EnrolledDevice {
+            tenant_id,
+            enrollment,
+            challenge_id,
+            challenge_nonce,
+            device_id,
+            display_name,
+            public_key_pem,
+            public_key_thumbprint,
+            now,
+        } = device;
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let consumed_challenge = tx.execute(
@@ -566,17 +688,23 @@ impl SecurityStore {
         }
         let enrollment_id: Option<String> = tx
             .query_row(
-                "SELECT id FROM worker_enrollments
+                &format!(
+                    "SELECT id FROM {}
                  WHERE tenant_id = ?1 AND token_hash = ?2
                    AND consumed_at IS NULL AND expires_at >= ?3",
+                    class.table
+                ),
                 params![tenant_id, hash_secret(enrollment), now],
                 |row| row.get(0),
             )
             .optional()?;
         let enrollment_id = enrollment_id.ok_or(SecurityStoreError::InvalidInvitation)?;
         if tx.execute(
-            "UPDATE worker_enrollments SET consumed_at = ?1, consumed_by_device_id = ?2
+            &format!(
+                "UPDATE {} SET consumed_at = ?1, consumed_by_device_id = ?2
              WHERE id = ?3 AND consumed_at IS NULL",
+                class.table
+            ),
             params![now, device_id, enrollment_id],
         )? != 1
         {
@@ -602,12 +730,15 @@ impl SecurityStore {
                 now
             ],
         )?;
-        upsert_capability_grant(&tx, tenant_id, device_id, "agent.worker", now)?;
+        extra(&tx)?;
+        for capability in class.capabilities {
+            upsert_capability_grant(&tx, tenant_id, device_id, capability, now)?;
+        }
         insert_audit(
             &tx,
             tenant_id,
             device_id,
-            "worker.registered",
+            class.registered_audit,
             device_id,
             now,
         )?;
@@ -630,33 +761,7 @@ impl SecurityStore {
         now: i64,
         ttl_secs: i64,
     ) -> Result<String, SecurityStoreError> {
-        let secret = format!("{}.{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
-        let enrollment_id = uuid::Uuid::new_v4().to_string();
-        let conn = self.conn.lock();
-        let tx = conn.unchecked_transaction()?;
-        tx.execute(
-            "INSERT INTO browser_enrollments
-             (id, tenant_id, token_hash, expires_at, created_by, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                enrollment_id,
-                tenant_id,
-                hash_secret(&secret),
-                now.saturating_add(ttl_secs),
-                actor_id,
-                now
-            ],
-        )?;
-        insert_audit(
-            &tx,
-            tenant_id,
-            actor_id,
-            "browser_enrollment.created",
-            &enrollment_id,
-            now,
-        )?;
-        tx.commit()?;
-        Ok(secret)
+        self.create_enrollment(&BROWSER_ENROLLMENT, tenant_id, actor_id, now, ttl_secs)
     }
 
     /// Consume a browser enrollment and register a companion extension with
@@ -685,73 +790,29 @@ impl SecurityStore {
         extension_origin: &str,
         now: i64,
     ) -> Result<(), SecurityStoreError> {
-        let mut conn = self.conn.lock();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let consumed_challenge = tx.execute(
-            "UPDATE device_challenges SET consumed_at = ?1
-             WHERE id = ?2 AND tenant_id = ?3 AND nonce_hash = ?4
-               AND consumed_at IS NULL AND expires_at >= ?1",
-            params![now, challenge_id, tenant_id, hash_secret(challenge_nonce)],
-        )?;
-        if consumed_challenge != 1 {
-            return Err(SecurityStoreError::InvalidChallenge);
-        }
-        let enrollment_id: Option<String> = tx
-            .query_row(
-                "SELECT id FROM browser_enrollments
-                 WHERE tenant_id = ?1 AND token_hash = ?2
-                   AND consumed_at IS NULL AND expires_at >= ?3",
-                params![tenant_id, hash_secret(enrollment), now],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let enrollment_id = enrollment_id.ok_or(SecurityStoreError::InvalidInvitation)?;
-        if tx.execute(
-            "UPDATE browser_enrollments SET consumed_at = ?1, consumed_by_device_id = ?2
-             WHERE id = ?3 AND consumed_at IS NULL",
-            params![now, device_id, enrollment_id],
-        )? != 1
-        {
-            return Err(SecurityStoreError::InvalidInvitation);
-        }
-        let owner = host_person_for_tenant(&tx, tenant_id)?;
-        tx.execute(
-            "INSERT INTO devices
-             (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?5, ?5)",
-            params![device_id, tenant_id, display_name, owner, now],
-        )?;
-        tx.execute(
-            "INSERT INTO device_keys
-             (id, device_id, tenant_id, public_key_pem, thumbprint, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                uuid::Uuid::new_v4().to_string(),
-                device_id,
+        self.register_enrolled_device(
+            &BROWSER_ENROLLMENT,
+            EnrolledDevice {
                 tenant_id,
+                enrollment,
+                challenge_id,
+                challenge_nonce,
+                device_id,
+                display_name,
                 public_key_pem,
                 public_key_thumbprint,
-                now
-            ],
-        )?;
-        tx.execute(
-            "INSERT INTO browser_devices
-             (device_id, tenant_id, extension_origin, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![device_id, tenant_id, extension_origin, now],
-        )?;
-        upsert_capability_grant(&tx, tenant_id, device_id, "browser.submit", now)?;
-        upsert_capability_grant(&tx, tenant_id, device_id, "browser.read-own", now)?;
-        insert_audit(
-            &tx,
-            tenant_id,
-            device_id,
-            "browser.registered",
-            device_id,
-            now,
-        )?;
-        tx.commit()?;
-        Ok(())
+                now,
+            },
+            |tx| {
+                tx.execute(
+                    "INSERT INTO browser_devices
+                     (device_id, tenant_id, extension_origin, created_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![device_id, tenant_id, extension_origin, now],
+                )?;
+                Ok(())
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1014,12 +1075,6 @@ impl SecurityStore {
         let mut normalized = capabilities.to_vec();
         normalized.sort();
         normalized.dedup();
-        if normalized
-            .iter()
-            .any(|capability| !is_assignable_device_capability(capability))
-        {
-            return Err(SecurityStoreError::InvalidCapabilities);
-        }
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Management plane: a suspended device's grants must stay editable, or
@@ -1033,6 +1088,31 @@ impl SecurityStore {
             )
             .optional()?;
         let role = role.ok_or(SecurityStoreError::DeviceUnavailable)?;
+        // The browser class's two capabilities are not *assignable* — no
+        // ordinary device may be handed them — but the browser device itself
+        // holds them, and every caller of this method reads that device's live
+        // snapshot and hands it straight back (`apply_device_grant`,
+        // `companion_set_worker`, the `fleet_worker_set` arm, the Owner route,
+        // `cognia-server devices grant|revoke`). Rejecting them by name would
+        // therefore not make the class unforgeable, it would make a browser
+        // device's grants uneditable. So the check is on the device's class,
+        // which `browser_devices` decides and no request can claim.
+        let is_browser_device: bool = tx.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM browser_devices WHERE tenant_id = ?1 AND device_id = ?2
+             )",
+            params![tenant_id, device_id],
+            |row| row.get(0),
+        )?;
+        if normalized.iter().any(|capability| {
+            !is_assignable_device_capability(capability)
+                && !(is_browser_device
+                    && BROWSER_ENROLLMENT
+                        .capabilities
+                        .contains(&capability.as_str()))
+        }) {
+            return Err(SecurityStoreError::InvalidCapabilities);
+        }
         if role == "owner"
             && !normalized
                 .iter()
@@ -2320,8 +2400,6 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             | "device.admin"
             | "server.admin"
             | "agent.worker"
-            | "browser.submit"
-            | "browser.read-own"
     )
 }
 
@@ -4164,6 +4242,91 @@ CREATE TABLE devices (
                 103,
             ),
             Err(SecurityStoreError::InvalidInvitation)
+        ));
+    }
+
+    #[test]
+    fn browser_capabilities_cannot_be_assigned_to_an_ordinary_device() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+
+        for capability in ["browser.submit", "browser.read-own"] {
+            assert!(matches!(
+                store.replace_device_capabilities(
+                    "tenant-a",
+                    "owner-a",
+                    "device-a",
+                    &[capability.to_string()],
+                    101,
+                ),
+                Err(SecurityStoreError::InvalidCapabilities)
+            ));
+        }
+    }
+
+    #[test]
+    fn a_browser_device_keeps_its_own_capabilities_through_a_grant_edit() {
+        // Every caller of `replace_device_capabilities` reads the device's live
+        // snapshot and hands it back with one grant added or removed. Refusing
+        // the two browser capabilities by name would therefore have made a
+        // browser device's grants uneditable — the Device Console's switches,
+        // `companion_set_worker`, the `fleet_worker_set` arm, the Owner route
+        // and `cognia-server devices grant|revoke` would all answer
+        // InvalidCapabilities on a device that legitimately holds them.
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "owner-a", 100, 300)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome on this Mac",
+                "pem",
+                "thumb-browser-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                101,
+            )
+            .unwrap();
+
+        // The snapshot round-trips, plus one ordinary grant the owner toggled on.
+        let replaced = store
+            .replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "browser-a",
+                &[
+                    "browser.read-own".into(),
+                    "browser.submit".into(),
+                    "host.observe".into(),
+                ],
+                102,
+            )
+            .unwrap();
+        assert_eq!(
+            replaced,
+            vec!["browser.read-own", "browser.submit", "host.observe"]
+        );
+        assert!(store
+            .has_capability("tenant-a", "browser-a", "browser.submit")
+            .unwrap());
+
+        // The class is what admits them, not the name: an ordinary device in
+        // the same tenant is still refused.
+        register(&store, "tenant-a", "device-a", 103);
+        assert!(matches!(
+            store.replace_device_capabilities(
+                "tenant-a",
+                "owner-a",
+                "device-a",
+                &["browser.submit".into()],
+                104,
+            ),
+            Err(SecurityStoreError::InvalidCapabilities)
         ));
     }
 

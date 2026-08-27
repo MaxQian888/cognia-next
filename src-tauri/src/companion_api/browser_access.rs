@@ -81,21 +81,21 @@ impl Default for BrowserAccessConfig {
 impl BrowserAccessConfig {
     /// Reject anything that cannot be an exact browser origin.
     ///
-    /// Normalizes the trailing slash, drops duplicates, and holds every entry
-    /// to the same transport rule as `web_origin`: HTTPS anywhere, HTTP only on
-    /// loopback. An origin that survives here is one the CORS layer will echo
-    /// verbatim, so a wildcard, a path, or credentials in the URL must never
-    /// get this far.
+    /// Canonicalizes each entry to the exact string a browser puts in `Origin`
+    /// (default port dropped, scheme and host lowercased, IDN host in
+    /// punycode), drops duplicates, and holds every entry to the browser
+    /// plane's admission rule: HTTPS anywhere, HTTP only on loopback, or a
+    /// Cognia `chrome-extension://<id>` origin. An origin that survives here is
+    /// one the CORS layer will echo verbatim, so a wildcard, a path, or
+    /// credentials in the URL must never get this far.
     pub fn sanitized(mut self) -> Result<Self, String> {
-        let mut seen = Vec::new();
-        for raw in self.allowed_origins.drain(..) {
-            let normalized = normalize_origin(&raw)
-                .ok_or_else(|| format!("`{raw}` is not an exact http(s) browser origin"))?;
-            if !seen.contains(&normalized) {
-                seen.push(normalized);
-            }
-        }
-        self.allowed_origins = seen;
+        self.allowed_origins = canonicalize_origins(self.allowed_origins.drain(..), |raw| {
+            Err(format!(
+                "`{raw}` is not an exact browser origin \u{2014} use \
+                 https://host, http://localhost or http://127.0.0.1 with a port, or the \
+                 chrome-extension://<id> origin the extension shows on its connection screen"
+            ))
+        })?;
         if self.port == 0 {
             self.port = DEFAULT_BROWSER_PORT;
         }
@@ -105,6 +105,43 @@ impl BrowserAccessConfig {
         Ok(self)
     }
 
+    /// Read-side repair: keep every entry that is still an exact origin, drop
+    /// the ones that are not.
+    ///
+    /// [`Self::sanitized`] refuses the whole config on the first bad entry,
+    /// which is right on save — the user typed it and has to be told. It is
+    /// wrong on load, where there is nobody to tell: one stale entry (an origin
+    /// shape a later release stopped admitting, a hand-edited file) sent the
+    /// entire config to [`Default`] — access off, the port reset, and every
+    /// other still-valid origin gone, with nothing in Settings to explain it.
+    ///
+    /// Dropping only the unusable entry cannot widen anything: what survives
+    /// went through the same normalizer, and `listener_enabled` already refuses
+    /// to bind an empty list.
+    fn repaired(mut self) -> Self {
+        self.allowed_origins = canonicalize_origins(self.allowed_origins.drain(..), |raw| {
+            log::warn!(
+                "browser access: dropping saved origin `{raw}`, which is no longer an exact browser origin"
+            );
+            Ok::<(), std::convert::Infallible>(())
+        })
+        // The closure never returns `Err`, and `Infallible` has no value to
+        // match, so this arm is the type system agreeing rather than a fallback.
+        .unwrap_or_else(|never| match never {});
+        if self.port == 0 {
+            self.port = DEFAULT_BROWSER_PORT;
+        }
+        // Nothing survived: there is no browser access to have, so say so on
+        // the flag too rather than leaving a switch that reads "on" over an
+        // empty list. This is the one case where the old whole-file rejection
+        // and this repair agree, and it keeps `enabled` from ever meaning
+        // something `listener_enabled` would contradict.
+        if self.allowed_origins.is_empty() {
+            self.enabled = false;
+        }
+        self
+    }
+
     /// Whether the plaintext listener should be bound.
     pub fn listener_enabled(&self) -> bool {
         self.enabled && !self.allowed_origins.is_empty()
@@ -112,12 +149,49 @@ impl BrowserAccessConfig {
 
     /// The origin a "pair in browser" link should target.
     ///
-    /// The first configured origin. There is no cleverness to add: the list is
-    /// ordered by the user, and a Host with several allowed browsers has no way
-    /// to know which one is in front of them right now.
+    /// The first configured **web** origin. There is no cleverness to add
+    /// beyond that: the list is ordered by the user, and a Host with several
+    /// allowed browsers has no way to know which one is in front of them right
+    /// now. But an extension origin can sit in this list too — the Browser
+    /// Companion flow tells users to put one there — and `chrome-extension://`
+    /// names a page inside an extension that no navigation can open, so it is
+    /// not a candidate for a link no matter where the user ordered it.
     pub fn primary_origin(&self) -> Option<&str> {
-        self.allowed_origins.first().map(String::as_str)
+        self.allowed_origins
+            .iter()
+            .find(|origin| super::extension_origin::normalize_web_origin(origin).is_some())
+            .map(String::as_str)
     }
+}
+
+/// Canonicalize a list of origins and drop duplicates, deciding what to do
+/// about a rejected entry at the call site.
+///
+/// The two callers differ in exactly one way and agree on everything else, so
+/// the loop lives here and the difference is the closure: on save
+/// ([`BrowserAccessConfig::sanitized`]) a bad entry returns `Err` and the whole
+/// config is refused, because the user just typed it and has to be told; on
+/// load ([`BrowserAccessConfig::repaired`]) it logs and returns `Ok`, dropping
+/// only that entry, because there is nobody to tell. Sharing the loop is what
+/// keeps the two from drifting on the parts that must not differ — which
+/// normalizer runs, and that dedupe happens on the canonical form rather than
+/// the raw one.
+fn canonicalize_origins<E>(
+    raw: impl IntoIterator<Item = String>,
+    mut on_reject: impl FnMut(&str) -> Result<(), E>,
+) -> Result<Vec<String>, E> {
+    let mut seen: Vec<String> = Vec::new();
+    for entry in raw {
+        match normalize_origin(&entry) {
+            Some(normalized) => {
+                if !seen.contains(&normalized) {
+                    seen.push(normalized);
+                }
+            }
+            None => on_reject(&entry)?,
+        }
+    }
+    Ok(seen)
 }
 
 /// Normalize one origin, or `None` when it cannot be one.
@@ -142,14 +216,18 @@ fn config_path(data_dir: Option<&Path>) -> PathBuf {
 /// Failing closed on a corrupt file is deliberate: the default is "no browser
 /// access", so the worst case of an unparseable config is a feature that stays
 /// off, never one that silently opens.
+///
+/// A file that *parses* is repaired rather than discarded — see
+/// [`BrowserAccessConfig::repaired`]. Sending a whole config to the default
+/// because one origin in it stopped being admissible is not failing closed, it
+/// is losing the user's settings.
 pub fn load(data_dir: Option<&Path>) -> BrowserAccessConfig {
     let path = config_path(data_dir);
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return BrowserAccessConfig::default();
     };
     serde_json::from_str::<BrowserAccessConfig>(&raw)
-        .ok()
-        .and_then(|config| config.sanitized().ok())
+        .map(BrowserAccessConfig::repaired)
         .unwrap_or_default()
 }
 
@@ -215,6 +293,69 @@ mod tests {
         );
         assert_eq!(config.port, DEFAULT_BROWSER_PORT);
         assert_eq!(config.primary_origin(), Some("http://localhost:3000"));
+    }
+
+    #[test]
+    fn sanitize_canonicalizes_to_what_the_browser_will_send() {
+        // Each of these is a valid origin a user could type, and each used to
+        // be stored verbatim and then never match the `Origin` header — an
+        // entry that looks saved and 403s forever.
+        let config = BrowserAccessConfig {
+            enabled: true,
+            allowed_origins: vec![
+                "https://web.example:443".into(),
+                "HTTPS://Web.Example".into(),
+                "http://127.0.0.1:3000/".into(),
+            ],
+            port: DEFAULT_BROWSER_PORT,
+        }
+        .sanitized()
+        .unwrap();
+        // The first two collapse onto one canonical entry, so the dedupe that
+        // could not see them as equal before now can.
+        assert_eq!(
+            config.allowed_origins,
+            vec!["https://web.example", "http://127.0.0.1:3000"]
+        );
+    }
+
+    #[test]
+    fn an_extension_origin_is_allowed_but_is_never_the_pair_in_browser_target() {
+        let config = BrowserAccessConfig {
+            enabled: true,
+            allowed_origins: vec![
+                // Ordered first, as the Browser Companion flow will tend to
+                // leave it when the user adds it last-in-first-position.
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop".into(),
+                "http://localhost:3000".into(),
+            ],
+            port: DEFAULT_BROWSER_PORT,
+        }
+        .sanitized()
+        .unwrap();
+        assert_eq!(
+            config.allowed_origins,
+            vec![
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                "http://localhost:3000"
+            ]
+        );
+        // It reaches the Host — but `chrome-extension://` names a page inside
+        // an extension that no navigation can open, so a link must not aim there.
+        assert_eq!(config.primary_origin(), Some("http://localhost:3000"));
+    }
+
+    #[test]
+    fn an_allowlist_of_only_extension_origins_offers_no_link_target() {
+        let config = BrowserAccessConfig {
+            enabled: true,
+            allowed_origins: vec!["chrome-extension://abcdefghijklmnopabcdefghijklmnop".into()],
+            port: DEFAULT_BROWSER_PORT,
+        }
+        .sanitized()
+        .unwrap();
+        assert!(config.listener_enabled());
+        assert_eq!(config.primary_origin(), None);
     }
 
     #[test]
@@ -296,6 +437,31 @@ mod tests {
         )
         .unwrap();
         assert!(!load(Some(&dir)).enabled);
+    }
+
+    #[test]
+    fn one_unusable_saved_origin_does_not_take_the_rest_of_the_config_with_it() {
+        // `extension://<id>` was admitted by an earlier release and written to
+        // real config files. Refusing the whole file over it reset browser
+        // access to off, reset the port, and dropped every other origin — with
+        // nothing in Settings to explain where they went.
+        let dir = temp_dir("partial-repair");
+        let path = dir.join(CONFIG_SUBDIR).join(CONFIG_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"enabled":true,"allowedOrigins":["extension://abcdefghijklmnopabcdefghijklmnop","http://127.0.0.1:3000","https://web.example:443"],"port":27999}"#,
+        )
+        .unwrap();
+
+        let loaded = load(Some(&dir));
+        assert!(loaded.listener_enabled());
+        assert_eq!(loaded.port, 27999);
+        // The stale entry is gone; the survivors are canonicalized as usual.
+        assert_eq!(
+            loaded.allowed_origins,
+            vec!["http://127.0.0.1:3000", "https://web.example"]
+        );
     }
 
     #[test]
