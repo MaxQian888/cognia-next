@@ -1,5 +1,5 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
-import { icons } from "lucide-react"
+import { getLucideIcon } from "@/lib/icons/lucide-catalog"
 import {
   resetActiveContextForTesting,
   setActiveContextForHost,
@@ -135,7 +135,7 @@ describe("plugin context panel API", () => {
       capabilities: [],
     }
     const registered = contextPanelRegistry.get("plugin-a:outline")
-    expect(registered?.icon).toBe(icons.SearchCode)
+    expect(registered?.icon).toBe(getLucideIcon("SearchCode"))
     expect(registered?.requiresChatScope).toBe(true)
     expect(registered?.getBadge?.(resource)).toBe(4)
 

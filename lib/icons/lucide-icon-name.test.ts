@@ -1,8 +1,15 @@
-import { icons as lucideIcons } from "lucide-react"
-
+import { hasLucideExport, hasLucideIcon, toCatalogIconName } from "./lucide-catalog"
 import { isLegacyKebabIconName, toLucideIconName } from "./lucide-icon-name"
 
-const isKnown = (name: string) => Object.prototype.hasOwnProperty.call(lucideIcons, name)
+/**
+ * The predicate that decides installability — `isExportedLucideIcon` in
+ * `lib/plugin/core/validation.ts` — not `lucide-react`'s `icons` record.
+ * That record is keyed by canonical icon name only, so it answers "no" for an
+ * icon lucide has renamed while keeping the old spelling as an export alias
+ * (`History` → `RotateCcwClock`). Asserting against it made this suite fail on
+ * a name a plugin can legitimately declare.
+ */
+const isKnown = (name: string) => hasLucideIcon(name) || hasLucideExport(name)
 
 describe("toLucideIconName", () => {
   it.each([
@@ -35,7 +42,20 @@ describe("toLucideIconName", () => {
     ]
     for (const legacy of retiredAllowlist) {
       expect(isKnown(toLucideIconName(legacy))).toBe(true)
+      // And it has to draw, not merely validate: the catalog must be able to
+      // name the entry the component comes from.
+      expect(toCatalogIconName(legacy)).not.toBeNull()
     }
+  })
+
+  it("resolves a legacy name whose icon lucide has since renamed", () => {
+    // `history` is the case the allowlist loop above cannot show on its own:
+    // lucide renamed the icon to `rotate-ccw-clock` and kept `History` only as
+    // an export alias, so the PascalCase form is not a canonical icon name.
+    expect(toLucideIconName("history")).toBe("History")
+    expect(hasLucideIcon("History")).toBe(false)
+    expect(hasLucideExport("History")).toBe(true)
+    expect(toCatalogIconName("history")).toBe("RotateCcwClock")
   })
 
   it("leaves an already-exported PascalCase name alone", () => {

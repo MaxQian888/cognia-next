@@ -31,6 +31,7 @@ import { createElement, forwardRef } from "react"
 import type { LucideIcon, LucideProps } from "lucide-react"
 
 import catalog from "./lucide-catalog.generated.json"
+import { toLucideIconName } from "./lucide-icon-name"
 
 type IconNode = Array<[string, Record<string, string | number>]>
 
@@ -126,6 +127,49 @@ export function getLucideExport(name: string): LucideIcon | null {
 
 export function getLucideExportNames(): readonly string[] {
   return Object.keys(generated.exportNames)
+}
+
+export function hasLucideExport(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(generated.exportNames, name)
+}
+
+/**
+ * The catalog entry a caller-written name refers to, or null.
+ *
+ * There are two name spaces, and a name can be valid in either. `iconNames`
+ * holds lucide's canonical icons; `exportNames` holds what the package
+ * exports, which is where its own renames survive as aliases — the `history`
+ * icon is exported as `History` and `HistoryIcon` but keyed `RotateCcwClock`
+ * in the record, so a caller naming `History` is naming a real icon that a
+ * `hasLucideIcon` check alone answers "no" to.
+ *
+ * The kebab-case form is tried after both, because it is the spelling the
+ * retired `PLUGIN_CONTEXT_PANEL_ICONS` allowlist published: an installed
+ * plugin pinned to `"file-text"` — or `"history"` — is following the
+ * documentation it was written against. Exact matches win, so no already-valid
+ * name changes meaning.
+ */
+export function toCatalogIconName(name: string): string | null {
+  if (hasLucideIcon(name)) return name
+  const exported = generated.exportNames[name]
+  if (exported) return exported
+  const pascal = toLucideIconName(name)
+  if (pascal === name) return null
+  if (hasLucideIcon(pascal)) return pascal
+  return generated.exportNames[pascal] ?? null
+}
+
+/**
+ * Resolve any spelling [`toCatalogIconName`] accepts to its component.
+ *
+ * This is the render-side half of the validator's admission rule: what
+ * `lib/plugin/core/validation.ts` lets a manifest declare has to be what
+ * actually draws, or a plugin passes validation and shows nothing.
+ */
+export function resolveLucideIcon(name: string | undefined): LucideIcon | null {
+  if (!name) return null
+  const catalogName = toCatalogIconName(name)
+  return catalogName ? getLucideIcon(catalogName) : null
 }
 
 /**

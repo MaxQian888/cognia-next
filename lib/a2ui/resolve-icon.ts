@@ -5,21 +5,18 @@
 
 import type { LucideIcon } from "lucide-react"
 
-import { getLucideIcon } from "@/lib/icons/lucide-catalog"
-import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
+import { resolveLucideIcon } from "@/lib/icons/lucide-catalog"
 
 /**
  * Resolve a Lucide icon name string to its component.
  * Returns null if the name is undefined or not found in the icon registry.
  *
- * Falls back to the kebab-case spelling the plugin contract used to publish, so
- * a plugin pinned to `"file-text"` still renders rather than silently showing
- * nothing. Exact matches are tried first — no already-valid name changes
- * meaning.
+ * Accepts every spelling the manifest validator accepts — a lucide export name
+ * (where lucide's own renames survive as aliases) and the kebab-case spelling
+ * the plugin contract used to publish — so a plugin pinned to `"file-text"` or
+ * `"history"` still renders rather than silently showing nothing. See
+ * [`resolveLucideIcon`] for the order; exact matches win.
  */
 export function resolveIcon(iconName?: string): LucideIcon | null {
-  if (!iconName) return null
-  const exact = getLucideIcon(iconName)
-  if (exact) return exact
-  return getLucideIcon(toLucideIconName(iconName))
+  return resolveLucideIcon(iconName)
 }

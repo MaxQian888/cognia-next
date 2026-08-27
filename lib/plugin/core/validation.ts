@@ -11,7 +11,7 @@ import type {
   PluginResilienceConfig,
   PluginType,
 } from "@/types/plugin"
-import { hasLucideIcon } from "@/lib/icons/lucide-catalog"
+import { hasLucideExport, hasLucideIcon } from "@/lib/icons/lucide-catalog"
 import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
 import { checkResilienceBudget, resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { loggers } from "./logger"
@@ -1128,7 +1128,12 @@ const NATIVE_LUCIDE_ICON_PATHS = [
 
 /** True when the name is a key `lucide-react` actually exports. */
 function isExportedLucideIcon(name: string): boolean {
-  return hasLucideIcon(name)
+  // Both name spaces, as the field's own error message promises ("must name an
+  // exported lucide-react icon"). `exportNames` is where lucide's renames
+  // survive as aliases: the `history` icon is exported as `History` but keyed
+  // `RotateCcwClock`, so a canonical-names-only check refuses a manifest that
+  // names a real, importable icon.
+  return hasLucideIcon(name) || hasLucideExport(name)
 }
 
 function validateNativeLucideIcons(
