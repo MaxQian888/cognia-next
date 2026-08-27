@@ -147,7 +147,7 @@ export function selectLiveVoiceCandidates(
   const {
     isProviderEnabled = isLiveVoiceProviderEnabled,
     isProviderImplemented = isLiveVoiceProviderImplemented,
-    // The real detector, not an optimistic `() => true`: relay-only providers
+    // The real detector, not an optimistic `() => true`: native providers
     // are genuinely unreachable from a browser, and assuming desktop would
     // offer a session the web shell cannot open.
     isDesktop = detectTauri,

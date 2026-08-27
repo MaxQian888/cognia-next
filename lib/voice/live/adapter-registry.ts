@@ -14,7 +14,8 @@
  *    a provider. OpenAI / Google / xAI come straight from the AI SDK via
  *    `provider.experimental_realtime`; Qwen / Doubao / Baidu need hand-written
  *    adapters (neither `@ai-sdk/alibaba` nor `@ai-sdk/bytedance` exposes any
- *    realtime surface) and land in Phase 2.
+ *    realtime surface) and use app-owned protocol adapters over the native
+ *    host-keyring transport.
  *
  * Adapters are loaded through dynamic `import()` so a session that only ever
  * dials OpenAI never pulls the Google and xAI provider packages into the
@@ -265,10 +266,7 @@ const DEFAULT_LOADERS: Readonly<Record<ImplementedLiveVoiceProvider, LiveAdapter
 /** Thrown when a provider is known but its adapter has not shipped yet. */
 export class LiveVoiceProviderUnavailableError extends Error {
   constructor(readonly provider: LiveVoiceProviderId) {
-    super(
-      `live voice provider "${provider}" has no adapter yet — ` +
-        `Qwen, Doubao and Baidu arrive with the Phase 2 relay`
-    )
+    super(`live voice provider "${provider}" is unavailable in this runtime`)
     this.name = "LiveVoiceProviderUnavailableError"
   }
 }
