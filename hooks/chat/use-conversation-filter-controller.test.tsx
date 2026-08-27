@@ -48,7 +48,7 @@ const sessions = [
   session("s3", { kind: "team", teamId: "t1" }),
 ]
 
-function setup(settings: ConversationSidebarSettings = {}) {
+function setup(settings: ConversationSidebarSettings = {}, scopeOwnsKind = false) {
   const saveSidebarSettings = jest.fn()
   const hook = renderHook(
     (props: { sidebarSettings: ConversationSidebarSettings }) =>
@@ -60,6 +60,7 @@ function setup(settings: ConversationSidebarSettings = {}) {
         teams: [{ id: "t1", name: "Squad" }],
         sidebarSettings: props.sidebarSettings,
         saveSidebarSettings,
+        scopeOwnsKind,
       }),
     { initialProps: { sidebarSettings: settings } }
   )
@@ -141,6 +142,65 @@ describe("useConversationFilterController", () => {
     expect(result.current.activeFilters).toBe(5)
     act(() => result.current.actions.reset())
     expect(result.current.filters).toEqual(EMPTY_CONVERSATION_FILTERS)
+  })
+
+  describe("scopeOwnsKind", () => {
+    // The desktop rail scopes its list by the selected guild on every grouping
+    // axis, so direct-vs-team is already decided before `kind` is consulted.
+    // The facet stays in the model for the mobile list, which has no guild rows
+    // — which makes "ignore it" and "erase it" two very different things.
+    it("stops applying the kind facet without disturbing the stored value", () => {
+      const { result } = setup()
+      act(() => result.current.actions.setKind("team"))
+      expect(result.current.filters.kind).toBe("team")
+      expect(result.current.activeFilters).toBe(1)
+
+      // Same store, a surface whose scope already answers the question.
+      const scoped = setup({}, true)
+      expect(useUIStore.getState().conversationFilters?.kind).toBe("team")
+      expect(scoped.result.current.filters.kind).toBe("all")
+      expect(scoped.result.current.activeFilters).toBe(0)
+      expect(scoped.result.current.scopeOwnsKind).toBe(true)
+    })
+
+    it("merges the next filter write into the stored blob, kind included", () => {
+      act(() => {
+        useUIStore.getState().setConversationFilters({
+          ...EMPTY_CONVERSATION_FILTERS,
+          kind: "team",
+        })
+      })
+      const { result } = setup({}, true)
+      act(() => result.current.actions.toggle("unread", true))
+      // Building the write off what this surface *applies* would have quietly
+      // reset `kind` on the surface that still honors it.
+      expect(useUIStore.getState().conversationFilters).toEqual({
+        ...EMPTY_CONVERSATION_FILTERS,
+        unread: true,
+        kind: "team",
+      })
+      expect(result.current.filters).toEqual({ ...EMPTY_CONVERSATION_FILTERS, unread: true })
+    })
+
+    it("leaves a view that pins kind neither drifting nor rewritten", () => {
+      const view = {
+        id: "v1",
+        name: "Team only",
+        createdAt: 1,
+        filters: { ...EMPTY_CONVERSATION_FILTERS, kind: "team" as const },
+      }
+      const { result, saveSidebarSettings } = setup({ views: [view] }, true)
+      act(() => result.current.actions.applyView("v1"))
+      expect(result.current.activeView?.id).toBe("v1")
+      // The rail ignores `kind`, but the view is a profile-level definition the
+      // mobile list reads too — so it is neither reported as modified here nor
+      // re-captured without the dimension it was saved for.
+      expect(result.current.activeViewDrift).toEqual([])
+      act(() => result.current.actions.updateView("v1"))
+      expect(saveSidebarSettings).toHaveBeenLastCalledWith({
+        views: [expect.objectContaining({ filters: expect.objectContaining({ kind: "team" }) })],
+      })
+    })
   })
 
   it("reports each filter change by facet and the resulting active count — never a value", () => {

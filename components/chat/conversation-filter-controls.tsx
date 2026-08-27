@@ -130,6 +130,7 @@ export type ConversationFilterViewModel = Pick<
   | "activeViewDrift"
   | "hiddenViewIds"
   | "suggestedViewDimensions"
+  | "scopeOwnsKind"
   | "actions"
 >
 
@@ -216,7 +217,7 @@ const SECTION_ICON: Record<
 
 function useFacetSections(model: ConversationFilterViewModel): FacetSection[] {
   const t = useTranslations("conversationFilters")
-  const { filters, sortBy, options, actions } = model
+  const { filters, sortBy, options, actions, scopeOwnsKind } = model
   return useMemo<FacetSection[]>(() => {
     const sections: FacetSection[] = []
 
@@ -258,17 +259,25 @@ function useFacetSections(model: ConversationFilterViewModel): FacetSection[] {
             onSelect: () => actions.toggle(key, !filters[key]),
           })),
         },
-        {
-          key: "kind",
-          label: t("kind.label"),
-          kind: "radio",
-          items: CONVERSATION_KIND_FILTER_OPTIONS.map((option) => ({
-            value: option,
-            label: t(`kind.options.${option}`),
-            checked: filters.kind === option,
-            onSelect: () => actions.setKind(option),
-          })),
-        },
+        // Direct vs team, unless the surface's own chrome already decided it —
+        // the desktop rail's guild rows do, and there the controller neutralizes
+        // `kind` too, so an option offered here could only ever look ignored.
+        // The mobile list has no such chrome and keeps the group.
+        ...(scopeOwnsKind
+          ? []
+          : [
+              {
+                key: "kind",
+                label: t("kind.label"),
+                kind: "radio" as const,
+                items: CONVERSATION_KIND_FILTER_OPTIONS.map((option) => ({
+                  value: option,
+                  label: t(`kind.options.${option}`),
+                  checked: filters.kind === option,
+                  onSelect: () => actions.setKind(option),
+                })),
+              },
+            ]),
       ],
     })
 
@@ -347,7 +356,7 @@ function useFacetSections(model: ConversationFilterViewModel): FacetSection[] {
     })
 
     return sections
-  }, [t, filters, sortBy, options, actions])
+  }, [t, filters, sortBy, options, actions, scopeOwnsKind])
 }
 
 // ---------------------------------------------------------------------------

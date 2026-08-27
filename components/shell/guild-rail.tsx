@@ -16,9 +16,8 @@ import {
 import { cn } from "@/lib/utils"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { avatarColor } from "@/lib/ui/avatar"
-import { listTeams } from "@/lib/db/teams"
 import { loggers } from "@cognia/logging"
-import { useClientLiveQuery } from "@/hooks/data"
+import { useOrderedTeams } from "@/hooks/shell/use-ordered-teams"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import {
@@ -133,7 +132,9 @@ export function GuildRail({
   const t = useTranslations("desktop.guildRail")
   const listT = useTranslations("desktop.channelList")
   const pluginT = useTranslations()
-  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+  // Same order the expanded sidebar's accordion shows — the rail is that
+  // sidebar folded up, so a team dragged there is in the same slot here.
+  const { teams } = useOrderedTeams()
   const {
     pathname,
     isDmActive,

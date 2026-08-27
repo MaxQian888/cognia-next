@@ -26,6 +26,7 @@
 import type { StoredMessage } from "@cognia/agent-config-types"
 
 import { projectSearchText } from "@/lib/chat/search/project-text"
+import { getMessageMentions } from "@/lib/chat/mentions/read"
 import { getDb } from "./schema"
 
 /** Lean, searchable projection of one message. */
@@ -79,6 +80,36 @@ export const BACKFILL_BATCH_SIZE = 500
 const SCAN_PAGE_SIZE = 1_000
 
 /**
+ * A message's searchable body, plus the mentions it cited.
+ *
+ * The mention labels matter because half of them are not IN the body. An `@`
+ * pick that stages a memory, an issue or a Feishu document leaves no token
+ * behind — the message reads as plain prose, and searching for the issue you
+ * attached would find nothing. `metadata.mentions` is the only record that the
+ * turn cited them, so the projection folds it in.
+ *
+ * This is also what `metadata.mentions` is FOR. The field was written at send
+ * time and read by nobody, which made "searchable/auditable without regex
+ * re-parsing" a promise the code did not keep.
+ *
+ * `getMessageMentions` handles the legacy fallback (older rows re-parse their
+ * text), so a backfill pass over history stays correct without a migration —
+ * and it re-projects idempotently, so old rows pick this up on the next walk.
+ */
+export function mentionAwareSearchText(message: StoredMessage): string {
+  const body = projectSearchText(message.parts)
+  const mentions = getMessageMentions({ metadata: message.metadata })
+  if (mentions.length === 0) return body
+  // Label and raw token both: the label is what the user recognises ("Fix the
+  // race in the broker"), the raw token is what they may retype (`@issue:…`).
+  const cited = mentions
+    .flatMap((ref) => [ref.label, ref.raw ?? ref.id])
+    .filter((part): part is string => Boolean(part))
+    .join(" ")
+  return body ? `${body}\n${cited}` : cited
+}
+
+/**
  * Project one message into its search row, or `null` when there is nothing to
  * match against. Storing an empty projection would cost space and buy nothing —
  * but callers must still advance their watermark past it (see
@@ -86,7 +117,7 @@ const SCAN_PAGE_SIZE = 1_000
  * would wedge the walk on the same batch forever.
  */
 export function projectMessageToSearchRow(message: StoredMessage): ChatSearchTextRow | null {
-  const text = projectSearchText(message.parts)
+  const text = mentionAwareSearchText(message)
   if (!text) return null
   return {
     messageId: message.id,

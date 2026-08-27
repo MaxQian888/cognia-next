@@ -14,6 +14,9 @@ const logInfo = jest.fn()
 const logWarn = jest.fn()
 let mockDragStart: ((event: unknown) => void) | undefined
 let mockDragEnd: ((event: unknown) => void) | undefined
+// Nested contexts address themselves by id — the team accordion's drag wraps
+// the whole rail, the session list's sits inside it.
+const mockDragEndById = new Map<string, (event: unknown) => void>()
 let mockDragOver: ((event: unknown) => void) | undefined
 let mockDragCancel: (() => void) | undefined
 const mockSensorOptions: unknown[] = []
@@ -26,21 +29,26 @@ jest.mock("@dnd-kit/core", () => {
     ...actual,
     DndContext: ({
       children,
+      id,
       onDragStart,
       onDragEnd,
       onDragOver,
       onDragCancel,
     }: {
       children: React.ReactNode
+      id?: string
       onDragStart?: (event: unknown) => void
       onDragEnd: (event: unknown) => void
       onDragOver?: (event: unknown) => void
       onDragCancel?: () => void
     }) => {
-      mockDragStart = onDragStart
-      mockDragEnd = onDragEnd
-      mockDragOver = onDragOver
-      mockDragCancel = onDragCancel
+      if (id) mockDragEndById.set(id, onDragEnd)
+      else {
+        mockDragStart = onDragStart
+        mockDragEnd = onDragEnd
+        mockDragOver = onDragOver
+        mockDragCancel = onDragCancel
+      }
       return <>{children}</>
     },
     // The real overlay reads the active draggable from a real DndContext; the
@@ -245,21 +253,23 @@ jest.mock("@/components/shell/sidebar-nav-section", () => ({
 }))
 jest.mock("@/components/shell/sidebar-guild-sections", () => {
   const actual = jest.requireActual("@/components/shell/sidebar-guild-sections") as {
-    splitGuildSections: unknown
+    guildSectionRows: unknown
+    activeGuildKey: unknown
   }
   return {
-    splitGuildSections: actual.splitGuildSections,
+    guildSectionRows: actual.guildSectionRows,
+    activeGuildKey: actual.activeGuildKey,
     SidebarGuildSectionRows: ({
       rows,
-      openKey,
+      activeKey,
       testId,
     }: {
       rows: Array<{ key: string }>
-      openKey: string | null
+      activeKey: string | null
       testId?: string
     }) =>
       rows.length === 0 ? null : (
-        <div data-testid={testId} data-open={openKey ?? undefined}>
+        <div data-testid={testId} data-active={activeKey ?? undefined}>
           {rows.map((row) => (
             <span key={row.key} data-testid={`guild-row-${row.key}`} />
           ))}
@@ -277,7 +287,10 @@ jest.mock("@/components/shell/workspace-switcher", () => ({
   ),
 }))
 
-import { ChannelList } from "./channel-list"
+import { ChannelList, TEAM_DND_CONTEXT_ID } from "./channel-list"
+// The team order is read and written through the real settings store — the
+// barrel mocked above only covers this component's own display settings.
+import { useSettingsStore as teamOrderSettingsStore } from "@/stores/settings/settings-store"
 import * as listTelemetry from "@/lib/telemetry/conversation-list-events"
 import {
   TitleBarOutletsProvider,
@@ -348,6 +361,7 @@ beforeEach(() => {
   mockSortableItems.length = 0
   mockDroppableNodes.clear()
   callQueue.length = 0
+  mockDragEndById.clear()
   selectedGuild = { kind: "dm" }
   collapsedFolderIds = []
   channelListView = "active"
@@ -1231,26 +1245,33 @@ describe("workspace grouping (the default axis)", () => {
     expect(within(alpha).getByText("1")).toHaveClass("rounded-pill", "tabular-nums")
   })
 
-  it("shows agent metadata for team conversations outside the selected guild", () => {
+  it("scopes the list to the selected guild on this axis too, and names the team on each row", () => {
+    // The guild rows sit right under the list and one of them is visibly
+    // selected, so the list follows them on *every* grouping axis — not only
+    // under `groupBy: "team"`, which is what it used to do. Workspace grouping
+    // still stacks the scoped set into its workspace sections.
     const otherTeam = { ...team, id: "t-2", name: "Platform" }
+    selectedGuild = { kind: "team", teamId: team.id }
     callQueue.push(characters, [], [team, otherTeam])
 
-    render(
+    const sessions = [
+      baseSession("squad", {
+        kind: "team",
+        teamId: team.id,
+        projectId: "w1",
+        title: "Squad planning",
+      }),
+      baseSession("platform", {
+        kind: "team",
+        teamId: otherTeam.id,
+        projectId: "w1",
+        title: "Platform planning",
+      }),
+      baseSession("dm", { projectId: "w1", title: "Just me" }),
+    ]
+    const { rerender } = render(
       <ChannelList
-        sessions={[
-          baseSession("squad", {
-            kind: "team",
-            teamId: team.id,
-            projectId: "w1",
-            title: "Squad planning",
-          }),
-          baseSession("platform", {
-            kind: "team",
-            teamId: otherTeam.id,
-            projectId: "w1",
-            title: "Platform planning",
-          }),
-        ]}
+        sessions={sessions}
         activeSessionId={null}
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
@@ -1263,11 +1284,26 @@ describe("workspace grouping (the default axis)", () => {
     expect(
       within(screen.getByText("Squad planning").closest("li")!).getByTestId("session-row-metadata")
     ).toHaveTextContent("Squad")
-    expect(
-      within(screen.getByText("Platform planning").closest("li")!).getByTestId(
-        "session-row-metadata"
-      )
-    ).toHaveTextContent("Platform")
+    // The other team's conversation and the direct one are out of scope.
+    expect(screen.queryByText("Platform planning")).toBeNull()
+    expect(screen.queryByText("Just me")).toBeNull()
+
+    // Chats is the complement: every conversation that is not a team's.
+    selectedGuild = { kind: "dm" }
+    callQueue.push(characters, [], [team, otherTeam])
+    rerender(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Just me")).toBeInTheDocument()
+    expect(screen.queryByText("Squad planning")).toBeNull()
   })
 
   it("toggling a workspace header records an explicit collapse choice", async () => {
@@ -2740,23 +2776,60 @@ describe("channel-list branch coverage top-ups", () => {
     )
   }
 
-  it("narrows to team conversations from the kind facet", async () => {
+  it("does not offer the kind facet, which the guild rows already decide", async () => {
     const user = userEvent.setup()
     renderList([dmSession, teamSession])
     await user.click(screen.getByTestId("channel-list-filter-trigger"))
     await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-status"))
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "kind.options.team" }))
-    expect(setConversationFilters).toHaveBeenCalledWith({
-      ...EMPTY_CONVERSATION_FILTERS,
-      kind: "team",
-    })
+    // The boolean quick filters are still the surface's own; direct-vs-team is
+    // the guild rows' decision and has no second control here.
+    expect(
+      await screen.findByRole("menuitemcheckbox", { name: "filters.options.unread" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("kind.label")).toBeNull()
+    for (const option of ["all", "dm", "team"]) {
+      expect(screen.queryByRole("menuitemradio", { name: `kind.options.${option}` })).toBeNull()
+    }
   })
 
-  it("renders the kind filter as applied when the store already holds it", async () => {
+  it("reads past a stored kind filter instead of emptying itself, and leaves it stored", async () => {
+    // Set on the mobile list, which has no guild rows and where the facet still
+    // discriminates. Inside Chats it used to match nothing and blank the rail
+    // with no control on screen to undo it; the guild rows own that axis here,
+    // so the rail ignores the value — and does not write it away, because the
+    // surface that can act on it shares this store.
     conversationFilters = { unread: false, pinned: false, branched: false, kind: "team" }
+    selectedGuild = { kind: "dm" }
+    const { unmount } = renderList([dmSession, teamSession])
+    expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+    expect(screen.queryByText("Squad meeting")).toBeNull()
+    // Nothing claims to be narrowing the list either — no chip to remove, and
+    // no count on the trigger.
+    expect(screen.queryByTestId("channel-list-filter-chips")).toBeNull()
+    expect(setConversationFilters).not.toHaveBeenCalled()
+    unmount()
+
+    selectedGuild = { kind: "team", teamId: "t-1" }
     renderList([dmSession, teamSession])
     expect(await screen.findByText("Squad meeting")).toBeInTheDocument()
     expect(screen.queryByText("Hi Alice")).toBeNull()
+  })
+
+  it("keeps a stored kind out of the blob it writes back", async () => {
+    // The rail neither shows nor applies `kind`, so it must not fold its own
+    // blindness into the next unrelated write: the value belongs to the mobile
+    // list, and one click on "unread" here would otherwise erase it.
+    conversationFilters = { unread: false, pinned: false, branched: false, kind: "team" }
+    const user = userEvent.setup()
+    renderList([dmSession, teamSession])
+    await user.click(screen.getByTestId("channel-list-filter-trigger"))
+    await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-status"))
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "filters.options.unread" }))
+    expect(setConversationFilters).toHaveBeenCalledWith({
+      ...EMPTY_CONVERSATION_FILTERS,
+      unread: true,
+      kind: "team",
+    })
   })
 
   it("Escape drops the keyboard focus ring once nothing is selected", async () => {
@@ -3000,16 +3073,84 @@ describe("title-bar projection", () => {
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
   })
 
-  it("orders the accordion around the list: open team's row above, the rest below", () => {
+  it("keeps the guild group in one fixed block under the list, whichever scope is selected", () => {
+    // The rail used to cut this run in two and hoist the selected row — and
+    // Chats above it — over the search field, so picking a team pushed the
+    // search row and the whole list down the rail. One block, always in the
+    // same place: only the highlight moves.
+    const teams = [
+      { id: "t-1", name: "Alpha" },
+      { id: "t-2", name: "Beta" },
+      { id: "t-3", name: "Gamma" },
+    ]
+    const renderRail = () => {
+      callQueue.length = 0
+      // The projection scope re-renders the rail as the outlet registers; the
+      // live-query stub is drained per call, so seed every pass.
+      for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+      return render(
+        <TitleBarOutletsProvider>
+          <StartOutlet />
+          <TitleBarProjectionScope enabled>
+            <ChannelList
+              sessions={[dmSession]}
+              activeSessionId={null}
+              onSelect={jest.fn()}
+              onNewDirect={jest.fn()}
+              onNewTeamConversation={jest.fn()}
+              onDelete={jest.fn()}
+              onRename={jest.fn()}
+            />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      )
+    }
+
+    selectedGuild = { kind: "team", teamId: "t-2" }
+    const { unmount } = renderRail()
+    const group = screen.getByTestId("sidebar-guild-rows")
+    expect(group).toHaveAttribute("data-active", "t-2")
+    for (const key of ["dm", "t-1", "t-2", "t-3"]) {
+      expect(group).toContainElement(screen.getByTestId(`guild-row-${key}`))
+    }
+    // Search and list first, the group under them — never the other way round.
+    const search = screen.getByTestId("channel-list-search")
+    expect(search.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByTestId("sidebar-guild-rows-before")).toBeNull()
+    const searchTop = search.compareDocumentPosition(screen.getByTestId("sidebar-nav-band"))
+    expect(searchTop & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    unmount()
+
+    // Selecting Chats instead moves the highlight and nothing else — the run
+    // still holds every row, in the same order, still under the search field.
+    selectedGuild = { kind: "dm" }
+    renderRail()
+    const chatsGroup = screen.getByTestId("sidebar-guild-rows")
+    expect(chatsGroup).toHaveAttribute("data-active", "dm")
+    for (const key of ["dm", "t-1", "t-2", "t-3"]) {
+      expect(chatsGroup).toContainElement(screen.getByTestId(`guild-row-${key}`))
+    }
+    expect(
+      screen.getByTestId("channel-list-search").compareDocumentPosition(chatsGroup) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("carries every team in one drag context, so a row can cross the open section", () => {
+    // Beta is open, which splits the accordion: Alpha above the list, Gamma
+    // below it. Both have to be in the same sortable run or Gamma could never
+    // be dragged above Alpha.
     selectedGuild = { kind: "team", teamId: "t-2" }
     const teams = [
       { id: "t-1", name: "Alpha" },
       { id: "t-2", name: "Beta" },
       { id: "t-3", name: "Gamma" },
     ]
+    const save = jest.fn(async () => {})
+    act(() => {
+      teamOrderSettingsStore.setState({ settings: {} as never, save: save as never })
+    })
     callQueue.length = 0
-    // The projection scope re-renders the rail as the outlet registers; the
-    // live-query stub is drained per call, so seed every pass.
     for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
     render(
       <TitleBarOutletsProvider>
@@ -3027,17 +3168,50 @@ describe("title-bar projection", () => {
         </TitleBarProjectionScope>
       </TitleBarOutletsProvider>
     )
-    const before = screen.getByTestId("sidebar-guild-rows-before")
-    const after = screen.getByTestId("sidebar-guild-rows-after")
-    expect(before).toHaveAttribute("data-open", "t-2")
-    expect(before).toContainElement(screen.getByTestId("guild-row-dm"))
-    expect(before).toContainElement(screen.getByTestId("guild-row-t-1"))
-    expect(before).toContainElement(screen.getByTestId("guild-row-t-2"))
-    expect(after).toContainElement(screen.getByTestId("guild-row-t-3"))
-    // The search row (the open section's content) sits between the two runs.
-    const search = screen.getByTestId("channel-list-search")
-    expect(before.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(search.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(mockSortableItems).toContainEqual(["t-1", "t-2", "t-3"])
+
+    const dropTeam = mockDragEndById.get(TEAM_DND_CONTEXT_ID)
+    expect(dropTeam).toBeDefined()
+    act(() => {
+      dropTeam?.({ active: { id: "t-3" }, over: { id: "t-1" } })
+    })
+    expect(save).toHaveBeenCalledWith({
+      conversationSidebar: { teamOrder: ["t-3", "t-1", "t-2"] },
+    })
+  })
+
+  it("ignores a team drag that was dropped on nothing", () => {
+    selectedGuild = { kind: "dm" }
+    const teams = [
+      { id: "t-1", name: "Alpha" },
+      { id: "t-2", name: "Beta" },
+    ]
+    const save = jest.fn(async () => {})
+    act(() => {
+      teamOrderSettingsStore.setState({ settings: {} as never, save: save as never })
+    })
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+    render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={jest.fn()}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+    act(() => {
+      mockDragEndById.get(TEAM_DND_CONTEXT_ID)?.({ active: { id: "t-1" }, over: null })
+    })
+    expect(save).not.toHaveBeenCalled()
   })
 
   it("stands down while collapsed — an invisible rail leaves nothing in the bar and hands the navigation back", () => {
@@ -3059,11 +3233,93 @@ describe("title-bar projection", () => {
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
   })
 
+  it("still draws the guild rows in the Sheet — they are its only way out of a team", () => {
+    // The list is scoped to the selected guild on every axis, and the Sheet
+    // has no rail, no icon column and no nav rows. Without these rows a narrow
+    // window that last had a team selected is stuck inside it.
+    isNarrow = true
+    selectedGuild = { kind: "team", teamId: "t-1" }
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], [team])
+    render(
+      <ChannelList
+        sessions={[dmSession, teamSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    fireEvent.click(screen.getByLabelText("openSessions"))
+    const group = screen.getByTestId("sidebar-guild-rows")
+    expect(group).toHaveAttribute("data-active", "t-1")
+    expect(group).toContainElement(screen.getByTestId("guild-row-dm"))
+    expect(group).toContainElement(screen.getByTestId("guild-row-t-1"))
+    // The rail's own footer stays out of the Sheet — that part is still merged-only.
+    expect(screen.queryByTestId("sidebar-footer")).toBeNull()
+  })
+
+  it("opens the search-row menus downward in the Sheet, where sideways has nowhere to go", async () => {
+    // A 256px menu opening `side="right"` off a 288px sheet gets flipped by
+    // Radix and lands past the left edge of a phone screen.
+    isNarrow = true
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], [team])
+    const { unmount } = render(
+      <ChannelList
+        sessions={[dmSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Radix triggers open on pointerdown, which `fireEvent.click` never sends.
+    const user = userEvent.setup()
+    await user.click(screen.getByLabelText("openSessions"))
+    await user.click(screen.getByTestId("channel-list-search-scope"))
+    expect(await screen.findByTestId("channel-list-search-scope-menu")).toHaveAttribute(
+      "data-side",
+      "bottom"
+    )
+    unmount()
+
+    // The merged rail has a whole chat pane to open into, so it keeps `right`.
+    isNarrow = false
+    renderProjected()
+    await user.click(screen.getByTestId("channel-list-search-scope"))
+    expect(await screen.findByTestId("channel-list-search-scope-menu")).toHaveAttribute(
+      "data-side",
+      "right"
+    )
+  })
+
   it("leaves the icon column in charge while a plugin view replaces the list", () => {
     selectedGuild = { kind: "plugin-view", containerId: "p:v" }
     const { unmount } = renderProjected()
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
     unmount()
+  })
+
+  it("sizes the search row like the navigation rows above it", () => {
+    // The rail reads as one list: the field and the three controls beside it
+    // take the same 32px `rounded-md` box as a `SidebarRow`, not the taller
+    // pill a form input defaults to. Kept as an assertion because the drift
+    // back to `h-9 rounded-lg` is invisible in every behavioural test.
+    renderProjected()
+    const field = screen.getByTestId("channel-list-search").querySelector("[data-slot=input-group]")
+    expect(field).toHaveClass("h-8", "rounded-md")
+    for (const testId of [
+      "channel-list-search-scope",
+      "channel-list-filter-trigger",
+      "channel-list-actions-menu",
+    ]) {
+      expect(screen.getByTestId(testId)).toHaveClass("size-8", "rounded-md")
+    }
   })
 
   it("heads the rail with new-conversation and puts the rest behind ⋯ on the search row", async () => {

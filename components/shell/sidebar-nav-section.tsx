@@ -74,7 +74,7 @@ export interface SidebarRowProps extends Omit<
 }
 
 /**
- * The sidebar's row: 32px, icon + label, the shared travelling highlight
+ * The sidebar's row: 28px, icon + label, the shared travelling highlight
  * behind it. Used by the nav section, the guild accordion headers and the
  * footer so all three read as one list. Rest props (and `ref`) reach the
  * button, so it can be a Radix `asChild` trigger directly.
@@ -116,7 +116,7 @@ export function SidebarRow({
       data-active={active || undefined}
       data-testid={testId}
       className={cn(
-        "relative h-8 w-full min-w-0 justify-start gap-2.5 rounded-md px-2 text-[13px] font-normal",
+        "relative h-7 w-full min-w-0 justify-start gap-2.5 rounded-md px-2 text-[13px] font-normal",
         active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
         className
       )}
@@ -170,7 +170,7 @@ export function SidebarNavSection({ className }: { className?: string }) {
     <nav
       aria-label={t("navigation")}
       data-testid="sidebar-nav"
-      className={cn("flex shrink-0 flex-col gap-px px-2 pt-2 pb-1", className)}
+      className={cn("flex shrink-0 flex-col gap-px px-2 py-1", className)}
     >
       {/* Declared form factor is `icon` (`lib/plugin/contracts/plugin-points.ts`)
           — square controls with no room for a label — so contributions get an

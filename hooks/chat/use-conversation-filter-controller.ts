@@ -94,6 +94,20 @@ export interface UseConversationFilterControllerInput {
    * its optimistic save queue; the mobile list writes straight to the store.
    */
   saveSidebarSettings: (patch: Partial<ConversationSidebarSettings>) => void | Promise<void>
+  /**
+   * True when the surface's own chrome already splits the list into direct vs
+   * team conversations, so the `kind` facet has nothing left to decide.
+   *
+   * The desktop rail is that surface: its guild rows scope the list to Chats or
+   * to one team on every grouping axis, which leaves `kind` a second, invisible
+   * copy of a choice already on screen — and a stale `kind: "team"` sitting
+   * inside Chats then matches nothing and empties the list with no control
+   * anywhere to explain it. Set here, the facet is neither offered nor applied.
+   *
+   * Reading only: the stored value is left exactly as it is, because the mobile
+   * list has no guild rows and `kind` is the only way to separate the two there.
+   */
+  scopeOwnsKind?: boolean
 }
 
 export interface ConversationFilterActions {
@@ -127,6 +141,11 @@ export interface ConversationFilterActions {
 }
 
 export interface ConversationFilterController {
+  /**
+   * The filters actually narrowing the list — the stored blob minus whatever
+   * this surface's scope already owns (see `scopeOwnsKind`). Read this; write
+   * through `actions`, which build off the stored blob instead.
+   */
   filters: Required<ConversationFilters>
   activeFilters: number
   sortBy: ConversationSortBy
@@ -149,6 +168,8 @@ export interface ConversationFilterController {
   suggestedViewDimensions: ConversationViewDimension[]
   /** Model / provider fallback chain — feed to `useConversationListModel`. */
   filterContext: Pick<ConversationFilterContext, "modelOf" | "providerOf">
+  /** Echoes the input: the menu drops the `kind` group when the scope owns it. */
+  scopeOwnsKind: boolean
   actions: ConversationFilterActions
 }
 
@@ -168,6 +189,7 @@ export function useConversationFilterController({
   teams,
   sidebarSettings,
   saveSidebarSettings,
+  scopeOwnsKind = false,
 }: UseConversationFilterControllerInput): ConversationFilterController {
   const persistedFilters = useUIStore((s) => s.conversationFilters)
   const setConversationFilters = useUIStore((s) => s.setConversationFilters)
@@ -175,16 +197,34 @@ export function useConversationFilterController({
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
 
-  const filters = useMemo(() => resolveConversationFilters(persistedFilters), [persistedFilters])
+  // Two readings of one blob, and which one a caller wants follows what it is
+  // for. `storedFilters` is the persisted truth — every write merges into it,
+  // and the saved views pin and compare against it — so a surface that cannot
+  // show a facet still cannot quietly erase it for the surface that can.
+  // `filters` is what this surface actually applies, which is the same object
+  // unless its scope already owns a facet.
+  const storedFilters = useMemo(
+    () => resolveConversationFilters(persistedFilters),
+    [persistedFilters]
+  )
+  const filters = useMemo(
+    () =>
+      scopeOwnsKind && storedFilters.kind !== "all"
+        ? setConversationKindFilter(storedFilters, "all")
+        : storedFilters,
+    [storedFilters, scopeOwnsKind]
+  )
   const activeFilters = countActiveConversationFilters(filters)
   const sortBy = resolveConversationSortBy(sidebarSettings)
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const search = useMemo(() => resolveConversationSearchOptions(sidebarSettings), [sidebarSettings])
   // The four dimensions a view can pin, resolved — one object so the drift
   // check, the "save as" capture and the suggestion all read the same state.
+  // Stored, not applied: a view that pins `kind` must not read as "modified"
+  // on the rail that ignores it, nor be rewritten without it by `updateView`.
   const viewState = useMemo<ConversationViewState>(
-    () => ({ filters, sortBy, groupBy, search }),
-    [filters, sortBy, groupBy, search]
+    () => ({ filters: storedFilters, sortBy, groupBy, search }),
+    [storedFilters, sortBy, groupBy, search]
   )
 
   const views = useMemo(() => resolveConversationViews(sidebarSettings), [sidebarSettings])
@@ -290,13 +330,15 @@ export function useConversationFilterController({
   )
   const actions = useMemo<ConversationFilterActions>(
     () => ({
-      toggle: (key, enabled) => applyFilters(key, toggleConversationFilter(filters, key, enabled)),
-      setKind: (kind) => applyFilters("kind", setConversationKindFilter(filters, kind)),
-      setList: (key, values) => applyFilters(key, setConversationFilterList(filters, key, values)),
+      toggle: (key, enabled) =>
+        applyFilters(key, toggleConversationFilter(storedFilters, key, enabled)),
+      setKind: (kind) => applyFilters("kind", setConversationKindFilter(storedFilters, kind)),
+      setList: (key, values) =>
+        applyFilters(key, setConversationFilterList(storedFilters, key, values)),
       toggleValue: (key, value, enabled) =>
-        applyFilters(key, toggleConversationFilterValue(filters, key, value, enabled)),
+        applyFilters(key, toggleConversationFilterValue(storedFilters, key, value, enabled)),
       setActivity: (activity) =>
-        applyFilters("activity", setConversationActivityFilter(filters, activity)),
+        applyFilters("activity", setConversationActivityFilter(storedFilters, activity)),
       reset: () => {
         resetConversationFilters()
         void trackConversationFiltered("reset", 0)
@@ -375,7 +417,7 @@ export function useConversationFilterController({
         void saveSidebarSettings({ hiddenViewIds: setBuiltInViewHidden(hiddenViewIds, id, false) }),
     }),
     [
-      filters,
+      storedFilters,
       search,
       viewState,
       views,
@@ -404,6 +446,7 @@ export function useConversationFilterController({
     hiddenViewIds,
     suggestedViewDimensions,
     filterContext,
+    scopeOwnsKind,
     actions,
   }
 }

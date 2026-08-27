@@ -70,6 +70,7 @@ export interface UseSessionsOptions {
 export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {}) {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
+  const setSessionMessagesLoading = useChatStore((s) => s.setSessionMessagesLoading)
   const setMessagesLoadError = useChatStore((s) => s.setMessagesLoadError)
   const hydrateSessionActiveBranches = useChatStore((s) => s.hydrateSessionActiveBranches)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -191,6 +192,12 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   useEffect(() => {
     if (!activeSessionId) return
     let cancelled = false
+    const hydrationBase = useChatStore.getState().sessions[activeSessionId]?.messages
+    const liveMessagesChanged = () =>
+      useChatStore.getState().sessions[activeSessionId]?.messages !== hydrationBase
+    const finishSupersededHydration = () => {
+      setSessionMessagesLoading(activeSessionId, false)
+    }
     const loadMessages = async () => {
       const local = await listMessages(activeSessionId)
       if (isTauri() || isCapacitor() || !hasWebCompanionTarget()) return local
@@ -220,14 +227,34 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
         const session = await getSession(activeSessionId)
         if (cancelled) return
         hydrateSessionActiveBranches(activeSessionId, session?.activeBranchByGroup ?? {})
+        // The first send can win while this activation read is still in flight.
+        // Publishing the older Dexie snapshot after that point replaces the
+        // optimistic/streaming array, then the next SDK event replaces it back;
+        // the two orders visibly trade places until persistence catches up.
+        // Message arrays are immutable in the chat store, so reference identity
+        // is a precise generation check without introducing another counter.
+        if (liveMessagesChanged()) {
+          finishSupersededHydration()
+          return
+        }
         if (msgs.length === 0) {
           const character = session?.characterId
             ? await resolveCharacterById(session.characterId)
             : null
+          if (cancelled) return
+          if (liveMessagesChanged()) {
+            finishSupersededHydration()
+            return
+          }
           const opening = buildOpeningMessage(character)
           if (opening) {
             await persistMessages(activeSessionId, [opening])
-            if (!cancelled) setMessages([opening])
+            if (cancelled) return
+            if (liveMessagesChanged()) {
+              finishSupersededHydration()
+              return
+            }
+            setMessages([opening])
             return
           }
         }
@@ -250,6 +277,7 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
     activeSessionId,
     hydrateSessionActiveBranches,
     setMessages,
+    setSessionMessagesLoading,
     setMessagesLoadError,
     messagesReloadNonce,
   ])

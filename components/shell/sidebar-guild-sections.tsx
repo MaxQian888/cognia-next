@@ -1,41 +1,44 @@
 "use client"
 
 /**
- * The expanded sidebar's guild accordion: Chats, then one section per team,
- * one of them open. The open section's body is the conversation list itself
- * (`ChannelListBody` — search field, filters, sessions), so this module
- * renders only the header rows and tells the caller where to put the list:
- * `splitGuildSections` returns the headers that go *above* it (ending with
- * the open one) and the ones that go *below* it. Codex-style: the rows that
- * are closed stay a single line each; picking one moves the list under it.
+ * The expanded sidebar's guild group: Chats, then one row per team, pinned
+ * below the conversation list as a fixed block.
  *
- * Which section is open is `selectedGuild` (`useShellNav`), so the header
- * rows here, the icon column and the chat pane all agree.
+ * These rows pick the list's *scope*, they do not disclose a panel of their
+ * own: the conversation list above shows whatever the selected row names
+ * (`channel-list.tsx` filters by it), so one row is highlighted the way a
+ * navigation entry is rather than turned open like an accordion header. That
+ * is a deliberate change from the earlier Codex-style accordion, which cut the
+ * row list in two and hoisted the open section — and Chats above it — over the
+ * search field. Selecting a team then moved the search row and the whole list
+ * down the rail, which read as the layout coming apart, and the rows danced
+ * around a list that (outside `groupBy: "team"`) never actually followed them.
  *
- * The one row this never draws is an *open* Chats section — see
- * `splitGuildSections`. The list's own actions are not here either: "new
- * conversation" heads the whole sidebar and the ⋯ menu sits on the search
- * row, both in one fixed place rather than travelling with whichever section
- * happens to be open (`channel-list.tsx`).
+ * The group's own order is the user's: team rows are drag-sortable, and the
+ * order is shared with the 56px icon column (`lib/shell/team-order.ts`).
  *
- * A closed section hides its conversations, so its row carries what the list
- * would have shown: the number of unread conversations inside it
- * (`useGuildUnread`, the same aggregate the icon column's buttons draw). Every
- * row also has a context menu with the section's own actions — start a
- * conversation there without opening it first, mark it read, manage teams —
- * the way a Discord category or a Slack section does.
+ * The list's actions are not here — "new conversation" heads the whole sidebar
+ * and the ⋯ menu sits on the search row, both in one fixed place
+ * (`channel-list.tsx`). Every row does carry a context menu with the scope's
+ * own actions — start a conversation there without selecting it first, mark it
+ * read, reorder it, manage teams — the way a Discord category or a Slack
+ * section does, plus the unread count of what it holds while it is not the
+ * selected scope (`useGuildUnread`, the same aggregate the icon column draws).
  */
-
-import { useCallback } from "react"
+import { Fragment, useCallback, type CSSProperties, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   CheckCheckIcon,
-  ChevronRightIcon,
+  ChevronDownIcon,
   MessagesSquareIcon,
   PlusIcon,
   SettingsIcon,
 } from "lucide-react"
+import { useSortable } from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { loggers } from "@cognia/logging"
 import type { Team } from "@cognia/agent-config-types"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
@@ -51,6 +54,7 @@ import {
   useGuildUnread,
   type GuildUnreadTarget,
 } from "@/hooks/shell/use-guild-unread"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { SidebarRow } from "./sidebar-nav-section"
 import { useShellNav } from "./use-shell-nav"
@@ -65,36 +69,28 @@ export type GuildSectionRow = { key: "dm" } | { key: string; team: Team }
 export type ActiveGuildSection = { kind: "dm" } | { kind: "team"; teamId: string }
 
 /**
- * Order the accordion — Chats first, then teams as listed — and cut it at the
- * open section: `before` ends with the open row (the list renders right after
- * it), `after` is everything below the list. A selected team that is no
- * longer in `teams` (deleted while selected) leaves nothing open: every header
- * goes above the list, which then reads as an orphan block until the user
- * picks a section.
+ * The group's rows, in order: Chats first — it is how you leave a team — then
+ * every team as the user arranged them.
  *
- * The exception is an open Chats section, whose row is dropped from `before`.
- * Chats is the sidebar's default, unscoped state — the search field and the
- * conversation list right below *are* that section, so a row above them
- * saying so is a line of chrome that carries nothing, and it read as one more
- * navigation entry under "More…" rather than as a heading. A team is a
- * *scope* on the same list, and its name is the only thing that explains why
- * the list is filtered, so an open team keeps its row. Closed, Chats is a
- * real destination again (it is how you leave a team) and is drawn as usual.
+ * A flat list, unlike the split this replaced: the rows sit together in one
+ * block below the conversation list, so selecting one never moves the search
+ * field or the list itself.
  */
-export function splitGuildSections(
-  teams: readonly Team[],
-  active: ActiveGuildSection
-): { before: GuildSectionRow[]; after: GuildSectionRow[]; openKey: string | null } {
-  const rows: GuildSectionRow[] = [{ key: "dm" }, ...teams.map((team) => ({ key: team.id, team }))]
-  const openKey = active.kind === "dm" ? "dm" : active.teamId
-  const index = rows.findIndex((row) => row.key === openKey)
-  if (index === -1) return { before: rows, after: [], openKey: null }
-  const before = rows.slice(0, index + 1)
-  if (openKey === "dm") before.pop()
-  return { before, after: rows.slice(index + 1), openKey }
+export function guildSectionRows(teams: readonly Team[]): GuildSectionRow[] {
+  return [{ key: "dm" }, ...teams.map((team) => ({ key: team.id, team }))]
 }
 
-/** Compact unread pill for a closed section — same glyph the session rows use. */
+/**
+ * Which row is highlighted, as a plain key. A team that was selected and has
+ * since been deleted leaves nothing highlighted rather than falling back to
+ * Chats — the list is still scoped to that team's (now empty) set, and saying
+ * "Chats" would misname what is on screen.
+ */
+export function activeGuildKey(active: ActiveGuildSection): string {
+  return active.kind === "dm" ? "dm" : active.teamId
+}
+
+/** Compact unread pill for an unselected scope — the glyph the session rows use. */
 export function GuildUnreadPill({ count, testId }: { count: number; testId?: string }) {
   if (count <= 0) return null
   return (
@@ -109,41 +105,111 @@ export function GuildUnreadPill({ count, testId }: { count: number; testId?: str
 
 interface RowsProps {
   rows: GuildSectionRow[]
-  /** Which row is the open one — the caller's `openKey` from the split. */
-  openKey: string | null
+  /** Which row names the list's current scope. `null` highlights nothing. */
+  activeKey: string | null
   /**
-   * Start a conversation in a section from its context menu — without having
-   * to open the section first. `teamId` is `null` for Chats. When absent the
-   * menu offers no "new" item (the mobile Sheet has none to give).
+   * Start a conversation in a scope from its context menu — without selecting
+   * it first. `teamId` is `null` for Chats. When absent the menu offers no
+   * "new" item (the mobile Sheet has none to give).
    */
   onNewConversation?: (teamId: string | null) => void
-  /**
-   * Element id of the block the open section discloses (the search field and
-   * the conversation list). Pairs with `aria-expanded` so a screen reader can
-   * follow the disclosure to what it opened, instead of announcing an
-   * expanded control with no target.
-   */
-  panelId?: string
   className?: string
   testId?: string
+  /**
+   * Turn the team rows into drag handles for a reorder.
+   *
+   * The `DndContext` and the `SortableContext` stay the caller's rather than
+   * this component's, so the ids a drag may land on are exactly the ones the
+   * caller persists (`channel-list.tsx`). This prop says "you are inside one"
+   * — `useSortable` outside a context would silently do nothing.
+   *
+   * Chats is never sortable — it is the unscoped list, not a peer of the
+   * teams, and it always leads.
+   */
+  sortable?: boolean
+  /**
+   * Keyboard path for the same reorder, offered in each team row's context
+   * menu. The rows already spend Enter/Space on "open this section", so they
+   * cannot also mean "pick this up" the way a dnd-kit keyboard sensor needs;
+   * the menu is where a keyboard user moves a team instead.
+   */
+  onMoveTeam?: (teamId: string, delta: number) => void
+  /**
+   * Folded: only the row that names the current scope is drawn, with a chevron
+   * beside it that unfolds the rest. The active row stays because it is the
+   * one piece of state the band carries — a fold that also hid *where the list
+   * is scoped* would put a narrow window back in the trap the accordion was
+   * retired for. The scopes that go away take their unread counts with them,
+   * so the total is drawn beside the chevron instead.
+   */
+  collapsed?: boolean
+  /** Absent = the band is not foldable here (the caller owns no state for it). */
+  onToggleCollapsed?: () => void
+}
+
+/** What a sortable row hands to the element that actually moves. */
+interface GuildRowDragBinding {
+  ref?: (node: HTMLElement | null) => void
+  style?: CSSProperties
+  dragging?: boolean
+  handleProps?: Record<string, unknown>
 }
 
 /**
- * A run of accordion header rows. Render once with `before` above the list
- * and once with `after` below it.
+ * Wraps one team row in `useSortable`. A component of its own because the
+ * hook cannot be called conditionally, and only *some* rows (teams, and only
+ * when the caller mounted a `DndContext`) are sortable.
+ */
+function SortableGuildRow({
+  id,
+  children,
+}: {
+  id: string
+  children: (binding: GuildRowDragBinding) => ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  })
+  // `attributes` carries `role="button"` and `tabIndex={0}` for the case where
+  // the activator is a plain div. Here it is a row that already *is* a button
+  // inside a `role="listitem"` wrapper, and the sidebar runs one roving tab
+  // stop across every row (`sidebar-row-roving.tsx`) — so take the two
+  // announcements and leave the focus model alone.
+  const handleProps: Record<string, unknown> = {
+    ...listeners,
+    "aria-roledescription": attributes["aria-roledescription"],
+    "aria-describedby": attributes["aria-describedby"],
+  }
+  return (
+    <>
+      {children({
+        ref: setNodeRef,
+        style: { transform: CSS.Transform.toString(transform), transition },
+        dragging: isDragging,
+        handleProps,
+      })}
+    </>
+  )
+}
+
+/**
+ * The guild group as rows. One block, rendered once, below the list.
  *
- * Disclosure reads from the left — `›` closed, `⌄` open — the way a Finder or
- * Codex tree does, so the right end stays free for the unread count; the open
- * row is a heading (bold, no selection tint), because "which section is open"
- * is structure, not a choice among peers.
+ * Each row is drawn like a navigation entry — icon, label, the travelling
+ * selection tint behind the selected one — because that is what it does: it
+ * points the list at a scope. The right end stays free for the unread count
+ * of the scopes that are not currently on screen.
  */
 export function SidebarGuildSectionRows({
   rows,
-  openKey,
+  activeKey,
   onNewConversation,
-  panelId,
   className,
   testId,
+  sortable = false,
+  onMoveTeam,
+  collapsed = false,
+  onToggleCollapsed,
 }: RowsProps) {
   const t = useTranslations("desktop.channelList")
   const railT = useTranslations("desktop.guildRail")
@@ -165,14 +231,30 @@ export function SidebarGuildSectionRows({
   }, [router])
 
   if (rows.length === 0) return null
+  // Which row survives a fold — the active scope, or the first row when the
+  // active one is gone (a deleted team leaves `activeKey` pointing nowhere,
+  // and a band that renders no rows at all cannot be unfolded again).
+  const foldKey = rows.some((row) => row.key === activeKey) ? activeKey : rows[0].key
+  const foldable = Boolean(onToggleCollapsed)
+  const folded = foldable && collapsed
+  const shownRows = folded ? rows.filter((row) => row.key === foldKey) : rows
+  const hiddenUnread = folded
+    ? rows.reduce(
+        (sum, row) =>
+          row.key === foldKey
+            ? sum
+            : sum + (row.key === "dm" ? unread.dm : (unread.teams.get(row.key) ?? 0)),
+        0
+      )
+    : 0
   return (
     <div
       role="list"
       data-testid={testId}
       className={cn("flex shrink-0 flex-col gap-px px-2", className)}
     >
-      {rows.map((row) => {
-        const open = row.key === openKey
+      {shownRows.map((row) => {
+        const active = row.key === activeKey
         // `key` is `string` on the team arm, so it does not narrow the union;
         // the `team` field is the discriminant.
         const team = "team" in row ? row.team : null
@@ -180,29 +262,34 @@ export function SidebarGuildSectionRows({
         const label = team ? team.name : t("directMessages")
         const count = isDm ? unread.dm : (unread.teams.get(row.key) ?? 0)
         const newLabel = isDm ? t("newChat") : t("newConversation")
-        return (
-          <ContextMenu key={row.key}>
+        const draggable = sortable && !isDm
+        const renderRow = (drag: GuildRowDragBinding = {}) => (
+          <ContextMenu>
             <ContextMenuTrigger asChild>
-              <div role="listitem" className="flex min-w-0 items-center gap-0.5">
+              <div
+                role="listitem"
+                ref={drag.ref}
+                style={drag.style}
+                // The whole row is the drag handle — a grip glyph would have to
+                // appear on hover, and a row that grows a control when the
+                // pointer arrives is what the 32px accordion was built to
+                // avoid. The pointer sensor only arms after 4px of travel, so
+                // a click still opens the section.
+                {...drag.handleProps}
+                className={cn(
+                  "flex min-w-0 items-center gap-0.5",
+                  draggable && "cursor-grab active:cursor-grabbing",
+                  // The row stays in place as the placeholder while its clone
+                  // follows the pointer; dimming is what says which one it is.
+                  drag.dragging && "z-10 opacity-50"
+                )}
+              >
                 <SidebarRow
-                  active={open}
-                  highlight={false}
-                  current={false}
-                  aria-expanded={open}
-                  aria-controls={open && panelId ? panelId : undefined}
+                  active={active}
                   // Long team names truncate; the native tooltip is what the icon
                   // column's tooltip was — the way to read the whole name.
                   title={label}
                   onClick={isDm ? switchToDm : () => switchToTeam(row.key)}
-                  leading={
-                    <ChevronRightIcon
-                      aria-hidden
-                      className={cn(
-                        "text-muted-foreground/60 transition-transform duration-200 motion-reduce:transition-none",
-                        open && "rotate-90"
-                      )}
-                    />
-                  }
                   icon={
                     team ? (
                       <AvatarBadge subject={team} size={16} textClassName="text-[9px]" />
@@ -212,14 +299,42 @@ export function SidebarGuildSectionRows({
                   }
                   label={label}
                   trailing={
-                    open ? undefined : (
-                      // Closed: the list is hidden, so the row says what it holds.
+                    active ? undefined : (
+                      // Not the current scope, so its conversations are not on
+                      // screen — the row says how many are waiting in there.
                       <GuildUnreadPill count={count} testId={`sidebar-guild-unread-${row.key}`} />
                     )
                   }
                   testId={isDm ? "sidebar-guild-dm" : `sidebar-guild-team-${row.key}`}
-                  className={cn("w-auto flex-1", open && "font-medium text-foreground")}
+                  className={cn("w-auto flex-1", active && "font-medium")}
                 />
+                {foldable && row.key === foldKey ? (
+                  <>
+                    {/* What the fold is hiding, so it is not silent. */}
+                    <GuildUnreadPill count={hiddenUnread} testId="sidebar-guild-folded-unread" />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      // The row wrapper is the drag handle; without this the
+                      // press that opens the fold also arms a team drag.
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => {
+                        log.info("guild band fold", { folded: !folded })
+                        onToggleCollapsed?.()
+                      }}
+                      aria-expanded={!folded}
+                      aria-label={folded ? t("expandTeams") : t("collapseTeams")}
+                      title={folded ? t("expandTeams") : t("collapseTeams")}
+                      data-testid="sidebar-guild-fold"
+                      className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronDownIcon
+                        className={cn("size-3.5 transition-transform", folded && "-rotate-90")}
+                      />
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent data-testid={`sidebar-guild-menu-${row.key}`}>
@@ -246,6 +361,24 @@ export function SidebarGuildSectionRows({
               {isDm ? null : (
                 <>
                   <ContextMenuSeparator />
+                  {onMoveTeam ? (
+                    <>
+                      <ContextMenuItem
+                        onSelect={() => onMoveTeam(row.key, -1)}
+                        data-testid={`sidebar-guild-menu-move-up-${row.key}`}
+                      >
+                        <ArrowUpIcon className="size-4" />
+                        {railT("moveTeamUp")}
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        onSelect={() => onMoveTeam(row.key, 1)}
+                        data-testid={`sidebar-guild-menu-move-down-${row.key}`}
+                      >
+                        <ArrowDownIcon className="size-4" />
+                        {railT("moveTeamDown")}
+                      </ContextMenuItem>
+                    </>
+                  ) : null}
                   <ContextMenuItem
                     onSelect={manageTeams}
                     data-testid={`sidebar-guild-menu-manage-${row.key}`}
@@ -257,6 +390,13 @@ export function SidebarGuildSectionRows({
               )}
             </ContextMenuContent>
           </ContextMenu>
+        )
+        return draggable ? (
+          <SortableGuildRow key={row.key} id={row.key}>
+            {renderRow}
+          </SortableGuildRow>
+        ) : (
+          <Fragment key={row.key}>{renderRow()}</Fragment>
         )
       })}
     </div>

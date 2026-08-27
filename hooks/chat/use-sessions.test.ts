@@ -73,9 +73,12 @@ jest.mock("@/lib/claude/ipc", () => ({
 const chatStoreState = {
   setActiveSession: jest.fn(),
   setMessages: jest.fn(),
+  setSessionMessagesLoading: jest.fn(),
   setMessagesLoadError: jest.fn(),
   hydrateSessionActiveBranches: jest.fn(),
   activeSessionId: null as string | null,
+  messages: [] as Array<{ id: string }>,
+  sessions: {} as Record<string, { messages: Array<{ id: string }> }>,
   messagesReloadNonce: 0,
 }
 
@@ -175,9 +178,12 @@ beforeEach(() => {
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   chatStoreState.setActiveSession.mockClear()
   chatStoreState.setMessages.mockClear()
+  chatStoreState.setSessionMessagesLoading.mockClear()
   chatStoreState.setMessagesLoadError.mockClear()
   chatStoreState.hydrateSessionActiveBranches.mockClear()
   chatStoreState.activeSessionId = null
+  chatStoreState.messages = []
+  chatStoreState.sessions = {}
   isTauriMock.mockReset().mockReturnValue(true)
   isCapacitorMock.mockReset().mockReturnValue(false)
   hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
@@ -314,10 +320,39 @@ describe("useSessions", () => {
 
   it("hydrates messages when activeSessionId changes", async () => {
     chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages }
     listMessagesMock.mockResolvedValueOnce([{ id: "m1" }])
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
     expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
+  })
+
+  it("does not replace a newer live first turn with a stale hydration order", async () => {
+    let resolveHistory!: (messages: Array<{ id: string }>) => void
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages }
+    listMessagesMock.mockReturnValueOnce(
+      new Promise<Array<{ id: string }>>((resolve) => {
+        resolveHistory = resolve
+      })
+    )
+
+    renderHook(() => useSessions())
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s1"))
+
+    // The first send wins the UI while the activation read is still in flight.
+    // Its live order must not be replaced by the older Dexie snapshot when that
+    // snapshot eventually resolves.
+    const liveFirstTurn = [{ id: "user-1" }, { id: "assistant-1" }]
+    chatStoreState.messages = liveFirstTurn
+    chatStoreState.sessions.s1 = { messages: liveFirstTurn }
+
+    resolveHistory([{ id: "assistant-1" }, { id: "user-1" }])
+
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith("s1"))
+    expect(chatStoreState.setMessages).not.toHaveBeenCalled()
+    expect(chatStoreState.setSessionMessagesLoading).toHaveBeenCalledWith("s1", false)
+    expect(chatStoreState.messages.map((message) => message.id)).toEqual(["user-1", "assistant-1"])
   })
 
   it("unfolds complete cloud history before publishing the active session", async () => {

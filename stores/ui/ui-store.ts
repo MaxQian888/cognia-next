@@ -126,6 +126,15 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void
 
   /**
+   * The sidebar's guild band (Chats + the teams) folded down to the row that
+   * names the current scope. The band is a fixed block under the conversation
+   * list, so on a short rail it competes with the list for the same pixels —
+   * folding it hands those back without hiding *where you are*. Persisted.
+   */
+  sidebarTeamsCollapsed: boolean
+  toggleSidebarTeams: () => void
+
+  /**
    * Draggable width (px) of the conversation sidebar (ChannelList). Clamped to
    * [{@link SIDEBAR_WIDTH_MIN}, {@link SIDEBAR_WIDTH_MAX}]. Persisted so the
    * choice sticks across reloads.
@@ -367,6 +376,9 @@ export const useUIStore = create<UIState>()(
         getPluginEventHooks().dispatchSidebarToggle(!collapsed)
       },
 
+      sidebarTeamsCollapsed: false,
+      toggleSidebarTeams: () => set((s) => ({ sidebarTeamsCollapsed: !s.sidebarTeamsCollapsed })),
+
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
 
@@ -549,6 +561,7 @@ export const useUIStore = create<UIState>()(
         selectedGuild: s.selectedGuild,
         scratchpadCollapsed: s.scratchpadCollapsed,
         sidebarCollapsed: s.sidebarCollapsed,
+        sidebarTeamsCollapsed: s.sidebarTeamsCollapsed,
         sidebarWidth: s.sidebarWidth,
         channelListView: s.channelListView,
         collapsedFolderIds: s.collapsedFolderIds,

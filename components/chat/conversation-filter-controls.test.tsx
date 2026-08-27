@@ -58,6 +58,7 @@ function makeModel(overrides: Partial<ConversationFilterViewModel> = {}) {
     activeViewDrift: [],
     hiddenViewIds: [],
     suggestedViewDimensions: [],
+    scopeOwnsKind: false,
     actions,
     ...overrides,
   }
@@ -196,6 +197,22 @@ describe("ConversationFilterMenu (desktop)", () => {
     expect(actions.toggle).toHaveBeenCalledWith("pinned", false)
     pick(screen.getByRole("menuitemradio", { name: "kind.options.team" }))
     expect(actions.setKind).toHaveBeenCalledWith("team")
+  })
+
+  it("drops the kind group on a surface whose own scope already decides it", async () => {
+    // The desktop rail's guild rows scope the list to Chats or to one team, and
+    // the controller stops applying `kind` there — so offering it would put a
+    // control on screen whose every option changes nothing. The boolean quick
+    // filters beside it are unaffected.
+    const user = userEvent.setup()
+    menu({ scopeOwnsKind: true })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-status"))
+    expect(
+      await screen.findByRole("menuitemcheckbox", { name: "filters.options.unread" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("kind.label")).toBeNull()
+    expect(screen.queryByRole("menuitemradio", { name: "kind.options.team" })).toBeNull()
   })
 
   it("offers an 'any' row plus counted values for each list facet, using the unassigned label", async () => {

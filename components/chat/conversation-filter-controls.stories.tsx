@@ -93,6 +93,7 @@ const base: ConversationFilterViewModel = {
   activeViewDrift: [],
   hiddenViewIds: [],
   suggestedViewDimensions: [],
+  scopeOwnsKind: false,
   actions,
 }
 

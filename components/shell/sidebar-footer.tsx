@@ -24,7 +24,7 @@ export function SidebarFooter({ className }: { className?: string }) {
   return (
     <div
       data-testid="sidebar-footer"
-      className={cn("flex shrink-0 flex-col gap-px border-t px-2 py-1.5", className)}
+      className={cn("flex shrink-0 flex-col gap-px border-t px-2 py-1", className)}
     >
       {/* Icon strip, matching the declared `icon` form factor and the icon
           column's own footer — see `sidebar-nav-section.tsx`. */}

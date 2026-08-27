@@ -3,6 +3,8 @@
  */
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
+import { DndContext } from "@dnd-kit/core"
+import { SortableContext } from "@dnd-kit/sortable"
 import type { Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -85,7 +87,8 @@ jest.mock("@/components/desktop/avatar-badge", () => ({
 import {
   SidebarCreateTeamRow,
   SidebarGuildSectionRows,
-  splitGuildSections,
+  activeGuildKey,
+  guildSectionRows,
 } from "./sidebar-guild-sections"
 
 const team = (id: string, name: string): Team =>
@@ -108,84 +111,85 @@ beforeEach(() => {
   })
 })
 
-describe("splitGuildSections", () => {
-  it("puts DM first and cuts the accordion right after the open section", () => {
-    const dm = splitGuildSections(teams, { kind: "dm" })
-    expect(dm.openKey).toBe("dm")
-    // Open Chats draws no row at all — the search field and the list below
-    // are the section, so nothing goes above them.
-    expect(dm.before).toEqual([])
-    expect(dm.after.map((r) => r.key)).toEqual(["t-1", "t-2"])
-
-    const mid = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
-    expect(mid.before.map((r) => r.key)).toEqual(["dm", "t-1"])
-    expect(mid.after.map((r) => r.key)).toEqual(["t-2"])
-
-    const last = splitGuildSections(teams, { kind: "team", teamId: "t-2" })
-    expect(last.before.map((r) => r.key)).toEqual(["dm", "t-1", "t-2"])
-    expect(last.after).toEqual([])
+describe("guildSectionRows", () => {
+  it("puts Chats first, then the teams in the order given", () => {
+    expect(guildSectionRows(teams).map((r) => r.key)).toEqual(["dm", "t-1", "t-2"])
   })
 
-  it("leaves nothing open when the selected team is gone", () => {
-    const gone = splitGuildSections(teams, { kind: "team", teamId: "t-9" })
-    expect(gone.openKey).toBeNull()
-    expect(gone.before.map((r) => r.key)).toEqual(["dm", "t-1", "t-2"])
-    expect(gone.after).toEqual([])
+  it("carries each team on its row, so the caller never re-looks it up", () => {
+    const [, alpha] = guildSectionRows(teams)
+    expect(alpha).toEqual({ key: "t-1", team: teams[0] })
+  })
+
+  it("draws Chats even with no teams at all", () => {
+    expect(guildSectionRows([]).map((r) => r.key)).toEqual(["dm"])
+  })
+})
+
+describe("activeGuildKey", () => {
+  it("names the selected scope", () => {
+    expect(activeGuildKey({ kind: "dm" })).toBe("dm")
+    expect(activeGuildKey({ kind: "team", teamId: "t-2" })).toBe("t-2")
+  })
+
+  it("keeps naming a team that is gone, so Chats is not falsely highlighted", () => {
+    // The list is still scoped to that team's (now empty) set; highlighting
+    // Chats would misname what is on screen.
+    expect(activeGuildKey({ kind: "team", teamId: "t-9" })).toBe("t-9")
+    expect(guildSectionRows(teams).some((r) => r.key === "t-9")).toBe(false)
   })
 })
 
 describe("SidebarGuildSectionRows", () => {
-  it("renders header rows, marks the open one expanded, and switches guilds on click", () => {
+  it("renders every scope as a row, highlights the selected one, and switches on click", () => {
     selectedGuild = { kind: "team", teamId: "t-1" }
-    const { before } = splitGuildSections(teams, selectedGuild)
-    render(<SidebarGuildSectionRows rows={before} openKey="t-1" testId="rows" />)
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="t-1" testId="rows" />)
     const dm = screen.getByTestId("sidebar-guild-dm")
     const alpha = screen.getByTestId("sidebar-guild-team-t-1")
     expect(dm).toHaveTextContent("directMessages")
-    expect(dm).toHaveAttribute("aria-expanded", "false")
     expect(alpha).toHaveTextContent("Alpha")
-    expect(alpha).toHaveAttribute("aria-expanded", "true")
-    expect(alpha).not.toHaveAttribute("aria-current")
     expect(screen.getByTestId("avatar-Alpha")).toBeInTheDocument()
+    // A scope, not a disclosure: the row is the current page, and nothing
+    // about it claims to have opened a panel.
+    expect(alpha).toHaveAttribute("aria-current", "page")
+    expect(dm).not.toHaveAttribute("aria-current")
+    expect(alpha).not.toHaveAttribute("aria-expanded")
+    expect(alpha).not.toHaveAttribute("aria-controls")
 
     fireEvent.click(dm)
     expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "dm" })
     expect(logInfo).toHaveBeenCalledWith("guild switch dm")
   })
 
-  it("selecting a closed team section switches to that team (and routes home off `/`)", () => {
+  it("selecting a team switches to it (and routes home off `/`)", () => {
     pathname = "/inbox"
-    const { after } = splitGuildSections(teams, { kind: "dm" })
-    render(<SidebarGuildSectionRows rows={after} openKey="dm" />)
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
     fireEvent.click(screen.getByTestId("sidebar-guild-team-t-2"))
     expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "team", teamId: "t-2" })
     expect(routerPush).toHaveBeenCalledWith("/")
   })
 
-  it("never draws a row for an open Chats section", () => {
-    // The list itself is that section; a heading above it says nothing the
-    // search field and the conversations below do not already say.
-    const { before, after } = splitGuildSections(teams, { kind: "dm" })
-    const { container } = render(<SidebarGuildSectionRows rows={before} openKey="dm" />)
-    expect(container).toBeEmptyDOMElement()
-    // Closed — the way back out of a team — it is a row like any other.
-    render(<SidebarGuildSectionRows rows={after} openKey="t-1" />)
-    expect(screen.queryByTestId("sidebar-guild-dm")).toBeNull()
-    expect(screen.getByTestId("sidebar-guild-team-t-1")).toBeInTheDocument()
+  it("keeps Chats on screen while a team is selected — it is the way back out", () => {
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="t-1" />)
+    expect(screen.getByTestId("sidebar-guild-dm")).toBeInTheDocument()
+    // ...and while Chats itself is the scope. The old accordion dropped this
+    // row when Chats was open, because the list right below it *was* the
+    // section; the group is a fixed block now, so a hole in it is just a hole.
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
+    expect(screen.getAllByTestId("sidebar-guild-dm")).toHaveLength(2)
   })
 
-  it("marks the open row as a heading: bold, no selection tint, chevron turned", () => {
-    const { before } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
-    render(<SidebarGuildSectionRows rows={before} openKey="t-1" />)
+  it("marks the selected row without turning it into a heading", () => {
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="t-1" />)
     expect(screen.getByTestId("sidebar-guild-team-t-1")).toHaveClass("font-medium")
-    expect(screen.getByTestId("sidebar-guild-team-t-1").querySelector(".rotate-90")).not.toBeNull()
-    expect(screen.getByTestId("sidebar-guild-dm").querySelector(".rotate-90")).toBeNull()
-    // The list's actions are not on the heading — they head the sidebar and
-    // sit on the search row (`channel-list.tsx`).
+    // No disclosure chevron anywhere — these rows never opened anything.
+    expect(document.querySelector(".rotate-90")).toBeNull()
+    // The list's actions are not on the row — they head the sidebar and sit on
+    // the search row (`channel-list.tsx`).
     expect(screen.queryByTestId("sidebar-guild-open-actions")).toBeNull()
   })
 
-  it("carries the unread count on closed rows only, and names the row for truncated labels", () => {
+  it("carries the unread count on unselected rows only, and names the row for truncated labels", () => {
     guildUnread = {
       dm: 4,
       teams: new Map([
@@ -194,15 +198,10 @@ describe("SidebarGuildSectionRows", () => {
       ]),
       total: 126,
     }
-    const { before, after } = splitGuildSections(teams, { kind: "team", teamId: "t-1" })
-    render(
-      <>
-        <SidebarGuildSectionRows rows={before} openKey="t-1" />
-        <SidebarGuildSectionRows rows={after} openKey="t-1" />
-      </>
-    )
-    // Closed DM and closed Beta show their pills; the open Alpha shows its
-    // list instead (which carries per-row badges), so no pill there.
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="t-1" />)
+    // Chats and Beta are off screen, so their rows say what is waiting; the
+    // selected Alpha's conversations are the list itself (which carries
+    // per-row badges), so no pill there.
     expect(screen.getByTestId("sidebar-guild-unread-dm")).toHaveTextContent("4")
     expect(screen.getByTestId("sidebar-guild-unread-t-2")).toHaveTextContent("99+")
     expect(screen.queryByTestId("sidebar-guild-unread-t-1")).toBeNull()
@@ -211,22 +210,24 @@ describe("SidebarGuildSectionRows", () => {
     expect(screen.getByTestId("sidebar-guild-dm")).toHaveAttribute("title", "directMessages")
   })
 
-  it("draws no pill for a closed row without unread", () => {
-    const { after } = splitGuildSections(teams, { kind: "dm" })
-    render(<SidebarGuildSectionRows rows={after} openKey="dm" />)
+  it("draws no pill for an unselected row without unread", () => {
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
     expect(screen.queryByTestId("sidebar-guild-unread-t-1")).toBeNull()
   })
 
-  it("right-click: start a conversation in a closed section without opening it", () => {
+  it("right-click: start a conversation in a scope without selecting it", () => {
     const onNewConversation = jest.fn()
-    const { after } = splitGuildSections(teams, { kind: "dm" })
     render(
-      <SidebarGuildSectionRows rows={after} openKey="dm" onNewConversation={onNewConversation} />
+      <SidebarGuildSectionRows
+        rows={guildSectionRows(teams)}
+        activeKey="dm"
+        onNewConversation={onNewConversation}
+      />
     )
     fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
     fireEvent.click(screen.getByTestId("sidebar-guild-menu-new-t-2"))
     expect(onNewConversation).toHaveBeenCalledWith("t-2")
-    // The section did not have to open first.
+    // The scope did not have to be selected first.
     expect(setSelectedGuild).not.toHaveBeenCalled()
   })
 
@@ -235,7 +236,7 @@ describe("SidebarGuildSectionRows", () => {
     render(
       <SidebarGuildSectionRows
         rows={[{ key: "dm" }]}
-        openKey="dm"
+        activeKey="dm"
         onNewConversation={onNewConversation}
       />
     )
@@ -245,10 +246,9 @@ describe("SidebarGuildSectionRows", () => {
     expect(onNewConversation).toHaveBeenCalledWith(null)
   })
 
-  it("right-click: mark a section read (only when it has unread) and manage teams", () => {
+  it("right-click: mark a scope read (only when it has unread) and manage teams", () => {
     guildUnread = { dm: 0, teams: new Map([["t-1", 3]]), total: 3 }
-    const { after } = splitGuildSections(teams, { kind: "dm" })
-    render(<SidebarGuildSectionRows rows={after} openKey="dm" />)
+    render(<SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />)
     // No "new" item without a handler (the mobile Sheet has none to give).
     fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
     expect(screen.queryByTestId("sidebar-guild-menu-new-t-2")).toBeNull()
@@ -264,8 +264,71 @@ describe("SidebarGuildSectionRows", () => {
   })
 
   it("renders nothing for an empty run", () => {
-    const { container } = render(<SidebarGuildSectionRows rows={[]} openKey="dm" />)
+    const { container } = render(<SidebarGuildSectionRows rows={[]} activeKey="dm" />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("right-click: moves a team up or down without selecting it", () => {
+    const onMoveTeam = jest.fn()
+    render(
+      <SidebarGuildSectionRows
+        rows={guildSectionRows(teams)}
+        activeKey="dm"
+        onMoveTeam={onMoveTeam}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-2"))
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-move-up-t-2"))
+    expect(onMoveTeam).toHaveBeenLastCalledWith("t-2", -1)
+
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-team-t-1"))
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-move-down-t-1"))
+    expect(onMoveTeam).toHaveBeenLastCalledWith("t-1", 1)
+    // Reordering never selects the scope it moves.
+    expect(setSelectedGuild).not.toHaveBeenCalled()
+  })
+
+  it("offers no move items on Chats — it is not one of the teams", () => {
+    render(<SidebarGuildSectionRows rows={[{ key: "dm" }]} activeKey="dm" onMoveTeam={jest.fn()} />)
+    fireEvent.contextMenu(screen.getByTestId("sidebar-guild-dm"))
+    expect(screen.queryByTestId("sidebar-guild-menu-move-up-dm")).toBeNull()
+    expect(screen.queryByTestId("sidebar-guild-menu-move-down-dm")).toBeNull()
+  })
+
+  it("makes only the team rows draggable, and only inside a caller's DndContext", () => {
+    const { rerender } = render(
+      <SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" />
+    )
+    const row = () => screen.getByTestId("sidebar-guild-team-t-1").closest("[role=listitem]")
+    // Off by default: the mobile Sheet renders these rows with no drag context.
+    expect(row()).not.toHaveAttribute("aria-roledescription")
+
+    rerender(
+      <DndContext>
+        <SortableContext items={["t-1", "t-2"]}>
+          <SidebarGuildSectionRows rows={guildSectionRows(teams)} activeKey="dm" sortable />
+        </SortableContext>
+      </DndContext>
+    )
+    expect(row()).toHaveAttribute("aria-roledescription", "sortable")
+    // dnd-kit's activator attributes must not steal the row's own focus
+    // model — the sidebar runs one roving tab stop across every row.
+    expect(row()).not.toHaveAttribute("tabindex")
+    expect(row()).toHaveAttribute("role", "listitem")
+  })
+
+  it("leaves Chats out of the drag even when the run is sortable", () => {
+    const rows = [{ key: "dm" as const }, { key: "t-1", team: teams[0] }]
+    render(
+      <DndContext>
+        <SortableContext items={["t-1"]}>
+          <SidebarGuildSectionRows rows={rows} activeKey="t-1" sortable />
+        </SortableContext>
+      </DndContext>
+    )
+    const listItem = (testId: string) => screen.getByTestId(testId).closest("[role=listitem]")
+    expect(listItem("sidebar-guild-dm")).not.toHaveAttribute("aria-roledescription")
+    expect(listItem("sidebar-guild-team-t-1")).toHaveAttribute("aria-roledescription", "sortable")
   })
 })
 

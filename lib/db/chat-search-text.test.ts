@@ -12,6 +12,7 @@ import {
   deleteChatSearchTextForSession,
   getChatSearchState,
   loadNewestChatSearchText,
+  mentionAwareSearchText,
   projectMessageToSearchRow,
   putChatSearchText,
   reprojectSession,
@@ -41,6 +42,9 @@ function message(over: Partial<StoredMessage> = {}): StoredMessage {
     parts: over.parts ?? [{ type: "text", text: "hello world" }],
     createdAt: over.createdAt ?? 1_000,
     ...(over.projectId !== undefined ? { projectId: over.projectId } : {}),
+    // Carried explicitly: the search projection reads `metadata.mentions` for
+    // the citations that leave no token in `parts`.
+    ...(over.metadata !== undefined ? { metadata: over.metadata } : {}),
   } as StoredMessage
 }
 
@@ -59,7 +63,65 @@ async function seedMessages(messages: StoredMessage[]): Promise<void> {
   await getDb().messages.bulkAdd(messages)
 }
 
+describe("mentionAwareSearchText", () => {
+  // Half of what an `@` pick cites is not in the message body at all: staging a
+  // memory, an issue or a Feishu document leaves NO token behind, so searching
+  // for what you attached used to find nothing. `metadata.mentions` is the only
+  // record of those, and this is the read that makes them findable.
+  it("returns the plain body when nothing was cited", () => {
+    expect(mentionAwareSearchText(message())).toBe("hello world")
+  })
+
+  it("folds in the label and the token of each citation", () => {
+    const text = mentionAwareSearchText(
+      message({
+        metadata: {
+          mentions: [
+            { kind: "entity", id: "issue:i1", label: "Fix the broker race", raw: "@issue:i1" },
+          ],
+        },
+      })
+    )
+    expect(text).toContain("hello world")
+    expect(text).toContain("Fix the broker race")
+    expect(text).toContain("@issue:i1")
+  })
+
+  it("makes a citation findable even when the body is empty", () => {
+    const text = mentionAwareSearchText(
+      message({
+        parts: [],
+        metadata: { mentions: [{ kind: "doc", id: "lark:d1", label: "Release plan" }] },
+      } as Partial<StoredMessage>)
+    )
+    expect(text).toContain("Release plan")
+  })
+
+  it("falls back to the id when a citation carries no raw token", () => {
+    const text = mentionAwareSearchText(
+      message({ metadata: { mentions: [{ kind: "file", id: "src/app.ts" }] } })
+    )
+    expect(text).toContain("src/app.ts")
+  })
+
+  it("ignores malformed entries rather than indexing junk", () => {
+    const text = mentionAwareSearchText(
+      message({ metadata: { mentions: [{ kind: "nope", id: "x" }, "garbage"] } })
+    )
+    expect(text).toBe("hello world")
+  })
+})
+
 describe("projectMessageToSearchRow", () => {
+  it("carries citations into the stored row", () => {
+    const row = projectMessageToSearchRow(
+      message({
+        metadata: { mentions: [{ kind: "entity", id: "memory:m1", label: "Prefers pnpm" }] },
+      })
+    )
+    expect(row?.text).toContain("Prefers pnpm")
+  })
+
   it("projects a message into a lean row", () => {
     expect(
       projectMessageToSearchRow(
