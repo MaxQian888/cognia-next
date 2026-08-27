@@ -13,6 +13,7 @@
   "localAccountsManage": "管理",
   "localAccountsSummary": "{name} · {count} 个本地账户",
   "localAccountsTitle": "本地账户",
+  "lockIncomplete": "账户已锁定，但部分清理未完成",
   "lockNow": "立即锁定",
   "lockedNow": "账户已锁定",
   "manageDescription": "更改套餐、账单信息，或退出登录。",

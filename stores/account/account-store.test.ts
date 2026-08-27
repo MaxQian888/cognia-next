@@ -77,6 +77,7 @@ const mockProvisionBrowserVault = jest.fn<Promise<string>, [string, string]>()
 const mockUnlockBrowserVault = jest.fn<Promise<void>, [string, string]>()
 const mockVerifyBrowserVaultPassword = jest.fn<Promise<boolean>, [string, string]>()
 const mockChangeBrowserVaultPassword = jest.fn<Promise<void>, [string, string, string]>()
+const mockResetVaultWithRecoveryKey = jest.fn<Promise<void>, [string, string, string]>()
 const mockDeleteBrowserVault = jest.fn<Promise<void>, [string]>()
 const mockLockBrowserVault = jest.fn<void, []>()
 jest.mock("@/lib/runtime/browser-vault", () => ({
@@ -88,6 +89,8 @@ jest.mock("@/lib/runtime/browser-vault", () => ({
     mockChangeBrowserVaultPassword(...args),
   deleteBrowserVault: (...args: [string]) => mockDeleteBrowserVault(...args),
   lockBrowserVault: () => mockLockBrowserVault(),
+  resetBrowserVaultPasswordWithRecoveryKey: (...args: [string, string, string]) =>
+    mockResetVaultWithRecoveryKey(...args),
 }))
 
 const mockSetActiveRuntimeTargetContext = jest.fn<void, [string, string]>()
@@ -130,6 +133,7 @@ const mockPrepareRuntimeTarget = jest.fn()
 const mockPrepareDatabase = jest.fn<Promise<unknown>, []>()
 const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
 const mockClearSubscriptionRuntime = jest.fn<Promise<void>, [string]>()
+const mockStopRuntimeSubscriptions = jest.fn<Promise<void>, []>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
 let selectActiveAccount: typeof import("./account-store").selectActiveAccount
@@ -169,6 +173,7 @@ function makeStore() {
     prepareDatabase: mockPrepareDatabase,
     removeRuntimeTargets: mockRemoveRuntimeTargets,
     clearSubscriptionRuntime: mockClearSubscriptionRuntime,
+    stopRuntimeSubscriptions: mockStopRuntimeSubscriptions,
   }
   return createAccountStore(dependencies)
 }
@@ -227,6 +232,8 @@ beforeEach(() => {
   mockPrepareDatabase.mockResolvedValue({ databaseName: "test", restoredPluginTables: [] })
   mockRemoveRuntimeTargets.mockResolvedValue()
   mockClearSubscriptionRuntime.mockResolvedValue()
+  mockStopRuntimeSubscriptions.mockResolvedValue()
+  mockResetVaultWithRecoveryKey.mockResolvedValue()
 })
 
 describe("account store load", () => {
@@ -699,7 +706,13 @@ describe("account store switching, locking, and lifecycle", () => {
     expect(store.getState().locked).toBe(true)
   })
 
-  it("keeps the local account unlocked when runtime clearing fails", async () => {
+  // Replaces an earlier test that pinned the opposite contract ("keeps the local
+  // account unlocked when runtime clearing fails"). A lock must not fail open:
+  // that path aborted before `set(...)`, so the Browser Vault could already be
+  // locked and the host binding already dropped while the UI still showed the
+  // workspace as unlocked. Locking is a security action — a partial teardown is
+  // reported, never rolled back.
+  it("still locks when a teardown step fails, and reports the failure", async () => {
     const alpha = account("acct_alpha", "Alpha")
     mockListAccounts.mockResolvedValue([alpha])
     mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
@@ -710,9 +723,44 @@ describe("account store switching, locking, and lifecycle", () => {
 
     await expect(store.getState().lock()).rejects.toThrow(/runtime clear failed/)
 
-    expect(mockClearAccountDatabaseSelection).not.toHaveBeenCalled()
-    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
-    expect(store.getState().locked).toBe(false)
+    expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
+    expect(mockClearAccountLocalState).toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().locked).toBe(true)
+  })
+
+  it("aggregates several teardown failures instead of hiding all but the first", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+    mockStopRuntimeSubscriptions.mockRejectedValueOnce(new Error("subscriptions still live"))
+    mockClearSubscriptionRuntime.mockRejectedValueOnce(new Error("runtime clear failed"))
+
+    await expect(store.getState().lock()).rejects.toThrow(/teardown was incomplete/i)
+
+    expect(store.getState().locked).toBe(true)
+  })
+
+  it("releases live runtime subscriptions before the database selection is cleared", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    await store.getState().lock()
+
+    // Order is the whole point: `getDb()` falls back to the legacy database name
+    // once the selection is gone, so a subscriber that is still live at that
+    // moment silently re-opens and writes to the wrong database.
+    expect(mockStopRuntimeSubscriptions).toHaveBeenCalled()
+    const stoppedAt = mockStopRuntimeSubscriptions.mock.invocationCallOrder[0]!
+    const clearedAt = mockClearAccountDatabaseSelection.mock.invocationCallOrder[0]!
+    expect(stoppedAt).toBeLessThan(clearedAt)
   })
 
   it("renames accounts in registry and local state", async () => {
@@ -1006,5 +1054,159 @@ describe("account store dev auto-unlock", () => {
     expect(store.getState().unlockedAccountId).toBeNull()
     expect(store.getState().locked).toBe(true)
     expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
+  })
+})
+
+describe("account store unlock progress and recovery", () => {
+  const stages = (): string[] => {
+    const seen: string[] = []
+    const listener = (event: Event) => {
+      seen.push((event as CustomEvent<{ stage: string }>).detail.stage)
+    }
+    window.addEventListener("cognia:account-unlock-progress", listener)
+    recorded.push(() => window.removeEventListener("cognia:account-unlock-progress", listener))
+    return seen
+  }
+  const recorded: Array<() => void> = []
+  afterEach(() => {
+    while (recorded.length) recorded.pop()!()
+  })
+
+  it("announces every stage of a desktop unlock, without the browser-only step", async () => {
+    mockIsTauri = true
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    const seen = stages()
+
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    expect(seen).toEqual(["verifying", "opening-database", "activating", "ready"])
+  })
+
+  it("announces the runtime-target step on a Browser Vault unlock", async () => {
+    mockIsTauri = false
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    const seen = stages()
+
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    expect(seen).toEqual([
+      "verifying",
+      "preparing-runtime",
+      "opening-database",
+      "activating",
+      "ready",
+    ])
+  })
+
+  it("announces failure so the lock screen leaves its pending state", async () => {
+    mockIsTauri = true
+    mockVerifyPassword.mockResolvedValue(false)
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    const seen = stages()
+
+    await expect(store.getState().unlockAccount("acct_alpha", "nope")).rejects.toMatchObject({
+      code: "invalid-password",
+    })
+
+    expect(seen).toEqual(["verifying", "failed"])
+  })
+
+  it("types an empty password so the screen can translate it", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(store.getState().unlockAccount("acct_alpha", "  ")).rejects.toMatchObject({
+      code: "password-required",
+    })
+  })
+
+  it("redeems a recovery key, rotates the verifier, and unlocks", async () => {
+    mockIsTauri = false
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await store.getState().unlockAccountWithRecoveryKey("acct_alpha", " key-abc ", "brand new pw")
+
+    expect(mockResetVaultWithRecoveryKey).toHaveBeenCalledWith(
+      "acct_alpha",
+      "key-abc",
+      "brand new pw"
+    )
+    // Rotating the vault wrap alone is not enough: the registry verifier is what
+    // the desktop host and the change-password flow compare against.
+    expect(mockCreatePasswordVerifier).toHaveBeenCalledWith("brand new pw")
+    expect(mockUpdatePasswordVerifier).toHaveBeenCalledWith(
+      "acct_alpha",
+      expect.objectContaining({ algorithm: expect.any(String) })
+    )
+    expect(store.getState().locked).toBe(false)
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+  })
+
+  it("refuses a recovery unlock on the desktop host, which mints no recovery key", async () => {
+    mockIsTauri = true
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(
+      store.getState().unlockAccountWithRecoveryKey("acct_alpha", "key-abc", "brand new pw")
+    ).rejects.toMatchObject({ code: "vault-not-provisioned" })
+    expect(mockResetVaultWithRecoveryKey).not.toHaveBeenCalled()
+  })
+
+  it("requires both a recovery key and a replacement password", async () => {
+    mockIsTauri = false
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(
+      store.getState().unlockAccountWithRecoveryKey("acct_alpha", "  ", "brand new pw")
+    ).rejects.toMatchObject({ code: "invalid-recovery-key" })
+    await expect(
+      store.getState().unlockAccountWithRecoveryKey("acct_alpha", "key-abc", " ")
+    ).rejects.toMatchObject({ code: "password-required" })
+    expect(mockResetVaultWithRecoveryKey).not.toHaveBeenCalled()
+  })
+
+  it("leaves the account locked when the recovery key is refused", async () => {
+    mockIsTauri = false
+    mockResetVaultWithRecoveryKey.mockRejectedValueOnce(
+      new Error("Vault recovery key is malformed.")
+    )
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(
+      store.getState().unlockAccountWithRecoveryKey("acct_alpha", "wrong", "brand new pw")
+    ).rejects.toMatchObject({ code: "invalid-recovery-key" })
+    expect(mockUpdatePasswordVerifier).not.toHaveBeenCalled()
+    expect(store.getState().locked).toBe(true)
   })
 })

@@ -1,63 +1,122 @@
 "use client"
 
-import { useEffect } from "react"
+/**
+ * Idle auto-lock for the active local account. THE implementation — there used
+ * to be two.
+ *
+ * `useAutoLock` (called from inside `AccountGate`) and `useAutoLockOnIdle`
+ * (mounted as `<AccountAutoLock/>`) both read `accountAutoLockMinutes` and both
+ * called `lock()`, so on the desktop two independent timers raced. They did not
+ * agree: one refused to lock while a turn was streaming, the other had no such
+ * guard — so the guard was defeated and the app could lock in the middle of a
+ * run. This is the merge of the two, with the stronger behaviour from each.
+ *
+ * Correctness notes:
+ *
+ * - **Wall-clock deadline, not an accumulating `setTimeout`.** A backgrounded or
+ *   throttled tab may never fire its timer on schedule; on every visibility or
+ *   focus regain we recompute against `Date.now()` and lock immediately if the
+ *   idle window has already elapsed. Activity handlers only stamp a timestamp
+ *   (cheap even under `pointermove`), and the single armed timer re-arms for the
+ *   remainder when it finds fresh activity, so continuous use never churns
+ *   timers.
+ *
+ * - **Never locks mid-run.** A streaming or approval-waiting local turn holds
+ *   the timer off entirely; the countdown restarts once the run settles.
+ *
+ * - **Not on overlay windows.** The desktop pet / fleet-island windows load the
+ *   same layout and pass straight through `AccountGate`, so they would each run
+ *   their own timer — and they never see the pointer and key events happening in
+ *   the main window. Left ungated, an overlay window would lock the whole app
+ *   out from under someone actively working in it.
+ *
+ * - **Not desktop-only.** The earlier `isTauri()` gate was wrong: an ordinary
+ *   browser has a real local account backed by the Browser Vault, and locking it
+ *   is exactly as meaningful there.
+ *
+ * Inert until the user sets a non-zero timeout in Settings → Account → Security.
+ */
 
-import { isTauri } from "@/lib/tauri"
+import { useEffect, useRef } from "react"
+
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useAccountStore } from "@/stores/account/account-store"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 
-// Reset the idle timer on deliberate interaction. We intentionally avoid
-// `pointermove`/`mousemove` — a single key press or click is enough signal and
-// keeps timer churn negligible (no throttle needed).
-const RESET_EVENTS = ["pointerdown", "keydown"] as const
+const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touchstart"] as const
 
-/**
- * Auto-lock the active local account after a configurable idle period.
- *
- * No-op unless running under Tauri (local accounts are desktop-only), an
- * account is unlocked, and `accountAutoLockMinutes > 0`. On timeout it calls
- * the account store's `lock()`, which flips the AccountGate back to the unlock
- * screen. While the window is hidden the timer keeps counting, so backgrounding
- * the app still locks it on schedule.
- */
 export function useAutoLockOnIdle(): void {
-  const autoLockMinutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
+  const minutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
   const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
+  const localTurnRunning = useChatStore((state) =>
+    Object.values(state.sessions).some(
+      (session) => session.status === "streaming" || session.status === "awaiting_approval"
+    )
+  )
+  const lastActivityRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    if (!isTauri()) return
-    if (!unlockedAccountId) return
-    if (!autoLockMinutes || autoLockMinutes <= 0) return
+    if (minutes <= 0 || !unlockedAccountId || localTurnRunning) return
+    if (isSecondaryOverlayRole(getPetWindowRole())) return
 
-    const timeoutMs = autoLockMinutes * 60_000
-    let timer: ReturnType<typeof setTimeout> | undefined
+    const windowMs = minutes * 60_000
+
+    const clearTimer = () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+
+    const lockNow = () => {
+      void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
+    }
 
     const arm = () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
-      }, timeoutMs)
+      clearTimer()
+      const remaining = windowMs - (Date.now() - lastActivityRef.current)
+      if (remaining <= 0) {
+        lockNow()
+        return
+      }
+      timerRef.current = setTimeout(onExpire, remaining)
     }
 
-    const onActivity = () => {
-      // While hidden, don't reset — let the timer run down toward a lock.
-      if (document.visibilityState === "hidden") return
-      arm()
+    const onExpire = () => {
+      timerRef.current = null
+      // Fresh activity since we armed? Wait out the remainder instead of locking.
+      const remaining = windowMs - (Date.now() - lastActivityRef.current)
+      if (remaining <= 0) lockNow()
+      else arm()
     }
 
+    const bump = () => {
+      lastActivityRef.current = Date.now()
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") arm()
+    }
+
+    lastActivityRef.current = Date.now()
     arm()
-    for (const event of RESET_EVENTS) {
-      window.addEventListener(event, onActivity, { passive: true })
+
+    for (const event of ACTIVITY_EVENTS) {
+      window.addEventListener(event, bump, { passive: true })
     }
-    document.addEventListener("visibilitychange", onActivity)
+    document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("focus", onVisibility)
 
     return () => {
-      if (timer) clearTimeout(timer)
-      for (const event of RESET_EVENTS) {
-        window.removeEventListener(event, onActivity)
+      clearTimer()
+      for (const event of ACTIVITY_EVENTS) {
+        window.removeEventListener(event, bump)
       }
-      document.removeEventListener("visibilitychange", onActivity)
+      document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("focus", onVisibility)
     }
-  }, [autoLockMinutes, unlockedAccountId])
+  }, [minutes, unlockedAccountId, localTurnRunning])
 }

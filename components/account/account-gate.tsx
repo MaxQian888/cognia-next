@@ -3,7 +3,7 @@
 import type { FormEvent, ReactNode } from "react"
 import { useId, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, CopyIcon, DownloadIcon, LockKeyholeIcon, UserRoundPlusIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, DownloadIcon, UserRoundPlusIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,9 +14,13 @@ import { isCapacitor } from "@/lib/tauri"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { downloadFile } from "@/lib/files/download"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
-import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
-import { useAutoLock } from "@/hooks/account/use-auto-lock"
+import {
+  selectActiveAccount,
+  useAccountStore,
+  usesBrowserVault,
+} from "@/stores/account/account-store"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { AccountLockScreen } from "./account-lock-screen"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 
 export interface AccountGateProps {
@@ -29,10 +33,14 @@ export function AccountGate({ children }: AccountGateProps) {
   const loaded = useAccountStore((state) => state.loaded)
   const loading = useAccountStore((state) => state.loading)
   const locked = useAccountStore((state) => state.locked)
+  const activeAccountId = useAccountStore((state) => state.activeAccountId)
   const storeError = useAccountStore((state) => state.error)
   const pendingRecoveryKey = useAccountStore((state) => state.pendingRecoveryKey)
   const createAccount = useAccountStore((state) => state.createAccount)
   const unlockAccount = useAccountStore((state) => state.unlockAccount)
+  const unlockAccountWithRecoveryKey = useAccountStore(
+    (state) => state.unlockAccountWithRecoveryKey
+  )
   const acknowledgeRecoveryKey = useAccountStore((state) => state.acknowledgeRecoveryKey)
   const activeAccount = useAccountStore(selectActiveAccount)
 
@@ -50,10 +58,6 @@ export function AccountGate({ children }: AccountGateProps) {
     [accounts, activeAccount]
   )
   const visibleError = actionError ?? storeError
-
-  // Idle auto-lock (Settings → Account → Security). Inert until the user sets a
-  // non-zero timeout; lives here because the gate wraps the whole desktop app.
-  useAutoLock()
 
   if (!loaded || loading) {
     // The boot screen's `accounts` step names this wait; the heading stays the
@@ -210,52 +214,19 @@ export function AccountGate({ children }: AccountGateProps) {
   }
 
   if (locked || !targetAccount) {
-    const handleUnlock = async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!targetAccount) return
-      setSubmitting(true)
-      setActionError(null)
-      try {
-        await unlockAccount(targetAccount.id, password)
-        setPassword("")
-      } catch (error) {
-        setActionError(toErrorMessage(error, t("operationFailed")))
-      } finally {
-        setSubmitting(false)
-      }
-    }
-
+    // The unlock screen owns its own submit lifecycle (pending stages, watchdog,
+    // attempt backoff, recovery-key mode), so it takes the store actions rather
+    // than this component's shared `submitting` / `actionError` state — which
+    // belong to the first-run and recovery-key-handover forms above.
     return (
       <GateShell>
-        <form
-          aria-label={t("unlockForm")}
-          className="flex w-full max-w-sm flex-col gap-4"
-          onSubmit={(event) => void handleUnlock(event)}
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <LockKeyholeIcon className="size-5" aria-hidden="true" />
-            </div>
-            <h1 className="text-lg font-semibold">
-              {t("unlockTitle", { name: targetAccount?.displayName ?? t("unknownAccount") })}
-            </h1>
-          </div>
-          <FieldBlock>
-            <Label htmlFor={passwordId}>{t("passwordLabel")}</Label>
-            <Input
-              id={passwordId}
-              value={password}
-              placeholder={t("passwordPlaceholder")}
-              type="password"
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </FieldBlock>
-          {visibleError && <ErrorText>{visibleError}</ErrorText>}
-          <Button type="submit" disabled={submitting || !targetAccount}>
-            {t("unlockAccount")}
-          </Button>
-        </form>
+        <AccountLockScreen
+          accounts={accounts}
+          activeAccountId={targetAccount?.id ?? activeAccountId}
+          supportsRecoveryKey={usesBrowserVault()}
+          onUnlock={unlockAccount}
+          onRecoveryUnlock={unlockAccountWithRecoveryKey}
+        />
       </GateShell>
     )
   }

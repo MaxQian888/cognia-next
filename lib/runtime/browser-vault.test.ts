@@ -13,6 +13,7 @@ import {
   getActiveBrowserVault,
   lockBrowserVault,
   provisionBrowserVault,
+  resetBrowserVaultPasswordWithRecoveryKey,
   unlockBrowserVault,
   verifyBrowserVaultPassword,
 } from "./browser-vault"
@@ -181,4 +182,74 @@ it("rewraps the password copy without invalidating the recovery copy", async () 
     BrowserVaultSession.unlockWithRecoveryKey(record!, recoveryKey)
   ).resolves.toBeDefined()
   repository.close()
+})
+
+describe("resetBrowserVaultPasswordWithRecoveryKey", () => {
+  it("rewraps the master key under a new password and leaves the vault unlocked", async () => {
+    const recoveryKey = await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    await getActiveBrowserVault()!.storeSecret("provider:anthropic", "sk-secret")
+    lockBrowserVault()
+
+    await resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "brand new phrase")
+
+    const session = getActiveBrowserVault()
+    expect(session?.accountId).toBe(ACCOUNT_ID)
+    await expect(session!.loadSecret("provider:anthropic")).resolves.toBe("sk-secret")
+  })
+
+  it("makes the new password the one that unlocks and retires the old one", async () => {
+    const recoveryKey = await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    await resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "brand new phrase")
+    lockBrowserVault()
+
+    await expect(unlockBrowserVault(ACCOUNT_ID, "brand new phrase")).resolves.toBeUndefined()
+    lockBrowserVault()
+    await expect(unlockBrowserVault(ACCOUNT_ID, "correct horse")).rejects.toBeDefined()
+  })
+
+  it("keeps the recovery key usable — it is the vault's root of trust, not a nonce", async () => {
+    const recoveryKey = await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    await resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "second phrase")
+    await resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "third phrase")
+    lockBrowserVault()
+
+    await expect(unlockBrowserVault(ACCOUNT_ID, "third phrase")).resolves.toBeUndefined()
+  })
+
+  it("refuses a wrong recovery key without touching the stored record", async () => {
+    await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    const other = await BrowserVaultSession.create("acct_other", "unrelated")
+    lockBrowserVault()
+
+    await expect(
+      resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, other.recoveryKey, "brand new phrase")
+    ).rejects.toBeDefined()
+    expect(getActiveBrowserVault()).toBeNull()
+    await expect(unlockBrowserVault(ACCOUNT_ID, "correct horse")).resolves.toBeUndefined()
+  })
+
+  it("refuses a malformed recovery key", async () => {
+    const recoveryKey = await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    lockBrowserVault()
+
+    await expect(
+      resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, `${recoveryKey}extra`, "new phrase")
+    ).rejects.toThrow(/malformed/i)
+  })
+
+  it("refuses an empty new password before writing anything", async () => {
+    const recoveryKey = await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+    lockBrowserVault()
+
+    await expect(
+      resetBrowserVaultPasswordWithRecoveryKey(ACCOUNT_ID, recoveryKey, "   ")
+    ).rejects.toThrow(/required/i)
+    await expect(unlockBrowserVault(ACCOUNT_ID, "correct horse")).resolves.toBeUndefined()
+  })
+
+  it("refuses an account with no vault", async () => {
+    await expect(
+      resetBrowserVaultPasswordWithRecoveryKey("acct_missing", "AAAA", "new phrase")
+    ).rejects.toThrow(/not provisioned/i)
+  })
 })

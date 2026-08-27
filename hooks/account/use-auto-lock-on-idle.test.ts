@@ -2,13 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 
 import { useAutoLockOnIdle } from "./use-auto-lock-on-idle"
 
-let mockIsTauri = true
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => mockIsTauri,
+let mockPetRole: string | null = null
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => mockPetRole,
+  isSecondaryOverlayRole: (role: string | null) => role === "overlay" || role === "popup",
 }))
 
 let mockAutoLockMinutes: number | undefined = 5
@@ -20,6 +21,11 @@ jest.mock("@/stores/settings", () => ({
     }),
 }))
 
+let mockSessions: Record<string, { status: string }> = {}
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: (selector: (s: unknown) => unknown) => selector({ sessions: mockSessions }),
+}))
+
 const lockMock = jest.fn()
 let mockUnlockedAccountId: string | null = "acct_1"
 jest.mock("@/stores/account/account-store", () => ({
@@ -29,13 +35,17 @@ jest.mock("@/stores/account/account-store", () => ({
   ),
 }))
 
+const FIVE_MINUTES = 5 * 60_000
+
 beforeEach(() => {
   jest.useFakeTimers()
+  jest.setSystemTime(new Date("2026-01-01T00:00:00Z"))
   jest.clearAllMocks()
-  mockIsTauri = true
+  mockPetRole = null
   mockAutoLockMinutes = 5
   mockSettingsPresent = true
   mockUnlockedAccountId = "acct_1"
+  mockSessions = {}
   lockMock.mockResolvedValue(undefined)
 })
 
@@ -48,88 +58,150 @@ describe("useAutoLockOnIdle", () => {
   it("locks after the configured idle timeout elapses", () => {
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(5 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
+    })
 
     expect(lockMock).toHaveBeenCalledTimes(1)
   })
 
-  it("contains runtime-clear rejection when the timeout elapses", async () => {
-    lockMock.mockRejectedValueOnce(new Error("runtime busy"))
+  it("does not lock before the timeout", () => {
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(5 * 60_000)
-    await Promise.resolve()
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES - 1_000)
+    })
 
-    expect(lockMock).toHaveBeenCalledTimes(1)
+    expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("resets the timer on user activity", () => {
+  it("waits out the remainder when activity lands before the deadline", () => {
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(4 * 60_000)
-    window.dispatchEvent(new Event("keydown"))
-    jest.advanceTimersByTime(4 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES - 10_000)
+      window.dispatchEvent(new Event("keydown"))
+      jest.advanceTimersByTime(10_001)
+    })
     expect(lockMock).not.toHaveBeenCalled()
 
-    jest.advanceTimersByTime(1 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
+    })
     expect(lockMock).toHaveBeenCalledTimes(1)
   })
 
-  it("does not reset while the document is hidden", () => {
-    const visibilitySpy = jest.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  it("locks on the next focus when a throttled tab never fired its timer", () => {
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(4 * 60_000)
-    window.dispatchEvent(new Event("pointerdown")) // ignored while hidden
-    jest.advanceTimersByTime(1 * 60_000)
+    act(() => {
+      // Wall-clock moves past the deadline without the timer being delivered,
+      // which is exactly what a backgrounded tab does.
+      jest.setSystemTime(Date.now() + FIVE_MINUTES + 1_000)
+      window.dispatchEvent(new Event("focus"))
+    })
 
     expect(lockMock).toHaveBeenCalledTimes(1)
-    visibilitySpy.mockRestore()
   })
 
-  it("is a no-op when auto-lock is disabled", () => {
+  it("is inert when auto-lock is off", () => {
     mockAutoLockMinutes = 0
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(60 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
 
     expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("is a no-op when settings have not hydrated yet", () => {
+  it("is inert before settings have hydrated", () => {
     mockSettingsPresent = false
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(60 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
 
     expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("is a no-op when no account is unlocked", () => {
+  it("is inert when no account is unlocked", () => {
     mockUnlockedAccountId = null
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(60 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
 
     expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("is a no-op off Tauri", () => {
-    mockIsTauri = false
+  it("never locks while a local turn is streaming", () => {
+    mockSessions = { s1: { status: "streaming" } }
     renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(60 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
 
     expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("clears the timer on unmount", () => {
-    const { unmount } = renderHook(() => useAutoLockOnIdle())
+  it("never locks while a local turn is waiting for approval", () => {
+    mockSessions = { s1: { status: "awaiting_approval" } }
+    renderHook(() => useAutoLockOnIdle())
 
-    jest.advanceTimersByTime(4 * 60_000)
-    unmount()
-    jest.advanceTimersByTime(10 * 60_000)
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
 
     expect(lockMock).not.toHaveBeenCalled()
+  })
+
+  it("does not run on an overlay window, which cannot see the main window's activity", () => {
+    mockPetRole = "overlay"
+    renderHook(() => useAutoLockOnIdle())
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
+
+    expect(lockMock).not.toHaveBeenCalled()
+  })
+
+  it("runs in an ordinary browser — a Browser Vault account is a real lock", () => {
+    renderHook(() => useAutoLockOnIdle())
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
+    })
+
+    expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears its timer and listeners on unmount", () => {
+    const { unmount } = renderHook(() => useAutoLockOnIdle())
+    unmount()
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
+
+    expect(lockMock).not.toHaveBeenCalled()
+  })
+
+  it("swallows a rejected lock rather than surfacing an unhandled rejection", async () => {
+    lockMock.mockRejectedValueOnce(new Error("teardown failed"))
+    renderHook(() => useAutoLockOnIdle())
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(lockMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -13,6 +13,7 @@
   "localAccountsManage": "Manage",
   "localAccountsSummary": "{name} · {count, plural, one {# local account} other {# local accounts}}",
   "localAccountsTitle": "Local accounts",
+  "lockIncomplete": "Account locked, but part of the teardown failed",
   "lockNow": "Lock now",
   "lockedNow": "Account locked",
   "manageDescription": "Change your plan, billing details, or sign out.",

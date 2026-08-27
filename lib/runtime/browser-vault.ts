@@ -363,6 +363,73 @@ export async function changeBrowserVaultPassword(
   }
 }
 
+/**
+ * Redeem the one-time recovery key: unwrap the master key from `recoveryWrap`,
+ * re-wrap it under a new password, and leave the vault unlocked.
+ *
+ * This is the only path back into an account whose password is lost. It has to
+ * rotate the password rather than merely unlock, because unlocking alone leaves
+ * `passwordWrap` keyed to the forgotten password — the user would be locked out
+ * again on the next lock.
+ *
+ * `recoveryWrap` is deliberately NOT rotated. The recovery key is the root of
+ * trust for the vault (the master key is not derivable from anything else), so
+ * minting a replacement here would silently invalidate the copy the user
+ * printed or filed away, at the exact moment they proved they still have it.
+ * Rotating it is a separate, explicit act.
+ */
+export async function resetBrowserVaultPasswordWithRecoveryKey(
+  accountId: string,
+  recoveryKey: string,
+  newPassword: string,
+  now = Date.now()
+): Promise<void> {
+  const current = await repository().get(accountId)
+  if (!current) throw new Error("Browser Vault is not provisioned for this account.")
+  assertPassword(newPassword)
+  // Proves the recovery key before anything is written, and normalizes a
+  // malformed key into the same error the unlock path reports.
+  const recovered = await BrowserVaultSession.unlockWithRecoveryKey(current, recoveryKey)
+  const recoveryBytes = decodeBase64Url(recoveryKey)
+  const nextSalt = randomBytes(16)
+  try {
+    const recoveryKek = await importAesKey(recoveryBytes, ["decrypt"])
+    const masterBytes = await unwrapMasterKey(
+      current.recoveryWrap,
+      recoveryKek,
+      wrapAad(accountId, "recovery")
+    )
+    try {
+      const nextPasswordKey = await derivePasswordKey(newPassword, nextSalt)
+      const passwordWrap = await wrapMasterKey(
+        masterBytes,
+        nextPasswordKey,
+        wrapAad(accountId, "password")
+      )
+      await repository().put({
+        ...current,
+        passwordKdf: {
+          ...current.passwordKdf,
+          salt: encodeBase64Url(nextSalt),
+          iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
+        },
+        passwordWrap,
+        updatedAt: now,
+      })
+    } finally {
+      zeroBytes(masterBytes)
+    }
+  } catch (error) {
+    recovered.lock()
+    throw error
+  } finally {
+    zeroBytes(recoveryBytes)
+    zeroBytes(nextSalt)
+  }
+  activeBrowserVaultSession?.lock()
+  activeBrowserVaultSession = recovered
+}
+
 export function getActiveBrowserVault(): BrowserVaultSession | null {
   return activeBrowserVaultSession
 }

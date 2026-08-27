@@ -187,9 +187,18 @@ export function AccountOverviewSection() {
     }
   }
 
-  const lockNow = () => {
-    lockAccounts()
-    toast.success(t("lockedNow"))
+  const lockNow = async () => {
+    // `lock()` is async and can reject on a partial teardown. Firing it bare and
+    // toasting success unconditionally reported "locked" for a lock that had
+    // failed, and left an unhandled rejection behind. The account still ends up
+    // locked either way — the store commits that unconditionally — so the toast
+    // reflects whether the teardown was clean.
+    try {
+      await lockAccounts()
+      toast.success(t("lockedNow"))
+    } catch {
+      toast.error(t("lockIncomplete"))
+    }
   }
 
   // Switching to a password-protected account can't happen inline — route the
@@ -334,7 +343,7 @@ export function AccountOverviewSection() {
                     variant="ghost"
                     size="sm"
                     className="gap-1.5"
-                    onClick={lockNow}
+                    onClick={() => void lockNow()}
                     data-testid="account-overview-lock-now"
                   >
                     <LockIcon className="size-3.5" />

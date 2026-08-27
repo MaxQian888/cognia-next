@@ -18,10 +18,6 @@ jest.mock("@/hooks/use-network-status", () => ({
   }),
 }))
 
-jest.mock("@/hooks/account/use-auto-lock", () => ({
-  useAutoLock: () => undefined,
-}))
-
 let mockIsTauri = true
 let mockIsCapacitor = false
 jest.mock("@/lib/tauri", () => ({
@@ -41,6 +37,8 @@ jest.mock("@/lib/pet/window-role", () => ({
 
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockUnlockAccount = jest.fn<Promise<void>, [string, string]>()
+const mockUnlockWithRecoveryKey = jest.fn<Promise<void>, [string, string, string]>()
+const mockUsesBrowserVault = false
 
 let mockState: Pick<
   AccountStoreState,
@@ -54,6 +52,7 @@ let mockState: Pick<
   | "pendingRecoveryKey"
   | "createAccount"
   | "unlockAccount"
+  | "unlockAccountWithRecoveryKey"
   | "acknowledgeRecoveryKey"
 >
 
@@ -61,6 +60,7 @@ jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
   selectActiveAccount: (state: typeof mockState) =>
     state.accounts.find((account) => account.id === state.activeAccountId) ?? null,
+  usesBrowserVault: () => mockUsesBrowserVault,
 }))
 
 import { AccountGate } from "./account-gate"
@@ -94,6 +94,7 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
     pendingRecoveryKey: null,
     createAccount: mockCreateAccount,
     unlockAccount: mockUnlockAccount,
+    unlockAccountWithRecoveryKey: mockUnlockWithRecoveryKey,
     acknowledgeRecoveryKey: jest.fn(),
     ...overrides,
   }
@@ -494,9 +495,12 @@ describe("AccountGate", () => {
     expect(screen.queryByRole("button", { name: "unlockAccount" })).not.toBeInTheDocument()
   })
 
-  it("shows store errors and action errors", async () => {
+  // The lock screen renders a TRANSLATED error code, not the raw `Error.message`
+  // the store carries — that is the point of the change. `state.error` still
+  // reaches the first-run and recovery-handover forms, which own it.
+  it("lets the lock screen own its own failure copy", async () => {
     const alpha = account("acct_alpha", "Alpha")
-    mockUnlockAccount.mockRejectedValueOnce(new Error("bad password"))
+    mockUnlockAccount.mockRejectedValueOnce(new Error("Invalid local account password."))
     setGateState({
       accounts: [alpha],
       activeAccountId: "acct_alpha",
@@ -510,13 +514,13 @@ describe("AccountGate", () => {
       </AccountGate>
     )
 
-    expect(screen.getByText("previous error")).toBeInTheDocument()
+    expect(screen.queryByText("previous error")).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("passwordLabel"), {
       target: { value: "bad" },
     })
     fireEvent.click(screen.getByRole("button", { name: "unlockAccount" }))
 
-    await screen.findByText("bad password")
+    await screen.findByText("errorInvalidPassword")
   })
 
   it("falls back to the first account and unknown-account copy when no active id resolves", () => {

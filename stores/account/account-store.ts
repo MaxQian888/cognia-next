@@ -18,12 +18,15 @@ import {
   verifyPassword,
 } from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
+import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
+import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import {
   changeBrowserVaultPassword,
   deleteBrowserVault,
   lockBrowserVault,
   provisionBrowserVault,
+  resetBrowserVaultPasswordWithRecoveryKey,
   unlockBrowserVault,
   verifyBrowserVaultPassword,
 } from "@/lib/runtime/browser-vault"
@@ -36,6 +39,7 @@ import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
 } from "@/lib/runtime/runtime-target-context"
+import { stopRuntimeTargetSubscriptions } from "@/lib/runtime/runtime-target-lifecycle"
 import { activateAccountDatabase, clearAccountDatabaseSelection } from "@/lib/db/schema"
 import {
   activateArtifactAccountStorage,
@@ -79,6 +83,16 @@ export interface AccountStoreState {
   load: () => Promise<void>
   createAccount: (input: CreateLocalAccountInput) => Promise<LocalAccountRecord>
   unlockAccount: (accountId: string, password: string) => Promise<void>
+  /**
+   * Redeem the Browser Vault recovery key and rotate the password in one step.
+   * Browser runtimes only — the desktop host mints no recovery key, so there is
+   * nothing to redeem there and the call refuses rather than pretending.
+   */
+  unlockAccountWithRecoveryKey: (
+    accountId: string,
+    recoveryKey: string,
+    newPassword: string
+  ) => Promise<void>
   switchAccount: (accountId: string, password?: string) => Promise<void>
   renameAccount: (accountId: string, displayName: string) => Promise<LocalAccountRecord>
   changePassword: (
@@ -105,6 +119,13 @@ export interface AccountStoreDependencies {
   prepareDatabase: () => Promise<unknown>
   removeRuntimeTargets: (accountId: string) => Promise<unknown>
   clearSubscriptionRuntime: (localAccountId: string) => Promise<void>
+  /**
+   * Release the live per-target subscriptions before the database closes.
+   * Wired only into the target-switch path before ADR-0009's lock path was
+   * audited; a lock that skips it leaves module-level subscribers running
+   * against a database selection that no longer exists.
+   */
+  stopRuntimeSubscriptions: () => Promise<void>
 }
 
 export interface LocalAccountDeletionResult {
@@ -146,6 +167,7 @@ export function createAccountStore(
       return ensureActiveDatabaseReady()
     },
     removeRuntimeTargets: removeAccountRuntimeTargets,
+    stopRuntimeSubscriptions: stopRuntimeTargetSubscriptions,
     clearSubscriptionRuntime: async (localAccountId) => {
       if (!isTauri() && !isCapacitor()) {
         const { hasWebCompanionTarget } = await import("@/lib/platform/web-companion")
@@ -190,10 +212,17 @@ export function createAccountStore(
         await dependencies.clearSubscriptionRuntime(previousUnlockedAccountId)
       }
       await dependencies.registry.setActiveAccountId(accountId)
-      const target = shouldUseBrowserVault()
-        ? await dependencies.prepareRuntimeTarget(accountId)
-        : null
+      let target: RuntimeTargetRecord | null = null
+      if (shouldUseBrowserVault()) {
+        publishUnlockStage(accountId, "preparing-runtime")
+        target = await dependencies.prepareRuntimeTarget(accountId)
+      }
+      // The long pole. `lock()` closed the cached Dexie connection, so this
+      // re-opens the schema, re-adopts plugin tables and re-seeds — seconds of
+      // work that the lock screen has to be able to name.
+      publishUnlockStage(accountId, "opening-database")
       await prepareSelectedDatabase(accountId, target?.id)
+      publishUnlockStage(accountId, "activating")
       setActiveRuntimeTargetContext(
         accountId,
         target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
@@ -206,6 +235,7 @@ export function createAccountStore(
         error: null,
         accountRevision: state.accountRevision + 1,
       }))
+      publishUnlockStage(accountId, "ready")
     }
 
     return {
@@ -342,17 +372,58 @@ export function createAccountStore(
         try {
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
+          publishUnlockStage(account.id, "verifying")
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
           } else {
             const ok = await verifyPassword(password, account.passwordVerifier, account.id)
             if (!ok) {
-              throw new Error("Invalid local account password.")
+              throw new AccountUnlockError("invalid-password", "Invalid local account password.")
             }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
-          throw setFailure(error)
+          publishUnlockStage(accountId, "failed")
+          throw setFailure(asUnlockError(error))
+        }
+      },
+
+      unlockAccountWithRecoveryKey: async (accountId, recoveryKey, newPassword) => {
+        set({ error: null })
+        try {
+          if (!shouldUseBrowserVault()) {
+            // Not dormancy: the desktop host stores no recovery wrap at all, so
+            // there is no key to redeem. The lock screen hides the entry point
+            // on this runtime; this is the backstop for a programmatic caller.
+            throw new AccountUnlockError(
+              "vault-not-provisioned",
+              "Recovery keys exist only for the Browser Vault runtime."
+            )
+          }
+          if (!recoveryKey.trim()) {
+            throw new AccountUnlockError("invalid-recovery-key", "Vault recovery key is required.")
+          }
+          assertPasswordProvided(newPassword)
+          const account = await findAccount(accountId)
+          publishUnlockStage(account.id, "verifying")
+          // Rotating the password is part of redeeming the key, not a follow-up
+          // step: unlocking alone leaves `passwordWrap` keyed to the password
+          // the user just proved they no longer have.
+          await resetBrowserVaultPasswordWithRecoveryKey(
+            account.id,
+            recoveryKey.trim(),
+            newPassword
+          )
+          const passwordVerifier = await createPasswordVerifier(newPassword)
+          const updated = await dependencies.registry.updatePasswordVerifier(
+            account.id,
+            passwordVerifier
+          )
+          set((state) => ({ accounts: upsertAccount(state.accounts, updated) }))
+          await activateUnlockedAccount(account.id)
+        } catch (error) {
+          publishUnlockStage(accountId, "failed")
+          throw setFailure(asUnlockError(error))
         }
       },
 
@@ -365,17 +436,19 @@ export function createAccountStore(
           }
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
+          publishUnlockStage(account.id, "verifying")
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
           } else {
             const ok = await verifyPassword(password, account.passwordVerifier, account.id)
             if (!ok) {
-              throw new Error("Invalid local account password.")
+              throw new AccountUnlockError("invalid-password", "Invalid local account password.")
             }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
-          throw setFailure(error)
+          publishUnlockStage(accountId, "failed")
+          throw setFailure(asUnlockError(error))
         }
       },
 
@@ -408,7 +481,7 @@ export function createAccountStore(
             ? await verifyBrowserVaultPassword(accountId, currentPassword)
             : await verifyPassword(currentPassword, account.passwordVerifier, account.id)
           if (!ok) {
-            throw new Error("Invalid local account password.")
+            throw new AccountUnlockError("invalid-password", "Invalid local account password.")
           }
           const passwordVerifier = await createPasswordVerifier(newPassword)
           const updated = await dependencies.registry.updatePasswordVerifier(
@@ -530,27 +603,62 @@ export function createAccountStore(
         }
       },
 
+      /**
+       * Lock the active account.
+       *
+       * Two properties this deliberately guarantees, both of which the earlier
+       * version did not:
+       *
+       * 1. **Subscriptions stop before the database does.** `lock()` clears the
+       *    database selection, and `getDb()` falls back to the LEGACY database
+       *    name when no account is selected — so any live subscriber that
+       *    outlived the gate's unmount and called `getDb()` afterwards silently
+       *    re-opened `cognia-claude` and kept reading and writing there. Killing
+       *    the subscriptions first is what makes the lock actually cut access.
+       *
+       * 2. **It cannot fail open.** Every teardown step is best-effort and the
+       *    locked state is committed unconditionally. Previously a throw in any
+       *    step returned before `set(...)`, so the vault could be locked while
+       *    the UI still believed the account was unlocked — the one outcome a
+       *    lock must never produce. A failed step is still reported.
+       */
       lock: async () => {
         const unlockedAccountId = get().unlockedAccountId
         if (unlockedAccountId) {
           bumpPerformanceSecurityGeneration(unlockedAccountId, "account-locked")
         }
-        try {
-          if (unlockedAccountId) {
-            await dependencies.clearSubscriptionRuntime(unlockedAccountId)
+        const failures: unknown[] = []
+        const attempt = async (step: () => void | Promise<void>) => {
+          try {
+            await step()
+          } catch (error) {
+            failures.push(error)
           }
-          await unbindLocalAccount()
-          lockBrowserVault()
-          clearActiveRuntimeTargetContext()
-          clearAccountDatabaseSelection()
-          dependencies.clearAccountLocalState()
-          set((state) => ({
-            unlockedAccountId: null,
-            locked: computeLocked(state.accounts, state.activeAccountId, null),
-            error: null,
-          }))
-        } catch (error) {
-          throw setFailure(error)
+        }
+
+        await attempt(() => dependencies.stopRuntimeSubscriptions())
+        if (unlockedAccountId) {
+          await attempt(() => dependencies.clearSubscriptionRuntime(unlockedAccountId))
+        }
+        await attempt(() => unbindLocalAccount())
+        await attempt(() => lockBrowserVault())
+        await attempt(() => clearActiveRuntimeTargetContext())
+        await attempt(() => clearAccountDatabaseSelection())
+        await attempt(() => dependencies.clearAccountLocalState())
+
+        set((state) => ({
+          unlockedAccountId: null,
+          locked: computeLocked(state.accounts, state.activeAccountId, null),
+          error: null,
+          accountRevision: state.accountRevision + 1,
+        }))
+
+        if (failures.length > 0) {
+          throw setFailure(
+            failures.length === 1
+              ? failures[0]
+              : new AggregateError(failures, "Account lock teardown was incomplete.")
+          )
         }
       },
 
@@ -559,6 +667,18 @@ export function createAccountStore(
       },
     }
   })
+}
+
+/**
+ * Which credential store this runtime authenticates against.
+ *
+ * Exported because the lock screen has to agree with the store on it: the
+ * unlock stage ladder, the recovery-key entry point and the runtime badge all
+ * differ between the desktop host (Argon2id verifier, no recovery wrap) and a
+ * browser (PBKDF2 Browser Vault). Two copies of this predicate would drift.
+ */
+export function usesBrowserVault(): boolean {
+  return shouldUseBrowserVault()
 }
 
 function shouldUseBrowserVault(): boolean {
@@ -649,7 +769,7 @@ function upsertAccount(
 
 function assertPasswordProvided(password: string | undefined): asserts password is string {
   if (!password?.trim()) {
-    throw new Error("Local account password is required.")
+    throw new AccountUnlockError("password-required", "Local account password is required.")
   }
 }
 
