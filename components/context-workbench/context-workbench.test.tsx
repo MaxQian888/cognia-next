@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import { RadarIcon } from "lucide-react"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { resetPanelHistoryForTesting } from "@/hooks/context-workbench/use-panel-history"
@@ -122,6 +124,34 @@ describe("ContextWorkbench", () => {
   })
 
   afterEach(clearAllMockExtensions)
+
+  it("gives a plugin's non-canonical activity its own rail button", () => {
+    // The rail draws ONE button per activity. A plugin that joins a canonical
+    // group becomes a tab behind a `⋯` overflow; claiming its own activity is
+    // the only way to get a button, and nothing in the rail may filter the id
+    // out for not being canonical.
+    const dispose = contextPanelRegistry.register({
+      id: "acme:incidents",
+      activity: "acme-incidents",
+      labelKey: "acme.panel",
+      label: "Incidents",
+      icon: RadarIcon,
+      appliesTo: () => true,
+      renderer: () => <div>incidents</div>,
+      pluginId: "acme",
+    })
+
+    try {
+      renderWorkbench([])
+      const button = screen.getByTestId("workbench-activity-acme-incidents")
+      expect(button).toBeInTheDocument()
+      // Label comes from the PANEL, not from a `contextWorkbench.activities.*`
+      // message — no such key exists for a plugin-contributed id.
+      expect(button).toHaveAttribute("aria-label", "Incidents")
+    } finally {
+      dispose()
+    }
+  })
 
   it("retains its stable resource layout across unmounts", () => {
     const Comments = ({ active }: { active: boolean }) => <div>comments:{String(active)}</div>
