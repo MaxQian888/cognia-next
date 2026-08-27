@@ -39,6 +39,11 @@ crates/cognia-cli/assets/host-command-catalog.json
 protocol/companion-request-schemas.json
 cli/src/serve/headless-contract-identity.ts
 cli/src/serve/fixtures/bridge-frames.json
+# Missed for the same reason, and it bites harder than whitespace: this file is
+# `include_bytes!`d by `cognia-headless-contract`, so a reformat that trips
+# `companion-api:check` is sitting in the binary that validates every
+# device-plane request.
+crates/cognia-headless-contract/assets/device-plane-overrides.json
 # Generated i18n message bundles — built from the per-namespace split sources
 # by `pnpm i18n:build`. Prettier collapses the build's expanded arrays, which
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.

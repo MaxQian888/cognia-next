@@ -6,13 +6,19 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["path", "workspaceId"],
+        "required": [
+          "path",
+          "workspaceId"
+        ],
         "properties": {
           "path": {
             "type": "string"
           },
           "rev": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -29,7 +35,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -46,7 +54,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -70,7 +82,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["sha", "workspaceId", "adminLease"],
+        "required": [
+          "sha",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "sha": {
             "type": "string"
@@ -94,7 +110,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["remoteUrl", "workspaceId", "destinationRelativePath", "adminLease"],
+        "required": [
+          "remoteUrl",
+          "workspaceId",
+          "destinationRelativePath",
+          "adminLease"
+        ],
         "properties": {
           "remoteUrl": {
             "type": "string"
@@ -119,7 +140,13 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["message", "amend", "signoff", "workspaceId", "adminLease"],
+        "required": [
+          "message",
+          "amend",
+          "signoff",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "message": {
             "type": "string"
@@ -149,7 +176,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["sha", "workspaceId"],
+        "required": [
+          "sha",
+          "workspaceId"
+        ],
         "properties": {
           "sha": {
             "type": "string"
@@ -169,7 +199,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -186,7 +218,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "checkout", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "checkout",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -195,7 +232,10 @@
             "type": "boolean"
           },
           "from": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -216,16 +256,26 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
           },
           "message": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -246,7 +296,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "remote": {
             "type": "string"
@@ -266,7 +318,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "force", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "force",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -293,7 +350,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -317,7 +378,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["sha", "path", "workspaceId"],
+        "required": [
+          "sha",
+          "path",
+          "workspaceId"
+        ],
         "properties": {
           "sha": {
             "type": "string"
@@ -340,7 +405,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["path", "staged", "workspaceId"],
+        "required": [
+          "path",
+          "staged",
+          "workspaceId"
+        ],
         "properties": {
           "path": {
             "type": "string"
@@ -363,7 +432,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["base", "target", "path", "workspaceId"],
+        "required": [
+          "base",
+          "target",
+          "path",
+          "workspaceId"
+        ],
         "properties": {
           "base": {
             "type": "string"
@@ -389,7 +463,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["base", "target", "workspaceId"],
+        "required": [
+          "base",
+          "target",
+          "workspaceId"
+        ],
         "properties": {
           "base": {
             "type": "string"
@@ -412,7 +490,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -429,7 +509,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -446,7 +528,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["paths", "workspaceId", "adminLease"],
+        "required": [
+          "paths",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "paths": {
             "type": "array",
@@ -455,7 +541,10 @@
             }
           },
           "hunkPatch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -476,7 +565,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["includeUntracked", "workspaceId", "adminLease"],
+        "required": [
+          "includeUntracked",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "includeUntracked": {
             "type": "boolean"
@@ -500,10 +593,16 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "remote": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "prune": {
             "type": "boolean"
@@ -527,7 +626,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["path", "maxCount", "workspaceId"],
+        "required": [
+          "path",
+          "maxCount",
+          "workspaceId"
+        ],
         "properties": {
           "path": {
             "type": "string"
@@ -550,7 +653,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -567,7 +672,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["pattern", "workspaceId", "adminLease"],
+        "required": [
+          "pattern",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "pattern": {
             "type": "string"
@@ -591,7 +700,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -612,7 +724,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["base", "entries", "workspaceId", "adminLease"],
+        "required": [
+          "base",
+          "entries",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "base": {
             "type": "string"
@@ -644,7 +761,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -661,7 +780,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["maxCount", "skip", "workspaceId"],
+        "required": [
+          "maxCount",
+          "skip",
+          "workspaceId"
+        ],
         "properties": {
           "maxCount": {
             "type": "integer"
@@ -684,7 +807,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branch", "workspaceId", "adminLease"],
+        "required": [
+          "branch",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "branch": {
             "type": "string"
@@ -708,7 +835,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -729,13 +859,22 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "remote": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "branch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "rebase": {
             "type": "boolean"
@@ -759,13 +898,22 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "remote": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "branch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "setUpstream": {
             "type": "boolean"
@@ -792,7 +940,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["remote", "name", "workspaceId", "adminLease"],
+        "required": [
+          "remote",
+          "name",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "remote": {
             "type": "string"
@@ -819,7 +972,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["gitRef", "path", "workspaceId"],
+        "required": [
+          "gitRef",
+          "path",
+          "workspaceId"
+        ],
         "properties": {
           "gitRef": {
             "type": "string",
@@ -844,7 +1001,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["onto", "workspaceId", "adminLease"],
+        "required": [
+          "onto",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "onto": {
             "type": "string"
@@ -868,7 +1029,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["base", "workspaceId"],
+        "required": [
+          "base",
+          "workspaceId"
+        ],
         "properties": {
           "base": {
             "type": "string"
@@ -888,7 +1052,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -905,7 +1071,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "url", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "url",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -932,7 +1103,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -956,7 +1131,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -973,13 +1150,20 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["newName", "workspaceId", "adminLease"],
+        "required": [
+          "newName",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "newName": {
             "type": "string"
           },
           "old": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1000,7 +1184,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1017,7 +1203,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["mode", "target", "workspaceId", "adminLease"],
+        "required": [
+          "mode",
+          "target",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "mode": {
             "type": "string"
@@ -1044,17 +1235,30 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["path", "workspaceId", "adminLease"],
+        "required": [
+          "path",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "path": {
             "type": "string"
           },
           "mergedContent": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "side": {
-            "type": ["string", "null"],
-            "enum": ["ours", "theirs"]
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "ours",
+              "theirs"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1075,7 +1279,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["paths", "staged", "workspaceId", "adminLease"],
+        "required": [
+          "paths",
+          "staged",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "paths": {
             "type": "array",
@@ -1087,7 +1296,10 @@
             "type": "boolean"
           },
           "source": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1108,7 +1320,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["sha", "workspaceId", "adminLease"],
+        "required": [
+          "sha",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "sha": {
             "type": "string"
@@ -1132,7 +1348,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1153,7 +1372,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1174,7 +1396,13 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["name", "email", "global", "workspaceId", "adminLease"],
+        "required": [
+          "name",
+          "email",
+          "global",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -1205,7 +1433,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1222,7 +1452,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branch", "workspaceId"],
+        "required": [
+          "branch",
+          "workspaceId"
+        ],
         "properties": {
           "branch": {
             "type": "string",
@@ -1243,7 +1476,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1260,7 +1495,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["remote", "branches", "workspaceId", "adminLease"],
+        "required": [
+          "remote",
+          "branches",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "remote": {
             "type": "string",
@@ -1292,7 +1532,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["onto", "branches", "workspaceId", "adminLease"],
+        "required": [
+          "onto",
+          "branches",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "onto": {
             "type": "string",
@@ -1324,7 +1569,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branch", "historyRef", "workspaceId", "adminLease"],
+        "required": [
+          "branch",
+          "historyRef",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "branch": {
             "type": "string",
@@ -1353,7 +1603,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branch", "workspaceId"],
+        "required": [
+          "branch",
+          "workspaceId"
+        ],
         "properties": {
           "branch": {
             "type": "string",
@@ -1377,7 +1630,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branches", "workspaceId"],
+        "required": [
+          "branches",
+          "workspaceId"
+        ],
         "properties": {
           "branches": {
             "type": "array",
@@ -1401,7 +1657,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["paths", "workspaceId", "adminLease"],
+        "required": [
+          "paths",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "paths": {
             "type": "array",
@@ -1410,7 +1670,10 @@
             }
           },
           "hunkPatch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1431,7 +1694,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["index", "workspaceId", "adminLease"],
+        "required": [
+          "index",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "index": {
             "type": "integer"
@@ -1455,7 +1722,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["index", "workspaceId", "adminLease"],
+        "required": [
+          "index",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "index": {
             "type": "integer"
@@ -1479,7 +1750,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1496,7 +1769,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["index", "workspaceId", "adminLease"],
+        "required": [
+          "index",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "index": {
             "type": "integer"
@@ -1520,10 +1797,16 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "message": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "includeUntracked": {
             "type": "boolean"
@@ -1550,7 +1833,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1567,7 +1852,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1588,7 +1876,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1605,7 +1895,11 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["paths", "workspaceId", "adminLease"],
+        "required": [
+          "paths",
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "paths": {
             "type": "array",
@@ -1614,7 +1908,10 @@
             }
           },
           "hunkPatch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1635,13 +1932,21 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["branch", "workspaceId", "destinationRelativePath", "adminLease"],
+        "required": [
+          "branch",
+          "workspaceId",
+          "destinationRelativePath",
+          "adminLease"
+        ],
         "properties": {
           "branch": {
             "type": "string"
           },
           "baseRef": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
@@ -1666,7 +1971,12 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["message", "workspaceId", "worktreeRelativePath", "adminLease"],
+        "required": [
+          "message",
+          "workspaceId",
+          "worktreeRelativePath",
+          "adminLease"
+        ],
         "properties": {
           "message": {
             "type": "string"
@@ -1691,7 +2001,9 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId"],
+        "required": [
+          "workspaceId"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1708,7 +2020,10 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["workspaceId", "adminLease"],
+        "required": [
+          "workspaceId",
+          "adminLease"
+        ],
         "properties": {
           "workspaceId": {
             "type": "string",
@@ -1729,13 +2044,21 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": ["force", "workspaceId", "worktreeRelativePath", "adminLease"],
+        "required": [
+          "force",
+          "workspaceId",
+          "worktreeRelativePath",
+          "adminLease"
+        ],
         "properties": {
           "force": {
             "type": "boolean"
           },
           "deleteBranch": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspaceId": {
             "type": "string",
