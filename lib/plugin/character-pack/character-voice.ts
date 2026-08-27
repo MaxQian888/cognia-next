@@ -19,16 +19,18 @@
 
 import type { Character } from "@cognia/agent-config-types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
-import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@cognia/tts/types"
+import {
+  type SelectableTTSProvider,
+  type SpeechSettings,
+  TTS_PROVIDER_SETTINGS,
+} from "@cognia/tts/types"
 
 /** Per-provider voice-id field on {@link SpeechSettings}. */
-const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
+const PROVIDER_VOICE_FIELD: Record<SelectableTTSProvider, keyof SpeechSettings> = {
   system: "systemVoice",
   openai: "openaiVoice",
   "local-openai-compatible": "localOpenaiVoice",
-  "openai-realtime": "realtimeVoice",
   gemini: "geminiVoice",
-  edge: "edgeVoice",
   elevenlabs: "elevenlabsVoice",
   lmnt: "lmntVoice",
   hume: "humeVoice",
@@ -61,7 +63,7 @@ export function resolveCharacterVoice(
   // Defensive: the SDK validate-time check warns but doesn't block, so an
   // unknown provider string could still reach runtime. Treat it as "no
   // overlay" — caller's AppSettings defaults take over.
-  if (!isKnownTtsProvider(profile.provider)) return undefined
+  if (!isSelectableTtsProvider(profile.provider)) return undefined
   if (!profile.voiceId.trim()) return undefined
 
   const overlay: CharacterVoiceOverlay = {
@@ -75,6 +77,6 @@ export function resolveCharacterVoice(
   return overlay
 }
 
-function isKnownTtsProvider(provider: string): provider is TTSProvider {
-  return Object.prototype.hasOwnProperty.call(TTS_PROVIDERS, provider)
+function isSelectableTtsProvider(provider: string): provider is SelectableTTSProvider {
+  return Object.prototype.hasOwnProperty.call(TTS_PROVIDER_SETTINGS, provider)
 }

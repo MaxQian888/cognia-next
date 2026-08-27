@@ -5,12 +5,16 @@
  */
 
 import { TTS_ADAPTERS, getAdapter } from "./registry"
-import { DEFAULT_SPEECH_SETTINGS, TTS_PROVIDERS, type TTSProvider } from "../types"
+import {
+  DEFAULT_SPEECH_SETTINGS,
+  ORDERED_TTS_PROVIDERS,
+  type SelectableTTSProvider,
+} from "../types"
 
-const ALL_PROVIDERS = Object.keys(TTS_PROVIDERS) as TTSProvider[]
+const ALL_PROVIDERS = ORDERED_TTS_PROVIDERS
 
 describe("TTS provider registry", () => {
-  it("has an adapter for every TTSProvider", () => {
+  it("has an adapter for every selectable provider", () => {
     for (const provider of ALL_PROVIDERS) {
       expect(TTS_ADAPTERS[provider]).toBeDefined()
       expect(getAdapter(provider).info.id).toBe(provider)
@@ -20,8 +24,8 @@ describe("TTS provider registry", () => {
   it("wires kind + generate consistently", () => {
     expect(getAdapter("system").kind).toBe("system")
     expect(getAdapter("system").generate).toBeUndefined()
-    expect(getAdapter("openai-realtime").kind).toBe("streaming")
-    expect(typeof getAdapter("openai-realtime").generateStream).toBe("function")
+    expect(getAdapter("openai-realtime").info.id).toBe("system")
+    expect(getAdapter("edge").info.id).toBe("system")
     for (const provider of ALL_PROVIDERS) {
       const adapter = getAdapter(provider)
       if (adapter.kind === "http") {
@@ -33,7 +37,7 @@ describe("TTS provider registry", () => {
     }
   })
 
-  const runtimeExpectations: Record<TTSProvider, Record<string, unknown>> = {
+  const runtimeExpectations: Record<SelectableTTSProvider, Record<string, unknown>> = {
     system: { voice: "", rate: 1.0, pitch: 1.0, volume: 1.0, lang: "en-US" },
     openai: {
       voice: "alloy",
@@ -51,13 +55,6 @@ describe("TTS provider registry", () => {
       timeoutMs: 60000,
     },
     gemini: { voice: "Kore", model: "gemini-3.1-flash-tts-preview" },
-    edge: {
-      voice: "en-US-JennyNeural",
-      rate: "+0%",
-      pitch: "+0Hz",
-      customSSMLEnabled: false,
-      customSSML: "",
-    },
     elevenlabs: {
       voice: "rachel",
       model: "eleven_multilingual_v2",
@@ -80,7 +77,6 @@ describe("TTS provider registry", () => {
       model: "voxtral-mini-tts-2603",
       responseFormat: "mp3",
     },
-    "openai-realtime": { voice: "marin", model: "gpt-realtime-2.1", instructions: "" },
   }
 
   it.each(ALL_PROVIDERS)("runtimeOptions(%s) matches the legacy switch", (provider) => {
@@ -109,26 +105,7 @@ describe("TTS provider registry", () => {
       speed: 1,
       responseFormat: "mp3",
     })
-    // Edge only includes customSSML when the toggle is on.
-    expect(getAdapter("edge").cacheKeyFields(DEFAULT_SPEECH_SETTINGS)).toEqual({
-      voice: "en-US-JennyNeural",
-      rate: "+0%",
-      pitch: "+0Hz",
-      customSSML: undefined,
-    })
-    expect(
-      getAdapter("edge").cacheKeyFields({
-        ...DEFAULT_SPEECH_SETTINGS,
-        ttsCustomSSMLEnabled: true,
-        ttsCustomSSML: "<speak/>",
-      })
-    ).toEqual({
-      voice: "en-US-JennyNeural",
-      rate: "+0%",
-      pitch: "+0Hz",
-      customSSML: "<speak/>",
-    })
-    // System and streaming providers are never chunk-cached → no fields.
+    // System providers are never chunk-cached → no fields.
     expect(getAdapter("system").cacheKeyFields(DEFAULT_SPEECH_SETTINGS)).toEqual({})
     expect(getAdapter("openai-realtime").cacheKeyFields(DEFAULT_SPEECH_SETTINGS)).toEqual({})
   })

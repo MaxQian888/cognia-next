@@ -182,8 +182,6 @@ export const STREAM_COMMAND_REPLACEMENTS = {
     "same /ws/terminal route; reattaching is opening the socket against an existing session id, so it needs no separate command",
   ssh_terminal_spawn:
     "same /ws/terminal route, which carries SSH-backed sessions on the identical canonical frame protocol",
-  tts_realtime_synthesize:
-    "recorded in protocol/headless-command-dispositions.json as separate-design-required: realtime synthesis is an interactive media lifecycle that needs a Headless-native design, not a channel bolted onto the RPC plane",
 }
 
 /**

@@ -3,6 +3,9 @@
   "autoPlayHelp": "助手消息到达时自动朗读出来。",
   "backAria": "返回个人",
   "pitch": "音调",
+  "localEndpoint": "本地端点",
+  "localEndpointHelp": "此设备本地的地址和模型仅在独立模式下使用。",
+  "model": "模型",
   "provider": "语音提供商",
   "providerHelp": "云提供商的 API 密钥仍在桌面端配置。",
   "providers": {
@@ -13,6 +16,8 @@
     "gemini": "Gemini",
     "hume": "Hume",
     "lmnt": "LMNT",
+    "local-openai-compatible": "本地 OpenAI 兼容",
+    "mistral": "Mistral",
     "openai": "OpenAI",
     "system": "系统语音",
     "xiaomi": "小米"

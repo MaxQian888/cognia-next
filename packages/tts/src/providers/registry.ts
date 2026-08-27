@@ -7,12 +7,16 @@
  * one entry here (plus its `TTS_PROVIDERS` metadata).
  */
 
-import { TTS_PROVIDERS, type TTSProvider } from "../types"
+import {
+  TTS_PROVIDERS,
+  normalizeTTSProvider,
+  type SelectableTTSProvider,
+  type TTSProvider,
+} from "../types"
 
 import { generateOpenAITTS } from "./openai"
 import { generateLocalOpenAICompatibleTTS } from "./local-openai-compatible"
 import { generateGeminiTTS } from "./gemini"
-import { generateEdgeTTS } from "./edge"
 import { generateElevenLabsTTS } from "./elevenlabs"
 import { generateLMNTTTS } from "./lmnt"
 import { generateHumeTTS } from "./hume"
@@ -20,10 +24,9 @@ import { generateCartesiaTTS } from "./cartesia"
 import { generateDeepgramTTS } from "./deepgram"
 import { generateXiaomiTTS } from "./xiaomi"
 import { generateMistralTTS } from "./mistral"
-import { synthesizeRealtimeStream } from "./openai-realtime"
 import type { TTSProviderAdapter } from "./adapter"
 
-export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
+export const TTS_ADAPTERS: Record<SelectableTTSProvider, TTSProviderAdapter> = {
   system: {
     info: TTS_PROVIDERS.system,
     kind: "system",
@@ -87,26 +90,6 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
     cacheKeyFields: (s) => ({ voice: s.geminiVoice, model: s.geminiModel }),
     generate: (text, options) =>
       generateGeminiTTS(text, options as Parameters<typeof generateGeminiTTS>[1]),
-  },
-  edge: {
-    info: TTS_PROVIDERS.edge,
-    kind: "http",
-    runtimeOptions: (s) => ({
-      voice: s.edgeVoice,
-      rate: s.edgeRate,
-      pitch: s.edgePitch,
-      customSSMLEnabled: s.ttsCustomSSMLEnabled,
-      customSSML: s.ttsCustomSSML,
-    }),
-    cacheKeyFields: (s) => ({
-      voice: s.edgeVoice,
-      rate: s.edgeRate,
-      pitch: s.edgePitch,
-      customSSML: s.ttsCustomSSMLEnabled ? s.ttsCustomSSML : undefined,
-    }),
-    // Edge ignores apiKey (free service via the Tauri WS bridge).
-    generate: (text, options) =>
-      generateEdgeTTS(text, options as Parameters<typeof generateEdgeTTS>[1]),
   },
   elevenlabs: {
     info: TTS_PROVIDERS.elevenlabs,
@@ -204,26 +187,8 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
     generate: (text, options) =>
       generateMistralTTS(text, options as Parameters<typeof generateMistralTTS>[1]),
   },
-  // Retired as a selectable TTS provider (RETIRED_TTS_PROVIDERS, plan D2): a
-  // pure-TTS use of the speech-to-speech Realtime model costs ~$64/1M vs ~$12
-  // for `gpt-4o-mini-tts` (which the `openai` provider already uses over REST).
-  // The adapter stays so persisted selections keep resolving, and the s2s
-  // transport is reserved for a future real-time voice-conversation feature (O1).
-  "openai-realtime": {
-    info: TTS_PROVIDERS["openai-realtime"],
-    kind: "streaming",
-    runtimeOptions: (s) => ({
-      voice: s.realtimeVoice,
-      model: s.realtimeModel,
-      instructions: s.realtimeInstructions,
-    }),
-    // Streaming providers synthesize live and bypass the chunk cache, so cache
-    // fields are unused; kept for interface parity.
-    cacheKeyFields: () => ({}),
-    generateStream: synthesizeRealtimeStream,
-  },
 }
 
 export function getAdapter(provider: TTSProvider): TTSProviderAdapter {
-  return TTS_ADAPTERS[provider]
+  return TTS_ADAPTERS[normalizeTTSProvider(provider) as SelectableTTSProvider]
 }

@@ -30,7 +30,6 @@ import {
   CARTESIA_TTS_MODELS,
   CARTESIA_TTS_VOICES,
   DEEPGRAM_TTS_VOICES,
-  EDGE_TTS_VOICES,
   ELEVENLABS_TTS_MODELS,
   ELEVENLABS_TTS_VOICES,
   GEMINI_TTS_VOICES,
@@ -40,8 +39,6 @@ import {
   MISTRAL_TTS_MODELS,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
-  REALTIME_TTS_MODELS,
-  REALTIME_TTS_VOICES,
   XIAOMI_TTS_VOICES,
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
@@ -423,67 +420,6 @@ export function MistralConfig() {
   )
 }
 
-// -- Edge --------------------------------------------------------------------
-
-export function EdgeConfig() {
-  const t = useTranslations("settings.speech.provider")
-  const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
-  const voice = settings?.edgeVoice ?? "en-US-JennyNeural"
-  const rate = settings?.edgeRate ?? "+0%"
-  const pitch = settings?.edgePitch ?? "+0Hz"
-  const sttLang = (settings?.sttLanguage ?? "en-US").split("-")[0]
-
-  // Filter by app language for usability; fall back to all if no match.
-  const filtered = EDGE_TTS_VOICES.filter((v) => v.language.startsWith(sttLang))
-  const list = filtered.length > 0 ? filtered : EDGE_TTS_VOICES
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t("edgeIntro")}</p>
-      <div className="space-y-2">
-        <Label className="text-xs">{t("voice")}</Label>
-        <TtsVoiceSelector
-          value={voice}
-          options={list}
-          onValueChange={(v) => void save({ edgeVoice: v })}
-          getVoiceOverlay={(voiceId) => ({
-            ttsProvider: "edge",
-            edgeVoice: voiceId as (typeof EDGE_TTS_VOICES)[number]["id"],
-          })}
-        />
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("edgeRate")}</Label>
-          <Input
-            value={rate}
-            onChange={(e) => void save({ edgeRate: e.target.value })}
-            placeholder="+0%"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("edgePitch")}</Label>
-          <Input
-            value={pitch}
-            onChange={(e) => void save({ edgePitch: e.target.value })}
-            // i18n-exempt: locale-invariant Edge TTS pitch format literal
-            placeholder="+0Hz"
-          />
-        </div>
-      </div>
-      <p className="text-[10px] text-muted-foreground">
-        {t("edgeFormatHintBefore")}
-        <code>+/-N%</code>
-        {t("edgeFormatHintMid")}
-        {/* i18n-exempt: locale-invariant Edge TTS pitch format literal */}
-        <code>+/-NHz</code>
-        {t("edgeFormatHintAfter")}
-      </p>
-    </div>
-  )
-}
-
 // -- ElevenLabs --------------------------------------------------------------
 
 export function ElevenLabsConfig() {
@@ -834,78 +770,15 @@ export function XiaomiConfig() {
   )
 }
 
-// -- OpenAI Realtime ---------------------------------------------------------
-
-export function OpenAiRealtimeConfig() {
-  const t = useTranslations("settings.speech.provider")
-  const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
-  const voice = settings?.realtimeVoice ?? "marin"
-  const model = settings?.realtimeModel ?? "gpt-realtime-2.1"
-  const instructions = settings?.realtimeInstructions ?? ""
-
-  return (
-    <div className="space-y-3">
-      {!isTauri() && (
-        <p className="text-xs text-amber-600 dark:text-amber-500">{t("realtimeDesktopOnly")}</p>
-      )}
-      <p className="text-xs text-muted-foreground">{t("realtimeIntro")}</p>
-      <ApiKeyInput
-        provider="openai"
-        label={t("label.openai")}
-        placeholder={t("apiKeyPlaceholder.generic")}
-      />
-      <div className="space-y-2">
-        <Label className="text-xs">{t("voice")}</Label>
-        <TtsVoiceSelector
-          value={voice}
-          options={REALTIME_TTS_VOICES}
-          onValueChange={(v) => void save({ realtimeVoice: v })}
-          getVoiceOverlay={(voiceId) => ({
-            ttsProvider: "openai-realtime",
-            realtimeVoice: voiceId as (typeof REALTIME_TTS_VOICES)[number]["id"],
-          })}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label className="text-xs">{t("model")}</Label>
-        <Select value={model} onValueChange={(v) => void save({ realtimeModel: v })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REALTIME_TTS_MODELS.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {m.name} — {m.description}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label className="text-xs">{t("voiceInstructions")}</Label>
-        <Textarea
-          value={instructions}
-          onChange={(e) => void save({ realtimeInstructions: e.target.value })}
-          placeholder={t("voiceInstructionsPlaceholder")}
-          rows={3}
-        />
-      </div>
-    </div>
-  )
-}
-
 // -- Mapping -----------------------------------------------------------------
 
-import type { TTSProvider } from "@cognia/tts/types"
+import type { SelectableTTSProvider } from "@cognia/tts/types"
 
-export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
+export const PROVIDER_CONFIG_COMPONENTS: Record<SelectableTTSProvider, () => React.ReactElement> = {
   system: SystemConfig,
   openai: OpenAiConfig,
   "local-openai-compatible": LocalOpenAiCompatibleConfig,
-  "openai-realtime": OpenAiRealtimeConfig,
   gemini: GeminiConfig,
-  edge: EdgeConfig,
   elevenlabs: ElevenLabsConfig,
   lmnt: LmntConfig,
   hume: HumeConfig,

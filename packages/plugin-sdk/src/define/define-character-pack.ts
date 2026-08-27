@@ -29,6 +29,7 @@ import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pac
 const KNOWN_TTS_PROVIDERS = new Set([
   "system",
   "openai",
+  "local-openai-compatible",
   "gemini",
   "edge",
   "elevenlabs",
@@ -37,8 +38,11 @@ const KNOWN_TTS_PROVIDERS = new Set([
   "cartesia",
   "deepgram",
   "xiaomi",
+  "mistral",
   "openai-realtime",
 ])
+
+const RETIRED_TTS_PROVIDERS = new Set(["edge", "openai-realtime"])
 
 /**
  * Soft upper bound on characters per pack — keeps the in-memory overlay
@@ -87,6 +91,13 @@ function warnIfUnknownVoiceProvider(
   provider: string | undefined
 ): void {
   if (!provider) return
+  if (RETIRED_TTS_PROVIDERS.has(provider)) {
+    console.warn(
+      `defineCharacterPack: pack "${packId}" character "${localId}" declares retired TTS provider "${provider}"; ` +
+        `the runtime will fall back to the user's global TTS settings.`
+    )
+    return
+  }
   if (KNOWN_TTS_PROVIDERS.has(provider)) return
 
   console.warn(

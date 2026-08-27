@@ -2,11 +2,9 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import {
   CartesiaConfig,
-  EdgeConfig,
   ElevenLabsConfig,
   GeminiConfig,
   OpenAiConfig,
-  OpenAiRealtimeConfig,
   SystemConfig,
 } from "./provider-config"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
@@ -51,10 +49,6 @@ export const Gemini: Story = {
   render: () => <GeminiConfig />,
 }
 
-export const Edge: Story = {
-  render: () => <EdgeConfig />,
-}
-
 export const ElevenLabs: Story = {
   render: () => <ElevenLabsConfig />,
 }
@@ -66,9 +60,4 @@ export const Cartesia: Story = {
 // System (Web Speech API) — voice list is populated from the browser.
 export const System: Story = {
   render: () => <SystemConfig />,
-}
-
-// OpenAI Realtime — shows the "desktop only" notice on the web shell.
-export const OpenAiRealtime: Story = {
-  render: () => <OpenAiRealtimeConfig />,
 }

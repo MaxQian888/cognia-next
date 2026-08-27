@@ -17,6 +17,7 @@ import "./host-bindings"
 import {
   ttsOrchestrator as coreOrchestrator,
   type TTSOrchestrator,
+  type TTSOrchestratorState,
 } from "@cognia/tts/tts-orchestrator"
 import type { TTSProvider } from "@cognia/tts/types"
 
@@ -67,38 +68,34 @@ async function* countingTokens(
 }
 
 /**
- * The metered singleton. Identical surface to the core orchestrator; only
- * `speak` and `speakStream` are intercepted, and both delegate first so a
- * metering failure can never change what the user hears.
+ * The metered singleton. The explicit facade keeps every method identity
+ * stable (important for React subscriptions and test spies) while delegating
+ * all state to the one package-owned orchestrator instance.
  */
-export const ttsOrchestrator: TTSOrchestrator = new Proxy(coreOrchestrator, {
-  get(target, property, receiver) {
-    if (property === "speak") {
-      return async (text: string, options?: Parameters<TTSOrchestrator["speak"]>[1]) => {
-        const result = await target.speak(text, options)
-        // Read the provider the orchestrator actually RESOLVED, not the one
-        // that was requested: the mobile shell forces `system`, and billing the
-        // requested cloud provider there would be pure fiction.
-        meterUtterance(text.length, target.getState().currentProvider)
-        return result
-      }
-    }
-    if (property === "speakStream") {
-      return async (
-        tokens: Parameters<TTSOrchestrator["speakStream"]>[0],
-        options?: Parameters<TTSOrchestrator["speakStream"]>[1]
-      ) => {
-        // The orchestrator consumes the token stream, so the character count
-        // only exists while it is being pulled — counting afterwards is not
-        // possible. Tapping it also means an aborted stream bills only what it
-        // actually synthesized.
-        const counter = { characters: 0 }
-        const result = await target.speakStream(countingTokens(tokens, counter), options)
-        meterUtterance(counter.characters, target.getState().currentProvider)
-        return result
-      }
-    }
-    const value = Reflect.get(target, property, receiver)
-    return typeof value === "function" ? value.bind(target) : value
+type TestableTTSFacade = TTSOrchestrator & {
+  setState(patch: Partial<TTSOrchestratorState>): void
+}
+
+const facade = {
+  subscribe: coreOrchestrator.subscribe.bind(coreOrchestrator),
+  getState: coreOrchestrator.getState.bind(coreOrchestrator),
+  stop: coreOrchestrator.stop.bind(coreOrchestrator),
+  pause: coreOrchestrator.pause.bind(coreOrchestrator),
+  resume: coreOrchestrator.resume.bind(coreOrchestrator),
+  setState: (
+    coreOrchestrator as unknown as { setState(patch: Partial<TTSOrchestratorState>): void }
+  ).setState.bind(coreOrchestrator),
+  async speak(text, options) {
+    const result = await coreOrchestrator.speak(text, options)
+    meterUtterance(text.length, coreOrchestrator.getState().currentProvider)
+    return result
   },
-})
+  async speakStream(tokens, options) {
+    const counter = { characters: 0 }
+    const result = await coreOrchestrator.speakStream(countingTokens(tokens, counter), options)
+    meterUtterance(counter.characters, coreOrchestrator.getState().currentProvider)
+    return result
+  },
+} as unknown as TestableTTSFacade
+
+export const ttsOrchestrator: TTSOrchestrator = facade

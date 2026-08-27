@@ -25,7 +25,7 @@ import {
   ORDERED_TTS_PROVIDERS,
   TTS_PROVIDERS,
   normalizeTTSProvider,
-  type TTSProvider,
+  type SelectableTTSProvider,
 } from "@cognia/tts/types"
 import { generateSSML } from "@cognia/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
@@ -33,9 +33,9 @@ import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
 import { loggers } from "@cognia/logging"
 import { detectPlatform } from "@/lib/platform/detect"
 
-// -- SSML Preview (Edge / System) --------------------------------------------
+// -- SSML Preview -------------------------------------------------------------
 
-function SSMLPreviewSection({ provider }: { provider: "edge" | "system" }) {
+function SSMLPreviewSection() {
   const t = useTranslations("settings.speech.tts")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
@@ -43,10 +43,10 @@ function SSMLPreviewSection({ provider }: { provider: "edge" | "system" }) {
 
   const customEnabled = settings?.ttsCustomSSMLEnabled ?? false
   const customSSML = settings?.ttsCustomSSML ?? ""
-  const voice = provider === "edge" ? settings?.edgeVoice : settings?.systemVoice
-  const rate = provider === "edge" ? undefined : settings?.ttsRate
-  const pitch = provider === "edge" ? undefined : settings?.ttsPitch
-  const volume = provider === "edge" ? undefined : settings?.ttsVolume
+  const voice = settings?.systemVoice
+  const rate = settings?.ttsRate
+  const pitch = settings?.ttsPitch
+  const volume = settings?.ttsVolume
 
   const preview = generateSSML(t("ssmlSampleText"), {
     voice: voice || undefined,
@@ -189,7 +189,7 @@ export function TtsCard() {
   const setTtsVolume = useSettingsStore((s) => s.setTtsVolume)
 
   const ttsEnabled = settings?.ttsEnabled ?? false
-  const provider: TTSProvider = normalizeTTSProvider(settings?.ttsProvider)
+  const provider = normalizeTTSProvider(settings?.ttsProvider)
   const ttsAutoPlay = settings?.ttsAutoPlay ?? false
   const ttsRate = settings?.ttsRate ?? 1.0
   const ttsPitch = settings?.ttsPitch ?? 1.0
@@ -241,7 +241,7 @@ export function TtsCard() {
                 value={provider}
                 onValueChange={(v) => {
                   loggers.tts.info("settings.ttsProviderChanged", { provider: v })
-                  void setTtsProvider(v as TTSProvider)
+                  void setTtsProvider(v as SelectableTTSProvider)
                 }}
               >
                 <SelectTrigger>
@@ -396,10 +396,8 @@ export function TtsCard() {
 
             <Separator />
 
-            {/* SSML preview (Edge / System) */}
-            {(provider === "edge" || provider === "system") && (
-              <SSMLPreviewSection provider={provider} />
-            )}
+            {/* SSML preview (system speech synthesis) */}
+            {provider === "system" && <SSMLPreviewSection />}
 
             <Separator />
 

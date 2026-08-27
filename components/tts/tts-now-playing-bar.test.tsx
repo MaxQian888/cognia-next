@@ -57,6 +57,12 @@ beforeEach(() => {
 })
 
 describe("TtsNowPlayingBar", () => {
+  it("exposes stable control method identities", () => {
+    expect(ttsOrchestrator.pause).toBe(ttsOrchestrator.pause)
+    expect(ttsOrchestrator.resume).toBe(ttsOrchestrator.resume)
+    expect(ttsOrchestrator.stop).toBe(ttsOrchestrator.stop)
+  })
+
   it("is hidden while idle", () => {
     render(<TtsNowPlayingBar />)
     expect(screen.queryByRole("status")).toBeNull()

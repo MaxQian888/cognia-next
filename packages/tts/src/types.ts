@@ -19,6 +19,9 @@ export type TTSProvider =
   | "mistral"
   | "openai-realtime"
 
+/** Providers that can be selected and executed by the current TTS runtime. */
+export type SelectableTTSProvider = Exclude<TTSProvider, "edge" | "openai-realtime">
+
 /**
  * Legacy web fallback row for the `tts_provider_keys` Dexie table. New writes
  * use the encrypted Browser Vault (or the OS keyring on desktop); this shape is
@@ -799,15 +802,25 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
  *   (`crates/cognia-tts/src/realtime.rs`, `providers/openai-realtime.ts`) is
  *   kept, reserved for a future real-time voice-conversation feature (O1).
  */
-export const RETIRED_TTS_PROVIDERS: TTSProvider[] = ["edge", "openai-realtime"]
+export const RETIRED_TTS_PROVIDERS = ["edge", "openai-realtime"] as const satisfies readonly TTSProvider[]
 
-export function normalizeTTSProvider(value: unknown): TTSProvider {
+const warnedRetiredProviders = new Set<string>()
+
+export function normalizeTTSProvider(value: unknown): SelectableTTSProvider {
+  if (
+    typeof value === "string" &&
+    (RETIRED_TTS_PROVIDERS as readonly string[]).includes(value) &&
+    !warnedRetiredProviders.has(value)
+  ) {
+    warnedRetiredProviders.add(value)
+    console.warn(`TTS provider "${value}" is retired; using "system" instead.`)
+  }
   if (
     typeof value === "string" &&
     Object.prototype.hasOwnProperty.call(TTS_PROVIDERS, value) &&
-    !RETIRED_TTS_PROVIDERS.includes(value as TTSProvider)
+    !(RETIRED_TTS_PROVIDERS as readonly string[]).includes(value)
   ) {
-    return value as TTSProvider
+    return value as SelectableTTSProvider
   }
   return "system"
 }
@@ -816,7 +829,7 @@ export function normalizeTTSProvider(value: unknown): TTSProvider {
  * Stable list of *selectable* TTS provider IDs in display order (system
  * first). Retired providers (see `RETIRED_TTS_PROVIDERS`) are excluded.
  */
-export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
+export const ORDERED_TTS_PROVIDERS: SelectableTTSProvider[] = [
   "system",
   "openai",
   "local-openai-compatible",
@@ -829,6 +842,112 @@ export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "lmnt",
   "hume",
 ]
+
+export type TTSConfigurationField = "apiKey" | "endpoint" | "model" | "voice"
+
+export interface TTSProviderSettingsDescriptor {
+  id: SelectableTTSProvider
+  voiceSettingKey: keyof TTSSettings
+  voices: readonly { id: string; name: string }[] | null
+  fallbackVoice: string
+  configurationFields: readonly TTSConfigurationField[]
+  supportsSystemControls: boolean
+}
+
+/** UI-neutral settings metadata shared by desktop, mobile, and character editors. */
+export const TTS_PROVIDER_SETTINGS: Record<
+  SelectableTTSProvider,
+  TTSProviderSettingsDescriptor
+> = {
+  system: {
+    id: "system",
+    voiceSettingKey: "systemVoice",
+    voices: null,
+    fallbackVoice: "",
+    configurationFields: ["voice"],
+    supportsSystemControls: true,
+  },
+  openai: {
+    id: "openai",
+    voiceSettingKey: "openaiVoice",
+    voices: OPENAI_TTS_VOICES,
+    fallbackVoice: "alloy",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  "local-openai-compatible": {
+    id: "local-openai-compatible",
+    voiceSettingKey: "localOpenaiVoice",
+    voices: null,
+    fallbackVoice: "",
+    configurationFields: ["apiKey", "endpoint", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  gemini: {
+    id: "gemini",
+    voiceSettingKey: "geminiVoice",
+    voices: GEMINI_TTS_VOICES,
+    fallbackVoice: "Kore",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  elevenlabs: {
+    id: "elevenlabs",
+    voiceSettingKey: "elevenlabsVoice",
+    voices: ELEVENLABS_TTS_VOICES,
+    fallbackVoice: "rachel",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  cartesia: {
+    id: "cartesia",
+    voiceSettingKey: "cartesiaVoice",
+    voices: CARTESIA_TTS_VOICES,
+    fallbackVoice: "a0e99841-438c-4a64-b679-ae501e7d6091",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  deepgram: {
+    id: "deepgram",
+    voiceSettingKey: "deepgramVoice",
+    voices: DEEPGRAM_TTS_VOICES,
+    fallbackVoice: "aura-2-asteria-en",
+    configurationFields: ["apiKey", "voice"],
+    supportsSystemControls: false,
+  },
+  xiaomi: {
+    id: "xiaomi",
+    voiceSettingKey: "xiaomiVoice",
+    voices: XIAOMI_TTS_VOICES,
+    fallbackVoice: "mimo_default",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  mistral: {
+    id: "mistral",
+    voiceSettingKey: "mistralVoiceId",
+    voices: null,
+    fallbackVoice: "",
+    configurationFields: ["apiKey", "model", "voice"],
+    supportsSystemControls: false,
+  },
+  lmnt: {
+    id: "lmnt",
+    voiceSettingKey: "lmntVoice",
+    voices: LMNT_TTS_VOICES,
+    fallbackVoice: "lily",
+    configurationFields: ["apiKey", "voice"],
+    supportsSystemControls: false,
+  },
+  hume: {
+    id: "hume",
+    voiceSettingKey: "humeVoice",
+    voices: HUME_TTS_VOICES,
+    fallbackVoice: "kora",
+    configurationFields: ["apiKey", "voice"],
+    supportsSystemControls: false,
+  },
+}
 
 /**
  * SpeechSettings — TTS surface plus the small STT cross-cut (`sttLanguage`)

@@ -163,18 +163,15 @@
       "disposition": "separate-design-required",
       "reason": "The existing command depends on an interactive media lifecycle and needs a separately approved Headless-native design before exposure.",
       "commands": [
-        "tts_edge_synthesize",
         "tts_keyring_delete",
         "tts_keyring_get",
         "tts_keyring_list_providers",
         "tts_keyring_set",
         "tts_proxy_cancel",
-        "tts_proxy_fetch",
-        "tts_realtime_cancel",
-        "tts_realtime_synthesize"
+        "tts_proxy_fetch"
       ],
       "commandReasons": {
-        "tts_proxy_cancel": "Cancels an in-flight tts_proxy_fetch through the process-global cancellation registry that command registers into. It has no local dependency of its own, but a cancel token is meaningless without the fetch that minted it, and tts_proxy_fetch is already in this group — as is tts_realtime_cancel, the exact same cancel-half of tts_realtime_synthesize. Splitting one request lifecycle across two dispositions would make both wrong."
+        "tts_proxy_cancel": "Cancels an in-flight tts_proxy_fetch through the process-global cancellation registry that command registers into. A cancel token is meaningless without the fetch that minted it, so splitting the request lifecycle across two dispositions would make both wrong."
       }
     },
     {

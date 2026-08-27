@@ -26,6 +26,7 @@ import { splitStream, type StreamSplitterOptions } from "./stream-splitter"
 import {
   DEFAULT_SPEECH_SETTINGS,
   TTS_PROVIDERS,
+  normalizeTTSProvider,
   type ProviderSettingsMap,
   type SpeechSettings,
   type TTSPlaybackState,
@@ -116,7 +117,7 @@ export class TTSOrchestrator {
   async speak(text: string, options: TTSOrchestratorSpeakOptions = {}): Promise<void> {
     const speechSettings = options.speechSettings ?? DEFAULT_SPEECH_SETTINGS
     const providerSettings = options.providerSettings
-    const requestedProvider = options.provider ?? speechSettings.ttsProvider
+    const requestedProvider = normalizeTTSProvider(options.provider ?? speechSettings.ttsProvider)
     const provider = getTtsHost().isMobileShell?.() ? "system" : requestedProvider
     const source = options.source ?? "unknown"
     const sourceId = options.sourceId
@@ -172,9 +173,7 @@ export class TTSOrchestrator {
     const bufferedAbort = new AbortController()
     this.bufferedAbort = bufferedAbort
 
-    const skipSplit =
-      provider === "edge" && speechSettings.ttsCustomSSMLEnabled && !!speechSettings.ttsCustomSSML
-    const chunks = skipSplit ? [normalizedText] : splitTextForTTS(normalizedText, provider)
+    const chunks = splitTextForTTS(normalizedText, provider)
 
     try {
       options.onStart?.()

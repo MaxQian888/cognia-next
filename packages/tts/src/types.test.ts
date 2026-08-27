@@ -5,6 +5,7 @@ import {
   ORDERED_TTS_PROVIDERS,
   REALTIME_TTS_MODELS,
   RETIRED_TTS_PROVIDERS,
+  TTS_PROVIDER_SETTINGS,
   TTS_PROVIDERS,
   getApiKeyProvider,
   getEdgeVoicesByLanguage,
@@ -59,6 +60,16 @@ describe("TTS types & helpers", () => {
       expect(ORDERED_TTS_PROVIDERS).not.toContain(p)
       expect(TTS_PROVIDERS[p]).toBeDefined()
     }
+  })
+
+  it("describes every selectable provider without exposing retired transports", () => {
+    expect(Object.keys(TTS_PROVIDER_SETTINGS)).toEqual(ORDERED_TTS_PROVIDERS)
+    expect(TTS_PROVIDER_SETTINGS.mistral.voiceSettingKey).toBe("mistralVoiceId")
+    expect(TTS_PROVIDER_SETTINGS["local-openai-compatible"].configurationFields).toEqual(
+      expect.arrayContaining(["endpoint", "model", "voice"])
+    )
+    expect("edge" in TTS_PROVIDER_SETTINGS).toBe(false)
+    expect("openai-realtime" in TTS_PROVIDER_SETTINGS).toBe(false)
   })
 
   it("DEFAULT_TTS_SETTINGS picks sensible defaults", () => {

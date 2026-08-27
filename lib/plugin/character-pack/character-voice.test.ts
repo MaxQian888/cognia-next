@@ -42,15 +42,15 @@ describe("resolveCharacterVoice", () => {
     const full = resolveCharacterVoice(
       makeCharacter({
         voiceProfile: {
-          provider: "edge",
-          voiceId: "en-US-JennyNeural",
+          provider: "elevenlabs",
+          voiceId: "rachel",
           rate: 1.2,
           pitch: 0.9,
           volume: 0.5,
         },
       })
     )
-    expect(full?.edgeVoice).toBe("en-US-JennyNeural")
+    expect(full?.elevenlabsVoice).toBe("rachel")
     expect(full?.ttsRate).toBe(1.2)
     expect(full?.ttsPitch).toBe(0.9)
     expect(full?.ttsVolume).toBe(0.5)
@@ -95,14 +95,12 @@ describe("resolveCharacterVoice", () => {
     expect(frozen.voiceProfile?.voiceId).toBe("alloy")
   })
 
-  it("covers every TTSProvider in the field map", () => {
+  it("covers every selectable TTSProvider in the field map", () => {
     const providers: Array<{ p: string; field: string }> = [
       { p: "system", field: "systemVoice" },
       { p: "openai", field: "openaiVoice" },
       { p: "local-openai-compatible", field: "localOpenaiVoice" },
-      { p: "openai-realtime", field: "realtimeVoice" },
       { p: "gemini", field: "geminiVoice" },
-      { p: "edge", field: "edgeVoice" },
       { p: "elevenlabs", field: "elevenlabsVoice" },
       { p: "lmnt", field: "lmntVoice" },
       { p: "hume", field: "humeVoice" },
@@ -122,4 +120,17 @@ describe("resolveCharacterVoice", () => {
       expect(overlay?.ttsProvider).toBe(p)
     }
   })
+
+  it.each(["edge", "openai-realtime"])(
+    "falls back to global settings for retired provider %s",
+    (provider) => {
+      expect(
+        resolveCharacterVoice(
+          makeCharacter({
+            voiceProfile: { provider: provider as "openai", voiceId: "legacy" },
+          })
+        )
+      ).toBeUndefined()
+    }
+  )
 })

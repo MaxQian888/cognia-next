@@ -3,6 +3,9 @@
   "autoPlayHelp": "Speak assistant messages aloud as they arrive.",
   "backAria": "Back to Me",
   "pitch": "Pitch",
+  "localEndpoint": "Local endpoint",
+  "localEndpointHelp": "This device-local address and model are used only in standalone mode.",
+  "model": "Model",
   "provider": "Voice provider",
   "providerHelp": "Cloud-provider API keys stay configured on the desktop.",
   "providers": {
@@ -13,6 +16,8 @@
     "gemini": "Gemini",
     "hume": "Hume",
     "lmnt": "LMNT",
+    "local-openai-compatible": "Local OpenAI-compatible",
+    "mistral": "Mistral",
     "openai": "OpenAI",
     "system": "System voice",
     "xiaomi": "Xiaomi"

@@ -4,9 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 const saveMock = jest.fn()
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => Boolean((globalThis as { __mockTauri?: boolean }).__mockTauri),
-}))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
@@ -34,38 +32,11 @@ jest.mock("./api-key-input", () => ({
 import {
   LocalOpenAiCompatibleConfig,
   MistralConfig,
-  OpenAiRealtimeConfig,
   PROVIDER_CONFIG_COMPONENTS,
 } from "./provider-config"
 
 beforeEach(() => {
   saveMock.mockClear()
-  ;(globalThis as { __mockTauri?: boolean }).__mockTauri = false
-})
-
-describe("OpenAiRealtimeConfig", () => {
-  it("registers in the provider component map", () => {
-    expect(PROVIDER_CONFIG_COMPONENTS["openai-realtime"]).toBe(OpenAiRealtimeConfig)
-  })
-
-  it("shows the desktop-only notice in browser mode", () => {
-    render(<OpenAiRealtimeConfig />)
-    expect(screen.getByText("realtimeDesktopOnly")).toBeInTheDocument()
-    expect(screen.getByText("realtimeIntro")).toBeInTheDocument()
-  })
-
-  it("hides the desktop-only notice when running in Tauri", () => {
-    ;(globalThis as { __mockTauri?: boolean }).__mockTauri = true
-    render(<OpenAiRealtimeConfig />)
-    expect(screen.queryByText("realtimeDesktopOnly")).not.toBeInTheDocument()
-  })
-
-  it("saves the delivery instructions on change", () => {
-    render(<OpenAiRealtimeConfig />)
-    const textarea = screen.getByPlaceholderText("voiceInstructionsPlaceholder")
-    fireEvent.change(textarea, { target: { value: "sound excited" } })
-    expect(saveMock).toHaveBeenCalledWith({ realtimeInstructions: "sound excited" })
-  })
 })
 
 describe("MistralConfig", () => {

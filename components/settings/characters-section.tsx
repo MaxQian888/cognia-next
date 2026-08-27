@@ -98,17 +98,10 @@ import type {
 } from "@/types/plugin/plugin-character-pack"
 import type { PluginRuntimeProfile } from "@/types/plugin/plugin"
 import {
+  ORDERED_TTS_PROVIDERS,
+  TTS_PROVIDER_SETTINGS,
   TTS_PROVIDERS,
-  type TTSProvider,
-  OPENAI_TTS_VOICES,
-  GEMINI_TTS_VOICES,
-  EDGE_TTS_VOICES,
-  ELEVENLABS_TTS_VOICES,
-  LMNT_TTS_VOICES,
-  HUME_TTS_VOICES,
-  CARTESIA_TTS_VOICES,
-  DEEPGRAM_TTS_VOICES,
-  XIAOMI_TTS_VOICES,
+  type SelectableTTSProvider,
 } from "@cognia/tts/types"
 import {
   Accordion,
@@ -171,17 +164,14 @@ const COLOR_PALETTE = [
 // ADR-0030 v2 — per-character voice profile editor support. Reuses the
 // existing TTS voice catalogs (`lib/tts/types.ts`). `system` has no static
 // catalog (browser voices load at runtime), so its voiceId is free-text.
-const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; name: string }>>> = {
-  openai: OPENAI_TTS_VOICES,
-  gemini: GEMINI_TTS_VOICES,
-  edge: EDGE_TTS_VOICES,
-  elevenlabs: ELEVENLABS_TTS_VOICES,
-  lmnt: LMNT_TTS_VOICES,
-  hume: HUME_TTS_VOICES,
-  cartesia: CARTESIA_TTS_VOICES,
-  deepgram: DEEPGRAM_TTS_VOICES,
-  xiaomi: XIAOMI_TTS_VOICES,
-}
+const VOICE_CATALOG: Partial<
+  Record<SelectableTTSProvider, ReadonlyArray<{ id: string; name: string }>>
+> = Object.fromEntries(
+  ORDERED_TTS_PROVIDERS.flatMap((provider) => {
+    const voices = TTS_PROVIDER_SETTINGS[provider].voices
+    return voices ? [[provider, voices]] : []
+  })
+)
 
 const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser", "mobile"]
 
@@ -2616,9 +2606,9 @@ export function CharacterEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{tEditor("voice.inherit")}</SelectItem>
-                {Object.values(TTS_PROVIDERS).map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
+                {ORDERED_TTS_PROVIDERS.map((provider) => (
+                  <SelectItem key={provider} value={provider}>
+                    {TTS_PROVIDERS[provider].name}
                   </SelectItem>
                 ))}
               </SelectContent>

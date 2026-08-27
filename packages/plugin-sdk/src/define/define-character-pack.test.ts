@@ -95,6 +95,28 @@ describe("defineCharacterPack", () => {
     }
   })
 
+  it.each(["edge", "openai-realtime"])(
+    "warns that retired provider %s will use global TTS settings",
+    (provider) => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        defineCharacterPack({
+          id: "demo",
+          name: "Demo",
+          version: "1.0.0",
+          characters: [
+            makeCharacter({
+              voiceProfile: { provider: provider as "openai", voiceId: "legacy" },
+            }),
+          ],
+        })
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/retired TTS provider/))
+      } finally {
+        warn.mockRestore()
+      }
+    }
+  )
+
   it("warns when avatarImage.webDataUrl exceeds the soft byte limit", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     try {

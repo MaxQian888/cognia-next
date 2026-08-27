@@ -36,55 +36,16 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 import {
-  CARTESIA_TTS_VOICES,
-  DEEPGRAM_TTS_VOICES,
-  EDGE_TTS_VOICES,
-  ELEVENLABS_TTS_VOICES,
-  GEMINI_TTS_VOICES,
-  HUME_TTS_VOICES,
-  LMNT_TTS_VOICES,
-  OPENAI_TTS_VOICES,
   ORDERED_TTS_PROVIDERS,
-  XIAOMI_TTS_VOICES,
-  type TTSProvider,
+  TTS_PROVIDER_SETTINGS,
+  type SelectableTTSProvider,
 } from "@cognia/tts/types"
 import { SPEECH_LANGUAGES } from "@cognia/tts/speech"
-
-/**
- * Per-provider voice config — maps each provider to its flat AppSettings voice
- * key, the selectable voice catalogue (or `null` for the system provider, whose
- * voices come from the Web Speech API at runtime), and the default voice id.
- * Mirrors the desktop `provider-config.tsx` defaults exactly.
- */
-const VOICE_CONFIG: Partial<
-  Record<
-    TTSProvider,
-    {
-      key: keyof AppSettings
-      voices: readonly { id: string; name: string }[] | null
-      fallback: string
-    }
-  >
-> = {
-  system: { key: "systemVoice", voices: null, fallback: "" },
-  openai: { key: "openaiVoice", voices: OPENAI_TTS_VOICES, fallback: "alloy" },
-  gemini: { key: "geminiVoice", voices: GEMINI_TTS_VOICES, fallback: "Kore" },
-  edge: { key: "edgeVoice", voices: EDGE_TTS_VOICES, fallback: "en-US-JennyNeural" },
-  elevenlabs: { key: "elevenlabsVoice", voices: ELEVENLABS_TTS_VOICES, fallback: "rachel" },
-  lmnt: { key: "lmntVoice", voices: LMNT_TTS_VOICES, fallback: "lily" },
-  hume: { key: "humeVoice", voices: HUME_TTS_VOICES, fallback: "kora" },
-  cartesia: {
-    key: "cartesiaVoice",
-    voices: CARTESIA_TTS_VOICES,
-    fallback: "a0e99841-438c-4a64-b679-ae501e7d6091",
-  },
-  deepgram: { key: "deepgramVoice", voices: DEEPGRAM_TTS_VOICES, fallback: "aura-2-asteria-en" },
-  xiaomi: { key: "xiaomiVoice", voices: XIAOMI_TTS_VOICES, fallback: "mimo_default" },
-}
 
 /**
  * Voice picker. For cloud providers the catalogue is the static list shipped in
@@ -100,7 +61,7 @@ function VoiceSelect({
   ariaLabel,
   autoLabel,
 }: {
-  provider: TTSProvider
+  provider: SelectableTTSProvider
   value: string
   onChange: (voice: string) => void
   disabled: boolean
@@ -125,11 +86,11 @@ function VoiceSelect({
     }
   }, [provider])
 
-  const cfg = VOICE_CONFIG[provider]
+  const cfg = TTS_PROVIDER_SETTINGS[provider]
   const options =
     provider === "system"
       ? [{ id: "auto", name: autoLabel }, ...systemVoices]
-      : (cfg?.voices ?? []).map((v) => ({ id: v.id, name: v.name }))
+      : (cfg.voices ?? []).map((v) => ({ id: v.id, name: v.name }))
   const selectValue = provider === "system" ? value || "auto" : value
 
   return (
@@ -161,20 +122,21 @@ export default function MobileSpeechPage() {
   const t = useTranslations("mobile.speech")
 
   const settings = useSettingsStore((s) => s.settings)
+  const saveLocalSettings = useSettingsStore((s) => s.save)
   const update = useSettingsPatch()
 
   const ttsEnabled = settings?.ttsEnabled ?? false
-  const ttsProvider = settings?.ttsProvider ?? "system"
+  const ttsProvider = (settings?.ttsProvider ?? "system") as SelectableTTSProvider
   const ttsRate = settings?.ttsRate ?? 1
   const ttsPitch = settings?.ttsPitch ?? 1
   const ttsVolume = settings?.ttsVolume ?? 1
   const ttsAutoPlay = settings?.ttsAutoPlay ?? false
   const sttLanguage = settings?.sttLanguage ?? "auto"
 
-  const voiceCfg = VOICE_CONFIG[ttsProvider as TTSProvider]
-  const currentVoice = voiceCfg
-    ? ((settings?.[voiceCfg.key] as string | undefined) ?? voiceCfg.fallback)
-    : ""
+  const voiceCfg = TTS_PROVIDER_SETTINGS[ttsProvider]
+  const currentVoice =
+    (settings?.[voiceCfg.voiceSettingKey as keyof AppSettings] as string | undefined) ??
+    voiceCfg.fallbackVoice
 
   return (
     <SubPageShell title={t("title")} backAria={t("backAria")} testid="mobile-speech-page">
@@ -226,18 +188,67 @@ export default function MobileSpeechPage() {
             </ItemContent>
           </Item>
 
-          {voiceCfg && (
+          {voiceCfg.voices !== null || ttsProvider === "system" ? (
             <Item size="sm" className="px-0">
               <ItemContent>
                 <ItemTitle className="text-xs">{t("voice")}</ItemTitle>
                 <ItemDescription className="text-[11px]">{t("voiceHelp")}</ItemDescription>
                 <VoiceSelect
-                  provider={ttsProvider as TTSProvider}
+                  provider={ttsProvider}
                   value={currentVoice}
-                  onChange={(v) => void update({ [voiceCfg.key]: v } as Partial<AppSettings>)}
+                  onChange={(v) =>
+                    void update({
+                      [voiceCfg.voiceSettingKey]: v,
+                    } as Partial<AppSettings>)
+                  }
                   disabled={!ttsEnabled}
                   ariaLabel={t("voice")}
                   autoLabel={t("voiceAuto")}
+                />
+              </ItemContent>
+            </Item>
+          ) : (
+            <Item size="sm" className="px-0">
+              <ItemContent>
+                <ItemTitle className="text-xs">{t("voice")}</ItemTitle>
+                <ItemDescription className="text-[11px]">{t("voiceHelp")}</ItemDescription>
+                <Input
+                  aria-label={t("voice")}
+                  disabled={!ttsEnabled}
+                  onChange={(event) =>
+                    void update({
+                      [voiceCfg.voiceSettingKey]: event.target.value,
+                    } as Partial<AppSettings>)
+                  }
+                  value={currentVoice}
+                />
+              </ItemContent>
+            </Item>
+          )}
+
+          {ttsProvider === "local-openai-compatible" && (
+            <Item size="sm" className="px-0">
+              <ItemContent>
+                <ItemTitle className="text-xs">{t("localEndpoint")}</ItemTitle>
+                <ItemDescription className="text-[11px]">
+                  {t("localEndpointHelp")}
+                </ItemDescription>
+                <Input
+                  aria-label={t("localEndpoint")}
+                  disabled={!ttsEnabled}
+                  onChange={(event) =>
+                    void saveLocalSettings({ localOpenaiBaseUrl: event.target.value })
+                  }
+                  value={settings?.localOpenaiBaseUrl ?? ""}
+                />
+                <Input
+                  aria-label={t("model")}
+                  className="mt-2"
+                  disabled={!ttsEnabled}
+                  onChange={(event) =>
+                    void saveLocalSettings({ localOpenaiModel: event.target.value })
+                  }
+                  value={settings?.localOpenaiModel ?? ""}
                 />
               </ItemContent>
             </Item>
