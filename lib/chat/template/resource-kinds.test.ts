@@ -16,6 +16,10 @@ const FIXTURES: Record<string, unknown> = {
   skill: { kind: "skill", skill: { id: "s1", name: "Skill" } },
   preset: { kind: "preset", preset: { id: "p1", name: "Preset" } },
   doc: { kind: "doc", providerId: "lark", accountId: "a1", doc: { id: "d1", title: "Doc" } },
+  entity: {
+    kind: "entity",
+    candidate: { entityKind: "issue", id: "i1", title: "Issue", searchText: "issue" },
+  },
   wfElement: {
     kind: "wfElement",
     element: { type: "node", id: "n1", label: "Node", kind: "agent" },

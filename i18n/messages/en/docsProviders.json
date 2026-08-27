@@ -54,5 +54,9 @@
     "larkNoAccount": "No Feishu account is connected yet.",
     "notConnected": "Not connected",
     "title": "Remote documents"
+  },
+  "name": {
+    "lark": "Feishu Docs",
+    "google": "Google Workspace"
   }
 }

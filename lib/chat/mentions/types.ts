@@ -9,22 +9,31 @@
  * Legacy messages without the field fall back to the regex path
  * (`read.ts` `getMessageMentions`).
  *
- * Chip-style picks (skill / preset / workflow element) mutate session state
- * rather than inserting a token — they are session context, not message
- * mentions, and are deliberately NOT captured here.
+ * Chip-style picks leave no token, so re-parsing the text can never find them.
+ * They enter through `MentionPickContext.recordMention` instead, and the send
+ * path merges both lists. Two groups, split by whether a citation even exists:
  *
- * `doc` (a remote Feishu / Google document, ADR-0134) IS captured: its body is
- * fetched at pick time and staged as an attachment, so no `@…` token survives
- * in the text and the ContextRef is the ONLY record that the turn cited that
- * document. Its `id` is `<providerId>:<documentId>`.
+ *   - `skill` / `preset` / `wfNode` / `wfEdge` mutate SESSION STATE. Enabling a
+ *     skill is not a statement about this message, so they record nothing and
+ *     these kinds stay declared-but-unproduced. That is deliberate, and
+ *     `read.ts` still accepts them so a future producer needs no migration.
+ *   - `doc` (ADR-0134) and `entity` DO carry a citation: their body is read at
+ *     pick time and staged — as an attachment and as a context chip
+ *     respectively — so no `@…` token survives and this ref is the only record
+ *     that the turn cited that document or record. `doc` ids are
+ *     `<providerId>:<documentId>`; `entity` ids are `<entityKind>:<recordId>`.
  */
 
 export type ContextRefKind =
-  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc"
+  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc" | "entity"
 
 export interface ContextRef {
   kind: ContextRefKind
-  /** Stable id: relPath for files, agent name, subagent handle, skill/preset/graph id. */
+  /**
+   * Stable id: relPath for files, agent name, subagent handle, skill / preset /
+   * graph id, `<providerId>:<documentId>` for a document,
+   * `<entityKind>:<recordId>` for a record.
+   */
   id: string
   /** Display label when it differs from `id`. */
   label?: string

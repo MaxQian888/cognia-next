@@ -31,14 +31,18 @@ import {
   BoxIcon,
   CloudIcon,
   BrainIcon,
+  CircleDotIcon,
   CircleHelpIcon,
+  ClipboardListIcon,
   CornerDownRightIcon,
+  DatabaseIcon,
   FileCode2Icon,
   GitBranchIcon,
   FileIcon,
   FolderIcon,
   ListPlusIcon,
   MessageCircleMoreIcon,
+  MessagesSquareIcon,
   PinIcon,
   PinOffIcon,
   Repeat2Icon,
@@ -48,6 +52,7 @@ import {
   SparklesIcon,
   SplineIcon,
   SheetIcon,
+  ShapesIcon,
   SquareTerminalIcon,
   TableIcon,
   TargetIcon,
@@ -64,8 +69,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { searchWorkspace } from "@/lib/files/workspace-search"
+import { isWorkspaceSearchReachable, searchWorkspace } from "@/lib/files/workspace-search"
 import { useRemoteDocSearch } from "@/hooks/chat/use-remote-doc-search"
+import { useEntityMentionSearch } from "@/hooks/chat/use-entity-mention-search"
+import type {
+  EntityMentionCandidate,
+  EntityMentionContext,
+} from "@/lib/chat/mentions/entity-sources"
 import type { RemoteDocRef } from "@/lib/docs-providers"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
@@ -99,6 +109,7 @@ import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-tar
 
 import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
 import type { OfferedChatTemplate } from "@/lib/chat/template/template"
+import type { EntitySelectionKind } from "@/types/artifact/artifact"
 
 export type PopoverItem =
   | {
@@ -144,6 +155,12 @@ export type PopoverItem =
       accountId: string
       doc: RemoteDocRef
     }
+  /**
+   * A first-party record reached through `@memory:` / `@issue:` / `@plan:` /
+   * `@chat:` / `@artifact:`. Carries only the picker row — the body is read on
+   * pick, not on every keystroke of the search.
+   */
+  | { kind: "entity"; candidate: EntityMentionCandidate }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -198,6 +215,12 @@ interface Props {
    * so arrowing through the picker pulses the matching node.
    */
   onHighlightElement?: (element: MentionableWorkflowElement | null) => void
+  /**
+   * Where the composer sits, so the entity sources can scope their reads to
+   * this workspace and exclude the conversation being composed in. Undefined
+   * outside the general chat composer, which leaves every source unscoped.
+   */
+  entityContext?: EntityMentionContext
   /** Recently-used command names (newest first) for the empty-query view. */
   recentCommands?: readonly string[]
   /** Pinned command names (pin order) for the empty-query view + pin toggles. */
@@ -231,6 +254,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     chatPresets,
     chatTemplates,
     workflowElements,
+    entityContext,
     onHighlightElement,
     recentCommands,
     pinnedCommands,
@@ -251,6 +275,14 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   const docSearch = useRemoteDocSearch({
     namespace: trigger?.kind === "doc" ? (trigger.namespace ?? null) : null,
     query: trigger?.kind === "doc" ? trigger.query : "",
+  })
+  // Local records (`@memory:` / `@issue:` / …). Same unconditional-call reason
+  // as `docSearch` above: the trigger kind changes on every keystroke and hooks
+  // cannot be conditional, so a null namespace is the "inactive" signal.
+  const entitySearch = useEntityMentionSearch({
+    namespace: trigger?.kind === "entity" ? (trigger.namespace ?? null) : null,
+    query: trigger?.kind === "entity" ? trigger.query : "",
+    context: entityContext ?? {},
   })
   // File-scoped memory writes go through a Tauri command, so the two CLAUDE.md
   // rows are inert off the desktop shell.
@@ -288,6 +320,20 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   useEffect(() => {
     if (!trigger || trigger.kind !== "file") {
       setFileList(null)
+      return
+    }
+    if (!isWorkspaceSearchReachable()) {
+      // Intentional dormancy (project rule 7, UI axis): a plain browser with no
+      // paired host cannot search files, and the panel says so rather than
+      // leaking `WebStubTransport`'s "tauri-only command from web mode: …".
+      // Not an `error`, because the combined `@` panel suppresses errors when
+      // agents are showing — this must survive as the files section's message.
+      setFileList({
+        items: [],
+        loading: false,
+        error: null,
+        emptyMessage: t("workspaceUnreachable"),
+      })
       return
     }
     if (!cwd) {
@@ -504,6 +550,41 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage: empty,
       }
     }
+    if (trigger.kind === "entity") {
+      if (!entitySearch.source) {
+        return { items: [], loading: false, error: null, emptyMessage: "" }
+      }
+      const kind = entitySearch.source.entityKind
+      return {
+        items: entitySearch.items.map((candidate) => ({ kind: "entity" as const, candidate })),
+        loading: entitySearch.loading,
+        // A failed local read is an ERROR, not an empty result. Saying "no
+        // matches" when the table could not be opened is the exact lie the
+        // dormancy rule is about.
+        error: entitySearch.error,
+        emptyMessage: trigger.query.trim()
+          ? t("noEntityMatches", { kind: t(`entityKinds.${kind}`), query: trigger.query })
+          : t("noEntities", { kind: t(`entityKinds.${kind}`) }),
+      }
+    }
+    if (trigger.kind === "subagent") {
+      // `@agent:` — the subagent half of the combined `@` panel, on its own.
+      const list = chatAgents ?? []
+      return {
+        items: filterSubagents(list, trigger.query).map((target) => ({
+          kind: "subagent" as const,
+          target,
+        })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0
+            ? safeLookup(tAgent, "noAgents", "No agents available")
+            : safeLookup(tAgent, "noMatches", `No agent matches "${trigger.query}"`, {
+                query: trigger.query,
+              }),
+      }
+    }
     if (trigger.kind === "wfNode" || trigger.kind === "wfEdge") {
       const wantType = trigger.kind === "wfNode" ? "node" : "edge"
       const list = (workflowElements ?? []).filter((el) => el.type === wantType)
@@ -530,8 +611,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       error: null as string | null,
       emptyMessage: "",
     }
+    // An explicit `@file:` means files and nothing else — that is the only
+    // reason to type it over a bare `@`, which lists both.
+    const filesOnly = trigger.namespace === "file:"
     const agentItems: PopoverItem[] =
-      chatAgents && chatAgents.length > 0
+      !filesOnly && chatAgents && chatAgents.length > 0
         ? filterSubagents(chatAgents, trigger.query).map((target) => ({
             kind: "subagent" as const,
             target,
@@ -566,6 +650,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     recentCommands,
     pinnedCommands,
     docSearch,
+    entitySearch,
     tDocs,
   ])
 
@@ -839,6 +924,19 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   )
 })
 
+/**
+ * One glyph per referenced record kind. A table rather than a switch because
+ * `EntitySelectionKind` is the exhaustiveness anchor: adding a sixth source
+ * fails to compile here until it has an icon, which is the point.
+ */
+const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
+  memory: BrainIcon,
+  issue: CircleDotIcon,
+  plan: ClipboardListIcon,
+  session: MessagesSquareIcon,
+  artifact: ShapesIcon,
+}
+
 function triggerTitle(
   kind: TriggerKind | undefined,
   t: (key: string) => string,
@@ -870,6 +968,10 @@ function triggerTitle(
       return { icon: <SplineIcon className="size-3.5" />, label: t("wfEdgeTitle") }
     case "doc":
       return { icon: <CloudIcon className="size-3.5" />, label: tDocs("picker.title") }
+    case "entity":
+      return { icon: <DatabaseIcon className="size-3.5" />, label: t("entityTitle") }
+    case "subagent":
+      return { icon: <AtSignIcon className="size-3.5" />, label: t("agentsSection") }
     case "agent":
       return {
         icon: <AtSignIcon className="size-3.5" />,
@@ -983,6 +1085,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "chatTemplate") return `chat-template-${item.template.id}`
   if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
   if (item.kind === "doc") return `doc-${item.providerId}-${item.doc.kind}-${item.doc.id}`
+  if (item.kind === "entity") return `entity-${item.candidate.entityKind}-${item.candidate.id}`
   return `idx-${idx}`
 }
 
@@ -1118,6 +1221,21 @@ const ItemRow = memo(function ItemRow({
         <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
           {tDocs(`kind.${doc.kind}`)}
         </span>
+      </>
+    )
+  }
+  if (item.kind === "entity") {
+    const { candidate } = item
+    const Icon = ENTITY_ROW_ICONS[candidate.entityKind]
+    return (
+      <>
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{candidate.title}</span>
+        {candidate.subtitle ? (
+          <span className="ml-auto shrink-0 truncate text-[10px] text-muted-foreground">
+            {candidate.subtitle}
+          </span>
+        ) : null}
       </>
     )
   }

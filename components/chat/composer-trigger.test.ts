@@ -449,9 +449,135 @@ describe("detectTrigger — remote document namespaces (@lark: / @gdoc:)", () =>
     })
   })
 
-  it("never sets `namespace` on a non-document trigger", () => {
+  it("sets `namespace` only where the prefix is still needed after detection", () => {
+    // The rule: a kind that maps 1:1 onto a prefix has nothing left to
+    // disambiguate, so it carries none. `doc` and `entity` each cover several
+    // sources, and `file` needs to tell an explicit `@file:` (files only) from
+    // a bare `@` (files + subagents) — those three carry it.
     expect(detectTrigger("@skill:x", 8)).not.toHaveProperty("namespace")
     expect(detectTrigger("@preset:x", 9)).not.toHaveProperty("namespace")
+    expect(detectTrigger("@agent:x", 8)).not.toHaveProperty("namespace")
     expect(detectTrigger("@src/app.ts", 11)).not.toHaveProperty("namespace")
+    expect(detectTrigger("@lark:x", 7)?.namespace).toBe("lark:")
+    expect(detectTrigger("@issue:x", 8)?.namespace).toBe("issue:")
+    expect(detectTrigger("@file:x", 7)?.namespace).toBe("file:")
+  })
+})
+
+describe("detectTrigger — entity namespaces (@memory: / @issue: / …)", () => {
+  it("flips to entity kind and carries the prefix that chose the source", () => {
+    const tg = detectTrigger("see @issue:rac", 14, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("entity")
+    expect(tg?.namespace).toBe("issue:")
+    expect(tg?.query).toBe("rac")
+    expect(tg?.tokenStart).toBe(4)
+  })
+
+  it("covers every registered source", () => {
+    for (const [prefix, expected] of [
+      ["memory:", "memory:"],
+      ["issue:", "issue:"],
+      ["plan:", "plan:"],
+      ["chat:", "chat:"],
+      ["artifact:", "artifact:"],
+    ] as const) {
+      const tg = detectTrigger(`@${prefix}q`, prefix.length + 2, { mentionMode: "combined" })
+      expect(tg?.kind).toBe("entity")
+      expect(tg?.namespace).toBe(expected)
+    }
+  })
+
+  it("yields an empty query right after the colon", () => {
+    const tg = detectTrigger("@plan:", 6, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("entity")
+    expect(tg?.query).toBe("")
+  })
+
+  it("stays a file token until the colon is typed", () => {
+    const tg = detectTrigger("@issue", 6, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+  })
+
+  it("does NOT flip in the team workspace, where `@` means a member", () => {
+    const tg = detectTrigger("@issue:rac", 10, { mentionMode: "agents" })
+    expect(tg?.kind).toBe("agent")
+    expect(tg?.query).toBe("issue:rac")
+  })
+
+  it("does NOT flip in the workflow composer", () => {
+    const tg = detectTrigger("@issue:rac", 10, { mentionMode: "workflow" })
+    expect(tg?.kind).toBe("wfNode")
+  })
+})
+
+describe("detectTrigger — @file: / @agent: (CLI vocabulary parity)", () => {
+  it("narrows `@file:` to files, carrying the prefix so agents can be suppressed", () => {
+    const tg = detectTrigger("@file:src/a", 11, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.namespace).toBe("file:")
+    expect(tg?.query).toBe("src/a")
+  })
+
+  it("narrows `@agent:` to subagents", () => {
+    const tg = detectTrigger("@agent:rev", 10, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("subagent")
+    expect(tg?.query).toBe("rev")
+  })
+
+  it("leaves a bare `@` unnamespaced so the combined panel still lists both", () => {
+    const tg = detectTrigger("@rev", 4, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.namespace).toBeUndefined()
+  })
+})
+
+describe("detectTrigger — mentions inside a slash command's arguments", () => {
+  it("opens the file picker for `@` in a command's argument region", () => {
+    // Previously the slash branch returned first and `hasSlashCompletion` shut
+    // the panel, so `@` was unreachable on any line starting with `/`.
+    const tg = detectTrigger("/review @src/a", 14, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("src/a")
+    expect(tg?.tokenStart).toBe(8)
+  })
+
+  it("names the host command so the hint bar can stay up", () => {
+    const tg = detectTrigger("/review @src/a", 14, { mentionMode: "combined" })
+    expect(tg?.withinCommand).toBe("review")
+  })
+
+  it("works for a namespaced mention too", () => {
+    const tg = detectTrigger("/plan @issue:rac", 16, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("entity")
+    expect(tg?.namespace).toBe("issue:")
+    expect(tg?.withinCommand).toBe("plan")
+  })
+
+  it("works past the FIRST argument, where the panel used to be shut entirely", () => {
+    const tg = detectTrigger("/review deep @src/a", 19, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
+    expect(tg?.query).toBe("src/a")
+  })
+
+  it("never reaches back over the command word", () => {
+    // The caret is in the command word itself — still a slash trigger.
+    const tg = detectTrigger("/review @src/a", 4, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("slash")
+    expect(tg?.query).toBe("rev")
+  })
+
+  it("leaves an argument with no `@` as a plain slash trigger", () => {
+    const tg = detectTrigger("/add-dir /usr/local", 19, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("slash")
+  })
+
+  it("still skips an email in a command argument", () => {
+    const tg = detectTrigger("/mail me@host.com", 17, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("slash")
+  })
+
+  it("does not set withinCommand for a mention on an ordinary line", () => {
+    const tg = detectTrigger("look at @src/a", 14, { mentionMode: "combined" })
+    expect(tg?.withinCommand).toBeUndefined()
   })
 })

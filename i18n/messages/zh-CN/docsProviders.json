@@ -54,5 +54,9 @@
     "larkNoAccount": "尚未连接飞书账号。",
     "notConnected": "未连接",
     "title": "云端文档"
+  },
+  "name": {
+    "lark": "飞书文档",
+    "google": "Google Workspace"
   }
 }

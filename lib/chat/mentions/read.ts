@@ -2,9 +2,14 @@
  * Typed reader for persisted message mentions.
  *
  * New messages carry `metadata.mentions: ContextRef[]` (written at send time
- * by the chat hook via `resolve-mentions.ts`); legacy messages fall back to
+ * by the chat hook: `resolve-mentions.ts` for the tokens still in the text,
+ * plus the composer's recorded chip-style picks); legacy messages fall back to
  * re-parsing the stored text with the same splitter, every token resolving
  * as `kind: "file"` (identity data for other kinds is gone by read time).
+ *
+ * Read by `lib/db/chat-search-text.ts`, which folds the mention labels into the
+ * message's search projection — that is what makes a chip-style citation
+ * findable at all, since it left no text behind to match.
  */
 
 import { resolveMentions } from "./resolve-mentions"
@@ -19,6 +24,7 @@ const KINDS: ReadonlySet<string> = new Set([
   "wfNode",
   "wfEdge",
   "doc",
+  "entity",
 ] satisfies ContextRefKind[])
 
 function isContextRef(value: unknown): value is ContextRef {

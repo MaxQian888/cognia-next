@@ -24,9 +24,21 @@ import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-bound
 import { isHttpUrlToken } from "@/lib/chat/link-token"
 import { tokenizeLine } from "@/lib/slash-commands/parse-segments"
 import { docsProviderPrefixes } from "@/lib/docs-providers"
+import { entityMentionPrefixes } from "@/lib/chat/mentions/entity-sources"
 
 export type TriggerKind =
-  "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc"
+  | "slash"
+  | "file"
+  | "bash"
+  | "memory"
+  | "agent"
+  | "subagent"
+  | "skill"
+  | "preset"
+  | "wfNode"
+  | "wfEdge"
+  | "doc"
+  | "entity"
 
 export type MentionMode = "files" | "agents" | "combined" | "workflow"
 
@@ -53,12 +65,27 @@ export interface MentionableWorkflowElement {
 export interface ComposerTrigger {
   kind: TriggerKind
   /**
-   * The namespace prefix that produced this trigger (`"lark:"`, `"gdoc:"`),
-   * when one did. Only `"doc"` triggers carry it — every other namespaced kind
-   * maps 1:1 to a `TriggerKind`, but the document providers share one kind and
-   * are told apart by which prefix the user typed.
+   * The namespace prefix that produced this trigger (`"lark:"`, `"issue:"`,
+   * `"file:"`), when one did.
+   *
+   * Carried by the kinds where the prefix is still load-bearing AFTER
+   * detection: `"doc"` and `"entity"` each cover several sources told apart
+   * only by which prefix was typed, and `"file"` needs it to distinguish an
+   * explicit `@file:` (files only) from a bare `@` (files + subagents). The
+   * kinds that map 1:1 onto a `TriggerKind` do not set it.
    */
   namespace?: string
+  /**
+   * The command whose argument region this mention sits inside, e.g. `review`
+   * for `/review @src/a|`.
+   *
+   * A mention inside a command's arguments returns a MENTION trigger (that is
+   * the whole point — the file picker has to open there), which would otherwise
+   * make the command hint bar stand down at exactly the moment the user is
+   * typing the arguments it exists to describe. Carrying the name keeps the bar
+   * up without giving the popover a second opinion about what it is completing.
+   */
+  withinCommand?: string
   /** Inclusive start of the token (the trigger char) in `value`. */
   tokenStart: number
   /** Exclusive end — equals caret unless the caret has moved past the token. */
@@ -128,6 +155,8 @@ const PRESET_TRIGGER: TriggerKind = "preset"
 const WFNODE_TRIGGER: TriggerKind = "wfNode"
 const WFEDGE_TRIGGER: TriggerKind = "wfEdge"
 const DOC_TRIGGER: TriggerKind = "doc"
+const SUBAGENT_TRIGGER: TriggerKind = "subagent"
+const ENTITY_TRIGGER: TriggerKind = "entity"
 
 // Namespaced `@` prefixes that flip the mention into a typed picker instead of
 // the file/agent panel. Mirrors the CLI's `@skill:` / `@agent:` mention
@@ -136,7 +165,21 @@ const DOC_TRIGGER: TriggerKind = "doc"
 const STATIC_CHAT_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
   { prefix: "skill:", kind: SKILL_TRIGGER },
   { prefix: "preset:", kind: PRESET_TRIGGER },
+  // `file:` and `agent:` exist for parity with the CLI's mention vocabulary
+  // (`cli/src/tui/mention/detector.ts`), which has always had both. Bare `@`
+  // still means "files and subagents together"; these two narrow it, which is
+  // the only way to reach a file whose name happens to match a subagent handle
+  // (and vice versa).
+  { prefix: "file:", kind: FILE_TRIGGER },
+  { prefix: "agent:", kind: SUBAGENT_TRIGGER },
 ]
+
+/** Prefixes whose `namespace` the popover still needs after detection. */
+const NAMESPACE_CARRYING_KINDS: ReadonlySet<TriggerKind> = new Set([
+  DOC_TRIGGER,
+  ENTITY_TRIGGER,
+  FILE_TRIGGER,
+])
 
 /**
  * Chat namespace prefixes = the two static ones plus one per registered remote
@@ -148,6 +191,7 @@ function chatNamespacePrefixes(): ReadonlyArray<{ prefix: string; kind: TriggerK
   return [
     ...STATIC_CHAT_NAMESPACE_PREFIXES,
     ...docsProviderPrefixes().map(({ prefix }) => ({ prefix, kind: DOC_TRIGGER })),
+    ...entityMentionPrefixes().map(({ prefix }) => ({ prefix, kind: ENTITY_TRIGGER })),
   ]
 }
 const WORKFLOW_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: TriggerKind }> = [
@@ -274,6 +318,23 @@ export function detectTrigger(
     )
     if (slashPos !== null && caret >= slashPos) {
       const tokenEnd = findTokenEnd(value, slashPos + 1, lineEnd)
+      // A mention inside the command's ARGUMENTS wins over the command itself.
+      //
+      // Without this the `@` picker was unreachable on any line starting with
+      // `/`: the slash branch returned first, and `hasSlashCompletion` then
+      // closed the panel for every command that declares no `argumentOptions`.
+      // So `/review @src/a` could be typed but never completed — while the send
+      // path (`resolve-mentions.ts`, which parses with `isKnownCommand: () =>
+      // false`) has always resolved mentions in command arguments. Completion
+      // now agrees with resolution.
+      //
+      // Scoped to `> tokenEnd` so the command WORD is never scanned, and the
+      // command name rides along on `withinCommand` so the hint bar stays up.
+      if (caret > tokenEnd) {
+        const commandName = value.slice(slashPos + 1, tokenEnd)
+        const mention = detectMentionAt(value, caret, opts, tokenEnd, commandName)
+        if (mention) return mention
+      }
       let argumentFields: Pick<
         ComposerTrigger,
         "argumentStart" | "argumentEnd" | "argumentQuery" | "caretPastArgument"
@@ -306,10 +367,29 @@ export function detectTrigger(
     }
   }
 
-  // `@file` / `@agent` / `@node` trigger — search backwards from the caret for
-  // an `@` whose left neighbour is whitespace or the start of input. Stop at
-  // whitespace. The kind depends on the composer's `mentionMode`: the workflow
-  // composer makes a bare `@` mean "workflow node".
+  return detectMentionAt(value, caret, opts)
+}
+
+/**
+ * The `@…` half of {@link detectTrigger}, callable on its own so a mention
+ * inside a slash command's argument region resolves by the identical rules.
+ *
+ * Searches backwards from the caret for an `@` whose left neighbour is
+ * whitespace or the start of the scanned region, stopping at whitespace. The
+ * bare-`@` kind depends on the composer's `mentionMode`: the workflow composer
+ * makes a bare `@` mean "workflow node", the team workspace makes it a member.
+ *
+ * `minStart` bounds the backwards walk. It is the command word's end when
+ * scanning inside a command's arguments, so the scan can never reach back over
+ * `/review` and mistake part of the command for a mention token.
+ */
+function detectMentionAt(
+  value: string,
+  caret: number,
+  opts?: DetectTriggerOptions,
+  minStart = 0,
+  withinCommand?: string
+): ComposerTrigger | null {
   const atKind: TriggerKind =
     opts?.mentionMode === "workflow"
       ? WFNODE_TRIGGER
@@ -317,7 +397,8 @@ export function detectTrigger(
         ? AGENT_TRIGGER
         : FILE_TRIGGER
   const namespacePrefixes = namespacePrefixesFor(opts?.mentionMode)
-  for (let i = caret - 1; i >= 0; i--) {
+  const commandField = withinCommand ? { withinCommand } : {}
+  for (let i = caret - 1; i >= minStart; i--) {
     const ch = value[i]
     if (ch === "@") {
       if (!isMentionStart(value, i)) {
@@ -330,9 +411,10 @@ export function detectTrigger(
       // token range.
       if (caret > queryEnd) return null
       const beforeCaret = value.slice(i + 1, caret)
-      // A typed namespace prefix (`@skill:` / `@preset:` in chat, `@node:` /
-      // `@edge:` in the workflow composer) flips the panel into a dedicated
-      // picker. The applicable set is chosen by mode above.
+      // A typed namespace prefix (`@skill:` / `@preset:` / `@file:` / `@agent:`
+      // / a document provider / an entity source in chat, `@node:` / `@edge:`
+      // in the workflow composer) flips the panel into a dedicated picker. The
+      // applicable set is chosen by mode above.
       for (const { prefix, kind } of namespacePrefixes) {
         if (beforeCaret.startsWith(prefix)) {
           return {
@@ -340,7 +422,8 @@ export function detectTrigger(
             tokenStart: i,
             tokenEnd: queryEnd,
             query: beforeCaret.slice(prefix.length),
-            ...(kind === DOC_TRIGGER ? { namespace: prefix } : {}),
+            ...(NAMESPACE_CARRYING_KINDS.has(kind) ? { namespace: prefix } : {}),
+            ...commandField,
           }
         }
       }
@@ -349,6 +432,7 @@ export function detectTrigger(
         tokenStart: i,
         tokenEnd: queryEnd,
         query: beforeCaret,
+        ...commandField,
       }
     }
     if (/\s/.test(ch)) break

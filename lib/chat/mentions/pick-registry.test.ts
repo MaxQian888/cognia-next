@@ -22,6 +22,8 @@ function makeCtx(overrides: Partial<MentionPickContext> = {}): MentionPickContex
     addReferencedWorkflowElement: jest.fn(),
     applyPreset: jest.fn().mockResolvedValue(undefined),
     stageRemoteDoc: jest.fn().mockResolvedValue(undefined),
+    stageEntity: jest.fn().mockResolvedValue({ kind: "entity" }),
+    recordMention: jest.fn(),
     session: null,
     clearWorkflowHighlight: jest.fn(),
     strings: { skillEnabled: (name: string) => `enabled:${name}` },
@@ -36,7 +38,16 @@ beforeEach(() => {
 
 describe("registry surface", () => {
   it("provides handlers for every mention-style kind, none for slash/memory", () => {
-    for (const kind of ["file", "agent", "subagent", "skill", "preset", "wfElement"] as const) {
+    for (const kind of [
+      "file",
+      "agent",
+      "subagent",
+      "skill",
+      "preset",
+      "wfElement",
+      "doc",
+      "entity",
+    ] as const) {
       expect(getMentionPickHandler(kind)).toBeDefined()
     }
     expect(getMentionPickHandler("slash")).toBeUndefined()
@@ -151,5 +162,111 @@ describe("built-in handlers", () => {
     expect(ctx.removeTriggerToken).toHaveBeenCalled()
     expect(ctx.clearWorkflowHighlight).toHaveBeenCalled()
     expect(handler.toContextRef(item)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Chip-style citations. These picks leave NO token in the message text, so
+// `resolve-mentions.ts` can never recover them by re-parsing — `recordMention`
+// is their only route into `metadata.mentions`.
+// ---------------------------------------------------------------------------
+
+const docItem = {
+  kind: "doc",
+  providerId: "lark",
+  accountId: "acct_1",
+  doc: { id: "doc_1", kind: "doc", title: "Release plan", url: "https://x.feishu.cn/docx/doc_1" },
+} as unknown as PopoverItem
+
+const entityItem = {
+  kind: "entity",
+  candidate: {
+    entityKind: "issue",
+    id: "iss_1",
+    title: "Fix the broker race",
+    searchText: "fix the broker race",
+  },
+} as unknown as PopoverItem
+
+describe("doc picks record a citation", () => {
+  it("records `<providerId>:<documentId>` after staging", async () => {
+    const ctx = makeCtx()
+    await getMentionPickHandler("doc")!.onPick(docItem as never, ctx)
+    expect(ctx.stageRemoteDoc).toHaveBeenCalled()
+    expect(ctx.recordMention).toHaveBeenCalledWith({
+      kind: "doc",
+      id: "lark:doc_1",
+      label: "Release plan",
+      raw: "https://x.feishu.cn/docx/doc_1",
+    })
+  })
+
+  it("drops the `@lark:…` token before the fetch, so a failure leaves it clean", async () => {
+    const ctx = makeCtx()
+    await getMentionPickHandler("doc")!.onPick(docItem as never, ctx)
+    expect(ctx.removeTriggerToken).toHaveBeenCalled()
+  })
+
+  it("stays out of the parameter-eligible set", () => {
+    // `toContextRef` answers "may this be a `{{parameter}}` value?", which a
+    // staged attachment may not — it contributes no characters at a sentence
+    // position. That is a different question from "was it cited?".
+    expect(getMentionPickHandler("doc")!.toContextRef(docItem as never)).toBeNull()
+  })
+})
+
+describe("entity picks record a citation", () => {
+  it("records `<entityKind>:<recordId>` once the record actually staged", async () => {
+    const ctx = makeCtx()
+    await getMentionPickHandler("entity")!.onPick(entityItem as never, ctx)
+    expect(ctx.recordMention).toHaveBeenCalledWith({
+      kind: "entity",
+      id: "issue:iss_1",
+      label: "Fix the broker race",
+      raw: "@issue:iss_1",
+    })
+  })
+
+  it("records NOTHING when the record could not be read", async () => {
+    // A record deleted between the pick and the read contributes no context.
+    // Claiming the turn cited it would make `metadata.mentions` assert context
+    // the model never saw — the one direction of lie that matters.
+    const ctx = makeCtx({ stageEntity: jest.fn().mockResolvedValue(null) })
+    await getMentionPickHandler("entity")!.onPick(entityItem as never, ctx)
+    expect(ctx.recordMention).not.toHaveBeenCalled()
+  })
+
+  it("drops the trigger token before reading", async () => {
+    const ctx = makeCtx({ stageEntity: jest.fn().mockResolvedValue(null) })
+    await getMentionPickHandler("entity")!.onPick(entityItem as never, ctx)
+    expect(ctx.removeTriggerToken).toHaveBeenCalled()
+    expect(ctx.insertReplacement).not.toHaveBeenCalled()
+  })
+
+  it("stays out of the parameter-eligible set", () => {
+    expect(getMentionPickHandler("entity")!.toContextRef(entityItem as never)).toBeNull()
+  })
+})
+
+describe("insertion-style picks record nothing", () => {
+  it("leaves a file pick to the text parser", async () => {
+    // Its `@src/app.ts` token survives in the message, so recording it here
+    // would double-count it against `resolveMentions`.
+    const ctx = makeCtx()
+    const item = {
+      kind: "file",
+      entry: { absolutePath: "/w/src/app.ts", relPath: "src/app.ts", isDir: false },
+    } as unknown as PopoverItem
+    await getMentionPickHandler("file")!.onPick(item as never, ctx)
+    expect(ctx.recordMention).not.toHaveBeenCalled()
+    expect(ctx.insertReplacement).toHaveBeenCalledWith("@src/app.ts")
+  })
+
+  it("leaves session-state picks uncited", async () => {
+    // Enabling a skill is not a statement about this message.
+    const ctx = makeCtx()
+    const item = { kind: "skill", skill: { id: "s1", name: "Reviewer" } } as unknown as PopoverItem
+    await getMentionPickHandler("skill")!.onPick(item as never, ctx)
+    expect(ctx.recordMention).not.toHaveBeenCalled()
   })
 })

@@ -150,10 +150,20 @@ interface ComposerChipOverlayProps {
    * aside. It stays mounted so the scroll-mirror ref and the layout stay put.
    */
   hidden?: boolean
+  /**
+   * Right-side inset reserved for the box's floating corner controls
+   * (`pe-*`), overriding {@link TEXTAREA_TYPOGRAPHY}'s default. It MUST be the
+   * same value the textarea gets: this layer mirrors the textarea glyph for
+   * glyph, so a different wrap width drifts every pill off its word.
+   */
+  padEndClass?: string
 }
 
 const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
-  function ComposerChipOverlay({ value, segments, paramState, mono, hidden }, innerRef) {
+  function ComposerChipOverlay(
+    { value, segments, paramState, mono, hidden, padEndClass },
+    innerRef
+  ) {
     // Nothing to paint when there are no pill segments — render an invisible
     // placeholder so the DOM node is stable but cheap.
     const hasPill = segments.some(
@@ -178,7 +188,8 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
           className={cn(
             "block min-h-9 w-full break-words whitespace-pre-wrap",
             mono && OVERLAY_MONO_CLASS,
-            TEXTAREA_TYPOGRAPHY
+            TEXTAREA_TYPOGRAPHY,
+            padEndClass
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}
         >
