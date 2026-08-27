@@ -129,11 +129,6 @@ const CliBridgeEventsBridge = dynamic(
   () => import("@/components/plugins/cli-bridge-events").then((m) => m.CliBridgeEventsBridge),
   { ssr: false }
 )
-const ExitConfirmationDialog = dynamic(
-  () =>
-    import("@/components/desktop/exit-confirmation-dialog").then((m) => m.ExitConfirmationDialog),
-  { ssr: false }
-)
 const CrashReportDialog = dynamic(
   () => import("@/components/desktop/crash-report-dialog").then((m) => m.CrashReportDialog),
   { ssr: false }
@@ -172,7 +167,7 @@ export function DesktopOnlyInitializers() {
   // The transparent desktop-pet windows (sprite overlay + click popup) load this
   // same root layout, but every initializer bundled here is a MAIN-window boot
   // concern (window show/heartbeat, terminal + CLI bridges, local character-pack
-  // disk scan, updater, deep-link routers, exit/crash dialogs). Running them in a
+  // disk scan, updater, deep-link routers, crash dialog). Running them in a
   // pet window is wasted work and actively wrong — e.g. the character-pack scan
   // calls `fs.read_dir`, which the least-privilege pet capabilities deny, logging
   // a spurious warning. Skip the whole bundle there; the pet windows start their
@@ -197,7 +192,6 @@ export function DesktopOnlyInitializers() {
       <PluginDeepLinkRouter />
       <ConsentOverlay />
       <CliBridgeEventsBridge />
-      <ExitConfirmationDialog />
       <CrashReportDialog />
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />

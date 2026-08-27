@@ -42,6 +42,11 @@ const SelectionToolbarRestoreInitializer = dynamic(
     ),
   { ssr: false }
 )
+const ExitConfirmationDialog = dynamic(
+  () =>
+    import("@/components/desktop/exit-confirmation-dialog").then((m) => m.ExitConfirmationDialog),
+  { ssr: false }
+)
 
 /**
  * Window-reveal + renderer-liveness initializers that MUST run *above* the
@@ -63,6 +68,16 @@ const SelectionToolbarRestoreInitializer = dynamic(
  * these two run here — above the gate — keyed only on Tauri main-window. The
  * heartbeat consumes `whiteScreenRecovery` i18n, so this component must sit
  * inside `LocaleGate`.
+ *
+ * `ExitConfirmationDialog` is here for the same shape of reason. Rust answers
+ * the window's close (X) button with `CloseBehavior::Ask` by default, which
+ * calls `api.prevent_close()` and emits `app://close-requested` — so the window
+ * only ever closes if something in the renderer is listening. It used to mount
+ * in `DesktopOnlyInitializers`, which is gated twice over: on the `desktop-tools`
+ * boot capability (requested per-route, and `/` does not request it — under the
+ * dev `main` profile only `core-chat` is requested at all) and on `AccountGate`.
+ * Whenever either gate was shut, nothing answered the event and the close button
+ * did nothing at all. Keyed only on Tauri main-window, it always answers.
  */
 export function WindowLivenessInitializers() {
   const isClient = useIsClient()
@@ -80,6 +95,7 @@ export function WindowLivenessInitializers() {
       <WindowShowInitializer />
       <WebviewHeartbeatInitializer />
       <SelectionToolbarRestoreInitializer />
+      <ExitConfirmationDialog />
     </>
   )
 }

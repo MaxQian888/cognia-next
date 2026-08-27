@@ -25,10 +25,17 @@ import {
 import { loggers } from "@cognia/logging"
 
 /**
- * Global overlay (mounted once in `app/layout.tsx`, like `<ConsentOverlay/>`)
- * that prompts the user when the main window's close (X) button is pressed and
- * the persisted close behavior is `ask`. Rust has already prevented the close;
- * the chosen action is sent back through `resolve_close_request`.
+ * Global overlay that prompts the user when the main window's close (X) button
+ * is pressed and the persisted close behavior is `ask`. Rust has already called
+ * `api.prevent_close()`; the chosen action is sent back through
+ * `resolve_close_request`.
+ *
+ * Mounted by `WindowLivenessInitializers`, which is keyed only on Tauri
+ * main-window — deliberately NOT by `DesktopOnlyInitializers`, which sits behind
+ * `AccountGate` and the per-route `desktop-tools` boot capability. Because Rust
+ * has already prevented the close, an unmounted listener does not degrade to
+ * "close without asking": the window stops closing at all. This listener has to
+ * outlive both gates.
  *
  * Renders nothing on web — the `app://close-requested` event only fires under
  * the desktop runtime.

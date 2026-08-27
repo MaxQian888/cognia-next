@@ -7,7 +7,7 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { withFailFastDev } from "./tauri.mjs"
+import { DEV_TAURI_CONFIG, withDevResourceEnv, withFailFastDev } from "./tauri.mjs"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
 const wrapperPath = fileURLToPath(new URL("./tauri.mjs", import.meta.url))
@@ -149,3 +149,34 @@ setTimeout(() => process.exit(101), 100)
     assert.equal(await canConnect(port), false, output)
   }
 )
+
+test("empties bundle.resources for development runs only", () => {
+  assert.deepEqual(withDevResourceEnv(["dev"], { PATH: "/bin" }), {
+    PATH: "/bin",
+    TAURI_CONFIG: DEV_TAURI_CONFIG,
+  })
+  assert.deepEqual(withDevResourceEnv(["dev", "--", "--profile", "dev-full"], {}), {
+    TAURI_CONFIG: DEV_TAURI_CONFIG,
+  })
+  assert.equal(DEV_TAURI_CONFIG, JSON.stringify({ bundle: { resources: [] } }))
+})
+
+test("leaves builds and explicit TAURI_CONFIG overrides alone", () => {
+  assert.deepEqual(withDevResourceEnv(["build"], { PATH: "/bin" }), { PATH: "/bin" })
+  assert.deepEqual(withDevResourceEnv(["info"], {}), {})
+
+  const overridden = { TAURI_CONFIG: '{"bundle":{"resources":["keep"]}}' }
+  assert.equal(withDevResourceEnv(["dev"], overridden), overridden)
+})
+
+test("shares one TAURI_CONFIG value with the headless build", async () => {
+  // `tauri-build` declares `rerun-if-env-changed=TAURI_CONFIG`. If these two
+  // drift, a headless build and a desktop dev build land on different
+  // build-script fingerprints and each switch re-pays the resource copy.
+  const headless = await readFile(path.join(root, "scripts/dev/headless.mjs"), "utf8")
+  const match = headless.match(/const HEADLESS_TAURI_CONFIG = (.+)/)
+
+  assert.ok(match, "headless.mjs no longer defines HEADLESS_TAURI_CONFIG")
+  assert.equal(match[1].trim(), "JSON.stringify({ bundle: { resources: [] } })")
+  assert.equal(DEV_TAURI_CONFIG, JSON.stringify({ bundle: { resources: [] } }))
+})
