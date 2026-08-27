@@ -1,5 +1,12 @@
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
+const hostIsTauriMock = jest.fn(() => true)
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => (hostIsTauriMock() ? "tauri" : "web"),
+  isTauri: () => hostIsTauriMock(),
+}))
+
 const runPlanMock = jest.fn()
 jest.mock("@/lib/agent/plan/runtime", () => ({
   getPlanRuntime: () => ({ runPlan: runPlanMock }),
@@ -26,6 +33,7 @@ function makeTask(payload: Record<string, unknown>): ScheduledTask {
 const execution = { id: "exec_1" } as unknown as TaskExecution
 
 beforeEach(() => {
+  hostIsTauriMock.mockReturnValue(true)
   runPlanMock.mockReset()
   buildUtilityLlmClientMock.mockClear()
 })
@@ -106,4 +114,16 @@ describe("executePlanTask", () => {
     expect(r.success).toBe(false)
     expect(r.error).toBe("boom")
   })
+})
+
+it("refuses on a host without the sidecar instead of failing inside the runtime", async () => {
+  hostIsTauriMock.mockReturnValue(false)
+  const r = await executePlanTask(
+    makeTask({ planId: "p1" }),
+    execution,
+    new AbortController().signal
+  )
+  expect(r.success).toBe(false)
+  expect(r.terminalReason).toBe("unsupported-on-host")
+  expect(runPlanMock).not.toHaveBeenCalled()
 })

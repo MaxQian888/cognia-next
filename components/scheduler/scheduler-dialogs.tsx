@@ -19,6 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Surface } from "@/components/surface/surface"
 import { TaskForm } from "./task-form"
 import { SystemTaskForm } from "./system-task-form"
 import { AdminElevationDialog, TaskConfirmationDialog } from "./task-confirmation-dialog"
@@ -37,6 +38,14 @@ export interface SchedulerDialogsProps {
   onShowCreateSheetChange: (open: boolean) => void
   onCreateTask: (input: CreateScheduledTaskInput) => Promise<void>
   isSubmitting: boolean
+  /**
+   * Pre-fill for the create form. Set when the sheet was opened from a draft
+   * handed over by another surface (`lib/scheduler/task-draft-handoff.ts`) —
+   * today the composer's "schedule this" suggestion.
+   */
+  createInitialValues?: Partial<CreateScheduledTaskInput>
+  /** One line explaining where the pre-filled draft came from. */
+  createDraftSummary?: string
 
   // Edit task sheet
   showEditSheet: boolean
@@ -84,6 +93,8 @@ export interface SchedulerDialogsProps {
 export function SchedulerDialogs({
   showCreateSheet,
   onShowCreateSheetChange,
+  createInitialValues,
+  createDraftSummary,
   onCreateTask,
   isSubmitting,
   showEditSheet,
@@ -130,7 +141,21 @@ export function SchedulerDialogs({
             </SheetDescription>
           </SheetHeader>
           <div className="mt-6">
+            {createDraftSummary && (
+              <Surface
+                asChild
+                layer="raised"
+                radius="control"
+                className="mb-4 block border border-primary/30 px-3 py-2 text-xs text-muted-foreground"
+              >
+                <p data-testid="create-draft-summary">{createDraftSummary}</p>
+              </Surface>
+            )}
             <TaskForm
+              // Remount on a new draft: TaskForm seeds its state once, so a
+              // second hand-off into an already-open sheet would be ignored.
+              key={createInitialValues ? JSON.stringify(createInitialValues) : "blank"}
+              initialValues={createInitialValues}
               onSubmit={onCreateTask}
               onCancel={() => onShowCreateSheetChange(false)}
               isSubmitting={isSubmitting}

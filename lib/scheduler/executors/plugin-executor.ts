@@ -17,6 +17,7 @@
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { loggers } from "@cognia/logging"
 import { getPluginTaskHandler } from "@/lib/plugin/scheduler/scheduler-plugin-executor"
+import { forgetExecutionProgress, reportTaskProgress } from "../execution-progress"
 import type { PluginTaskContext } from "@/types/plugin/plugin-scheduler"
 
 const log = loggers.scheduler
@@ -79,13 +80,11 @@ export async function executePluginTask(
       attemptNumber: (execution.retryAttempt ?? 0) + 1,
       signal: controller.signal,
       reportProgress: (progress, message) => {
-        // Progress is purely advisory at this layer; the scheduler doesn't
-        // record per-task progress yet, so we log it for diagnostics.
-        log.debug("Plugin task progress", {
-          executionId: execution.id,
-          progress,
-          message,
-        })
+        // Recorded on the execution row and, when the task opted into
+        // `notification.onProgress`, raised through the notification center.
+        // `reportTaskProgress` owns the write coalescing and the notification
+        // rate limit; a report never fails the run.
+        reportTaskProgress(task, execution, { progress, message })
       },
       log: (level, message, data) => {
         const fn = log[level] ?? log.info
@@ -113,6 +112,7 @@ export async function executePluginTask(
       signal.removeEventListener("abort", forwardAbort)
     }
     activeExecutions.delete(execution.id)
+    forgetExecutionProgress(execution.id)
   }
 }
 

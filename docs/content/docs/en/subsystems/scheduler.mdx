@@ -184,9 +184,9 @@ This prevents duplicate fires when the user has Cognia open in multiple windows.
 
 ## Conversational task authoring
 
-`conversational-task-authoring.ts` and `conversational-task-intent.ts` let the user describe a schedule in plain language ("every weekday at 9 send a stand-up reminder") and have the LLM emit a `ScheduledTask` JSON object. The intent extractor pulls structured fields; the authoring agent fills in defaults and validates.
+`conversational-task-intent.ts` reads scheduling intent out of a line the user is typing ("every weekday at 9 send a stand-up reminder", "每天早上提醒我看 PR"); `conversational-task-authoring.ts` turns it into a typed `CreateScheduledTaskInput` with the same payload shape the executors read. It is pattern matching, not an LLM call — the cadence it emits is a starting point (a daily 09:00 cron), not a guess at the real one.
 
-This surfaces in the workbench's "Create with AI" panel.
+Where it surfaces: the chat composer renders a quiet suggestion row under the input (`components/chat/composer/schedule-suggestion.tsx`). It never intercepts the turn — Enter still sends — and it is dismissible per line. Accepting it parks the draft in `lib/scheduler/task-draft-handoff.ts` and routes to `/scheduler`, which opens the create sheet pre-filled on its next mount. The draft is consumed once and expires after five minutes, so a stale hand-off can never pop a sheet later.
 
 ## Executors
 
@@ -226,6 +226,8 @@ Results are written to `schedulerHistory` (capped at 200 newest per task).
 
 Placement is **host-owned**: the desktop, the headless brain (`cognia-server`), and a web / companion webview each keep their own `CogniaSchedulerDB`, and nothing hands tasks between hosts. What differs is which types a host can *run*. `lib/scheduler/host-support.ts` declares the requirement per type; the executor refuses with a structured `unsupported-on-host` result, and the task form shows unsupported types **disabled with the reason** (never hidden).
 
+The gate is applied **twice**: each executor calls `assertTaskTypeSupportedOnHost` first, and `task-scheduler.ts` checks the same table again before dispatching. The second check is not redundancy for its own sake — a type that declared a requirement and whose executor forgot to gate used to fail with a bare `Error` indistinguishable from a bug.
+
 | Type                                                     | Requires            | Desktop | Headless brain | Web / companion webview |
 | -------------------------------------------------------- | ------------------- | ------- | -------------- | ----------------------- |
 | `chat` `agent` `skill` `goal` `plan` `agent-team`        | `sidecar`           | ✓       | ✓              | ✗                       |
@@ -240,6 +242,8 @@ Timing drivers follow the host too: the Rust daemon on Tauri, `NodeTimingDriver`
 
 **Which schedule the page manages.** A client can look at two schedules: `local` (this device) and `paired` (the host it drives or is paired with, via the `scheduled_task_*` companion RPCs). Companions and a desktop driving a remote host default to `paired`; the scheduler page's **host bar** says which one you are managing and lets you switch (`lib/scheduler/scheduler-host-target.ts`). The type picker resolves the *target* host's capabilities through the `host_capabilities` RPC.
 
+That choice binds the **whole** page. The unified `app` and `plugin` sources resolve their backend per call through `getSchedulerDataSource()` and re-attach their subscription when the target flips, so the sidebar, calendar, timeline and facet counts show the same host the detail pane, pause and run-now act on. A remote schedule has no change feed across the companion transport, so those two sources poll (`REMOTE_TASK_POLL_INTERVAL_MS`, 30 s) and re-read immediately after their own writes. The other four kinds — backup, workflow, system, connector — have no cross-host RPC and are always this device's; the host bar says so while a paired schedule is managed.
+
 **Headless bridges.** Workflow triggers on the brain arrive through the Companion `subscribe` control frame (`lib/headless/runtimes/workflow-trigger-bridge.ts`); toast / OS notifications raised on the brain are published once through `remote_notification_publish` and ingested into the local notification center by connected clients (`lib/notifications/remote-subscription.ts`).
 
 **OS promotion is wake-and-delegate.** A promoted task's native entry opens `cognia://scheduler/task/<id>?run=<token>`; the app verifies the token and runs the task through the ordinary in-app executor, so promoted and in-app runs never diverge. Headless hosts do not promote (they are always on).
@@ -251,6 +255,7 @@ Timing drivers follow the host too: the Rust daemon on Tauri, `NodeTimingDriver`
 - A toast on every run (configurable, default "errors only").
 - A native OS notification on failure (via `tauri-plugin-notification`).
 - A badge in the menu / system tray when there are unread failures.
+- A **progress** notification while a run is still going, when the task set `notification.onProgress`. Only executors that report mid-run progress raise it — today that is `plugin` tasks, through `PluginTaskContext.reportProgress`. Reports also land as `info` entries on the execution row. `lib/scheduler/execution-progress.ts` owns both: writes are coalesced, the notification is rate-limited per execution, and the retained progress entries are capped so a chatty handler cannot grow the row without bound.
 
 ## Event triggers
 

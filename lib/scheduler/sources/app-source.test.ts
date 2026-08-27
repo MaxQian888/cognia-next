@@ -259,3 +259,175 @@ describe("createAppSource", () => {
     sub.unsubscribe()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Host target (ADR-0128 §6). The page's host bar promises it switches which
+// schedule the page reads AND writes; before this the unified sources always
+// read the local Dexie while the store already followed the target.
+// ---------------------------------------------------------------------------
+
+describe("app source · managed host target", () => {
+  function makeRemote(tasks: ScheduledTask[]) {
+    return {
+      host: "remote" as const,
+      listTasks: jest.fn(async () => tasks),
+      getTask: jest.fn(async (id: string) => tasks.find((t) => t.id === id) ?? null),
+      getRecentExecutions: jest.fn(async () => []),
+      createTask: jest.fn(async () => tasks[0]),
+      updateTask: jest.fn(async () => tasks[0]),
+      deleteTask: jest.fn(async () => true),
+      pauseTask: jest.fn(async () => true),
+      resumeTask: jest.fn(async () => true),
+      runTaskNow: jest.fn(async () => null),
+    }
+  }
+
+  function makeLocalStubs() {
+    const db = {
+      getAllTasks: jest.fn(async () => [makeTask({ id: "local-only" })]),
+      getTask: jest.fn(async () => null),
+    }
+    const scheduler = {
+      createTask: jest.fn(),
+      updateTask: jest.fn(),
+      deleteTask: jest.fn(),
+      pauseTask: jest.fn(),
+      resumeTask: jest.fn(),
+      runTaskNow: jest.fn(),
+    }
+    return { db, scheduler }
+  }
+
+  it("reads the paired host's tasks, not this device's, while the target is remote", async () => {
+    const { db, scheduler } = makeLocalStubs()
+    const remote = makeRemote([makeTask({ id: "remote-row" })])
+    const source = createAppSource({
+      scheduler,
+      db,
+      dataSource: () => remote as never,
+    })
+
+    expect((await source.list()).map((item) => item.sourceId)).toEqual(["remote-row"])
+    expect((await source.get("remote-row"))?.sourceId).toBe("remote-row")
+    expect(db.getAllTasks).not.toHaveBeenCalled()
+    expect(db.getTask).not.toHaveBeenCalled()
+  })
+
+  it("routes every write to the paired host and leaves the local scheduler untouched", async () => {
+    const { db, scheduler } = makeLocalStubs()
+    const remote = makeRemote([makeTask({ id: "remote-row" })])
+    const source = createAppSource({ scheduler, db, dataSource: () => remote as never })
+
+    await source.create({
+      name: "n",
+      type: "chat",
+      trigger: { type: "cron", cronExpression: "* * * * *" },
+    })
+    await source.update("remote-row", { description: "x" })
+    await source.pause("remote-row")
+    await source.resume("remote-row")
+    await source.runNow("remote-row")
+    await source.delete("remote-row")
+
+    expect(remote.createTask).toHaveBeenCalledTimes(1)
+    expect(remote.updateTask).toHaveBeenCalledWith("remote-row", { description: "x" })
+    expect(remote.pauseTask).toHaveBeenCalledWith("remote-row")
+    expect(remote.resumeTask).toHaveBeenCalledWith("remote-row")
+    expect(remote.runTaskNow).toHaveBeenCalledWith("remote-row", { triggerSource: "run-now" })
+    expect(remote.deleteTask).toHaveBeenCalledWith("remote-row")
+    for (const fn of Object.values(scheduler)) expect(fn).not.toHaveBeenCalled()
+  })
+
+  it("over-fetches remote runs and keeps only this kind's, capped at the limit", async () => {
+    const { db, scheduler } = makeLocalStubs()
+    const remote = makeRemote([])
+    remote.getRecentExecutions = jest.fn(
+      async () =>
+        [
+          { id: "r1", taskId: "a", taskName: "a", taskType: "chat", status: "completed" },
+          { id: "r2", taskId: "p", taskName: "p", taskType: "plugin", status: "completed" },
+          { id: "r3", taskId: "b", taskName: "b", taskType: "chat", status: "completed" },
+        ].map((row) => ({ ...row, retryAttempt: 0, startedAt: new Date(0), logs: [] })) as never
+    )
+    const source = createAppSource({ scheduler, db, dataSource: () => remote as never })
+
+    const runs = await source.listRuns!(2)
+    // 2 * 4 = 8 requested, so a busy sibling kind cannot starve this one.
+    expect(remote.getRecentExecutions).toHaveBeenCalledWith(8)
+    expect(runs.map((run) => run.unifiedId)).toEqual(["app:r1", "app:r3"])
+  })
+
+  it("polls the paired host and re-reads immediately after its own writes", async () => {
+    jest.useFakeTimers()
+    try {
+      const { db, scheduler } = makeLocalStubs()
+      const remote = makeRemote([makeTask({ id: "remote-row" })])
+      const source = createAppSource({
+        scheduler,
+        db,
+        dataSource: () => remote as never,
+        remotePollIntervalMs: 1_000,
+      })
+
+      const emitted: number[] = []
+      const sub = source.subscribe({ next: (items) => emitted.push(items.length) })
+      await Promise.resolve()
+      expect(remote.listTasks).toHaveBeenCalledTimes(1)
+
+      jest.advanceTimersByTime(2_000)
+      expect(remote.listTasks).toHaveBeenCalledTimes(3)
+
+      await source.pause("remote-row")
+      expect(remote.listTasks).toHaveBeenCalledTimes(4)
+
+      sub.unsubscribe()
+      jest.advanceTimersByTime(5_000)
+      expect(remote.listTasks).toHaveBeenCalledTimes(4)
+      expect(emitted.length).toBeGreaterThan(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("re-attaches the subscription when the managed host flips", async () => {
+    const { db, scheduler } = makeLocalStubs()
+    const remote = makeRemote([makeTask({ id: "remote-row" })])
+    let host: "local" | "remote" = "local"
+    let notify: (() => void) | null = null
+
+    const observe = jest.fn((querier: () => Promise<ScheduledTask[]>) => ({
+      subscribe(obs: { next: (t: ScheduledTask[]) => void }) {
+        void querier().then(obs.next)
+        return { unsubscribe: jest.fn() }
+      },
+    }))
+
+    const source = createAppSource({
+      scheduler,
+      db,
+      observe,
+      remotePollIntervalMs: 60_000,
+      dataSource: () => (host === "remote" ? (remote as never) : ({ host: "local" } as never)),
+      onHostTargetChange: (listener) => {
+        notify = listener
+        return () => {
+          notify = null
+        }
+      },
+    })
+
+    const seen: string[][] = []
+    const sub = source.subscribe({ next: (items) => seen.push(items.map((i) => i.sourceId)) })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(seen.at(-1)).toEqual(["local-only"])
+
+    host = "remote"
+    notify!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(seen.at(-1)).toEqual(["remote-row"])
+
+    sub.unsubscribe()
+  })
+})

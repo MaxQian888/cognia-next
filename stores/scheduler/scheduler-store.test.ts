@@ -1282,113 +1282,6 @@ describe("useSchedulerStore", () => {
     })
   })
 
-  describe("Bulk operations", () => {
-    it("bulkPause counts only the successful results", async () => {
-      mockScheduler.pauseTask
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true)
-      const { result } = renderHook(() => useSchedulerStore())
-      let count = 0
-      await act(async () => {
-        count = await result.current.bulkPause(["a", "b", "c"])
-      })
-      expect(count).toBe(2)
-    })
-
-    it("bulkPause does not refresh when nothing succeeds", async () => {
-      mockScheduler.pauseTask.mockResolvedValue(false)
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.bulkPause(["a"])
-      })
-      expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
-    })
-
-    it("bulkPause records errors when scheduler throws", async () => {
-      mockScheduler.pauseTask.mockRejectedValueOnce(new Error("boom"))
-      const { result } = renderHook(() => useSchedulerStore())
-      let count = -1
-      await act(async () => {
-        count = await result.current.bulkPause(["a"])
-      })
-      expect(result.current.error).toBe("Failed to pause tasks")
-      expect(count).toBe(0)
-    })
-
-    it("bulkResume counts successful results", async () => {
-      mockScheduler.resumeTask.mockResolvedValueOnce(true).mockResolvedValueOnce(true)
-      const { result } = renderHook(() => useSchedulerStore())
-      let count = 0
-      await act(async () => {
-        count = await result.current.bulkResume(["a", "b"])
-      })
-      expect(count).toBe(2)
-    })
-
-    it("bulkResume does not refresh when none succeed", async () => {
-      mockScheduler.resumeTask.mockResolvedValue(false)
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.bulkResume(["a"])
-      })
-      expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
-    })
-
-    it("bulkResume records errors when scheduler throws", async () => {
-      mockScheduler.resumeTask.mockRejectedValueOnce(new Error("boom"))
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.bulkResume(["a"])
-      })
-      expect(result.current.error).toBe("Failed to resume tasks")
-    })
-
-    it("bulkDelete clears selection if one of the deleted tasks was selected", async () => {
-      mockScheduler.deleteTask.mockResolvedValue(true)
-      const { result } = renderHook(() => useSchedulerStore())
-      act(() => {
-        useSchedulerStore.setState({ selectedTaskId: "a" })
-      })
-      let count = 0
-      await act(async () => {
-        count = await result.current.bulkDelete(["a", "b"])
-      })
-      expect(count).toBe(2)
-      expect(result.current.selectedTaskId).toBeNull()
-    })
-
-    it("bulkDelete preserves selection when no deleted ID matches", async () => {
-      mockScheduler.deleteTask.mockResolvedValue(true)
-      const { result } = renderHook(() => useSchedulerStore())
-      act(() => {
-        useSchedulerStore.setState({ selectedTaskId: "unrelated" })
-      })
-      await act(async () => {
-        await result.current.bulkDelete(["a"])
-      })
-      expect(result.current.selectedTaskId).toBe("unrelated")
-    })
-
-    it("bulkDelete does not refresh when nothing succeeds", async () => {
-      mockScheduler.deleteTask.mockResolvedValue(false)
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.bulkDelete(["a"])
-      })
-      expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
-    })
-
-    it("bulkDelete records errors when scheduler throws", async () => {
-      mockScheduler.deleteTask.mockRejectedValueOnce(new Error("boom"))
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.bulkDelete(["a"])
-      })
-      expect(result.current.error).toBe("Failed to delete tasks")
-    })
-  })
-
   describe("Import / Export", () => {
     it("exportTasks returns serialized JSON", async () => {
       mockScheduler.exportTasks.mockResolvedValueOnce({ tasks: [{ id: "a" }] })
@@ -1828,5 +1721,25 @@ describe("stores/scheduler index barrel", () => {
     expect(typeof barrel.selectRecentExecutions).toBe("function")
     expect(typeof barrel.selectSchedulerStatus).toBe("function")
     expect(typeof barrel.selectSelectedTask).toBe("function")
+  })
+})
+
+describe("setAutoRefreshInterval", () => {
+  it("stores a sane cadence", () => {
+    const { result } = renderHook(() => useSchedulerStore())
+    act(() => result.current.setAutoRefreshInterval(120))
+    expect(result.current.autoRefreshInterval).toBe(120)
+  })
+
+  it("accepts 0 as 'off' and clamps the rest into range", () => {
+    const { result } = renderHook(() => useSchedulerStore())
+    act(() => result.current.setAutoRefreshInterval(0))
+    expect(result.current.autoRefreshInterval).toBe(0)
+    act(() => result.current.setAutoRefreshInterval(-5))
+    expect(result.current.autoRefreshInterval).toBe(0)
+    act(() => result.current.setAutoRefreshInterval(99_999))
+    expect(result.current.autoRefreshInterval).toBe(3600)
+    act(() => result.current.setAutoRefreshInterval(Number.NaN))
+    expect(result.current.autoRefreshInterval).toBe(0)
   })
 })

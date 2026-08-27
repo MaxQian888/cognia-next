@@ -76,6 +76,29 @@ description: 桌面、无头大脑与 web / 伴侣壳共用一份调度器契约
 
 `lib/data/destinations/` 新增 **GitHub**（contents API 写入私有仓库——公开仓库被拒绝）与 **Google Drive**（用户自备 OAuth 客户端、**设备流**、`drive.file` 范围、令牌存于 `backup-destinations` keyring 命名空间）两条腿，以及与调度 `backup` executor 同一管线的手动"立即同步"。`convex` 原地弃用。executor 按腿扇出并在备份历史中记录 `destination`。主机文件系统访问经 `lib/data/backup-host-filesystem.ts`，无头运行时注入自己的接缝。设置 → 数据承载两张卡片；调度对话框只提供已配置的目的地。
 
+> **2026-08-27 修订。** 上述三处机制在实现中只接了一半，本次修订把它们补齐：
+>
+> 1. **主机闸现在也在中心位置检查。** §1 说 executor 调用
+>    `assertTaskTypeSupportedOnHost`。`plan`、`agent-team`、`background-command`
+>    与 `monitor` 在 `TASK_TYPE_HOST_REQUIREMENTS` 里声明了需求，它们的 executor
+>    却从不调用，于是在缺少该能力的主机上抛出裸 `Error` —— 正是 §1 要消除的失败
+>    形态。`task-scheduler.ts` 现在在派发前评估同一张表，结构化的
+>    `unsupported-on-host` 行不会因为某个 executor 遗漏而被跳过。各 executor 内
+>    的调用保留：那是已写明的契约，而且失败得更早。
+> 2. **§6 的主机目标现在约束整页。** store 的每次读写都遵守
+>    `getSchedulerDataSource()`，但统一列表的 `app` 与 `plugin` 两个 source 被硬接
+>    在本机 Dexie 与本机 `TaskScheduler` 上。于是选中配对主机后，侧栏、日历与分面
+>    计数来自*本*机，而详情面板、暂停与立即运行作用在*远端*。两个 source 现在每次
+>    调用都解析后端，并在目标切换时重新订阅；远端日程采用轮询（30 秒），因为伴侣
+>    通道对 `scheduled_task_*` 没有变更流，并在自己写入后立即重读。没有跨主机 RPC
+>    的四种 kind（备份 / 工作流 / 系统 / 连接器）保持本机，主机栏明说这一点。
+> 3. **进度会被记录，并且可以通知。** `TaskNotificationConfig.onProgress` 与通知层
+>    的 `"progress"` 分支都存在却不可达：唯一的生产者
+>    `PluginTaskContext.reportProgress` 写进了 `log.debug`，两条创建路径都硬编码
+>    `onProgress: false`。`lib/scheduler/execution-progress.ts` 现在把上报记入执行
+>    行，并在任务选择加入时发出通知；写入会合并、通知按执行限流、保留的进度条目有
+>    上限。开关由任务表单承载。
+
 ## 后果
 
 - 新任务类型必须在 `TASK_TYPE_HOST_REQUIREMENTS` 中声明需求（或显式为空）——选择器、executor 门禁与文档矩阵都读这一张表。

@@ -477,13 +477,6 @@ export interface CronPreset {
   description: string
 }
 
-export interface CronExpressionOption {
-  id: string
-  label: string
-  value: string
-  description?: string
-}
-
 /**
  * Task trigger configuration
  */
@@ -521,7 +514,14 @@ export interface TaskNotificationConfig {
   onComplete: boolean
   /** Notify when task fails */
   onError: boolean
-  /** Notify on progress (for long-running tasks) */
+  /**
+   * Notify while the run is still going. Raised by
+   * `lib/scheduler/execution-progress.ts` when an executor reports mid-run
+   * progress — today only `plugin` tasks have a reporter
+   * (`PluginTaskContext.reportProgress`), so a type with no reporter simply
+   * never fires it. Rate-limited per execution (see
+   * `PROGRESS_NOTIFY_INTERVAL_MS`).
+   */
   onProgress?: boolean
   /** Notification channels to use */
   channels?: NotificationChannel[]
@@ -973,16 +973,6 @@ export const TIMEZONE_OPTIONS = [
   { value: "Europe/Berlin", label: "Central European Time (Berlin)", offset: "+01:00" },
   { value: "Australia/Sydney", label: "Australian Eastern Time (Sydney)", offset: "+10:00" },
 ]
-
-export function getCronExpressionOptions(limit?: number): CronExpressionOption[] {
-  const presets = typeof limit === "number" ? CRON_PRESETS.slice(0, limit) : CRON_PRESETS
-  return presets.map((preset) => ({
-    id: preset.id,
-    label: preset.label,
-    value: preset.expression,
-    description: preset.description,
-  }))
-}
 
 // ============================================================================
 // Permission types

@@ -3,23 +3,27 @@ import type {
   MonitorTaskPayload,
   ScheduledTask,
   TaskExecution,
+  TaskExecutorResult,
 } from "@/types/scheduler"
 import {
   registerScheduledBackgroundMonitor,
   spawnScheduledBackgroundJob,
 } from "@/lib/jobs/background-jobs"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 
-type ExecutionResult = {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type ExecutionResult = TaskExecutorResult
 
 export async function executeBackgroundCommandTask(
   task: ScheduledTask,
   _execution: TaskExecution,
   signal: AbortSignal
 ): Promise<ExecutionResult> {
+  // Host gate: the jobs supervisor spawns a real process. `shell` is the
+  // capability that says the host can; a browser/mobile webview cannot, and
+  // must say so structurally instead of throwing from the RPC layer.
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   const payload = task.payload as Partial<BackgroundCommandTaskPayload> | undefined
   if (!payload?.command?.trim()) {
     return { success: false, error: "background-command task requires `command` in payload" }
@@ -58,6 +62,10 @@ export async function executeMonitorTask(
   _execution: TaskExecution,
   signal: AbortSignal
 ): Promise<ExecutionResult> {
+  // Host gate: a monitor registers against the same process supervisor.
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   const payload = task.payload as Partial<MonitorTaskPayload> | undefined
   if (!payload?.condition) {
     return { success: false, error: "monitor task requires `condition` in payload" }

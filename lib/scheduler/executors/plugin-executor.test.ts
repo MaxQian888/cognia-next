@@ -113,6 +113,27 @@ describe("executePluginTask — activated handler dispatch", () => {
     reg.clearPluginTaskHandlers()
   })
 
+  it("records reportProgress on the execution instead of dropping it in a debug log", async () => {
+    reg.registerPluginTaskHandler("p:progress", async (_args, ctx) => {
+      ctx.reportProgress(0.5, "halfway")
+      return { success: true }
+    })
+
+    const execution = makeExecution()
+    const r = await executePluginTask(
+      makeTask({ pluginId: "p", handler: "progress" }),
+      execution,
+      new AbortController().signal
+    )
+
+    expect(r.success).toBe(true)
+    const progressLogs = execution.logs.filter(
+      (row) => (row.data as { kind?: string } | undefined)?.kind === "progress"
+    )
+    expect(progressLogs).toHaveLength(1)
+    expect(progressLogs[0].message).toBe("50% — halfway")
+  })
+
   it("dispatches to the registered handler and forwards the result", async () => {
     const handler = jest.fn(async () => ({
       success: true,

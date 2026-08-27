@@ -2,6 +2,7 @@
   "action": "Action",
   "actionApp": "App",
   "actionCommand": "Command",
+  "actionFailed": "Could not update “{name}”",
   "actionScript": "Script",
   "active": "active",
   "activePlugins": "{count} plugin(s)",
@@ -123,6 +124,8 @@
   "bulkDelete": "Delete",
   "bulkDeleteDescription": "This will delete {n} selected tasks across all kinds. This action cannot be undone.",
   "bulkDeleteTitle": "Delete selected tasks?",
+  "bulkPartialFailure": "{count, plural, =1 {1 item could not be updated} other {# items could not be updated}}",
+  "bulkPartialFailureMore": "{hidden, plural, =1 {and 1 more} other {and # more}}",
   "bulkPause": "Pause",
   "bulkResume": "Resume",
   "bulkSelect": "Select",
@@ -136,6 +139,7 @@
     "today": "Today"
   },
   "cancel": "Cancel",
+  "cancelRun": "Cancel",
   "cancelSelect": "Cancel",
   "catchupWindow": {
     "help": "Missed runs older than this are skipped instead of re-run. 0 = no limit.",
@@ -145,7 +149,8 @@
   "cleanupOldExecutions": "Cleanup old executions (30d)",
   "clearSearch": "Clear search",
   "clearSelection": "Clear selection",
-  "cloneSuccess": "Task cloned successfully",
+  "cloneFailed": "Could not duplicate this task",
+  "cloneSuccess": "Duplicated as “{name}”",
   "cloneTask": "Clone Task",
   "close": "Close",
   "code": "code:",
@@ -341,6 +346,7 @@
     "remote": "Remote host"
   },
   "hostBar": {
+    "localKindsStay": "backup / workflow / system / connector rows below stay on this device",
     "localOnlyWhileOpen": "runs only while this app is open",
     "localSuspended": "suspended — taken over by the cloud host",
     "managing": "Managing: {host}",
@@ -430,6 +436,7 @@
   "logs": "Logs",
   "maxMissedRuns": "Max Missed Runs",
   "maxRetries": "Max Retries",
+  "maxRetryDelayMs": "Max Retry Delay (ms)",
   "mcp": {
     "disabledNote": "disabled",
     "empty": "No MCP servers configured.",
@@ -503,6 +510,8 @@
     "never": "Never",
     "successOnly": "Success Only"
   },
+  "notifyOnProgress": "Notify on progress",
+  "notifyOnProgressHint": "Only task types that report mid-run progress raise this (plugin tasks today).",
   "notifyOnStart": "Notify on start",
   "occurrenceList": {
     "moreTimes": "+{count} more",
@@ -707,6 +716,8 @@
     "agentAutoCreate": "Agent Auto-Create",
     "agentAutoCreateDesc": "Allow AI agents to create scheduled tasks without user confirmation dialog",
     "allowAgentAutoCreate": "Allow agents to auto-create tasks",
+    "autoRefreshInterval": "Auto-refresh (seconds)",
+    "autoRefreshIntervalDesc": "How often the scheduler page re-reads tasks and runs. 0 turns it off.",
     "confirmationRequired": "Confirmation Required",
     "confirmationRequiredDesc": "Task types that always require explicit user confirmation before creation by agents",
     "description": "Control what agents and plugins can do with scheduled tasks",
@@ -897,6 +908,7 @@
     "nextRun": "Next Run"
   },
   "sourceConversationMissing": "The source IM conversation is no longer bound to a chat session.",
+  "sourceLoadFailed": "Could not load: {kinds}",
   "stackTrace": "Stack trace",
   "startedAt": "Started at",
   "statistics": "Statistics",

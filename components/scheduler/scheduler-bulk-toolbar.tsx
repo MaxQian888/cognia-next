@@ -10,7 +10,8 @@
  */
 
 import { useState } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Pause, Play, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +41,7 @@ export function SchedulerBulkToolbar({
   registry,
 }: SchedulerBulkToolbarProps) {
   const t = useTranslations("scheduler")
+  const locale = useLocale()
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [working, setWorking] = useState(false)
 
@@ -51,6 +53,7 @@ export function SchedulerBulkToolbar({
     setWorking(true)
     try {
       const reg = resolveRegistry()
+      const failed: string[] = []
       // Iterate sequentially; per-source operations may hit IndexedDB or
       // sidecars and parallelizing them risks lock contention.
       for (const item of selectedItems) {
@@ -58,13 +61,38 @@ export function SchedulerBulkToolbar({
         if (action === "resume" && !item.capabilities.pause) continue
         if (action === "delete" && !item.capabilities.delete) continue
         const source = reg.getSource(item.kind)
-        if (!source) continue
+        if (!source) {
+          failed.push(item.name)
+          continue
+        }
         try {
           await source[action](item.sourceId)
         } catch {
-          // Surface a single failed action via the per-source error stream
-          // — bulk toolbar doesn't itself toast.
+          // A bulk run keeps going past one bad item, but it must not pretend
+          // the item succeeded: the loop used to swallow this entirely and
+          // clear the selection, so a failed pause read as a done pause.
+          failed.push(item.name)
         }
+      }
+      if (failed.length > 0) {
+        // `Intl.ListFormat`, the same way the sidebar's source-error line does
+        // it: "、" is right for zh-CN and wrong for English, and this is a
+        // user-facing string like any other.
+        const names = failed.slice(0, 5)
+        let joined: string
+        try {
+          joined = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(names)
+        } catch {
+          joined = names.join(", ")
+        }
+        // The title counts every failure; the body can only name five without
+        // becoming a wall of text. Say so, or the two disagree and the rows the
+        // list left out are unrecoverable — `onClearSelection()` below drops the
+        // selection that was the only other way back to them.
+        const hidden = failed.length - names.length
+        toast.error(t("bulkPartialFailure", { count: failed.length }), {
+          description: hidden > 0 ? `${joined} ${t("bulkPartialFailureMore", { hidden })}` : joined,
+        })
       }
       onClearSelection()
     } finally {

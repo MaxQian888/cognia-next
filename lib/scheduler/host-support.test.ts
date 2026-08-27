@@ -159,3 +159,28 @@ describe("host-support matrix", () => {
     })
   })
 })
+
+describe("CARD_AUTHORED_TASK_TYPES covers every subsystem-authored type", () => {
+  // The type picker is an explicit allowlist, so a missing entry here does not
+  // leak the type into the form — but `isCardAuthoredTaskType` is the SSOT any
+  // other surface reads, and it silently answered "no" for these two.
+  it.each(["github-issue-sync", "connection:housekeeping:attachment-cache"] as const)(
+    "recognises %s",
+    (type) => {
+      expect(isCardAuthoredTaskType(type)).toBe(true)
+    }
+  )
+
+  it("recognises every connector-owned type", () => {
+    const connectorTypes = CARD_AUTHORED_TASK_TYPES.filter((type) => type.startsWith("connection:"))
+    // Guards the walk itself: an empty filter would make the loop below vacuous.
+    expect(connectorTypes.length).toBeGreaterThanOrEqual(8)
+    for (const type of connectorTypes) expect(isCardAuthoredTaskType(type)).toBe(true)
+  })
+
+  it("still leaves user-authored types out", () => {
+    for (const type of ["chat", "agent", "workflow", "backup", "plugin", "test"] as const) {
+      expect(isCardAuthoredTaskType(type)).toBe(false)
+    }
+  })
+})

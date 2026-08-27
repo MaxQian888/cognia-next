@@ -15,8 +15,8 @@
  */
 
 import React, { useCallback, useMemo } from "react"
-import { Calendar, Search, X } from "lucide-react"
-import { useTranslations } from "next-intl"
+import { AlertTriangle, Calendar, Search, X } from "lucide-react"
+import { useLocale, useTranslations } from "next-intl"
 
 import {
   Sidebar,
@@ -44,6 +44,7 @@ import {
   type UnifiedScheduledItem,
 } from "@/types/scheduler/unified"
 
+import { Surface } from "@/components/surface/surface"
 import { SchedulerFilterBar } from "./scheduler-filter-bar"
 import { UnifiedTaskSidebarItem } from "./unified-task-sidebar-item"
 import { TaskListEmptyState } from "./empty-states"
@@ -93,6 +94,15 @@ export interface SchedulerSidebarProps {
 
   /** Empty-state CTA — opens the new-task sheet. */
   onCreate?: () => void
+
+  /**
+   * Kinds whose source failed to load, from `useUnifiedScheduledItems().errors`.
+   * The hook has always collected these ("for the UI to decide whether to
+   * render a per-source warning chip") and nothing rendered them, so a source
+   * that threw on subscribe looked exactly like a source with no items — an
+   * empty list reading as "you have nothing scheduled".
+   */
+  sourceErrors?: Partial<Record<ScheduledItemKind, unknown>>
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +148,24 @@ export function SchedulerSidebarContent({
   selectedUnifiedIds,
   onToggleUnifiedSelection,
   onCreate,
+  sourceErrors,
 }: SchedulerSidebarProps) {
   const t = useTranslations("scheduler")
+  const locale = useLocale()
+
+  // `Intl.ListFormat`, not a hardcoded separator: "、" is right for zh-CN and
+  // wrong for English, and the reverse for ", ".
+  const failedKinds = useMemo(() => {
+    const names = SCHEDULED_ITEM_KINDS.filter((kind) => sourceErrors?.[kind] !== undefined).map(
+      (kind) => t(`kindFilter.${kind}`)
+    )
+    if (names.length === 0) return ""
+    try {
+      return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(names)
+    } catch {
+      return names.join(", ")
+    }
+  }, [sourceErrors, t, locale])
 
   // Status dot color for the scheduler itself
   const schedulerDotClass =
@@ -254,6 +280,19 @@ export function SchedulerSidebarContent({
 
       {/* Task list */}
       <SidebarContent className="group-data-[collapsible=icon]:hidden">
+        {failedKinds && (
+          <Surface
+            layer="raised"
+            radius="control"
+            role="status"
+            data-testid="scheduler-source-errors"
+            className="mx-3 mb-2 flex items-start gap-2 border border-amber-500/30 px-2.5 py-2 text-[11px] text-amber-600 dark:text-amber-400"
+          >
+            <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{t("sourceLoadFailed", { kinds: failedKinds })}</span>
+          </Surface>
+        )}
+
         {hasNothingAtAll && <TaskListEmptyState onCreate={onCreate} />}
 
         {isFilteredEmpty && (

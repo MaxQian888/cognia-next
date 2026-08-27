@@ -6,10 +6,15 @@ import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  // The failure list is joined with `Intl.ListFormat`, which needs a locale.
+  useLocale: () => "en",
 }))
 
 // Stub AlertDialog so we don't need its full Radix machinery.
 jest.mock("@/components/ui/alert-dialog")
+
+const toastErrorMock = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastErrorMock(...a) } }))
 
 function makeItem(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledItem {
   return {
@@ -153,5 +158,40 @@ describe("SchedulerBulkToolbar", () => {
     expect(screen.getByTestId("bulk-pause")).toBeDisabled()
     expect(screen.getByTestId("bulk-resume")).toBeDisabled()
     expect(screen.getByTestId("bulk-delete")).toBeDisabled()
+  })
+})
+
+describe("SchedulerBulkToolbar · failures are reported", () => {
+  it("tells the user which items a bulk pause could not update", async () => {
+    const registry = {
+      register: jest.fn(),
+      unregister: jest.fn(),
+      listAllSources: jest.fn(() => []),
+      getSource: jest.fn(() => ({
+        pause: jest.fn(async (sourceId: string) => {
+          if (sourceId === "bad") throw new Error("host unreachable")
+        }),
+        resume: jest.fn(),
+        delete: jest.fn(),
+      })),
+    } as never
+
+    render(
+      <SchedulerBulkToolbar
+        selectedItems={[
+          makeItem({ unifiedId: "app:ok", sourceId: "ok", name: "Good" }),
+          makeItem({ unifiedId: "app:bad", sourceId: "bad", name: "Bad" }),
+        ]}
+        onClearSelection={jest.fn()}
+        registry={registry}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("bulk-pause"))
+    // Before this the catch was empty and the selection just cleared, so a
+    // pause that never happened looked identical to one that did.
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    expect(toastErrorMock.mock.calls[0][0]).toBe("bulkPartialFailure")
+    expect(toastErrorMock.mock.calls[0][1]).toEqual(expect.objectContaining({ description: "Bad" }))
   })
 })

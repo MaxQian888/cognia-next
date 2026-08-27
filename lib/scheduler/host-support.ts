@@ -72,6 +72,9 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   "wiki-rebuild",
   "wiki-lint",
   "radar-report",
+  // Authored by the /issues project console when a GitHub repo resource is
+  // bound (`lib/issues/github-sync-schedule.ts`), never from the task form.
+  "github-issue-sync",
   "provider-diagnostics-refresh",
   "connection:scheduled:digest",
   "connection:outbound:send",
@@ -80,6 +83,9 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   "connection:housekeeping:connector-retention",
   "connection:housekeeping:callback-bindings",
   "connection:housekeeping:execution-runs",
+  // The daily housekeeping clock fans out to this one too
+  // (`lib/connectors/housekeeping-scheduler.ts`).
+  "connection:housekeeping:attachment-cache",
   "connection:presence:refresh",
 ] as const)
 

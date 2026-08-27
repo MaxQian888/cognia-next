@@ -18,6 +18,7 @@ import {
   History,
   ArrowUpFromLine,
   ArrowDownToLine,
+  CopyPlus,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -52,6 +53,7 @@ import { TaskTagsDisplay } from "./task-tags-display"
 import { TaskDependencyGraph } from "./task-dependency-graph"
 import { buildDependencyGraph, hasDependencyLinks } from "@/lib/scheduler/dependency-graph"
 import { isDeprecatedTaskType } from "@/lib/scheduler/host-support"
+import { PROMOTABLE_TRIGGER_TYPES } from "@/lib/scheduler/promote-to-system"
 
 export interface TaskDetailViewProps {
   task: ScheduledTask
@@ -62,8 +64,17 @@ export interface TaskDetailViewProps {
   onRunNow: (taskId: string) => void
   onDelete: (taskId: string) => void
   onEdit: () => void
+  /**
+   * Cancel a running plugin task execution. The controller lives in
+   * `lib/scheduler/executors/plugin-executor.ts` and the store already
+   * exposes both halves — the execution list simply never offered the action.
+   */
   onCancelPluginExecution?: (executionId: string) => boolean
   isPluginExecutionActive?: (executionId: string) => boolean
+  /** True while the store holds more execution rows than it has loaded. */
+  hasMoreExecutions?: boolean
+  /** Fetch the next page of execution rows (store `loadMoreExecutions`). */
+  onLoadMoreExecutions?: () => Promise<void> | void
   /**
    * Optional: fired when the user clicks a row in the execution history.
    * The page maps the click to opening the `RunDetailSheet` with a unified
@@ -81,6 +92,12 @@ export interface TaskDetailViewProps {
   onOpenDependencyGraph?: () => void
   /** Opens the backfill dialog (recurring triggers only). */
   onBackfill?: () => void
+  /**
+   * Duplicate this task into a new paused row. The store has implemented
+   * `cloneTask` since the scheduler shipped and the hook exposed it; no
+   * surface ever called it.
+   */
+  onClone?: (taskId: string) => void
   /**
    * OS promotion (desktop, own schedule only). When `onPromote` is supplied the
    * "Promote to system" entry is offered for cron/interval/once tasks that are
@@ -109,13 +126,16 @@ export function TaskDetailView({
   onRunNow,
   onDelete,
   onEdit,
-  onCancelPluginExecution: _onCancelPluginExecution,
-  isPluginExecutionActive: _isPluginExecutionActive,
+  onCancelPluginExecution,
+  isPluginExecutionActive,
+  hasMoreExecutions,
+  onLoadMoreExecutions,
   onSelectExecution,
   allTasks,
   onSelectTask,
   onOpenDependencyGraph,
   onBackfill,
+  onClone,
   onPromote,
   onUnpromote,
   promotionAvailable = true,
@@ -125,8 +145,10 @@ export function TaskDetailView({
 
   const isPaused = task.status === "paused"
   const isPromoted = Boolean(task.promotion)
-  const promotableTrigger =
-    task.trigger.type === "cron" || task.trigger.type === "interval" || task.trigger.type === "once"
+  // The promotion module owns which triggers an OS backend can express; this
+  // used to re-list them by hand, so widening one list silently left the other
+  // behind.
+  const promotableTrigger = PROMOTABLE_TRIGGER_TYPES.has(task.trigger.type)
   const [promoteConfirmOpen, setPromoteConfirmOpen] = useState(false)
 
   const showDependencies = !!allTasks && hasDependencyLinks(task, allTasks)
@@ -261,6 +283,12 @@ export function TaskDetailView({
                         {t("backfill.open")}
                       </DropdownMenuItem>
                     )}
+                  {onClone && (
+                    <DropdownMenuItem onClick={() => onClone(task.id)} data-testid="clone-task">
+                      <CopyPlus className="mr-2 h-3.5 w-3.5" />
+                      {t("duplicate")}
+                    </DropdownMenuItem>
+                  )}
                   {onPromote && !isPromoted && promotableTrigger && (
                     <DropdownMenuItem
                       onClick={() => setPromoteConfirmOpen(true)}
@@ -314,7 +342,20 @@ export function TaskDetailView({
           </div>
 
           <div className="mt-5">
-            <TaskExecutionHistory executions={executions} onSelectExecution={onSelectExecution} />
+            <TaskExecutionHistory
+              executions={executions}
+              onSelectExecution={onSelectExecution}
+              hasMoreOnServer={hasMoreExecutions}
+              onLoadMore={onLoadMoreExecutions}
+              onCancelExecution={
+                onCancelPluginExecution
+                  ? (executionId) => {
+                      onCancelPluginExecution(executionId)
+                    }
+                  : undefined
+              }
+              canCancelExecution={isPluginExecutionActive}
+            />
           </div>
 
           <div className="mt-5">

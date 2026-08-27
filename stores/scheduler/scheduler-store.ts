@@ -117,9 +117,6 @@ interface SchedulerActions {
   refreshAll: () => Promise<void>
 
   // Bulk Operations
-  bulkPause: (taskIds: string[]) => Promise<number>
-  bulkResume: (taskIds: string[]) => Promise<number>
-  bulkDelete: (taskIds: string[]) => Promise<number>
 
   // Import/Export
   exportTasks: (taskIds?: string[]) => Promise<string>
@@ -148,6 +145,13 @@ interface SchedulerActions {
 
   // System Status
   setSchedulerStatus: (status: SchedulerStatus) => void
+  /**
+   * Seconds between background refreshes of the app-scheduler slices; `0`
+   * disables the poll. Persisted since the store shipped and read by
+   * `useScheduler`, but there was no way to change it — Settings → Scheduled
+   * tasks now owns the control.
+   */
+  setAutoRefreshInterval: (seconds: number) => void
 
   // UI Actions
   selectTask: (taskId: string | null) => void
@@ -600,71 +604,6 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       // ========== Bulk Operations ==========
 
-      bulkPause: async (taskIds) => {
-        let count = 0
-        try {
-          const source = getSchedulerDataSource()
-          for (const taskId of taskIds) {
-            const taskType = get().tasks.find((task) => task.id === taskId)?.type
-            const success = await source.pauseTask(taskId, taskType)
-            if (success) count++
-          }
-          if (count > 0) {
-            log.info(`SchedulerStore: Bulk paused ${count}/${taskIds.length} tasks`)
-            await get().refreshAll()
-          }
-        } catch (error) {
-          log.error("SchedulerStore: Bulk pause failed", error as Error)
-          set({ error: "Failed to pause tasks" })
-        }
-        return count
-      },
-
-      bulkResume: async (taskIds) => {
-        let count = 0
-        try {
-          const source = getSchedulerDataSource()
-          for (const taskId of taskIds) {
-            const taskType = get().tasks.find((task) => task.id === taskId)?.type
-            const success = await source.resumeTask(taskId, taskType)
-            if (success) count++
-          }
-          if (count > 0) {
-            log.info(`SchedulerStore: Bulk resumed ${count}/${taskIds.length} tasks`)
-            await get().refreshAll()
-          }
-        } catch (error) {
-          log.error("SchedulerStore: Bulk resume failed", error as Error)
-          set({ error: "Failed to resume tasks" })
-        }
-        return count
-      },
-
-      bulkDelete: async (taskIds) => {
-        let count = 0
-        try {
-          const source = getSchedulerDataSource()
-          for (const taskId of taskIds) {
-            const taskType = get().tasks.find((task) => task.id === taskId)?.type
-            const success = await source.deleteTask(taskId, taskType)
-            if (success) count++
-          }
-          if (count > 0) {
-            log.info(`SchedulerStore: Bulk deleted ${count}/${taskIds.length} tasks`)
-            // Clear selection if selected task was deleted
-            const { selectedTaskId } = get()
-            if (selectedTaskId && taskIds.includes(selectedTaskId)) {
-              set({ selectedTaskId: null, executions: [] })
-            }
-            await get().refreshAll()
-          }
-        } catch (error) {
-          log.error("SchedulerStore: Bulk delete failed", error as Error)
-          set({ error: "Failed to delete tasks" })
-        }
-        return count
-      },
-
       // ========== Import/Export ==========
 
       exportTasks: async (taskIds) => {
@@ -810,6 +749,15 @@ export const useSchedulerStore = create<SchedulerStore>()(
           return
         }
         set({ schedulerStatus: status })
+      },
+
+      setAutoRefreshInterval: (seconds) => {
+        // Clamped rather than validated: the only caller is a numeric input,
+        // and a 1-second poll over Dexie + a paired-host RPC is a footgun.
+        const clamped = Number.isFinite(seconds)
+          ? Math.max(0, Math.min(3600, Math.round(seconds)))
+          : 0
+        set({ autoRefreshInterval: clamped })
       },
 
       // ========== Initialization ==========

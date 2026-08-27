@@ -582,6 +582,48 @@ describe("TaskScheduler", () => {
         expect(executor).toHaveBeenCalled()
       })
 
+      it("refuses centrally when the host cannot run the type, even if the executor forgot to", async () => {
+        // `chat` declares `sidecar` in TASK_TYPE_HOST_REQUIREMENTS. The
+        // registered executor here deliberately does NOT gate — the scheduler
+        // must still write a structured `unsupported-on-host` row instead of
+        // letting the run reach a host that cannot serve it.
+        const ungated = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("chat", ungated)
+        platformState.value = "web"
+
+        const task: ScheduledTask = {
+          id: "task-ungated",
+          name: "Ungated",
+          type: "chat",
+          trigger: { type: "interval", intervalMs: 60000 },
+          config: {
+            maxRetries: 0,
+            retryDelay: 1000,
+            timeout: 30000,
+            allowConcurrent: true,
+            runMissedOnStartup: true,
+          },
+          notification: { onStart: false, onComplete: false, onError: false },
+          status: "active",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        mockSchedulerDb.getTask.mockResolvedValueOnce(task)
+
+        try {
+          const execution = await scheduler.runTaskNow("task-ungated")
+          expect(ungated).not.toHaveBeenCalled()
+          expect(execution?.status).toBe("failed")
+          expect(execution?.terminalReason).toBe("unsupported-on-host")
+        } finally {
+          platformState.value = "tauri"
+          unregisterTaskExecutor("chat")
+        }
+      })
+
       it("tags the execution with a caller-supplied triggerSource", async () => {
         const executor = jest.fn().mockResolvedValue({ success: true })
         registerTaskExecutor("test", executor)

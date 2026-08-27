@@ -94,3 +94,19 @@ export const Empty: Story = {
     facets: deriveUnifiedFacets([]),
   },
 }
+
+/**
+ * A source that failed to load says so. Without this strip a source that threw
+ * on subscribe was indistinguishable from a source with nothing scheduled —
+ * the hook has always collected these errors and nothing rendered them.
+ */
+export const SourceLoadFailed: Story = {
+  args: {
+    items: unifiedItems,
+    facets: deriveUnifiedFacets(unifiedItems),
+    sourceErrors: {
+      workflow: new Error("workflowTriggers is unavailable"),
+      system: new Error("launchd refused the query"),
+    },
+  },
+}

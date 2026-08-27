@@ -90,6 +90,15 @@ export function SchedulerHostBar({ className }: SchedulerHostBarProps) {
           {t("localOnlyWhileOpen")}
         </span>
       )}
+      {/* Only the app scheduler has cross-host RPCs (`scheduled_task_*`). The
+          other four unified kinds are storage this device owns outright, so
+          they keep showing local rows while a paired schedule is managed —
+          said out loud rather than letting the list imply one host. */}
+      {target === "paired" && (
+        <span className="text-muted-foreground" data-testid="scheduler-host-bar-local-kinds">
+          {t("localKindsStay")}
+        </span>
+      )}
       {!pairedAvailable && (
         <span className="text-muted-foreground" data-testid="scheduler-host-bar-no-paired">
           {t("noPairedHost")}

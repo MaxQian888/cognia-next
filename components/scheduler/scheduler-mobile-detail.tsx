@@ -61,6 +61,11 @@ export interface SchedulerMobileDetailViewProps {
   onUnifiedResume?: (item: UnifiedScheduledItem) => void
   onUnifiedDelete?: (item: UnifiedScheduledItem) => void
   onSelectRun?: (run: UnifiedExecutionRun) => void
+  /** Execution-history pagination + plugin-run cancel (app-kind path only). */
+  hasMoreExecutions?: boolean
+  onLoadMoreExecutions?: () => Promise<void> | void
+  onCancelPluginExecution?: (executionId: string) => boolean
+  isPluginExecutionActive?: (executionId: string) => boolean
 }
 
 const statusColors: Record<string, string> = {
@@ -87,6 +92,10 @@ export function SchedulerMobileDetailView({
   onUnifiedResume,
   onUnifiedDelete,
   onSelectRun,
+  hasMoreExecutions,
+  onLoadMoreExecutions,
+  onCancelPluginExecution,
+  isPluginExecutionActive,
 }: SchedulerMobileDetailViewProps) {
   const t = useTranslations("scheduler")
 
@@ -175,6 +184,16 @@ export function SchedulerMobileDetailView({
               onSelectExecution={
                 onSelectRun ? (exec) => onSelectRun(toUnifiedFromTaskExecution(exec)) : undefined
               }
+              hasMoreOnServer={hasMoreExecutions}
+              onLoadMore={onLoadMoreExecutions}
+              onCancelExecution={
+                onCancelPluginExecution
+                  ? (executionId) => {
+                      onCancelPluginExecution(executionId)
+                    }
+                  : undefined
+              }
+              canCancelExecution={isPluginExecutionActive}
             />
             <TaskConfiguration task={task} />
             <TaskNotificationDisplay notification={task.notification} />

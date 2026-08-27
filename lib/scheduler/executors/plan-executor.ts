@@ -12,22 +12,30 @@
  * with the shared utility-client factory.
  */
 
-import type { PlanTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type {
+  PlanTaskPayload,
+  ScheduledTask,
+  TaskExecution,
+  TaskExecutorResult,
+} from "@/types/scheduler"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
-interface PlanExecutionResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type PlanExecutionResult = TaskExecutorResult
 
 export async function executePlanTask(
   task: ScheduledTask,
   execution: TaskExecution,
   signal: AbortSignal
 ): Promise<PlanExecutionResult> {
+  // Host gate: a plan drives agent turns through the sidecar (and may build a
+  // replan LLM client). Refuse structurally instead of failing deep inside the
+  // runtime with a bare Error — see `lib/scheduler/host-support.ts`.
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   const payload = (task.payload ?? {}) as Partial<PlanTaskPayload>
   if (!payload.planId || !payload.planId.trim()) {
     return { success: false, error: "plan task requires `planId` in payload" }

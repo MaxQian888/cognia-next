@@ -5,7 +5,11 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  // Echoes the key, then any interpolated values, so a test can assert on what
+  // was actually passed into a message (the source-error strip's kind list).
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key} ${Object.values(values).join(" ")}` : key,
+  useLocale: () => "en",
 }))
 
 // Stub the Sidebar primitives so we don't need a Provider / matchMedia.
@@ -283,5 +287,27 @@ describe("SchedulerSidebar", () => {
     )
     fireEvent.click(screen.getByTestId("scheduler-sidebar-reset-filters"))
     expect(onResetFilters).toHaveBeenCalled()
+  })
+})
+
+describe("SchedulerSidebar · source load failures", () => {
+  it("says which sources failed instead of showing an innocent short list", () => {
+    setup({ sourceErrors: { workflow: new Error("boom"), system: new Error("nope") } })
+    const strip = screen.getByTestId("scheduler-source-errors")
+    expect(strip).toHaveTextContent("sourceLoadFailed")
+  })
+
+  it("joins the failed kinds with the locale's own conjunction", () => {
+    // Hardcoding "、" reads wrong in English and ", " reads wrong in zh-CN;
+    // `Intl.ListFormat` is the only separator that is right in both.
+    const names = ["kindFilter.workflow", "kindFilter.system"]
+    const expected = new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(names)
+    setup({ sourceErrors: { workflow: new Error("boom"), system: new Error("nope") } })
+    expect(screen.getByTestId("scheduler-source-errors")).toHaveTextContent(expected)
+  })
+
+  it("renders nothing when every source loaded", () => {
+    setup({ sourceErrors: {} })
+    expect(screen.queryByTestId("scheduler-source-errors")).not.toBeInTheDocument()
   })
 })

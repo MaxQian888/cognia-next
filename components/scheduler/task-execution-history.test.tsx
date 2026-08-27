@@ -201,3 +201,91 @@ describe("TaskExecutionHistory", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Pagination past the loaded page, and cancelling a run that is still ours.
+// Both halves existed in the store (`loadMoreExecutions` / `hasMoreExecutions`
+// and `cancelPluginExecution` / `isPluginExecutionActive`) and were never
+// reachable from the list.
+// ---------------------------------------------------------------------------
+
+describe("TaskExecutionHistory · reaching the rest of the history", () => {
+  it("reveals already-loaded rows before asking the store for more", () => {
+    const onLoadMore = jest.fn()
+    const executions = Array.from({ length: 12 }, (_, i) => makeExecution(`e${i}`))
+    render(
+      <TaskExecutionHistory
+        executions={executions}
+        maxItems={10}
+        hasMoreOnServer
+        onLoadMore={onLoadMore}
+      />
+    )
+    expect(screen.getAllByTestId("execution-row")).toHaveLength(10)
+    fireEvent.click(screen.getByTestId("execution-load-more"))
+    expect(onLoadMore).not.toHaveBeenCalled()
+    expect(screen.getAllByTestId("execution-row")).toHaveLength(12)
+  })
+
+  it("fetches the next page once the loaded array is exhausted", async () => {
+    const onLoadMore = jest.fn().mockResolvedValue(undefined)
+    const executions = Array.from({ length: 10 }, (_, i) => makeExecution(`e${i}`))
+    render(
+      <TaskExecutionHistory
+        executions={executions}
+        maxItems={10}
+        hasMoreOnServer
+        onLoadMore={onLoadMore}
+      />
+    )
+    // Before this the button was simply absent here — the page boundary hid
+    // every remaining row in Dexie.
+    fireEvent.click(screen.getByTestId("execution-load-more"))
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides the button when neither the array nor the store has more", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("only")]}
+        maxItems={10}
+        hasMoreOnServer={false}
+        onLoadMore={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("execution-load-more")).not.toBeInTheDocument()
+  })
+
+  it("offers Cancel only on running rows the app can still abort", () => {
+    const onCancelExecution = jest.fn()
+    render(
+      <TaskExecutionHistory
+        executions={[
+          makeExecution("running-ours", { status: "running", duration: undefined }),
+          makeExecution("running-theirs", { status: "running", duration: undefined }),
+          makeExecution("done"),
+        ]}
+        onCancelExecution={onCancelExecution}
+        canCancelExecution={(id) => id === "running-ours"}
+      />
+    )
+    const cancels = screen.getAllByTestId("execution-cancel")
+    expect(cancels).toHaveLength(1)
+    fireEvent.click(cancels[0])
+    expect(onCancelExecution).toHaveBeenCalledWith("running-ours")
+  })
+
+  it("does not open the run sheet when Cancel is used", () => {
+    const onSelectExecution = jest.fn()
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("r", { status: "running", duration: undefined })]}
+        onSelectExecution={onSelectExecution}
+        onCancelExecution={jest.fn()}
+        canCancelExecution={() => true}
+      />
+    )
+    fireEvent.click(screen.getByTestId("execution-cancel"))
+    expect(onSelectExecution).not.toHaveBeenCalled()
+  })
+})

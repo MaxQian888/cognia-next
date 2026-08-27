@@ -54,6 +54,11 @@ export function TaskNotificationDisplay({ notification, className }: TaskNotific
       label: t("notifyOn"),
       value: formatNotifyOn(notification, t),
     },
+    // Read out only when armed: `onProgress` is off on every task that has no
+    // mid-run reporter, and a row saying "off" on every one of them is noise.
+    ...(notification?.onProgress
+      ? [{ label: t("notifyOnProgress"), value: t("notifyOnModes.always") }]
+      : []),
   ]
 
   return (

@@ -95,6 +95,11 @@ export function ScheduledTasksSection() {
 
   const policy = useSchedulerStore((s) => s.permissionPolicy)
   const updatePolicy = useSchedulerStore((s) => s.updatePermissionPolicy)
+  const autoRefreshInterval = useSchedulerStore((s) => s.autoRefreshInterval)
+  const setAutoRefreshInterval = useSchedulerStore((s) => s.setAutoRefreshInterval)
+  // In-flight text for the auto-refresh box; `null` means "show the store's
+  // number". See the input below for why the raw string has to exist.
+  const [rawAutoRefresh, setRawAutoRefresh] = useState<string | null>(null)
   const schedulerStatus = useSchedulerStore((s) => s.schedulerStatus)
   const isInitialized = useSchedulerStore((s) => s.isInitialized)
   const tasks = useSchedulerStore((s) => s.tasks)
@@ -254,6 +259,43 @@ export function ScheduledTasksSection() {
                 loggers.scheduler.info("settings.maxConcurrentChanged", { value: next })
                 updatePolicy({ maxConcurrentExecutions: next })
               }}
+            />
+          </div>
+          {/* The scheduler page re-reads its slices on this cadence
+              (`hooks/scheduler/use-scheduler.ts`). The value has been persisted
+              since the store shipped and nothing could change it. */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <Label htmlFor="auto-refresh-interval">{t("permissions.autoRefreshInterval")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {t("permissions.autoRefreshIntervalDesc")}
+              </p>
+            </div>
+            <Input
+              id="auto-refresh-interval"
+              data-testid="scheduler-auto-refresh-interval"
+              type="number"
+              min={0}
+              max={3600}
+              className="w-24"
+              // `rawAutoRefresh` is what makes clearing the box possible. The
+              // store holds a number, so a purely controlled input cannot say
+              // "emptied, about to be retyped" — and committing that as
+              // `parseInt("") === NaN → 0` is not a small interval, it is the
+              // value that turns the poll OFF. Backspacing 30 to type 60 did
+              // exactly that. Show the raw text, commit nothing until it parses,
+              // and snap back to the committed number on blur.
+              value={rawAutoRefresh ?? String(autoRefreshInterval)}
+              onChange={(e) => {
+                const next = e.target.value
+                setRawAutoRefresh(next)
+                if (next.trim() === "") return
+                const parsed = Number(next)
+                if (!Number.isFinite(parsed)) return
+                loggers.scheduler.info("settings.autoRefreshIntervalChanged", { value: parsed })
+                setAutoRefreshInterval(parsed)
+              }}
+              onBlur={() => setRawAutoRefresh(null)}
             />
           </div>
         </CardContent>

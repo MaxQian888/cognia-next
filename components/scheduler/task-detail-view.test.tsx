@@ -18,9 +18,16 @@ jest.mock("./task-execution-chart", () => ({
   TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
   toChartPointsFromExecutions: () => [],
 }))
+// Captured so the wiring test can assert the detail view actually forwards
+// the cancel + pagination handlers it receives — it used to accept and discard
+// `onCancelPluginExecution` / `isPluginExecutionActive`.
+const historyProps: Record<string, unknown>[] = []
 jest.mock("./task-execution-history", () => ({
   __esModule: true,
-  TaskExecutionHistory: () => <div data-testid="task-execution-history-stub" />,
+  TaskExecutionHistory: (props: Record<string, unknown>) => {
+    historyProps.push(props)
+    return <div data-testid="task-execution-history-stub" />
+  },
 }))
 jest.mock("./task-configuration", () => ({
   __esModule: true,
@@ -285,5 +292,55 @@ describe("TaskDetailView", () => {
       fireEvent.click(screen.getByTestId("dependency-node-up"))
       expect(onSelectTask).toHaveBeenCalledWith("up")
     })
+  })
+})
+
+describe("TaskDetailView · execution-list wiring", () => {
+  beforeEach(() => {
+    historyProps.length = 0
+  })
+
+  it("forwards plugin-run cancel and store pagination to the execution list", () => {
+    const onCancelPluginExecution = jest.fn(() => true)
+    const isPluginExecutionActive = jest.fn(() => true)
+    const onLoadMoreExecutions = jest.fn()
+
+    render(
+      <TaskDetailView
+        task={buildTask()}
+        executions={[]}
+        {...callbacks()}
+        onCancelPluginExecution={onCancelPluginExecution}
+        isPluginExecutionActive={isPluginExecutionActive}
+        hasMoreExecutions
+        onLoadMoreExecutions={onLoadMoreExecutions}
+      />
+    )
+
+    const props = historyProps.at(-1)!
+    expect(props.hasMoreOnServer).toBe(true)
+    expect(props.onLoadMore).toBe(onLoadMoreExecutions)
+    expect(props.canCancelExecution).toBe(isPluginExecutionActive)
+    ;(props.onCancelExecution as (id: string) => void)("exec-1")
+    expect(onCancelPluginExecution).toHaveBeenCalledWith("exec-1")
+  })
+
+  it("offers no cancel handler when the page supplies none", () => {
+    render(<TaskDetailView task={buildTask()} executions={[]} {...callbacks()} />)
+    expect(historyProps.at(-1)!.onCancelExecution).toBeUndefined()
+  })
+})
+
+describe("TaskDetailView · duplicate", () => {
+  it("offers Duplicate and passes the task id through", () => {
+    const onClone = jest.fn()
+    render(<TaskDetailView task={buildTask()} executions={[]} {...callbacks()} onClone={onClone} />)
+    fireEvent.click(screen.getByTestId("clone-task"))
+    expect(onClone).toHaveBeenCalledWith("t1")
+  })
+
+  it("omits the entry when the page supplies no handler", () => {
+    render(<TaskDetailView task={buildTask()} executions={[]} {...callbacks()} />)
+    expect(screen.queryByTestId("clone-task")).not.toBeInTheDocument()
   })
 })

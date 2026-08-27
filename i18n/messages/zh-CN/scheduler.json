@@ -2,6 +2,7 @@
   "action": "操作",
   "actionApp": "应用",
   "actionCommand": "命令",
+  "actionFailed": "无法更新“{name}”",
   "actionScript": "脚本",
   "active": "活跃",
   "activePlugins": "{count} 个插件",
@@ -123,6 +124,8 @@
   "bulkDelete": "删除",
   "bulkDeleteDescription": "将跨所有类型删除 {n} 个任务，此操作不可撤销。",
   "bulkDeleteTitle": "删除已选任务？",
+  "bulkPartialFailure": "{count, plural, other {# 个条目未能更新}}",
+  "bulkPartialFailureMore": "{hidden, plural, other {等另外 # 个}}",
   "bulkPause": "暂停",
   "bulkResume": "恢复",
   "bulkSelect": "多选",
@@ -136,6 +139,7 @@
     "today": "今天"
   },
   "cancel": "取消",
+  "cancelRun": "取消",
   "cancelSelect": "取消",
   "catchupWindow": {
     "help": "超过该时长的错过运行将被跳过而不是补跑。0 表示不限制。",
@@ -145,7 +149,8 @@
   "cleanupOldExecutions": "清理旧执行记录（30天）",
   "clearSearch": "清空搜索",
   "clearSelection": "清除选择",
-  "cloneSuccess": "任务克隆成功",
+  "cloneFailed": "无法创建该任务的副本",
+  "cloneSuccess": "已创建副本“{name}”",
   "cloneTask": "克隆任务",
   "close": "关闭",
   "code": "代码：",
@@ -341,6 +346,7 @@
     "remote": "远程主机"
   },
   "hostBar": {
+    "localKindsStay": "下面的备份 / 工作流 / 系统 / 连接器条目仍属于本设备",
     "localOnlyWhileOpen": "仅在应用打开时运行",
     "localSuspended": "已挂起——由云端主机接管",
     "managing": "正在管理：{host}",
@@ -430,6 +436,7 @@
   "logs": "日志",
   "maxMissedRuns": "最大补跑次数",
   "maxRetries": "最大重试次数",
+  "maxRetryDelayMs": "最大重试间隔（毫秒）",
   "mcp": {
     "disabledNote": "已禁用",
     "empty": "尚未配置 MCP 服务器。",
@@ -503,6 +510,8 @@
     "never": "从不",
     "successOnly": "仅成功时"
   },
+  "notifyOnProgress": "进度更新时通知",
+  "notifyOnProgressHint": "只有会上报中途进度的任务类型才会触发（目前是插件任务）。",
   "notifyOnStart": "开始时通知",
   "occurrenceList": {
     "moreTimes": "另有 {count} 次",
@@ -707,6 +716,8 @@
     "agentAutoCreate": "代理自动创建",
     "agentAutoCreateDesc": "允许 AI 代理在不弹出确认对话框的情况下创建定时任务",
     "allowAgentAutoCreate": "允许代理自动创建任务",
+    "autoRefreshInterval": "自动刷新间隔（秒）",
+    "autoRefreshIntervalDesc": "定时任务页面重新读取任务和执行记录的间隔，0 表示关闭。",
     "confirmationRequired": "需要确认",
     "confirmationRequiredDesc": "代理创建以下类型的任务时，始终需要用户明确确认",
     "description": "控制代理和插件对定时任务的操作权限",
@@ -897,6 +908,7 @@
     "nextRun": "下次运行"
   },
   "sourceConversationMissing": "来源 IM 会话已不再绑定聊天会话。",
+  "sourceLoadFailed": "无法加载：{kinds}",
   "stackTrace": "堆栈跟踪",
   "startedAt": "开始时间",
   "statistics": "统计",

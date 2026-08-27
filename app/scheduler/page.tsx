@@ -11,6 +11,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
+import { consumeScheduledTaskDraft } from "@/lib/scheduler/task-draft-handoff"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import { useBreakpoint } from "@/hooks/ui"
@@ -78,12 +79,12 @@ export default function SchedulerPage() {
     clearFilter,
     refresh,
     cleanupOldExecutions,
+    cloneTask,
     cancelPluginExecution,
     getActivePluginCount: _getActivePluginCount,
     isPluginExecutionActive,
-    bulkPause: _bulkPause,
-    bulkResume: _bulkResume,
-    bulkDelete: _bulkDelete,
+    hasMoreExecutions,
+    loadMoreExecutions,
   } = useScheduler()
 
   // Multi-select state (unified-item ids) lives in the scheduler store so it
@@ -131,7 +132,11 @@ export default function SchedulerPage() {
   useEffect(() => {
     bootstrapSchedulerSources()
   }, [])
-  const { items: unifiedItems, statistics: unifiedStatistics } = useUnifiedScheduledItems({
+  const {
+    items: unifiedItems,
+    statistics: unifiedStatistics,
+    errors: unifiedSourceErrors,
+  } = useUnifiedScheduledItems({
     registry: getSchedulerSourceRegistry(),
   })
   // Cross-source run history — feeds the overview's 7-day chart. The chart used
@@ -160,6 +165,28 @@ export default function SchedulerPage() {
 
   // --- Dialog / sheet state ---
   const [showCreateSheet, setShowCreateSheet] = useState(false)
+  // A draft handed over by another surface (the composer's "schedule this"
+  // suggestion) opens the create sheet pre-filled on the next mount.
+  const [createDraft, setCreateDraft] = useState<{
+    input: Partial<CreateScheduledTaskInput>
+    summary?: string
+  } | null>(null)
+
+  // Pick up a staged draft exactly once. `consumeScheduledTaskDraft` clears
+  // the stash itself, so StrictMode's replayed effect finds nothing to reopen.
+  // The state write is deferred by a microtask: a synchronous setState in an
+  // effect body cascades an extra render, which `react-hooks/set-state-in-effect`
+  // rightly refuses. StrictMode replays effects on the same instance, so the
+  // deferred write still lands.
+  useEffect(() => {
+    const handed = consumeScheduledTaskDraft()
+    if (!handed) return
+    queueMicrotask(() => {
+      setCreateDraft(handed)
+      setShowCreateSheet(true)
+    })
+  }, [])
+
   const [showEditSheet, setShowEditSheet] = useState(false)
   // One confirmation for every destructive delete on this page. The list rows
   // used to call the source adapter straight from the hover menu — no dialog,
@@ -431,6 +458,20 @@ export default function SchedulerPage() {
     [runTaskNow]
   )
 
+  const handleCloneTask = useCallback(
+    async (taskId: string) => {
+      const clone = await cloneTask(taskId)
+      if (!clone) {
+        toast.error(t("cloneFailed"))
+        return
+      }
+      // Land on the copy so the very next thing the user does is edit it.
+      selectTask(clone.id)
+      toast.success(t("cloneSuccess", { name: clone.name }))
+    },
+    [cloneTask, selectTask, t]
+  )
+
   const handlePromote = useCallback(
     async (taskId: string) => {
       const result = await promoteTask(taskId)
@@ -532,10 +573,21 @@ export default function SchedulerPage() {
   // pause/resume/run/delete its native rows. Memoized so the memoized sidebar
   // rows keep referentially-stable handlers across page re-renders.
   const unifiedActions = useMemo(() => {
+    // Every one of these can genuinely fail — a paired host that stopped
+    // answering, an OS task the scheduler refuses, a source whose backend is
+    // gone. They used to be fired as bare floating promises, so the row simply
+    // did not change and the user was told nothing.
     const dispatch = (action: "runNow" | "pause" | "resume") => (item: UnifiedScheduledItem) => {
       const source = getSchedulerSourceRegistry().getSource(item.kind)
-      if (!source) return
-      void source[action](item.sourceId)
+      if (!source) {
+        toast.error(t("actionFailed", { name: item.name }))
+        return
+      }
+      void source[action](item.sourceId).catch((error: unknown) => {
+        toast.error(t("actionFailed", { name: item.name }), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
     }
     return {
       runNow: dispatch("runNow"),
@@ -545,7 +597,10 @@ export default function SchedulerPage() {
       // confirmation dialog dispatch it.
       delete: (item: UnifiedScheduledItem) => setPendingDelete(item),
     }
-  }, [])
+    // `t` is `useMemo`-stable inside use-intl (it only changes when the locale
+    // or the message bundle does), so depending on it does not defeat the
+    // `React.memo` on the sidebar rows these handlers are passed to.
+  }, [t])
 
   const handleSelectUnifiedItem = useCallback(
     (item: UnifiedScheduledItem) => {
@@ -681,6 +736,7 @@ export default function SchedulerPage() {
       <SidebarComponent
         items={unifiedItems}
         facets={facets}
+        sourceErrors={unifiedSourceErrors}
         selectedUnifiedId={selectedUnifiedId}
         highlightedUnifiedId={highlightedUnifiedId}
         schedulerStatus={schedulerStatus}
@@ -733,6 +789,10 @@ export default function SchedulerPage() {
             onUnifiedResume={unifiedActions.resume}
             onUnifiedDelete={unifiedActions.delete}
             onSelectRun={setSelectedRun}
+            hasMoreExecutions={hasMoreExecutions}
+            onLoadMoreExecutions={loadMoreExecutions}
+            onCancelPluginExecution={cancelPluginExecution}
+            isPluginExecutionActive={isPluginExecutionActive}
           />
         }
         header={
@@ -789,11 +849,14 @@ export default function SchedulerPage() {
                     onEdit={() => setShowEditSheet(true)}
                     onCancelPluginExecution={cancelPluginExecution}
                     isPluginExecutionActive={isPluginExecutionActive}
+                    hasMoreExecutions={hasMoreExecutions}
+                    onLoadMoreExecutions={loadMoreExecutions}
                     onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
                     allTasks={tasks}
                     onSelectTask={handleSelectTask}
                     onOpenDependencyGraph={() => setShowDependencyDialog(true)}
                     onBackfill={() => setShowBackfillDialog(true)}
+                    onClone={handleCloneTask}
                     onPromote={handlePromote}
                     onUnpromote={handleUnpromote}
                     promotionAvailable={promotionAvailable}
@@ -855,7 +918,14 @@ export default function SchedulerPage() {
 
       <SchedulerDialogs
         showCreateSheet={showCreateSheet}
-        onShowCreateSheetChange={setShowCreateSheet}
+        createInitialValues={createDraft?.input}
+        createDraftSummary={createDraft?.summary}
+        onShowCreateSheetChange={(open) => {
+          setShowCreateSheet(open)
+          // Closing the sheet retires the hand-off; reopening it from the
+          // header must give a blank form, not the draft again.
+          if (!open) setCreateDraft(null)
+        }}
         onCreateTask={handleCreateTask}
         isSubmitting={isSubmitting}
         showEditSheet={showEditSheet}

@@ -42,9 +42,6 @@ interface FakeStore {
   exportTasks: jest.Mock
   importTasks: jest.Mock
   cloneTask: jest.Mock
-  bulkPause: jest.Mock
-  bulkResume: jest.Mock
-  bulkDelete: jest.Mock
 }
 
 let storeRef: FakeStore = makeStore()
@@ -89,9 +86,6 @@ function makeStore(): FakeStore {
     exportTasks: jest.fn(),
     importTasks: jest.fn(),
     cloneTask: jest.fn(),
-    bulkPause: jest.fn(),
-    bulkResume: jest.fn(),
-    bulkDelete: jest.fn(),
   }
 }
 
@@ -148,9 +142,6 @@ describe("useScheduler", () => {
     expect(result.current.exportTasks).toBe(storeRef.exportTasks)
     expect(result.current.importTasks).toBe(storeRef.importTasks)
     expect(result.current.cloneTask).toBe(storeRef.cloneTask)
-    expect(result.current.bulkPause).toBe(storeRef.bulkPause)
-    expect(result.current.bulkResume).toBe(storeRef.bulkResume)
-    expect(result.current.bulkDelete).toBe(storeRef.bulkDelete)
   })
 
   it("BroadcastChannel: debounced execution-update triggers refreshAll", async () => {

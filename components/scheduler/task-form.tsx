@@ -291,6 +291,7 @@ interface TaskFormState {
   notifyOnStart: boolean
   notifyOnComplete: boolean
   notifyOnError: boolean
+  notifyOnProgress: boolean
   notificationChannels: NotificationChannel[]
   /**
    * Conversation the `im` channel delivers to. Empty means "use the global ops
@@ -301,6 +302,7 @@ interface TaskFormState {
   taskTimeout: number
   maxRetries: number
   retryDelay: number
+  maxRetryDelay: number
   runMissedOnStartup: boolean
   maxMissedRuns: number
   /** Overlap policy — replaces the legacy allowConcurrent switch. */
@@ -455,11 +457,14 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
     notifyOnStart: initialValues?.notification?.onStart ?? false,
     notifyOnComplete: initialValues?.notification?.onComplete ?? true,
     notifyOnError: initialValues?.notification?.onError ?? true,
+    notifyOnProgress: initialValues?.notification?.onProgress ?? false,
     notificationChannels: initialValues?.notification?.channels || ["toast"],
     notificationImConversationKey: initialValues?.notification?.imTarget?.conversationKey ?? "",
     taskTimeout: initialValues?.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
     maxRetries: initialValues?.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
     retryDelay: initialValues?.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
+    maxRetryDelay:
+      initialValues?.config?.maxRetryDelay ?? DEFAULT_EXECUTION_CONFIG.maxRetryDelay ?? 60_000,
     runMissedOnStartup:
       initialValues?.config?.runMissedOnStartup ?? DEFAULT_EXECUTION_CONFIG.runMissedOnStartup,
     maxMissedRuns:
@@ -698,11 +703,14 @@ export function TaskForm({
       notifyOnStart: input.notification?.onStart ?? false,
       notifyOnComplete: input.notification?.onComplete ?? true,
       notifyOnError: input.notification?.onError ?? true,
+      notifyOnProgress: input.notification?.onProgress ?? false,
       notificationChannels: input.notification?.channels || ["toast"],
       notificationImConversationKey: input.notification?.imTarget?.conversationKey ?? "",
       taskTimeout: input.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
       maxRetries: input.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
       retryDelay: input.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
+      maxRetryDelay:
+        input.config?.maxRetryDelay ?? DEFAULT_EXECUTION_CONFIG.maxRetryDelay ?? 60_000,
       runMissedOnStartup:
         input.config?.runMissedOnStartup ?? DEFAULT_EXECUTION_CONFIG.runMissedOnStartup,
       maxMissedRuns: input.config?.maxMissedRuns ?? DEFAULT_EXECUTION_CONFIG.maxMissedRuns ?? 1,
@@ -872,6 +880,7 @@ export function TaskForm({
         timeout: f.taskTimeout,
         maxRetries: f.maxRetries,
         retryDelay: f.retryDelay,
+        maxRetryDelay: f.maxRetryDelay > 0 ? f.maxRetryDelay : undefined,
         runMissedOnStartup: f.runMissedOnStartup,
         maxMissedRuns: Math.max(0, f.maxMissedRuns),
         overlapPolicy: f.overlapPolicy,
@@ -888,7 +897,10 @@ export function TaskForm({
         onStart: f.notifyOnStart,
         onComplete: f.notifyOnComplete,
         onError: f.notifyOnError,
-        onProgress: false,
+        // Producers are executors that report mid-run — plugin handlers today
+        // (`PluginTaskContext.reportProgress`). Types with no reporter simply
+        // never raise the event; the switch is not a lie, it is unused.
+        onProgress: f.notifyOnProgress,
         channels: f.notificationChannels,
         // Only persisted when the channel is actually on and a key was typed;
         // an empty key means "fall back to the global ops channel", which is
@@ -1501,6 +1513,12 @@ export function TaskForm({
                 checked: f.notifyOnError,
                 field: "notifyOnError" as const,
               },
+              {
+                key: "progress",
+                label: t("notifyOnProgress"),
+                checked: f.notifyOnProgress,
+                field: "notifyOnProgress" as const,
+              },
             ].map((item) => (
               <div
                 key={item.key}
@@ -1519,6 +1537,12 @@ export function TaskForm({
               </div>
             ))}
           </div>
+
+          {f.notifyOnProgress && (
+            <p className="text-[10px] text-muted-foreground" data-testid="notify-on-progress-hint">
+              {t("notifyOnProgressHint")}
+            </p>
+          )}
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("notificationChannels") || "Channels"}</Label>
@@ -1650,6 +1674,22 @@ export function TaskForm({
                 min={0}
                 value={f.retryDelay}
                 onChange={(e) => updateForm({ retryDelay: parseInt(e.target.value) || 0 })}
+                className="h-9 text-sm transition-all focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            {/* The retry delay grows exponentially and this caps it. The
+                scheduler has always honoured it (`applyRetryBackoff`), but the
+                only way to set it was to hand-edit the persisted row. */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("maxRetryDelayMs")}
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                data-testid="task-max-retry-delay"
+                value={f.maxRetryDelay}
+                onChange={(e) => updateForm({ maxRetryDelay: parseInt(e.target.value) || 0 })}
                 className="h-9 text-sm transition-all focus:ring-2 focus:ring-primary/20"
               />
             </div>

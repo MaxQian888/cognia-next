@@ -18,22 +18,30 @@
  * `workflowRuns`, under an id minted by `lib/ai/agent/team/team-workflow-id.ts`.
  */
 
-import type { AgentTeamTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type {
+  AgentTeamTaskPayload,
+  ScheduledTask,
+  TaskExecution,
+  TaskExecutorResult,
+} from "@/types/scheduler"
+import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
-interface TeamExecutionResult {
-  success: boolean
-  output?: Record<string, unknown>
-  error?: string
-}
+type TeamExecutionResult = TaskExecutorResult
 
 export async function executeAgentTeamTask(
   task: ScheduledTask,
   execution: TaskExecution,
   signal: AbortSignal
 ): Promise<TeamExecutionResult> {
+  // Host gate: every teammate turn goes through the sidecar. A browser-only
+  // shell has none, so refuse with the structured reason rather than letting
+  // the team runtime fail turn by turn.
+  const refused = assertTaskTypeSupportedOnHost(task.type)
+  if (refused) return refused
+
   const payload = (task.payload ?? {}) as Partial<AgentTeamTaskPayload>
   if (!payload.teamId || !payload.teamId.trim()) {
     return { success: false, error: "agent-team task requires `teamId` in payload" }

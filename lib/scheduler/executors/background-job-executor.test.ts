@@ -5,6 +5,13 @@ import {
 } from "@/lib/jobs/background-jobs"
 import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 
+const hostIsTauriMock = jest.fn(() => true)
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => (hostIsTauriMock() ? "tauri" : "web"),
+  isTauri: () => hostIsTauriMock(),
+}))
+
 jest.mock("@/lib/jobs/background-jobs", () => ({
   spawnScheduledBackgroundJob: jest.fn(),
   registerScheduledBackgroundMonitor: jest.fn(),
@@ -17,6 +24,7 @@ const task = (type: ScheduledTask["type"], payload: ScheduledTask["payload"]) =>
 const execution = {} as TaskExecution
 
 beforeEach(() => {
+  hostIsTauriMock.mockReturnValue(true)
   spawn.mockReset()
   register.mockReset()
 })
@@ -84,4 +92,22 @@ it("registers a durable monitor and validates inputs before invoking", async () 
   ).resolves.toEqual(expect.objectContaining({ success: false }))
   expect(spawn).not.toHaveBeenCalled()
   expect(register).toHaveBeenCalledTimes(1)
+})
+
+it("refuses both job types on a host with no shell", async () => {
+  hostIsTauriMock.mockReturnValue(false)
+  const command = await executeBackgroundCommandTask(
+    task("background-command", { command: "pnpm build", cwd: "/repo" }),
+    execution,
+    new AbortController().signal
+  )
+  const monitor = await executeMonitorTask(
+    task("monitor", { condition: { kind: "file-exists", path: "/tmp/x" } }),
+    execution,
+    new AbortController().signal
+  )
+  expect(command.terminalReason).toBe("unsupported-on-host")
+  expect(monitor.terminalReason).toBe("unsupported-on-host")
+  expect(spawn).not.toHaveBeenCalled()
+  expect(register).not.toHaveBeenCalled()
 })

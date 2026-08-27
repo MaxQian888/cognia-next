@@ -1,21 +1,49 @@
 /**
- * App-source adapter: wraps the existing `scheduler-db` Dexie store +
- * `getTaskScheduler()` lifecycle into the unified source contract.
+ * App-source adapter: wraps the scheduler for the schedule the page currently
+ * MANAGES into the unified source contract.
  *
  * This is the cognia-next "native" scheduler — chat / agent / skill /
- * external-agent / script / custom / plugin / backup tasks. No behavior
- * change vs the existing TaskScheduler; the adapter just normalizes the
- * row shape and routes CRUD to the same underlying APIs the UI already
- * uses today.
+ * external-agent / script / custom / plugin / backup tasks.
+ *
+ * ## Which host's tasks this emits (ADR-0128 §6)
+ *
+ * `SchedulerHostBar` lets the user pick whether this page reads and writes
+ * *this device's* schedule or the *paired / remote host's*. That choice lives
+ * in `scheduler-host-target.ts` and is resolved into a backend by
+ * `getSchedulerDataSource()`. Every read and write below goes through it:
+ *
+ *   - `local`  → Dexie `liveQuery` over `scheduler-db` + `getTaskScheduler()`,
+ *                exactly as before (push-based, no polling).
+ *   - `paired` → the `scheduled_task_*` RPCs. There is no change feed across
+ *                the companion transport, so `subscribe` polls at
+ *                {@link REMOTE_TASK_POLL_INTERVAL_MS} and re-reads immediately
+ *                after any write this source performs.
+ *
+ * The subscription re-attaches when the target flips
+ * (`subscribeSchedulerHostTarget`), so switching hosts swaps the whole list
+ * without a page reload. Before this, the sidebar / calendar / facet counts
+ * always rendered the LOCAL rows while the detail pane, pause and run-now
+ * (which go through the store) already followed the target — the two halves
+ * of the page disagreed the moment a paired host was selected.
+ *
+ * The other four unified kinds (backup / workflow / system / connector) have
+ * no cross-host RPC and are always this device's; `SchedulerHostBar` says so
+ * while a paired schedule is being managed.
  */
 
 import Dexie from "dexie"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import {
+  getSchedulerDataSource,
+  type SchedulerDataSource,
+} from "@/lib/scheduler/scheduler-data-source"
+import { subscribeSchedulerHostTarget } from "@/lib/scheduler/scheduler-host-target"
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
   ScheduledTaskStatus,
+  TaskExecution,
   TaskExecutionTriggerSource,
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
@@ -91,8 +119,87 @@ export interface AppSourceDeps {
   /**
    * Replace the live-subscription factory. In production this is `liveQuery`
    * from Dexie; tests pass a stub that yields whatever the test wants.
+   *
+   * Only used while the LOCAL schedule is managed — a paired host has no
+   * change feed and is polled instead.
    */
   observe?: (querier: () => Promise<ScheduledTask[]>) => RawObservable<ScheduledTask[]>
+  /**
+   * Resolve the backend for the schedule the page manages. Defaults to
+   * `getSchedulerDataSource()`; only its `host` discriminator and the remote
+   * methods are used — the local path still goes through `scheduler` / `db`
+   * above so injected test doubles keep working.
+   */
+  dataSource?: () => SchedulerDataSource
+  /** Subscribe to host-target flips. Defaults to `subscribeSchedulerHostTarget`. */
+  onHostTargetChange?: (listener: () => void) => () => void
+  /** Poll cadence while a paired schedule is managed. */
+  remotePollIntervalMs?: number
+}
+
+/**
+ * How often the paired host's task list is re-read. The companion transport
+ * has no change feed for `scheduled_task_*`, and every write this source
+ * performs re-reads immediately, so this only has to catch changes made
+ * elsewhere (the host's own fires, another client). Deliberately slower than
+ * the run poll: a task row changes far less often than its executions.
+ */
+export const REMOTE_TASK_POLL_INTERVAL_MS = 30_000
+
+/**
+ * The reads + writes one unified task source needs, resolved per call against
+ * whichever host the page currently manages.
+ */
+interface TaskSourceBackend {
+  readonly host: "local" | "remote"
+  listTasks(): Promise<ScheduledTask[]>
+  getTask(taskId: string): Promise<ScheduledTask | null>
+  listRuns(limit: number, ownsExecution: (taskType: string) => boolean): Promise<TaskExecution[]>
+  createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask>
+  updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<unknown>
+  deleteTask(taskId: string): Promise<unknown>
+  pauseTask(taskId: string): Promise<unknown>
+  resumeTask(taskId: string): Promise<unknown>
+  runTaskNow(taskId: string): Promise<unknown>
+}
+
+function localBackend(scheduler: AppSourceScheduler, db: AppSourceDb): TaskSourceBackend {
+  return {
+    host: "local",
+    listTasks: () => db.getAllTasks(),
+    getTask: (taskId) => db.getTask(taskId),
+    listRuns: (limit, ownsExecution) =>
+      db.getRecentExecutionsMatching?.(ownsExecution, limit) ??
+      schedulerDb.getRecentExecutionsMatching(ownsExecution, limit),
+    createTask: (input) => scheduler.createTask(input),
+    updateTask: (taskId, input) => scheduler.updateTask(taskId, input),
+    deleteTask: (taskId) => scheduler.deleteTask(taskId),
+    pauseTask: (taskId) => scheduler.pauseTask(taskId),
+    resumeTask: (taskId) => scheduler.resumeTask(taskId),
+    runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
+  }
+}
+
+function remoteBackend(source: SchedulerDataSource): TaskSourceBackend {
+  return {
+    host: "remote",
+    listTasks: () => source.listTasks(),
+    getTask: (taskId) => source.getTask(taskId),
+    // The RPC has no "recent executions matching these task types" shape, so
+    // the host returns the newest runs across every type and the kind split
+    // happens here. Over-fetch so a busy `app` schedule cannot starve the
+    // `plugin` list (and vice versa) out of one shared page.
+    listRuns: async (limit, ownsExecution) => {
+      const rows = await source.getRecentExecutions(Math.min(limit * 4, 200))
+      return rows.filter((row) => ownsExecution(row.taskType)).slice(0, limit)
+    },
+    createTask: (input) => source.createTask(input),
+    updateTask: (taskId, input) => source.updateTask(taskId, input),
+    deleteTask: (taskId) => source.deleteTask(taskId),
+    pauseTask: (taskId) => source.pauseTask(taskId),
+    resumeTask: (taskId) => source.resumeTask(taskId),
+    runTaskNow: (taskId) => source.runTaskNow(taskId, { triggerSource: "run-now" }),
+  }
 }
 
 export function createAppSource(
@@ -119,63 +226,132 @@ function createTaskSource(
   // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
   // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
   const observe = deps.observe ?? ((querier) => Dexie.liveQuery(querier))
+  const resolveDataSource = deps.dataSource ?? getSchedulerDataSource
+  const onHostTargetChange = deps.onHostTargetChange ?? subscribeSchedulerHostTarget
+  const remotePollIntervalMs = deps.remotePollIntervalMs ?? REMOTE_TASK_POLL_INTERVAL_MS
+
+  /**
+   * Resolve the backend for the schedule currently managed. Re-resolved on
+   * every call so a host switch takes effect without recreating the source
+   * (the registry holds one instance for the process lifetime).
+   */
+  function backend(): TaskSourceBackend {
+    const dataSource = resolveDataSource()
+    return dataSource.host === "remote" ? remoteBackend(dataSource) : localBackend(scheduler, db)
+  }
+
+  /** Subscribers to nudge after a write, so a remote list does not sit stale
+   * until the next poll. No-op while the local Dexie feed is driving. */
+  const remoteRefreshers = new Set<() => void>()
+  function afterWrite(): void {
+    for (const refresh of remoteRefreshers) refresh()
+  }
 
   return {
     kind,
 
     subscribe(observer: ScheduledItemSourceObserver): ScheduledItemSubscription {
-      const sub = observe(() => db.getAllTasks()).subscribe({
-        next: (tasks: ScheduledTask[]) => {
-          observer.next(tasks.filter(ownsTask).map(toUnified))
+      let disposed = false
+      let detach: (() => void) | null = null
+
+      const emit = (tasks: ScheduledTask[]) => {
+        if (disposed) return
+        observer.next(tasks.filter(ownsTask).map(toUnified))
+      }
+      const fail = (err: unknown) => {
+        if (disposed) return
+        observer.error?.(err)
+      }
+
+      const attach = () => {
+        detach?.()
+        detach = null
+        if (disposed) return
+        const active = backend()
+
+        if (active.host === "local") {
+          const sub = observe(() => active.listTasks()).subscribe({
+            next: emit,
+            error: fail,
+          })
+          detach = () => sub.unsubscribe()
+          return
+        }
+
+        // Remote: poll, and re-read on demand after our own writes.
+        const read = () => {
+          void active.listTasks().then(emit).catch(fail)
+        }
+        read()
+        const timer = setInterval(read, remotePollIntervalMs)
+        remoteRefreshers.add(read)
+        detach = () => {
+          clearInterval(timer)
+          remoteRefreshers.delete(read)
+        }
+      }
+
+      attach()
+      const offTargetChange = onHostTargetChange(attach)
+
+      return {
+        unsubscribe: () => {
+          disposed = true
+          offTargetChange()
+          detach?.()
+          detach = null
         },
-        error: (err: unknown) => observer.error?.(err),
-      })
-      return { unsubscribe: () => sub.unsubscribe() }
+      }
     },
 
     async list(): Promise<UnifiedScheduledItem[]> {
-      const tasks = await db.getAllTasks()
+      const tasks = await backend().listTasks()
       return tasks.filter(ownsTask).map(toUnified)
     },
 
     async listRuns(limit) {
       const ownsExecution = (taskType: string) => taskExecutionKind(taskType) === kind
-      const executions = await (db.getRecentExecutionsMatching?.(ownsExecution, limit) ??
-        schedulerDb.getRecentExecutionsMatching(ownsExecution, limit))
+      const executions = await backend().listRuns(limit, ownsExecution)
       const runs = executions.map(toUnifiedFromTaskExecution)
       return filterRunsByKind(runs, kind)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {
-      const task = await db.getTask(sourceId)
+      const task = await backend().getTask(sourceId)
       if (!task) return undefined
       if (!ownsTask(task)) return undefined
       return toUnified(task)
     },
 
     async create(input: CreateScheduledTaskInput): Promise<UnifiedScheduledItem> {
-      const task = await scheduler.createTask(input)
+      const task = await backend().createTask(input)
+      afterWrite()
       return toUnified(task)
     },
 
     async update(sourceId: string, input: UpdateScheduledTaskInput): Promise<void> {
-      await scheduler.updateTask(sourceId, input)
+      await backend().updateTask(sourceId, input)
+      afterWrite()
     },
 
     async delete(sourceId: string): Promise<void> {
-      await scheduler.deleteTask(sourceId)
+      await backend().deleteTask(sourceId)
+      afterWrite()
     },
 
     async pause(sourceId: string): Promise<void> {
-      await scheduler.pauseTask(sourceId)
+      await backend().pauseTask(sourceId)
+      afterWrite()
     },
 
     async resume(sourceId: string): Promise<void> {
-      await scheduler.resumeTask(sourceId)
+      await backend().resumeTask(sourceId)
+      afterWrite()
     },
 
     async runNow(sourceId: string): Promise<void> {
-      await scheduler.runTaskNow(sourceId)
+      await backend().runTaskNow(sourceId)
+      afterWrite()
     },
   }
 }

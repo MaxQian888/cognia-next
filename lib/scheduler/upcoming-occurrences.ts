@@ -52,47 +52,7 @@ const DEFAULT_MAX_PER_TASK = 100
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
- * Project the concrete future run instants of every active task inside the
- * window, sorted ascending by date. Stable: ties broken by task name then id.
- */
-export function computeUpcomingOccurrences(
-  tasks: ScheduledTask[],
-  window: OccurrenceWindow
-): Occurrence[] {
-  const { from, days } = window
-  const maxPerTask = window.maxPerTask ?? DEFAULT_MAX_PER_TASK
-  const windowEnd = new Date(from.getTime() + days * DAY_MS)
-  const out: Occurrence[] = []
-
-  for (const task of tasks) {
-    if (task.status !== "active") continue
-    const dates = expandTrigger(task, from, windowEnd, maxPerTask)
-    for (const date of dates) {
-      out.push({
-        taskId: task.id,
-        taskName: task.name,
-        taskType: task.type,
-        triggerType: task.trigger.type,
-        status: task.status,
-        kind: task.type === "plugin" ? "plugin" : "app",
-        date,
-      })
-    }
-  }
-
-  out.sort((a, b) => {
-    const d = a.date.getTime() - b.date.getTime()
-    if (d !== 0) return d
-    const n = a.taskName.localeCompare(b.taskName)
-    if (n !== 0) return n
-    return a.taskId.localeCompare(b.taskId)
-  })
-
-  return out
-}
-
-/**
- * The shape both projections reduce to — a trigger description plus the
+ * The shape the projection reduces to — a trigger description plus the
  * scheduler's own idea of when the item fires next. Keeping the expansion in
  * one place is what lets the calendar and the agenda show workflow / backup /
  * connector runs on exactly the same terms as app tasks.
@@ -105,29 +65,6 @@ interface ScheduleSpec {
   timezone?: string
   /** Epoch ms of the next scheduled fire, when the source knows it. */
   nextRunAtMs?: number
-}
-
-/** Expand a single task's trigger into in-window run instants. */
-function expandTrigger(
-  task: ScheduledTask,
-  from: Date,
-  windowEnd: Date,
-  maxPerTask: number
-): Date[] {
-  const { trigger } = task
-  return expandSchedule(
-    {
-      type: trigger.type,
-      cron: trigger.cronExpression,
-      intervalMs: trigger.intervalMs,
-      runAtMs: trigger.runAt?.getTime(),
-      timezone: trigger.timezone,
-      nextRunAtMs: task.nextRunAt?.getTime(),
-    },
-    from,
-    windowEnd,
-    maxPerTask
-  )
 }
 
 function expandSchedule(
@@ -172,8 +109,7 @@ function expandSchedule(
 }
 
 /**
- * Cross-source projection — the unified counterpart of
- * {@link computeUpcomingOccurrences}.
+ * Cross-source projection over every registered scheduler source.
  *
  * The calendar and agenda used to receive the app-only `ScheduledTask[]`, so a
  * workspace whose schedule was mostly workflow triggers and backups rendered
@@ -269,7 +205,7 @@ export function dayKey(date: Date): string {
 
 /**
  * Group a sorted occurrence list into per-day buckets (ascending). Input is
- * assumed already sorted (as returned by {@link computeUpcomingOccurrences}).
+ * assumed already sorted (as returned by {@link computeUnifiedOccurrences}).
  */
 export function groupOccurrencesByDay(occurrences: Occurrence[]): OccurrenceDay[] {
   const days: OccurrenceDay[] = []

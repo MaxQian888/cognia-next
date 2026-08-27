@@ -88,6 +88,38 @@ Every host keeps its own `CogniaSchedulerDB`; nothing hands tasks between hosts.
 
 `lib/data/destinations/` gains **GitHub** (contents API into a private repo — public repos are refused) and **Google Drive** (user-supplied OAuth client, **device flow**, `drive.file` scope, tokens in the `backup-destinations` keyring namespace) legs, plus a manual "Sync now" that runs the same pipeline as the scheduled `backup` executor. `convex` is deprecated in place. The executor fans out per leg and records `destination` in backup history. Host filesystem access goes through `lib/data/backup-host-filesystem.ts` so the headless runtime injects its own seam. Settings → Data hosts the two cards; the schedule dialog only offers destinations that are configured.
 
+> **Amended 2026-08-27.** Three of the mechanisms above were half-connected in
+> practice, and this amendment closes them:
+>
+> 1. **The host gate is now checked centrally too.** §1 says executors call
+>    `assertTaskTypeSupportedOnHost`. `plan`, `agent-team`, `background-command`
+>    and `monitor` declared requirements in `TASK_TYPE_HOST_REQUIREMENTS` and
+>    their executors never called it, so on a host without the capability they
+>    failed with a bare `Error` — exactly the failure mode §1 set out to remove.
+>    `task-scheduler.ts` now evaluates the same table before dispatch, so the
+>    structured `unsupported-on-host` row cannot be skipped by an executor that
+>    forgets. The per-executor calls stay: they are the documented contract and
+>    they fail earlier.
+> 2. **§6's host target now binds the whole page.** The store honoured
+>    `getSchedulerDataSource()` on every read and write, but the unified `app`
+>    and `plugin` sources were hard-wired to the local Dexie and the local
+>    `TaskScheduler`. Selecting a paired host therefore gave a sidebar, calendar
+>    and facet counts from *this* device above a detail pane, pause and run-now
+>    acting on the *remote* one. Both sources now resolve their backend per call
+>    and re-subscribe when the target flips; a remote schedule is polled
+>    (30 s) because the companion transport has no change feed for
+>    `scheduled_task_*`, and re-read immediately after their own writes. The
+>    four kinds with no cross-host RPC (backup / workflow / system / connector)
+>    stay local and the host bar says so.
+> 3. **Progress is recorded and can notify.** `TaskNotificationConfig.onProgress`
+>    and the `"progress"` branch of the notification layer both existed and were
+>    unreachable: the only producer, `PluginTaskContext.reportProgress`, wrote to
+>    `log.debug`, and both authoring paths hard-coded `onProgress: false`.
+>    `lib/scheduler/execution-progress.ts` now records reports on the execution
+>    row and raises the notification when the task opted in, with coalesced
+>    writes, a per-execution notification rate limit, and a cap on retained
+>    progress entries. The task form owns the switch.
+
 ## Consequences
 
 - Any new task type must declare its requirements in `TASK_TYPE_HOST_REQUIREMENTS` (or explicitly none) — the picker, the executor gate, and the docs matrix all read that one table.

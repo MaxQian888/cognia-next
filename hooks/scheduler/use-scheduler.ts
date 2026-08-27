@@ -177,8 +177,5 @@ export function useScheduler() {
     cloneTask: store.cloneTask,
 
     // Bulk Operations
-    bulkPause: store.bulkPause,
-    bulkResume: store.bulkResume,
-    bulkDelete: store.bulkDelete,
   }
 }

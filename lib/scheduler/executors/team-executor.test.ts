@@ -1,5 +1,12 @@
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
+const hostIsTauriMock = jest.fn(() => true)
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  detectPlatform: () => (hostIsTauriMock() ? "tauri" : "web"),
+  isTauri: () => hostIsTauriMock(),
+}))
+
 const getMock = jest.fn()
 const startMock = jest.fn()
 const abortTeamMock = jest.fn()
@@ -102,4 +109,20 @@ describe("executeAgentTeamTask", () => {
     expect(r.success).toBe(false)
     expect(startMock).not.toHaveBeenCalled()
   })
+})
+
+it("refuses on a host without the sidecar instead of starting the team", async () => {
+  hostIsTauriMock.mockReturnValue(false)
+  try {
+    const r = await executeAgentTeamTask(
+      makeTask({ teamId: "t1" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(r.success).toBe(false)
+    expect(r.terminalReason).toBe("unsupported-on-host")
+    expect(startMock).not.toHaveBeenCalled()
+  } finally {
+    hostIsTauriMock.mockReturnValue(true)
+  }
 })

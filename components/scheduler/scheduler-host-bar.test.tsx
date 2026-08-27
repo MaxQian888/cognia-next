@@ -86,6 +86,24 @@ describe("SchedulerHostBar", () => {
     expect(screen.getByTestId("scheduler-host-bar-switch")).toHaveTextContent(/this device/i)
   })
 
+  it("says the four local-only kinds stay put while a paired schedule is managed", () => {
+    profileState.value = "cloud-companion"
+    hostTarget.pairedAvailable = true
+    hostTarget.target = "paired"
+    render(<SchedulerHostBar />)
+    // Only `app` / `plugin` have cross-host RPCs; the bar must not let the
+    // list imply that backup / workflow / system / connector came along.
+    expect(screen.getByTestId("scheduler-host-bar-local-kinds")).toBeInTheDocument()
+  })
+
+  it("omits the local-kinds note while this device's own schedule is managed", () => {
+    profileState.value = "mobile-companion"
+    hostTarget.pairedAvailable = true
+    hostTarget.target = "local"
+    render(<SchedulerHostBar />)
+    expect(screen.queryByTestId("scheduler-host-bar-local-kinds")).not.toBeInTheDocument()
+  })
+
   it("falls back to the base URL when the remote host has no label", () => {
     routing.active = true
     hostTarget.pairedAvailable = true

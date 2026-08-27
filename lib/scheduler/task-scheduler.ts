@@ -19,7 +19,11 @@ import {
   DEFAULT_EXECUTION_CONFIG,
   DEFAULT_NOTIFICATION_CONFIG,
 } from "@/types/scheduler"
-import { DEPRECATED_TASK_TYPES, isDeprecatedTaskType } from "./host-support"
+import {
+  assertTaskTypeSupportedOnHost,
+  DEPRECATED_TASK_TYPES,
+  isDeprecatedTaskType,
+} from "./host-support"
 import { getNextCronTime } from "./cron-parser"
 import { enumerateBackfillSlots } from "./backfill"
 import { schedulerDb } from "./scheduler-db"
@@ -1747,12 +1751,23 @@ class TaskSchedulerImpl {
         throw SchedulerError.executorNotFound(task.type)
       }
 
+      // Central host gate (ADR-0128 §1). Executors are supposed to call
+      // `assertTaskTypeSupportedOnHost` themselves, but a type that declares a
+      // requirement in `TASK_TYPE_HOST_REQUIREMENTS` and whose executor forgets
+      // used to fail with a bare Error indistinguishable from a bug — `plan`,
+      // `agent-team`, `background-command` and `monitor` all did. Checking here
+      // too means the structured `unsupported-on-host` row cannot be skipped by
+      // a future executor, and costs one table lookup per fire.
+      const refusedByHost = assertTaskTypeSupportedOnHost(task.type)
+
       // Execute with timeout (controller is shared with cancel-previous aborts)
-      const result = await this.executeWithTimeout(
-        (signal) => executor(task, execution, signal),
-        task.config.timeout,
-        controller
-      )
+      const result =
+        refusedByHost ??
+        (await this.executeWithTimeout(
+          (signal) => executor(task, execution, signal),
+          task.config.timeout,
+          controller
+        ))
 
       // Update execution
       execution.status = result.success ? "completed" : "failed"

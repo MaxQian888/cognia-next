@@ -128,20 +128,60 @@ interface TaskExecutionHistoryProps {
    * selected execution.
    */
   onSelectExecution?: (execution: TaskExecution) => void
+  /**
+   * True when the STORE holds more executions than it has loaded. "Load more"
+   * walks the in-memory array first and only then asks for the next page, so
+   * a task with hundreds of runs is reachable past the first page — before
+   * this the button simply vanished at the page boundary while the rows were
+   * still in Dexie.
+   */
+  hasMoreOnServer?: boolean
+  /** Fetch the next page. Awaited so the button can show its pending state. */
+  onLoadMore?: () => Promise<void> | void
+  /**
+   * Cancel a still-running execution. Only offered for rows
+   * {@link canCancelExecution} accepts — today that is plugin task runs, whose
+   * controllers `lib/scheduler/executors/plugin-executor.ts` holds.
+   */
+  onCancelExecution?: (executionId: string) => void
+  canCancelExecution?: (executionId: string) => boolean
 }
 
 export function TaskExecutionHistory({
   executions,
   maxItems = 10,
   onSelectExecution,
+  hasMoreOnServer = false,
+  onLoadMore,
+  onCancelExecution,
+  canCancelExecution,
 }: TaskExecutionHistoryProps) {
   const t = useTranslations("scheduler")
   const format = useFormatter()
   const [displayCount, setDisplayCount] = useState(maxItems)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const displayed = executions.slice(0, displayCount)
-  const hasMore = executions.length > displayed.length
+  const hasLocalMore = executions.length > displayed.length
+  const canFetchMore = Boolean(onLoadMore) && hasMoreOnServer
+  const hasMore = hasLocalMore || canFetchMore
   const remaining = executions.length - displayed.length
+
+  const handleLoadMore = async () => {
+    // Reveal what is already loaded before paying for a round trip.
+    if (hasLocalMore) {
+      setDisplayCount((count) => count + maxItems)
+      return
+    }
+    if (!onLoadMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      await onLoadMore()
+      setDisplayCount((count) => count + maxItems)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   if (displayed.length === 0) {
     return (
@@ -237,6 +277,25 @@ export function TaskExecutionHistory({
               )}
             </div>
 
+            {/* Cancel — only for runs whose controller this app still holds. */}
+            {execution.status === "running" &&
+              onCancelExecution &&
+              canCancelExecution?.(execution.id) && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="shrink-0 h-6 px-2 text-[11px]"
+                  data-testid="execution-cancel"
+                  onClick={(event) => {
+                    // The row itself opens the run sheet.
+                    event.stopPropagation()
+                    onCancelExecution(execution.id)
+                  }}
+                >
+                  {t("cancelRun")}
+                </Button>
+              )}
+
             {/* Duration */}
             <span
               className="shrink-0 text-xs tabular-nums text-muted-foreground font-mono"
@@ -253,10 +312,11 @@ export function TaskExecutionHistory({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setDisplayCount((count) => count + maxItems)}
+            onClick={() => void handleLoadMore()}
+            disabled={loadingMore}
             data-testid="execution-load-more"
           >
-            {t("loadMore")} ({remaining})
+            {hasLocalMore ? `${t("loadMore")} (${remaining})` : t("loadMore")}
           </Button>
         </div>
       )}

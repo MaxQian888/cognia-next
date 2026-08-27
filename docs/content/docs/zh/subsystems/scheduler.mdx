@@ -163,9 +163,9 @@ flowchart TB
 
 ## 对话式任务创作
 
-`conversational-task-authoring.ts` 与 `conversational-task-intent.ts` 让用户用自然语言描述调度（"每个工作日 9 点发一份站会提醒"），LLM 输出一个 `ScheduledTask` JSON。意图抽取器拉出结构化字段；创作 agent 补默认值并校验。
+`conversational-task-intent.ts` 从用户正在输入的一行里读出调度意图（"每天早上提醒我看 PR"、"every weekday at 9 send a stand-up reminder"）；`conversational-task-authoring.ts` 把它变成一份带类型的 `CreateScheduledTaskInput`，payload 形状与 executor 读的完全一致。这是模式匹配而非 LLM 调用 —— 它给出的节奏（每天 09:00 的 cron）是起点，不是对真实节奏的猜测。
 
-工作台的"AI 创建"面板使用这一能力。
+落点：聊天输入框下方的一行安静建议（`components/chat/composer/schedule-suggestion.tsx`）。它从不接管这一轮 —— 回车照常发送 —— 并且可以按行忽略。接受后草稿存进 `lib/scheduler/task-draft-handoff.ts` 并跳转 `/scheduler`，页面下次挂载时以预填状态打开创建面板。草稿只被消费一次，五分钟后过期，因此过期的交接不会在事后弹出面板。
 
 ## 内置 executor
 
@@ -205,6 +205,8 @@ interface TaskExecutorResult {
 
 归属是**主机自有**的：桌面、无头大脑（`cognia-server`）与 web / 伴侣 webview 各自维护自己的 `CogniaSchedulerDB`，任务不在主机间交接。差别在于主机能*运行*哪些类型。`lib/scheduler/host-support.ts` 按类型声明需求；executor 以结构化的 `unsupported-on-host` 结果拒绝，任务表单把不支持的类型**禁用并给出原因**（从不隐藏）。
 
+这道闸**执行两次**：每个 executor 先调 `assertTaskTypeSupportedOnHost`，`task-scheduler.ts` 在派发前再查一次同一张表。第二次不是为冗余而冗余 —— 一个声明了需求但 executor 忘记设闸的类型，过去会抛出与真 bug 无法区分的裸 `Error`。
+
 | 类型                                                     | 需要                | 桌面 | 无头大脑 | Web / 伴侣 webview |
 | -------------------------------------------------------- | ------------------- | ---- | -------- | ------------------ |
 | `chat` `agent` `skill` `goal` `plan` `agent-team`        | `sidecar`           | ✓    | ✓        | ✗                  |
@@ -218,6 +220,8 @@ interface TaskExecutorResult {
 定时驱动同样跟随主机：Tauri 上是 Rust 守护进程，无头上是 `NodeTimingDriver`，web / 移动上是渲染端循环 + tab 锁。
 
 **页面管理哪份日程。** 客户端可以查看两份日程：`local`（本机）与 `paired`（它驱动或配对的主机，经 `scheduled_task_*` 伴侣 RPC）。伴侣与驱动远端主机的桌面默认 `paired`；调度器页面的**主机栏**说明当前管理的是哪一份并允许切换（`lib/scheduler/scheduler-host-target.ts`）。类型选择器通过 `host_capabilities` RPC 解析*目标*主机的能力。
+
+这个选择约束**整页**。统一列表的 `app` 与 `plugin` 两个 source 每次调用都经 `getSchedulerDataSource()` 解析后端，并在目标切换时重新订阅，因此侧栏、日历、时间线与分面计数展示的主机，与详情面板、暂停、立即运行作用的主机是同一台。远端日程在伴侣通道上没有变更流，所以这两个 source 采用轮询（`REMOTE_TASK_POLL_INTERVAL_MS`，30 秒），并在自己写入后立即重读。其余四种 kind —— 备份、工作流、系统、连接器 —— 没有跨主机 RPC，永远属于本机；管理配对日程时主机栏会明说这一点。
 
 **无头桥接。** 大脑上的 workflow 触发经伴侣 `subscribe` 控制帧到达（`lib/headless/runtimes/workflow-trigger-bridge.ts`）；大脑上产生的 toast / OS 通知通过 `remote_notification_publish` 发布一次，由已连接客户端摄入本地通知中心（`lib/notifications/remote-subscription.ts`）。
 
@@ -246,6 +250,7 @@ registerTaskExecutor("custom-daily-report", async (task) => {
 - 每次运行 toast（可配，默认"仅错误"）。
 - 失败时发原生 OS 通知（`tauri-plugin-notification`）。
 - 菜单 / 系统托盘有未读失败时显示徽章。
+- 运行进行中的**进度**通知：任务设置了 `notification.onProgress` 时触发。只有会上报中途进度的 executor 才会产生它 —— 目前是 `plugin` 任务，经 `PluginTaskContext.reportProgress`。上报同时作为 `info` 条目写入执行记录。二者都由 `lib/scheduler/execution-progress.ts` 统一处理：写入会合并、通知按执行限流、保留的进度条目有上限，一个高频上报的 handler 无法把记录撑大。
 
 ## 事件触发
 
