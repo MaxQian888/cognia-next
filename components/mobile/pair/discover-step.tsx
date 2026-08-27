@@ -22,6 +22,7 @@ import { useLanScan } from "@/hooks/connectivity/use-lan-scan"
 import { DiscoverHelp } from "./discover-help"
 import { ScanRadar } from "./scan-radar"
 import { ServerCard, type ServerCardStatus } from "./server-card"
+import type { PairHostState } from "./pair-scene"
 
 export interface DiscoverStepProps {
   /** Pre-populate the list with previously paired / recent servers. */
@@ -34,6 +35,13 @@ export interface DiscoverStepProps {
   onSkip: () => void
   /** Called when the user taps "Scan QR" — jumps to the pair step's scanner. */
   onScanShortcut?: () => void
+  /**
+   * Reports what the scan currently knows about the far end, so the shell's
+   * scene can draw it. The step owns the scan, so it is the only thing that
+   * can answer; deriving it a second time in the coordinator is how the
+   * picture and the list end up disagreeing.
+   */
+  onHostStateChange?: (state: PairHostState) => void
   /** Test seam — replaces the full scan. */
   scan?: typeof scanLan
   /** Test seam — replaces the `/healthz` pre-flight probe. */
@@ -57,6 +65,7 @@ export function DiscoverStep({
   onSelect,
   onSkip,
   onScanShortcut,
+  onHostStateChange,
   scan = scanLan,
   probe = fetchHealthz,
   precheckDelayMs = 600,
@@ -96,6 +105,20 @@ export function DiscoverStep({
   const foundCount = sorted.length
   const showEmpty = !scanning && foundCount === 0
   const checking = precheck?.status === "checking"
+
+  // `blocked` outranks `reachable`: a Host that answered and refused us is a
+  // more specific — and more actionable — fact than a list that happens to
+  // have entries in it from history.
+  const hostState: PairHostState = loopbackBlocked
+    ? "blocked"
+    : live.length > 0
+      ? "reachable"
+      : scanning
+        ? "searching"
+        : "absent"
+  useEffect(() => {
+    onHostStateChange?.(hostState)
+  }, [hostState, onHostStateChange])
 
   // Pre-flight: probe `/healthz` before advancing so we never hand a dead
   // server to the pair step. Success enriches the picked server with the

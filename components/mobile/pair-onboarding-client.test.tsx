@@ -542,11 +542,37 @@ describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
   })
 
-  it("centers the web pairing flow vertically without removing the full-height container", async () => {
+  it("paints an opaque full-viewport surface instead of letting the wallpaper through", async () => {
+    // `/pair` is a shell-bypass route, so nothing paints behind it. Without a
+    // background of its own, `body[data-bg-enabled]::before` — the fixed
+    // wallpaper layer — showed straight through under the body text.
     render(<PairOnboardingClient />)
     await screen.findByTestId("pair-pair-step")
-    expect(screen.getByTestId("pair-onboarding")).toHaveClass("min-h-[100dvh]", "py-6")
-    expect(screen.getByTestId("pair-onboarding-content")).toHaveClass("my-auto")
+    const shell = screen.getByTestId("pair-shell")
+    expect(shell).toHaveClass("bg-background", "h-[100dvh]", "overflow-hidden")
+    // The coordinator's own wrapper must not become a box between the shell
+    // and the flex column that sizes it.
+    expect(screen.getByTestId("pair-onboarding")).toHaveClass("contents")
+  })
+
+  it("runs the loopback probe the web flow used to skip entirely", async () => {
+    // `discoverLoopbackHost` was written for a browser tab and wired into
+    // `scanLan`, but the only surface that rendered it was the Discover step —
+    // which `WEB_STEPS` skips. It ran for nobody.
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    expect(mockScanLan).toHaveBeenCalled()
+    expect(screen.getByTestId("pair-host-probe")).toBeInTheDocument()
+  })
+
+  it("puts the invitation-minting material in the panel, not in the form column", async () => {
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    const panel = screen.getByTestId("pair-narrative-panel")
+    expect(panel).toContainElement(screen.getByTestId("pair-headless-help"))
+    expect(screen.getByTestId("pair-step-body")).not.toContainElement(
+      screen.getByTestId("pair-headless-help")
+    )
   })
 
   it("renders a two-step stepper (no Discover) and hides QR + back affordances", async () => {

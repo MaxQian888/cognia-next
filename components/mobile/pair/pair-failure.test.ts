@@ -29,6 +29,7 @@ const BASE_FAILURE: PairFailure = {
 
 const LAN_HTTPS = "https://192.168.1.42:27890"
 const LOOPBACK = "http://127.0.0.1:27891"
+const LOOPBACK_HTTPS = "https://127.0.0.1:27890"
 
 /** The exact exception a browser raises for every kind of blocked request. */
 const failedToFetch = () => new TypeError("Failed to fetch")
@@ -62,6 +63,24 @@ describe("the opaque `Failed to fetch` split", () => {
     })
     expect(failure.kind).toBe("tls_untrusted")
     expect(failure.remedies).toContain("useLoopbackInvitation")
+  })
+
+  it("blames the certificate on a LOOPBACK HTTPS Host too", () => {
+    // The reported case: `cognia-server` listens on https://127.0.0.1:27890
+    // with an rcgen self-signed certificate (tls.rs) and no CA, so a browser
+    // cannot complete the handshake. This used to classify as `unreachable`,
+    // whose advice is to confirm the Host is listening on that address — while
+    // it was listening on exactly that address.
+    const failure = diagnosePairFailure(failedToFetch(), {
+      stage: "register",
+      baseUrl: LOOPBACK_HTTPS,
+      webMode: true,
+      peerAnswered: false,
+      online: true,
+    })
+    expect(failure.kind).toBe("tls_untrusted")
+    expect(failure.remedies).toContain("useLoopbackInvitation")
+    expect(failure.invitationSpent).toBe(false)
   })
 
   it("blames reachability when nothing answered an origin the browser could have trusted", () => {

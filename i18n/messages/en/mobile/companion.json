@@ -9,6 +9,24 @@
     "title": "Allow running agents",
     "toggleAria": "Toggle agent control for {label}"
   },
+  "browserAccess": {
+    "title": "Browser access",
+    "description": "A browser can't verify this computer's self-signed certificate, so the usual HTTPS port is unreachable from a tab. This opens a plain http://127.0.0.1 listener — the one address a browser trusts without a certificate. It stays on this machine and never leaves it.",
+    "enable": "Enable browser access",
+    "listening": "Listening on {url}",
+    "notListening": "Not listening",
+    "restartRequired": "Restart the Companion server to apply.",
+    "loadFailed": "Browser access settings could not be read.",
+    "origins": {
+      "title": "Allowed browser origins",
+      "description": "Only these exact origins may reach this computer. Anything else is refused — including the same address on a different port.",
+      "empty": "No origin is allowed yet, so browser access does nothing until you add one.",
+      "add": "Add origin",
+      "placeholder": "http://localhost:3000",
+      "revoke": "Remove {origin}",
+      "suggested": "Suggested:"
+    }
+  },
   "channels": {
     "blocked": {
       "loopbackOnly": "Bound to this machine only — switch the server to LAN.",

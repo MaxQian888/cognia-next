@@ -57,7 +57,6 @@ describe("isBrowserTrustableOrigin", () => {
     ["http://127.0.0.1:27891", true],
     ["http://localhost:27891", true],
     ["http://[::1]:27891", true],
-    ["https://localhost:8443", true],
     ["https://cognia.example.com", true],
     ["https://cognia.example.com:8443", true],
   ])("accepts %s", (url, expected) => {
@@ -72,10 +71,25 @@ describe("isBrowserTrustableOrigin", () => {
     ["https://cognia-desktop.local:27890", false],
     // Plaintext off-machine is not "untrusted", it is unencrypted.
     ["http://192.168.1.42:27891", false],
+    // Loopback earns no HTTPS exemption. `tls.rs` mints the Host's certificate
+    // with rcgen and no CA, so it is self-signed on 127.0.0.1 exactly as on the
+    // LAN. Calling it trustable sent the user's failure to `unreachable`, whose
+    // advice was to check the Host is listening on an address it was listening
+    // on — while the certificate was the whole problem.
+    ["https://localhost:8443", false],
+    ["https://127.0.0.1:27890", false],
+    ["https://[::1]:27890", false],
     ["not a url", false],
   ])("rejects %s", (url, expected) => {
     expect(isBrowserTrustableOrigin(url)).toBe(expected)
   })
+})
+
+it("splits the loopback exemption by scheme, not by host", () => {
+  // http on loopback is a potentially-trustworthy origin with no chain to
+  // verify; https on the same host still has to present a certificate.
+  expect(isBrowserTrustableOrigin("http://127.0.0.1:27891")).toBe(true)
+  expect(isBrowserTrustableOrigin("https://127.0.0.1:27891")).toBe(false)
 })
 
 describe("isLoopbackHostname", () => {

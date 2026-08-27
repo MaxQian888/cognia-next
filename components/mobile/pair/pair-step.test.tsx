@@ -139,7 +139,7 @@ it("keeps a scanned payload editable when registration fails", async () => {
   await userEvent.click(screen.getByTestId("pair-scan-qr"))
   const panel = await screen.findByTestId("pair-error")
   expect(panel).toHaveAttribute("data-stage", "register")
-  await userEvent.click(screen.getByTestId("pair-error-detail-toggle"))
+  await userEvent.click(screen.getByTestId("pair-error-more-toggle"))
   expect(await screen.findByTestId("pair-error-detail")).toHaveTextContent("registration failed")
   expect(screen.getByTestId("pair-payload")).toHaveValue(payload)
 })
@@ -174,7 +174,7 @@ it("does not expose the camera action in web mode", () => {
   fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: payload } })
 })
 
-it("helps a web user issue, paste, inspect, and clear a headless invitation", async () => {
+it("summarises a pasted invitation and folds the blob away behind it", async () => {
   // Empty at mount so the arrival clipboard sniff no-ops and the explicit
   // paste button is the only reader under test here.
   mockReadClipboardText.mockResolvedValue(null)
@@ -185,36 +185,39 @@ it("helps a web user issue, paste, inspect, and clear a headless invitation", as
   mockReadClipboardText.mockClear()
   mockReadClipboardText.mockResolvedValue(payload)
 
-  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
-    "pnpm --silent dev:headless pair --device-name browser"
-  )
-  await user.click(screen.getByTestId("pair-copy-command"))
-  expect(mockWriteClipboardText).toHaveBeenCalledWith(
-    "pnpm --silent dev:headless pair --device-name browser"
-  )
-
-  await user.click(screen.getByRole("tab", { name: "web.commandMode.compose" }))
-  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
-    "docker compose -f deploy/compose/docker-compose.yml"
-  )
-  await user.click(screen.getByTestId("pair-copy-command"))
-  expect(mockWriteClipboardText).toHaveBeenLastCalledWith(
-    "docker compose -f deploy/compose/docker-compose.yml --profile server exec cognia-server cognia-server pair --device-name browser"
-  )
-
-  await user.click(screen.getByRole("tab", { name: "web.commandMode.kubernetes" }))
-  expect(screen.getByTestId("pair-headless-command")).toHaveTextContent(
-    "kubectl -n <namespace> exec -i cognia-server-0"
-  )
-
   await user.click(screen.getByTestId("pair-paste-clipboard"))
   expect(mockReadClipboardText).toHaveBeenCalledTimes(1)
+
+  // What the user sees is the target, not 800 characters of base64url.
+  const card = screen.getByTestId("pair-invitation-card")
+  expect(card).toHaveAttribute("data-tone", "ready")
+  expect(screen.getByTestId("pair-invitation-host")).toHaveTextContent("host.local:27890")
+
+  // The blob stays mounted and editable inside the card's disclosure — it is
+  // the form's controlled input, so it may be hidden but never unmounted.
   expect(screen.getByTestId("pair-payload")).toHaveValue(payload)
-  expect(screen.getByTestId("pair-invitation-summary")).toHaveTextContent("host.local:27890")
 
   await user.click(screen.getByTestId("pair-clear-payload"))
   expect(screen.getByTestId("pair-payload")).toHaveValue("")
-  expect(screen.queryByTestId("pair-invitation-summary")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("pair-invitation-card")).not.toBeInTheDocument()
+})
+
+it("marks the invitation spent rather than leaving a 'ready' summary beside the error", async () => {
+  // The old screen rendered the green summary from the decoded payload alone,
+  // so a spent invitation showed "ready", "locked" and "spent" at once.
+  register.mockResolvedValue({
+    kind: "registration_error",
+    message: "vault locked",
+    error: Object.assign(new Error("vault locked"), { name: "VaultLockedError" }),
+    baseUrl: "https://host.local:27890",
+  })
+  mockReadClipboardText.mockResolvedValue(null)
+  render(<PairStep webMode onPaired={jest.fn()} />)
+  fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: payload } })
+  await userEvent.click(screen.getByTestId("pair-submit"))
+
+  await screen.findByTestId("pair-error")
+  expect(screen.getByTestId("pair-invitation-card")).not.toHaveAttribute("data-tone", "ready")
 })
 
 it("fills the payload from the clipboard on arrival without submitting it", async () => {
@@ -225,7 +228,7 @@ it("fills the payload from the clipboard on arrival without submitting it", asyn
   mockReadClipboardText.mockResolvedValue(`  ${payload}\n`)
   render(<PairStep webMode onPaired={jest.fn()} />)
   await waitFor(() => expect(screen.getByTestId("pair-payload")).toHaveValue(payload))
-  expect(screen.getByTestId("pair-invitation-summary")).toBeInTheDocument()
+  expect(screen.getByTestId("pair-invitation-card")).toBeInTheDocument()
   expect(register).not.toHaveBeenCalled()
 })
 

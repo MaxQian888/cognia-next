@@ -21,34 +21,37 @@
  * browser can ever complete is rejected while it is still redeemable elsewhere,
  * instead of after the Host has burned it.
  *
- * # Layout
+ * # What this component is no longer responsible for
  *
- * The web form is a two-column grid from `lg` up: the invariant "how to get an
- * invitation" material on the left, the field and everything that appears in
- * response to it on the right. Single-column stacking is what made the page grow
- * a scrollbar the moment a payload was pasted — the invitation summary, the
- * storage notice and the error panel all landed under a form that already filled
- * the viewport. Mobile keeps the single column, where it is correct.
+ * The page frame, the title, the stepper and — on web — the "how to mint an
+ * invitation" material all belong to `PairShell` now. This file used to carry a
+ * two-column grid, a command block with three deployment tabs, and a storage
+ * notice, on top of the form; the invariant half of that never changed between
+ * states and had no business being re-laid-out every time the field did. What
+ * is left here is the one thing that does change: the invitation, and what
+ * happened to it.
+ *
+ * # One subject at a time
+ *
+ * Before a payload decodes, the field is the subject and gets the room. After
+ * it decodes, the *target* is the subject — which Host, which version, how long
+ * it stays valid — and the 800-character blob folds into that card's
+ * disclosure, still mounted and still editable. A page cannot have two heroes,
+ * and the blob was never a candidate for the job.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ArrowLeftIcon,
-  CheckIcon,
   ClipboardPasteIcon,
-  CopyIcon,
-  InfoIcon,
   Loader2Icon,
   ScanLineIcon,
-  ShieldCheckIcon,
-  TerminalIcon,
   XIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
@@ -57,7 +60,7 @@ import { notify } from "@/lib/capacitor/haptics"
 import { recordRecentServer } from "@/lib/connectivity/recent-servers"
 import { probeOriginReachable } from "@/lib/connectivity/origin-reachability"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
-import { readClipboardText, writeClipboardText } from "@/lib/tauri/clipboard"
+import { readClipboardText } from "@/lib/tauri/clipboard"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
 
@@ -69,7 +72,16 @@ import {
   type PairFailure,
 } from "./pair-failure"
 import { PairFailurePanel } from "./pair-failure-panel"
+import { InvitationCard, type InvitationTone } from "./invitation-card"
 import { DiscoverHelp } from "./discover-help"
+
+/**
+ * What the step is doing, in the vocabulary the narrative panel's scene draws.
+ * Reported upward rather than derived by the coordinator because `phase` and
+ * the decoded payload both live here, and duplicating that state to draw a
+ * picture of it is how the two drift apart.
+ */
+export type PairActivity = "idle" | "armed" | "pairing" | "failed"
 
 export interface PairStepProps {
   prefilledPairPayload?: string
@@ -84,6 +96,8 @@ export interface PairStepProps {
   persistPairing?: (config: CompanionConfig) => Promise<void>
   onPaired: (config: CompanionConfig) => void
   onBack?: () => void
+  /** Lets the shell's scene follow what the form is doing. */
+  onActivityChange?: (activity: PairActivity) => void
 }
 
 type ErrorAction = { label: string; onAction: () => void | Promise<void> }
@@ -93,26 +107,8 @@ type Phase =
   | { kind: "pairing" }
   | { kind: "error"; failure: PairFailure; action?: ErrorAction }
 
-const HEADLESS_PAIR_COMMANDS = {
-  development: "pnpm --silent dev:headless pair --device-name browser",
-  compose:
-    "docker compose -f deploy/compose/docker-compose.yml --profile server exec cognia-server cognia-server pair --device-name browser",
-  kubernetes:
-    "kubectl -n <namespace> exec -i cognia-server-0 -- cognia-server pair --device-name browser",
-} as const
-
-type HeadlessPairMode = keyof typeof HEADLESS_PAIR_COMMANDS
-
 /** Budget for the failure-path reachability probe. */
 const PROBE_TIMEOUT_MS = 2000
-
-function displayPairHost(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).host
-  } catch {
-    return baseUrl
-  }
-}
 
 /**
  * Ask the peer whether it is there at all, ignoring whether we may read it.
@@ -141,13 +137,12 @@ export function PairStep({
   persistPairing = saveCompanionConfig,
   onPaired,
   onBack,
+  onActivityChange,
 }: PairStepProps) {
   const t = useTranslations("mobile.pair")
   const keyboard = useKeyboardInsets()
   const [payload, setPayload] = useState(prefilledPairPayload)
   const [phase, setPhase] = useState<Phase>({ kind: "idle" })
-  const [commandCopied, setCommandCopied] = useState(false)
-  const [headlessPairMode, setHeadlessPairMode] = useState<HeadlessPairMode>("development")
   const decodedPayload = useMemo(() => decodePairPayload(payload), [payload])
   const invitation = decodedPayload.kind === "ok" ? decodedPayload.payload : null
 
@@ -343,93 +338,47 @@ export function PairStep({
     setPhase({ kind: "idle" })
   }, [t])
 
-  const onCopyCommand = useCallback(async () => {
-    try {
-      await writeClipboardText(HEADLESS_PAIR_COMMANDS[headlessPairMode])
-      setCommandCopied(true)
-    } catch {
-      setCommandCopied(false)
-    }
-  }, [headlessPairMode])
-
   const busy = phase.kind === "pairing" || phase.kind === "scanning"
+  const failure = phase.kind === "error" ? phase.failure : null
 
-  const headlessHelp = webMode ? (
-    <div className="rounded-xl border bg-muted/35 p-3.5" data-testid="pair-headless-help">
-      <div className="flex items-start gap-2.5">
-        <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{t("web.headlessTitle")}</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {t("web.headlessDescription")}
-          </p>
-        </div>
-      </div>
-      <Tabs
-        value={headlessPairMode}
-        onValueChange={(value) => {
-          setHeadlessPairMode(value as HeadlessPairMode)
-          setCommandCopied(false)
-        }}
-        className="mt-3 gap-2"
-      >
-        <TabsList className="grid h-auto w-full grid-cols-3">
-          <TabsTrigger value="development" className="text-xs">
-            {t("web.commandMode.development")}
-          </TabsTrigger>
-          <TabsTrigger value="compose" className="text-xs">
-            {t("web.commandMode.compose")}
-          </TabsTrigger>
-          <TabsTrigger value="kubernetes" className="text-xs">
-            {t("web.commandMode.kubernetes")}
-          </TabsTrigger>
-        </TabsList>
-        {(Object.keys(HEADLESS_PAIR_COMMANDS) as HeadlessPairMode[]).map((mode) => (
-          <TabsContent key={mode} value={mode}>
-            <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
-              <code
-                className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap"
-                data-testid="pair-headless-command"
-              >
-                {HEADLESS_PAIR_COMMANDS[mode]}
-              </code>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0"
-                onClick={() => void onCopyCommand()}
-                aria-label={commandCopied ? t("web.commandCopied") : t("web.copyCommand")}
-                data-testid="pair-copy-command"
-              >
-                {commandCopied ? (
-                  <CheckIcon className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <CopyIcon className="size-3.5" aria-hidden="true" />
-                )}
-              </Button>
-            </div>
-          </TabsContent>
-        ))}
-      </Tabs>
-      {headlessPairMode !== "development" ? (
-        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          {t("web.deploymentCommandHint")}
-        </p>
-      ) : null}
-      {/* The localStorage-credential warning. Demoted from a standalone Alert
-          to a line inside this block — it is standing context about how web
-          pairing works, not an event, and a second full-width callout is what
-          pushed the form past the fold. Still unconditional in web mode. */}
-      <p
-        className="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-muted-foreground"
-        data-testid="pair-web-storage-notice"
-      >
-        <InfoIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-        <span>{t("web.storageNotice")}</span>
-      </p>
-    </div>
-  ) : null
+  // The card's tone is the single owner of "what happened to this invitation".
+  // Rendering the green summary from the decoded payload alone is what put a
+  // "ready" line, a "locked" panel and a "spent" banner on screen at once.
+  const invitationTone: InvitationTone = failure
+    ? failure.invitationSpent
+      ? "spent"
+      : "failed"
+    : "ready"
+
+  const activity: PairActivity =
+    phase.kind === "error"
+      ? "failed"
+      : phase.kind === "pairing"
+        ? "pairing"
+        : invitation
+          ? "armed"
+          : "idle"
+  useEffect(() => {
+    onActivityChange?.(activity)
+  }, [activity, onActivityChange])
+
+  const rawField = (
+    <Textarea
+      id="pair-payload"
+      value={payload}
+      onChange={(event) => {
+        setPayload(event.target.value)
+        if (phase.kind === "error") setPhase({ kind: "idle" })
+      }}
+      placeholder={t("payloadPlaceholder")}
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      className={cn("resize-none font-mono text-xs", invitation ? "min-h-16" : "min-h-20")}
+      disabled={busy}
+      data-testid="pair-payload"
+    />
+  )
 
   return (
     <section
@@ -438,38 +387,40 @@ export function PairStep({
       style={{ paddingBottom: keyboard.keyboardHeight ? keyboard.keyboardHeight + 16 : undefined }}
     >
       <form
-        className={cn(
-          "grid items-start gap-4",
-          // Two columns only where there is room for them; the mobile shell is
-          // narrower than `lg` on every device it runs on.
-          webMode && "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
-        )}
+        className="flex min-w-0 flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault()
           void onPair()
         }}
       >
-        {headlessHelp ? <div className="flex flex-col gap-4">{headlessHelp}</div> : null}
+        {!webMode ? (
+          <Button
+            type="button"
+            size="lg"
+            className="touch-target w-full"
+            onClick={() => void onScanQr()}
+            disabled={busy}
+            data-testid="pair-scan-qr"
+          >
+            {phase.kind === "scanning" ? (
+              <Loader2Icon className="size-5 animate-spin" aria-hidden="true" />
+            ) : (
+              <ScanLineIcon className="size-5" aria-hidden="true" />
+            )}
+            {phase.kind === "scanning" ? t("scanning") : t("scanCta")}
+          </Button>
+        ) : null}
 
-        <div className="flex min-w-0 flex-col gap-3">
-          {!webMode ? (
-            <Button
-              type="button"
-              size="lg"
-              className="touch-target w-full"
-              onClick={() => void onScanQr()}
-              disabled={busy}
-              data-testid="pair-scan-qr"
-            >
-              {phase.kind === "scanning" ? (
-                <Loader2Icon className="size-5 animate-spin" aria-hidden="true" />
-              ) : (
-                <ScanLineIcon className="size-5" aria-hidden="true" />
-              )}
-              {phase.kind === "scanning" ? t("scanning") : t("scanCta")}
-            </Button>
-          ) : null}
-
+        {invitation ? (
+          <InvitationCard
+            invitation={invitation}
+            tone={invitationTone}
+            onClear={onClearPayload}
+            disabled={busy}
+          >
+            {rawField}
+          </InvitationCard>
+        ) : (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="pair-payload">{t("tokenLabel")}</Label>
@@ -502,74 +453,28 @@ export function PairStep({
                 ) : null}
               </div>
             </div>
-            <Textarea
-              id="pair-payload"
-              value={payload}
-              onChange={(event) => {
-                setPayload(event.target.value)
-                if (phase.kind === "error") setPhase({ kind: "idle" })
-              }}
-              placeholder={t("payloadPlaceholder")}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              className="min-h-24 resize-none font-mono text-xs"
-              disabled={busy}
-              data-testid="pair-payload"
-            />
-            {/* One status line under the field, always the same slot: the
-                verified-invitation summary when the payload decodes, the
-                paste hint before that. Swapping in place is what keeps
-                pasting a key from growing the page. */}
-            {invitation ? (
-              <p
-                className="flex items-start gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs leading-relaxed"
-                data-testid="pair-invitation-summary"
-              >
-                <ShieldCheckIcon
-                  className="mt-px size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0">
-                  <span className="font-medium">
-                    {t("invitationSummary.title", { host: displayPairHost(invitation.baseUrl) })}
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    {t("invitationSummary.description", {
-                      version: invitation.serverVersion,
-                      expiresAt: new Date(invitation.expiresAt),
-                    })}
-                  </span>
-                </span>
-              </p>
-            ) : (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {webMode ? t("web.pasteHint") : t("codeHint")}
-              </p>
-            )}
+            {rawField}
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {webMode ? t("web.pasteHint") : t("codeHint")}
+            </p>
           </div>
+        )}
 
-          <Button
-            type="submit"
-            size="lg"
-            disabled={busy || !payload.trim()}
-            data-testid="pair-submit"
-          >
-            {phase.kind === "pairing" ? (
-              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-            ) : null}
-            {phase.kind === "pairing" ? t("submitInProgress") : t("submit")}
-          </Button>
-
-          {phase.kind === "error" ? (
-            <PairFailurePanel
-              failure={phase.failure}
-              action={phase.action}
-              onRetry={phase.failure.retryable ? () => void onPair() : undefined}
-              onStartOver={payload ? onClearPayload : undefined}
-            />
+        <Button type="submit" size="lg" disabled={busy || !payload.trim()} data-testid="pair-submit">
+          {phase.kind === "pairing" ? (
+            <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
           ) : null}
-        </div>
+          {phase.kind === "pairing" ? t("submitInProgress") : t("submit")}
+        </Button>
+
+        {failure ? (
+          <PairFailurePanel
+            failure={failure}
+            action={phase.kind === "error" ? phase.action : undefined}
+            onRetry={failure.retryable ? () => void onPair() : undefined}
+            onStartOver={payload ? onClearPayload : undefined}
+          />
+        ) : null}
       </form>
 
       {onBack ? (

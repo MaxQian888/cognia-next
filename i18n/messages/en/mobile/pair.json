@@ -2,6 +2,7 @@
   "accountContextMissing": "An active local account is required before pairing a Host.",
   "baseUrlLabel": "Server URL",
   "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
+  "brandMark": "Cognia",
   "checkingTitle": "Re-checking link",
   "codeError": {
     "invalid_pair_code": "Pair code must be exactly 6 digits.",
@@ -64,13 +65,31 @@
   },
   "errorTitle": "Pairing failed",
   "failure": {
-    "whatToDo": "What to do",
-    "retry": "Try again",
-    "startOver": "Paste a new invitation",
+    "body": {
+      "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
+      "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
+      "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help."
+    },
     "copyDiagnostics": "Copy diagnostics",
     "diagnosticsCopied": "Diagnostics copied",
-    "technicalDetail": "Technical detail",
     "invitationSpent": "This invitation is now spent — the Host consumed it. Issue a fresh one before trying again; re-submitting the same string cannot work.",
+    "moreOptions": "More options",
+    "remedy": {
+      "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
+      "checkHostLogs": "Check the Host's logs for the matching error.",
+      "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
+      "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
+      "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
+      "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
+      "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
+      "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
+      "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
+      "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
+      "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin."
+    },
+    "retry": "Try again",
+    "startOver": "Paste a new invitation",
+    "technicalDetail": "Technical detail",
     "title": {
       "activate_failed": "Paired, but the Host didn't come online",
       "clipboard_unavailable": "Clipboard unavailable",
@@ -89,24 +108,7 @@
       "unreachable": "Couldn't reach the Host",
       "vault_locked": "Your local account is locked"
     },
-    "body": {
-      "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
-      "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
-      "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one."
-    },
-    "remedy": {
-      "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
-      "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
-      "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin.",
-      "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
-      "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
-      "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
-      "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
-      "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
-      "checkHostLogs": "Check the Host's logs for the matching error.",
-      "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
-      "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation."
-    }
+    "whatToDo": "What to do"
   },
   "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
   "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). The pair code was already consumed — generate a fresh QR/code on the desktop and pair again.",
@@ -125,6 +127,14 @@
     "refresh": "Refresh status",
     "server": "Server"
   },
+  "hostProbe": {
+    "absent": "No Host answered on this computer.",
+    "blocked": "A Host is running here, but it refuses this browser. Add this origin to its allowed origins:",
+    "copyOrigin": "Copy this origin",
+    "originCopied": "Origin copied",
+    "reachable": "Host on {host} · v{version}",
+    "searching": "Looking for a Host on this computer…"
+  },
   "httpError": {
     "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
     "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
@@ -133,6 +143,15 @@
     "generic": "Pairing failed (HTTP {status})."
   },
   "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "invitationCard": {
+    "replace": "Replace",
+    "showRaw": "Show the invitation string",
+    "state": {
+      "failed": "Server v{version} · still valid until {expiresAt, time, short}",
+      "ready": "Server v{version} · valid until {expiresAt, time, short}",
+      "spent": "Already spent — this Host consumed it. Issue a fresh one."
+    }
+  },
   "invitationSummary": {
     "description": "Server v{version} · expires at {expiresAt, time, short}",
     "title": "Invitation ready for {host}"
@@ -141,6 +160,16 @@
   "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
   "loadingTitle": "Checking for an existing pairing…",
   "manualDivider": "or paste manually",
+  "narration": {
+    "absent": "Nothing answered yet. Paste an invitation below and it will tell you exactly where it points.",
+    "armed": "The invitation checks out. Completing the pairing registers this client's key and spends it.",
+    "blocked": "Something is listening, but it will not talk to this browser until you allow this origin on the Host.",
+    "failed": "The attempt did not go through. What to do next is on the right.",
+    "paired": "This client holds its own key now. It reconnects on its own from here.",
+    "pairing": "Registering this client's key with the Host. This takes a moment.",
+    "reachable": "The Host is there. It still needs to hand you a one-time invitation before this client can connect.",
+    "searching": "Checking whether a cognia Host is listening where this client can reach it."
+  },
   "networkError": {
     "browserBlocked": "The browser blocked the connection. Check the server's HTTPS certificate and its CORS or Private Network Access settings.",
     "browserPolicy": "The browser blocked the request because of its CORS or Private Network Access policy. Allow this web origin on the server, then try again.",
@@ -191,6 +220,16 @@
     "unsupported": "This device can't scan QR codes. Paste the pair token manually below."
   },
   "scanning": "Scanning…",
+  "scene": {
+    "absent": "No Host found",
+    "armed": "An invitation is ready to redeem",
+    "blocked": "A Host refused this browser",
+    "failed": "Pairing failed",
+    "paired": "Paired with the Host",
+    "pairing": "Redeeming the invitation",
+    "reachable": "A Host is reachable",
+    "searching": "Looking for a Host"
+  },
   "signOut": {
     "cardDescription": "Sign out and clear the device JWT. You'll need to scan a fresh QR to reconnect.",
     "cardTitle": "Disconnect",
@@ -231,14 +270,15 @@
     },
     "copyCommand": "Copy headless pairing command",
     "deploymentCommandHint": "Run this inside the target Host instance. In a multi-tenant or multi-replica deployment, replace the namespace and Pod name with the exact Host the browser should connect to. If it prints cgnp2, update the deployed image and restart or roll out that Host before retrying.",
+    "developmentCommandHint": "Run this in a second terminal while `pnpm dev:web-headless` is running, then paste the printed invitation below. It aims the invitation at the loopback listener on port {port} — the only address a browser reaches without a certificate. `pnpm dev:headless` on its own does not open that port.",
     "formCardDescription": "Paste the one-time cgnp3 invitation issued by your cognia server.",
     "formCardTitle": "Pair this browser",
     "headlessDescription": "Run this in a second terminal while the headless server is running, then paste the printed cgnp3 invitation below.",
     "headlessTitle": "Using a headless server?",
     "httpsRequired": "Browser pairing requires HTTPS so the pair credential is never sent in cleartext. Use an HTTPS companion URL.",
     "intro": "Connect this browser with a one-time invitation issued by your cognia server.",
-    "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
     "pasteClipboard": "Paste",
+    "pasteHint": "Paste the full cgnp3|… invitation; the server address and identity are verified automatically.",
     "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
     "storageNoticeTitle": "Credential stays in this browser",
     "title": "Connect to your server"

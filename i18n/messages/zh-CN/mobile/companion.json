@@ -9,6 +9,24 @@
     "title": "允许运行 Agent",
     "toggleAria": "切换 {label} 的运行 Agent 权限"
   },
+  "browserAccess": {
+    "title": "浏览器访问",
+    "description": "浏览器无法验证本机的自签名证书，所以常用的 HTTPS 端口在标签页里根本连不上。这里打开的是一个明文 http://127.0.0.1 监听器——浏览器无需证书就信任的唯一地址。它只在本机，不会离开这台电脑。",
+    "enable": "启用浏览器访问",
+    "listening": "正在监听 {url}",
+    "notListening": "未监听",
+    "restartRequired": "重启 Companion 服务后生效。",
+    "loadFailed": "无法读取浏览器访问设置。",
+    "origins": {
+      "title": "允许的浏览器来源",
+      "description": "只有这些完全一致的来源可以访问本机，其余一律拒绝——包括同一地址的不同端口。",
+      "empty": "还没有添加任何来源，此时启用浏览器访问不会有任何效果。",
+      "add": "添加来源",
+      "placeholder": "http://localhost:3000",
+      "revoke": "移除 {origin}",
+      "suggested": "建议："
+    }
+  },
   "channels": {
     "blocked": {
       "loopbackOnly": "仅绑定到本机——请把服务器改为局域网绑定。",

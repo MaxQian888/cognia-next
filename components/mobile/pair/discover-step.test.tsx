@@ -279,4 +279,37 @@ describe("<DiscoverStep />", () => {
     render(<DiscoverStep onSelect={() => {}} onSkip={() => {}} scan={scan as never} />)
     expect(await screen.findByTestId("pair-discover-permission")).toBeInTheDocument()
   })
+
+  it("reports what it knows about the far end so the shell's scene can draw it", async () => {
+    // The step owns the scan, so it is the only thing that can answer.
+    // Deriving this a second time in the coordinator is how the picture and
+    // the list end up disagreeing.
+    const onHostStateChange = jest.fn()
+    const scan = makeScanStub({ hits: [mdnsHit] })
+    render(
+      <DiscoverStep
+        onSelect={() => {}}
+        onSkip={() => {}}
+        onHostStateChange={onHostStateChange}
+        scan={scan as never}
+      />
+    )
+    await waitFor(() => expect(onHostStateChange).toHaveBeenCalledWith("reachable"))
+    expect(onHostStateChange).toHaveBeenCalledWith("searching")
+  })
+
+  it("reports an absence only once the scan has settled on one", async () => {
+    const onHostStateChange = jest.fn()
+    const scan = makeScanStub({ hits: [] })
+    render(
+      <DiscoverStep
+        onSelect={() => {}}
+        onSkip={() => {}}
+        onHostStateChange={onHostStateChange}
+        scan={scan as never}
+      />
+    )
+    await waitFor(() => expect(onHostStateChange).toHaveBeenLastCalledWith("absent"))
+    expect(onHostStateChange.mock.calls[0]).toEqual(["searching"])
+  })
 })

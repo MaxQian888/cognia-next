@@ -95,9 +95,22 @@ export async function probeOriginReachable(
  * a LAN address is, from a browser, un-completable by construction, and saying
  * so is far more useful than "Failed to fetch".
  *
- * Loopback is exempt in both directions: `http://127.0.0.1` is a potentially
- * trustworthy origin needing no chain, and an `https://localhost` Host is
- * usually a dev certificate the user has already trusted.
+ * Loopback is exempt for `http:` ONLY. `http://127.0.0.1` is a potentially
+ * trustworthy origin needing no chain at all, so it is fine.
+ *
+ * `https://` on loopback earns no exemption, and this used to be the bug: the
+ * exemption assumed such a Host is "a dev certificate the user already
+ * trusted", which is false for the one Host this function exists to describe.
+ * `src-tauri/src/companion_api/tls.rs` mints the listener's certificate with
+ * rcgen and no CA — self-signed on `127.0.0.1` exactly as on the LAN. Returning
+ * `true` there skipped the `tls_untrusted` arm in `pair-failure.ts` and let an
+ * opaque `TypeError: Failed to fetch` fall through to `unreachable`, whose
+ * advice is "confirm the Host is listening on that address" — while it was
+ * listening on exactly that address. The certificate was the whole problem.
+ *
+ * This is consulted only AFTER an attempt has failed and nothing answered even
+ * opaquely (`pair-failure.ts` gates on `peerAnswered === false`), so a false
+ * negative costs a mislabel, never a spent invitation.
  */
 export function isBrowserTrustableOrigin(baseUrl: string): boolean {
   let url: URL
@@ -106,8 +119,9 @@ export function isBrowserTrustableOrigin(baseUrl: string): boolean {
   } catch {
     return false
   }
-  if (isLoopbackHostname(url.hostname)) return true
+  if (url.protocol === "http:") return isLoopbackHostname(url.hostname)
   if (url.protocol !== "https:") return false
+  if (isLoopbackHostname(url.hostname)) return false
   // A public DNS name gets a real certificate from a real CA; a bare LAN IP
   // literal cannot, so an https invitation pointing at one is self-signed.
   return !isIpLiteral(url.hostname) && !url.hostname.endsWith(".local")

@@ -19,6 +19,7 @@ import {
   type TerminalFrame,
 } from "./protocol"
 import { recordHostCapabilities } from "./host-capabilities"
+import { toWebSocketBase } from "@/lib/network/ws-url"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
 import {
@@ -622,7 +623,7 @@ async function openLanConnection(endpoint: CompanionEndpoint): Promise<TerminalH
   if (ticket.expiresAt <= Date.now()) {
     throw new TerminalSessionError("unauthorized", "terminal socket ticket expired")
   }
-  const url = new URL("/ws/terminal", toWsBase(endpoint.baseUrl))
+  const url = new URL("/ws/terminal", toWebSocketBase(endpoint.baseUrl))
   url.searchParams.set("ticket", ticket.ticket)
   const connection = new LanTerminalHostConnection(
     url.toString(),
@@ -645,10 +646,6 @@ async function openWanConnection(): Promise<TerminalHostConnection> {
   }
   await connection.open()
   return connection
-}
-
-function toWsBase(baseUrl: string): string {
-  return baseUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:")
 }
 
 function isResponse(kind: TerminalFrameKind): boolean {

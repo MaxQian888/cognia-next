@@ -6,10 +6,14 @@ import { PairOnboardingClient } from "./pair-onboarding-client"
  * The whole `/pair` route, as a browser sees it.
  *
  * Storybook reports `usePlatform() === "web"` (no Tauri or Capacitor globals),
- * which is exactly the surface this story exists to check: the two-column web
- * layout that replaced the phone-width column the route used to render at every
- * viewport. `hydrateCompanionConfig` finds no pairing in the Storybook profile,
- * so the flow settles on the pair step.
+ * which is exactly the surface this story exists to check: the two-pane window
+ * `PairShell` paints, with the live loopback probe running in the panel beside
+ * the form. `hydrateCompanionConfig` finds no pairing in the Storybook profile,
+ * so the flow settles on the pair step, and no Host answers on the Storybook
+ * host — which makes this the `absent` state end to end.
+ *
+ * The individual scene states (including the origin-refused case, which needs a
+ * Host that is running *and* refusing) are in `pair/pair-shell.stories.tsx`.
  */
 const meta = {
   title: "Mobile/Pair/PairOnboardingClient",
@@ -20,5 +24,5 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Desktop browser — the reported "looks bad and scrolls" surface. */
+/** Desktop browser. */
 export const WebBrowser: Story = {}

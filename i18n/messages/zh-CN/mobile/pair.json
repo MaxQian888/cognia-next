@@ -2,6 +2,7 @@
   "accountContextMissing": "配对 Host 前需要一个活动的本地账户。",
   "baseUrlLabel": "服务器地址",
   "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+  "brandMark": "Cognia",
   "checkingTitle": "正在重新检查链路",
   "codeError": {
     "invalid_pair_code": "配对码必须是 6 位数字。",
@@ -64,13 +65,31 @@
   },
   "errorTitle": "配对失败",
   "failure": {
-    "whatToDo": "接下来怎么做",
-    "retry": "重试",
-    "startOver": "粘贴新的邀请码",
+    "body": {
+      "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。",
+      "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
+      "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。"
+    },
     "copyDiagnostics": "复制诊断信息",
     "diagnosticsCopied": "诊断信息已复制",
-    "technicalDetail": "技术细节",
     "invitationSpent": "该邀请码已被 Host 消费，无法再次使用。请重新生成一个再试；重复提交同一串字符不会成功。",
+    "moreOptions": "更多办法",
+    "remedy": {
+      "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
+      "checkHostLogs": "查看 Host 日志中对应的错误。",
+      "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
+      "enableBrowserAccess": "在 Host 上打开 设置 → Companion → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
+      "freshInvitation": "在 Host 上重新生成邀请码（设置 → Companion，或执行 “cognia-server pair”），然后粘贴到这里。",
+      "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
+      "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
+      "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
+      "unlockAccount": "用密码登录本地账户后再配对。开发环境下可用 NEXT_PUBLIC_ACCOUNT_GATE=1 启动，以便出现解锁界面。",
+      "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
+      "useLoopbackInvitation": "改用 {loopback} 生成邀请码，而不是 {host}。局域网地址使用自签名证书，只有原生 App 才能固定校验。"
+    },
+    "retry": "重试",
+    "startOver": "粘贴新的邀请码",
+    "technicalDetail": "技术细节",
     "title": {
       "activate_failed": "配对已完成，但 Host 未能上线",
       "clipboard_unavailable": "无法读取剪贴板",
@@ -89,24 +108,7 @@
       "unreachable": "无法连接到 Host",
       "vault_locked": "本地账户处于锁定状态"
     },
-    "body": {
-      "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
-      "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。",
-      "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。"
-    },
-    "remedy": {
-      "enableBrowserAccess": "在 Host 上打开 设置 → Companion → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
-      "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
-      "useLoopbackInvitation": "改用 {loopback} 生成邀请码，而不是 {host}。局域网地址使用自签名证书，只有原生 App 才能固定校验。",
-      "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
-      "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
-      "freshInvitation": "在 Host 上重新生成邀请码（设置 → Companion，或执行 “cognia-server pair”），然后粘贴到这里。",
-      "unlockAccount": "用密码登录本地账户后再配对。开发环境下可用 NEXT_PUBLIC_ACCOUNT_GATE=1 启动，以便出现解锁界面。",
-      "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
-      "checkHostLogs": "查看 Host 日志中对应的错误。",
-      "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
-      "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。"
-    }
+    "whatToDo": "接下来怎么做"
   },
   "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
   "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…）。该配对码已被使用——请在桌面端重新生成二维码/配对码后再试。",
@@ -125,6 +127,14 @@
     "refresh": "刷新状态",
     "server": "服务器"
   },
+  "hostProbe": {
+    "absent": "这台机器上没有 Host 应答。",
+    "blocked": "这台机器上有 Host 在运行，但它拒绝了这个浏览器。把这个来源加进它的允许列表：",
+    "copyOrigin": "复制这个来源",
+    "originCopied": "来源已复制",
+    "reachable": "Host 在 {host} · v{version}",
+    "searching": "正在这台机器上寻找 Host…"
+  },
   "httpError": {
     "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
     "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
@@ -133,6 +143,15 @@
     "generic": "配对失败（HTTP {status}）。"
   },
   "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "invitationCard": {
+    "replace": "更换",
+    "showRaw": "查看邀请原文",
+    "state": {
+      "failed": "服务端 v{version} · 仍然有效至 {expiresAt, time, short}",
+      "ready": "服务端 v{version} · 有效期至 {expiresAt, time, short}",
+      "spent": "已被使用 —— Host 已经消费掉它。请重新签发一份。"
+    }
+  },
   "invitationSummary": {
     "description": "服务器 v{version} · {expiresAt, time, short} 过期",
     "title": "已识别 {host} 的配对邀请"
@@ -141,6 +160,16 @@
   "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
   "loadingTitle": "正在检查既有配对…",
   "manualDivider": "或手动粘贴",
+  "narration": {
+    "absent": "还没有任何回应。在右侧粘贴邀请码，它会告诉你这份邀请指向哪里。",
+    "armed": "邀请校验通过。完成配对会注册这台客户端的密钥，并把这份邀请用掉。",
+    "blocked": "确实有东西在监听，但在 Host 上放行这个来源之前，它不会和这个浏览器通话。",
+    "failed": "这次没有成功。右侧写着下一步该做什么。",
+    "paired": "这台客户端已经有了自己的密钥，之后会自行重连。",
+    "pairing": "正在向 Host 注册这台客户端的密钥，稍等一下。",
+    "reachable": "Host 就在那里。它还需要给你一份一次性邀请，这台客户端才能连上。",
+    "searching": "正在确认这台客户端能够到达的地方是否有 cognia Host 在监听。"
+  },
   "networkError": {
     "browserBlocked": "浏览器阻止了连接。请检查服务器的 HTTPS 证书，以及 CORS 或私有网络访问（PNA）设置。",
     "browserPolicy": "浏览器因 CORS 或私有网络访问（PNA）策略阻止了请求。请在服务器上允许当前网页来源后重试。",
@@ -191,6 +220,16 @@
     "unsupported": "本设备不支持扫码，请在下方手动粘贴配对令牌。"
   },
   "scanning": "扫描中…",
+  "scene": {
+    "absent": "没有找到 Host",
+    "armed": "邀请已就绪，等待兑换",
+    "blocked": "有 Host 拒绝了这个浏览器",
+    "failed": "配对失败",
+    "paired": "已与 Host 配对",
+    "pairing": "正在兑换邀请",
+    "reachable": "Host 可达",
+    "searching": "正在寻找 Host"
+  },
   "signOut": {
     "cardDescription": "退出登录并清除设备 JWT，需要重新扫码才能再次连接。",
     "cardTitle": "断开连接",
@@ -231,14 +270,15 @@
     },
     "copyCommand": "复制 Headless 配对命令",
     "deploymentCommandHint": "请在目标 Host 实例内部执行。多租户或多副本部署中，请把 namespace 和 Pod 名替换为浏览器实际要连接的 Host。如果输出 cgnp2，请先更新部署镜像并重启或 rollout 该 Host。",
+    "developmentCommandHint": "在 `pnpm dev:web-headless` 运行时，于另一个终端执行此命令，然后把输出的邀请粘贴到下方。它会把邀请指向 {port} 端口的回环监听器——那是浏览器无需证书就能访问的唯一地址；单独运行 `pnpm dev:headless` 不会开启该端口。",
     "formCardDescription": "粘贴 Cognia 服务器签发的一次性 cgnp3 配对邀请。",
     "formCardTitle": "配对此浏览器",
     "headlessDescription": "保持 Headless 服务运行，在另一个终端执行此命令，然后把输出的 cgnp3 邀请粘贴到下方。",
     "headlessTitle": "正在使用 Headless 服务器？",
     "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
     "intro": "使用 Cognia 服务器签发的一次性邀请连接此浏览器。",
-    "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
     "pasteClipboard": "粘贴",
+    "pasteHint": "粘贴完整的 cgnp3|… 邀请，系统会自动验证服务器地址和身份。",
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
     "storageNoticeTitle": "凭据保存在此浏览器中",
     "title": "连接到服务器"

@@ -1,5 +1,6 @@
 "use client"
 
+import { toWebSocketBase } from "@/lib/network/ws-url"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
@@ -1380,7 +1381,7 @@ export class CompanionTransport implements Transport {
     // Build ?since= from the highest cursor across all active channels.
     const maxSeq = this.globalMaxSeq()
     const since = maxSeq > 0 ? String(maxSeq) : ""
-    const wsBase = config.baseUrl.replace(/^https?/, "wss")
+    const wsBase = toWebSocketBase(config.baseUrl)
     const query = new URLSearchParams(internalService ? { token: ticket } : { ticket })
     if (since) query.set("since", since)
     const wsUrl = `${wsBase}${this.eventsPath}?${query.toString()}`

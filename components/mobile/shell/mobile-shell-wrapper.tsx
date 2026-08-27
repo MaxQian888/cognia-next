@@ -154,7 +154,13 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     pathname.startsWith("/a2ui/") ||
     pathname === "/me/terminal" ||
     pathname === "/onboarding" ||
-    pathname.startsWith("/onboarding/")
+    pathname.startsWith("/onboarding/") ||
+    // `/pair` for the same reason as `/onboarding`: `PairShell` is a
+    // `h-[100dvh] overflow-hidden` two-pane window. Under the document-scroll
+    // branch the offline banner takes a row *above* a full-viewport child and
+    // the page grows a scrollbar that has nothing in it.
+    pathname === "/pair" ||
+    pathname.startsWith("/pair/")
 
   return (
     <div

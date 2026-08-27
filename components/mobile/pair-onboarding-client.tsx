@@ -1,14 +1,14 @@
 "use client"
 
 /**
- * Mobile Pair Onboarding (Capacitor `/pair`).
+ * Pair onboarding (`/pair`) — the phone's flow and the browser's.
  *
- * Coordinator for a three-step wizard:
+ * Coordinator for a three-step wizard, rendered into {@link PairShell}:
  *
  *   1. **Discover** — auto-scan the LAN for cognia desktops via mDNS, with
  *      an IP-segment fallback driven by the WebRTC ICE-candidate trick.
  *      Discovery remains informational because registration requires a fresh
- *      one-shot Owner invitation.
+ *      one-shot Owner invitation. Native only — see below.
  *   2. **Pair** — scans or pastes a cgnp3 payload, registers an ES256 device
  *      identity, and persists only its private key in secure storage.
  *   3. **Paired** — connection-health card with refresh probe, diagnostics
@@ -18,12 +18,35 @@
  * callbacks; every other piece of behavior lives inside the matching
  * step component (`components/mobile/pair/*`). Pairing accepts only a complete
  * cgnp3 invitation payload; the legacy URL + JWT form is intentionally absent.
+ *
+ * # The browser gets discovery back, as a fact rather than a step
+ *
+ * `WEB_STEPS` skips Discover, which is right — a tab has at most one candidate
+ * (the loopback browser-access listener on this machine) and finding it does
+ * not get you closer to being paired, because a fresh invitation from that Host
+ * is still required. What was wrong is that skipping the *step* also skipped
+ * the *probe*: `lib/connectivity/loopback-discovery.ts` was written expressly
+ * for a browser tab, wired into `scanLan`, and rendered only by the step no
+ * browser ever mounts. So the one message that names the exact origin to
+ * allowlist — the answer to the most common web-pairing failure there is — ran
+ * for nobody.
+ *
+ * The probe now runs here on web and feeds two things: the scene the shell
+ * draws, and a {@link HostProbeStatus} line beside the form.
+ *
+ * # Why the scene state is assembled here
+ *
+ * The picture needs one verdict drawn from two owners — what the form is doing
+ * (`PairStep` owns the phase and the decoded payload) and what is known about
+ * the far end (`DiscoverStep` owns the native scan; this file owns the web
+ * probe). Both report upward rather than being re-derived, because a second
+ * derivation of the same state is how the picture and the list end up
+ * disagreeing.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -35,9 +58,8 @@ import {
   switchCompanionHost,
 } from "@/lib/companion/host-orchestration"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
-import { mobileTransition } from "@/lib/ui/motion"
-import { cn } from "@/lib/utils"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
+import { useLanScan } from "@/hooks/connectivity/use-lan-scan"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 import {
   loadRecentServers,
@@ -47,9 +69,13 @@ import {
 import { readPairLinkPayload, stripPairLinkPayload } from "@/lib/qr/pair-link"
 
 import { DiscoverStep } from "./pair/discover-step"
-import { PairStep } from "./pair/pair-step"
+import { HeadlessInvitationHelp } from "./pair/headless-invitation-help"
+import { HostProbeStatus } from "./pair/host-probe-status"
+import { PairShell } from "./pair/pair-shell"
+import { PairStep, type PairActivity } from "./pair/pair-step"
 import { PairedStep } from "./pair/paired-step"
-import { PairStepper, type PairStep as PairStepName } from "./pair/pair-stepper"
+import { type PairStep as PairStepName } from "./pair/pair-stepper"
+import type { PairHostState, PairSceneState } from "./pair/pair-scene"
 
 type PhaseLoading = { kind: "loading" }
 type PhaseUnpaired = { kind: "unpaired" }
@@ -181,7 +207,6 @@ export function PairOnboardingClient() {
   const [recoveryHosts, setRecoveryHosts] = useState<CompanionHostRecord[]>([])
   const [pendingRecoveryHostId, setPendingRecoveryHostId] = useState<string | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
-  const reduce = useReducedMotion()
   // Recently-paired servers (localStorage) — surfaced as the Discover step's
   // "Recent" group so the user can one-tap reconnect even after sign-out.
   // Read once on mount (synchronous; localStorage is hot for first paint).
@@ -389,157 +414,191 @@ export function PairOnboardingClient() {
     [isWebHost, onPaired, pendingRecoveryHostId, platform, t]
   )
 
+  // What the form is doing, reported by the step that owns the phase. Kept
+  // here only so the shell's scene can draw it.
+  const [activity, setActivity] = useState<PairActivity>("idle")
+  // What the native Discover step knows about the far end. Web never mounts
+  // that step, so the browser gets its own probe below.
+  const [nativeHostState, setNativeHostState] = useState<PairHostState>("searching")
+
+  // The browser's only discovery. `scanLan`'s mDNS leg is a Tauri invoke that
+  // resolves to nothing off-desktop and its /24 sweep has no seed in a browser
+  // (WebRTC host candidates are anonymised to `<uuid>.local`), so on web this
+  // is precisely the loopback browser-access probe and nothing else — which is
+  // the whole point: it is the one Host a tab can reach, and its "answered but
+  // refused this origin" verdict is the single most useful fact this screen
+  // can state. It ran for nobody before, because the web flow skips Discover.
+  const webScan = useLanScan({ enabled: isWebHost, mdnsWindowMs: 2000 })
+  const webLoopback = useMemo(
+    () => webScan.servers.find((server) => server.source === "loopback"),
+    [webScan.servers]
+  )
+  const hostState: PairHostState = !isWebHost
+    ? nativeHostState
+    : webScan.loopbackBlocked
+      ? "blocked"
+      : webLoopback
+        ? "reachable"
+        : webScan.scanning
+          ? "searching"
+          : "absent"
+
+  // The invitation outranks the Host: once one is in play, whether the probe
+  // found something has stopped being the question on screen.
+  const sceneState: PairSceneState =
+    step === "paired"
+      ? "paired"
+      : activity === "pairing"
+        ? "pairing"
+        : activity === "failed"
+          ? "failed"
+          : activity === "armed"
+            ? "armed"
+            : hostState
+
   if (phase.kind === "loading") {
     return (
-      <main
-        className="mx-auto flex min-h-[100dvh] max-w-md items-center justify-center safe-area-py safe-area-px"
+      <div
+        className="flex h-[100dvh] min-h-0 w-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-background text-foreground safe-area-py safe-area-px"
         data-testid="pair-onboarding"
         data-step="loading"
+        role="status"
+        aria-live="polite"
       >
-        <div className="flex flex-col items-center gap-3" role="status" aria-live="polite">
-          <Spinner className="size-6" />
-          <p className="text-sm text-muted-foreground">{t("loadingTitle")}</p>
-          {hydrateSlow ? (
-            <div className="flex flex-col items-center gap-2 pt-1">
-              <p className="max-w-xs text-center text-xs text-muted-foreground">
-                {t("loadingSlow")}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onSkipLoading}
-                data-testid="pair-loading-skip"
-              >
-                {t("loadingManualCta")}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </main>
+        <Spinner className="size-6" />
+        <p className="text-sm text-muted-foreground">{t("loadingTitle")}</p>
+        {hydrateSlow ? (
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <p className="max-w-xs text-center text-xs text-muted-foreground">{t("loadingSlow")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onSkipLoading}
+              data-testid="pair-loading-skip"
+            >
+              {t("loadingManualCta")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
     )
   }
 
+  const recoveryNotice =
+    pairParams.mode === "recover" ? (
+      <div
+        className="rounded-lg border bg-muted/60 p-3 text-sm"
+        data-testid="pair-recovery-context"
+      >
+        <p className="font-medium">{t(`recovery.${pairParams.state ?? "offline"}.title`)}</p>
+        <p className="mt-1 text-muted-foreground">
+          {pairParams.state === "requires-grant"
+            ? t("recovery.requiresGrant.description", {
+                grant: pairParams.requiredGrant ?? t("recovery.requiresGrant.unknownGrant"),
+              })
+            : t(`recovery.${pairParams.state ?? "offline"}.description`)}
+        </p>
+        {pairParams.state === "requires-grant" ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("recovery.requiresGrant.instructions")}
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {recoveryHosts.map((host) => (
+            <Button
+              key={host.hostId}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pendingRecoveryHostId !== null}
+              onClick={() => void onRecoverySwitch(host.hostId)}
+            >
+              {t("recovery.switchTo", { name: host.label })}
+            </Button>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setSelection(EMPTY_SELECTION)
+              setStep("pair")
+            }}
+          >
+            {t("recovery.repair")}
+          </Button>
+        </div>
+        {recoveryError ? (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {recoveryError}
+          </p>
+        ) : null}
+      </div>
+    ) : null
+
   return (
-    <main
-      className={cn(
-        // `my-auto` on the inner block rather than `justify-center` on this
-        // one: auto margins centre short content without clipping the top of
-        // content that outgrows the viewport, which centring does.
-        "mx-auto flex min-h-[100dvh] w-full max-w-md flex-col px-4 py-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] safe-area-pt sm:max-w-lg sm:px-6",
-        // A browser is not a phone. The web flow lays its form out in two
-        // columns from `lg`, so the column it lives in has to be allowed to
-        // be that wide — the fixed `md:max-w-xl` is what forced every piece
-        // of state into one tall stack and put a scrollbar on the page as
-        // soon as an invitation was pasted.
-        isWebHost ? "lg:max-w-4xl lg:px-8" : "md:max-w-xl"
-      )}
+    // `display: contents` — the shell is the viewport owner, so this element
+    // must not become a box between it and the flex column that sizes it.
+    <div
+      className="contents"
       data-testid="pair-onboarding"
       data-step={step}
       data-mode={pairParams.mode}
     >
-      <div className="my-auto flex w-full flex-col gap-5" data-testid="pair-onboarding-content">
-        <header className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {isWebHost ? t("web.title") : t("title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {isWebHost ? t("web.intro") : t("intro")}
-          </p>
-        </div>
-        <PairStepper current={step} steps={isWebHost ? WEB_STEPS : undefined} />
-        {pairParams.mode === "recover" ? (
-          <div className="rounded-lg border bg-muted/60 p-3 text-sm" data-testid="pair-recovery-context">
-            <p className="font-medium">{t(`recovery.${pairParams.state ?? "offline"}.title`)}</p>
-            <p className="mt-1 text-muted-foreground">
-              {pairParams.state === "requires-grant"
-                ? t("recovery.requiresGrant.description", {
-                    grant: pairParams.requiredGrant ?? t("recovery.requiresGrant.unknownGrant"),
-                  })
-                : t(`recovery.${pairParams.state ?? "offline"}.description`)}
-            </p>
-            {pairParams.state === "requires-grant" ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t("recovery.requiresGrant.instructions")}
-              </p>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              {recoveryHosts.map((host) => (
-                <Button
-                  key={host.hostId}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={pendingRecoveryHostId !== null}
-                  onClick={() => void onRecoverySwitch(host.hostId)}
-                >
-                  {t("recovery.switchTo", { name: host.label })}
-                </Button>
-              ))}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setSelection(EMPTY_SELECTION)
-                  setStep("pair")
-                }}
-              >
-                {t("recovery.repair")}
-              </Button>
-            </div>
-            {recoveryError ? (
-              <p role="alert" className="mt-2 text-xs text-destructive">
-                {recoveryError}
-              </p>
-            ) : null}
-          </div>
+      <PairShell
+        client={isWebHost ? "web" : "mobile"}
+        sceneState={sceneState}
+        step={step}
+        steps={isWebHost ? WEB_STEPS : undefined}
+        bodyKey={step}
+        notice={recoveryNotice}
+        status={
+          isWebHost ? (
+            <HostProbeStatus
+              state={hostState}
+              baseUrl={webLoopback?.baseUrl ?? webScan.loopbackBlocked?.baseUrl}
+              serverVersion={webLoopback?.serverVersion}
+              origin={webScan.loopbackBlocked?.origin}
+            />
+          ) : undefined
+        }
+        aside={isWebHost ? <HeadlessInvitationHelp /> : undefined}
+      >
+        {step === "discover" && !isWebHost ? (
+          <DiscoverStep
+            history={recentServers}
+            onSelect={onSelectServer}
+            onSkip={onSkipDiscover}
+            onScanShortcut={onScanShortcut}
+            onHostStateChange={setNativeHostState}
+          />
         ) : null}
-        </header>
 
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={step}
-            initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? undefined : { opacity: 0, y: -8 }}
-            transition={mobileTransition("fast")}
-          >
-          {step === "discover" && !isWebHost ? (
-            <DiscoverStep
-              history={recentServers}
-              onSelect={onSelectServer}
-              onSkip={onSkipDiscover}
-              onScanShortcut={onScanShortcut}
-            />
-          ) : null}
+        {step === "pair" ? (
+          <PairStep
+            key={selection.pairPayload}
+            prefilledPairPayload={selection.pairPayload}
+            autoScan={selection.autoScan}
+            autoSubmit={selection.autoSubmit}
+            webMode={isWebHost}
+            persistPairing={persistPairing}
+            onPaired={onPaired}
+            onBack={isWebHost ? undefined : onBackToDiscover}
+            onActivityChange={setActivity}
+          />
+        ) : null}
 
-          {step === "pair" ? (
-            <PairStep
-              key={selection.pairPayload}
-              prefilledPairPayload={selection.pairPayload}
-              autoScan={selection.autoScan}
-              autoSubmit={selection.autoSubmit}
-              webMode={isWebHost}
-              persistPairing={persistPairing}
-              onPaired={onPaired}
-              onBack={isWebHost ? undefined : onBackToDiscover}
-            />
-          ) : null}
-
-          {step === "paired" && phase.kind === "paired" ? (
-            <PairedStep
-              baseUrl={phase.baseUrl}
-              deviceId={phase.deviceId}
-              serverVersion={phase.serverVersion}
-              onContinue={onContinueToChat}
-              onAfterSignOut={onAfterSignOut}
-            />
-          ) : null}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-    </main>
+        {step === "paired" && phase.kind === "paired" ? (
+          <PairedStep
+            baseUrl={phase.baseUrl}
+            deviceId={phase.deviceId}
+            serverVersion={phase.serverVersion}
+            onContinue={onContinueToChat}
+            onAfterSignOut={onAfterSignOut}
+          />
+        ) : null}
+      </PairShell>
+    </div>
   )
 }

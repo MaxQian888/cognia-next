@@ -3,28 +3,37 @@
 /**
  * What `/pair` shows instead of "Pairing failed / Failed to fetch".
  *
- * Three tiers, in the order a stuck user needs them:
+ * # One cause, one instruction, one button
  *
- *   1. **A named cause.** The kind's own headline, not the generic
- *      "Pairing failed" the flow used for every one of fourteen distinct
- *      failures.
- *   2. **What to do.** An ordered remedy list from {@link PairFailure.remedies},
- *      interpolated with *this* Host URL and *this* tab's origin so the user can
- *      copy the exact string the allowlist wants rather than guess it.
- *   3. **The technical detail**, collapsed. Kept verbatim — the raw
- *      `Failed to fetch` still belongs in a bug report, just not as the whole
- *      message — and copyable as one block.
+ * The taxonomy behind this panel is good — fourteen named kinds, each with an
+ * ordered remedy list interpolated with *this* Host URL and *this* tab's
+ * origin. The presentation was not: it rendered a headline, a paragraph, an
+ * amber banner, a numbered remedy list, four buttons and a disclosure trigger,
+ * all expanded, all at once. On the web flow that block was taller than the
+ * form it belonged to, and a person who is already stuck reads none of it.
  *
- * The invitation-spent banner is the part that matters most and is easiest to
- * miss: `cgnp3` invitations are one-shot, so for half these failures pressing
- * Submit again cannot work, and the UI has to say so instead of offering a
- * Retry button that silently burns another one.
+ * So the panel now shows the three things a stuck user needs *first* — what
+ * went wrong, the single next thing to do, and one button that does it — and
+ * puts the remaining remedies, the diagnostics and the raw technical detail
+ * behind one disclosure. Nothing was deleted; the order is now the order the
+ * information is useful in.
+ *
+ * # The spent invitation is structural, not a banner
+ *
+ * `cgnp3` invitations are one-shot, so for half of these failures pressing
+ * Submit again cannot work. That used to be an amber banner competing with
+ * everything else for attention. It is now enforced by the shape of the panel:
+ * a spent failure is diagnosed `retryable: false`, so no Retry button is
+ * rendered at all and the primary action becomes "paste a new invitation". The
+ * chip stays as the *explanation* for why Retry is absent — never as the only
+ * thing standing between the user and a second burned invitation.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
+  ArrowRightIcon,
   CheckIcon,
   ChevronDownIcon,
   ClipboardCopyIcon,
@@ -33,11 +42,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { cn } from "@/lib/utils"
 
@@ -63,7 +68,7 @@ export function PairFailurePanel({
 }: PairFailurePanelProps) {
   const t = useTranslations("mobile.pair")
   const [copied, setCopied] = useState(false)
-  const [detailOpen, setDetailOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
 
   const onCopy = useCallback(async () => {
     try {
@@ -81,6 +86,34 @@ export function PairFailurePanel({
     origin: failure.origin ?? "",
     host: failure.baseUrl ?? "",
   }
+  const remedyValues = {
+    origin: failure.origin ?? "",
+    host: failure.baseUrl ?? "",
+    loopback: failure.loopbackUrl ?? "",
+  }
+
+  const [nextStep, ...restRemedies] = failure.remedies
+
+  // The one button, chosen in the order the fixes actually apply: a concrete
+  // affordance the caller owns beats a generic retry, and a retry is only ever
+  // offered when the diagnosis says the same invitation can still be spent.
+  const canRetry = failure.retryable && onRetry !== undefined
+  const primary: { label: string; onAction: () => void | Promise<void>; icon: ReactNode } | null =
+    action
+      ? { label: action.label, onAction: action.onAction, icon: null }
+      : canRetry && onRetry
+        ? {
+            label: t("failure.retry"),
+            onAction: onRetry,
+            icon: <RefreshCwIcon className="size-3.5" aria-hidden="true" />,
+          }
+        : onStartOver
+          ? { label: t("failure.startOver"), onAction: onStartOver, icon: null }
+          : null
+
+  // Anything the primary button did not already cover.
+  const hasMore =
+    restRemedies.length > 0 || (canRetry && !!onStartOver) || (!!action && (canRetry || !!onStartOver))
 
   return (
     <div
@@ -88,16 +121,10 @@ export function PairFailurePanel({
       data-testid="pair-error"
       data-kind={failure.kind}
       data-stage={failure.stage}
-      className={cn(
-        "rounded-xl border border-destructive/35 bg-destructive/5 p-4 text-sm",
-        className
-      )}
+      className={cn("rounded-xl border border-destructive/35 bg-destructive/5 p-4 text-sm", className)}
     >
       <div className="flex items-start gap-2.5">
-        <AlertTriangleIcon
-          className="mt-0.5 size-4 shrink-0 text-destructive"
-          aria-hidden="true"
-        />
+        <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-destructive" data-testid="pair-error-title">
             {t(`failure.title.${failure.kind}`)}
@@ -108,108 +135,132 @@ export function PairFailurePanel({
         </div>
       </div>
 
+      {/* The single next thing to do. Promoted out of the numbered list because
+          a list of five instructions has no first item the eye can find. */}
+      {nextStep ? (
+        <p
+          className="rounded-control mt-3 flex items-start gap-2 bg-background/70 px-3 py-2 text-xs leading-relaxed"
+          data-testid="pair-error-next-step"
+        >
+          <ArrowRightIcon className="mt-px size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0">{t(`failure.remedy.${nextStep}`, remedyValues)}</span>
+        </p>
+      ) : null}
+
       {failure.invitationSpent ? (
         <p
-          className="mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400"
           data-testid="pair-invitation-spent"
         >
-          <KeyRoundIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          <KeyRoundIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
           {t("failure.invitationSpent")}
         </p>
       ) : null}
 
-      {failure.remedies.length > 0 ? (
-        <div className="mt-3">
-          <p className="text-xs font-medium">{t("failure.whatToDo")}</p>
-          <ol
-            className="mt-1.5 flex list-none flex-col gap-1.5 text-xs leading-relaxed text-muted-foreground"
-            data-testid="pair-error-remedies"
-          >
-            {failure.remedies.map((remedy, index) => (
-              <li key={remedy} className="flex gap-2">
-                <span
-                  aria-hidden="true"
-                  className="mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground"
-                >
-                  {index + 1}
-                </span>
-                <span className="min-w-0">
-                  {t(`failure.remedy.${remedy}`, {
-                    origin: failure.origin ?? "",
-                    host: failure.baseUrl ?? "",
-                    loopback: failure.loopbackUrl ?? "",
-                  })}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
-
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {action ? (
-          <Button type="button" size="sm" variant="outline" onClick={action.onAction}>
-            {action.label}
-          </Button>
-        ) : null}
-        {failure.retryable && onRetry ? (
+        {primary ? (
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            onClick={onRetry}
-            data-testid="pair-error-retry"
+            onClick={primary.onAction}
+            data-testid={
+              action
+                ? "pair-error-action"
+                : canRetry
+                  ? "pair-error-retry"
+                  : "pair-error-start-over"
+            }
           >
-            <RefreshCwIcon className="size-3.5" aria-hidden="true" />
-            {t("failure.retry")}
+            {primary.icon}
+            {primary.label}
           </Button>
         ) : null}
-        {onStartOver ? (
+        {hasMore ? (
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            onClick={onStartOver}
-            data-testid="pair-error-start-over"
-          >
-            {t("failure.startOver")}
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => void onCopy()}
-          data-testid="pair-error-copy"
-        >
-          {copied ? (
-            <CheckIcon className="size-3.5" aria-hidden="true" />
-          ) : (
-            <ClipboardCopyIcon className="size-3.5" aria-hidden="true" />
-          )}
-          {copied ? t("failure.diagnosticsCopied") : t("failure.copyDiagnostics")}
-        </Button>
-      </div>
-
-      <Collapsible open={detailOpen} onOpenChange={setDetailOpen} className="mt-2">
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
             variant="ghost"
-            size="xs"
-            className="text-muted-foreground"
-            data-testid="pair-error-detail-toggle"
+            onClick={() => setMoreOpen((open) => !open)}
+            aria-expanded={moreOpen}
+            aria-controls="pair-error-more"
+            data-testid="pair-error-more-toggle"
           >
             <ChevronDownIcon
-              className={cn("size-3.5 transition-transform", detailOpen && "rotate-180")}
+              className={cn("size-3.5 transition-transform", moreOpen && "rotate-180")}
               aria-hidden="true"
             />
-            {t("failure.technicalDetail")}
+            {t("failure.moreOptions")}
           </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
+        ) : null}
+      </div>
+
+      <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
+        <CollapsibleContent id="pair-error-more">
+          {restRemedies.length > 0 ? (
+            <div className="mt-3">
+              <p className="text-xs font-medium">{t("failure.whatToDo")}</p>
+              <ol
+                className="mt-1.5 flex list-none flex-col gap-1.5 text-xs leading-relaxed text-muted-foreground"
+                data-testid="pair-error-remedies"
+              >
+                {restRemedies.map((remedy, index) => (
+                  <li key={remedy} className="flex gap-2">
+                    <span
+                      aria-hidden="true"
+                      className="mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-foreground"
+                    >
+                      {index + 2}
+                    </span>
+                    <span className="min-w-0">{t(`failure.remedy.${remedy}`, remedyValues)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {/* Whichever of the two the primary button did not take. */}
+            {action && canRetry ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onRetry}
+                data-testid="pair-error-retry"
+              >
+                <RefreshCwIcon className="size-3.5" aria-hidden="true" />
+                {t("failure.retry")}
+              </Button>
+            ) : null}
+            {onStartOver && (canRetry || action) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onStartOver}
+                data-testid="pair-error-start-over"
+              >
+                {t("failure.startOver")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => void onCopy()}
+              data-testid="pair-error-copy"
+            >
+              {copied ? (
+                <CheckIcon className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ClipboardCopyIcon className="size-3.5" aria-hidden="true" />
+              )}
+              {copied ? t("failure.diagnosticsCopied") : t("failure.copyDiagnostics")}
+            </Button>
+          </div>
+
           <pre
-            className="mt-1.5 max-h-40 overflow-auto rounded-md border bg-background p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+            className="mt-2 max-h-40 overflow-auto rounded-md border bg-background p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
             data-testid="pair-error-detail"
           >
             {formatPairDiagnostics(failure)}
