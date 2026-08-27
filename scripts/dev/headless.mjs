@@ -24,6 +24,12 @@ const cliOptionsSchema = z
     action: z.enum(["serve", "pair", "token"]).default("serve"),
     allowRemoteTerminal: z.boolean().default(false),
     advertiseUrl: z.url("--advertise-url must be a valid URL").optional(),
+    browserListenerPort: z.coerce
+      .number({ error: "--browser-listener-port must be an integer between 1 and 65535" })
+      .int("--browser-listener-port must be an integer between 1 and 65535")
+      .min(1, "--browser-listener-port must be an integer between 1 and 65535")
+      .max(65_535, "--browser-listener-port must be an integer between 1 and 65535")
+      .optional(),
     check: z.boolean().default(false),
     dataDir: z.string().min(1, "--data-dir must not be empty").optional(),
     deviceName: z.string().trim().min(1, "--device-name must not be empty").optional(),
@@ -47,6 +53,7 @@ const cliOptionsSchema = z
       action,
       advertiseUrl,
       allowRemoteTerminal,
+      browserListenerPort,
       check,
       deviceName,
       dryRun,
@@ -57,6 +64,7 @@ const cliOptionsSchema = z
       action !== "token" ||
       (!advertiseUrl &&
         !allowRemoteTerminal &&
+        !browserListenerPort &&
         !check &&
         !deviceName &&
         !dryRun &&
@@ -66,9 +74,24 @@ const cliOptionsSchema = z
     { message: "token only accepts --data-dir" }
   )
   .refine(
-    ({ action, allowRemoteTerminal, check, dryRun, gateway, localDebug, recoverSecretStore }) =>
+    ({
+      action,
+      allowRemoteTerminal,
+      browserListenerPort,
+      check,
+      dryRun,
+      gateway,
+      localDebug,
+      recoverSecretStore,
+    }) =>
       action !== "pair" ||
-      (!allowRemoteTerminal && !check && !dryRun && !gateway && !localDebug && !recoverSecretStore),
+      (!allowRemoteTerminal &&
+        !browserListenerPort &&
+        !check &&
+        !dryRun &&
+        !gateway &&
+        !localDebug &&
+        !recoverSecretStore),
     {
       message:
         "pair accepts --data-dir, --device-name, --advertise-url, --port, --tenant-id, and --skip-build",
@@ -114,6 +137,10 @@ function createProgram() {
       "Bind to loopback and create a temporary Apifox/Postman environment with automatic authentication."
     )
     .option("--allow-remote-terminal", "Enable remote terminal tickets for granted devices.")
+    .option(
+      "--browser-listener-port <port>",
+      "Also bind the plaintext loopback listener a browser tab can reach without a certificate (27891 by default in dev:web-headless). Off unless passed."
+    )
     .option("--skip-build", "Reuse existing headless build artifacts.")
     .option(
       "--recover-secret-store",
@@ -234,6 +261,9 @@ function launchArgs(options) {
   if (options.localDebug) args.push("--bind-loopback")
   if (options.advertiseUrl) args.push("--advertise-url", options.advertiseUrl)
   if (options.allowRemoteTerminal) args.push("--allow-remote-terminal")
+  if (options.browserListenerPort) {
+    args.push("--browser-listener-port", String(options.browserListenerPort))
+  }
   return args
 }
 

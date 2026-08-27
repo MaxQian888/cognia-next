@@ -137,6 +137,23 @@ enum CliCommand {
         /// and automatic local-debug authentication.
         #[arg(long, default_value_t = false)]
         bind_loopback: bool,
+        /// Also bind the plaintext, **loopback-only** browser listener on this
+        /// port (27891 is the conventional one — `browser_access`).
+        ///
+        /// A browser cannot pin this Host's self-signed certificate, so the
+        /// HTTPS listener is unreachable from a tab without a manual
+        /// certificate interstitial. `http://127.0.0.1` needs no chain at all,
+        /// which makes it the one address a browser reaches unaided.
+        ///
+        /// Off unless passed. Deliberately a flag and not an environment
+        /// variable: the listener is hard-bound to loopback, so it is only
+        /// meaningful when the browser runs on this same machine — which a
+        /// containerised deployment never is.
+        ///
+        /// Requires `COGNIA_ALLOWED_WEB_ORIGINS`; a listener with an empty
+        /// allowlist refuses every browser request.
+        #[arg(long)]
+        browser_listener_port: Option<u16>,
     },
     /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
     /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
@@ -532,13 +549,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             advertise_url,
             allow_remote_terminal,
             bind_loopback,
+            browser_listener_port,
         } => {
             if allow_remote_terminal {
                 let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
                 settings.allow_remote_access = true;
                 app_lib::terminal_host_service::save_terminal_host_settings(&settings)?;
             }
-            run_serve(&store, &tls_material, port, advertise_url, bind_loopback).await
+            run_serve(
+                &store,
+                &tls_material,
+                port,
+                advertise_url,
+                bind_loopback,
+                browser_listener_port,
+            )
+            .await
         }
         CliCommand::IssueServiceToken => {
             let signing_secret = secret::load_or_generate()?;
@@ -964,6 +990,7 @@ async fn run_serve(
     port: u16,
     advertise_url: Option<String>,
     bind_loopback: bool,
+    browser_listener_port: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Config validation BEFORE anything is installed: a typo'd Lark base
     // would otherwise only surface as a 503 to a user inside a Feishu client.
@@ -971,6 +998,26 @@ async fn run_serve(
         &mut std::io::stderr(),
         &lark_entry::lark_env_issues(|var| std::env::var(var).ok()),
     )?;
+
+    // Same rule for the browser plane: resolve its origin policy before the
+    // first listener binds, so a missing allowlist is a usage error at the
+    // command line rather than a half-started server.
+    let browser_plane = match browser_listener_port {
+        Some(browser_port) => {
+            let policy = app_lib::companion_api::web_origin::WebOriginPolicy::from_env()
+                .allowing_private_network();
+            if !policy.allows_any_origin() {
+                return Err(
+                    "--browser-listener-port needs at least one allowed browser \
+                     origin; set COGNIA_ALLOWED_WEB_ORIGINS (for example \
+                     http://localhost:3000,http://127.0.0.1:3000)"
+                        .into(),
+                );
+            }
+            Some((browser_port, policy))
+        }
+        None => None,
+    };
 
     // Install the headless AppStore — the DEGRADED data plane, serving only
     // while no brain is connected (ADR-0059 D3/R4).
@@ -1237,6 +1284,37 @@ async fn run_serve(
         tls_material.fingerprint_sha256
     );
 
+    // Opt-in plaintext loopback plane for browsers (`browser_access`). The
+    // desktop reads its allowlist from a saved config because a GUI-launched
+    // process inherits no shell environment; a headless deployment is
+    // configured by environment, so the env policy is the whole policy here.
+    //
+    // An empty allowlist is refused rather than bound: every request a browser
+    // makes carries an `Origin`, so such a listener would answer `403
+    // web_origin_forbidden` to all of them while looking, from the outside,
+    // exactly like a working port.
+    let browser_handle = match browser_plane {
+        Some((browser_port, policy)) => {
+            // A bind failure must not take the HTTPS listener down with it:
+            // the port may simply be taken, and every already-paired client
+            // depends on the server that just came up.
+            match server::spawn_browser_listener(browser_port, Arc::clone(&shared), policy).await {
+                Ok(handle) => {
+                    println!(
+                        "[cognia-server] browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
+                        handle.bound_port
+                    );
+                    Some(handle)
+                }
+                Err(error) => {
+                    eprintln!("[cognia-server] browser listener could not start: {error}");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     // Brain supervisor (R8): spawn `node $COGNIA_BRAIN_ENTRY serve` against
     // the bound port and keep it alive. Without an entry the server still
     // runs — the degraded store serves reads and /healthz reports
@@ -1295,6 +1373,22 @@ async fn run_serve(
     if let Some(supervisor) = app_lib::jobs::supervisor() {
         if let Err(error) = supervisor.shutdown().await {
             log::warn!("jobs: headless shutdown failed: {error}");
+        }
+    }
+    if let Some(browser_handle) = browser_handle {
+        let mut browser_terminated = browser_handle.terminated.clone();
+        let _ = browser_handle.shutdown.send(());
+        let browser_drained =
+            tokio::time::timeout(std::time::Duration::from_secs(30), async move {
+                while !*browser_terminated.borrow() {
+                    if browser_terminated.changed().await.is_err() {
+                        break;
+                    }
+                }
+            })
+            .await;
+        if browser_drained.is_err() {
+            log::warn!("companion browser listener drain exceeded 30 seconds; forcing shutdown");
         }
     }
     let mut terminated = handle.terminated.clone();
@@ -1428,6 +1522,32 @@ mod tests {
             cli.command,
             CliCommand::Serve {
                 bind_loopback: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn serve_leaves_the_browser_listener_off_unless_a_port_is_named() {
+        let cli = Cli::try_parse_from(["cognia-server", "serve"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Serve {
+                browser_listener_port: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn serve_binds_the_browser_listener_on_the_named_port() {
+        let cli =
+            Cli::try_parse_from(["cognia-server", "serve", "--browser-listener-port", "27891"])
+                .unwrap();
+        assert!(matches!(
+            cli.command,
+            CliCommand::Serve {
+                browser_listener_port: Some(27891),
                 ..
             }
         ));

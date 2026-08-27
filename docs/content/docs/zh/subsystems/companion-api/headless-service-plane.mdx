@@ -54,6 +54,62 @@ curl --insecure \
 
 如需在图形化客户端中调试，请使用 [Apifox 本地调试](./apifox-debugging) 中的导入、证书和环境配置。
 
+## 用浏览器驱动它
+
+`pnpm dev:web-headless` 就是同一个 headless server，旁边再起一个 Next 开发服务器——当你要改的是界面、
+而真正要跑这一轮的是原生宿主时，用的就是这个拓扑。它等于 `:3000` 上的 `pnpm dev` 加 `:27890` 上的
+`pnpm dev:headless`，由同一个进程组统一管理。
+
+```bash
+pnpm dev:web-headless
+```
+
+有两件事很容易在上面耗掉一个下午。
+
+**页面和 API 不同源。** `http://localhost:3000` 访问 `https://127.0.0.1:27890` 属于跨源，而服务端的
+origin 策略是精确匹配、默认为空——任何不在清单里的 origin 都会拿到 `403 web_origin_forbidden`，
+**且不带 CORS 头**，浏览器看到的结果和"端口没开"完全一样。启动器已经替你把
+`COGNIA_ALLOWED_WEB_ORIGINS` 设成了 `http://localhost:3000,http://127.0.0.1:3000`，所以只有你自己
+单独启动 `cognia-server` 时才会踩到：
+
+```bash
+COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
+COGNIA_ALLOW_PRIVATE_NETWORK=true \
+cargo run --bin cognia-server -- serve --port 27890
+```
+
+**浏览器根本够不到 HTTPS 监听器。** `tls.rs` 用 rcgen 生成证书、没有 CA，在 `127.0.0.1` 上和在局域网
+地址上一样。移动端没问题——它在原生层 pin SPKI 哈希，绕开任何信任库；但浏览器只按系统根证书校验，
+且没有任何 JavaScript 逃生口。所以 `https://127.0.0.1:27890` 不是浏览器的门。
+
+浏览器的门是 `browser_access.rs` 里那个**明文、仅回环**的监听器。按 Secure Contexts，
+`http://127.0.0.1` 属于 "potentially trustworthy"，既不需要证书链，也不受混合内容拦截。
+`pnpm dev:web-headless` 会替你在 `:27891` 上打开它；自己启动服务时，显式指定端口：
+
+```bash
+COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
+cargo run --bin cognia-server -- serve --port 27890 --browser-listener-port 27891
+```
+
+这个开关硬绑在 `127.0.0.1` 上——放弃 TLS 的全部理由就是字节出不了本机——并且在没有 allowlist 时
+拒绝启动：空清单的监听器会对浏览器发出的每一个请求回 `403 web_origin_forbidden`，而从外面看它和
+一个正常工作的端口一模一样。它同时为这些 origin 打开 Private Network Access——Chrome 在 `:3000`
+上的页面能访问回环之前，会先发这个预检。
+
+然后**对着这个平面**签发邀请，而不是 HTTPS 那个：
+
+```bash
+pnpm --silent dev:headless pair --device-name browser --skip-build \
+  --advertise-url http://127.0.0.1:27891
+```
+
+不带 `--advertise-url` 时载荷里写的是 `https://127.0.0.1:27890`，配对页会（正确地）拒绝它自己给出的
+建议。配对页上可复制的"开发环境"命令里已经带上了这个参数。
+
+把 `cgnp3|…` 粘贴进 `http://localhost:3000/pair`。这里失败时会给出分类结论，而不是一句
+"Failed to fetch"：明文的非回环地址会在邀请被消耗之前就被拒绝，证书不受信任会显示**此浏览器无法验证
+Host 的证书**，而 allowlist 缺条目会直接点名要加的那个 origin。
+
 ## 内部路由
 
 | 路由 | 用途 |

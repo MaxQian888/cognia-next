@@ -51,6 +51,32 @@ impl WebOriginPolicy {
         policy
     }
 
+    /// Turn on Private Network Access for this policy.
+    ///
+    /// A browser classifies `127.0.0.1` as a *private* destination, so a page
+    /// on `http://localhost:3000` sends a PNA preflight before it may reach the
+    /// plaintext loopback listener. [`Self::from_env_and_config`] sets this for
+    /// the desktop whenever the saved config turns that listener on. The
+    /// headless binary has no such config — its listener is opted into by
+    /// `--browser-listener-port` — so it carries the same opt-in explicitly.
+    /// Without it every cross-origin request to the browser plane dies in its
+    /// preflight with `private_network_access_forbidden`.
+    pub fn allowing_private_network(mut self) -> Self {
+        self.allow_private_network = true;
+        self
+    }
+
+    /// Whether any browser origin is allowed at all.
+    ///
+    /// A listener bound with an empty allowlist answers `403
+    /// web_origin_forbidden` to every request carrying an `Origin` header —
+    /// which is every request a browser makes. Callers that bind the browser
+    /// plane check this first so the misconfiguration surfaces at startup
+    /// instead of as an unexplained failure inside a tab.
+    pub fn allows_any_origin(&self) -> bool {
+        !self.allowed_origins.is_empty()
+    }
+
     fn from_values(origins: Option<&str>, allow_private_network: Option<&str>) -> Self {
         let allowed_origins = origins
             .into_iter()
@@ -361,6 +387,32 @@ mod tests {
             OriginDecision::AllowedCrossOrigin("https://web.example".into())
         );
         assert!(policy.allow_private_network);
+    }
+
+    #[test]
+    fn the_headless_browser_listener_opt_in_carries_pna_without_a_saved_config() {
+        // `cognia-server --browser-listener-port` has no BrowserAccessConfig to
+        // read, so it must reach the same policy the desktop derives from one:
+        // env origins plus Private Network Access.
+        let policy = WebOriginPolicy::from_values(Some("http://localhost:3000"), None)
+            .allowing_private_network();
+        assert!(policy.allow_private_network);
+        assert_eq!(
+            policy.evaluate(&headers(Some("http://localhost:3000"), "127.0.0.1:27891")),
+            OriginDecision::AllowedCrossOrigin("http://localhost:3000".into())
+        );
+    }
+
+    #[test]
+    fn an_empty_allowlist_is_visible_to_the_caller_that_would_bind_the_listener() {
+        // The listener would still bind and still answer — with 403
+        // web_origin_forbidden to every request a browser makes. Callers check
+        // this so the misconfiguration surfaces at startup, not in a tab.
+        assert!(!WebOriginPolicy::from_values(None, None).allows_any_origin());
+        assert!(!WebOriginPolicy::from_values(Some("   "), None).allows_any_origin());
+        assert!(
+            WebOriginPolicy::from_values(Some("http://localhost:3000"), None).allows_any_origin()
+        );
     }
 
     #[test]

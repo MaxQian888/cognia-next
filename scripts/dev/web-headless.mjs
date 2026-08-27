@@ -5,10 +5,27 @@ import { spawn } from "node:child_process"
 import { findListenerPids, freePort } from "./free-port.mjs"
 
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
-const requiredPorts = [3000, 27_890]
+
+/**
+ * Plaintext loopback listener for the browser (Rust
+ * `browser_access::DEFAULT_BROWSER_PORT`, mirrored in
+ * `lib/connectivity/loopback-discovery.ts`).
+ *
+ * `pnpm dev:headless` alone leaves it off, matching the production default.
+ * This script exists precisely to put a browser tab and a headless Host on one
+ * machine, and the tab cannot reach the HTTPS listener at all — it can neither
+ * pin nor validate the self-signed certificate. So the one topology this script
+ * is for is also the one that needs this port.
+ */
+const BROWSER_LISTENER_PORT = 27_891
+const requiredPorts = [3000, 27_890, BROWSER_LISTENER_PORT]
 const services = [
   { name: "web", command: pnpmCommand, args: ["dev"] },
-  { name: "headless", command: pnpmCommand, args: ["dev:headless"] },
+  {
+    name: "headless",
+    command: pnpmCommand,
+    args: ["dev:headless", "--browser-listener-port", String(BROWSER_LISTENER_PORT)],
+  },
 ]
 
 async function findOccupiedPorts() {

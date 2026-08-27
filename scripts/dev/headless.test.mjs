@@ -275,6 +275,64 @@ test("dry-run prints a redacted launch plan without writing development state", 
   await assert.rejects(access(dataDir), { code: "ENOENT" })
 })
 
+test("the browser listener is off unless a port is named, and forwarded when it is", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-"))
+  const dataDir = path.join(root, "data")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const env = { COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  // Off by default: `dev:headless` alone starts no browser, so it should not
+  // open a plaintext port on behalf of one.
+  const off = await run(["--dry-run", "--data-dir", dataDir, "--port", "28900"], env)
+  assert.equal(off.code, 0, off.stderr)
+  assert.deepEqual(JSON.parse(off.stdout).launch.args, ["serve", "--port", "28900"])
+
+  const on = await run(
+    ["--dry-run", "--data-dir", dataDir, "--port", "28900", "--browser-listener-port", "27891"],
+    env
+  )
+  assert.equal(on.code, 0, on.stderr)
+  const plan = JSON.parse(on.stdout)
+  assert.deepEqual(plan.launch.args, [
+    "serve",
+    "--port",
+    "28900",
+    "--browser-listener-port",
+    "27891",
+  ])
+  // The listener refuses to bind without an allowlist, so the launch plan must
+  // already carry the development origins.
+  assert.equal(
+    plan.launch.environment.COGNIA_ALLOWED_WEB_ORIGINS,
+    "http://localhost:3000,http://127.0.0.1:3000"
+  )
+})
+
+test("the browser listener port is rejected for actions that never bind one", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-usage-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const env = { COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  for (const [action, expected] of [
+    ["pair", /pair accepts/],
+    ["token", /token only accepts --data-dir/],
+  ]) {
+    const result = await run(
+      [action, "--data-dir", path.join(root, "data"), "--browser-listener-port", "27891"],
+      env
+    )
+    assert.equal(result.code, 2, result.stderr)
+    assert.match(result.stderr, expected)
+  }
+
+  const invalid = await run(
+    ["--dry-run", "--data-dir", path.join(root, "data"), "--browser-listener-port", "0"],
+    env
+  )
+  assert.equal(invalid.code, 2, invalid.stderr)
+  assert.match(invalid.stderr, /--browser-listener-port must be an integer between 1 and 65535/)
+})
+
 test("check mode accepts a complete renderer-free artifact set", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-check-"))
   t.after(() => rm(root, { recursive: true, force: true }))

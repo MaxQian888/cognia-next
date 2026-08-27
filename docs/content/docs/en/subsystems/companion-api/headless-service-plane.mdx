@@ -58,6 +58,69 @@ running server must use the same `--data-dir`, or they will use different signin
 For graphical API debugging, follow [Local debugging with Apifox](./apifox-debugging) for import,
 certificate, and environment setup.
 
+## Driving it from a browser
+
+`pnpm dev:web-headless` is the same headless server with a Next dev server beside it — the
+topology you want when the thing you are changing is the UI but the thing that has to run the
+turn is the native host. It is `pnpm dev` on `:3000` plus `pnpm dev:headless` on `:27890`,
+supervised together.
+
+```bash
+pnpm dev:web-headless
+```
+
+Two facts about it are easy to lose an afternoon to.
+
+**The page and the API are different origins.** `http://localhost:3000` talking to
+`https://127.0.0.1:27890` is cross-origin, and the server's origin policy is exact-match with an
+empty default — every unlisted origin gets `403 web_origin_forbidden` **without CORS headers**,
+which a browser reports identically to a closed port. The launcher already sets
+`COGNIA_ALLOWED_WEB_ORIGINS` to `http://localhost:3000,http://127.0.0.1:3000` for you, so this
+only bites when you start `cognia-server` yourself:
+
+```bash
+COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
+COGNIA_ALLOW_PRIVATE_NETWORK=true \
+cargo run --bin cognia-server -- serve --port 27890
+```
+
+**A browser cannot reach the HTTPS listener at all.** `tls.rs` mints the certificate with rcgen
+and no CA, on `127.0.0.1` exactly as on a LAN address. A mobile client is fine — it pins the SPKI
+hash at the native layer, outside any trust store — but a browser validates against the system
+roots and has no JavaScript escape hatch. So `https://127.0.0.1:27890` is not the browser's door.
+
+The browser's door is `browser_access.rs`'s **plaintext, loopback-only** listener. `http://127.0.0.1`
+is "potentially trustworthy" per Secure Contexts, so it needs no certificate chain and is exempt
+from mixed-content blocking. `pnpm dev:web-headless` opens it on `:27891` for you; starting the
+server yourself, name the port:
+
+```bash
+COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
+cargo run --bin cognia-server -- serve --port 27890 --browser-listener-port 27891
+```
+
+The flag is hard-bound to `127.0.0.1` — the whole justification for dropping TLS is that the bytes
+cannot leave the machine — and it refuses to start without an allowlist, because a listener with an
+empty one answers `403 web_origin_forbidden` to every request a browser makes while looking, from
+the outside, exactly like a working port. It also turns on Private Network Access for those
+origins, which Chrome preflights before a page on `:3000` may reach loopback at all.
+
+Then issue the invitation **against that plane**, not the HTTPS one:
+
+```bash
+pnpm --silent dev:headless pair --device-name browser --skip-build \
+  --advertise-url http://127.0.0.1:27891
+```
+
+Without `--advertise-url` the payload carries `https://127.0.0.1:27890`, and the pair screen will
+correctly refuse its own suggestion. The screen's copyable Development command already includes the
+flag.
+
+Paste the `cgnp3|…` string into `http://localhost:3000/pair`. A failure here is classified rather
+than reported as "Failed to fetch": a plaintext non-loopback address is refused before the
+invitation is spent, an untrusted certificate reads as **This browser can't verify the Host's
+certificate**, and a missing allowlist entry names the exact origin to add.
+
 ## Internal routes
 
 | Route | Purpose |

@@ -169,7 +169,35 @@ test("dev:web-headless starts both services and tears down the peer on exit", as
     killPeerOnExit: true,
     services: [
       { name: "web", command: "pnpm", args: ["dev"] },
-      { name: "headless", command: "pnpm", args: ["dev:headless"] },
+      {
+        name: "headless",
+        command: "pnpm",
+        args: ["dev:headless", "--browser-listener-port", "27891"],
+      },
     ],
   })
+})
+
+test("dev:web-headless opens the one port a browser tab can reach the Host on", async () => {
+  // A tab can neither pin nor validate the Host's self-signed certificate, so
+  // the HTTPS listener on 27890 is unreachable from the web client this script
+  // starts. Without the plaintext loopback listener the two halves boot and
+  // never meet.
+  const result = await run(["--dry-run"])
+  assert.equal(result.code, 0, result.stderr)
+  const headless = JSON.parse(result.stdout).services.find(({ name }) => name === "headless")
+  assert.deepEqual(headless.args.slice(1), ["--browser-listener-port", "27891"])
+
+  // The port must agree with the Rust default and the browser-side probe, or
+  // discovery looks in a place nothing is listening.
+  const rust = await readFile(
+    new URL("../../src-tauri/src/companion_api/browser_access.rs", import.meta.url),
+    "utf8"
+  )
+  assert.match(rust, /pub const DEFAULT_BROWSER_PORT: u16 = 27891;/)
+  const probe = await readFile(
+    new URL("../../lib/connectivity/loopback-discovery.ts", import.meta.url),
+    "utf8"
+  )
+  assert.match(probe, /export const DEFAULT_BROWSER_ACCESS_PORT = 27891/)
 })
