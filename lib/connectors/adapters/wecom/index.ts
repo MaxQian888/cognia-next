@@ -450,6 +450,15 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     healthState = "running"
     healthReason = undefined
     lastActivityAt = Date.now()
+    // Reset the backoff HERE, not in the caller. A successful subscribe is
+    // exactly this line, but the reset used to sit on the far side of the
+    // `await` below (the credential fingerprint + live-connection
+    // registration). Inside that window the adapter reported `running` while
+    // still carrying the previous attempt count, so a socket dropping there
+    // was counted as a SECOND consecutive failure and backed off as if the
+    // reconnect it had just completed had failed.
+    attempts = 0
+    pingMisses = 0
     // Claim this bot's single connection slot so the settings form's "test
     // connection" answers from HERE instead of opening a second socket that
     // would fight this one. Re-run on every reconnect; last writer wins,
@@ -490,10 +499,10 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       await connectorsWsClose(id).catch(() => undefined)
       throw err
     }
-    // Reset the backoff only AFTER a successful subscribe — resetting on
-    // socket-open would hammer bad credentials at base backoff forever.
-    attempts = 0
-    pingMisses = 0
+    // `attempts` / `pingMisses` are reset inside `subscribe()`, at the instant
+    // health flips to `running` — see the note there. Resetting on socket-open
+    // instead would hammer bad credentials at base backoff forever, which is
+    // why neither lives in `connectOnce`'s prologue.
     pingTimer = setInterval(() => {
       void heartbeat()
     }, pingIntervalMs)

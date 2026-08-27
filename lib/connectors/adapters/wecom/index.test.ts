@@ -25,6 +25,23 @@ jest.mock("@/lib/connectors/bus", () => ({
   getBus: () => ({ dispatchConnectorCallback: mockDispatch }),
 }))
 
+// ── observe the live-connection registration ───────────────────────────────
+// It is the one `await` that used to sit between `healthState = "running"` and
+// the backoff reset, so it is the only place a test can act from inside that
+// window. The real implementation still runs.
+const onLiveRegister = { current: null as null | (() => void) }
+jest.mock("./live-connection", () => ({
+  ...jest.requireActual("./live-connection"),
+  registerWeComLiveConnection: (...a: unknown[]) => {
+    onLiveRegister.current?.()
+    return (
+      jest.requireActual("./live-connection") as typeof import("./live-connection")
+    ).registerWeComLiveConnection(
+      a[0] as Parameters<typeof import("./live-connection").registerWeComLiveConnection>[0]
+    )
+  },
+}))
+
 // ── mock the A2UI card builder (its binding writes hit Dexie) ──────────────
 jest.mock("./a2ui-mapper", () => ({
   ...jest.requireActual("./a2ui-mapper"),
@@ -49,7 +66,27 @@ function listenBus() {
   return { impl, trigger }
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0))
+/**
+ * Set by the heartbeat block, which is the only place here that fakes the clock.
+ */
+let fakeClock = false
+
+/**
+ * Yield long enough for the adapter's promise chain AND any due timer.
+ *
+ * On the real clock this must stay a `setTimeout` macrotask: several tests poll
+ * `tick()` while waiting on a `delay(_backoffBaseMs)` reconnect, and only a
+ * timer callback is guaranteed to run after the timer phase has advanced.
+ * Swapping it for `setImmediate` — which runs in the check phase — let 200
+ * ticks spin without the 1 ms backoff ever firing, and failed
+ * "resets the backoff counter after a successful subscribe" in one contended
+ * run out of two.
+ *
+ * Under fake timers there is no real clock to wait on, so advance the fake one
+ * by nothing and let its microtask flush do the same job.
+ */
+const tick = (): Promise<unknown> =>
+  fakeClock ? jest.advanceTimersByTimeAsync(0) : new Promise((r) => setTimeout(r, 0))
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Typed emit mock so `emit.mock.calls[0][0]` narrows to the event. */
@@ -314,6 +351,34 @@ describe("createWeComAdapter — lifecycle", () => {
     expect(attempts.slice(0, 2)).toEqual([1, 1])
   })
 
+  it("has already reset the backoff by the time health reads running", async () => {
+    // The reset used to live in `connectOnce`, one `await` past the line that
+    // flips health — so a drop landing in between counted as a SECOND
+    // consecutive failure and backed off accordingly. Dropping the socket from
+    // inside `registerWeComLiveConnection` is exactly that window; the attempt
+    // it reports must still be 1.
+    const attempts: number[] = []
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit, undefined, {
+      adapter: { _onReconnectAttempt: (n) => attempts.push(n) },
+    })
+    const ack = makeAcker(bus, (f) => (f.cmd === "aibot_subscribe" ? {} : null))
+
+    // First drop, reconnect, and close again from inside the window.
+    onLiveRegister.current = () => {
+      onLiveRegister.current = null
+      expect(adapter.health().state).toBe("running")
+      bus.trigger("connectors://ws/h1/close", "")
+    }
+    bus.trigger("connectors://ws/h1/close", "")
+    for (let i = 0; i < 200 && attempts.length < 2; i++) {
+      await tick()
+      ack()
+    }
+    await adapter.stop()
+    expect(attempts.slice(0, 2)).toEqual([1, 1])
+  })
+
   it("aborting ctx.signal stops the adapter and closes the handle", async () => {
     const controller = new AbortController()
     const emit = makeEmit()
@@ -327,17 +392,37 @@ describe("createWeComAdapter — lifecycle", () => {
 })
 
 describe("createWeComAdapter — heartbeat", () => {
+  // The only two assertions in this file that are about a WALL-CLOCK window:
+  // "the ack arrived inside `_pingTimeoutMs`" and "two pings expired in a row".
+  // On real timers that makes them a bet on the scheduler — under a loaded
+  // 16-worker run a `setTimeout(5)` lands well past 30 ms, the adapter
+  // correctly declares the socket half-dead, and a test asserting "no close
+  // happened" goes red on code that did exactly the right thing. Faking the
+  // clock here means the window can only be crossed when this test crosses it.
+  beforeEach(() => {
+    jest.useFakeTimers()
+    fakeClock = true
+  })
+  afterEach(() => {
+    fakeClock = false
+    jest.useRealTimers()
+  })
+
   it("stays running while pings are acked", async () => {
     const emit = makeEmit()
     const { adapter, bus } = await startSubscribed(emit, undefined, {
       adapter: { _pingIntervalMs: 10, _pingTimeoutMs: 30 },
     })
     const ack = makeAcker(bus)
-    for (let i = 0; i < 12; i++) {
-      await sleep(5)
+    // Six intervals, each acked well inside its own timeout. The ack has to do
+    // real work for this to pass: drop it and the third interval is a second
+    // consecutive miss, which closes the socket.
+    for (let i = 0; i < 6; i++) {
+      await jest.advanceTimersByTimeAsync(10)
       ack()
+      await tick()
     }
-    expect(sentFrames().some((f) => f.cmd === "ping")).toBe(true)
+    expect(sentFrames().filter((f) => f.cmd === "ping").length).toBeGreaterThanOrEqual(6)
     expect(mockWsClose).not.toHaveBeenCalled()
     expect(adapter.health().state).toBe("running")
     await adapter.stop()
@@ -348,12 +433,13 @@ describe("createWeComAdapter — heartbeat", () => {
     const { adapter } = await startSubscribed(emit, undefined, {
       adapter: { _pingIntervalMs: 15, _pingTimeoutMs: 5 },
     })
-    // Never ack pings → 2 misses → degrade + close + reconnect.
-    for (let i = 0; i < 200 && !mockWsClose.mock.calls.length; i++) await sleep(5)
+    // Never ack pings → each expires 5 ms after it is sent → 2 misses in a row
+    // degrade, close and reconnect. One advance replaces a second of polling.
+    await jest.advanceTimersByTimeAsync(100)
     expect(mockWsClose).toHaveBeenCalledWith("h1")
     expect(adapter.health().reason).toBe("heartbeat lost")
     // The reconnect loop kicked in (a fresh socket dial happened).
-    for (let i = 0; i < 100 && mockWsOpen.mock.calls.length < 2; i++) await sleep(5)
+    await jest.advanceTimersByTimeAsync(100)
     expect(mockWsOpen.mock.calls.length).toBeGreaterThan(1)
     await adapter.stop()
   })
