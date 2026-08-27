@@ -22,7 +22,7 @@ import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import type { ContextResource } from "@/types/context-workbench"
 import type { Plugin, PluginManifest } from "@/types/plugin"
-import { PANEL_FULL_ID, PLUGIN_ID } from "./ids"
+import { PANEL_ACTIVITY, PANEL_FULL_ID, PLUGIN_ID } from "./ids"
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/stores/plugin-runtime", () => ({ usePluginStore: { getState: jest.fn() } }))
@@ -133,6 +133,11 @@ describe("sre-agent in a browser tab", () => {
     expect(resolved.map((panel) => panel.id)).toContain(PANEL_FULL_ID)
 
     const panel = resolved.find((entry) => entry.id === PANEL_FULL_ID)
-    expect(panel).toMatchObject({ activity: "inspect", pluginId: PLUGIN_ID })
+    expect(panel).toMatchObject({ activity: PANEL_ACTIVITY, pluginId: PLUGIN_ID })
+
+    // Its own rail button, not a seventh tab inside `inspect`: the rail groups
+    // by activity, so sharing one would bury the panel behind an overflow.
+    expect(contextPanelRegistry.listActivities()).toContain(PANEL_ACTIVITY)
+    expect(resolved.filter((entry) => entry.activity === PANEL_ACTIVITY)).toHaveLength(1)
   })
 })

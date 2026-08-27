@@ -1,7 +1,7 @@
 import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
 import manifestJson from "../plugin.json"
 import { I18N_MESSAGES } from "./i18n"
-import { PANEL_ID, PLUGIN_ID } from "./ids"
+import { PANEL_ACTIVITY, PANEL_ID, PLUGIN_ID } from "./ids"
 import { createSreTools } from "./tools"
 import { createSreRuntime, type SrePluginContext } from "./runtime"
 import { clearSrePanelRuntime, setSrePanelRuntime } from "./panel-runtime"
@@ -58,15 +58,14 @@ const definition: PluginDefinition = {
     try {
       disposePanel = ctx.contextPanels?.register({
         id: PANEL_ID,
-        activity: "inspect",
+        activity: PANEL_ACTIVITY,
         label: "SRE incidents",
         labelKey: `plugin.${PLUGIN_ID}.panel.title`,
         resourceKinds: ["session"],
         icon: "Radar",
-        // After the built-in session inspect panels (metadata 50, memory 55,
-        // logs 60) — an investigation is something you reach for, not the
-        // first thing the group should offer.
-        order: 65,
+        // Sole panel in its own activity, so this only orders it against a
+        // future sibling — it does not affect where the rail button sits.
+        order: 10,
         preferredMode: "narrow",
         retention: "stateful",
         renderer: IncidentPanel,

@@ -154,6 +154,34 @@ describe("getWorkbenchRailCatalogWithPlugins", () => {
     expect(aiEntries).toHaveLength(1)
   })
 
+  it("carries the contributing panel's label so the customizer has something to show", () => {
+    contextPanelRegistry.register({
+      id: "test-plugin:custom-panel",
+      activity: "custom-activity",
+      labelKey: "panel.title",
+      label: "Custom panel",
+      appliesTo: () => true,
+      renderer: () => null,
+      pluginId: "test-plugin",
+    })
+
+    const entry = getWorkbenchRailCatalogWithPlugins().find((i) => i.id === "custom-activity")
+    // Without these the customizer renders the raw
+    // `contextWorkbench.activities.custom-activity` key: no such message
+    // exists, and none can, because the id comes from a plugin.
+    expect(entry).toMatchObject({
+      label: "Custom panel",
+      labelKey: "panel.title",
+      pluginId: "test-plugin",
+    })
+  })
+
+  it("leaves canonical activities without a literal label, so they stay translated", () => {
+    const entry = getWorkbenchRailCatalogWithPlugins().find((i) => i.id === "inspect")
+    expect(entry?.label).toBeUndefined()
+    expect(entry?.pluginId).toBeUndefined()
+  })
+
   it("removes plugin activities when the plugin is unregistered", () => {
     contextPanelRegistry.register({
       id: "test-plugin:custom-panel",

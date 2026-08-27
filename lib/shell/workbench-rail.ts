@@ -56,9 +56,27 @@ export const WORKBENCH_ACTIVITY_ICONS: Record<CanonicalContextActivity, LucideIc
 
 /** A catalog entry with its resolved icon. */
 export interface WorkbenchRailCatalogItem {
-  /** The activity id — also the i18n key leaf under `contextWorkbench.activities`. */
+  /**
+   * The activity id. For a canonical activity this is also the i18n key leaf
+   * under `contextWorkbench.activities`; a plugin-contributed one has no such
+   * key, which is what the label fields below exist for.
+   */
   id: ContextActivity
   Icon: LucideIcon
+  /**
+   * Literal label for a plugin-contributed activity, taken from the first
+   * panel registered into it. Absent for canonical activities, which the
+   * customizer translates from their id.
+   *
+   * Without this the customizer rendered `contextWorkbench.activities.<id>`
+   * verbatim for every plugin activity — `getWorkbenchRailCatalogWithPlugins`
+   * has always returned ids that key cannot resolve.
+   */
+  label?: string
+  /** The contributing panel's own translation key, preferred over `label`. */
+  labelKey?: string
+  /** Set for plugin-contributed activities; namespaces `labelKey`. */
+  pluginId?: string
 }
 
 /**
@@ -97,10 +115,22 @@ export function getWorkbenchRailCatalogWithPlugins(): WorkbenchRailCatalogItem[]
   const canonical = getWorkbenchRailCatalog()
   const canonicalIds = new Set(canonical.map((item) => item.id))
 
+  // Carry the contributing panel's label with the activity: the customizer has
+  // no panel in front to read one from, and an activity id is not a label.
+  const panels = contextPanelRegistry.listPanels()
   const pluginActivities = contextPanelRegistry
     .listActivities()
     .filter((activity) => !canonicalIds.has(activity))
-    .map((activity) => ({ id: activity, Icon: PlugIcon }))
+    .map((activity) => {
+      const panel = panels.find((entry) => entry.activity === activity)
+      return {
+        id: activity,
+        Icon: PlugIcon,
+        label: panel?.label,
+        labelKey: panel?.labelKey,
+        pluginId: panel?.pluginId,
+      }
+    })
 
   return [...canonical, ...pluginActivities]
 }

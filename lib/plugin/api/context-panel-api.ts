@@ -15,7 +15,7 @@ import {
 } from "@/lib/context-workbench/active-context"
 import { CONTEXT_RESOURCE_READ_PERMISSIONS } from "@/types/context-workbench"
 import type {
-  CanonicalContextActivity,
+  ContextActivity,
   ContextCapability,
   ContextPanelDefinition,
   ContextPanelMode,
@@ -29,7 +29,21 @@ type ContextResourceKind = ContextResource["kind"]
 
 export interface PluginContextPanelRegistration {
   id: string
-  activity: CanonicalContextActivity
+  /**
+   * Rail group this panel joins.
+   *
+   * A canonical activity shares a rail button with the built-in panels already
+   * in it — six of them under `inspect`, where a seventh is a tab behind a `⋯`
+   * overflow rather than something anyone finds. A non-canonical id gets the
+   * plugin its OWN rail button instead: the registry, the rail sort order and
+   * the customizer catalog all already handle unknown activities (the rail
+   * draws the active panel's own icon and label, and unknown ids sort after
+   * the canonical ones), so nothing here had to grow a special case.
+   *
+   * Prefer a canonical activity when the panel genuinely belongs beside the
+   * built-ins; reach for a custom one when it is a destination of its own.
+   */
+  activity: ContextActivity
   label: string
   labelKey: string
   resourceKinds: ContextResourceKind[]
