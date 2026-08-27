@@ -1031,6 +1031,17 @@ describe("useChatStore", () => {
       expect(result.current.status).toBe("streaming")
     })
 
+    it("upserts persisted messages by id without replacing unrelated session messages", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveSession("A"))
+      act(() => result.current.setSessionMessages("A", [msg("old", "keep"), msg("voice", "stale")]))
+
+      act(() => result.current.upsertSessionMessages("A", [msg("voice", "final"), msg("new")]))
+
+      expect(result.current.messages.map((message) => message.id)).toEqual(["old", "voice", "new"])
+      expect(result.current.messages[1].parts).toEqual([{ type: "text", text: "final" }])
+    })
+
     it("session-scoped writes to the active session also update the projection", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => result.current.setActiveSession("A"))

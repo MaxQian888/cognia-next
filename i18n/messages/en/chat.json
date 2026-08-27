@@ -721,6 +721,7 @@
           "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
           "startFailed": "Could not start live voice. Check your provider key and microphone access."
         },
+        "busyHint": "Finish or approve the current text response before starting live voice.",
         "inputLevel": "Microphone input level",
         "mute": "Mute microphone",
         "noMicrophone": "No microphone found.",

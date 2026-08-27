@@ -266,7 +266,10 @@ describe("persistLiveVoiceTurns", () => {
       persist,
     })
 
-    expect(written).toBe(2)
+    expect(written.map((message) => message.id)).toEqual([
+      liveVoiceMessageId("s1", "item_1"),
+      liveVoiceMessageId("s1", "item_2"),
+    ])
     const [, messages] = persist.mock.calls[0] as unknown as [string, UIMessage[]]
     expect(messages.map((m) => m.id)).toEqual([
       "old_1",
@@ -311,7 +314,7 @@ describe("persistLiveVoiceTurns", () => {
       persist,
     })
 
-    expect(written).toBe(0)
+    expect(written).toEqual([])
     expect(persist).not.toHaveBeenCalled()
   })
 })

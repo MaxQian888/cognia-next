@@ -29,8 +29,12 @@ const persistTurnsMock = jest.fn()
 const persistAppendMock = jest.fn()
 const persistFlushMock = jest.fn()
 const saveSettingsMock = jest.fn()
+const stopTTSMock = jest.fn()
+const upsertSessionMessagesMock = jest.fn()
 /** The chat session the composer is mounted in; `undefined` = scratch pane. */
 let currentSessionId: string | undefined = "chat-1"
+let currentChatStatus: "idle" | "streaming" | "awaiting_approval" | "error" = "idle"
+let currentLiveVoiceEnabled = true
 let currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
 let currentSelectedMicId: string | undefined = "mic-1"
 let currentToolRecords: unknown[] = []
@@ -94,8 +98,21 @@ jest.mock("@/lib/voice/live/session", () => {
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => true }))
 
 jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: (selector: (state: { activeSessionId?: string }) => unknown) =>
-    selector({ activeSessionId: currentSessionId }),
+  useChatStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        activeSessionId: currentSessionId,
+        status: currentChatStatus,
+        upsertSessionMessages: upsertSessionMessagesMock,
+      }),
+    {
+      getState: () => ({ upsertSessionMessages: upsertSessionMessagesMock }),
+    }
+  ),
+}))
+
+jest.mock("@/lib/tts/tts-orchestrator", () => ({
+  ttsOrchestrator: { stop: (...args: unknown[]) => stopTTSMock(...args) },
 }))
 
 jest.mock("@/lib/voice/live/runtime-bindings", () => ({
@@ -105,11 +122,11 @@ jest.mock("@/lib/voice/live/runtime-bindings", () => ({
 jest.mock("@/lib/voice/live/persist-turns", () => ({
   persistLiveVoiceTurns: (...args: unknown[]) => persistTurnsMock(...args),
   createLiveVoiceTurnPersister: (options: Record<string, unknown>) => ({
-    append: (turns: unknown, toolRecords: unknown) => {
+    append: async (turns: unknown, toolRecords: unknown) => {
       persistAppendMock(turns, toolRecords)
-      return Promise.resolve()
+      return []
     },
-    flush: (turns: unknown, toolRecords: unknown) => {
+    flush: async (turns: unknown, toolRecords: unknown) => {
       persistFlushMock(turns, toolRecords)
       if (
         Array.isArray(turns) &&
@@ -117,9 +134,11 @@ jest.mock("@/lib/voice/live/persist-turns", () => ({
         Array.isArray(toolRecords) &&
         toolRecords.length === 0
       ) {
-        return Promise.resolve()
+        return []
       }
-      return persistTurnsMock({ ...options, turns, toolRecords })
+      const written = await persistTurnsMock({ ...options, turns, toolRecords })
+      ;(options.onPersisted as ((messages: unknown[]) => void) | undefined)?.(written)
+      return written
     },
   }),
 }))
@@ -138,7 +157,7 @@ jest.mock("@/stores/settings", () => ({
         agentPermissions: { toolRules: { search_notes: "allow" } },
         alwaysAllowTools: ["web_search"],
         liveVoice: {
-          enabled: true,
+          enabled: currentLiveVoiceEnabled,
           region: "global",
           fallbackEnabled: true,
           maxCandidates: 3,
@@ -215,14 +234,57 @@ beforeEach(() => {
   })
   saveSettingsMock.mockResolvedValue(undefined)
   currentSessionId = "chat-1"
+  currentChatStatus = "idle"
+  currentLiveVoiceEnabled = true
   currentSelectedMicId = "mic-1"
   currentToolRecords = []
   currentDeployments = [{ id: "d1", provider: "openai", region: "global", enabled: true }]
   buildBindingsMock.mockResolvedValue({ droppedTools: [] })
-  persistTurnsMock.mockResolvedValue(0)
+  persistTurnsMock.mockResolvedValue([])
 })
 
 describe("LiveVoiceDialog — starting a session", () => {
+  it("is hidden when the live voice master switch is off", () => {
+    currentLiveVoiceEnabled = false
+    renderDialog()
+    expect(screen.queryByLabelText("startLive")).not.toBeInTheDocument()
+  })
+
+  it("shows a disabled trigger with a setup hint when no provider is configured", async () => {
+    currentDeployments = []
+    const user = userEvent.setup()
+    renderDialog()
+
+    const trigger = screen.getByLabelText("startLive")
+    expect(trigger).toBeDisabled()
+    await user.hover(trigger)
+    expect(await screen.findByText("errors.noDeployments")).toBeInTheDocument()
+  })
+
+  it.each(["streaming", "awaiting_approval"] as const)(
+    "disables live voice while text chat is %s",
+    (status) => {
+      currentChatStatus = status
+      renderDialog()
+      expect(screen.getByLabelText("startLive")).toBeDisabled()
+    }
+  )
+
+  it("stops application TTS immediately before opening microphone capture", async () => {
+    const order: string[] = []
+    stopTTSMock.mockImplementationOnce(() => order.push("tts"))
+    preflightMicrophoneMock.mockImplementationOnce(async () => {
+      order.push("microphone")
+      return { getTracks: () => [], getAudioTracks: () => [] }
+    })
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(screen.getByLabelText("startLive"))
+
+    expect(order.slice(0, 2)).toEqual(["tts", "microphone"])
+  })
+
   it("settles microphone permission before minting a provider token", async () => {
     const order: string[] = []
     preflightMicrophoneMock.mockImplementationOnce(async () => {
@@ -882,6 +944,23 @@ describe("LiveVoiceDialog — archiving the conversation", () => {
           region: "global",
         },
       })
+    )
+  })
+
+  it("upserts the exact persisted records into the matching in-memory session", async () => {
+    const projected = [
+      { id: "voice:chat-1:item_1", role: "user", parts: [{ type: "text", text: "who won" }] },
+    ]
+    persistTurnsMock.mockResolvedValueOnce(projected)
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByLabelText("startLive"))
+    act(() => publish({ turns: [TURNS[0]] }))
+
+    await user.click(screen.getByLabelText("end"))
+
+    await waitFor(() =>
+      expect(upsertSessionMessagesMock).toHaveBeenCalledWith("chat-1", projected)
     )
   })
 

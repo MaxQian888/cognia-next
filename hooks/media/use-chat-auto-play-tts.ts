@@ -53,6 +53,10 @@ function lastAssistant(messages: UIMessage[]): UIMessage | null {
   return null
 }
 
+function isAudioModality(message: UIMessage): boolean {
+  return (message as { metadata?: { modality?: string } }).metadata?.modality === "audio"
+}
+
 function extractText(message: UIMessage): string {
   return message.parts
     .filter((p): p is { type: "text"; text: string } => (p as { type?: string }).type === "text")
@@ -99,7 +103,7 @@ export function useChatAutoPlayTTS({
     }
 
     const last = lastAssistant(messages)
-    if (!last) return
+    if (!last || isAudioModality(last)) return
     const text = extractText(last)
 
     // Close a session that belonged to an earlier message.
@@ -153,7 +157,7 @@ export function useChatAutoPlayTTS({
     if (!canAutoPlayTTS({ ttsEnabled, ttsAutoPlay, isLoading: false, isStreaming: false })) return
 
     const last = lastAssistant(messages)
-    if (!last || lastAutoPlayedId.current === last.id) return
+    if (!last || isAudioModality(last) || lastAutoPlayedId.current === last.id) return
     const text = extractText(last)
     if (!text.trim()) return
 

@@ -667,6 +667,8 @@ interface ChatState {
   setSessionMessages: (id: string, msgs: UIMessage[]) => void
   appendSessionMessage: (id: string, msg: UIMessage) => void
   replaceSessionMessages: (id: string, msgs: UIMessage[]) => void
+  /** Merge durable records into one session by id without dropping unrelated messages. */
+  upsertSessionMessages: (id: string, msgs: readonly UIMessage[]) => void
   setSessionMessagesLoading: (id: string, v: boolean) => void
   setSessionMessagesLoadError: (id: string, msg: string | null) => void
   requestSessionMessagesReload: (id: string) => void
@@ -915,6 +917,17 @@ export const useChatStore = create<ChatState>((set) => ({
   appendSessionMessage: (id, msg) =>
     set((s) => patchSliceState(s, id, { messages: [...sliceForId(s, id).messages, msg] })),
   replaceSessionMessages: (id, msgs) => set((s) => patchSliceState(s, id, { messages: msgs })),
+  upsertSessionMessages: (id, msgs) =>
+    set((s) => {
+      const existing = sliceForId(s, id).messages
+      const incoming = new Map(msgs.map((message) => [message.id, message]))
+      const existingIds = new Set(existing.map((message) => message.id))
+      const messages = existing.map((message) => incoming.get(message.id) ?? message)
+      for (const message of msgs) {
+        if (!existingIds.has(message.id)) messages.push(message)
+      }
+      return patchSliceState(s, id, { messages })
+    }),
   setSessionMessagesLoading: (id, v) => set((s) => patchSliceState(s, id, { messagesLoading: v })),
   setSessionMessagesLoadError: (id, msg) =>
     set((s) => patchSliceState(s, id, { messagesLoadError: msg, messagesLoading: false })),

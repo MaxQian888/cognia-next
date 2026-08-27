@@ -58,6 +58,7 @@ import {
 import { DEFAULT_LIVE_VOICE_SETTINGS } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
+import { ttsOrchestrator } from "@/lib/tts/tts-orchestrator"
 import { cn } from "@/lib/utils"
 import type { LiveVoiceState } from "@/lib/voice/live/reducer"
 
@@ -111,6 +112,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
   const providerKeys = useSettingsStore((store) => store.providerKeys)
   const saveSettings = useSettingsStore((store) => store.save)
   const sessionId = useChatStore((store) => store.activeSessionId)
+  const chatStatus = useChatStore((store) => store.status)
   const [open, setOpen] = useState(false)
   const [controller, setController] = useState<LiveVoiceController | null>(null)
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
@@ -167,6 +169,26 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     [providerKeys?.openai, providerKeys?.google, providerKeys?.xai]
   )
 
+  const liveVoiceCandidates = useMemo(
+    () => selectLiveVoiceCandidates(liveVoiceSettings),
+    [liveVoiceSettings]
+  )
+  const unavailableReason =
+    liveVoiceSettings?.enabled && liveVoiceCandidates.length === 0
+      ? explainLiveVoiceUnavailability(liveVoiceSettings)
+      : null
+  const chatBusy = chatStatus === "streaming" || chatStatus === "awaiting_approval"
+  const triggerDisabled = Boolean(disabled || chatBusy || unavailableReason)
+
+  const upsertPersistedMessages = useCallback(
+    (messages: readonly import("ai").UIMessage[]) => {
+      if (sessionId && messages.length > 0) {
+        useChatStore.getState().upsertSessionMessages(sessionId, messages)
+      }
+    },
+    [sessionId]
+  )
+
   // Deliver each finalised user turn to the composer exactly once. Screened
   // again here because the transcript is model output, not the instructions
   // that were gated at mint time.
@@ -210,10 +232,14 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
         provenance: meta.provenance,
         startedAt: meta.startedAt,
         toolRecords,
-      }).catch(() => {
+      })
+        .then((messages) => {
+          useChatStore.getState().upsertSessionMessages(meta.sessionId, messages)
+        })
+        .catch(() => {
         // The conversation still happened; failing to archive it must not take
         // the composer down with it.
-      })
+        })
     }
 
     setController(null)
@@ -234,7 +260,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
   )
 
   const startSession = useCallback(async () => {
-    if (disabled || controllerRef.current || startingRef.current) return
+    if (triggerDisabled || controllerRef.current || startingRef.current) return
     const generation = ++startGenerationRef.current
     const assertStartActive = () => {
       if (generation !== startGenerationRef.current) throw LIVE_VOICE_START_CANCELLED
@@ -253,6 +279,10 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
       if (candidates.length === 0) {
         throw new LiveVoiceUnavailableError(explainLiveVoiceUnavailability(liveVoiceSettings))
       }
+
+      // Live conversation owns audio focus from this point forward. Existing
+      // speech is intentionally not resumed when the session ends.
+      ttsOrchestrator.stop()
 
       // Permission is settled before minting an ephemeral token. The retained
       // stream is handed to the capture graph after provider readiness.
@@ -310,6 +340,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
                   region: initial.session.region,
                 },
                 startedAt: connectedStartedAt,
+                onPersisted: upsertPersistedMessages,
               })
             : null
           next = createLiveVoiceController({
@@ -417,7 +448,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
       if (generation === startGenerationRef.current) startingRef.current = false
     }
   }, [
-    disabled,
+    triggerDisabled,
     liveVoiceSettings,
     microphoneId,
     apiKeys,
@@ -425,6 +456,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
     agentPermissions,
     alwaysAllowTools,
     t,
+    upsertPersistedMessages,
   ])
 
   const toggleMute = useCallback(() => {
@@ -494,6 +526,14 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
 
   const phase = startFailure || startError ? "error" : state.phase
 
+  if (!liveVoiceSettings?.enabled) return null
+
+  const triggerHint = unavailableReason
+    ? t(UNAVAILABLE_MESSAGE_KEYS[unavailableReason])
+    : chatBusy
+      ? t("busyHint")
+      : t("startLive")
+
   return (
     <>
       <Tooltip>
@@ -501,7 +541,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
           <Button
             aria-label={t("startLive")}
             className="size-8 shrink-0"
-            disabled={disabled}
+            disabled={triggerDisabled}
             onClick={() => void startSession()}
             size="icon"
             type="button"
@@ -510,7 +550,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
             <AudioWaveformIcon className="size-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t("startLive")}</TooltipContent>
+        <TooltipContent>{triggerHint}</TooltipContent>
       </Tooltip>
 
       <Dialog open={open} onOpenChange={onOpenChange}>

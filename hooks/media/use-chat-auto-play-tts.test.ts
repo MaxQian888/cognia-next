@@ -52,6 +52,13 @@ function asstMsg(id: string, text: string, senderId?: string): UIMessage {
   } as UIMessage
 }
 
+function audioAsstMsg(id: string, text: string): UIMessage {
+  return {
+    ...asstMsg(id, text),
+    metadata: { modality: "audio" },
+  } as UIMessage
+}
+
 function setup(initial: {
   messages: UIMessage[]
   status: Status
@@ -109,6 +116,11 @@ describe("useChatAutoPlayTTS — streaming path", () => {
     expect(speakChatMessageStream).not.toHaveBeenCalled()
   })
 
+  it("does not stream an assistant reply already delivered as live audio", () => {
+    setup({ messages: [audioAsstMsg("a1", "spoken live")], status: "streaming" })
+    expect(speakChatMessageStream).not.toHaveBeenCalled()
+  })
+
   it("keeps the session across a mid-turn approval pause (no restart)", () => {
     const { rerender } = setup({ messages: [asstMsg("a1", "Start")], status: "streaming" })
     rerender({ messages: [asstMsg("a1", "Start")], status: "awaiting_approval" })
@@ -153,6 +165,13 @@ describe("useChatAutoPlayTTS — turn-complete fallback", () => {
     const messages = [asstMsg("a1", "hi")]
     const { rerender } = setup({ messages, status: "idle" })
     rerender({ messages, status: "idle" })
+    expect(speakChatMessage).not.toHaveBeenCalled()
+  })
+
+  it("does not read a completed assistant reply already delivered as live audio", () => {
+    const user = { id: "u1", role: "user", parts: [{ type: "text", text: "q" }] } as UIMessage
+    const { rerender } = setup({ messages: [user], status: "streaming" })
+    rerender({ messages: [user, audioAsstMsg("a1", "spoken live")], status: "idle" })
     expect(speakChatMessage).not.toHaveBeenCalled()
   })
 })

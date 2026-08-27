@@ -142,14 +142,14 @@ export interface PersistLiveVoiceTurnsOptions extends LiveVoiceTurnsToMessagesOp
 /**
  * Append this session's finished voice turns to its chat history.
  *
- * Returns the number of turns written. A session where nothing was said writes
- * nothing at all rather than an empty row.
+ * Returns the exact projected voice records written by the successful
+ * transaction. A session where nothing was said writes nothing at all.
  */
 export async function persistLiveVoiceTurns(
   options: PersistLiveVoiceTurnsOptions
-): Promise<number> {
+): Promise<UIMessage[]> {
   const voiceMessages = liveVoiceTurnsToMessages(options.sessionId, options)
-  if (voiceMessages.length === 0) return 0
+  if (voiceMessages.length === 0) return []
 
   const persist =
     options.persist ??
@@ -171,13 +171,16 @@ export async function persistLiveVoiceTurns(
   for (const message of [...existing, ...voiceMessages]) byId.set(message.id, message)
 
   await persist(options.sessionId, [...byId.values()])
-  return voiceMessages.length
+  return voiceMessages
 }
 
 export type LiveVoiceTurnPersisterOptions = Omit<
   PersistLiveVoiceTurnsOptions,
   "turns" | "toolRecords" | "existing" | "createdAtOffsets" | "toolCreatedAtOffset"
->
+> & {
+  /** Runs only after Dexie accepted the projected records. */
+  onPersisted?: (messages: readonly UIMessage[]) => void
+}
 
 /** Serial, incremental writer for finalized turns in one live session. */
 export class LiveVoiceTurnPersister {
@@ -220,13 +223,14 @@ export class LiveVoiceTurnPersister {
     // completion cannot change the payload while this write waits its turn.
     const toolSnapshot = toolRecords.map((record) => ({ ...record }))
     const operation = this.tail.then(async () => {
-      await persistLiveVoiceTurns({
+      const written = await persistLiveVoiceTurns({
         ...this.options,
         turns: freshTurns,
         createdAtOffsets: freshTurns.map((turn) => this.turnOffsetById.get(turn.id) ?? 0),
         ...(toolsChanged ? { toolRecords: toolSnapshot } : {}),
         ...(toolsChanged ? { toolCreatedAtOffset: this.toolCreatedAtOffset } : {}),
       })
+      this.options.onPersisted?.(written)
     })
     void operation.then(
       () => {
