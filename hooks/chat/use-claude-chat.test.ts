@@ -383,6 +383,7 @@ interface ChatStateLike {
   activeBranchByGroup: Record<string, string>
   pendingCommandOverrides: unknown
   referencedPaths: unknown[]
+  citedRefs: unknown[]
   ephemeralSkillIds: string[]
   lastSendBySession: Record<string, unknown>
   setActiveSession: jest.Mock
@@ -448,6 +449,7 @@ const chatState: ChatStateLike = {
   activeBranchByGroup: {},
   pendingCommandOverrides: null,
   referencedPaths: [],
+  citedRefs: [],
   ephemeralSkillIds: [],
   lastSendBySession: {},
   setActiveSession: jest.fn(),
@@ -533,6 +535,14 @@ jest.mock("@/stores/chat", () => ({
       : null) ??
     s.pendingCommandOverrides ??
     null,
+  // Chip-style citations (a staged document / memory / issue / plan / chat /
+  // artifact). They leave no token in the text, so the send path merges this
+  // list with the ones `resolve-mentions.ts` parses out of it — same
+  // per-conversation resolution as the two above.
+  selectComposerCitedRefs: (s: ChatStateLike, id?: string | null) =>
+    (id ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.citedRefs : null) ??
+    s.citedRefs ??
+    [],
 }))
 
 // The unified execution broker governs the concurrency cap; stub it so a test
@@ -1780,8 +1790,15 @@ describe("useClaudeChat — actions", () => {
       )
     })
     // Scoped rule persisted; the coarse name-grant path is NOT taken.
+    //
+    // The pattern is the command the user actually read, not its family.
+    // Deriving `git *` from the head is what `deriveAllowRuleFromApproval`
+    // deliberately stopped doing: one click on a read-only `git status` also,
+    // and permanently, granted `git push --force` / `git reset --hard`.
+    // `approval-rule.test.ts` pins that directly (`not.toBe("git *")`); this
+    // asserts the caller threads it through unwidened.
     expect(settingsState.save).toHaveBeenCalledWith({
-      agentPermissions: { toolRules: { Bash: { "git *": "allow" } } },
+      agentPermissions: { toolRules: { Bash: { "git status": "allow" } } },
     })
     expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")

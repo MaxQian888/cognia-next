@@ -6,7 +6,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import { createDiagnostic } from "@cognia/diagnostics"
+import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
+import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
@@ -112,6 +113,7 @@ import {
   type SessionBundleBinding,
 } from "@/lib/task-workspace/session-bundle"
 import {
+  repairManagedContextProjectId,
   bindExecutionBundleTurn,
   bindExecutionRun,
   resolveSessionWorkspaceRoot,
@@ -130,6 +132,7 @@ import { useGitStore } from "@/stores/git/git-store"
 import { refreshGitStatus } from "@/lib/git/load"
 import { buildChatMentionTargets } from "@/lib/claude/agents/chat-mention-targets"
 import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
+import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import {
   dispatchChatError as dispatchPluginChatError,
@@ -147,6 +150,7 @@ import type {
   SendOptions,
 } from "@cognia/agent-config-types"
 import {
+  selectComposerCitedRefs,
   selectComposerEphemeralSkillIds,
   selectComposerPendingCommandOverrides,
   useChatStore,
@@ -367,6 +371,98 @@ export function useClaudeChat() {
     }
   }, [registry])
 
+  /**
+   * Turn-silence watchdog (see `lib/chat/silence-watchdog`).
+   *
+   * Armed once the send is dispatched, fed by every inbound frame, and disarmed
+   * by the store watcher below when the session leaves an active status. It
+   * raises a persistent `turnSilent` warning and nothing else — it never ends
+   * the turn, because a long tool call is indistinguishable from a dropped one
+   * at this layer.
+   */
+  const silenceWatchdogRef = useRef<SilenceWatchdog | null>(null)
+  // Created on demand rather than in the render body, because the effect below
+  // disposes and clears the ref on cleanup. StrictMode replays mount → cleanup
+  // → mount with NO re-render in between, so a render-body lazy init left the
+  // second mount reading `null`, returning early, and installing no
+  // subscription — the watchdog was inert for the whole of development. Making
+  // the effect the thing that guarantees an instance keeps the two in step:
+  // whatever is subscribed is what `arm` / `notice` reach.
+  const ensureSilenceWatchdog = useCallback((): SilenceWatchdog => {
+    const existing = silenceWatchdogRef.current
+    if (existing) return existing
+    const created = createSilenceWatchdog({
+      onSilent: (sessionId, silentForMs) => {
+        const session = useChatStore.getState().sessions[sessionId]
+        // Never overwrite a real failure with "we heard nothing": a diagnostic
+        // already on the session is strictly more informative than this one.
+        if (session?.errorDiagnostic) return
+        // And never warn about a turn that is not running. The store watcher
+        // disarms on every settle, but it can only disarm what is armed — so
+        // this is the backstop for any path that settles a session the clock
+        // has not been told about yet. A card offering "Interrupt" on an idle
+        // conversation is worse than no card.
+        if (session?.status !== "streaming" && session?.status !== "awaiting_approval") return
+        useChatStore.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("turnSilent", {
+            source: "chat",
+            meta: { sessionId, extra: { silentForMs } },
+          })
+        )
+      },
+      onRecovered: (sessionId) => {
+        // Clear only our own warning. Anything else on the session came from a
+        // producer that knows more than the clock does.
+        const current = useChatStore.getState().sessions[sessionId]?.errorDiagnostic
+        if (current?.code === "turnSilent") {
+          useChatStore.getState().setSessionDiagnostic(sessionId, null)
+        }
+      },
+    })
+    silenceWatchdogRef.current = created
+    return created
+  }, [])
+
+  useEffect(() => {
+    const watchdog = ensureSilenceWatchdog()
+    // Same shape as the execution-broker lease watcher: one subscription
+    // covers every settle path (session_ended, error, interrupt, external-agent
+    // completion) instead of a disarm call per exit.
+    //
+    // Scoped to the ARMED sessions, not to every open one. This store writes
+    // once per streaming delta, so an `Object.entries(state.sessions)` sweep
+    // here ran the full session list thousands of times a turn to answer a
+    // question about (normally) one of them. `state.sessions` identity is the
+    // cheap first cut — most writes are composer/projection fields that leave
+    // it alone — and `watchdog.armed()` is the second.
+    //
+    // `previous` is optional on purpose. Zustand always passes it, but it is
+    // only ever an OPTIMISATION here — the armed scan below is correct on its
+    // own — so a caller that notifies with just the new state (a test double,
+    // a wrapper store) must still get the disarm, not a TypeError inside a
+    // subscription every other producer shares.
+    const unsubscribe = useChatStore.subscribe((state, previous?: typeof state) => {
+      if (previous && state.sessions === previous.sessions) return
+      for (const sessionId of watchdog.armed()) {
+        const session = state.sessions[sessionId]
+        // A closed pane drops its slice entirely; that is a settle too, and the
+        // old sweep could not see it because it only walked what still existed.
+        if (
+          !session ||
+          (session.status !== "streaming" && session.status !== "awaiting_approval")
+        ) {
+          watchdog.disarm(sessionId)
+        }
+      }
+    })
+    return () => {
+      unsubscribe()
+      watchdog.dispose()
+      if (silenceWatchdogRef.current === watchdog) silenceWatchdogRef.current = null
+    }
+  }, [ensureSilenceWatchdog])
+
   // Route one ClaudeEvent into the per-session serialized queue → `handleEvent`.
   // Keyed by session so same-session events serialize; events without a session
   // id (ready/log/sidecar_exited) share one chain. Shared by the Tauri transport
@@ -378,6 +474,9 @@ export function useClaudeChat() {
         typeof (evt as { sessionId?: unknown }).sessionId === "string"
           ? (evt as { sessionId: string }).sessionId
           : "__nosession__"
+      // Any frame naming a session is a sign of life for that turn. Fed here
+      // rather than from a second subscription so there is one demux, not two.
+      if (key !== "__nosession__") silenceWatchdogRef.current?.notice(key)
       const queues = eventQueuesRef.current
       const tail = (queues.get(key) ?? Promise.resolve())
         // A prior failure must not break the chain for later events.
@@ -866,19 +965,24 @@ export function useClaudeChat() {
               .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
               .map((b) => b.text)
               .join("\n")
-      if (mentionSourceText.includes("@")) {
-        const mentionTargets = buildChatMentionTargets()
-        const mentionRefs = resolveMentions(mentionSourceText, {
-          resolveAgentHandle: (name) => {
-            const hit = mentionTargets.find((t) => t.handle === name)
-            return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
-          },
-        })
-        if (mentionRefs.length > 0) {
-          ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
-            ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
-            mentions: mentionRefs,
-          }
+      const parsedMentionRefs = mentionSourceText.includes("@")
+        ? resolveMentions(mentionSourceText, {
+            resolveAgentHandle: (name) => {
+              const hit = buildChatMentionTargets().find((t) => t.handle === name)
+              return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
+            },
+          })
+        : []
+      // Chip-style picks (a staged remote document, a staged memory / issue /
+      // plan / conversation / artifact) leave NO token behind, so re-parsing the
+      // text can never recover them — this list is their only route in. Read
+      // before the composer clears it, which it does after `onSend` resolves.
+      const citedRefs = selectComposerCitedRefs(store.getState(), sessionId)
+      const mentionRefs = mergeContextRefs(parsedMentionRefs, citedRefs)
+      if (mentionRefs.length > 0) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          mentions: mentionRefs,
         }
       }
       if (callOptions?.templateRun) {
@@ -1145,7 +1249,14 @@ export function useClaudeChat() {
       // worktree. The developer flag remains a compatibility path for sessions
       // created before execution contexts existed.
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
-      let executionContext = session?.executionContext
+      // Repair a pre-existing managed context that was persisted with an empty
+      // projectId before the creation path started stamping the real one. Doing
+      // it here rather than in a Dexie upgrade covers the connector and
+      // scheduler legs too, which never touch the UI.
+      let executionContext = repairManagedContextProjectId(
+        session?.executionContext,
+        session?.projectId
+      )
       const hasNoToolSurface = sendOptions.toolSurface === "none"
       const agentRuntime = useAgentRuntimeStore.getState().runtime
       const manualExternal = !hasNoToolSurface && agentRuntime === "external"
@@ -1266,6 +1377,54 @@ export function useClaudeChat() {
       let dispatchClaim: Awaited<ReturnType<typeof claimChatTurnForDispatch>> = "legacy"
       let stopAssemblyHeartbeat = () => {}
       let durableLeaseLost = false
+
+      /**
+       * Refuse a turn that has already flipped the session to `streaming`.
+       *
+       * Eight call sites repeated this by hand, and each had to remember five
+       * separate steps: terminal status, performance finish, work-submission
+       * settle, assembly heartbeat, and — once the execution run has started —
+       * finishing that run. A path that forgot one left the composer spinning
+       * with nothing to press. One place means a refusal added tomorrow cannot
+       * forget, and it is where the metric goes: these refusals emitted nothing
+       * at all, so a workspace that refuses every send looked exactly like an
+       * install nobody used.
+       *
+       * The execution lease is deliberately absent. It is released by the store
+       * subscription in `lib/execution/chat-lease.ts` on any transition out of
+       * an active status, which the `idle` flip below is; releasing here too
+       * would give one lease two owners.
+       *
+       * `chat.turn.failed` rather than a new event name: the turn was accepted
+       * and then failed, which is exactly what that event already means.
+       */
+      const refuseTurn = async (input: {
+        diagnostic: CogniaDiagnostic
+        /** Stable, low-cardinality reason. Doubles as the telemetry `errorType`. */
+        errorCode: string
+        /** True once `startDirectChatExecutionRun` has run for this turn. */
+        finishRun?: boolean
+      }): Promise<void> => {
+        if (input.finishRun) await finishDirectChatExecutionRun(sessionId, "failed")
+        store.getState().setSessionStatus(sessionId, "idle")
+        store.getState().setSessionDiagnostic(sessionId, input.diagnostic)
+        chatTurnPerformance.finish(sessionId, "failed")
+        await settleChatTurnForSession(sessionId, {
+          outcome: "failed",
+          errorCode: input.errorCode,
+        })
+        stopAssemblyHeartbeat()
+        const durationMs = finishBehaviorTurn(sessionId)
+        if (durationMs !== undefined) {
+          void trackEvent("chat.turn.failed", {
+            sessionId,
+            surface: "chat",
+            errorType: input.errorCode,
+            durationMs,
+            ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
+          })
+        }
+      }
       let abortStaleLocalRuntime = () => {}
       if (durableReceipt) {
         dispatchClaim = await claimChatTurnForDispatch(executionRunId)
@@ -1291,14 +1450,14 @@ export function useClaudeChat() {
           .getState()
           .projects.find((candidate) => candidate.id === executionContext?.projectId)
         if (!project) {
-          store.getState().setSessionStatus(sessionId, "idle")
-          store.getState().setSessionError(sessionId, tInlineErr("managedWorktreeUnavailable"))
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "managed_project_unavailable",
+            diagnostic: createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: tInlineErr("managedWorktreeUnavailable"),
+              meta: { sessionId },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
         try {
@@ -1318,14 +1477,14 @@ export function useClaudeChat() {
           await updateSession(sessionId, { executionContext })
         } catch (error) {
           console.error("managed workspace bundle acquisition failed", error)
-          store.getState().setSessionStatus(sessionId, "idle")
-          store.getState().setSessionError(sessionId, tInlineErr("managedWorktreeUnavailable"))
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "workspace_bundle_unavailable",
+            diagnostic: createDiagnostic("workspaceBundleFailed", {
+              source: "chat",
+              message: error instanceof Error ? error.message : String(error),
+              meta: { sessionId },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
       }
@@ -1343,19 +1502,10 @@ export function useClaudeChat() {
             : {}),
         })
       } catch (error) {
-        store.getState().setSessionStatus(sessionId, "idle")
-        store
-          .getState()
-          .setSessionDiagnostic(
-            sessionId,
-            toDiagnostic(error, { source: "chat", meta: { sessionId } })
-          )
-        chatTurnPerformance.finish(sessionId, "failed")
-        await settleChatTurnForSession(sessionId, {
-          outcome: "failed",
+        await refuseTurn({
           errorCode: "execution_run_start_failed",
+          diagnostic: toDiagnostic(error, { source: "chat", meta: { sessionId } }),
         })
-        stopAssemblyHeartbeat()
         return
       }
       const legacyWorkspaceEnabled = !executionContext && Boolean(sendOptions.cwd)
@@ -1364,16 +1514,15 @@ export function useClaudeChat() {
         (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
       ) {
         if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
-          await finishDirectChatExecutionRun(sessionId, "failed")
-          const message = tInlineErr("managedWorktreeUnavailable")
-          store.getState().setSessionStatus(sessionId, "idle")
-          store.getState().setSessionError(sessionId, message)
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "managed_worktree_unavailable",
+            finishRun: true,
+            diagnostic: createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: tInlineErr("managedWorktreeUnavailable"),
+              meta: { sessionId },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
         const anchorMessage = skipAppend
@@ -1434,16 +1583,15 @@ export function useClaudeChat() {
           !taskLease &&
           (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
         ) {
-          await finishDirectChatExecutionRun(sessionId, "failed")
-          const message = tInlineErr("managedWorktreeUnavailable")
-          store.getState().setSessionStatus(sessionId, "idle")
-          store.getState().setSessionError(sessionId, message)
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "task_workspace_unavailable",
+            finishRun: true,
+            diagnostic: createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: tInlineErr("managedWorktreeUnavailable"),
+              meta: { sessionId },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
@@ -1490,15 +1638,15 @@ export function useClaudeChat() {
       if (!hasNoToolSurface && executionContext?.environmentId) {
         const environment = await getProjectEnvironment(executionContext.environmentId)
         if (!environment || environment.projectId !== executionContext.projectId) {
-          await finishDirectChatExecutionRun(sessionId, "failed")
-          store.getState().setSessionStatus(sessionId, "idle")
-          store.getState().setSessionError(sessionId, tInlineErr("environmentUnavailable"))
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "environment_unavailable",
+            finishRun: true,
+            diagnostic: createDiagnostic("environmentUnavailable", {
+              source: "chat",
+              message: tInlineErr("environmentUnavailable"),
+              meta: { sessionId, extra: { environmentId: executionContext.environmentId } },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
         // The repository's own `.cognia/workspace.json`, merged in when the
@@ -1520,17 +1668,17 @@ export function useClaudeChat() {
           bypassOnFailure: callOptions?.bypassEnvironmentSetup,
         })
         if (!setup.success) {
-          await finishDirectChatExecutionRun(sessionId, "failed")
-          store.getState().setSessionStatus(sessionId, "idle")
-          store
-            .getState()
-            .setSessionError(sessionId, setup.error || tInlineErr("environmentSetupFailed"))
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
+          await refuseTurn({
             errorCode: "environment_setup_failed",
+            finishRun: true,
+            diagnostic: createDiagnostic("environmentSetupFailed", {
+              // The setup step's own words when it has them: it names the
+              // failing command, which no generic label can.
+              source: "chat",
+              message: setup.error || tInlineErr("environmentSetupFailed"),
+              meta: { sessionId, extra: { environmentId: executionContext.environmentId } },
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
       }
@@ -1558,22 +1706,17 @@ export function useClaudeChat() {
           ? useAgentRuntimeStore.getState().externalAgentId
           : delegation!.targetAgentId
         if (!extAgentId) {
-          await finishDirectChatExecutionRun(sessionId, "failed")
+          // The optimistic user message is rolled back before the refusal:
+          // nothing was sent, so it must not stay in the transcript.
           store.getState().replaceSessionMessages(sessionId, previousMessages)
-          store.getState().setSessionDiagnostic(
-            sessionId,
-            createDiagnostic("externalAgentNotSelected", {
+          await refuseTurn({
+            errorCode: "external_agent_not_selected",
+            finishRun: true,
+            diagnostic: createDiagnostic("externalAgentNotSelected", {
               source: "external-agent",
               meta: { sessionId },
-            })
-          )
-          store.getState().setSessionStatus(sessionId, "idle")
-          chatTurnPerformance.finish(sessionId, "failed")
-          await settleChatTurnForSession(sessionId, {
-            outcome: "failed",
-            errorCode: "external_agent_not_selected",
+            }),
           })
-          stopAssemblyHeartbeat()
           return
         }
         // Record the lane this session's turn is actually on, so a follow-up
@@ -1962,6 +2105,15 @@ export function useClaudeChat() {
             sendOptions,
           },
         })
+        // Armed BEFORE the dispatch, not after it. `sendPrompt` is awaited, and
+        // a turn can settle inside that await (the host rejects the prompt, an
+        // error or `sidecar_exited` frame is processed). The store subscription
+        // that disarms only walks `watchdog.armed()`, so arming afterwards meant
+        // the settle found nothing to disarm and the clock then ran against an
+        // already-idle session — surfacing "the turn has gone silent" 90 seconds
+        // later on a conversation that had finished. Arming first puts the
+        // session in `armed()` before any frame can arrive.
+        silenceWatchdogRef.current?.arm(sessionId)
         if (isStandaloneChatMode()) {
           // Standalone (BYOK): run the turn in-renderer against the user's own
           // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
@@ -2328,9 +2480,16 @@ export function useClaudeChat() {
         rememberDenial(approval.sessionId, approval.toolName, approval.input)
       }
       // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
-      // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
-      // matching calls auto-resolve via the sidecar ruleset — falling back to a
-      // coarse tool-NAME grant only when no useful target can be extracted.
+      // (`Bash(git status)`, `Read(/path/x)`) so the grant is precise and
+      // future matching calls auto-resolve via the sidecar ruleset — falling
+      // back to a coarse tool-NAME grant only when no useful target can be
+      // extracted.
+      //
+      // The scope is the action the user READ, never its family: the example
+      // here used to say `Bash(git *)`, and so did the derivation, which meant
+      // approving `git status` also bought `git push --force` forever. See
+      // `deriveAllowRuleFromApproval` — a family grant is now something the
+      // user authors deliberately in Settings, not something a click arrives at.
       if (decision === "allow_always") {
         const rule = deriveAllowRuleFromApproval(approval.toolName, approval.input)
         if (rule) {

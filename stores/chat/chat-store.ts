@@ -185,7 +185,21 @@ export interface SessionChatSlice {
   permissionMode: PermissionMode | null
   referencedPaths: FileReference[]
   referencedWorkflowElements: WorkflowElementRef[]
-  referencedDocs: ContextRef[]
+  /**
+   * Citations from picks that leave NO token in the message text — a remote
+   * document staged as an attachment, a memory / issue / plan / conversation /
+   * artifact staged as a context chip. Merged with the tokens
+   * `resolve-mentions.ts` parses out of the sent text and stored together as
+   * `metadata.mentions`, then cleared with the rest of the composer's staged
+   * material once the send commits.
+   *
+   * Was `referencedDocs` while it sat unread: nothing called `addCitedRef`, so
+   * the `doc` ContextRef its own type docs called "the ONLY record that the
+   * turn cited that document" was never written. The name went with the wiring
+   * — the list is not document-specific and never was (its type is
+   * `ContextRef[]`), and a name that says otherwise mis-sends the next reader.
+   */
+  citedRefs: ContextRef[]
   contextSelections: ContextSelectionRef[]
   pendingCommandOverrides: PendingCommandOverrides | null
   bookmarkedIds: string[]
@@ -213,7 +227,7 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     permissionMode: null,
     referencedPaths: [],
     referencedWorkflowElements: [],
-    referencedDocs: [],
+    citedRefs: [],
     contextSelections: [],
     pendingCommandOverrides: null,
     bookmarkedIds: [],
@@ -248,7 +262,7 @@ type ProjectedField =
   | "permissionMode"
   | "referencedPaths"
   | "referencedWorkflowElements"
-  | "referencedDocs"
+  | "citedRefs"
   | "contextSelections"
   | "pendingCommandOverrides"
   | "bookmarkedIds"
@@ -270,7 +284,7 @@ function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> 
     permissionMode: slice.permissionMode,
     referencedPaths: slice.referencedPaths,
     referencedWorkflowElements: slice.referencedWorkflowElements,
-    referencedDocs: slice.referencedDocs,
+    citedRefs: slice.citedRefs,
     contextSelections: slice.contextSelections,
     pendingCommandOverrides: slice.pendingCommandOverrides,
     bookmarkedIds: slice.bookmarkedIds,
@@ -392,7 +406,7 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       permissionMode: state.permissionMode,
       referencedPaths: state.referencedPaths,
       referencedWorkflowElements: state.referencedWorkflowElements,
-      referencedDocs: state.referencedDocs,
+      citedRefs: state.citedRefs,
       contextSelections: state.contextSelections,
       pendingCommandOverrides: state.pendingCommandOverrides,
       bookmarkedIds: state.bookmarkedIds,
@@ -480,7 +494,7 @@ function projectionAsSlice(state: ChatState): Partial<SessionChatSlice> {
     permissionMode: state.permissionMode,
     referencedPaths: state.referencedPaths,
     referencedWorkflowElements: state.referencedWorkflowElements,
-    referencedDocs: state.referencedDocs,
+    citedRefs: state.citedRefs,
     contextSelections: state.contextSelections,
     pendingCommandOverrides: state.pendingCommandOverrides,
     bookmarkedIds: state.bookmarkedIds,
@@ -541,7 +555,7 @@ interface ChatState {
    * in the text, so unlike every other mention kind it cannot be recovered by
    * re-parsing the message. Cleared on send with the attachments.
    */
-  referencedDocs: ContextRef[]
+  citedRefs: ContextRef[]
   /**
    * Material the user pointed at + commented on, staged as context chips for
    * the next send. Cleared on send (like attachments) and on focus change.
@@ -706,9 +720,9 @@ interface ChatState {
   removeReferencedPath: (absolute: string, sessionId?: string | null) => void
   clearReferencedPaths: (sessionId?: string | null) => void
   /** Stage a workflow element as a reference chip for the next copilot turn. */
-  addReferencedDoc: (ref: ContextRef, sessionId?: string | null) => void
-  removeReferencedDoc: (id: string, sessionId?: string | null) => void
-  clearReferencedDocs: (sessionId?: string | null) => void
+  addCitedRef: (ref: ContextRef, sessionId?: string | null) => void
+  removeCitedRef: (id: string, sessionId?: string | null) => void
+  clearCitedRefs: (sessionId?: string | null) => void
   addReferencedWorkflowElement: (ref: WorkflowElementRef, sessionId?: string | null) => void
   removeReferencedWorkflowElement: (
     type: "node" | "edge",
@@ -770,7 +784,7 @@ export const useChatStore = create<ChatState>((set) => ({
   permissionMode: null,
   referencedPaths: [],
   referencedWorkflowElements: [],
-  referencedDocs: [],
+  citedRefs: [],
   contextSelections: [],
   pendingCommandOverrides: null,
   bookmarkedIds: [],
@@ -1114,24 +1128,24 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => patchComposerState(s, sessionId, { pendingCommandOverrides: overrides })),
   clearReferencedPaths: (sessionId) =>
     set((s) => patchComposerState(s, sessionId, { referencedPaths: [] })),
-  addReferencedDoc: (ref, sessionId) =>
+  addCitedRef: (ref, sessionId) =>
     set((s) => {
-      const current = composerSlice(s, sessionId).referencedDocs
+      const current = composerSlice(s, sessionId).citedRefs
       return current.some((r) => r.id === ref.id)
         ? s
-        : patchComposerState(s, sessionId, { referencedDocs: [...current, ref] })
+        : patchComposerState(s, sessionId, { citedRefs: [...current, ref] })
     }),
-  removeReferencedDoc: (id, sessionId) =>
+  removeCitedRef: (id, sessionId) =>
     set((s) =>
       patchComposerState(s, sessionId, {
-        referencedDocs: composerSlice(s, sessionId).referencedDocs.filter((r) => r.id !== id),
+        citedRefs: composerSlice(s, sessionId).citedRefs.filter((r) => r.id !== id),
       })
     ),
-  clearReferencedDocs: (sessionId) =>
+  clearCitedRefs: (sessionId) =>
     set((s) =>
-      composerSlice(s, sessionId).referencedDocs.length === 0
+      composerSlice(s, sessionId).citedRefs.length === 0
         ? s
-        : patchComposerState(s, sessionId, { referencedDocs: [] })
+        : patchComposerState(s, sessionId, { citedRefs: [] })
     ),
   addReferencedWorkflowElement: (ref, sessionId) =>
     set((s) => {
@@ -1299,7 +1313,7 @@ export const useChatStore = create<ChatState>((set) => ({
       permissionMode: null,
       referencedPaths: [],
       referencedWorkflowElements: [],
-      referencedDocs: [],
+      citedRefs: [],
       contextSelections: [],
       pendingCommandOverrides: null,
       bookmarkedIds: [],
@@ -1468,6 +1482,13 @@ export function selectComposerPermissionMode(
   sessionId: string | null | undefined
 ): PermissionMode | null {
   return composerReadSlice(state, sessionId).permissionMode
+}
+/** Chip-style citations recorded for `sessionId`'s next send. */
+export function selectComposerCitedRefs(
+  state: ChatState,
+  sessionId: string | null | undefined
+): ContextRef[] {
+  return composerReadSlice(state, sessionId).citedRefs
 }
 /** Staged context selections for `sessionId`'s conversation. */
 export function selectComposerContextSelections(

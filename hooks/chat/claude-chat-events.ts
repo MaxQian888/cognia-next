@@ -29,6 +29,12 @@ import {
   maybeDrainSteer,
   steerArmed,
 } from "./steer-runtime"
+import {
+  clearSidecarLogTrail,
+  lastSidecarError,
+  recordSidecarLog,
+  type SidecarLogFrame,
+} from "@/lib/chat/sidecar-log-trail"
 import { drainSessionPeerMessages } from "@/lib/chat/session-peer-messaging"
 import { completeAttachedSession } from "@/lib/chat/attached-session"
 import { maybeDrainBackgroundResults } from "./background-result-runtime"
@@ -249,8 +255,21 @@ export async function handleEvent(
   }
   switch (evt.type) {
     case "ready":
-    case "log":
+      // A fresh sidecar: every line the trail holds was printed by a process
+      // that no longer exists, so none of them can explain anything this one
+      // goes on to do. Without this the buffer only ever grew for the life of
+      // the renderer and a pre-restart warning outlived the crash it followed.
+      clearSidecarLogTrail()
       return
+    case "log": {
+      // Kept, never rendered. A log line is not a turn outcome — a warning
+      // mid-stream would show as a failure on a turn that goes on to succeed,
+      // and the terminal state belongs to the lifecycle events. What the trail
+      // is for is the `sidecar_exited` case below, which until now raised
+      // "the backend stopped" with the stderr line that explains it discarded.
+      recordSidecarLog(evt as unknown as SidecarLogFrame, Date.now())
+      return
+    }
     case "command_ack": {
       // ADR-0127: the host dropped a retried idempotent command (interrupt /
       // approve / compact / set-model / close) as a duplicate. The first
@@ -290,9 +309,18 @@ export async function handleEvent(
         registry.get(sid).persist.cancel()
         registry.release(sid)
         messagesMirrorRef.current.delete(sid)
+        // The last error line the dying process printed, redacted and capped.
+        // `message` is the diagnostic's documented slot for raw technical
+        // detail, so this reaches the card as supporting text without becoming
+        // the label — the code still decides what this failure *is*.
+        const cause = lastSidecarError(sid)
         chat.setSessionDiagnostic(
           sid,
-          createDiagnostic("sidecarExited", { source: "chat", meta: { sessionId: sid } })
+          createDiagnostic("sidecarExited", {
+            source: "chat",
+            ...(cause ? { message: cause.message } : {}),
+            meta: { sessionId: sid },
+          })
         )
         const cached = chat.lastSendBySession[sid] as
           { options?: { spanId?: string; provider?: string } } | undefined

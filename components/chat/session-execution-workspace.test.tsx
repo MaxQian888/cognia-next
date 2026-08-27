@@ -5,6 +5,7 @@ jest.mock("@/lib/git/commands", () => ({
   gitStatus: (...args: unknown[]) => gitStatusMock(...args),
 }))
 const handoffManagedMock = jest.fn()
+const undoHandoffMock = jest.fn()
 const handoffLocalMock = jest.fn()
 jest.mock("@/lib/task-workspace/handoff", () => ({
   handoffSessionToManaged: (...args: unknown[]) => handoffManagedMock(...args),
@@ -13,7 +14,7 @@ jest.mock("@/lib/task-workspace/handoff", () => ({
   pruneSessionWorktree: jest.fn(),
   resolveSessionHandoffConflict: jest.fn(),
   restoreSessionSnapshot: jest.fn(),
-  undoSessionHandoff: jest.fn(),
+  undoSessionHandoff: (...args: unknown[]) => undoHandoffMock(...args),
 }))
 const listRunsMock = jest.fn()
 const getPatchMock = jest.fn()
@@ -62,6 +63,7 @@ beforeEach(() => {
     lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
   })
   handoffLocalMock.mockReset().mockResolvedValue({ state: "applied", conflicts: [] })
+  undoHandoffMock.mockReset().mockResolvedValue(undefined)
   listRunsMock.mockReset().mockResolvedValue([])
   getPatchMock.mockReset().mockResolvedValue(null)
   getBundleTurnMock.mockReset().mockResolvedValue(null)
@@ -281,4 +283,40 @@ it("keeps managed workspace deletion separate and explicitly confirmed", async (
   fireEvent.click(screen.getByRole("button", { name: "Delete files" }))
   await waitFor(() => expect(deleteManagedMock).toHaveBeenCalledWith("session-1"))
   expect(await screen.findByText("Deleted locally and available for recovery.")).toBeInTheDocument()
+})
+
+it("undoes a handoff without throwing on the bundle turn id", async () => {
+  // Regression: the click handler read a bare `bundleTurnId`, whose only
+  // bindings live inside two useEffects and a callback. SWC erases the type
+  // error and keeps the identifier, so pressing Undo threw ReferenceError —
+  // invisible to typecheck-free tests and to `pnpm build`, which sets
+  // `ignoreBuildErrors`.
+  render(
+    <SessionExecutionWorkspace
+      session={
+        {
+          ...session,
+          executionContext: {
+            location: "local",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            taskWorkspace: {
+              taskId: "task-1",
+              workspaceKey: "session-1",
+              runId: "run-1",
+              bundleTurnId: "bundle-turn-1",
+            },
+          },
+        } as never
+      }
+      projectId="project-1"
+      projectRoot="/repo"
+    />
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Undo last handoff" }))
+  await waitFor(() => expect(undoHandoffMock).toHaveBeenCalledWith("session-1"))
+  // The button's own render condition is `runId`, not `bundleTurnId`, so the
+  // handler has to tolerate the id being absent rather than assume it.
+  expect(screen.queryByRole("button", { name: "Undo last handoff" })).not.toBeInTheDocument()
 })

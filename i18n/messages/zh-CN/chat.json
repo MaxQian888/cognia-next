@@ -202,7 +202,16 @@
       "capabilitiesGroup": "能力",
       "file": "上传文件",
       "folder": "添加文件夹",
-      "trigger": "添加附件"
+      "trigger": "添加附件",
+      "turnGroup": "本轮",
+      "extendGroup": "扩展",
+      "cloudDocs": "云文档",
+      "records": "引用记录",
+      "planMode": "计划模式",
+      "goal": "设定目标",
+      "recordSkill": "录制技能",
+      "slashCommands": "斜杠命令",
+      "externalServices": "外部服务（{count}）"
     },
     "attachments": {
       "analyzing": "正在解析图片…",
@@ -342,6 +351,7 @@
         "error": "润色提示词失败。",
         "noModel": "请在设置中配置模型后再润色提示词。",
         "noOutput": "没有可改进的建议。",
+        "openSettings": "打开设置",
         "pii": "草稿包含敏感信息——已跳过润色。"
       },
       "trigger": "润色提示词"
@@ -489,6 +499,18 @@
         "workflow": "工作流"
       },
       "comingSoon": "即将上线",
+      "entityEmpty": "「{title}」没有可读内容，可能已被删除。",
+      "entityFailed": "读取「{title}」失败：{reason}",
+      "entityKinds": {
+        "artifact": "产物",
+        "issue": "Issue",
+        "memory": "记忆",
+        "plan": "计划",
+        "session": "会话"
+      },
+      "entityStaged": "已把「{title}」附加到下一条消息。",
+      "entityTitle": "引用一条记录",
+      "entityUnavailable": "「{title}」已无法在这里引用。",
       "fileTitle": "引用文件或文件夹",
       "filesSection": "文件",
       "memoryTitle": "追加到 memory",
@@ -497,6 +519,8 @@
       "noArgumentMatches": "没有匹配“{query}”的参数选项。",
       "noCommandMatches": "没有匹配「/{query}」的命令。",
       "noCommands": "暂无可用命令。",
+      "noEntities": "没有可用的{kind}。",
+      "noEntityMatches": "没有匹配“{query}”的{kind}。",
       "noFiles": "没有匹配「{query}」的文件。",
       "noPresetMatches": "没有匹配「{query}」的预设。",
       "noPresets": "暂无可用预设。",
@@ -526,7 +550,8 @@
       "wfEdgeTitle": "引用一条连线",
       "wfNodeTitle": "引用一个节点",
       "workspaceEmpty": "工作区为空。",
-      "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。"
+      "workspaceMissing": "请在会话设置中配置工作目录后再使用 @ 引用。",
+      "workspaceUnreachable": "文件引用需要已配对的设备，连接后即可看到文件。"
     },
     "presets": {
       "applied": "已套用预设「{name}」。",
@@ -561,6 +586,11 @@
       "templateDescription": "描述",
       "title": "存为模板",
       "trigger": "存为模板"
+    },
+    "scheduleSuggestion": {
+      "accept": "去创建",
+      "dismiss": "忽略这条建议",
+      "prompt": "看起来是一件重复的事——要设成定时任务吗？"
     },
     "screenshot": {
       "captureAria": "截图",

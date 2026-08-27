@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import {
   useCallback,
   useEffect,
@@ -317,6 +318,7 @@ export function ChatPane({
   const tHistory = useTranslations("chat.history")
   const tConcurrent = useTranslations("chat.concurrent")
   const tInlineErr = useTranslations("chat.inlineError")
+  const router = useRouter()
   // The pane is bound to its own session slice (defaulting to the focused
   // session) so a background pane reads + streams its own state independently.
   const boundId = sessionId ?? activeSession?.id ?? null
@@ -590,6 +592,11 @@ export function ChatPane({
         <ChatColumn className="mt-2">
           <DiagnosticCard
             diagnostic={errorDiagnostic}
+            // Every kind this surface can genuinely serve. An action with no
+            // handler is DROPPED rather than rendered dead
+            // (`diagnostic-actions.tsx`), so a short map does not degrade
+            // gracefully — it silently removes the button the registry ordered.
+            // `view-logs` alone is prescribed by 18 of the codes.
             handlers={{
               ...(hasHistory ? { retry: () => void handleRetry() } : {}),
               "open-settings": (action) =>
@@ -598,6 +605,16 @@ export function ChatPane({
                     ? (action.section as SettingsSectionId)
                     : "providers"
                 ),
+              "view-logs": () => router.push("/logs"),
+              // The same stop the composer offers. Reached from here because a
+              // `turnSilent` warning is precisely the case where the composer's
+              // stop button is on screen and the user cannot tell whether it
+              // will do anything.
+              "interrupt-turn": () => void onStop(),
+              "reload-app": () => window.location.reload(),
+              "restart-sidecar": () => {
+                void import("@/lib/claude/ipc").then(({ restartSidecar }) => restartSidecar())
+              },
             }}
             onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
           />

@@ -202,7 +202,16 @@
       "capabilitiesGroup": "Capabilities",
       "file": "Upload files",
       "folder": "Add folder",
-      "trigger": "Attach"
+      "trigger": "Attach",
+      "turnGroup": "This turn",
+      "extendGroup": "Extend",
+      "cloudDocs": "Cloud document",
+      "records": "Reference a record",
+      "planMode": "Plan mode",
+      "goal": "Set a goal",
+      "recordSkill": "Record a skill",
+      "slashCommands": "Slash commands",
+      "externalServices": "External services ({count})"
     },
     "attachments": {
       "analyzing": "Analyzing image…",
@@ -342,6 +351,7 @@
         "error": "Couldn't enhance the prompt.",
         "noModel": "Configure a model in Settings to enhance prompts.",
         "noOutput": "No improvement suggested.",
+        "openSettings": "Open settings",
         "pii": "Draft contains sensitive data — enhancement skipped."
       },
       "trigger": "Enhance prompt"
@@ -489,6 +499,18 @@
         "workflow": "Workflow"
       },
       "comingSoon": "Coming soon",
+      "entityEmpty": "“{title}” has nothing to read — it may have been deleted.",
+      "entityFailed": "Could not read “{title}”: {reason}",
+      "entityKinds": {
+        "artifact": "artifact",
+        "issue": "issue",
+        "memory": "memory",
+        "plan": "plan",
+        "session": "conversation"
+      },
+      "entityStaged": "Attached “{title}” to your next message.",
+      "entityTitle": "Reference a record",
+      "entityUnavailable": "“{title}” can no longer be referenced here.",
       "fileTitle": "Reference a file or folder",
       "filesSection": "Files",
       "memoryTitle": "Append to memory",
@@ -497,6 +519,8 @@
       "noArgumentMatches": "No parameter options match \"{query}\".",
       "noCommandMatches": "No commands match \"/{query}\".",
       "noCommands": "No commands available.",
+      "noEntities": "No {kind} available.",
+      "noEntityMatches": "No {kind} matches \"{query}\".",
       "noFiles": "No files match \"{query}\".",
       "noPresetMatches": "No presets match \"{query}\".",
       "noPresets": "No presets available.",
@@ -526,7 +550,8 @@
       "wfEdgeTitle": "Reference an edge",
       "wfNodeTitle": "Reference a node",
       "workspaceEmpty": "Workspace is empty.",
-      "workspaceMissing": "Set a working directory in session settings to use @-references."
+      "workspaceMissing": "Set a working directory in session settings to use @-references.",
+      "workspaceUnreachable": "File references need a paired device. Files appear once one is connected."
     },
     "presets": {
       "applied": "Applied preset \"{name}\".",
@@ -561,6 +586,11 @@
       "templateDescription": "Description",
       "title": "Save as template",
       "trigger": "Save as template"
+    },
+    "scheduleSuggestion": {
+      "accept": "Schedule",
+      "dismiss": "Dismiss suggestion",
+      "prompt": "Looks like a recurring task — schedule it?"
     },
     "screenshot": {
       "captureAria": "Capture screenshot",

@@ -398,6 +398,58 @@ describe("ChatPane", () => {
     }
   })
 
+  it("serves every action its own registry entry prescribes for a chat failure", () => {
+    // An action with no handler is DROPPED, not rendered disabled
+    // (`diagnostic-actions.tsx`), so a short map silently removes buttons the
+    // registry ordered. `sidecarExited` asks for restart-sidecar and view-logs
+    // and used to show neither; view-logs alone is prescribed by 18 codes.
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
+    MockDiagnosticCard.mockClear()
+    const diagnostic = createDiagnostic("sidecarExited", {
+      source: "chat",
+      now: () => 0,
+      id: "d1",
+    })
+    storeState.errorDiagnostic = diagnostic
+    try {
+      render(<ChatPane {...makeProps()} />)
+      const handlers = MockDiagnosticCard.mock.calls[0]?.[0]?.handlers ?? {}
+      for (const action of diagnostic.actions) {
+        expect(Object.keys(handlers)).toContain(action.kind)
+      }
+    } finally {
+      storeState.errorDiagnostic = null
+    }
+  })
+
+  it("serves the workspace codes the send path now emits", () => {
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
+    for (const code of [
+      "workspaceUnavailable",
+      "workspaceBundleFailed",
+      "environmentUnavailable",
+      "environmentSetupFailed",
+    ] as const) {
+      MockDiagnosticCard.mockClear()
+      const diagnostic = createDiagnostic(code, { source: "chat", now: () => 0, id: code })
+      storeState.errorDiagnostic = diagnostic
+      try {
+        render(<ChatPane {...makeProps()} />)
+        const handlers = MockDiagnosticCard.mock.calls[0]?.[0]?.handlers ?? {}
+        // `retry` is conditional on having history, so only assert the rest.
+        for (const action of diagnostic.actions.filter((a) => a.kind !== "retry")) {
+          expect({ code, kind: action.kind, served: action.kind in handlers }).toEqual({
+            code,
+            kind: action.kind,
+            served: true,
+          })
+        }
+      } finally {
+        storeState.errorDiagnostic = null
+      }
+    }
+  })
+
   it("passes any other error message through unchanged", () => {
     const MockInlineError = InlineError as jest.Mock
     MockInlineError.mockClear()

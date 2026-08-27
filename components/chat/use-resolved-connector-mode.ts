@@ -23,13 +23,7 @@ export function useResolvedConnectorMode(
   const binding = session?.platformBinding
   return (
     useResolvedBinding(
-      binding
-        ? {
-            adapterId: binding.adapterId,
-            conversationKey: binding.conversationKey,
-            characterId: session?.characterId,
-          }
-        : null
+      binding ? { adapterId: binding.adapterId, conversationKey: binding.conversationKey } : null
     )?.mode ?? null
   )
 }

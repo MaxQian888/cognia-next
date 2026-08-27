@@ -109,7 +109,13 @@ export function SessionSettingsSection({
           aria-controls={contentId}
           className={cn(
             "flex w-full items-center gap-2.5 px-4 py-2.5 outline-none transition-colors",
-            "hover:bg-muted/40 focus-visible:bg-muted/40"
+            "hover:bg-muted/40 focus-visible:bg-muted/40",
+            // The summary line only renders while collapsed, so a header that
+            // can show one must reserve its row (10px + 20px title + 16px
+            // summary + 10px = 56px). Without the reservation every toggle
+            // snapped the header — and everything under it — by 16px in the
+            // same frame the content started animating.
+            summary && "min-h-14"
           )}
         >
           {header}
@@ -122,12 +128,24 @@ export function SessionSettingsSection({
           />
         </button>
       </CollapsibleTrigger>
-      {/* Padding lives on the inner div: the height animation drives the
-          content element from 0 → measured height, and padding on that element
-          would stay visible at height 0. `motion-reduce` drops the animation. */}
+      {/* Padding lives on the inner div: the collapse animation drives the
+          content element from its measured height → 0, and padding on that
+          element would stay visible at height 0. `motion-reduce` drops the
+          animation.
+
+          Opening deliberately does NOT animate height. Radix measures the
+          content once, in a layout effect, before any of the section's async
+          children (workspace state, snapshot lists, environment rows) have
+          resolved; the keyframe target is therefore stale, the taller real
+          content is clipped for the whole 200ms, and the height snaps at the
+          end. On top of that the measured frame is the same frame that mounts
+          the subtree, so the first half of the animation is dropped. Layout
+          settles in one step and the content fades in instead — compositor
+          only, nothing to retarget. Collapsing keeps the slide: by then the
+          height Radix measures is the real one. */}
       <CollapsibleContent
         id={contentId}
-        className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none"
+        className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1 motion-reduce:animate-none"
       >
         <div className={cn("space-y-4 px-4 pt-1 pb-4", contentClassName)}>{children}</div>
       </CollapsibleContent>

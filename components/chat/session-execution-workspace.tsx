@@ -658,8 +658,16 @@ function SessionExecutionWorkspaceContent({
               disabled={busy}
               onClick={() =>
                 void runOperation(async () => {
+                  // Read the id from context: the three `const bundleTurnId`
+                  // bindings in this file all live inside a hook or callback,
+                  // so the bare identifier here resolved to nothing. SWC erases
+                  // the type error and keeps the name, which made this button
+                  // throw ReferenceError the moment it was pressed.
+                  const undoneTurnId = context?.taskWorkspace.bundleTurnId
                   await undoSessionHandoff(session.id)
-                  setBundleUndoRecovery({ bundleTurnId, recovered: true })
+                  if (undoneTurnId) {
+                    setBundleUndoRecovery({ bundleTurnId: undoneTurnId, recovered: true })
+                  }
                   if (context) setContext({ ...context, location: "managedWorktree" })
                 })
               }
