@@ -28,6 +28,7 @@ export {
   type PanelSource,
 } from "./use-log-panel-filters"
 export { useCrashLogs, type UseCrashLogsResult } from "./use-crash-logs"
+export { useRecentErrorLogs } from "./use-recent-error-logs"
 export {
   useTraceList,
   TRACE_PAGE_SIZE,

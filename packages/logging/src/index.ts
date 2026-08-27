@@ -49,7 +49,12 @@ export {
   flushLogs,
   shutdownLogger,
 } from "./core"
-export { clearRecentErrorLogs, getRecentErrorLogs, subscribeRecentErrorLogs } from "./recent-errors"
+export {
+  clearRecentErrorLogs,
+  getRecentErrorLogs,
+  getRecentErrorLogsSnapshot,
+  subscribeRecentErrorLogs,
+} from "./recent-errors"
 export { installConsoleBridge, type InstallConsoleBridgeOptions } from "./console-bridge"
 
 export {

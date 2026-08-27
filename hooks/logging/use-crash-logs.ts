@@ -16,11 +16,7 @@ import type {
 } from "@/types/logging"
 import { downloadFile } from "@/lib/files/download"
 import { getIndexedDBTransport } from "@/lib/logging"
-import {
-  clearRecentErrorLogs,
-  getRecentErrorLogs,
-  subscribeRecentErrorLogs,
-} from "@cognia/logging/recent-errors"
+import { clearRecentErrorLogs } from "@cognia/logging/recent-errors"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import {
   getNativeLogDirectory,
@@ -30,6 +26,7 @@ import {
 } from "@/lib/native/native-logging"
 import { getWindowDiagnostics } from "@/lib/native/window-diagnostics"
 import { useLogStream } from "./use-log-stream"
+import { useRecentErrorLogs } from "./use-recent-error-logs"
 
 function matchesSearch(item: CrashLogItem, query: string): boolean {
   if (!query.trim()) {
@@ -64,7 +61,9 @@ export function useCrashLogs(): UseCrashLogsResult {
   const [sourceFilter, setSourceFilter] = useState<CrashLogSourceFilter>("all")
   const [levelFilter, setLevelFilter] = useState<CrashLogLevelFilter>("all")
   const [search, setSearch] = useState("")
-  const [recentErrors, setRecentErrors] = useState(getRecentErrorLogs())
+  // Render-safe read of the recent-error buffer — see `useRecentErrorLogs` for
+  // why a plain subscription here is a render-phase update waiting to happen.
+  const recentErrors = useRecentErrorLogs()
   const [diagnostics, setDiagnostics] = useState<CrashDiagnosticsSnapshot | null>(null)
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -82,12 +81,6 @@ export function useCrashLogs(): UseCrashLogsResult {
     maxLogs: 400,
     level: "all",
   })
-
-  useEffect(() => {
-    return subscribeRecentErrorLogs(() => {
-      setRecentErrors(getRecentErrorLogs())
-    })
-  }, [])
 
   const refreshDiagnostics = useCallback(async () => {
     setDiagnosticsLoading(true)
@@ -186,8 +179,9 @@ export function useCrashLogs(): UseCrashLogsResult {
   )
 
   const refresh = useCallback(async () => {
+    // The recent-error buffer needs no re-read: it is subscribed to, not
+    // polled, so it is already whatever the logging core last recorded.
     await Promise.all([refreshPersisted(), refreshDiagnostics()])
-    setRecentErrors(getRecentErrorLogs())
     setLastUpdatedAt(new Date().toISOString())
   }, [refreshDiagnostics, refreshPersisted])
 

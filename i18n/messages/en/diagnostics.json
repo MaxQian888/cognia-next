@@ -4,6 +4,7 @@
     "copyReport": "Copy report",
     "dismiss": "Dismiss",
     "exportCrashLog": "Export crash log",
+    "interruptTurn": "Stop this turn",
     "jumpToNode": "Go to node",
     "locateBinary": "Locate binary",
     "openExternal": "Open docs",
@@ -119,6 +120,14 @@
     "documentedOnly": {
       "hint": "Cognia can't drive this agent directly — follow its own product workflow, or use the built-in agent.",
       "label": "Documentation only"
+    },
+    "environmentSetupFailed": {
+      "label": "Environment setup failed",
+      "hint": "The environment was found but its setup did not finish — retry, and check the log for the failing step."
+    },
+    "environmentUnavailable": {
+      "label": "Environment unavailable",
+      "hint": "The environment this conversation runs in no longer exists — pick another one in Agent Runtime settings, or retry."
     },
     "eventChannelLost": {
       "hint": "Cognia stopped receiving updates from the desktop backend, so parts of the app will look frozen — reload to reconnect.",
@@ -344,6 +353,10 @@
       "hint": "Running an external agent needs the desktop app — in the browser, use the built-in agent.",
       "label": "Needs the desktop app"
     },
+    "turnSilent": {
+      "hint": "This turn has been running a while without reporting anything. A long tool call looks the same from here, so check the log before stopping it.",
+      "label": "No response yet"
+    },
     "unauthorized": {
       "hint": "Authentication failed — check your API key or token in Settings.",
       "label": "Unauthorized"
@@ -351,6 +364,14 @@
     "unknown": {
       "hint": "Something went wrong that Cognia doesn't recognise — the details below help us diagnose it.",
       "label": "Unexpected error"
+    },
+    "workspaceBundleFailed": {
+      "label": "Couldn't open the workspace",
+      "hint": "Preparing the working copy for this turn failed — retry; the log says what the provisioner refused."
+    },
+    "workspaceUnavailable": {
+      "label": "Workspace unavailable",
+      "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel."
     }
   },
   "detail": {

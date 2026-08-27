@@ -31,6 +31,24 @@ export function getRecentErrorLogs(limit = MAX_RECENT_ERROR_LOGS): StructuredLog
   return recentErrorLogs.slice(0, limit)
 }
 
+/**
+ * The buffer itself, by reference — a `useSyncExternalStore` snapshot.
+ *
+ * `getRecentErrorLogs` slices, so it hands back a fresh array on every call and
+ * cannot be a snapshot getter (React would re-render forever). The buffer is
+ * only ever *replaced*, never mutated in place, so its identity is a valid
+ * snapshot: it changes exactly when subscribers are notified.
+ *
+ * This matters beyond tidiness. `recordRecentErrorLog` runs on the console
+ * bridge's synchronous path, so a `console.error` from inside any component's
+ * render notifies subscribers mid-render. A `useState` subscriber then trips
+ * React's "Cannot update a component while rendering a different component";
+ * `useSyncExternalStore` is the path that is allowed to be told mid-render.
+ */
+export function getRecentErrorLogsSnapshot(): StructuredLogEntry[] {
+  return recentErrorLogs
+}
+
 export function clearRecentErrorLogs(): void {
   recentErrorLogs = []
   notifySubscribers()

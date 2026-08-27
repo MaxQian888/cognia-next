@@ -9,17 +9,20 @@
  * a short window it surfaces a "cascading errors" hint. Hidden entirely when
  * there's nothing to show.
  *
- * Uses `useState` + `subscribeRecentErrorLogs` (rather than
- * `useSyncExternalStore`) because `getRecentErrorLogs` returns a fresh array
- * slice on every call, which would violate the snapshot-stability contract.
+ * Reads the buffer through `useRecentErrorLogs`, which is the render-safe read:
+ * recent errors are recorded on the console bridge's synchronous path, so a
+ * `console.error` raised during any render notifies subscribers mid-render, and
+ * a `useState` subscriber there is React's "Cannot update a component while
+ * rendering a different component". The rows are a `useMemo` over that snapshot
+ * rather than a second copy in state.
  */
 
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { getRecentErrorLogs, subscribeRecentErrorLogs } from "@cognia/logging/recent-errors"
 import { LEVEL_THEME } from "@cognia/logging/level-theme"
+import { useRecentErrorLogs } from "@/hooks/logging/use-recent-error-logs"
 import { cn } from "@/lib/utils"
 import { isCascadingIso } from "@/lib/diagnostics/cascade"
 import type { StructuredLogEntry } from "@/types/logging"
@@ -38,8 +41,14 @@ export interface RecentErrorsPanelProps {
   className?: string
 }
 
-function readEntries(limit: number, currentErrorId?: string): StructuredLogEntry[] {
-  const all = getRecentErrorLogs(limit + (currentErrorId ? 1 : 0))
+/** Derived from the whole buffer, not from a pre-sliced window: dropping the
+ * boundary error first is what keeps the panel at `limit` rows even when that
+ * error is not one of the newest few. */
+function selectEntries(
+  all: StructuredLogEntry[],
+  limit: number,
+  currentErrorId?: string
+): StructuredLogEntry[] {
   const filtered = currentErrorId ? all.filter((entry) => entry.id !== currentErrorId) : all
   return filtered.slice(0, limit)
 }
@@ -67,15 +76,11 @@ export function RecentErrorsPanel({
   limit = 5,
   className,
 }: RecentErrorsPanelProps) {
-  const [entries, setEntries] = useState<StructuredLogEntry[]>(() =>
-    readEntries(limit, currentErrorId)
+  const recentErrors = useRecentErrorLogs()
+  const entries = useMemo(
+    () => selectEntries(recentErrors, limit, currentErrorId),
+    [recentErrors, limit, currentErrorId]
   )
-
-  useEffect(() => {
-    const update = () => setEntries(readEntries(limit, currentErrorId))
-    update()
-    return subscribeRecentErrorLogs(update)
-  }, [limit, currentErrorId])
 
   if (entries.length === 0) {
     return null

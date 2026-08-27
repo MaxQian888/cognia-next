@@ -19,6 +19,8 @@
     "autoRefreshOff": "Off",
     "autoRefreshOn": "On",
     "autoRefreshStatus": "Auto Refresh",
+    "detailDescription": "Inspect the crash log entry and the diagnostic snapshot captured with it.",
+    "detailTitle": "Crash detail",
     "diagnostics": {
       "runtime": "Runtime Diagnostics",
       "title": "Diagnostic Snapshots",
@@ -54,8 +56,10 @@
       "title": "Before You Share"
     },
     "refreshing": "Refreshing...",
+    "resizeDetail": "Resize diagnostics detail pane",
     "searchPlaceholder": "Search crash logs...",
     "sourceCount": "sources",
+    "sourceLabel": "Source filter",
     "sources": {
       "all": "All Sources",
       "diagnostic": "Diagnostic",
@@ -1019,6 +1023,7 @@
     "views": {
       "logs": "Logs",
       "traces": "Traces",
+      "diagnostics": "Diagnostics",
       "incidents": "Incidents",
       "service": "Service"
     }

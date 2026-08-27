@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 
-import { CrashLogSettings } from "@/components/settings/system/crash-log-settings"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -16,12 +15,11 @@ import { DiagnosticServiceCard } from "./diagnostic-service-card"
 import { DeveloperFlagsCard } from "./developer-flags-card"
 import { PluginMessagingCard } from "./plugin-messaging-card"
 
-type DiagnosticsTab = "crash-logs" | "native-reports" | "system"
+type DiagnosticsTab = "native-reports" | "system"
 
-const TAB_ORDER: DiagnosticsTab[] = ["crash-logs", "native-reports", "system"]
+const TAB_ORDER: DiagnosticsTab[] = ["native-reports", "system"]
 
 const TAB_LABEL_KEY: Record<DiagnosticsTab, string> = {
-  "crash-logs": "crashLogs",
   "native-reports": "nativeReports",
   system: "system",
 }
@@ -29,15 +27,20 @@ const TAB_LABEL_KEY: Record<DiagnosticsTab, string> = {
 /**
  * Settings → Observability → Diagnostics.
  *
- * Fill-height tabbed surface (registered in `FILL_HEIGHT_SECTIONS`):
- * - Crash logs — incident list + detail two-pane filling the viewport
- * - Native reports — the Rust crash subsystem's saved reports
- * - System — ADR-0028 Phase 14 cards (sandbox audit, sidecar restarts)
- *   and the v49 inbox telemetry exporter
+ * Two tabs, both settings:
+ * - Native reports — where reports go, and the Rust crash subsystem's saved ones
+ * - System — ADR-0028 Phase 14 cards (sandbox audit, sidecar restarts) and the
+ *   v49 inbox telemetry exporter
+ *
+ * The third tab was "Crash logs": a fill-height two-pane crash inspector,
+ * hosted in a settings pane, for logs the route named `/logs` already exists to
+ * show. It is the Diagnostics channel of that workspace now
+ * (`CrashDiagnosticsWorkspace`), so reading a crash no longer means leaving the
+ * logs page for Settings and back.
  */
 export function DiagnosticsSection() {
   const t = useTranslations("settings.diagnostics.tabs")
-  const [activeTab, setActiveTab] = useState<DiagnosticsTab>("crash-logs")
+  const [activeTab, setActiveTab] = useState<DiagnosticsTab>("native-reports")
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3" data-testid="diagnostics-section">
@@ -70,31 +73,25 @@ export function DiagnosticsSection() {
         })}
       </div>
 
-      {activeTab === "crash-logs" ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <CrashLogSettings />
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto w-full max-w-5xl space-y-4">
+          {activeTab === "native-reports" ? (
+            <>
+              {/* Where these reports go, above the list of what is here. */}
+              <DiagnosticServiceCard />
+              <NativeCrashReportsCard />
+            </>
+          ) : (
+            <>
+              <DeveloperFlagsCard />
+              <SandboxAuditCard />
+              <PluginMessagingCard />
+              <SidecarRestartCard />
+              <InboxTelemetryCard />
+            </>
+          )}
         </div>
-      ) : (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto w-full max-w-5xl space-y-4">
-            {activeTab === "native-reports" ? (
-              <>
-                {/* Where these reports go, above the list of what is here. */}
-                <DiagnosticServiceCard />
-                <NativeCrashReportsCard />
-              </>
-            ) : (
-              <>
-                <DeveloperFlagsCard />
-                <SandboxAuditCard />
-                <PluginMessagingCard />
-                <SidecarRestartCard />
-                <InboxTelemetryCard />
-              </>
-            )}
-          </div>
-        </ScrollArea>
-      )}
+      </ScrollArea>
     </div>
   )
 }

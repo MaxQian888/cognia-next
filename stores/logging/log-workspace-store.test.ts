@@ -69,8 +69,9 @@ describe("log-workspace-store", () => {
 })
 
 describe("resolveLogWorkspaceView", () => {
-  it("accepts the three channels and rejects anything else", () => {
+  it("accepts every channel and rejects anything else", () => {
     expect(resolveLogWorkspaceView("traces")).toBe("traces")
+    expect(resolveLogWorkspaceView("diagnostics")).toBe("diagnostics")
     expect(resolveLogWorkspaceView("incidents")).toBe("incidents")
     expect(resolveLogWorkspaceView("health")).toBe("logs")
     expect(resolveLogWorkspaceView(null)).toBe("logs")

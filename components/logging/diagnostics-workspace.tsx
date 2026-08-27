@@ -11,11 +11,17 @@
  * it was mounted with `includeAgentTrace={false}`, which switched off the span
  * merge, the trace view button and the agent-trace stats bar all at once.
  *
- * There are now three channels and the page opens on logs:
+ * The channels, in local → remote order, and the page opens on logs:
  *
- *   logs       the full `LogPanel`, agent-trace enabled
- *   traces     `TraceWorkspace` — trace list → waterfall → span detail
- *   incidents  `IncidentWorkspace` — crash reports, receipts as a filter
+ *   logs         the full `LogPanel`, agent-trace enabled
+ *   traces       `TraceWorkspace` — trace list → waterfall → span detail
+ *   diagnostics  `CrashDiagnosticsWorkspace` — this machine's crash logs and
+ *                the diagnostic snapshot taken with them. Lifted out of
+ *                Settings → Diagnostics, which is where the page named after
+ *                logs used to send you to read the crash ones.
+ *   incidents    `IncidentWorkspace` — crash reports, receipts as a filter
+ *   service      `ServiceConsoleWorkspace` — the diagnostic service's triage
+ *                console
  *
  * The status the deleted `health` view gestured at is now a single live chip
  * in the header (see `WorkspaceHealthPill`) reading from `useTransportHealth`,
@@ -37,6 +43,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
+  ActivityIcon,
   AlertTriangleIcon,
   ServerIcon,
   RotateCcwIcon,
@@ -48,6 +55,7 @@ import {
 import type { FeatureHeaderAction } from "@/components/feature-shell/feature-page-header"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { CrashDiagnosticsWorkspace } from "@/components/logging/crash-diagnostics-workspace"
 import { IncidentDetail, IncidentWorkspace } from "@/components/logging/incident-workspace"
 import { ServiceConsoleWorkspace } from "@/components/logging/service-console-workspace"
 import { LogPanel } from "@/components/logging/log-panel"
@@ -99,6 +107,7 @@ import {
 const CHANNEL_ICONS: Record<LogWorkspaceView, typeof ScrollTextIcon> = {
   logs: ScrollTextIcon,
   traces: WaypointsIcon,
+  diagnostics: ActivityIcon,
   incidents: AlertTriangleIcon,
   service: ServerIcon,
 }
@@ -409,6 +418,8 @@ export function DiagnosticsWorkspace() {
             onOpenInLogs={(trace) => openInLogs({ trace })}
             onOpenSession={(session) => openInLogs({ session })}
           />
+        ) : activeView === "diagnostics" ? (
+          <CrashDiagnosticsWorkspace />
         ) : activeView === "service" ? (
           <ServiceConsoleWorkspace
             console={triageConsole}

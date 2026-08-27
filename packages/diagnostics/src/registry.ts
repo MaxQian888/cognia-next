@@ -51,6 +51,46 @@ const EXTERNAL_AGENT_CONFIG: DiagnosticCodeSpec = {
 }
 
 export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpec>> = {
+  // ------------------------------------------------------------- workspace
+  // The workspace defaults (including `projectsRoot`) live under
+  // `agent-runtime`; the per-session rebind lives in the session's own
+  // workspace sheet, which `chat-view` opens through its `retry` host action
+  // after the binding is fixed.
+  workspaceUnavailable: {
+    severity: "error",
+    retryable: true,
+    persistent: true,
+    actions: [
+      { kind: "retry" },
+      { kind: "open-settings", section: "agent-runtime" },
+      { kind: "view-logs" },
+    ],
+    icon: "settings",
+  },
+  workspaceBundleFailed: {
+    severity: "error",
+    retryable: true,
+    persistent: false,
+    // Acquisition is the native provisioner's job and it says why in the log;
+    // a second attempt genuinely helps when a lease was merely contended.
+    actions: [{ kind: "retry" }, { kind: "view-logs" }],
+    icon: "settings",
+  },
+  environmentUnavailable: {
+    severity: "error",
+    retryable: true,
+    persistent: true,
+    actions: [{ kind: "open-settings", section: "agent-runtime" }, { kind: "retry" }],
+    icon: "settings",
+  },
+  environmentSetupFailed: {
+    severity: "error",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "view-logs" }],
+    icon: "settings",
+  },
+
   // ---------------------------------------------------------------- network
   connectionRefused: {
     severity: "error",
@@ -573,6 +613,22 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
   },
 
   // ------------------------------------------------------------- chat-local
+  turnSilent: {
+    // `warning`, not `error`: nothing has failed. The turn is open and has said
+    // nothing for a long time, which is the observable shape of both a genuinely
+    // slow model and a dropped turn — and the user cannot tell those apart from
+    // a spinner. `persistent` because the condition holds until someone acts;
+    // the watchdog clears it itself the moment the next frame arrives.
+    //
+    // Deliberately NOT `retryable`: re-sending would start a second turn beside
+    // the one still holding the session. The two moves that make sense are to
+    // look at why, and to take the session back.
+    severity: "warning",
+    retryable: false,
+    persistent: true,
+    actions: [{ kind: "interrupt-turn" }, { kind: "view-logs" }],
+    icon: "clock",
+  },
   noSessionOpen: {
     severity: "warning",
     retryable: false,

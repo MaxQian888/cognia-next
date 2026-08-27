@@ -93,6 +93,14 @@ export type DiagnosticAction =
   | { kind: "shorten-input" }
   /** Open the log viewer. */
   | { kind: "view-logs" }
+  /**
+   * Stop the turn that is currently running on this session.
+   *
+   * Distinct from `retry`/`dismiss`: the turn has not failed and has not been
+   * abandoned — it is open and producing nothing, and the only two useful
+   * moves are to look at why (`view-logs`) or to take the session back.
+   */
+  | { kind: "interrupt-turn" }
   /** Jump to the offending node in the workflow editor. */
   | { kind: "jump-to-node"; nodeId: string }
   /** Open an external URL (docs, provider status page, install guide). */
@@ -282,7 +290,23 @@ export type DiagnosticCode =
   | "hostUnavailable"
   | "frozenModelBinding"
   | "degradedFallback"
+  // --- Workspace / project environment preflight ---
+  // These six send-path refusals used to be raw strings through
+  // `setSessionError`, which nulls `errorDiagnostic` — so they landed in the
+  // deprecated `InlineError` whose only affordance opens Providers, the one
+  // settings page that could never fix any of them.
+  | "workspaceUnavailable"
+  | "workspaceBundleFailed"
+  | "environmentUnavailable"
+  | "environmentSetupFailed"
   // --- Chat-local ---
+  /**
+   * The turn was dispatched and acknowledged nothing since. Not an error: no
+   * failure has been observed, which is exactly the problem — a bare `return`
+   * on a path that had already flipped the session to `streaming` leaves the
+   * composer spinning with nothing to report and nothing to press.
+   */
+  | "turnSilent"
   | "noSessionOpen"
   | "promptBlockedByPlugin"
   | "externalAgentNotSelected"

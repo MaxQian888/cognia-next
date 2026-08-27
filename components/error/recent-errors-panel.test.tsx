@@ -60,6 +60,8 @@ describe("RecentErrorsPanel", () => {
     expect(screen.getByTestId("recent-errors-cascade")).toBeInTheDocument()
   })
 
+  // The wake-up is deferred by one microtask (see `useRecentErrorLogs`), so the
+  // assertion has to let that microtask run — hence the async `act`.
   it("reacts to new errors via the subscription", async () => {
     act(() => {
       recordRecentErrorLog(entry("e1", "2026-06-23T10:00:00.000Z", "first"))
@@ -68,10 +70,39 @@ describe("RecentErrorsPanel", () => {
     await userEvent.click(screen.getByTestId("recent-errors-toggle"))
     expect(screen.getAllByTestId("recent-errors-item")).toHaveLength(1)
 
-    act(() => {
+    await act(async () => {
       recordRecentErrorLog(entry("e2", "2026-06-23T10:00:01.000Z", "second"))
+      await Promise.resolve()
     })
     expect(screen.getAllByTestId("recent-errors-item")).toHaveLength(2)
+  })
+
+  // The same render-phase hazard `useCrashLogs` hit: a sibling that logs during
+  // its own render must not wake this panel mid-render.
+  it("takes a mid-render recorded error without a render-phase update warning", () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    let recorded = false
+    function LogsWhileRendering({ noisy }: { noisy: boolean }) {
+      if (noisy && !recorded) {
+        recorded = true
+        recordRecentErrorLog(entry("mid", "2026-06-23T10:00:05.000Z", "mid-render"))
+      }
+      return null
+    }
+    const tree = (noisy: boolean) => (
+      <>
+        <RecentErrorsPanel copy={copy} />
+        <LogsWhileRendering noisy={noisy} />
+      </>
+    )
+
+    const { rerender } = render(tree(false))
+    rerender(tree(true))
+
+    expect(recorded).toBe(true)
+    const logged = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n")
+    expect(logged).not.toContain("Cannot update a component")
+    errorSpy.mockRestore()
   })
 })
 

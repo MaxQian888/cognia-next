@@ -92,7 +92,6 @@
     "title": "Sidecar restarts"
   },
   "tabs": {
-    "crashLogs": "Crash logs",
     "label": "Diagnostics sections",
     "nativeReports": "Native reports",
     "system": "System"

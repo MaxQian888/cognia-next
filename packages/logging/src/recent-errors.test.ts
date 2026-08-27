@@ -5,6 +5,7 @@
 import {
   clearRecentErrorLogs,
   getRecentErrorLogs,
+  getRecentErrorLogsSnapshot,
   recordRecentErrorLog,
   resetRecentErrorLogsForTest,
   subscribeRecentErrorLogs,
@@ -60,6 +61,28 @@ describe("recordRecentErrorLog", () => {
   it("respects the limit argument on read", () => {
     for (let i = 0; i < 5; i++) recordRecentErrorLog(makeEntry("error", `e${i}`))
     expect(getRecentErrorLogs(2).map((e) => e.id)).toEqual(["e4", "e3"])
+  })
+})
+
+describe("getRecentErrorLogsSnapshot", () => {
+  // The `useSyncExternalStore` contract: same buffer, same reference. The
+  // slicing reader cannot serve as a snapshot getter, which is the whole
+  // reason this one exists.
+  it("is stable between records and changes on every write", () => {
+    const first = getRecentErrorLogsSnapshot()
+    expect(getRecentErrorLogsSnapshot()).toBe(first)
+    expect(getRecentErrorLogs()).not.toBe(getRecentErrorLogs())
+
+    recordRecentErrorLog(makeEntry("error", "s1"))
+    const second = getRecentErrorLogsSnapshot()
+    expect(second).not.toBe(first)
+    expect(second.map((e) => e.id)).toEqual(["s1"])
+
+    recordRecentErrorLog(makeEntry("info", "ignored"))
+    expect(getRecentErrorLogsSnapshot()).toBe(second)
+
+    clearRecentErrorLogs()
+    expect(getRecentErrorLogsSnapshot()).not.toBe(second)
   })
 })
 

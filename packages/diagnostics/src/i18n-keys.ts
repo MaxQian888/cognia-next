@@ -28,6 +28,7 @@ export const DIAGNOSTIC_ACTION_KINDS: readonly DiagnosticActionKind[] = [
   "locate-binary",
   "shorten-input",
   "view-logs",
+  "interrupt-turn",
   "jump-to-node",
   "open-external",
   "export-crash-log",

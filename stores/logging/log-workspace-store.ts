@@ -10,9 +10,10 @@
  * gestured at (transport health, native-log readiness, queue depth) has a
  * live implementation in Settings → Logs → Overview.
  *
- * It is now three channels — **logs / traces / incidents** — defaulting to
- * `logs`. `receipts` was never a view, only "incidents that carry a receipt
- * code", so it is a boolean filter on the incidents channel.
+ * It is now five channels — **logs / traces / diagnostics / incidents /
+ * service** — defaulting to `logs`. `receipts` was never a view, only
+ * "incidents that carry a receipt code", so it is a boolean filter on the
+ * incidents channel.
  *
  * The Traces channel additionally carries a sub-view (`explore` / `dashboard`)
  * since the standalone `/observability` route folded into it. Only that switch
@@ -28,12 +29,19 @@ import { persistLocalStorage } from "@/stores/persist-storage"
 import { useObservabilityStore } from "@/stores/observability/observability-store"
 
 /**
- * `service` is the diagnostic service's triage console (ADR-0102). It reads a
- * remote host rather than local state, which is why it is a channel of its own
- * rather than a filter on `incidents`: those are the crashes this machine
- * captured, these are the ones a service accepted from everyone.
+ * The channels run local → remote:
+ *
+ * - `diagnostics` is this machine's crash logs plus the diagnostic snapshot
+ *   taken with them. It used to be Settings → Diagnostics → "Crash logs",
+ *   which sent the user out of the page named after logs to read the crash
+ *   ones; it is a channel here now.
+ * - `incidents` is the packaged native crash *reports* awaiting consent.
+ * - `service` is the diagnostic service's triage console (ADR-0102). It reads
+ *   a remote host rather than local state, which is why it is a channel of its
+ *   own rather than a filter on `incidents`: those are the crashes this
+ *   machine captured, these are the ones a service accepted from everyone.
  */
-export type LogWorkspaceView = "logs" | "traces" | "incidents" | "service"
+export type LogWorkspaceView = "logs" | "traces" | "diagnostics" | "incidents" | "service"
 
 /**
  * The Traces channel's two sub-views. `explore` is the per-trace surface
@@ -62,6 +70,7 @@ export type IncidentStateFilter =
 export const LOG_WORKSPACE_VIEWS: readonly LogWorkspaceView[] = [
   "logs",
   "traces",
+  "diagnostics",
   "incidents",
   "service",
 ]

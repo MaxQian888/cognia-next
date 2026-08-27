@@ -118,7 +118,6 @@ describe("settings component primitives", () => {
         "components/settings/provider/model-catalog-section.tsx",
         "components/settings/security/auto-lock-control.tsx",
         "components/settings/sections/diagnostics-section.tsx",
-        "components/settings/system/crash-log-settings.tsx",
         "components/settings/tray-panel/tray-panel-field-editor.tsx",
       ])
     )

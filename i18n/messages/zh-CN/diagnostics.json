@@ -4,6 +4,7 @@
     "copyReport": "复制报告",
     "dismiss": "忽略",
     "exportCrashLog": "导出崩溃日志",
+    "interruptTurn": "停止这一轮",
     "jumpToNode": "跳转到节点",
     "locateBinary": "指定可执行文件",
     "openExternal": "查看文档",
@@ -119,6 +120,14 @@
     "documentedOnly": {
       "hint": "Cognia 无法直接驱动该智能体——请按其官方流程使用，或改用内置智能体。",
       "label": "仅提供文档"
+    },
+    "environmentSetupFailed": {
+      "label": "环境准备失败",
+      "hint": "环境找到了，但它的准备步骤没有完成——可以重试，并在日志里查看失败的那一步。"
+    },
+    "environmentUnavailable": {
+      "label": "环境不可用",
+      "hint": "这个会话运行所在的环境已不存在——请在「Agent 运行时」设置里另选一个，或重试。"
     },
     "eventChannelLost": {
       "hint": "Cognia 已收不到桌面后端的更新，部分界面会像卡住一样——请重新加载以恢复连接。",
@@ -344,6 +353,10 @@
       "hint": "运行外部智能体需要桌面端应用——在浏览器中请使用内置智能体。",
       "label": "需要桌面端应用"
     },
+    "turnSilent": {
+      "hint": "这一轮已经跑了一段时间，期间没有任何回报。长时间的工具调用从这里看是一样的——先看日志，再决定要不要停止。",
+      "label": "还没有任何响应"
+    },
     "unauthorized": {
       "hint": "身份验证失败——请在设置中检查 API 密钥或令牌。",
       "label": "未授权"
@@ -351,6 +364,14 @@
     "unknown": {
       "hint": "发生了 Cognia 无法识别的错误——下方详情有助于我们定位问题。",
       "label": "意外错误"
+    },
+    "workspaceBundleFailed": {
+      "label": "无法打开工作区",
+      "hint": "为这一轮准备工作副本失败——可以重试；日志里写了供给器拒绝的原因。"
+    },
+    "workspaceUnavailable": {
+      "label": "工作区不可用",
+      "hint": "本设备上解析不到这个会话的工作区——可以重试，或在会话的工作区面板里绑定一个目录。"
     }
   },
   "detail": {

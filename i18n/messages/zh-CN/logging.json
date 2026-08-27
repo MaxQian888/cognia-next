@@ -19,6 +19,8 @@
     "autoRefreshOff": "关闭",
     "autoRefreshOn": "开启",
     "autoRefreshStatus": "自动刷新",
+    "detailDescription": "查看该崩溃日志条目及随其采集的诊断快照。",
+    "detailTitle": "崩溃详情",
     "diagnostics": {
       "runtime": "运行时诊断",
       "title": "诊断快照",
@@ -54,8 +56,10 @@
       "title": "分享前注意"
     },
     "refreshing": "刷新中...",
+    "resizeDetail": "调整诊断详情面板宽度",
     "searchPlaceholder": "搜索崩溃日志...",
     "sourceCount": "个来源",
+    "sourceLabel": "来源筛选",
     "sources": {
       "all": "全部来源",
       "diagnostic": "诊断",
@@ -1019,6 +1023,7 @@
     "views": {
       "logs": "日志",
       "traces": "追踪",
+      "diagnostics": "诊断",
       "incidents": "事故",
       "service": "服务"
     }

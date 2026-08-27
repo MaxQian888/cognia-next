@@ -92,7 +92,6 @@
     "title": "Sidecar 重启"
   },
   "tabs": {
-    "crashLogs": "崩溃日志",
     "label": "诊断分区",
     "nativeReports": "原生报告",
     "system": "系统"
