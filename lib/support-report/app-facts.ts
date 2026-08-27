@@ -12,6 +12,7 @@ import {
   getReleaseChannel,
   getRuntimeVersions,
 } from "@/lib/app-metadata"
+import { detectOsFamily } from "@/lib/platform/os"
 
 export interface DiagnosticsFacts {
   name: string
@@ -42,9 +43,15 @@ export function formatDiagnostics(f: DiagnosticsFacts): string {
   ].join("\n")
 }
 
-/** Read `navigator.platform` defensively (absent in node / SSR). */
+/**
+ * The OS family, not `navigator.platform` — that string says `MacIntel` on
+ * every Mac ever built and on an iPad, which is exactly the line a support
+ * report must not get wrong. Empty when nothing can name it, so
+ * {@link formatDiagnostics} renders the dash.
+ */
 function readPlatform(): string {
-  return typeof navigator !== "undefined" && navigator.platform ? navigator.platform : ""
+  const family = detectOsFamily()
+  return family === "unknown" ? "" : family
 }
 
 /** Gather the live facts from the app-metadata helpers. */

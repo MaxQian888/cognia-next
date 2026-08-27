@@ -31,6 +31,7 @@ import { isAutostartEnabled } from "@/lib/tauri/autostart"
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { isMainAppWindow } from "@/lib/pet/window-role"
+import { detectDesktopOsFamily } from "@/lib/platform/os"
 import type { PetProfile } from "@/types/pet"
 
 import { onAutostartChanged } from "./autostart-control"
@@ -41,12 +42,7 @@ import type { TrayStateSnapshot } from "./types"
 const ACTIVITY_WINDOW_MS = 8_000
 
 function detectOs(): TrayStateSnapshot["platform"]["os"] {
-  if (typeof navigator === "undefined" || !navigator.platform) return "unknown"
-  const p = navigator.platform.toLowerCase()
-  if (p.includes("win")) return "windows"
-  if (p.includes("mac")) return "macos"
-  if (p.includes("linux")) return "linux"
-  return "unknown"
+  return detectDesktopOsFamily()
 }
 
 /** Lazily decay the profile's needs against the current wall clock. */

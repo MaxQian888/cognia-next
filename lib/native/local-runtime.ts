@@ -8,6 +8,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
+import { detectOsFamily } from "@/lib/platform/os"
 import type { LocalRuntimeDiagnostics } from "@/lib/logging/crash-log"
 
 export type { LocalRuntimeDiagnostics }
@@ -76,11 +77,17 @@ function readWebEnv(): Record<string, unknown> {
   if (typeof navigator === "undefined") {
     return { runtime: "server" }
   }
+  // `platform` is the resolved OS family, in the same vocabulary the Tauri
+  // branch uses, so a report never reads `MacIntel` for an Apple Silicon Mac
+  // (or for an iPad). The frozen `navigator.platform` string is deliberately
+  // NOT kept beside it: `userAgent` is one line above and strictly more
+  // informative, so the raw value would add no evidence and put the very
+  // string this field exists to correct back into a report someone reads.
   return {
     runtime: "browser",
     userAgent: navigator.userAgent,
     language: navigator.language,
-    platform: typeof navigator.platform === "string" ? navigator.platform : undefined,
+    platform: detectOsFamily(),
     online: typeof navigator.onLine === "boolean" ? navigator.onLine : undefined,
   }
 }

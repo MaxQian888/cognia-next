@@ -9,6 +9,7 @@ import {
   type as typeNative,
   version as versionNative,
 } from "@tauri-apps/plugin-os"
+import { isMacOs, isLinuxOs } from "@/lib/platform/os"
 import { isTauri } from "@/lib/tauri"
 
 export interface OsInfo {
@@ -75,7 +76,7 @@ export function hostPlatformId(): string | undefined {
 /** Quick check for "is the user on macOS" — drives ⌘ vs Ctrl shortcut hints. */
 export function isMacPlatform(): boolean {
   if (!isTauri()) {
-    return typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
+    return isMacOs()
   }
   try {
     return platformNative() === "macos"
@@ -92,7 +93,7 @@ export function isMacPlatform(): boolean {
  */
 export function isLinuxPlatform(): boolean {
   if (!isTauri()) {
-    return typeof navigator !== "undefined" && /linux/i.test(navigator.platform)
+    return isLinuxOs()
   }
   try {
     return platformNative() === "linux"

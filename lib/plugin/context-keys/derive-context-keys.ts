@@ -6,6 +6,8 @@
 // Route keys are handled separately (imperatively) by the initializer because
 // route ids are open-ended — see the component's route effect.
 
+import { detectDesktopOsFamily } from "@/lib/platform/os"
+
 import type { ContextValue } from "./context-key-store"
 
 export type GuildKind = "dm" | "team" | "canvas" | "plugin-view"
@@ -65,12 +67,7 @@ export function deriveContextKeys(input: ContextKeyInputs): Record<string, Conte
   return keys
 }
 
-/** Detect the host OS from `navigator.platform`. Safe in non-browser contexts. */
+/** Detect the host OS family. Safe in non-browser contexts. */
 export function detectOs(): ContextKeyInputs["os"] {
-  if (typeof navigator === "undefined" || !navigator.platform) return "unknown"
-  const p = navigator.platform.toLowerCase()
-  if (p.includes("win")) return "windows"
-  if (p.includes("mac")) return "macos"
-  if (p.includes("linux")) return "linux"
-  return "unknown"
+  return detectDesktopOsFamily()
 }

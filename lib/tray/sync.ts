@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { useTranslations } from "next-intl"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { detectDesktopOsFamily } from "@/lib/platform/os"
 
 import { APP_VERSION } from "@/lib/app-version"
 
@@ -96,21 +97,12 @@ export async function getTrayTooltipFromRust(): Promise<string | null> {
  * the real chat / goal / automation / platform state.
  */
 export function defaultSnapshot(): TrayStateSnapshot {
-  const os =
-    typeof navigator !== "undefined" && navigator.platform
-      ? navigator.platform.toLowerCase().includes("win")
-        ? "windows"
-        : navigator.platform.toLowerCase().includes("mac")
-          ? "macos"
-          : navigator.platform.toLowerCase().includes("linux")
-            ? "linux"
-            : "unknown"
-      : "unknown"
+  const os = detectDesktopOsFamily()
   return {
     goal: { active: false, paused: false },
     automation: { running: false, armed: true },
     chat: { streaming: false, hasActiveSession: false, awaitingApproval: false, activeCount: 0 },
-    platform: { os: os as TrayStateSnapshot["platform"]["os"] },
+    platform: { os },
     app: { autostart: false, version: APP_VERSION },
   }
 }

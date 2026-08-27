@@ -5,6 +5,8 @@
 // canvas helpers — see `lib/shortcuts/utils.test.ts` for the ported
 // regression cases.
 
+import { usesAppleModifierGlyphs } from "@/lib/platform/os"
+
 import type { Chord } from "./types"
 
 const MODIFIER_ORDER = ["ctrl", "alt", "shift", "meta"] as const
@@ -93,7 +95,9 @@ const PC_LABELS: Record<string, string> = {
 }
 
 function isMacPlatform(): boolean {
-  return typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+  // The GLYPH question, not the OS-family one: an iPad with a Magic Keyboard
+  // is `ios`, not `macos`, and its keys still say ⌘/⌥.
+  return usesAppleModifierGlyphs()
 }
 
 /**
