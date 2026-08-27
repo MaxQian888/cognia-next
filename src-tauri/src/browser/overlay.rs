@@ -10,6 +10,8 @@
 
 /// The selection overlay, injected verbatim via `initialization_script`. Single
 /// source of truth with the Jest suite — both load the same bytes.
+pub const AUTOMATION_CORE_JS: &str =
+    include_str!("../../../lib/browser/automation-core.injected.js");
 pub const OVERLAY_JS: &str = include_str!("../../../lib/browser/overlay.injected.js");
 
 /// Sentinel host the overlay navigates to on selection. A reserved TLD that
@@ -94,6 +96,7 @@ mod tests {
 
     #[test]
     fn overlay_js_is_embedded() {
+        assert!(AUTOMATION_CORE_JS.contains("__cogniaAutomationCore"));
         assert!(OVERLAY_JS.contains("__cogniaSetSelectMode"));
         assert!(OVERLAY_JS.contains("__cognia_select"));
         assert!(OVERLAY_JS.contains("__cognia_nav"));

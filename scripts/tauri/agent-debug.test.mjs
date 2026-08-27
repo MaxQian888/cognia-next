@@ -6,12 +6,29 @@ import {
   agentDebugEnvironment,
   AGENT_DEBUG_TAURI_CONFIG,
   DEFAULT_LAUNCH_TIMEOUT_MS,
+  detectTerminalTauriFailure,
   endpointFilePath,
   launchTimeout,
   parseArgs,
   parseEndpoint,
   tauriDevArgs,
 } from "./agent-debug.mjs"
+
+test("detects terminal Cargo and Tauri launch failures from the log tail", () => {
+  assert.match(
+    detectTerminalTauriFailure(
+      `error[E0277]: trait bound failed\nerror: could not compile \`cognia\` due to 2 previous errors`
+    ),
+    /could not compile/
+  )
+  assert.match(
+    detectTerminalTauriFailure(
+      `Error The \"beforeDevCommand\" terminated with a non-zero status code.`
+    ),
+    /beforeDevCommand/
+  )
+  assert.equal(detectTerminalTauriFailure("Compiling cognia v0.1.0"), null)
+})
 
 test("allows a Cognia cold native build to finish by default", () => {
   assert.equal(launchTimeout(), DEFAULT_LAUNCH_TIMEOUT_MS)

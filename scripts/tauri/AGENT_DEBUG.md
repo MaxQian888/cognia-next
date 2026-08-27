@@ -17,6 +17,11 @@ artifact directory, native log path, and live windows. The session record lives
 under `.cache/tauri-agent-debug/`; normal Tauri builds do not compile the debug
 routes.
 
+The API v3 status report distinguishes missing/stale endpoints, normal builds,
+helper mismatches, authentication failures, tracked-process exits, and session
+ownership mismatches. Cargo/Tauri terminal markers in `tauri-dev.log` abort a
+launch immediately instead of consuming the full cold-build timeout.
+
 The bridge reuses Cognia's per-launch `cli-endpoint.json` token and rejects
 non-loopback clients. Treat that file as a session credential. Raw renderer
 evaluation and screenshots are intentionally unavailable without the feature.
@@ -66,9 +71,12 @@ await page.getByLabel("Message").fill("hello")
 await page.screenshot({ path: ".cache/tauri-agent-debug/flow.png" })
 ```
 
-The client provides strict `TauriLocator` semantics, role/text/label/CSS
-locators, actions, state queries, navigation, `waitFor*`, evaluation,
-screenshots, and buffered console/network evidence. See the project skill at
+The client provides strict atomic `TauriLocator` semantics, role/text/label/CSS
+locators, relative composition, actions, actionability checks, navigation
+identity, `waitFor*`, `ariaSnapshot`, evaluation, screenshots, and cursor-based
+console/network evidence. Locator operations resolve and execute in one webview
+evaluation and therefore do not invalidate one another's snapshot generations.
+See the project skill at
 `.agents/skills/tauri-agent-debug` for the agent workflow and full API matrix.
 
 ## Stop
@@ -77,5 +85,7 @@ screenshots, and buffered console/network evidence. See the project skill at
 pnpm tauri:debug:agent:stop
 ```
 
-`stop` first asks Cognia to exit cleanly, then terminates only the tracked dev
-process group if the Tauri supervisor remains alive.
+`stop` first verifies that the live bridge PID belongs to the tracked session,
+then asks Cognia to exit cleanly and terminates the tracked dev process group if
+the Tauri supervisor remains alive. It refuses shutdown when ownership cannot
+be proven.

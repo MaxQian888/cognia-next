@@ -3,7 +3,20 @@ import path from "node:path"
 
 import { loadEndpoint, request } from "./agent-debug.mjs"
 
-const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+const sleep = (milliseconds, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason || new Error("operation aborted"))
+    const timer = setTimeout(done, milliseconds)
+    signal?.addEventListener("abort", aborted, { once: true })
+    function done() {
+      signal?.removeEventListener("abort", aborted)
+      resolve()
+    }
+    function aborted() {
+      clearTimeout(timer)
+      reject(signal.reason || new Error("operation aborted"))
+    }
+  })
 const cleanRegex = (value) => new RegExp(value.source, value.flags.replace(/[gy]/g, ""))
 
 function expressionFor(pageFunction, arg) {
@@ -40,6 +53,22 @@ export class TauriDebugUnsupportedError extends Error {
   }
 }
 
+export class TauriDebugLocatorError extends Error {
+  constructor(code, message, retryable = false) {
+    super(message)
+    this.name = "TauriDebugLocatorError"
+    this.code = code
+    this.retryable = retryable
+  }
+}
+
+export class TauriDebugTimeoutError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = "TauriDebugTimeoutError"
+  }
+}
+
 export class TauriLocator {
   constructor(page, query, index = null, predicates = []) {
     this.page = page
@@ -72,19 +101,54 @@ export class TauriLocator {
   filter(options = {}) {
     const predicates = [...this.predicates]
     if (options.hasText !== undefined)
-      predicates.push((node) => matches(`${node.name || ""} ${node.text || ""}`, options.hasText))
+      predicates.push({ kind: "hasText", value: serializeMatcher(options.hasText) })
     if (options.hasNotText !== undefined)
-      predicates.push(
-        (node) => !matches(`${node.name || ""} ${node.text || ""}`, options.hasNotText)
-      )
-    if (options.has || options.hasNot)
-      throw new TauriDebugUnsupportedError(
-        "locator.filter({ has/hasNot })",
-        "use a nested semantic locator or CSS locator"
-      )
+      predicates.push({ kind: "hasNotText", value: serializeMatcher(options.hasNotText) })
+    for (const [key, kind] of [
+      ["has", "has"],
+      ["hasNot", "hasNot"],
+    ]) {
+      if (options[key] === undefined) continue
+      const locator = options[key]
+      if (!(locator instanceof TauriLocator) || locator.page !== this.page)
+        throw new TypeError(`filter({ ${key} }) requires a locator from the same TauriPage`)
+      predicates.push({
+        kind,
+        query: locator.query,
+        ...(locator.predicates.length ? { filters: locator.predicates } : {}),
+      })
+    }
+    if (options.visible !== undefined)
+      predicates.push({ kind: "visible", value: Boolean(options.visible) })
     return this._clone({ predicates })
   }
 
+  and(locator) {
+    if (!(locator instanceof TauriLocator) || locator.page !== this.page)
+      throw new TypeError("locator.and() requires a locator from the same TauriPage")
+    return this._clone({
+      query: {
+        kind: "and",
+        left: { kind: "filtered", query: this.query, filters: this.predicates },
+        right: { kind: "filtered", query: locator.query, filters: locator.predicates },
+      },
+      index: null,
+      predicates: [],
+    })
+  }
+  or(locator) {
+    if (!(locator instanceof TauriLocator) || locator.page !== this.page)
+      throw new TypeError("locator.or() requires a locator from the same TauriPage")
+    return this._clone({
+      query: {
+        kind: "or",
+        left: { kind: "filtered", query: this.query, filters: this.predicates },
+        right: { kind: "filtered", query: locator.query, filters: locator.predicates },
+      },
+      index: null,
+      predicates: [],
+    })
+  }
   locator(selector) {
     return this._append({ kind: "css", selector })
   }
@@ -92,16 +156,35 @@ export class TauriLocator {
     return this.locator(`[data-testid=${JSON.stringify(String(testId))}]`)
   }
   getByPlaceholder(text, options = {}) {
-    return this.locator(`[placeholder${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return this._append({
+      kind: "attribute",
+      name: "placeholder",
+      value: serializeMatcher(text),
+      exact: options.exact === true,
+    })
   }
   getByAltText(text, options = {}) {
-    return this.locator(`[alt${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return this._append({
+      kind: "attribute",
+      name: "alt",
+      value: serializeMatcher(text),
+      exact: options.exact === true,
+    })
   }
   getByTitle(text, options = {}) {
-    return this.locator(`[title${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return this._append({
+      kind: "attribute",
+      name: "title",
+      value: serializeMatcher(text),
+      exact: options.exact === true,
+    })
   }
   getByLabel(text, options = {}) {
-    return this._append({ kind: "label", text: String(text), exact: options.exact === true })
+    return this._append({
+      kind: "label",
+      text: serializeMatcher(text),
+      exact: options.exact === true,
+    })
   }
   getByText(text, options = {}) {
     const locator = this._append({
@@ -109,7 +192,7 @@ export class TauriLocator {
       text: serializeMatcher(text),
       exact: options.exact === true,
     })
-    return text instanceof RegExp ? locator.filter({ hasText: text }) : locator
+    return locator
   }
   getByRole(role, options = {}) {
     const { name, exact, ...state } = options
@@ -119,21 +202,25 @@ export class TauriLocator {
       ...state,
       ...(name === undefined ? {} : { name: serializeMatcher(name), exact: exact === true }),
     })
-    return name instanceof RegExp
-      ? locator._clone({ predicates: [...locator.predicates, (node) => matches(node.name, name)] })
-      : locator
+    return locator
   }
 
   async _nodes({ includeHidden = true } = {}) {
-    const payload = await this.page._post("/api/dev/agent/snapshot", {
+    const payload = await this.page._post("/api/dev/agent/locator", {
       window: this.page.windowLabel,
-      includeText: true,
-      includeHidden,
       query: this.query,
+      filters: this.predicates,
+      operation: "query",
+      strict: false,
+      args: { includeHidden },
     })
-    let nodes = payload.snapshot.nodes
-    for (const predicate of this.predicates) nodes = nodes.filter(predicate)
-    return nodes
+    if (!payload.locator?.ok)
+      throw new TauriDebugLocatorError(
+        payload.locator?.code || "locator_failed",
+        payload.locator?.error || "locator query failed",
+        payload.locator?.retryable === true
+      )
+    return payload.locator.nodes
   }
 
   _indexed(nodes) {
@@ -170,9 +257,51 @@ export class TauriLocator {
       if (Date.now() >= deadline) break
       await sleep(100)
     } while (true)
-    throw new Error(
+    throw new TauriDebugTimeoutError(
       `locator timed out after ${timeout}ms: ${JSON.stringify(this.query)}; last count: ${lastNodes.length}`
     )
+  }
+
+  async _atomic(operation, name, args = {}, options = {}, requirements = {}) {
+    if (options.signal?.aborted) throw options.signal.reason || new Error("operation aborted")
+    const payload = await this.page._post(
+      "/api/dev/agent/locator",
+      {
+        window: this.page.windowLabel,
+        query: this.query,
+        index: this.index,
+        filters: this.predicates,
+        operation,
+        name,
+        args,
+        options: {
+          force: options.force === true,
+          trial: options.trial === true,
+          scroll: options.scroll || "auto",
+          timeout: options.timeout ?? this.page.defaultTimeout,
+        },
+        requirements,
+        strict: true,
+      },
+      { signal: options.signal }
+    )
+    const result = payload.locator
+    if (!result?.ok)
+      throw new TauriDebugLocatorError(
+        result?.code || "locator_failed",
+        result?.error || "locator operation failed",
+        result?.retryable === true
+      )
+    if (operation === "action" && result.navigation && options.trial !== true) {
+      await this.page.waitForLoadState(options.waitUntil || "load", {
+        timeout: options.timeout ?? this.page.defaultTimeout,
+        signal: options.signal,
+        previousDocumentId: result.previousDocumentId,
+        previousUrl: result.previousUrl,
+        requireNavigation: true,
+      })
+    }
+    return result.value
   }
 
   async _act(action, args = {}, options = {}, requirements = {}) {
@@ -181,49 +310,58 @@ export class TauriLocator {
     let lastError
     do {
       try {
-        const node = await this._resolve({
-          timeout: Math.max(0, deadline - Date.now()),
-          visible: options.force !== true && requirements.visible === true,
-          enabled: options.force !== true && requirements.enabled === true,
-          editable: options.force !== true && requirements.editable === true,
-        })
-        if (options.trial) return
-        const payload = await this.page._post("/api/dev/agent/act", {
-          window: this.page.windowLabel,
-          reference: node.ref,
-          action,
-          args,
-        })
-        return payload.act.result?.value ?? payload.act.result
+        return await this._atomic("action", action, args, options, requirements)
       } catch (error) {
         lastError = error
-        if (!String(error).includes("stale or unknown element ref") || Date.now() >= deadline)
-          throw error
-        await sleep(50)
+        if (!error.retryable) throw error
+        if (Date.now() >= deadline)
+          throw new TauriDebugTimeoutError(
+            `locator action ${action} timed out after ${timeout}ms: ${error.message}`
+          )
+        await sleep(50, options.signal)
       }
     } while (Date.now() <= deadline)
     throw lastError
   }
 
   async _inspect(operation, args = {}, options = {}) {
-    const node = await this._resolve({ timeout: options.timeout ?? this.page.defaultTimeout })
-    const payload = await this.page._post("/api/dev/agent/inspect", {
-      window: this.page.windowLabel,
-      reference: node.ref,
-      operation,
-      args,
-    })
-    return payload.value
+    const timeout = options.timeout ?? this.page.defaultTimeout
+    const deadline = Date.now() + timeout
+    let lastError
+    do {
+      try {
+        return await this._atomic("inspect", operation, args, options)
+      } catch (error) {
+        lastError = error
+        if (!error.retryable) throw error
+        if (Date.now() >= deadline)
+          throw new TauriDebugTimeoutError(
+            `locator inspection ${operation} timed out after ${timeout}ms: ${error.message}`
+          )
+        await sleep(50, options.signal)
+      }
+    } while (Date.now() <= deadline)
+    throw lastError
   }
 
   click(options) {
-    return this._act("click", {}, options, { visible: true, enabled: true })
+    return this._act("click", {}, options, {
+      visible: true,
+      stable: true,
+      receivesEvents: true,
+      enabled: true,
+    })
   }
   tap(options) {
     return this.click(options)
   }
   dblclick(options) {
-    return this._act("dblclick", {}, options, { visible: true, enabled: true })
+    return this._act("dblclick", {}, options, {
+      visible: true,
+      stable: true,
+      receivesEvents: true,
+      enabled: true,
+    })
   }
   focus(options) {
     return this._act("focus", {}, options, { visible: true })
@@ -322,13 +460,14 @@ export class TauriLocator {
   }
 
   async count() {
-    return (await this._nodes()).length
+    return this._indexed(await this._nodes()).length
   }
   async all() {
+    if (this.index !== null) return (await this.count()) === 0 ? [] : [this]
     return Array.from({ length: await this.count() }, (_, index) => this.nth(index))
   }
   async allTextContents() {
-    return (await this._nodes()).map((node) => node.text)
+    return this._indexed(await this._nodes()).map((node) => node.text)
   }
   async allInnerTexts() {
     return this.allTextContents()
@@ -361,8 +500,31 @@ export class TauriLocator {
     return this._inspect("evaluate", { functionSource: pageFunction.toString(), arg }, options)
   }
 
+  async waitForFunction(pageFunction, arg, options = {}) {
+    if (typeof pageFunction !== "function")
+      throw new TypeError("locator.waitForFunction expects a function")
+    const timeout = options.timeout ?? this.page.defaultTimeout
+    const deadline = Date.now() + timeout
+    let lastValue
+    do {
+      if (options.signal?.aborted)
+        throw options.signal.reason || new Error("locator.waitForFunction aborted")
+      lastValue = await this.evaluate(pageFunction, arg, options)
+      if (lastValue) return lastValue
+      if (Date.now() >= deadline) break
+      await sleep(typeof options.polling === "number" ? options.polling : 100, options.signal)
+    } while (true)
+    throw new TauriDebugTimeoutError(
+      `locator.waitForFunction timed out after ${timeout}ms; last value: ${JSON.stringify(lastValue)}`
+    )
+  }
+
+  ariaSnapshot(options = {}) {
+    return this._inspect("ariaSnapshot", { options }, options)
+  }
+
   async isVisible() {
-    return (await this._nodes()).some((node) => node.visible)
+    return this._indexed(await this._nodes()).some((node) => node.visible)
   }
   async isHidden() {
     return !(await this.isVisible())
@@ -485,6 +647,8 @@ export class TauriPage {
     this.windowLabel = window
     this.fetchImpl = fetchImpl
     this.defaultTimeout = defaultTimeout
+    this._consoleCursor = 0
+    this._networkCursor = 0
     this.keyboard = new TauriKeyboard(this)
     this.mouse = new TauriMouse(this)
   }
@@ -492,8 +656,8 @@ export class TauriPage {
   _request(route, options = {}) {
     return request(route, { ...options, endpoint: this.endpoint, fetchImpl: this.fetchImpl })
   }
-  _post(route, body) {
-    return this._request(route, { method: "POST", body })
+  _post(route, body, options = {}) {
+    return this._request(route, { ...options, method: "POST", body })
   }
   _helperCall(method, ...args) {
     const serializedArgs = args.map((arg) => JSON.stringify(arg)).join(",")
@@ -507,24 +671,51 @@ export class TauriPage {
     return this.locator(`[data-testid=${JSON.stringify(String(testId))}]`)
   }
   getByPlaceholder(text, options = {}) {
-    return this.locator(`[placeholder${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return new TauriLocator(this, {
+      steps: [
+        {
+          kind: "attribute",
+          name: "placeholder",
+          value: serializeMatcher(text),
+          exact: options.exact === true,
+        },
+      ],
+    })
   }
   getByAltText(text, options = {}) {
-    return this.locator(`[alt${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return new TauriLocator(this, {
+      steps: [
+        {
+          kind: "attribute",
+          name: "alt",
+          value: serializeMatcher(text),
+          exact: options.exact === true,
+        },
+      ],
+    })
   }
   getByTitle(text, options = {}) {
-    return this.locator(`[title${options.exact ? "=" : "*="}${JSON.stringify(String(text))}]`)
+    return new TauriLocator(this, {
+      steps: [
+        {
+          kind: "attribute",
+          name: "title",
+          value: serializeMatcher(text),
+          exact: options.exact === true,
+        },
+      ],
+    })
   }
   getByLabel(text, options = {}) {
     return new TauriLocator(this, {
-      steps: [{ kind: "label", text: String(text), exact: options.exact === true }],
+      steps: [{ kind: "label", text: serializeMatcher(text), exact: options.exact === true }],
     })
   }
   getByText(text, options = {}) {
     const locator = new TauriLocator(this, {
       steps: [{ kind: "text", text: serializeMatcher(text), exact: options.exact === true }],
     })
-    return text instanceof RegExp ? locator.filter({ hasText: text }) : locator
+    return locator
   }
   getByRole(role, options = {}) {
     const { name, exact, ...state } = options
@@ -539,9 +730,7 @@ export class TauriPage {
       ],
     }
     const locator = new TauriLocator(this, query)
-    return name instanceof RegExp
-      ? locator._clone({ predicates: [(node) => matches(node.name, name)] })
-      : locator
+    return locator
   }
 
   setDefaultTimeout(timeout) {
@@ -583,28 +772,55 @@ export class TauriPage {
     return this.evaluate(() => document.documentElement.outerHTML)
   }
 
+  _pageState() {
+    return this.evaluate(() => window.__cogniaAgentDebug.health())
+  }
+
   async reload(options = {}) {
+    const before = await this._pageState()
     await this._post("/api/dev/agent/reload", { window: this.windowLabel })
-    await this.waitForLoadState(options.waitUntil || "load", options)
+    await this.waitForLoadState(options.waitUntil || "load", {
+      ...options,
+      previousDocumentId: before.documentId,
+      requireNewDocument: true,
+    })
   }
   async goto(url, options = {}) {
+    const before = await this._pageState()
     await this._post("/api/dev/agent/navigate", { window: this.windowLabel, url })
-    await this.waitForLoadState(options.waitUntil || "load", options)
+    await this.waitForLoadState(options.waitUntil || "load", {
+      ...options,
+      previousDocumentId: before.documentId,
+      previousUrl: before.url,
+      requireNavigation: true,
+    })
     return { url: await this.url() }
   }
   async goBack(options = {}) {
+    const before = await this._pageState()
     await this.evaluate(() => {
       setTimeout(() => history.back(), 0)
       return true
     })
-    await this.waitForLoadState(options.waitUntil || "load", options)
+    await this.waitForLoadState(options.waitUntil || "load", {
+      ...options,
+      previousDocumentId: before.documentId,
+      previousUrl: before.url,
+      requireNavigation: true,
+    })
   }
   async goForward(options = {}) {
+    const before = await this._pageState()
     await this.evaluate(() => {
       setTimeout(() => history.forward(), 0)
       return true
     })
-    await this.waitForLoadState(options.waitUntil || "load", options)
+    await this.waitForLoadState(options.waitUntil || "load", {
+      ...options,
+      previousDocumentId: before.documentId,
+      previousUrl: before.url,
+      requireNavigation: true,
+    })
   }
 
   waitForTimeout(milliseconds) {
@@ -648,13 +864,25 @@ export class TauriPage {
     const deadline = Date.now() + timeout
     let idleSince = null
     do {
-      const health = await this.evaluate(() => window.__cogniaAgentDebug.health())
+      if (options.signal?.aborted)
+        throw options.signal.reason || new Error(`page.waitForLoadState(${state}) aborted`)
+      const health = await this._pageState()
+      const documentChanged = health.documentId !== options.previousDocumentId
+      const urlChanged = health.url !== options.previousUrl
+      const navigationSettled = options.requireNewDocument
+        ? documentChanged
+        : !options.requireNavigation || documentChanged || urlChanged
       const domReady =
         state === "domcontentloaded"
           ? ["interactive", "complete"].includes(health.readyState)
           : health.readyState === "complete"
-      if (state !== "networkidle" && domReady) return
-      if (state === "networkidle" && domReady && health.pendingRequests === 0) {
+      if (state !== "networkidle" && navigationSettled && domReady) return
+      if (
+        state === "networkidle" &&
+        navigationSettled &&
+        domReady &&
+        health.pendingRequests === 0
+      ) {
         idleSince ??= Date.now()
         if (Date.now() - idleSince >= 500) return
       } else idleSince = null
@@ -808,14 +1036,29 @@ export class TauriPage {
     throw new TauriDebugUnsupportedError("video recording", "no recording is active")
   }
   async consoleMessages() {
-    return (
-      await this._request(`/api/dev/agent/console?window=${encodeURIComponent(this.windowLabel)}`)
-    ).console
+    const result = await this.readConsole({ after: this._consoleCursor })
+    this._consoleCursor = result.nextCursor
+    return result.entries
   }
   async networkEvents() {
-    return (
-      await this._request(`/api/dev/agent/network?window=${encodeURIComponent(this.windowLabel)}`)
-    ).network
+    const result = await this.readNetwork({ after: this._networkCursor })
+    this._networkCursor = result.nextCursor
+    return result.entries
+  }
+  async _readDiagnostics(kind, options = {}) {
+    const params = new URLSearchParams({
+      window: this.windowLabel,
+      after: String(options.after ?? 0),
+      limit: String(options.limit ?? 500),
+    })
+    const payload = await this._request(`/api/dev/agent/${kind}?${params}`)
+    return payload[kind]
+  }
+  readConsole(options = {}) {
+    return this._readDiagnostics("console", options)
+  }
+  readNetwork(options = {}) {
+    return this._readDiagnostics("network", options)
   }
   async nativeLogs(options = {}) {
     const lines = options.lines ?? 400

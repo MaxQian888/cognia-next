@@ -77,6 +77,40 @@ export function parseEndpoint(raw) {
   return null
 }
 
+export function detectTerminalTauriFailure(logText) {
+  const lines = String(logText || "").split(/\r?\n/)
+  const markers = [
+    /error: could not compile/i,
+    /beforeDevCommand.*terminated/i,
+    /ELIFECYCLE.*Command failed/i,
+    /failed to run custom build command/i,
+    /tauri dev.*exited with/i,
+  ]
+  for (const marker of markers) {
+    const line = [...lines].reverse().find((entry) => marker.test(entry))
+    if (line) return line.trim()
+  }
+  return null
+}
+
+function terminalFailureFromFile(logFile) {
+  if (!logFile) return null
+  try {
+    const stat = fs.statSync(logFile)
+    const length = Math.min(stat.size, 128 * 1024)
+    const descriptor = fs.openSync(logFile, "r")
+    try {
+      const buffer = Buffer.alloc(length)
+      fs.readSync(descriptor, buffer, 0, length, stat.size - length)
+      return detectTerminalTauriFailure(buffer.toString("utf8"))
+    } finally {
+      fs.closeSync(descriptor)
+    }
+  } catch {
+    return null
+  }
+}
+
 export function parseArgs(argv) {
   const [command = "status", ...tokens] = argv
   const positional = []
@@ -127,8 +161,11 @@ export function loadEndpoint() {
 
 export async function request(
   route,
-  { method = "GET", body, endpoint = loadEndpoint(), fetchImpl = fetch } = {}
+  { method = "GET", body, endpoint = loadEndpoint(), fetchImpl = fetch, signal } = {}
 ) {
+  const requestSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+    : AbortSignal.timeout(15_000)
   const response = await fetchImpl(`${endpoint.baseUrl}${route}`, {
     method,
     headers: {
@@ -136,7 +173,7 @@ export async function request(
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
+    signal: requestSignal,
   })
   const text = await response.text()
   let payload
@@ -145,8 +182,12 @@ export async function request(
   } catch {
     payload = { ok: false, error: text || `HTTP ${response.status}` }
   }
-  if (!response.ok)
-    throw new Error(`${route} failed (${response.status}): ${payload.error || text}`)
+  if (!response.ok) {
+    const error = new Error(`${route} failed (${response.status}): ${payload.error || text}`)
+    error.status = response.status
+    error.code = payload.code
+    throw error
+  }
   return payload
 }
 
@@ -173,10 +214,12 @@ function terminateProcessTree(pid) {
   }
 }
 
-async function waitForAgent(startedAt, timeoutMs, childPid) {
+async function waitForAgent(startedAt, timeoutMs, childPid, logFile) {
   const deadline = Date.now() + timeoutMs
   let lastError = "endpoint not written"
   while (Date.now() < deadline) {
+    const terminalFailure = terminalFailureFromFile(logFile)
+    if (terminalFailure) throw new Error(`Tauri launch failed: ${terminalFailure}`)
     if (childPid && !processAlive(childPid)) {
       throw new Error(`Tauri debug process ${childPid} exited before the bridge was ready`)
     }
@@ -187,7 +230,7 @@ async function waitForAgent(startedAt, timeoutMs, childPid) {
       const endpoint = loadEndpoint()
       const health = await request("/api/dev/agent/health", { endpoint })
       if (
-        health.helper?.version !== 2 ||
+        health.helper?.version !== 3 ||
         !["interactive", "complete"].includes(health.helper.readyState)
       ) {
         throw new Error("agent helper is not ready in the main webview")
@@ -206,6 +249,12 @@ async function launch(options) {
   if (existing?.pid && processAlive(existing.pid)) {
     try {
       const health = await request("/api/dev/agent/health")
+      if (!existing.healthPid || health.pid !== existing.healthPid)
+        throw new Error("tracked session ownership does not match the live bridge")
+      if (health.helper?.version !== 3)
+        throw new Error(
+          `agent helper version mismatch: expected 3, received ${health.helper?.version}`
+        )
       return output({ ok: true, reused: true, session: existing, health })
     } catch {
       throw new Error(
@@ -244,9 +293,12 @@ async function launch(options) {
   let rejectOnExit
   const childExit = new Promise((_, reject) => {
     rejectOnExit = (code, signal) => {
+      const terminalFailure = terminalFailureFromFile(logFile)
       reject(
         new Error(
-          `Tauri debug process exited before the bridge was ready (code=${code ?? "null"}, signal=${signal ?? "none"})`
+          terminalFailure
+            ? `Tauri launch failed: ${terminalFailure}`
+            : `Tauri debug process exited before the bridge was ready (code=${code ?? "null"}, signal=${signal ?? "none"})`
         )
       )
     }
@@ -254,14 +306,16 @@ async function launch(options) {
   })
   try {
     const ready = await Promise.race([
-      waitForAgent(startedAt, launchTimeout(options.timeout), child.pid),
+      waitForAgent(startedAt, launchTimeout(options.timeout), child.pid, logFile),
       childExit,
     ])
     child.off("exit", rejectOnExit)
+    const readySession = { ...session, healthPid: ready.health.pid }
+    fs.writeFileSync(SESSION_FILE, `${JSON.stringify(readySession, null, 2)}\n`, { mode: 0o600 })
     output({
       ok: true,
       reused: false,
-      session,
+      session: readySession,
       endpointFile: ready.endpoint.file,
       health: ready.health,
     })
@@ -279,11 +333,24 @@ async function launch(options) {
 
 async function stop() {
   const session = readJson(SESSION_FILE)
-  try {
+  if (session?.pid && processAlive(session.pid)) {
+    let health
+    try {
+      health = await request("/api/dev/agent/health")
+    } catch (error) {
+      throw new Error(
+        `cannot validate tracked-session ownership; refusing to stop PID ${session.pid}: ${error.message}; session: ${SESSION_FILE}; log: ${session.logFile || "unknown"}`
+      )
+    }
+    if (!session.healthPid || health.pid !== session.healthPid) {
+      throw new Error(
+        `tracked-session ownership mismatch; refusing to stop PID ${session.pid}; session: ${SESSION_FILE}`
+      )
+    }
     await request("/api/dev/agent/shutdown", { method: "POST", body: {} })
-  } catch {}
-  await new Promise((resolve) => setTimeout(resolve, 750))
-  if (session?.pid && processAlive(session.pid)) terminateProcessTree(session.pid)
+    await new Promise((resolve) => setTimeout(resolve, 750))
+    if (processAlive(session.pid)) terminateProcessTree(session.pid)
+  }
   try {
     fs.unlinkSync(SESSION_FILE)
   } catch (error) {
@@ -300,9 +367,57 @@ async function run(parsed) {
     case "stop":
       return stop()
     case "status": {
-      const health = await request("/api/dev/agent/health")
-      const windows = await request("/api/dev/agent/windows")
-      return output({ ok: true, health, windows: windows.windows, session: readJson(SESSION_FILE) })
+      const session = readJson(SESSION_FILE)
+      const paths = { endpoint: endpointFilePath(), session: SESSION_FILE, log: session?.logFile }
+      if (session?.pid && !processAlive(session.pid))
+        return output({ ok: false, status: "tracked_process_exited", session, paths })
+      let endpoint
+      try {
+        endpoint = loadEndpoint()
+      } catch (error) {
+        return output({
+          ok: false,
+          status: "missing_endpoint",
+          error: error.message,
+          session,
+          paths,
+        })
+      }
+      if (session?.startedAt) {
+        const endpointMtime = fs.statSync(endpoint.file).mtimeMs
+        if (endpointMtime + 1_000 < Date.parse(session.startedAt))
+          return output({ ok: false, status: "stale_endpoint", session, paths })
+      }
+      try {
+        const health = await request("/api/dev/agent/health", { endpoint })
+        if (health.agentDebug !== true)
+          return output({ ok: false, status: "normal_non_agent_build", health, session, paths })
+        if (health.helper?.version !== 3)
+          return output({ ok: false, status: "helper_mismatch", health, session, paths })
+        if (session?.healthPid && health.pid !== session.healthPid)
+          return output({ ok: false, status: "ownership_mismatch", health, session, paths })
+        const windows = await request("/api/dev/agent/windows", { endpoint })
+        return output({
+          ok: true,
+          status: "ready",
+          health,
+          windows: windows.windows,
+          session,
+          paths,
+        })
+      } catch (error) {
+        const status =
+          error.status === 401 || error.status === 403
+            ? "authentication_failure"
+            : error.status === 404
+              ? "normal_non_agent_build"
+              : "bridge_unavailable"
+        const message =
+          status === "bridge_unavailable"
+            ? `endpoint exists but the bridge is unreachable: ${endpoint.baseUrl}`
+            : error.message
+        return output({ ok: false, status, error: message, session, paths })
+      }
     }
     case "capabilities": {
       const health = await request("/api/dev/agent/health")

@@ -1,7 +1,12 @@
 /// <reference types="node" />
 
-export type TimeoutOption = { timeout?: number }
-export type ActionOption = TimeoutOption & { force?: boolean; trial?: boolean }
+export type TimeoutOption = { timeout?: number; signal?: AbortSignal }
+export type ActionOption = TimeoutOption & {
+  force?: boolean
+  trial?: boolean
+  scroll?: "auto" | "none"
+  waitUntil?: "domcontentloaded" | "load" | "networkidle"
+}
 export type LocatorState = "attached" | "detached" | "visible" | "hidden"
 export type TextMatcher = string | RegExp
 
@@ -14,9 +19,16 @@ export interface TauriDebugCapabilities {
   stablePositionCheck?: boolean
   receivesEventsCheck?: boolean
   semanticLocators?: boolean
+  atomicLocators?: boolean
+  openShadowDom?: boolean
+  sameOriginFrames?: boolean
+  shadowDomScope?: string
+  frameScope?: string
+  navigationIdentity?: string
   multiWindow?: boolean
   nativeScreenshot?: boolean
   consoleCapture?: string
+  diagnosticCursors?: boolean
   networkCapture?: string
   networkMocking?: string
   dialogs?: boolean
@@ -24,6 +36,7 @@ export interface TauriDebugCapabilities {
   keyboard?: string
   mouse?: string
   trustedEvents?: boolean
+  syntheticInputLimits?: string[]
   video?: boolean
   cdp?: boolean
 }
@@ -59,18 +72,42 @@ export class TauriDebugUnsupportedError extends Error {
   constructor(feature: string, detail?: string)
 }
 
+export class TauriDebugLocatorError extends Error {
+  readonly code: string
+  readonly retryable: boolean
+  constructor(code: string, message: string, retryable?: boolean)
+}
+
+export class TauriDebugTimeoutError extends Error {
+  constructor(message: string)
+}
+
+export interface DiagnosticRead<T = unknown> {
+  entries: T[]
+  nextCursor: number
+  dropped: number
+}
+
 export class TauriLocator {
   first(): TauriLocator
   last(): TauriLocator
   nth(index: number): TauriLocator
   all(): Promise<TauriLocator[]>
-  filter(options: { hasText?: TextMatcher; hasNotText?: TextMatcher }): TauriLocator
+  filter(options: {
+    hasText?: TextMatcher
+    hasNotText?: TextMatcher
+    has?: TauriLocator
+    hasNot?: TauriLocator
+    visible?: boolean
+  }): TauriLocator
+  and(locator: TauriLocator): TauriLocator
+  or(locator: TauriLocator): TauriLocator
   locator(selector: string): TauriLocator
   getByTestId(testId: string): TauriLocator
-  getByPlaceholder(text: string, options?: { exact?: boolean }): TauriLocator
-  getByAltText(text: string, options?: { exact?: boolean }): TauriLocator
-  getByTitle(text: string, options?: { exact?: boolean }): TauriLocator
-  getByLabel(text: string, options?: { exact?: boolean }): TauriLocator
+  getByPlaceholder(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByAltText(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByTitle(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByLabel(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
   getByText(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
   getByRole(role: string, options?: RoleOptions): TauriLocator
 
@@ -119,6 +156,14 @@ export class TauriLocator {
     arg?: A,
     options?: TimeoutOption
   ): Promise<T>
+  waitForFunction<T = unknown, A = unknown>(
+    pageFunction: (element: Element, arg: A) => T | Promise<T>,
+    arg?: A,
+    options?: TimeoutOption & { polling?: number }
+  ): Promise<T>
+  ariaSnapshot(
+    options?: TimeoutOption & { mode?: "ai"; depth?: number; boxes?: boolean }
+  ): Promise<string>
   isVisible(): Promise<boolean>
   isHidden(): Promise<boolean>
   isEnabled(): Promise<boolean>
@@ -167,10 +212,10 @@ export class TauriPage {
   capabilities(): Promise<TauriDebugCapabilities>
   locator(selector: string): TauriLocator
   getByTestId(testId: string): TauriLocator
-  getByPlaceholder(text: string, options?: { exact?: boolean }): TauriLocator
-  getByAltText(text: string, options?: { exact?: boolean }): TauriLocator
-  getByTitle(text: string, options?: { exact?: boolean }): TauriLocator
-  getByLabel(text: string, options?: { exact?: boolean }): TauriLocator
+  getByPlaceholder(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByAltText(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByTitle(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
+  getByLabel(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
   getByText(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
   getByRole(role: string, options?: RoleOptions): TauriLocator
   evaluate<T = unknown, A = unknown>(
@@ -286,6 +331,8 @@ export class TauriPage {
   stopRecording(): never
   consoleMessages(): Promise<unknown[]>
   networkEvents(): Promise<unknown[]>
+  readConsole(options?: { after?: number; limit?: number }): Promise<DiagnosticRead>
+  readNetwork(options?: { after?: number; limit?: number }): Promise<DiagnosticRead>
   nativeLogs(options?: { lines?: number }): Promise<Array<{ source: string; text: string }>>
   window(label: string): TauriPage
   listWindows(): Promise<WindowInfo[]>

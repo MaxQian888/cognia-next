@@ -330,6 +330,7 @@ fn add_embed_webview(
     let nav_app = app.clone();
     let nav_label = EMBED_LABEL.to_string();
     let mut builder = WebviewBuilder::new(EMBED_LABEL, WebviewUrl::External(target))
+        .initialization_script(overlay::AUTOMATION_CORE_JS)
         .initialization_script(overlay::OVERLAY_JS)
         .on_navigation(move |url| handle_embed_navigation(&nav_app, &nav_label, url.as_str()));
     if let Some(proxy_url) = proxy_url {

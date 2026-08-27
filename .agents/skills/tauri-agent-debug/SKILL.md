@@ -17,15 +17,15 @@ for longer flows.
    1+ GiB sidecar dependency tree. A cold Rust build may still use the 20-minute
    default startup budget; pass `--timeout <milliseconds>` only when needed.
 3. Confirm the shell with `rtk pnpm tauri:debug:agent:status`. Do not continue if
-   `agentDebug` is absent or helper API version is not `2`; a stale normal-build
+   `agentDebug` is absent or helper API version is not `3`; a stale normal-build
    endpoint is not a valid target.
 4. Capture `rtk node scripts/tauri/agent-debug.mjs snapshot --include-text`.
 5. Act on a ref from that snapshot. Every action returns a fresh snapshot; use
    only its new generation for the next action.
 6. Reproduce the user path in the real shell. Prefer semantic role/name locators
    over CSS and raw `evaluate`.
-7. On failure, drain console and network events, read native logs, and take a
-   screenshot before changing code.
+7. On failure, read console and network events by cursor, read native logs, and
+   take a screenshot before changing code.
 8. After a fix, repeat the same user path and one adjacent desktop surface.
 9. Stop only the tracked session with `rtk pnpm tauri:debug:agent:stop`.
 

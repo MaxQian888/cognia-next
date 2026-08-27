@@ -1,13 +1,23 @@
 ;(() => {
-  if (window.__cogniaAgentDebug?.version === 2) return
+  if (window.__cogniaAgentDebug?.version === 3) return
+  const legacyAgentDebug = window.__cogniaAgentDebug || null
+
+  const core = window.__cogniaAutomationCore
+  if (!core) throw new Error("Cognia automation core is unavailable")
 
   const MAX_EVENTS = 500
   const MAX_NODES = 500
+  const MAX_FRAME_DEPTH = 8
   const state = {
+    documentId:
+      globalThis.crypto?.randomUUID?.() ||
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
     generation: 0,
     refs: new Map(),
     console: [],
     network: [],
+    consoleSequence: 0,
+    networkSequence: 0,
     pendingRequests: 0,
     networkRoutes: new Map(),
     dialogs: [],
@@ -18,17 +28,24 @@
   }
 
   const capabilities = Object.freeze({
-    apiVersion: 2,
+    apiVersion: 3,
     transport: "tauri-webview-eval",
     locatorAutoWait: true,
     locatorStrictness: true,
     actionability: ["attached", "visible", "enabled", "editable"],
-    stablePositionCheck: false,
-    receivesEventsCheck: false,
+    stablePositionCheck: true,
+    receivesEventsCheck: true,
     semanticLocators: true,
+    atomicLocators: true,
+    openShadowDom: true,
+    sameOriginFrames: true,
+    shadowDomScope: "open-only",
+    frameScope: "same-origin-only",
+    navigationIdentity: "document-id-and-url",
     multiWindow: true,
     nativeScreenshot: true,
     consoleCapture: "buffered",
+    diagnosticCursors: true,
     networkCapture: "fetch-and-xhr",
     networkMocking: "fetch-only",
     dialogs: true,
@@ -36,6 +53,7 @@
     keyboard: "dom-events",
     mouse: "dom-events",
     trustedEvents: false,
+    syntheticInputLimits: ["untrusted-events", "no-native-hit-testing", "no-cdp"],
     video: false,
     cdp: false,
   })
@@ -43,6 +61,23 @@
   const pushBounded = (target, entry) => {
     target.push(entry)
     if (target.length > MAX_EVENTS) target.splice(0, target.length - MAX_EVENTS)
+  }
+
+  const pushDiagnostic = (target, sequenceKey, entry) => {
+    state[sequenceKey] += 1
+    pushBounded(target, { id: state[sequenceKey], ...entry })
+  }
+
+  const readEvents = (target, currentSequence, after = 0, limit = MAX_EVENTS) => {
+    const cursor = Number.isSafeInteger(Number(after)) && Number(after) >= 0 ? Number(after) : 0
+    const boundedLimit = Math.max(1, Math.min(Number(limit) || MAX_EVENTS, MAX_EVENTS))
+    const oldestId = target[0]?.id ?? cursor + 1
+    const entries = target.filter((entry) => entry.id > cursor).slice(0, boundedLimit)
+    return {
+      entries: [...entries],
+      nextCursor: entries.at(-1)?.id ?? Math.max(cursor, currentSequence),
+      dropped: Math.max(0, oldestId - cursor - 1),
+    }
   }
 
   const serialize = (value, depth = 0, seen = new WeakSet()) => {
@@ -75,48 +110,52 @@
   }
 
   const timestamp = () => new Date().toISOString()
-  const normalize = (value) =>
-    String(value ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-  const textMatches = (actual, expected, exact = false) => {
-    const haystack = normalize(actual)
-    if (expected && typeof expected === "object" && typeof expected.regex === "string") {
-      return new RegExp(expected.regex, String(expected.flags || "").replace(/[gy]/g, "")).test(
-        haystack
-      )
+  const normalize = core.normalize
+  const textMatches = core.textMatches
+  const currentPendingRequests = () =>
+    Number(legacyAgentDebug?.health?.()?.pendingRequests ?? state.pendingRequests)
+
+  if (!legacyAgentDebug) {
+    for (const level of ["debug", "info", "log", "warn", "error"]) {
+      const original = console[level]?.bind(console)
+      if (!original) continue
+      console[level] = (...args) => {
+        pushDiagnostic(state.console, "consoleSequence", {
+          timestamp: timestamp(),
+          level,
+          args: serialize(args),
+        })
+        original(...args)
+      }
     }
-    const needle = normalize(expected)
-    return exact
-      ? haystack === needle
-      : haystack.toLocaleLowerCase().includes(needle.toLocaleLowerCase())
+
+    window.addEventListener("error", (event) => {
+      pushDiagnostic(state.console, "consoleSequence", {
+        timestamp: timestamp(),
+        level: "error",
+        args: [
+          {
+            message: event.message,
+            source: event.filename,
+            line: event.lineno,
+            column: event.colno,
+          },
+        ],
+      })
+    })
+    window.addEventListener("unhandledrejection", (event) => {
+      pushDiagnostic(state.console, "consoleSequence", {
+        timestamp: timestamp(),
+        level: "error",
+        args: [{ type: "unhandledrejection", reason: serialize(event.reason) }],
+      })
+    })
   }
 
-  for (const level of ["debug", "info", "log", "warn", "error"]) {
-    const original = console[level]?.bind(console)
-    if (!original) continue
-    console[level] = (...args) => {
-      pushBounded(state.console, { timestamp: timestamp(), level, args: serialize(args) })
-      original(...args)
-    }
+  const syncLegacyDiagnostics = (method, target, sequenceKey) => {
+    if (typeof legacyAgentDebug?.[method] !== "function") return
+    for (const entry of legacyAgentDebug[method]() || []) pushDiagnostic(target, sequenceKey, entry)
   }
-
-  window.addEventListener("error", (event) => {
-    pushBounded(state.console, {
-      timestamp: timestamp(),
-      level: "error",
-      args: [
-        { message: event.message, source: event.filename, line: event.lineno, column: event.colno },
-      ],
-    })
-  })
-  window.addEventListener("unhandledrejection", (event) => {
-    pushBounded(state.console, {
-      timestamp: timestamp(),
-      level: "error",
-      args: [{ type: "unhandledrejection", reason: serialize(event.reason) }],
-    })
-  })
 
   const globMatches = (url, pattern) => {
     if (!pattern) return false
@@ -126,7 +165,7 @@
   }
 
   const originalFetch = window.fetch?.bind(window)
-  if (originalFetch) {
+  if (originalFetch && !legacyAgentDebug) {
     window.fetch = async (...args) => {
       const input = args[0]
       const init = args[1]
@@ -147,7 +186,7 @@
               },
             })
           : await originalFetch(...args)
-        pushBounded(state.network, {
+        pushDiagnostic(state.network, "networkSequence", {
           timestamp: timestamp(),
           method,
           url,
@@ -158,7 +197,7 @@
         })
         return response
       } catch (error) {
-        pushBounded(state.network, {
+        pushDiagnostic(state.network, "networkSequence", {
           timestamp: timestamp(),
           method,
           url,
@@ -175,7 +214,7 @@
   }
 
   const NativeXhr = window.XMLHttpRequest
-  if (NativeXhr) {
+  if (NativeXhr && !legacyAgentDebug) {
     const open = NativeXhr.prototype.open
     const send = NativeXhr.prototype.send
     NativeXhr.prototype.open = function (method, url, ...rest) {
@@ -187,7 +226,7 @@
       const startedAt = performance.now()
       state.pendingRequests += 1
       const finish = () => {
-        pushBounded(state.network, {
+        pushDiagnostic(state.network, "networkSequence", {
           timestamp: timestamp(),
           method: request.method,
           url: request.url,
@@ -203,89 +242,62 @@
     }
   }
 
-  const implicitRole = (element) => {
-    const tag = element.tagName.toLowerCase()
-    if (tag === "button") return "button"
-    if (tag === "a" && element.hasAttribute("href")) return "link"
-    if (tag === "textarea") return "textbox"
-    if (tag === "select") return "combobox"
-    if (/^h[1-6]$/.test(tag)) return "heading"
-    if (tag === "img") return "img"
-    if (tag === "li") return "listitem"
-    if (tag === "input") {
-      const type = (element.getAttribute("type") || "text").toLowerCase()
-      if (["button", "submit", "reset"].includes(type)) return "button"
-      if (type === "checkbox") return "checkbox"
-      if (type === "radio") return "radio"
-      if (type === "range") return "slider"
-      return "textbox"
+  const implicitRole = core.implicitRole
+  const accessibleName = core.accessibleName
+  const isVisible = core.isVisible
+  const isDisabled = core.isDisabled
+  const isEditable = core.isEditable
+
+  const queryAcrossRoots = (
+    root,
+    selector,
+    depth = 0,
+    result = [],
+    scope = { limitations: [] }
+  ) => {
+    if (depth > MAX_FRAME_DEPTH) {
+      scope.limitations.push("maximum frame/shadow depth exceeded")
+      return result
     }
-    return element.getAttribute("role") || null
+    let elements = []
+    try {
+      elements = Array.from(root.querySelectorAll(selector))
+    } catch (error) {
+      throw new Error(`invalid selector: ${String(error)}`)
+    }
+    result.push(...elements)
+    let all = []
+    try {
+      all = Array.from(root.querySelectorAll("*"))
+    } catch {
+      return result
+    }
+    for (const element of all) {
+      if (element.shadowRoot)
+        queryAcrossRoots(element.shadowRoot, selector, depth + 1, result, scope)
+      if (element.tagName === "IFRAME" || element.tagName === "FRAME") {
+        try {
+          if (element.contentDocument)
+            queryAcrossRoots(element.contentDocument, selector, depth + 1, result, scope)
+          else scope.limitations.push("cross-origin frame")
+        } catch {
+          scope.limitations.push("cross-origin frame")
+        }
+      }
+    }
+    return Array.from(new Set(result))
   }
 
-  const accessibleName = (element) => {
-    const labelledBy = element.getAttribute("aria-labelledby")
-    if (labelledBy) {
-      const text = labelledBy
-        .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent || "")
-        .join(" ")
-        .trim()
-      if (text) return normalize(text)
-    }
-    const aria = element.getAttribute("aria-label")?.trim()
-    if (aria) return aria
-    if (element.labels?.length) {
-      const text = Array.from(element.labels)
-        .map((label) => label.textContent || "")
-        .join(" ")
-        .trim()
-      if (text) return normalize(text)
-    }
-    return normalize(
-      element.getAttribute("alt") ||
-        element.getAttribute("title") ||
-        element.getAttribute("placeholder") ||
-        element.textContent ||
-        ""
-    ).slice(0, 240)
-  }
-
-  const isVisible = (element) => {
-    for (let current = element; current instanceof Element; current = current.parentElement) {
-      const style = getComputedStyle(current)
-      if (
-        current.hasAttribute("hidden") ||
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        style.visibility === "collapse" ||
-        style.opacity === "0"
-      )
-        return false
-    }
-    const rect = element.getBoundingClientRect()
-    return rect.width > 0 && rect.height > 0
-  }
-
-  const isDisabled = (element) =>
-    Boolean(element.disabled || element.getAttribute("aria-disabled") === "true")
-  const isEditable = (element) => {
-    if (isDisabled(element) || element.readOnly) return false
-    return ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) || element.isContentEditable
-  }
-
-  const descendants = (root) => Array.from(root.querySelectorAll("*"))
-  const applyStep = (roots, step) => {
+  const descendants = (root, scope) => queryAcrossRoots(root, "*", 0, [], scope)
+  const applyStep = (roots, step, scope) => {
     let candidates = []
     for (const root of roots) {
       if (step.kind === "css") {
-        try {
-          candidates.push(...root.querySelectorAll(step.selector))
-        } catch (error) {
-          throw new Error(`invalid selector: ${String(error)}`)
-        }
+        candidates.push(...queryAcrossRoots(root, step.selector, 0, [], scope))
+      } else if (step.kind === "attribute") {
+        candidates.push(...descendants(root, scope))
       } else {
-        candidates.push(...descendants(root))
+        candidates.push(...descendants(root, scope))
       }
     }
     candidates = Array.from(new Set(candidates))
@@ -344,29 +356,124 @@
           ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) &&
           textMatches(accessibleName(element), step.text, step.exact)
       )
+    } else if (step.kind === "attribute") {
+      candidates = candidates.filter((element) =>
+        textMatches(element.getAttribute(step.name), step.value, step.exact)
+      )
     }
     return candidates
   }
 
-  const resolveCandidates = (options = {}) => {
-    const steps = options.query?.steps?.length
-      ? options.query.steps
-      : options.selector
-        ? [{ kind: "css", selector: options.selector }]
-        : options.role
-          ? [{ kind: "role", role: options.role, name: options.name, exact: options.nameExact }]
-          : options.name
-            ? [{ kind: "text", text: options.name, exact: options.nameExact }]
-            : [
-                {
-                  kind: "css",
-                  selector:
-                    "button,a[href],input,textarea,select,[role],[contenteditable='true'],h1,h2,h3,h4,h5,h6,img,li,p",
-                },
-              ]
-    let roots = [document]
-    for (const step of steps) roots = applyStep(roots, step)
+  const resolveQuery = (query, root = document, scope = { limitations: [] }) => {
+    if (query?.kind === "filtered")
+      return applyFilters(resolveQuery(query.query, root, scope), query.filters, scope)
+    if (query?.kind === "and") {
+      const right = new Set(resolveQuery(query.right, root, scope))
+      return resolveQuery(query.left, root, scope).filter((element) => right.has(element))
+    }
+    if (query?.kind === "or") {
+      return Array.from(
+        new Set([
+          ...resolveQuery(query.left, root, scope),
+          ...resolveQuery(query.right, root, scope),
+        ])
+      )
+    }
+    const steps = query?.steps?.length ? query.steps : []
+    let roots = [root]
+    for (const step of steps) roots = applyStep(roots, step, scope)
     return roots
+  }
+
+  const applyFilters = (elements, filters = [], scope = { limitations: [] }) =>
+    elements.filter((element) =>
+      filters.every((filter) => {
+        const text = `${accessibleName(element)} ${normalize(element.textContent)}`
+        if (filter.kind === "hasText") return textMatches(text, filter.value)
+        if (filter.kind === "hasNotText") return !textMatches(text, filter.value)
+        if (filter.kind === "visible") return isVisible(element) === Boolean(filter.value)
+        if (filter.kind === "has")
+          return (
+            applyFilters(resolveQuery(filter.query, element, scope), filter.filters, scope).length >
+            0
+          )
+        if (filter.kind === "hasNot")
+          return (
+            applyFilters(resolveQuery(filter.query, element, scope), filter.filters, scope)
+              .length === 0
+          )
+        return true
+      })
+    )
+
+  const resolveCandidates = (options = {}, scope = { limitations: [] }) => {
+    const query =
+      options.query?.steps?.length || options.query?.kind
+        ? options.query
+        : options.selector
+          ? { steps: [{ kind: "css", selector: options.selector }] }
+          : options.role
+            ? {
+                steps: [
+                  {
+                    kind: "role",
+                    role: options.role,
+                    name: options.name,
+                    exact: options.nameExact,
+                  },
+                ],
+              }
+            : options.name
+              ? { steps: [{ kind: "text", text: options.name, exact: options.nameExact }] }
+              : {
+                  steps: [
+                    {
+                      kind: "css",
+                      selector:
+                        "button,a[href],input,textarea,select,[role],[contenteditable='true'],h1,h2,h3,h4,h5,h6,img,li,p",
+                    },
+                  ],
+                }
+    return applyFilters(resolveQuery(query, document, scope), options.filters, scope)
+  }
+
+  const indexed = (elements, index) => {
+    if (index == null) return elements
+    const resolved = index < 0 ? elements.length + index : index
+    return elements[resolved] ? [elements[resolved]] : []
+  }
+
+  const nodeFor = (element, ref = null) => {
+    const rect = element.getBoundingClientRect()
+    const role = implicitRole(element)
+    const node = {
+      ...(ref ? { ref } : {}),
+      role: role || "text",
+      name: accessibleName(element),
+      tag: element.tagName.toLowerCase(),
+      text: normalize(element.textContent).slice(0, 500),
+      visible: isVisible(element),
+      disabled: isDisabled(element),
+      editable: isEditable(element),
+      focused: document.activeElement === element,
+      bounds: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+    }
+    if ("value" in element && typeof element.value === "string")
+      node.value = element.value.slice(0, 500)
+    if ("checked" in element) node.checked = Boolean(element.checked)
+    if ("selected" in element) node.selected = Boolean(element.selected)
+    if (element.hasAttribute("href")) node.href = element.href
+    if (element.hasAttribute("aria-expanded"))
+      node.expanded = element.getAttribute("aria-expanded") === "true"
+    if (role === "heading")
+      node.level =
+        Number(element.getAttribute("aria-level") || element.tagName.slice(1)) || undefined
+    return node
   }
 
   const snapshot = (options = {}) => {
@@ -379,52 +486,27 @@
       const visible = isVisible(element)
       if (!visible && !options.includeHidden && !options.query?.steps?.at(-1)?.includeHidden)
         continue
-      const role = element.getAttribute("role") || implicitRole(element)
+      const role = implicitRole(element)
       const interactive = Boolean(
         role && !["heading", "img", "listitem", "paragraph"].includes(role)
       )
       if (!interactive && !options.includeText && role !== "heading" && !options.query) continue
+      if (role === "listitem" && options.includeText && !core.directText(element)) continue
+      if (!role && options.includeText && !core.directText(element)) continue
       const ref = `g${generation}e${nodes.length + 1}`
       state.refs.set(ref, element)
-      const rect = element.getBoundingClientRect()
-      const node = {
-        ref,
-        role: role || "text",
-        name: accessibleName(element),
-        tag: element.tagName.toLowerCase(),
-        text: normalize(element.textContent).slice(0, 500),
-        visible,
-        disabled: isDisabled(element),
-        editable: isEditable(element),
-        focused: document.activeElement === element,
-        bounds: {
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        },
-      }
-      if ("value" in element && typeof element.value === "string")
-        node.value = element.value.slice(0, 500)
-      if ("checked" in element) node.checked = Boolean(element.checked)
-      if ("selected" in element) node.selected = Boolean(element.selected)
-      if (element.hasAttribute("href")) node.href = element.href
-      if (element.hasAttribute("aria-expanded"))
-        node.expanded = element.getAttribute("aria-expanded") === "true"
-      if (role === "heading")
-        node.level =
-          Number(element.getAttribute("aria-level") || element.tagName.slice(1)) || undefined
-      nodes.push(node)
+      nodes.push(nodeFor(element, ref))
     }
     return {
       generation,
+      documentId: state.documentId,
       url: location.href,
       title: document.title,
       readyState: document.readyState,
       viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
       nodes,
       truncated: nodes.length >= MAX_NODES,
-      pendingRequests: state.pendingRequests,
+      pendingRequests: currentPendingRequests(),
     }
   }
 
@@ -434,20 +516,34 @@
     return element
   }
 
-  const setNativeValue = (element, value) => {
-    const prototype =
-      element instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype
-        : HTMLInputElement.prototype
-    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set
-    if (setter) setter.call(element, value)
-    else element.value = value
-    element.dispatchEvent(new Event("input", { bubbles: true }))
-    element.dispatchEvent(new Event("change", { bubbles: true }))
+  const ariaSnapshot = (root, options = {}) => {
+    const lines = []
+    const maxDepth = Math.max(0, Math.min(Number(options.depth ?? 5), 12))
+    const visit = (element, depth) => {
+      if (depth > maxDepth || !isVisible(element)) return
+      const role = implicitRole(element)
+      const name = accessibleName(element)
+      const direct = core.directText(element)
+      if (role || direct) {
+        const label = name || direct
+        const box = options.boxes ? element.getBoundingClientRect() : null
+        lines.push(
+          `${"  ".repeat(depth)}- ${role || "text"}${label ? ` ${JSON.stringify(label)}` : ""}${
+            box
+              ? ` [box=${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}]`
+              : ""
+          }`
+        )
+      }
+      for (const child of element.children || []) visit(child, depth + 1)
+      if (element.shadowRoot?.mode === "open")
+        for (const child of element.shadowRoot.children || []) visit(child, depth + 1)
+    }
+    visit(root, 0)
+    return lines.join("\n")
   }
 
-  const inspect = async (ref, operation, args = {}) => {
-    const element = refElement(ref)
+  const inspectElement = async (element, operation, args = {}) => {
     switch (operation) {
       case "textContent":
         return element.textContent
@@ -468,26 +564,40 @@
         return getComputedStyle(element).getPropertyValue(String(args.property))
       case "evaluate":
         return serialize(await (0, eval)(`(${String(args.functionSource)})`)(element, args.arg))
+      case "ariaSnapshot":
+        return ariaSnapshot(element, args.options)
       default:
         throw new Error(`unsupported inspection: ${operation}`)
     }
   }
 
-  const act = async (ref, action, args = {}) => {
-    const element = refElement(ref)
+  const inspect = (ref, operation, args = {}) => inspectElement(refElement(ref), operation, args)
+
+  const actElement = async (element, action, args = {}) => {
     if (
       isDisabled(element) &&
       !["focus", "blur", "scrollIntoView", "dispatchEvent"].includes(action)
     )
-      throw new Error(`element is disabled: ${ref}`)
+      throw new Error("element is disabled")
     let value = null
     switch (action) {
       case "click":
         element.click()
         break
       case "dblclick":
+        for (const detail of [1, 2]) {
+          for (const type of ["mousedown", "mouseup", "click"])
+            element.dispatchEvent(
+              new MouseEvent(type, { bubbles: true, cancelable: true, view: window, detail })
+            )
+        }
         element.dispatchEvent(
-          new MouseEvent("dblclick", { bubbles: true, cancelable: true, view: window })
+          new MouseEvent("dblclick", {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            detail: 2,
+          })
         )
         break
       case "focus":
@@ -501,28 +611,28 @@
         element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, view: window }))
         break
       case "fill":
-        setNativeValue(element, String(args.value ?? ""))
+        core.setValue(element, String(args.value ?? ""), false)
         break
       case "type":
         element.focus()
-        setNativeValue(element, `${element.value || ""}${String(args.value ?? "")}`)
+        core.setValue(element, String(args.value ?? ""), true)
         break
       case "press": {
-        const key = String(args.key || "Enter")
+        const chord = core.parseKeyChord(args.key || "Enter")
         element.focus()
-        element.dispatchEvent(
-          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
-        )
-        element.dispatchEvent(
-          new KeyboardEvent("keypress", { key, bubbles: true, cancelable: true })
-        )
-        element.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }))
+        const event = { ...chord, bubbles: true, cancelable: true }
+        element.dispatchEvent(new KeyboardEvent("keydown", event))
+        if (String(chord.key).length === 1 && !chord.ctrlKey && !chord.altKey && !chord.metaKey)
+          element.dispatchEvent(new KeyboardEvent("keypress", event))
+        element.dispatchEvent(new KeyboardEvent("keyup", event))
         break
       }
       case "check":
       case "uncheck": {
         const desired = action === "check"
         if (Boolean(element.checked) !== desired) element.click()
+        if (Boolean(element.checked) !== desired)
+          throw new Error(`${action} did not reach the requested checked state`)
         break
       }
       case "select": {
@@ -534,6 +644,17 @@
         element.dispatchEvent(new Event("input", { bubbles: true }))
         element.dispatchEvent(new Event("change", { bubbles: true }))
         value = Array.from(element.selectedOptions || []).map((option) => option.value)
+        if (
+          requested.some(
+            (requestedValue) =>
+              !Array.from(element.options || []).some(
+                (option) =>
+                  option.selected &&
+                  (option.value === requestedValue || option.label === requestedValue)
+              )
+          )
+        )
+          throw new Error("select did not match every requested option")
         break
       }
       case "scrollIntoView":
@@ -588,8 +709,105 @@
       default:
         throw new Error(`unsupported action: ${action}`)
     }
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    return { action, ref, value }
+    if (!["click", "dblclick"].includes(action))
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    return { action, value }
+  }
+
+  const act = async (ref, action, args = {}) => ({
+    ...(await actElement(refElement(ref), action, args)),
+    ref,
+  })
+
+  const locatorError = (code, error, retryable = false) => ({
+    ok: false,
+    code,
+    error,
+    retryable,
+  })
+
+  const locator = async (request = {}) => {
+    const scope = { limitations: [] }
+    let elements = applyFilters(
+      resolveQuery(request.query, document, scope),
+      request.filters,
+      scope
+    )
+    elements = indexed(elements, request.index)
+    if (request.strict !== false && request.index == null && elements.length > 1) {
+      return locatorError(
+        "strict_mode_violation",
+        `strict locator resolved to ${elements.length} elements`
+      )
+    }
+    const element = elements[0]
+    if (request.operation === "query") {
+      return { ok: true, nodes: elements.slice(0, MAX_NODES).map((entry) => nodeFor(entry)) }
+    }
+    if (!element && scope.limitations.length)
+      return locatorError(
+        "unsupported_scope",
+        `${Array.from(new Set(scope.limitations)).join(", ")} is unsupported by synthetic Tauri input; use Windows CDP or the configured remote-Chromium browser backend`
+      )
+    if (!element) return locatorError("not_found", "locator did not resolve", true)
+
+    if (request.operation === "inspect") {
+      try {
+        return {
+          ok: true,
+          value: await inspectElement(element, request.name, request.args),
+          documentId: state.documentId,
+        }
+      } catch (error) {
+        return locatorError("inspection_failed", String(error))
+      }
+    }
+
+    if (request.operation === "action") {
+      const requirements = request.requirements || {}
+      const options = request.options || {}
+      const previousDocumentId = state.documentId
+      const previousUrl = location.href
+      try {
+        if (options.scroll !== "none")
+          element.scrollIntoView?.({ block: "center", inline: "center" })
+        if (options.force !== true) {
+          if (requirements.visible && !isVisible(element))
+            return locatorError("not_visible", "element is not visible", true)
+          if (requirements.enabled && isDisabled(element))
+            return locatorError("not_enabled", "element is disabled", true)
+          if (requirements.editable && !isEditable(element))
+            return locatorError("not_editable", "element is not editable", true)
+          if (requirements.stable && !(await core.isStable(element)))
+            return locatorError("not_stable", "element position is not stable", true)
+          if (requirements.receivesEvents && !core.receivesEvents(element))
+            return locatorError("not_receives_events", "element does not receive events", true)
+        }
+        if (options.trial)
+          return {
+            ok: true,
+            value: null,
+            documentId: state.documentId,
+            previousDocumentId,
+            previousUrl,
+            url: location.href,
+            navigation: false,
+          }
+        const result = await actElement(element, request.name, request.args)
+        return {
+          ok: true,
+          value: result.value ?? result,
+          documentId: state.documentId,
+          previousDocumentId,
+          previousUrl,
+          url: location.href,
+          navigation: state.documentId !== previousDocumentId || location.href !== previousUrl,
+        }
+      } catch (error) {
+        return locatorError("action_failed", String(error))
+      }
+    }
+    return locatorError("unsupported_locator_operation", String(request.operation))
   }
 
   const keyboard = async (operation, args = {}) => {
@@ -616,13 +834,7 @@
       element.dispatchEvent(new KeyboardEvent("keyup", eventOptions))
     } else if (["type", "insertText"].includes(operation)) {
       const text = String(args.text ?? "")
-      if ("value" in element) setNativeValue(element, `${element.value || ""}${text}`)
-      else if (element.isContentEditable) {
-        element.textContent = `${element.textContent || ""}${text}`
-        element.dispatchEvent(
-          new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" })
-        )
-      }
+      if ("value" in element || element.isContentEditable) core.setValue(element, text, true)
     } else throw new Error(`unsupported keyboard operation: ${operation}`)
     return true
   }
@@ -674,6 +886,8 @@
   }
 
   const installDialogHandler = (options = {}) => {
+    if (typeof legacyAgentDebug?.installDialogHandler === "function")
+      return legacyAgentDebug.installDialogHandler(options)
     state.dialogOptions = { ...state.dialogOptions, ...options }
     if (state.dialogHandlerInstalled) return true
     const native = {
@@ -712,42 +926,69 @@
 
   const drain = (target) => target.splice(0, target.length)
   window.__cogniaAgentDebug = Object.freeze({
-    version: 2,
+    version: 3,
     capabilities,
     snapshot,
+    locator,
     inspect,
     act,
     keyboard,
     mouse,
     serialize,
     installDialogHandler,
-    getDialogs: () => [...state.dialogs],
+    getDialogs: () =>
+      typeof legacyAgentDebug?.getDialogs === "function"
+        ? legacyAgentDebug.getDialogs()
+        : [...state.dialogs],
     clearDialogs: () => {
+      if (typeof legacyAgentDebug?.clearDialogs === "function")
+        return legacyAgentDebug.clearDialogs()
       state.dialogs.length = 0
       return true
     },
     addNetworkRoute: (pattern, response) => {
+      if (typeof legacyAgentDebug?.addNetworkRoute === "function")
+        return legacyAgentDebug.addNetworkRoute(pattern, response)
       state.networkRoutes.set(String(pattern), response || {})
       return true
     },
-    removeNetworkRoute: (pattern) => state.networkRoutes.delete(String(pattern)),
+    removeNetworkRoute: (pattern) =>
+      typeof legacyAgentDebug?.removeNetworkRoute === "function"
+        ? legacyAgentDebug.removeNetworkRoute(pattern)
+        : state.networkRoutes.delete(String(pattern)),
     clearNetworkRoutes: () => {
+      if (typeof legacyAgentDebug?.clearNetworkRoutes === "function")
+        return legacyAgentDebug.clearNetworkRoutes()
       state.networkRoutes.clear()
       return true
     },
-    getNetworkRequests: () => [...state.network],
+    getNetworkRequests: () =>
+      typeof legacyAgentDebug?.getNetworkRequests === "function"
+        ? legacyAgentDebug.getNetworkRequests()
+        : [...state.network],
     clearNetworkRequests: () => {
+      if (typeof legacyAgentDebug?.clearNetworkRequests === "function")
+        return legacyAgentDebug.clearNetworkRequests()
       state.network.length = 0
       return true
     },
     drainConsole: () => drain(state.console),
     drainNetwork: () => drain(state.network),
+    readConsole: (after, limit) => {
+      syncLegacyDiagnostics("drainConsole", state.console, "consoleSequence")
+      return readEvents(state.console, state.consoleSequence, after, limit)
+    },
+    readNetwork: (after, limit) => {
+      syncLegacyDiagnostics("drainNetwork", state.network, "networkSequence")
+      return readEvents(state.network, state.networkSequence, after, limit)
+    },
     health: () => ({
-      version: 2,
+      version: 3,
       readyState: document.readyState,
       url: location.href,
+      documentId: state.documentId,
       generation: state.generation,
-      pendingRequests: state.pendingRequests,
+      pendingRequests: currentPendingRequests(),
       capabilities,
     }),
   })

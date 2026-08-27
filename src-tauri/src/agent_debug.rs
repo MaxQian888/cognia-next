@@ -20,6 +20,7 @@ use tauri::{AppHandle, Manager, Webview, WebviewWindow};
 use crate::cli_bridge::SharedState;
 
 const INJECTED_SCRIPT: &str = include_str!("agent_debug/injected.js");
+const AUTOMATION_CORE_SCRIPT: &str = include_str!("../../lib/browser/automation-core.injected.js");
 const MAX_EXPRESSION_BYTES: usize = 64 * 1024;
 const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_WINDOW: &str = "main";
@@ -33,6 +34,17 @@ type ApiResult = Result<Json<Value>, (StatusCode, Json<Value>)>;
 struct WindowQuery {
     #[serde(default = "default_window")]
     window: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticQuery {
+    #[serde(default = "default_window")]
+    window: String,
+    #[serde(default)]
+    after: u64,
+    #[serde(default = "default_diagnostic_limit")]
+    limit: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +88,27 @@ struct InspectRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct LocatorRequest {
+    #[serde(default = "default_window")]
+    window: String,
+    query: Value,
+    index: Option<i64>,
+    #[serde(default)]
+    filters: Vec<Value>,
+    operation: String,
+    name: Option<String>,
+    #[serde(default)]
+    args: Value,
+    #[serde(default)]
+    options: Value,
+    #[serde(default)]
+    requirements: Value,
+    #[serde(default = "default_true")]
+    strict: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EvaluateRequest {
     #[serde(default = "default_window")]
     window: String,
@@ -100,6 +133,14 @@ fn default_window() -> String {
     DEFAULT_WINDOW.to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_diagnostic_limit() -> usize {
+    500
+}
+
 pub fn router() -> Router<SharedState> {
     Router::new()
         .route("/api/dev/agent/health", get(health))
@@ -107,6 +148,7 @@ pub fn router() -> Router<SharedState> {
         .route("/api/dev/agent/snapshot", post(snapshot))
         .route("/api/dev/agent/act", post(act))
         .route("/api/dev/agent/inspect", post(inspect))
+        .route("/api/dev/agent/locator", post(locator))
         .route("/api/dev/agent/evaluate", post(evaluate))
         .route("/api/dev/agent/console", get(console))
         .route("/api/dev/agent/network", get(network))
@@ -120,6 +162,13 @@ pub fn router() -> Router<SharedState> {
 /// Install the non-invasive page helper after each navigation. The helper is
 /// idempotent, so routes may also install it lazily before an operation.
 pub fn install(webview: &Webview) {
+    if let Err(error) = webview.eval(AUTOMATION_CORE_SCRIPT) {
+        log::warn!(
+            "agent_debug automation core injection failed for {}: {error}",
+            webview.label()
+        );
+        return;
+    }
     if let Err(error) = webview.eval(INJECTED_SCRIPT) {
         log::warn!(
             "agent_debug helper injection failed for {}: {error}",
@@ -210,6 +259,50 @@ async fn inspect(
     })))
 }
 
+async fn locator(
+    State(state): State<SharedState>,
+    Json(request): Json<LocatorRequest>,
+) -> ApiResult {
+    const OPERATIONS: [&str; 3] = ["query", "inspect", "action"];
+    if !OPERATIONS.contains(&request.operation.as_str()) {
+        return Err(bad_request(
+            "unsupported_locator_operation",
+            format!("unsupported locator operation: {}", request.operation),
+        ));
+    }
+    let webview = resolve_webview(&state.app_handle, &request.window)?;
+    let timeout = Duration::from_millis(
+        request
+            .options
+            .get("timeout")
+            .and_then(Value::as_u64)
+            .unwrap_or(10_000)
+            .clamp(1, 10_000),
+    );
+    let payload = serde_json::to_string(&json!({
+        "query": request.query,
+        "index": request.index,
+        "filters": request.filters,
+        "operation": request.operation,
+        "name": request.name,
+        "args": request.args,
+        "options": request.options,
+        "requirements": request.requirements,
+        "strict": request.strict,
+    }))
+    .map_err(internal_error)?;
+    let script =
+        format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload})))()");
+    let value = eval_json_async_with_timeout(&webview, &script, timeout)
+        .await
+        .map_err(eval_error)?;
+    Ok(Json(json!({
+        "ok": true,
+        "window": request.window,
+        "locator": value,
+    })))
+}
+
 async fn act(State(state): State<SharedState>, Json(request): Json<ActRequest>) -> ApiResult {
     validate_ref(&request.reference)?;
     validate_action(&request.action)?;
@@ -257,19 +350,36 @@ async fn evaluate(
     ))
 }
 
-async fn console(State(state): State<SharedState>, Query(query): Query<WindowQuery>) -> ApiResult {
-    drain(&state.app_handle, &query.window, "drainConsole", "console").await
+async fn console(
+    State(state): State<SharedState>,
+    Query(query): Query<DiagnosticQuery>,
+) -> ApiResult {
+    read_diagnostics(&state.app_handle, &query, "readConsole", "console").await
 }
 
-async fn network(State(state): State<SharedState>, Query(query): Query<WindowQuery>) -> ApiResult {
-    drain(&state.app_handle, &query.window, "drainNetwork", "network").await
+async fn network(
+    State(state): State<SharedState>,
+    Query(query): Query<DiagnosticQuery>,
+) -> ApiResult {
+    read_diagnostics(&state.app_handle, &query, "readNetwork", "network").await
 }
 
-async fn drain(app: &AppHandle, label: &str, method: &str, key: &str) -> ApiResult {
-    let webview = resolve_webview(app, label)?;
-    let script = format!("JSON.stringify(window.__cogniaAgentDebug.{method}())");
+async fn read_diagnostics(
+    app: &AppHandle,
+    query: &DiagnosticQuery,
+    method: &str,
+    key: &str,
+) -> ApiResult {
+    let webview = resolve_webview(app, &query.window)?;
+    let limit = query.limit.clamp(1, 500);
+    let script = format!(
+        "JSON.stringify(window.__cogniaAgentDebug.{method}({}, {limit}))",
+        query.after
+    );
     let value = eval_json(&webview, &script).await.map_err(eval_error)?;
-    Ok(Json(json!({ "ok": true, "window": label, (key): value })))
+    Ok(Json(
+        json!({ "ok": true, "window": query.window, (key): value }),
+    ))
 }
 
 async fn reload(State(state): State<SharedState>, Json(request): Json<WindowQuery>) -> ApiResult {
@@ -439,7 +549,7 @@ fn unwrap_js_string(raw: String) -> String {
 fn async_eval_start_script(request_id: &str, expression: &str) -> String {
     let request_id = serde_json::to_string(request_id).expect("request id is serializable");
     format!(
-        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));results[id]={{status:\"pending\"}};Promise.resolve().then(async()=>{{try{{results[id]={{status:\"fulfilled\",value:await ({expression})}}}}catch(error){{results[id]={{status:\"rejected\",error:String((error&&(error.stack||error.message))||error)}}}}}});return JSON.stringify({{status:\"started\"}})}})()"
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));const now=Date.now();for(const [key,result] of Object.entries(results)){{if(now-Number(result.startedAt||now)>30000)delete results[key]}}const keys=Object.keys(results).sort((left,right)=>Number(results[left].startedAt||0)-Number(results[right].startedAt||0));while(keys.length>=100)delete results[keys.shift()];results[id]={{status:\"pending\",startedAt:now}};Promise.resolve().then(async()=>{{try{{results[id]={{status:\"fulfilled\",startedAt:now,value:await ({expression})}}}}catch(error){{results[id]={{status:\"rejected\",startedAt:now,error:String((error&&(error.stack||error.message))||error)}}}}}});return JSON.stringify({{status:\"started\"}})}})()"
     )
 }
 
@@ -450,19 +560,45 @@ fn async_eval_poll_script(request_id: &str) -> String {
     )
 }
 
+fn async_eval_cleanup_script(request_id: &str) -> String {
+    let request_id = serde_json::to_string(request_id).expect("request id is serializable");
+    format!(
+        "(()=>{{const results=window.__cogniaAgentDebugAsyncResults;if(results)delete results[{request_id}];return JSON.stringify({{status:\"cleaned\"}})}})()"
+    )
+}
+
+async fn cleanup_async_eval(webview: &Webview, request_id: &str) {
+    let _ = eval_json(webview, &async_eval_cleanup_script(request_id)).await;
+}
+
 async fn eval_json_async(webview: &Webview, expression: &str) -> Result<Value, String> {
+    eval_json_async_with_timeout(webview, expression, Duration::from_secs(10)).await
+}
+
+async fn eval_json_async_with_timeout(
+    webview: &Webview,
+    expression: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     let request_id = uuid::Uuid::new_v4().simple().to_string();
     let start = eval_json(webview, &async_eval_start_script(&request_id, expression)).await?;
     if start["status"] != "started" {
         return Err("webview async evaluation did not start".to_string());
     }
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + timeout;
     loop {
         if std::time::Instant::now() >= deadline {
+            cleanup_async_eval(webview, &request_id).await;
             return Err("webview async evaluation timed out".to_string());
         }
-        let result = eval_json(webview, &async_eval_poll_script(&request_id)).await?;
+        let result = match eval_json(webview, &async_eval_poll_script(&request_id)).await {
+            Ok(result) => result,
+            Err(error) => {
+                cleanup_async_eval(webview, &request_id).await;
+                return Err(error);
+            }
+        };
         match result["status"].as_str() {
             Some("pending") => tokio::time::sleep(Duration::from_millis(25)).await,
             Some("fulfilled") => {
@@ -474,10 +610,12 @@ async fn eval_json_async(webview: &Webview, expression: &str) -> Result<Value, S
                 });
             }
             Some("rejected") => {
-                return Err(result["error"]
-                    .as_str()
-                    .unwrap_or("webview async evaluation failed")
-                    .to_string());
+                return Err(format!(
+                    "webview async evaluation rejected: {}",
+                    result["error"]
+                        .as_str()
+                        .unwrap_or("webview async evaluation failed")
+                ));
             }
             Some("missing") => {
                 return Err("webview async evaluation result disappeared".to_string());
@@ -630,11 +768,26 @@ fn internal_error(error: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
 }
 
 fn eval_error(error: String) -> (StatusCode, Json<Value>) {
-    api_error(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "webview_eval_failed",
-        error,
-    )
+    let code = if error == "webview async evaluation timed out"
+        || error == "webview evaluation timed out"
+    {
+        "webview_eval_timeout"
+    } else if error.starts_with("webview async evaluation rejected:") {
+        "webview_eval_rejected"
+    } else if error == "webview async evaluation result disappeared" {
+        "webview_eval_missing"
+    } else if error == "webview evaluation channel closed" {
+        "webview_eval_cancelled"
+    } else if error.contains("invalid JSON")
+        || error.contains("non-string result")
+        || error.contains("invalid state")
+        || error.contains("exceeds the 2 MiB limit")
+    {
+        "webview_eval_malformed"
+    } else {
+        "webview_eval_failed"
+    };
+    api_error(StatusCode::UNPROCESSABLE_ENTITY, code, error)
 }
 
 fn api_error(
@@ -652,12 +805,13 @@ fn api_error(
 mod tests {
     use super::*;
 
-    const AGENT_ROUTES: [&str; 13] = [
+    const AGENT_ROUTES: [&str; 14] = [
         "/api/dev/agent/health",
         "/api/dev/agent/windows",
         "/api/dev/agent/snapshot",
         "/api/dev/agent/act",
         "/api/dev/agent/inspect",
+        "/api/dev/agent/locator",
         "/api/dev/agent/evaluate",
         "/api/dev/agent/console",
         "/api/dev/agent/network",
@@ -764,6 +918,12 @@ mod tests {
         let poll = async_eval_poll_script("request-1");
         assert!(poll.contains("delete results[id]"));
         assert!(poll.contains("request-1"));
+
+        assert!(start.contains("keys.length>=100"));
+        assert!(start.contains("startedAt"));
+        let cleanup = async_eval_cleanup_script("request-1");
+        assert!(cleanup.contains("delete results"));
+        assert!(cleanup.contains("request-1"));
     }
 
     #[test]
@@ -773,6 +933,17 @@ mod tests {
         assert!(INJECTED_SCRIPT.contains("capabilities"));
         assert!(!INJECTED_SCRIPT.contains("setInterval ="));
         assert!(!INJECTED_SCRIPT.contains("requestAnimationFrame ="));
+    }
+
+    #[test]
+    fn classifies_evaluation_failures_with_stable_codes() {
+        let (_, Json(timeout)) = eval_error("webview async evaluation timed out".to_string());
+        assert_eq!(timeout["code"], "webview_eval_timeout");
+        let (_, Json(rejected)) = eval_error("webview async evaluation rejected: boom".to_string());
+        assert_eq!(rejected["code"], "webview_eval_rejected");
+        let (_, Json(missing)) =
+            eval_error("webview async evaluation result disappeared".to_string());
+        assert_eq!(missing["code"], "webview_eval_missing");
     }
 
     #[test]
