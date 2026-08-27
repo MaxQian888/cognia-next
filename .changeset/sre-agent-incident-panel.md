@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+SRE Agent gains a UI: an incident panel in the right-hand Context Workbench, beside the conversation it belongs to. An investigation now has a list, four derived phases (scope → evidence → attribution → conclusion), a log lens that shows a request histogram plus the log templates that moved against the preceding window, the drafted timeline with the validator's verdict rendered per row, and a conclusion that stays locked until every row cites evidence that actually exists. Evidence pinned in the panel is fetched first, so `sre_validate_timeline` can resolve it; the agent-activity line reports the queries the panel observed rather than a run it cannot see. Behind it, the plugin's query logic moved off the bundled fixtures onto a `SreLogProvider` seam, with the fixture corpus as its first implementation — ingest sources report as `static` there rather than inventing a collector lag. The Strix security scan panel moves from the left rail into the same right-hand workbench under the Review activity, drops its duplicate title bar for the workbench header, and badges its own rail button while a scan runs.
