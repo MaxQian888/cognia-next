@@ -145,6 +145,8 @@
   "webCardDesc": "Web search and fetch (web_search / web_fetch). On by default — works in the browser and the CLI. web_search needs a provider configured in Settings → Search.",
   "webCardTitle": "Web",
   "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
+  "webPreferCogniaTitle": "Prefer Cognia's web search",
+  "webPreferCogniaDesc": "Use Cognia's multi-provider search (Tavily / Brave / Exa …) even when the model's own runtime brings web search. Off means the runtime's native search is used where it exists — it needs no API key and returns citations. Needs a configured search provider.",
   "webNativeAnthropicTitle": "Use native Anthropic web tools",
   "webclone": "Web page snapshot",
   "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."

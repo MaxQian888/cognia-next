@@ -145,6 +145,8 @@
   "webCardDesc": "网络搜索与抓取（web_search / web_fetch）。默认开启——浏览器与 CLI 均可用。web_search 需要在 设置 → 搜索 中配置 provider。",
   "webCardTitle": "网络",
   "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
+  "webPreferCogniaTitle": "优先用 Cognia 的联网搜索",
+  "webPreferCogniaDesc": "即使模型所在 runtime 自带联网，也改用 Cognia 的多服务商搜索（Tavily / Brave / Exa…）。关闭时优先用 runtime 自带的原生搜索——不需要 API key，且带引用。需要先配置搜索服务商。",
   "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
   "webclone": "网页快照",
   "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"

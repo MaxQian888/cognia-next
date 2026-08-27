@@ -10,11 +10,8 @@ import { GlobeIcon } from "lucide-react"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useChatStore, useComposerWebSearchOn } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import {
-  SEARCH_PROVIDERS,
-  isProviderConfigured,
-  DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@cognia/web-search/types"
+import { SEARCH_PROVIDERS, type SearchProviderType } from "@cognia/web-search/types"
+import { resolveWebAccess } from "@/lib/chat/web-access"
 import { cn } from "@/lib/utils"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -33,19 +30,38 @@ export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggle
   const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
 
   const settings = useSettingsStore((s) => s.settings)
-  const searchEnabled = settings?.searchEnabled ?? false
-  const providers = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
-  const defaultProvider = settings?.defaultSearchProvider ?? "tavily"
 
-  const enabledProviders = Object.values(providers).filter(
-    (p) => p.enabled && isProviderConfigured(p.providerId, p)
-  )
-  const hasEnabledProvider = enabledProviders.length > 0
-  const disabled = streamingDisabled || !searchEnabled || !hasEnabledProvider
+  // One resolution, shared with the turn builder (`lib/claude/build-options.ts`).
+  // This control used to re-derive "is a provider configured" from
+  // `settings.searchProviders` by hand, which is the duplication
+  // `lib/chat/web-access.ts` exists to remove — and it drifted: with
+  // `webTools.enabled === false` every agent-facing web tool was withheld while
+  // this globe stayed lit. `preSearch` is the verdict for exactly this button
+  // (it runs the search itself before sending, so a runtime native does not
+  // help it), and `searchProviderId` names the provider that would actually run.
+  // Not memoized: `resolveWebAccess` is a pure function over plain settings
+  // data and this component only re-renders when that data changes. A manual
+  // `useMemo` here just fights the React Compiler, which infers `settings` as
+  // the dependency where a hand-written list names its four fields.
+  const webAccess = resolveWebAccess({
+    ...(settings?.webTools ? { webTools: settings.webTools } : {}),
+    // This button never routes through a runtime native — it pre-searches in
+    // the renderer — so the native question does not enter here.
+    nativeAvailable: false,
+    ...(settings?.searchProviders ? { searchProviders: settings.searchProviders } : {}),
+    ...(settings?.defaultSearchProvider
+      ? { defaultSearchProvider: settings.defaultSearchProvider }
+      : {}),
+    ...(settings?.searchEnabled !== undefined ? { searchEnabled: settings.searchEnabled } : {}),
+  })
 
-  const activeProvider = providers[defaultProvider]?.enabled
-    ? defaultProvider
-    : (enabledProviders[0]?.providerId ?? defaultProvider)
+  const disabled = streamingDisabled || !webAccess.preSearch
+  // `searchProviderId` is carried as a plain string (the resolver is provider
+  // agnostic); every value it can produce came out of `searchProviders`, so it
+  // is a `SearchProviderType` in practice and the lookup below tolerates a miss.
+  const activeProvider = (webAccess.searchProviderId ??
+    settings?.defaultSearchProvider ??
+    "tavily") as SearchProviderType
 
   const tooltip = disabled
     ? t("tooltipDisabled")

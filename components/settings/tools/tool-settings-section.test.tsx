@@ -6,6 +6,7 @@ import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()
 const setWebToolsNativeOnAnthropic = jest.fn()
+const setWebToolsPreferCognia = jest.fn()
 const setWebToolsAllowPrivateHosts = jest.fn()
 const setWebToolsAlwaysDistill = jest.fn()
 const setSkillToolEnabled = jest.fn()
@@ -41,11 +42,16 @@ const settingsState = {
   settings: {
     alwaysAllowTools: ["mcp__cognia-tools__git_status"],
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
-    webTools: { enabled: true } as { enabled: boolean; nativeOnAnthropic?: boolean },
+    webTools: { enabled: true } as {
+      enabled: boolean
+      nativeOnAnthropic?: boolean
+      preferCognia?: boolean
+    },
   },
   setBuiltinToolEnabled,
   setWebToolsEnabled,
   setWebToolsNativeOnAnthropic,
+  setWebToolsPreferCognia,
   setWebToolsAllowPrivateHosts,
   setWebToolsAlwaysDistill,
   setSkillToolEnabled,
@@ -66,6 +72,7 @@ describe("ToolSettingsSection", () => {
     setBuiltinToolEnabled.mockClear()
     setWebToolsEnabled.mockClear()
     setWebToolsNativeOnAnthropic.mockClear()
+    setWebToolsPreferCognia.mockClear()
     setWebToolsAllowPrivateHosts.mockClear()
     setWebToolsAlwaysDistill.mockClear()
     setSkillToolEnabled.mockClear()
@@ -154,15 +161,18 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByLabelText("toggleAriaLabel:vectorToolTitle")).not.toBeDisabled()
   })
 
-  it("calls setWebToolsNativeOnAnthropic when the native sub-toggle is flipped", () => {
+  // The sub-toggle used to be "use the SDK's natives on Anthropic", off by
+  // default. Native is the default resolution now (`lib/chat/web-access.ts`),
+  // so the remaining choice is its inverse.
+  it("calls setWebToolsPreferCognia when the web sub-toggle is flipped", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
     fireEvent.click(switches[1])
-    expect(setWebToolsNativeOnAnthropic).toHaveBeenCalledWith(true)
+    expect(setWebToolsPreferCognia).toHaveBeenCalledWith(true)
   })
 
-  it("reflects the native sub-toggle's checked state", () => {
-    settingsState.settings.webTools = { enabled: true, nativeOnAnthropic: true }
+  it("reflects the web sub-toggle's checked state", () => {
+    settingsState.settings.webTools = { enabled: true, preferCognia: true }
     render(<ToolSettingsSection />)
     expect(screen.getAllByRole("switch")[1]).toBeChecked()
   })

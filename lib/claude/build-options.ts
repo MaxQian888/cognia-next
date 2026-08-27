@@ -2633,39 +2633,105 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   // First-class web tools — appended OUTSIDE the disablePluginTools gate and
-  // AFTER semantic pruning so they are always available when the capability is
-  // on (Claude Code parity for WebSearch/WebFetch). They round-trip through the
-  // same plugin_tool_exec wire and resolve host-side in plugin-tool-ipc.
+  // AFTER semantic pruning so they are available whenever the turn's resolved
+  // web access routes through Cognia. They round-trip through the same
+  // plugin_tool_exec wire and resolve host-side in plugin-tool-ipc.
   //
-  // Opt-in (`webTools.nativeOnAnthropic`): on the Anthropic Agent-SDK path the
-  // user can instead use the SDK's built-in WebSearch / WebFetch (server-side
-  // extraction + citations). In that mode we do NOT surface the custom
-  // host-routed tools and instead pre-approve the natives via `allowedTools`
-  // (anthropic.mjs forwards it to `query()`). Only applies when the provider is
-  // Anthropic — other providers have no native web tools, so they always get
-  // the custom ones.
-  // ...and only on the path that actually has natives. `allowedTools` is
-  // forwarded to `query()` by anthropic.mjs, i.e. the Agent SDK. A standalone
-  // (BYOK) turn runs in the renderer against the provider API through the AI
-  // SDK, which reads no such field — so opting into the natives there does not
-  // swap the web tools, it removes them, and the phone loses the search/fetch
-  // loop `buildStandaloneTools` exists to give it. Standalone always takes the
-  // host-routed custom tools.
+  // WHICH implementation serves this turn is `lib/chat/web-access.ts`'s call,
+  // not this file's: the composer's web control reads the same resolution, and
+  // the two answering differently is exactly what this replaced. Native-first
+  // (a subscription's SDK WebSearch/WebFetch costs no key and returns
+  // citations); Cognia's provider-backed tools otherwise; and when there is
+  // neither a native nor a configured provider, `web_search` is NOT surfaced —
+  // it could only throw "no providers enabled" — while `web_fetch`, which
+  // needs no key, still is.
   const { isStandaloneChatMode } = await import("@/lib/runtime/standalone-mode")
-  const useNativeWebTools =
-    webCapabilityOn &&
-    appSettings?.webTools?.nativeOnAnthropic === true &&
-    providerId === "anthropic" &&
-    !isStandaloneChatMode()
-  if (webCapabilityOn && !useNativeWebTools) {
+  const { resolveWebAccess, anthropicNativeWebSearch, externalAgentNativeWebSearch } =
+    await import("@/lib/chat/web-access")
+  // The OTHER runtime that can bring its own web search. Whether it does is a
+  // property of the binary the user installed, not of the wire protocol, so the
+  // only layer that can answer is the capability matrix — the user's own
+  // declaration (`ExternalAgentConfig.declaredCapabilities`) or a live
+  // observation. Every protocol row ships `unknown`, which is not usable, so an
+  // undeclared agent keeps getting Cognia's pair: the safe direction to be
+  // wrong in. Best-effort by construction — off the desktop, or before the
+  // manager has a profile, this is simply `false`.
+  const externalNativeWebSearch = await (async () => {
+    try {
+      const { useAgentRuntimeStore } = await import("@/stores/agent/agent-runtime-store")
+      const runtimeState = useAgentRuntimeStore.getState()
+      if (runtimeState.runtime !== "external" || !runtimeState.externalAgentId) return false
+      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+      return externalAgentNativeWebSearch(
+        getExternalAgentManager().getAgentCapabilityProfile(runtimeState.externalAgentId)
+      )
+    } catch {
+      return false
+    }
+  })()
+  // The legacy explicit opt-in. Its documented behaviour — pre-approve the two
+  // natives into `allowedTools` and clear them from `disallowedTools` — is kept
+  // verbatim for anyone who set it, and ONLY for them.
+  const explicitNativeOptIn = appSettings?.webTools?.nativeOnAnthropic === true
+  // Has anything already narrowed this turn's tool surface — a character's
+  // allow-list, a skill's, the session's tool filter?
+  //
+  // It decides whether the natives can serve, because they are governed by that
+  // list and the host-routed tools are not. Reaching for the natives on a
+  // narrowed turn would mean either silently widening the list (and escaping a
+  // filter that was applied further up this function) or leaving the turn with
+  // no web at all, where today it still has the host-routed pair. Route those
+  // turns through Cognia and both problems disappear.
+  const surfaceNarrowed = (opts.allowedTools?.length ?? 0) > 0
+  const webAccess = resolveWebAccess({
+    ...(appSettings?.webTools ? { webTools: appSettings.webTools } : {}),
+    nativeAvailable:
+      (anthropicNativeWebSearch(providerId, isStandaloneChatMode()) &&
+        (explicitNativeOptIn || !surfaceNarrowed)) ||
+      // An external agent's own search is not governed by `allowedTools` — that
+      // list filters the SDK's tools, and this runtime is not the SDK — so the
+      // narrowing carve-out above does not apply to it.
+      externalNativeWebSearch,
+    ...(appSettings?.searchProviders ? { searchProviders: appSettings.searchProviders } : {}),
+    ...(appSettings?.defaultSearchProvider
+      ? { defaultSearchProvider: appSettings.defaultSearchProvider }
+      : {}),
+    ...(appSettings?.searchEnabled !== undefined
+      ? { searchEnabled: appSettings.searchEnabled }
+      : {}),
+  })
+  if (webAccess.search === "cognia" || webAccess.fetch === "cognia") {
     try {
       const { buildWebBuiltinManifestEntries } = await import("@/lib/claude/web-builtin-tools")
-      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildWebBuiltinManifestEntries()]
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...buildWebBuiltinManifestEntries({
+          search: webAccess.search === "cognia",
+          fetch: webAccess.fetch === "cognia",
+        }),
+      ]
     } catch (err) {
       loggers.app.warn("failed to append web built-in tools", { error: String(err) })
     }
   }
-  if (useNativeWebTools) {
+  // Reaching native BY DEFAULT writes nothing: on an unnarrowed turn the SDK
+  // already exposes WebSearch / WebFetch, and naming them in `allowedTools`
+  // would convert "no filtering" into "these two and nothing else" — which a
+  // parent permission ceiling then intersects down to the empty set.
+  //
+  // The legacy opt-in keeps its documented widening. It carries that same
+  // empty-allow-list hazard, but it is a choice someone made explicitly and
+  // narrowing it here would change behaviour nobody asked to change.
+  //
+  // Scoped to the SDK's natives: `WebSearch` / `WebFetch` are Agent-SDK tool
+  // names, so pre-approving them for a turn that reads `native` because an
+  // EXTERNAL agent brings its own search would name two tools that runtime has
+  // never heard of — and, on an otherwise unfiltered turn, narrow it to them.
+  if (
+    webAccess.mode === "native" &&
+    explicitNativeOptIn &&
+    anthropicNativeWebSearch(providerId, isStandaloneChatMode())
+  ) {
     const allow = new Set(opts.allowedTools ?? [])
     allow.add("WebSearch")
     allow.add("WebFetch")

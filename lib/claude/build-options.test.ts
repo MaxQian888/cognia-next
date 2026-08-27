@@ -366,6 +366,18 @@ beforeEach(() => {
   mockHasWorkspaceFsBackend.mockReturnValue(true)
 })
 
+/**
+ * An install whose web access resolves to Cognia's host-routed pair: a
+ * configured search provider (so `web_search` is not withheld) and the explicit
+ * preference for it over a runtime native.
+ */
+const COGNIA_WEB_SETTINGS = {
+  webTools: { enabled: true, preferCognia: true },
+  searchProviders: {
+    tavily: { providerId: "tavily", enabled: true, apiKey: "tvly-0123456789abcdef" },
+  },
+} as unknown as AppSettings
+
 describe("resolveSendOptions — editor workspace tool", () => {
   it("exposes read_active_editor only when an active workspace is present", async () => {
     const withoutWorkspace = await resolveSendOptions({ character: makeChar() })
@@ -3810,6 +3822,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: true, disablePluginTools: true }),
+      appSettings: COGNIA_WEB_SETTINGS,
     })
     // web_search / web_fetch are first-class built-ins (ungated by the plugin
     // toggle); every other plugin tool is gone.
@@ -3820,10 +3833,14 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     ])
   })
 
-  it("appends the first-class web tools by default (web capability on)", async () => {
+  // The default Anthropic turn now takes the SDK's own WebSearch/WebFetch, so
+  // the host-routed pair is what a turn WITHOUT a native gets — see the
+  // "web access resolution" block below for the full contract.
+  it("appends the first-class web tools when the turn routes through Cognia", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar(),
+      appSettings: COGNIA_WEB_SETTINGS,
     })
     const names = (opts.pluginTools ?? []).map((t) => t.name)
     expect(names).toContain("web_search")
@@ -3956,6 +3973,7 @@ describe("resolveSendOptions — first-class web tools supersede the plugin", ()
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar(),
+      appSettings: COGNIA_WEB_SETTINGS,
     })
     const tools = opts.pluginTools ?? []
     const names = tools.map((t) => t.name)
@@ -4872,14 +4890,76 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
   })
 })
 
-describe("native Anthropic web tools (Tier C opt-in)", () => {
+describe("web access resolution (lib/chat/web-access.ts)", () => {
   const webNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
     (opts.pluginTools ?? []).map((t) => t.name)
 
-  it("surfaces the custom web tools by default", async () => {
+  // Native-first. The SDK already exposes WebSearch/WebFetch on an unnarrowed
+  // turn, so taking that path means appending NOTHING — not the host-routed
+  // pair (which would shadow it) and not the two names into `allowedTools`
+  // (which would convert "no filtering" into "these two only").
+  it("takes the runtime's own web tools on a default Anthropic turn", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  // The bug this replaced: a subscriber with no search key was handed a
+  // `web_search` that could only throw "no providers enabled".
+  it("withholds web_search — but not web_fetch — when nothing can serve a search", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+  })
+
+  it("routes a non-Anthropic turn through Cognia once a provider is configured", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        searchProviders: {
+          tavily: { providerId: "tavily", enabled: true, apiKey: "tvly-0123456789abcdef" },
+        },
+      } as unknown as AppSettings,
+    })
     expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
     expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  // A narrowed surface governs the natives but not the host-routed pair, so
+  // reaching for the natives there would either widen the list behind the
+  // user's back (escaping the tool filter applied further up) or leave the turn
+  // with no web at all. Those turns take Cognia's route instead.
+  it("keeps a narrowed turn on the host-routed tools instead of widening its allow-list", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", allowedTools: ["Read"] }),
+      appSettings: {
+        searchProviders: {
+          tavily: { providerId: "tavily", enabled: true, apiKey: "tvly-0123456789abcdef" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.allowedTools).toEqual(["Read"])
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+  })
+
+  it("prefers Cognia over a native when the user asked for it", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: COGNIA_WEB_SETTINGS,
+    })
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+  })
+
+  it("surfaces no web tools at all when the capability is off", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: { webTools: { enabled: false } } as AppSettings,
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
   })
 
   it("swaps to native WebSearch/WebFetch on the Anthropic path when opted in", async () => {
@@ -4895,7 +4975,12 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
   it("keeps the custom tools for non-Anthropic providers even when opted in", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
-      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+      appSettings: {
+        webTools: { enabled: true, nativeOnAnthropic: true },
+        searchProviders: {
+          tavily: { providerId: "tavily", enabled: true, apiKey: "tvly-0123456789abcdef" },
+        },
+      } as unknown as AppSettings,
     })
     expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
     expect(opts.allowedTools ?? []).not.toContain("WebSearch")
@@ -4923,7 +5008,12 @@ describe("native Anthropic web tools (Tier C opt-in)", () => {
     try {
       const opts = await resolveSendOptions({
         character: makeChar({ id: "c1" }),
-        appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+        appSettings: {
+          webTools: { enabled: true, nativeOnAnthropic: true },
+          searchProviders: {
+            tavily: { providerId: "tavily", enabled: true, apiKey: "tvly-0123456789abcdef" },
+          },
+        } as unknown as AppSettings,
       })
       expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
       expect(opts.allowedTools ?? []).not.toContain("WebSearch")

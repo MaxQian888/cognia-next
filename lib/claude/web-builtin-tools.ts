@@ -74,25 +74,36 @@ export interface WebBuiltinManifestEntry {
 
 /**
  * Manifest entries for the promoted web tools. Appended to `opts.pluginTools`
- * by `build-options` when the web capability is enabled.
+ * by `build-options` for whichever of the two the turn's resolved web access
+ * routes through Cognia (`lib/chat/web-access.ts`).
+ *
+ * The two are selectable because they fail apart: `web_fetch` needs no API key
+ * and works on any install, while `web_search` needs a configured provider and
+ * throws "no providers enabled" without one. Shipping both unconditionally is
+ * what put a tool in the model's hands that could only fail.
  */
-export function buildWebBuiltinManifestEntries(): WebBuiltinManifestEntry[] {
-  return [
-    {
+export function buildWebBuiltinManifestEntries(
+  include: { search?: boolean; fetch?: boolean } = {}
+): WebBuiltinManifestEntry[] {
+  const { search = true, fetch = true } = include
+  const entries: WebBuiltinManifestEntry[] = []
+  if (search)
+    entries.push({
       name: WEB_SEARCH_TOOL_NAME,
       description:
         "Search the web via the user's configured provider (Tavily/Brave/Exa/Google/…) and return ranked results with an optional AI answer.",
       jsonSchema: WEB_SEARCH_SCHEMA as unknown as Record<string, unknown>,
       pluginId: WEB_BUILTIN_PLUGIN_ID,
-    },
-    {
+    })
+  if (fetch)
+    entries.push({
       name: WEB_FETCH_TOOL_NAME,
       description:
         "Fetch a URL. For HTML pages it returns clean extracted `text` (+ `title`), not the raw markup. Pass `prompt` to get back only the content relevant to your question instead of the whole page.",
       jsonSchema: WEB_FETCH_SCHEMA as unknown as Record<string, unknown>,
       pluginId: WEB_BUILTIN_PLUGIN_ID,
-    },
-  ]
+    })
+  return entries
 }
 
 /** Is this tool name one of the promoted web built-ins? */

@@ -86,7 +86,7 @@ export function ToolSettingsSection() {
   const setBuiltinToolEnabled = useSettingsStore((s) => s.setBuiltinToolEnabled)
 
   const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
-  const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
+  const setWebToolsPreferCognia = useSettingsStore((s) => s.setWebToolsPreferCognia)
   const setWebToolsAllowPrivateHosts = useSettingsStore((s) => s.setWebToolsAllowPrivateHosts)
   const setWebToolsAlwaysDistill = useSettingsStore((s) => s.setWebToolsAlwaysDistill)
   const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
@@ -98,7 +98,11 @@ export function ToolSettingsSection() {
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
-  const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
+  // The switch used to be "use the SDK's natives on Anthropic", defaulting off.
+  // Native is the default resolution now (`lib/chat/web-access.ts`), so the
+  // remaining choice is the opposite one: take Cognia's multi-provider search
+  // even where a native exists.
+  const webPreferCognia = settings?.webTools?.preferCognia ?? false
   const webAllowPrivateHosts = settings?.webTools?.allowPrivateHosts ?? false
   const webAlwaysDistill = settings?.webTools?.alwaysDistill ?? false
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
@@ -154,15 +158,15 @@ export function ToolSettingsSection() {
           {webToolsEnabled && desktop && (
             <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
               <div className="min-w-0">
-                <p className="text-[12px] font-medium">{t("webNativeAnthropicTitle")}</p>
+                <p className="text-[12px] font-medium">{t("webPreferCogniaTitle")}</p>
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  {t("webNativeAnthropicDesc")}
+                  {t("webPreferCogniaDesc")}
                 </p>
               </div>
               <Switch
-                checked={webNativeOnAnthropic}
-                onCheckedChange={(next) => setWebToolsNativeOnAnthropic(next)}
-                aria-label={t("toggleAriaLabel", { name: t("webNativeAnthropicTitle") })}
+                checked={webPreferCognia}
+                onCheckedChange={(next) => setWebToolsPreferCognia(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webPreferCogniaTitle") })}
               />
             </div>
           )}
