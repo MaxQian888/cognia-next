@@ -1154,6 +1154,56 @@ pub async fn companion_create_worker_enrollment(
     })
 }
 
+/// One-time enrollment for a Cognia browser companion extension.
+///
+/// `base_url` is the **plaintext loopback** listener, not the HTTPS plane every
+/// other enrollment advertises. That is not a downgrade, it is the only door: a
+/// tab validates the Host's self-signed certificate against system roots and
+/// has no escape hatch, so `https://127.0.0.1:27890` is structurally
+/// unreachable from a browser, while `http://127.0.0.1` is "potentially
+/// trustworthy" per Secure Contexts and needs no chain at all.
+///
+/// Which is why this refuses to mint a code when that listener is not bound.
+/// Handing back a code that cannot possibly connect would send the user to the
+/// extension to discover a failure whose cause lives in Settings.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserEnrollmentIssue {
+    pub enrollment: String,
+    pub expires_at_ms: i64,
+    pub base_url: String,
+    pub tenant_id: String,
+}
+
+#[tauri::command]
+pub async fn companion_create_browser_enrollment(
+    state: State<'_, CompanionServerState>,
+) -> Result<BrowserEnrollmentIssue, String> {
+    // Five minutes, matching the owner invitation rather than the worker's ten:
+    // this code is copied from a settings pane into a side panel that is
+    // already open, not carried to another machine.
+    const ENROLLMENT_TTL_SECS: i64 = 5 * 60;
+    let Some(port) = state.browser_port() else {
+        return Err(
+            "browser access is not listening; enable it in Settings and restart the server"
+                .to_string(),
+        );
+    };
+    let now = unix_time_secs();
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    let tenant_id = paired_tenant_id();
+    let enrollment = security
+        .create_browser_enrollment(&tenant_id, "local-trust-root", now, ENROLLMENT_TTL_SECS)
+        .map_err(|error| error.to_string())?;
+    Ok(BrowserEnrollmentIssue {
+        enrollment,
+        expires_at_ms: now.saturating_add(ENROLLMENT_TTL_SECS) * 1_000,
+        base_url: format!("http://127.0.0.1:{port}"),
+        tenant_id,
+    })
+}
+
 #[tauri::command]
 pub async fn companion_list_workers() -> Result<Vec<super::ws_worker::WorkerDeviceSummary>, String>
 {

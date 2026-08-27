@@ -1188,6 +1188,7 @@ pub fn run() {
             companion_api::commands::companion_browser_access_set,
             companion_api::commands::companion_create_owner_invitation,
             companion_api::commands::companion_create_worker_enrollment,
+            companion_api::commands::companion_create_browser_enrollment,
             companion_api::commands::companion_list_workers,
             companion_api::commands::companion_set_worker,
             companion_api::commands::companion_seed_deny_list,

@@ -48,6 +48,7 @@ pub fn router() -> Router<SharedState> {
         .route("/api/auth/device/challenge", post(challenge_handler))
         .route("/api/auth/device/register", post(register_handler))
         .route("/api/auth/worker/register", post(worker_register_handler))
+        .route("/api/auth/browser/register", post(browser_register_handler))
         .route("/api/auth/token", post(token_handler))
         .route("/api/auth/socket-ticket", post(socket_ticket_handler))
         .layer(from_fn(super::middleware::pre_auth_rate_limit))
@@ -953,6 +954,28 @@ fn authenticate_device_request(
             "the access token is not bound to the active device key",
         ));
     }
+    // A browser companion is definitionally a browser, so every one of its
+    // requests must carry the extension origin it registered from.
+    //
+    // `WebOriginPolicy` cannot express this. It classifies a request with no
+    // `Origin` header at all as `Native` and allows it — the right default for
+    // a native client, and the wrong one here, because an MV3 service worker's
+    // `fetch` may omit the header and because any other local process can. The
+    // check is scoped to devices that actually carry a bound origin, so no
+    // other device class changes behaviour.
+    if let Some(bound_origin) = snapshot.bound_origin.as_deref() {
+        let presented = request
+            .headers()
+            .get("origin")
+            .and_then(|value| value.to_str().ok());
+        if presented != Some(bound_origin) {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "device_origin_mismatch",
+                "the request did not come from the extension this device registered from",
+            ));
+        }
+    }
 
     let path = request.uri().path();
     if let Some(command_name) = path
@@ -1205,6 +1228,40 @@ struct WorkerRegisterResponse {
     server_version: &'static str,
 }
 
+/// Registration for a Cognia browser companion extension.
+///
+/// No `signalingPublicKey`: a browser device never joins the WebRTC plane, so
+/// asking for one would provision a rendezvous nobody can use. `platform` is
+/// absent for the same reason it is untrusted elsewhere — the device class
+/// here is decided by which endpoint was called and which enrollment table the
+/// token was spent from, never by a label the client chose.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserRegisterRequest {
+    tenant_id: Option<String>,
+    enrollment: String,
+    challenge_id: String,
+    challenge_nonce: String,
+    device_id: String,
+    display_name: String,
+    public_key_pem: String,
+    proof: String,
+    /// The `chrome-extension://<id>` origin this extension serves its pages
+    /// from. Bound to the device and replayed on every later request.
+    extension_origin: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserRegisterResponse {
+    device_id: String,
+    tenant_id: String,
+    role: &'static str,
+    capabilities: [&'static str; 2],
+    extension_origin: String,
+    server_version: &'static str,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SignalingRegistrationResponse {
@@ -1414,6 +1471,69 @@ async fn worker_register_handler(
         tenant_id,
         role: "member",
         capabilities: ["agent.worker"],
+        server_version: env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+async fn browser_register_handler(
+    body: Result<Json<BrowserRegisterRequest>, JsonRejection>,
+) -> ApiResult<BrowserRegisterResponse> {
+    let request = parse_public_json(body)?;
+    if request.enrollment.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "browser_enrollment_required",
+            "a one-time browser enrollment is required",
+        ));
+    }
+    // Refuse a shape that could never be an extension before anything is
+    // consumed: a bad origin here would otherwise burn the single-use
+    // enrollment and leave the user with a code that no longer works and no
+    // explanation of why.
+    let extension_origin =
+        super::extension_origin::normalize_browser_plane_origin(&request.extension_origin)
+            .filter(|origin| {
+                url::Url::parse(origin)
+                    .ok()
+                    .is_some_and(|url| super::extension_origin::is_cognia_extension_origin(&url))
+            })
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_extension_origin",
+                    "extensionOrigin must be a bare chrome-extension:// origin",
+                )
+            })?;
+    let tenant_id = request_tenant(request.tenant_id)?;
+    let _ = verify_device_proof(
+        &request.public_key_pem,
+        &request.proof,
+        &request.challenge_nonce,
+        "POST",
+        "/api/auth/browser/register",
+        unix_time_secs(),
+    )?;
+    let thumbprint = hex::encode(Sha256::digest(request.public_key_pem.as_bytes()));
+    store()?
+        .register_browser_device(
+            &tenant_id,
+            &request.enrollment,
+            &request.challenge_id,
+            &request.challenge_nonce,
+            &request.device_id,
+            &request.display_name,
+            &request.public_key_pem,
+            &thumbprint,
+            &extension_origin,
+            unix_time_secs(),
+        )
+        .map_err(store_error)?;
+    Ok(Json(BrowserRegisterResponse {
+        device_id: request.device_id,
+        tenant_id,
+        role: "member",
+        capabilities: ["browser.submit", "browser.read-own"],
+        extension_origin,
         server_version: env!("CARGO_PKG_VERSION"),
     }))
 }

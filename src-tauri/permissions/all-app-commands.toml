@@ -194,6 +194,7 @@ commands.allow = [
   "codex_oauth_revoke",
   "companion_browser_access_get",
   "companion_browser_access_set",
+  "companion_create_browser_enrollment",
   "companion_create_owner_invitation",
   "companion_create_worker_enrollment",
   "companion_desktop_write_response",

@@ -10,6 +10,7 @@
     { "path": "/api/auth/device/challenge", "method": "post", "document": "public" },
     { "path": "/api/auth/device/register", "method": "post", "document": "public" },
     { "path": "/api/auth/worker/register", "method": "post", "document": "public" },
+    { "path": "/api/auth/browser/register", "method": "post", "document": "public" },
     { "path": "/api/auth/token", "method": "post", "document": "public" },
     { "path": "/api/auth/socket-ticket", "method": "post", "document": "public" },
     { "path": "/api/whoami", "method": "get", "document": "public" },

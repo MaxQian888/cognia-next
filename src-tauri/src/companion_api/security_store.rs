@@ -58,6 +58,16 @@ pub struct AuthorizationSnapshot {
     pub public_key_pem: String,
     pub key_thumbprint: String,
     pub capabilities: Vec<String>,
+    /// The extension origin this device was registered from, for a browser
+    /// companion; `None` for every other device class.
+    ///
+    /// It rides on the snapshot rather than being a second query because the
+    /// check it feeds is on the authentication path: a browser device's every
+    /// request must carry this exact `Origin`. `WebOriginPolicy` alone cannot
+    /// enforce that — a request with no `Origin` header at all is classified
+    /// `Native` and allowed, which is the right default for a native client
+    /// and the wrong one for a device that is definitionally a browser.
+    pub bound_origin: Option<String>,
 }
 
 /// The sentinel namespace for a binding that predates any local account.
@@ -598,6 +608,145 @@ impl SecurityStore {
             tenant_id,
             device_id,
             "worker.registered",
+            device_id,
+            now,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Create a one-time enrollment for a browser companion extension.
+    ///
+    /// Its own table rather than a reuse of `worker_enrollments`: the two
+    /// consume into different capability sets, and a token that can be spent
+    /// on either would make the device class a property of whichever endpoint
+    /// happened to receive it. Keeping the tables apart is what lets
+    /// [`Self::register_browser_device`] assert the class instead of trusting
+    /// a client-supplied label.
+    pub fn create_browser_enrollment(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        now: i64,
+        ttl_secs: i64,
+    ) -> Result<String, SecurityStoreError> {
+        let secret = format!("{}.{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+        let enrollment_id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO browser_enrollments
+             (id, tenant_id, token_hash, expires_at, created_by, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                enrollment_id,
+                tenant_id,
+                hash_secret(&secret),
+                now.saturating_add(ttl_secs),
+                actor_id,
+                now
+            ],
+        )?;
+        insert_audit(
+            &tx,
+            tenant_id,
+            actor_id,
+            "browser_enrollment.created",
+            &enrollment_id,
+            now,
+        )?;
+        tx.commit()?;
+        Ok(secret)
+    }
+
+    /// Consume a browser enrollment and register a companion extension with
+    /// only `browser.submit` and `browser.read-own`.
+    ///
+    /// A browser device never receives `host.observe`, `agent.run`,
+    /// `workspace.*`, `terminal.open`, `process.spawn` or Owner authority. The
+    /// two it does hold name one closed effect each — submit a captured page
+    /// as a new task, and read back the submissions this same device made.
+    ///
+    /// `extension_origin` is recorded here and replayed on every subsequent
+    /// request (see [`AuthorizationSnapshot::bound_origin`]). It is validated
+    /// by the caller against `extension_origin::is_cognia_extension_origin`
+    /// before it reaches this method.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_browser_device(
+        &self,
+        tenant_id: &str,
+        enrollment: &str,
+        challenge_id: &str,
+        challenge_nonce: &str,
+        device_id: &str,
+        display_name: &str,
+        public_key_pem: &str,
+        public_key_thumbprint: &str,
+        extension_origin: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let consumed_challenge = tx.execute(
+            "UPDATE device_challenges SET consumed_at = ?1
+             WHERE id = ?2 AND tenant_id = ?3 AND nonce_hash = ?4
+               AND consumed_at IS NULL AND expires_at >= ?1",
+            params![now, challenge_id, tenant_id, hash_secret(challenge_nonce)],
+        )?;
+        if consumed_challenge != 1 {
+            return Err(SecurityStoreError::InvalidChallenge);
+        }
+        let enrollment_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM browser_enrollments
+                 WHERE tenant_id = ?1 AND token_hash = ?2
+                   AND consumed_at IS NULL AND expires_at >= ?3",
+                params![tenant_id, hash_secret(enrollment), now],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let enrollment_id = enrollment_id.ok_or(SecurityStoreError::InvalidInvitation)?;
+        if tx.execute(
+            "UPDATE browser_enrollments SET consumed_at = ?1, consumed_by_device_id = ?2
+             WHERE id = ?3 AND consumed_at IS NULL",
+            params![now, device_id, enrollment_id],
+        )? != 1
+        {
+            return Err(SecurityStoreError::InvalidInvitation);
+        }
+        let owner = host_person_for_tenant(&tx, tenant_id)?;
+        tx.execute(
+            "INSERT INTO devices
+             (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?5, ?5)",
+            params![device_id, tenant_id, display_name, owner, now],
+        )?;
+        tx.execute(
+            "INSERT INTO device_keys
+             (id, device_id, tenant_id, public_key_pem, thumbprint, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                device_id,
+                tenant_id,
+                public_key_pem,
+                public_key_thumbprint,
+                now
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO browser_devices
+             (device_id, tenant_id, extension_origin, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![device_id, tenant_id, extension_origin, now],
+        )?;
+        upsert_capability_grant(&tx, tenant_id, device_id, "browser.submit", now)?;
+        upsert_capability_grant(&tx, tenant_id, device_id, "browser.read-own", now)?;
+        insert_audit(
+            &tx,
+            tenant_id,
+            device_id,
+            "browser.registered",
             device_id,
             now,
         )?;
@@ -1396,12 +1545,14 @@ impl SecurityStore {
                  ORDER BY created_at DESC, id DESC
                  LIMIT 1
              )
-             SELECT k.public_key_pem, k.thumbprint, g.capability
+             SELECT k.public_key_pem, k.thumbprint, g.capability, b.extension_origin
              FROM devices d
              JOIN active_key k
              LEFT JOIN capability_grants g
                ON g.tenant_id = d.tenant_id AND g.device_id = d.id
               AND g.revoked_at IS NULL
+             LEFT JOIN browser_devices b
+               ON b.tenant_id = d.tenant_id AND b.device_id = d.id
              WHERE d.tenant_id = ?1 AND d.id = ?2 AND d.status = 'active'
              ORDER BY g.capability",
         )?;
@@ -1410,15 +1561,17 @@ impl SecurityStore {
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?;
         let mut snapshot: Option<AuthorizationSnapshot> = None;
         for row in rows {
-            let (public_key_pem, key_thumbprint, capability) = row?;
+            let (public_key_pem, key_thumbprint, capability, bound_origin) = row?;
             let current = snapshot.get_or_insert_with(|| AuthorizationSnapshot {
                 public_key_pem,
                 key_thumbprint,
                 capabilities: Vec::new(),
+                bound_origin,
             });
             if let Some(capability) = capability {
                 current.capabilities.push(capability);
@@ -2167,6 +2320,8 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             | "device.admin"
             | "server.admin"
             | "agent.worker"
+            | "browser.submit"
+            | "browser.read-own"
     )
 }
 
@@ -2621,6 +2776,22 @@ CREATE TABLE IF NOT EXISTS worker_enrollments (
     created_at INTEGER NOT NULL,
     consumed_at INTEGER,
     consumed_by_device_id TEXT
+);
+CREATE TABLE IF NOT EXISTS browser_enrollments (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    consumed_at INTEGER,
+    consumed_by_device_id TEXT
+);
+CREATE TABLE IF NOT EXISTS browser_devices (
+    device_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    extension_origin TEXT NOT NULL,
+    created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS device_challenges (
     id TEXT PRIMARY KEY,
@@ -3927,6 +4098,169 @@ CREATE TABLE devices (
             ),
             Err(SecurityStoreError::InvalidInvitation)
         ));
+    }
+
+    #[test]
+    fn browser_enrollment_is_single_use_and_grants_only_the_two_browser_capabilities() {
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "owner-a", 100, 300)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome on this Mac",
+                "pem",
+                "thumb-browser-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                101,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .capability_snapshot("tenant-a", "browser-a")
+                .unwrap()
+                .unwrap(),
+            vec!["browser.read-own", "browser.submit"]
+        );
+        // The whole point of a separate device class: none of the capabilities
+        // that would let a tab drive the host come along with it.
+        for capability in [
+            "host.observe",
+            "agent.run",
+            "workspace.read",
+            "workspace.write",
+            "terminal.open",
+            "process.spawn",
+            "host.admin",
+            "agent.worker",
+        ] {
+            assert!(
+                !store
+                    .has_capability("tenant-a", "browser-a", capability)
+                    .unwrap(),
+                "a browser device must not hold {capability}"
+            );
+        }
+
+        let replay_challenge = store.issue_challenge("tenant-a", 102, 60).unwrap();
+        assert!(matches!(
+            store.register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &replay_challenge.id,
+                &replay_challenge.nonce,
+                "browser-b",
+                "Copied extension",
+                "pem-b",
+                "thumb-browser-b",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                103,
+            ),
+            Err(SecurityStoreError::InvalidInvitation)
+        ));
+    }
+
+    #[test]
+    fn a_browser_enrollment_cannot_be_spent_as_a_worker_enrollment() {
+        // The two tables exist separately so the device class is decided by
+        // which enrollment was consumed, never by a label on the request.
+        let store = SecurityStore::in_memory().unwrap();
+        let browser = store
+            .create_browser_enrollment("tenant-a", "owner-a", 100, 300)
+            .unwrap();
+        let worker = store
+            .create_worker_enrollment("tenant-a", "owner-a", 100, 300)
+            .unwrap();
+
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        assert!(matches!(
+            store.register_worker_device(
+                "tenant-a",
+                &browser,
+                &challenge.id,
+                &challenge.nonce,
+                "worker-a",
+                "Worker A",
+                "pem",
+                "thumb-a",
+                101,
+            ),
+            Err(SecurityStoreError::InvalidInvitation)
+        ));
+
+        let challenge = store.issue_challenge("tenant-a", 102, 60).unwrap();
+        assert!(matches!(
+            store.register_browser_device(
+                "tenant-a",
+                &worker,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Browser A",
+                "pem",
+                "thumb-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                103,
+            ),
+            Err(SecurityStoreError::InvalidInvitation)
+        ));
+    }
+
+    #[test]
+    fn the_authorization_snapshot_carries_a_browser_devices_bound_origin_and_nothing_elses() {
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "owner-a", 100, 300)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome",
+                "pem",
+                "thumb-browser-a",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                101,
+            )
+            .unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+
+        let browser = store
+            .authorization_snapshot("tenant-a", "browser-a")
+            .unwrap()
+            .expect("browser device is active");
+        assert_eq!(
+            browser.bound_origin.as_deref(),
+            Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop")
+        );
+        // An ordinary paired device has no bound origin, so the enforcement
+        // that reads this field cannot accidentally start policing them.
+        let ordinary = store
+            .authorization_snapshot("tenant-a", "device-a")
+            .unwrap()
+            .expect("ordinary device is active");
+        assert_eq!(ordinary.bound_origin, None);
+
+        // Revocation still removes the device wholesale — a bound origin is
+        // not a second life for a revoked key.
+        store
+            .revoke_device("tenant-a", "owner-a", "browser-a", false, 104)
+            .unwrap();
+        assert!(store
+            .authorization_snapshot("tenant-a", "browser-a")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
