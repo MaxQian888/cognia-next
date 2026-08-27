@@ -19,9 +19,13 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+// Seeded into `labels`, not the legacy `conversationLabels` table. Schema v170
+// folded the CRM catalogue into the shared table under `scope: "conversation"`
+// (which is why the fixture carries a scope); seeding the old one left the
+// picker rendering an empty catalog in every story.
 const seedCatalog = () =>
   seedDb(async (db) => {
-    await db.conversationLabels.bulkPut([
+    await db.labels.bulkPut([
       makeConversationLabel({ id: "lbl-followup", name: "follow-up", color: "#f59e0b" }),
       makeConversationLabel({ id: "lbl-vip", name: "vip", color: "#7c3aed" }),
       makeConversationLabel({ id: "lbl-bug", name: "bug", color: "#ef4444" }),
