@@ -121,23 +121,13 @@ impl BrowserAccessConfig {
 }
 
 /// Normalize one origin, or `None` when it cannot be one.
+///
+/// Delegates to `extension_origin`, which owns the browser plane's admission
+/// rule: the transport predicate, or a Cognia browser-extension origin. The
+/// two call sites must not drift — an origin the user can save here but the
+/// request path refuses reads, from inside a tab, as an unexplained 403.
 pub fn normalize_origin(raw: &str) -> Option<String> {
-    let value = raw.trim().trim_end_matches('/');
-    if value.is_empty() {
-        return None;
-    }
-    let url = url::Url::parse(value).ok()?;
-    if !super::web_origin::is_secure_or_loopback(&url)
-        || url.host_str().is_none()
-        || url.path() != "/"
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return None;
-    }
-    Some(value.to_string())
+    super::extension_origin::normalize_browser_plane_origin(raw)
 }
 
 fn config_path(data_dir: Option<&Path>) -> PathBuf {

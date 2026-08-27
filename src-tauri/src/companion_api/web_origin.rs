@@ -228,20 +228,12 @@ pub(crate) fn is_secure_or_loopback(url: &url::Url) -> bool {
     }
 }
 
+/// Normalize one allowlist entry, or `None` when it cannot be an origin.
+///
+/// Shares `extension_origin`'s rule with the saved config's own normalizer so
+/// `COGNIA_ALLOWED_WEB_ORIGINS` and Settings admit exactly the same set.
 fn normalize_allowed_origin(raw: &str) -> Option<String> {
-    let value = raw.trim().trim_end_matches('/');
-    let url = url::Url::parse(value).ok()?;
-    if !is_secure_or_loopback(&url)
-        || url.host_str().is_none()
-        || url.path() != "/"
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return None;
-    }
-    Some(value.to_string())
+    super::extension_origin::normalize_browser_plane_origin(raw)
 }
 
 fn request_origin(headers: &HeaderMap) -> Option<String> {
