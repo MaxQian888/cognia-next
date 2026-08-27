@@ -152,16 +152,32 @@ export function keepExisting(files, exists) {
   return files.filter((file) => exists(file))
 }
 
-/** @returns {string[]} */
+/**
+ * Every repo-relative path the gate reasons about — sources AND tests.
+ *
+ * `--others --exclude-standard` alongside `--cached`, for the same reason
+ * `check-surface-usage.mjs` does it: a gate meant to catch NEW code that only
+ * sees committed files is exactly backwards, and it is wrong in both
+ * directions. A new source file without a test passed until the commit
+ * introducing it had already landed; and a newly written test did not count
+ * for its source until it was staged, so the gate failed on work that was
+ * already done. The second one is not hypothetical — it fires whenever someone
+ * migrates `foo.test.ts` to `foo.test.tsx`, because the deletion is visible
+ * (git tracks it) while the replacement is not.
+ *
+ * @returns {string[]}
+ */
 function listTrackedFiles() {
-  const tracked = execFileSync("git", ["ls-files"], {
+  const listed = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     maxBuffer: 64e6,
   })
     .split("\n")
     .filter(Boolean)
-  return keepExisting(tracked, (file) => existsSync(join(REPO_ROOT, file)))
+  // `git ls-files` still lists a tracked file whose deletion is unstaged, and
+  // `--others` can list a path removed between the listing and this check.
+  return keepExisting(listed, (file) => existsSync(join(REPO_ROOT, file)))
 }
 
 /** @returns {{ version: number, files: string[] }} */

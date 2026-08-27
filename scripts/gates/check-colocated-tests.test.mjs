@@ -177,6 +177,26 @@ test("the committed baseline is a sorted, de-duplicated path list", () => {
   assert.equal(new Set(baseline.files).size, baseline.files.length)
 })
 
+test("a source is satisfied by a test that is not committed yet", () => {
+  // The listing feeds `--others` in, so a freshly written test counts before
+  // it is staged. Without that, migrating `foo.test.ts` to `foo.test.tsx`
+  // failed the gate on work that was already done: git reports the deletion
+  // and says nothing about the replacement.
+  const files = ["hooks/logging/use-crash-logs.ts", "hooks/logging/use-crash-logs.test.tsx"]
+  const present = new Set(files)
+  assert.deepEqual(findViolations(files, { has: (p) => present.has(p), readRust: () => "" }), [])
+})
+
+test("a source that arrives without a test is caught before it is committed", () => {
+  // The same listing change closes the opposite hole: an untracked new source
+  // used to be invisible until the commit that introduced it had landed.
+  const files = ["hooks/logging/use-recent-error-logs.ts"]
+  const present = new Set(files)
+  assert.deepEqual(findViolations(files, { has: (p) => present.has(p), readRust: () => "" }), [
+    "hooks/logging/use-recent-error-logs.ts",
+  ])
+})
+
 test("live: the real repo matches its baseline", () => {
   assert.equal(main(), 0)
 })
