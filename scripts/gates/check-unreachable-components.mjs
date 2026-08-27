@@ -72,6 +72,33 @@ const IS_TEST_OR_STORY = /\.(test|spec|stories)\.[^/]+$/
 const IS_DECLARATION = /\.d\.ts$/
 
 /**
+ * Build-target variants, the React Native / metro convention `next.config.ts`
+ * applies to webpack via `resolve.extensions`: `foo.mobile.tsx` beside
+ * `foo.tsx` is compiled INSTEAD of it for the Capacitor build. Nothing ever
+ * imports the variant's own path — the importer names the default module and
+ * the resolver substitutes — so the plain "who imports this file" question
+ * always answers "nobody" and would flag a mounted component as dead.
+ *
+ * A variant is therefore reachable exactly when the module it stands in for is
+ * reachable. An orphan variant (no default beside it, or a default nothing
+ * renders) is still dead, and still reported.
+ */
+export const PLATFORM_VARIANT_TARGETS = ["mobile"]
+const PLATFORM_VARIANT = new RegExp(`\\.(?:${PLATFORM_VARIANT_TARGETS.join("|")})(\\.(?:ts|tsx))$`)
+
+/**
+ * The default module a platform variant stands in for, or null when the file
+ * is not a variant. Pure.
+ * @param {string} file repo-relative, posix separators
+ * @returns {string|null}
+ */
+export function platformVariantBase(file) {
+  const match = PLATFORM_VARIANT.exec(file)
+  if (!match) return null
+  return file.slice(0, match.index) + match[1]
+}
+
+/**
  * Is this a component file whose reachability we gate? Pure.
  * @param {string} file repo-relative, posix separators
  * @returns {boolean}
@@ -151,7 +178,15 @@ export function findUnreachable(files, io) {
     }
   }
 
-  return files.filter((f) => isGatedComponent(f) && !importedByProduction.has(f)).sort()
+  return files
+    .filter((f) => {
+      if (!isGatedComponent(f)) return false
+      if (importedByProduction.has(f)) return false
+      // Build-target variants are reached through the module they replace.
+      const base = platformVariantBase(f)
+      return !(base && known.has(base) && importedByProduction.has(base))
+    })
+    .sort()
 }
 
 /**

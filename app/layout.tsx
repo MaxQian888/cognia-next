@@ -2,7 +2,6 @@
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
-import dynamic from "next/dynamic"
 import { Suspense } from "react"
 // Geist ships as a self-hosted local font package (geist/font/*), so the build
 // never fetches from fonts.gstatic.com. This keeps offline / proxied / CI and
@@ -54,13 +53,11 @@ import { WebDavMobileAutosyncProvider } from "@/components/providers/webdav-mobi
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { WebCompanionBootProvider } from "@/components/providers/web-companion-boot-provider"
 import { SurfaceAvailabilityBoundary } from "@/components/runtime/surface-availability-boundary"
-import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
-import { DesktopOnlyInitializers } from "@/components/providers/initializers/desktop-only-initializers"
-import { MobileOnlyInitializers } from "@/components/providers/initializers/mobile-only-initializers"
-import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
-import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
-import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
+import { MobileOnlyInitializers } from "@/components/providers/initializers/mobile-only-initializers"
+import { PlatformDesktopInitializers } from "@/components/runtime/platform-desktop-initializers"
+import { PlatformDesktopSources } from "@/components/runtime/platform-desktop-sources"
+import { PlatformShell } from "@/components/runtime/platform-shell"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { HookTrustSyncProvider } from "@/components/providers/hook-trust-sync-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
@@ -106,16 +103,6 @@ import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
-
-// This harness reaches nearly every plugin surface and renderer by design.
-// Keeping it as a static import made ordinary `pnpm dev` compile the E2E-only
-// graph even though NEXT_PUBLIC_E2E is unset. The conditional render below now
-// has a real module boundary; E2E builds still load the exact same component.
-const PluginSurfaceReferenceHarness = dynamic(() =>
-  import("@/app/e2e/plugin-ui-surfaces/plugin-surface-reference-harness").then(
-    (module) => module.PluginSurfaceReferenceHarness
-  )
-)
 
 export const metadata: Metadata = {
   title: "Cognia · Claude Code",
@@ -183,12 +170,6 @@ export default async function RootLayout({
           >
             <AccountStoreInitializer />
             <LocaleGate>
-              {process.env.NEXT_PUBLIC_E2E === "1" ? (
-                <>
-                  <PluginRuntimeInitializer onlyForPluginSurfaceE2E />
-                  <PluginSurfaceReferenceHarness />
-                </>
-              ) : null}
               {/* Reveals the hidden Tauri main window on first paint and starts
                   the white-screen watchdog heartbeat. Mounted ABOVE AccountGate
                   so a locked / first-run cold boot (which never renders the
@@ -251,8 +232,9 @@ export default async function RootLayout({
                              * runtime-gated + dynamically imported so the browser dev
                              * server never compiles their subsystem graphs; the Tauri
                              * build loads them at runtime. See the component for the
-                             * full rationale. */}
-                            <DesktopOnlyInitializers />
+                             * full rationale. The Capacitor build resolves the
+                             * `.mobile` variant, which renders nothing at all. */}
+                            <PlatformDesktopInitializers />
                             <AuditRetentionInitializer />
                             <StorageRetentionInitializer />
                             <StoragePersistenceInitializer />
@@ -333,28 +315,24 @@ export default async function RootLayout({
                                                     <SidecarSpanProvider>
                                                       <CompanionBootProvider>
                                                         <WebCompanionBootProvider>
-                                                          <DesktopSyncSourceProvider>
-                                                            <DesktopMessageSourceProvider>
-                                                              {/* id="app" is the scope root for user
+                                                          <PlatformDesktopSources>
+                                                            {/* id="app" is the scope root for user
                                                         custom CSS when `customCssScope` is
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                              <div
-                                                                id="app"
-                                                                data-bg-target="global"
-                                                                className="contents"
-                                                              >
-                                                                <MobileShellWrapper>
-                                                                  <DesktopAppShell>
-                                                                    <SurfaceAvailabilityBoundary>
-                                                                      {children}
-                                                                    </SurfaceAvailabilityBoundary>
-                                                                  </DesktopAppShell>
-                                                                </MobileShellWrapper>
-                                                              </div>
-                                                            </DesktopMessageSourceProvider>
-                                                          </DesktopSyncSourceProvider>
+                                                            <div
+                                                              id="app"
+                                                              data-bg-target="global"
+                                                              className="contents"
+                                                            >
+                                                              <PlatformShell>
+                                                                <SurfaceAvailabilityBoundary>
+                                                                  {children}
+                                                                </SurfaceAvailabilityBoundary>
+                                                              </PlatformShell>
+                                                            </div>
+                                                          </PlatformDesktopSources>
                                                         </WebCompanionBootProvider>
                                                       </CompanionBootProvider>
                                                     </SidecarSpanProvider>
@@ -457,7 +435,10 @@ export default async function RootLayout({
                             {/* Capacitor-only boot surfaces (splash). Consolidated +
                              * runtime-gated + dynamically imported; the browser/Tauri
                              * dev server never compiles them, the mobile build loads
-                             * them at runtime. */}
+                             * them at runtime. Mounted here rather than beside the
+                             * desktop initializers above: this position is the one
+                             * the splash has always had, and it is a sibling of the
+                             * surfaces it covers. */}
                             <MobileOnlyInitializers />
                           </OnboardingGate>
                         </RecoveryBootGate>

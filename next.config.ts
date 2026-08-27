@@ -9,6 +9,40 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
 
 const isProd = process.env.NODE_ENV === "production"
 
+/**
+ * Is this the Capacitor build? `pnpm mobile:sync` is the only path that sets
+ * it, and the flag already decides Serwist below — one signal, so a target
+ * swap can never disagree with the platform the bundle declares.
+ *
+ * There is deliberately no `tauri` target: the desktop shell consumes the very
+ * same `out/` the browser build produces (`tauri.conf.json` → `frontendDist`),
+ * so anything compiled out for the web would be missing on the desktop too.
+ * Web/desktop differences stay where they have always been — runtime gates on
+ * `usePlatform()` / `isTauri()`, which also keep working under `pnpm tauri
+ * dev`, where the frontend is just `pnpm dev`.
+ */
+const isMobileBuild = process.env.NEXT_PUBLIC_PLATFORM === "mobile"
+
+/**
+ * Platform extensions, the React Native / metro convention applied to webpack:
+ * with `.mobile.tsx` ahead of `.tsx` in `resolve.extensions`, an import of
+ * `@/components/runtime/platform-shell` picks up `platform-shell.mobile.tsx`
+ * when that file exists and falls back to `platform-shell.tsx` when it does
+ * not. That is how the Capacitor bundle drops module graphs it can never run
+ * (see `components/runtime/platform-shell.tsx` for the seam's contract).
+ *
+ * It has to be `resolve.extensions` rather than `resolve.alias`: Next unshifts
+ * its own `JsConfigPathsPlugin` into `resolve.plugins`, and that plugin
+ * resolves every `@/…` specifier itself before webpack's alias plugin is
+ * consulted — an alias keyed on a `@/…` request is silently ignored. Extension
+ * order applies inside the plugin's own resolution pass, so it survives.
+ *
+ * Turbopack (`pnpm dev`) needs no counterpart: dev never builds for Capacitor,
+ * and the default variants are supersets that self-gate at runtime, so a dev
+ * server behaves identically — it only carries more code than a phone needs.
+ */
+const MOBILE_PLATFORM_EXTENSIONS = [".mobile.tsx", ".mobile.ts"]
+
 // Build-time metadata surfaced on the About page (components/settings/about/*).
 // Resolved here in Node at config-eval time and inlined into the client bundle
 // as `process.env.NEXT_PUBLIC_*`. Both reads are failure-tolerant: a tarball /
@@ -35,8 +69,7 @@ const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
 //
 // Also disabled in development so HMR works without precache stale-while-revalidate
 // interference.
-const disableSerwist =
-  process.env.NEXT_PUBLIC_PLATFORM === "mobile" || process.env.NODE_ENV !== "production"
+const disableSerwist = isMobileBuild || process.env.NODE_ENV !== "production"
 const MAX_PRECACHE_ASSET_BYTES = 2 * 1024 * 1024
 const MAX_ANYDOC_WASM_BYTES = 8 * 1024 * 1024
 const ANYDOC_WASM_ASSET = /(?:^|\/)anydoc_wasm_bg(?:\.[a-f0-9]+)?\.wasm$/i
@@ -323,6 +356,16 @@ const nextConfig: NextConfig = {
   },
   // Webpack (pnpm build): client-side fallbacks for Node built-ins.
   webpack: (config, { isServer, webpack }) => {
+    // Platform extensions ahead of the plain ones, so `foo.mobile.tsx` wins
+    // over `foo.tsx` on the Capacitor build only. Prepended (not replaced) so
+    // Next's own extension list — including the server/client variants it adds
+    // — keeps working underneath.
+    if (isMobileBuild) {
+      config.resolve.extensions = [
+        ...MOBILE_PLATFORM_EXTENSIONS,
+        ...(config.resolve.extensions ?? []),
+      ]
+    }
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,

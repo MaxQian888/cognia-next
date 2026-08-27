@@ -122,6 +122,7 @@
     "dev:eager": "cross-env NEXT_PUBLIC_COGNIA_BOOT_PROFILE=eager pnpm run dev",
     "dev:headless": "node scripts/dev/headless.mjs",
     "dev:main": "cross-env NEXT_PUBLIC_COGNIA_BOOT_PROFILE=main pnpm run dev",
+    "dev:webpack": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next dev --webpack --port 3000",
     "dev:sign:setup": "bash src-tauri/scripts/dev-codesign-setup.sh",
     "dev:web-headless": "node scripts/dev/web-headless.mjs",
     "docs:build": "pnpm --filter docs run build",

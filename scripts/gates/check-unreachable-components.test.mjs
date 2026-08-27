@@ -8,6 +8,7 @@ import {
   findUnreachable,
   isGatedComponent,
   isProductionFile,
+  platformVariantBase,
   resolveSpecifier,
 } from "./check-unreachable-components.mjs"
 
@@ -205,5 +206,54 @@ describe("diffAgainstBaseline", () => {
   it("is clean when nothing changed", () => {
     const { added, fixed, stale } = diffAgainstBaseline(["a.tsx"], ["a.tsx"], new Set(["a.tsx"]))
     assert.deepEqual({ added, fixed, stale }, { added: [], fixed: [], stale: [] })
+  })
+})
+
+describe("platformVariantBase", () => {
+  it("maps a build-target variant onto the module it replaces", () => {
+    assert.equal(
+      platformVariantBase("components/runtime/platform-shell.mobile.tsx"),
+      "components/runtime/platform-shell.tsx"
+    )
+    assert.equal(platformVariantBase("components/foo.mobile.ts"), "components/foo.ts")
+  })
+
+  it("leaves ordinary files alone", () => {
+    assert.equal(platformVariantBase("components/runtime/platform-shell.tsx"), null)
+    assert.equal(platformVariantBase("components/mobile/shell/mobile-shell-wrapper.tsx"), null)
+    assert.equal(platformVariantBase("components/foo.desktop.tsx"), null)
+  })
+})
+
+describe("findUnreachable — build-target variants", () => {
+  const io = {
+    read: (file) =>
+      file === "app/layout.tsx" ? 'import { PlatformShell } from "@/components/runtime/shell"' : "",
+  }
+
+  it("counts a variant as reached through the module it replaces", () => {
+    const files = [
+      "app/layout.tsx",
+      "components/runtime/shell.tsx",
+      "components/runtime/shell.mobile.tsx",
+    ]
+    assert.deepEqual(findUnreachable(files, io), [])
+  })
+
+  it("still reports a variant whose default module nothing renders", () => {
+    const files = [
+      "app/layout.tsx",
+      "components/runtime/dead.tsx",
+      "components/runtime/dead.mobile.tsx",
+    ]
+    assert.deepEqual(findUnreachable(files, io), [
+      "components/runtime/dead.mobile.tsx",
+      "components/runtime/dead.tsx",
+    ])
+  })
+
+  it("still reports an orphan variant with no default beside it", () => {
+    const files = ["app/layout.tsx", "components/runtime/shell.mobile.tsx"]
+    assert.deepEqual(findUnreachable(files, io), ["components/runtime/shell.mobile.tsx"])
   })
 })
