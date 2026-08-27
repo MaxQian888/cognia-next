@@ -77,6 +77,7 @@ export const CORE_TABLE_NAMES = [
   "browserDomainGrants",
   "browserProfiles",
   "browserRecordings",
+  "browserSubmissions",
   "calibrationItems",
   "calibrationRuns",
   "cannedResponses",
@@ -512,6 +513,11 @@ const CACHE_TABLES = new Set<CoreTableName>([
 
 const PROJECTION_TABLES = new Set<CoreTableName>([
   "agentCanonicalSessions",
+  // Browser Companion side-notes (v199). A projection, not a record: the
+  // session it points at owns the instruction and the page text, and this row
+  // holds only what the extension's recent list cannot get from anywhere else.
+  // Losing it costs a history list, never a task.
+  "browserSubmissions",
   "agentCompatibilityRecords",
   "agentTeamBoard",
   "chatSearchText",

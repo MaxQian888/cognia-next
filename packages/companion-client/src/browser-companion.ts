@@ -1,0 +1,251 @@
+/**
+ * Cognia Browser Companion — the contract between the extension side panel and
+ * the desktop Host.
+ *
+ * One module, shared by both ends, because the two are separately built: the
+ * app compiles this out of `types/`, the extension imports it through
+ * `@cognia/companion-client`. A second copy would drift the moment a limit
+ * changed on one side only, and the failure would show up as a submission the
+ * panel believed was in bounds and the Host refused.
+ *
+ * ## What is deliberately not here
+ *
+ * There is no model, provider, cwd, tool set or permission mode. A page
+ * captured in a browser describes *what to work on*, never *how* — the task
+ * inherits whatever a new session on the chosen workspace would have used, so
+ * a compromised or merely over-eager extension cannot widen the agent it
+ * starts.
+ *
+ * There is no `runtimeTargetId` either. The four ids in
+ * `lib/runtime/runtime-target.ts` name a *client's* execution identity, and
+ * `resolveRuntimeTarget()` returns `null` for `tauri` precisely because that
+ * shell **is** the host. An extension executes nothing; the Host does. What
+ * the user actually chooses is a workspace (ADR-0144), which is what the
+ * request carries.
+ */
+
+/**
+ * How much of the page the user chose to send.
+ *
+ * Three modes rather than a boolean because the middle one is the common case:
+ * a selection is what a person has already told the browser they care about,
+ * so it is the default whenever one exists, and it is cheap and legible in the
+ * preview. `readable-page` is never implicit — whole-page text is the largest
+ * and least predictable thing this feature can send.
+ */
+export type BrowserCaptureMode = "metadata" | "selection" | "readable-page"
+
+export const BROWSER_CAPTURE_MODES: readonly BrowserCaptureMode[] = Object.freeze([
+  "metadata",
+  "selection",
+  "readable-page",
+])
+
+/**
+ * Byte ceilings, in UTF-8 bytes rather than characters.
+ *
+ * Characters would be the wrong unit twice over: the wire budget is bytes, and
+ * a CJK page hits a byte limit at roughly a third of the character count, so a
+ * character-denominated cap silently means something different per language.
+ *
+ * The Host re-checks all of these. The extension enforces them too, but only so
+ * the preview can say *what was cut* — a client-side limit is a courtesy, never
+ * the boundary.
+ */
+export interface BrowserContextLimits {
+  instructionBytes: number
+  selectionBytes: number
+  readableTextBytes: number
+  /** Ceiling on the whole serialized request, envelope included. */
+  requestBytes: number
+}
+
+export const BROWSER_CONTEXT_LIMITS: Readonly<BrowserContextLimits> = Object.freeze({
+  instructionBytes: 8 * 1024,
+  selectionBytes: 32 * 1024,
+  readableTextBytes: 128 * 1024,
+  requestBytes: 192 * 1024,
+})
+
+/** Text that may have been cut, and says so. */
+export interface BrowserCapturedText {
+  text: string
+  /**
+   * Whether {@link text} is shorter than what was on the page.
+   *
+   * Carried explicitly rather than inferred from a length comparison the Host
+   * cannot make: only the extension saw the original. It is surfaced in the
+   * preview because "the agent read the whole page" and "the agent read the
+   * first 128 KiB" are different claims and the user is the one who has to
+   * know which one they are making.
+   */
+  truncated: boolean
+}
+
+export interface BrowserReadableText extends BrowserCapturedText {
+  /** Length of the extracted text before truncation, in characters. */
+  originalCharacterCount: number
+}
+
+/**
+ * One captured page.
+ *
+ * Text only — never HTML. HTML would carry script, style, tracking markup and
+ * anything else the page felt like embedding into a prompt, and none of that
+ * is context. It also cannot be reviewed in a preview, which is the whole
+ * mechanism by which the user consents to what gets sent.
+ */
+export interface BrowserPageContextV1 {
+  schemaVersion: 1
+  captureMode: BrowserCaptureMode
+  /**
+   * The page address, already normalized by the extension.
+   *
+   * Credentials, query and fragment are stripped by default — query strings
+   * routinely carry session tokens, tracking ids and search terms that the
+   * title alone would not have revealed. The user can opt a full URL back in
+   * per capture; nothing does it silently.
+   */
+  url: string
+  title: string
+  capturedAt: number
+  selection?: BrowserCapturedText
+  readableText?: BrowserReadableText
+}
+
+/** What the side panel sends when the user submits. */
+export interface BrowserContextSubmitRequestV1 {
+  /**
+   * Client-minted UUID, doubling as the `Idempotency-Key` header.
+   *
+   * One id rather than two so a retry cannot accidentally present a fresh key
+   * for the same submission — which is exactly the case that would create a
+   * second session out of one user action.
+   */
+  submissionId: string
+  /** From {@link BrowserCompanionCapabilityV1.workspaces}. */
+  workspaceId: string
+  instruction: string
+  /** Overrides the title derived from the page, when the user typed one. */
+  suggestedTitle?: string
+  context: BrowserPageContextV1
+}
+
+/**
+ * Where a submission has got to.
+ *
+ * `host_unavailable` is a real state, not an error: the Host accepted the work
+ * and the runtime is not there to run it yet. Collapsing it into `failed`
+ * would tell the user to resubmit something that is still queued.
+ */
+export type BrowserSubmissionStatus =
+  | "submitting"
+  | "queued"
+  | "running"
+  | "needs_input"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "host_unavailable"
+
+export const BROWSER_TERMINAL_STATUSES: readonly BrowserSubmissionStatus[] = Object.freeze([
+  "completed",
+  "cancelled",
+  "failed",
+])
+
+/** Whether nothing further will happen to this submission on its own. */
+export function isTerminalBrowserSubmissionStatus(status: BrowserSubmissionStatus): boolean {
+  return BROWSER_TERMINAL_STATUSES.includes(status)
+}
+
+export interface BrowserContextSubmitResponseV1 {
+  submissionId: string
+  sessionId: string
+  acceptedAt: number
+  status: BrowserSubmissionStatus
+  /** `cognia://session/<id>` — opens the task in the desktop app. */
+  deepLink: string
+}
+
+/**
+ * One row of the side panel's recent list.
+ *
+ * Deliberately thin. The instruction and the page text are not stored on the
+ * Host beyond the transcript that already owns them, and they are not stored
+ * in the extension at all, so there is nothing here to read them back from.
+ * What a person needs to re-find a task is its title, where it came from, and
+ * whether it is still running.
+ */
+export interface BrowserContextSubmissionSummaryV1 {
+  submissionId: string
+  sessionId: string
+  title: string
+  /** Hostname only — never the full URL. */
+  sourceHost: string
+  captureMode: BrowserCaptureMode
+  status: BrowserSubmissionStatus
+  submittedAt: number
+  updatedAt: number
+  deepLink: string
+}
+
+export interface BrowserContextSubmissionSummaryPageV1 {
+  items: BrowserContextSubmissionSummaryV1[]
+  /** Opaque; absent when this is the last page. */
+  cursor?: string
+}
+
+export interface BrowserContextSubmissionStatusV1 {
+  submissionId: string
+  sessionId: string
+  status: BrowserSubmissionStatus
+  updatedAt: number
+  /** A machine-readable reason, present only on `failed`. */
+  errorCode?: string
+  deepLink: string
+}
+
+/**
+ * The Host's resolved appearance, handed to the extension so the side panel
+ * looks like the app rather than like an approximation of it.
+ *
+ * `cssVars` is the complete set from `lib/appearance/theme-token-catalog.ts`,
+ * already resolved: a custom theme, an imported VSCode theme and the stock
+ * palette all arrive here the same way. Sending values rather than a theme id
+ * is what makes drift impossible — there is no second copy of the palette in
+ * the extension to fall behind.
+ */
+export interface BrowserCompanionAppearanceV1 {
+  mode: "light" | "dark"
+  /** CSS custom-property name → value, e.g. `--background` → `oklch(1 0 0)`. */
+  cssVars: Record<string, string>
+  /** `--radius` in rem; the named control/panel/stage scale derives from it. */
+  radiusBaseRem: number
+  /** `--pill-radius` in px. 9999 is a capsule, 0 is square. */
+  pillRadiusPx: number
+  density: "compact" | "comfortable" | "spacious"
+}
+
+/** A workspace the user may aim a submission at. */
+export interface BrowserCompanionWorkspaceV1 {
+  id: string
+  label: string
+  isDefault: boolean
+}
+
+/**
+ * What the Host can do, asked once per panel open.
+ *
+ * The limits travel with it rather than being compiled into the extension:
+ * the extension updates on the store's schedule and the Host on the user's, so
+ * a build-time constant would be wrong on exactly the machines where the two
+ * have drifted.
+ */
+export interface BrowserCompanionCapabilityV1 {
+  schemaVersion: 1
+  limits: BrowserContextLimits
+  supportedCaptureModes: BrowserCaptureMode[]
+  workspaces: BrowserCompanionWorkspaceV1[]
+  appearance: BrowserCompanionAppearanceV1
+}

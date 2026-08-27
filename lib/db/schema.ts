@@ -145,6 +145,7 @@ import type { CollabIssueMirrorRow } from "./collab-issue-mirror-types"
 import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
 import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
 import type { CollabRunMirrorRow } from "./collab-run-mirror-types"
+import type { BrowserSubmissionRow } from "./browser-submissions-types"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
@@ -4733,6 +4734,18 @@ export class CogniaDB extends Dexie {
       collabPlans: "&id, orgId, workspaceId, status, updatedAt, fetchedAt",
       collabRuns: "&id, orgId, workspaceId, issueId, planId, status, startedAt, fetchedAt",
     })
+
+    // v199 — Browser Companion submission side-notes. Deliberately thin: the
+    // session and its transcript already own the instruction and the page
+    // text, and neither is copied here. What this table holds is only what the
+    // extension's recent list needs and cannot get anywhere else — which
+    // device submitted, what mode it captured in, and the hostname it came
+    // from. `[deviceId+submittedAt]` is compound because `browser.read-own`
+    // scopes every read to the calling device and the list is newest-first.
+    // See `lib/db/browser-submissions.ts`.
+    this.version(199).stores({
+      browserSubmissions: "&submissionId, deviceId, sessionId, submittedAt, [deviceId+submittedAt]",
+    })
   }
 
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
@@ -4753,6 +4766,9 @@ export class CogniaDB extends Dexie {
   // caches; see `lib/db/collab-plan-mirror.ts` and `lib/db/collab-run-mirror.ts`.
   collabPlans!: Table<CollabPlanMirrorRow, string>
   collabRuns!: Table<CollabRunMirrorRow, string>
+  // v199 — Browser Companion submission side-notes. See
+  // `lib/db/browser-submissions.ts`.
+  browserSubmissions!: Table<BrowserSubmissionRow, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.

@@ -71,6 +71,8 @@
       ],
       "@cognia/security-findings": ["./packages/security-findings/src/index.ts"],
       "@cognia/security-findings/*": ["./packages/security-findings/src/*"],
+      "@cognia/companion-client": ["./packages/companion-client/src/index.ts"],
+      "@cognia/companion-client/*": ["./packages/companion-client/src/*"],
       "@cognia/redact": ["./packages/redact/src/index.ts"],
       "@cognia/redact/*": ["./packages/redact/src/*"],
       "@cognia/web-search": ["./packages/web-search/src/index.ts"],
