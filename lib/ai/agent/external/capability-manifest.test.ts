@@ -85,11 +85,28 @@ describe("the shipped manifest", () => {
     // Both OpenCode adapters expose reasoning events and command discovery;
     // stable maps file parts and V2 maps PromptInput.files.
     for (const protocol of ["opencode", "opencode-v2"] as const) {
-      expect(manifest.protocols[protocol].capabilities.thinking.level).toBe("native")
       expect(manifest.protocols[protocol].capabilities.images.level).toBe("native")
       expect(manifest.protocols[protocol].capabilities["commands.dynamic"].level).toBe("native")
     }
-    expect(manifest.protocols.acp.capabilities.thinking.level).toBe("native")
+    // Reasoning EVENTS are not the `thinking` capability, and the two SDK majors
+    // diverge on it. v1 has no reasoning field anywhere in its API — effort is
+    // only settable in the user's own opencode.json. v2 added variants, which
+    // its docs call named request overlays for reasoning effort, and the adapter
+    // sends the pick as the `variant` half of the `ModelRef` on switchModel — a
+    // different channel reaching the same outcome, which is what `equivalent`
+    // means here and why it carries its own reasonKey rather than `native`.
+    expect(manifest.protocols.opencode.capabilities.thinking.level).toBe("unsupported")
+    expect(manifest.protocols.opencode.capabilities.thinking.reasonKey).toBe("noProtocolSlot")
+    expect(manifest.protocols["opencode-v2"].capabilities.thinking.level).toBe("equivalent")
+    expect(manifest.protocols["opencode-v2"].capabilities.thinking.reasonKey).toBe(
+      "modelVariantOverlay"
+    )
+    // ACP is the counter-example `capabilityNotes.thinking` names: the row asks
+    // whether the HOST can set the reasoning level, and no ACP method carries
+    // one. Streaming thought chunks — which every ACP agent does — is a
+    // different question, and answering this one with it lit up `/think` on a
+    // backend that forwards the pick nowhere.
+    expect(manifest.protocols.acp.capabilities.thinking.level).toBe("unsupported")
   })
 
   it("answers steering per protocol, and lets the adapter layer tighten it", () => {
@@ -146,10 +163,13 @@ describe("presetCapabilityLayer", () => {
     expect(layer.cells.images?.level).toBe("unsupported")
   })
 
-  it("does not inherit generic per-session MCP support for the Pi ACP bridge", () => {
-    const layer = presetCapabilityLayer("pi")
-    expect(layer.layer).toBe("refinement")
-    expect(layer.cells.mcp?.level).toBe("unsupported")
+  it("no longer refines the removed Pi ACP bridge", () => {
+    // The `pi` refinement existed only to strip generic ACP per-session MCP
+    // from the community bridge. The bridge is gone, and native `pi-rpc`
+    // declares the same thing at the PROTOCOL layer, so the guarantee moved
+    // rather than disappeared — assert it in its new home too.
+    expect(presetCapabilityLayer("pi").cells).toEqual({})
+    expect(protocolCapabilityLayer("pi-rpc").cells.mcp?.level).toBe("unsupported")
   })
 })
 

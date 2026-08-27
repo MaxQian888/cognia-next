@@ -49,7 +49,6 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts 枚�
 | **copilot-cli** | acp-stdio（GitHub Copilot CLI） | executable | acp/stdio | `copilot --acp` | `COPILOT_GITHUB_TOKEN` / `/login` | 238 |
 | **kiro** | acp-stdio（Kiro CLI） | executable | acp/stdio | `kiro-cli acp` | AWS Builder ID 登录 | 269 |
 | **qwen-code** | acp-stdio（Qwen Code） | executable | acp/stdio | `npx -y @qwen-code/qwen-code --acp` | Qwen OAuth / `OPENAI_API_KEY` | 298 |
-| **pi** | acp-stdio（Pi，社区适配器） | executable | acp/stdio | `npx -y pi-acp` | Pi 自身配置密钥；第三方桥 | 327 |
 | **droid** | acp-stdio（Factory Droid） | executable | acp/stdio | `droid exec --output-format acp` | `FACTORY_API_KEY` / 设备码登录 | 359 |
 | **cursor** | acp-stdio（Cursor CLI） | executable | acp/stdio | `cursor-agent`（在 PATH） | 安装 Cursor CLI | 390 |
 | cursor | mcp-config | documented-only | acp/http | — | Cursor 侧 MCP 配置 | 410 |
@@ -80,12 +79,12 @@ qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅�
 | `copilot-cli` | GitHub Copilot CLI | acp | stdio | `copilot --acp` |
 | `kiro` | Kiro CLI | acp | stdio | `kiro-cli acp` |
 | `qwen-code` | Qwen Code | acp | stdio | `npx -y @qwen-code/qwen-code --acp` |
-| `pi` | Pi（社区适配器） | acp | stdio | `npx -y pi-acp` |
 | `droid` | Factory Droid | acp | stdio | `droid exec --output-format acp` |
 | `custom` | — | — | — | `null`（用户自定义） |
 
-`ExternalAgentPresetId`（`:26`）是一个封闭联合，但预设不是——见下一节。Pi 条目由社区 `pi-acp` 适配器
-桥接（Pi 尚无原生 ACP 支持），在目录中打有 `community-adapter` / `experimental` 标签。
+`ExternalAgentPresetId`（`:26`）是一个封闭联合，但预设不是——见下一节。Pi 没有 ACP 条目：它由 `pi-rpc`
+预设经原生协议驱动。曾经出现在这里的社区 `pi-acp` 桥，已连同它的 runtime 与 `npx` 允许名单条目一并移除
+——见 Pi 适配器页。
 
 ### 物化一个配置
 

@@ -63,8 +63,7 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "copilot",
     "kiro-cli",
     "droid",
-    // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119). The
-    // `pi-acp` npx bridge stays in NPX_PACKAGE_ALLOWLIST for the legacy preset.
+    // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
     "pi",
 ];
 
@@ -79,7 +78,6 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
     "@anthropic-ai/claude-code",
     "@google/gemini-cli",
     "@qwen-code/qwen-code",
-    "pi-acp",
     "opencode-ai",
 ];
 
@@ -520,7 +518,6 @@ mod tests {
         assert!(p
             .validate(config("npx", &["-y", "@qwen-code/qwen-code", "--acp"]))
             .is_ok());
-        assert!(p.validate(config("npx", &["-y", "pi-acp"])).is_ok());
         assert!(p
             .validate(config("npx", &["--yes", "opencode-ai", "--acp"]))
             .is_ok());
@@ -718,14 +715,18 @@ mod tests {
         assert_eq!(validated.config.env.len(), 6);
     }
 
-    /// Pi runs as a bare allowlisted binary, unlike the `pi-acp` bridge which
-    /// goes through npx. Both must keep working: the native preset spawns
-    /// `pi`, the legacy compatibility preset still spawns `npx -y pi-acp`.
+    /// Pi runs as a bare allowlisted binary, never through npx (ADR-0119).
+    ///
+    /// The `pi-acp` community bridge used to be allowlisted alongside it. It
+    /// was removed once the native adapter shipped, and this asserts the
+    /// removal rather than just omitting it: re-adding the package to the
+    /// allowlist would silently restore an unpinned `npx` launch that the
+    /// runtime catalog no longer waives.
     #[test]
-    fn pi_runs_as_an_allowlisted_binary_alongside_the_legacy_bridge() {
+    fn pi_runs_as_an_allowlisted_binary_and_the_acp_bridge_is_refused() {
         let (_tmp, p) = policy(false);
         assert!(p.validate(config("pi", &["--mode", "rpc"])).is_ok());
-        assert!(p.validate(config("npx", &["-y", "pi-acp"])).is_ok());
+        assert!(p.validate(config("npx", &["-y", "pi-acp"])).is_err());
         // Still a bare name only — a path must never be admitted.
         assert!(p
             .validate(config("/usr/local/bin/pi", &["--mode", "rpc"]))

@@ -69,8 +69,15 @@ export function liveCapabilityFacts(
 
     if (negotiated.mcpTools === false) cells.mcp = no("negotiatedNoMcpTools")
 
-    if (negotiated.thinking === true) cells.thinking = yes("negotiatedThinking")
-    if (negotiated.thinking === false) cells.thinking = no("negotiatedNoThinking")
+    // `thinking` is deliberately NOT mapped, for the same name-vs-meaning reason
+    // as `multiTurn` above. `AcpCapabilities.thinking` means "the agent streams
+    // chain-of-thought"; the `thinking` CAPABILITY asks whether the HOST can set
+    // the reasoning level, which `capabilityNotes.thinking` spells out and which
+    // streaming thought chunks do not answer. Only `opencode-client.ts` ever set
+    // the flag — hardcoded `true` in the streaming sense — and because `live` is
+    // the one layer allowed to widen, mapping it here overrode a correct
+    // manifest row and lit up `/think` on a backend that forwards the pick
+    // nowhere. The manifest owns this cell; the handshake has nothing to add.
 
     if (negotiated.toolExecution === false) {
       // An agent that cannot execute tools cannot produce tool results or tool

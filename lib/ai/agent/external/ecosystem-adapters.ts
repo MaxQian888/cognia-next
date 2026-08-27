@@ -326,7 +326,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   pi: {
     id: "pi",
     name: "Pi",
-    description: "Pi coding agent surfaces (native RPC, or the community ACP adapter)",
+    description: "Pi coding agent surfaces (native RPC)",
     docsUrl: "https://pi.dev/docs/latest/rpc",
     tags: ["coding", "pi"],
     surfaces: [
@@ -354,29 +354,6 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         process: {
           command: "pi",
           args: ["--mode", "rpc"],
-        },
-        icon: "pi",
-      },
-      {
-        id: "acp-stdio",
-        presetId: "pi",
-        name: "Pi (community adapter)",
-        description:
-          "Pi coding agent bridged over ACP by the community pi-acp adapter (experimental)",
-        protocol: "acp",
-        transport: "stdio",
-        supportTier: "executable",
-        executionMode: "direct",
-        defaultPermissionMode: "default",
-        tags: ["coding", "pi", "community-adapter", "experimental"],
-        docsUrl: "https://github.com/svkozak/pi-acp",
-        setupHint:
-          "Requires Pi >= 0.80.4 (`npm install -g @earendil-works/pi-coding-agent`) and Node.js >= 22, with provider keys configured in Pi's own settings (~/.pi/agent/settings.json). Pi has no native ACP support yet; the third-party pi-acp adapter bridges ACP to `pi --mode rpc`.",
-        limitationNote:
-          "pi-acp is a community adapter, not an official Pi surface — behavior may lag Pi releases.",
-        process: {
-          command: "npx",
-          args: ["-y", "pi-acp"],
         },
         icon: "pi",
       },

@@ -14,7 +14,12 @@ describe("liveCapabilityFacts", () => {
       evidence: "handshake",
       reasonKey: "negotiatedStreaming",
     })
-    expect(cells.thinking?.level).toBe("native")
+    // `thinking` is NOT among them: the flag means "streams chain-of-thought",
+    // while the capability asks whether the host can set the reasoning level.
+    // Answering the second with the first widened a correct manifest row —
+    // `live` is the only layer allowed to widen — and opened `/think` on a
+    // backend with nothing to forward the pick to.
+    expect(cells.thinking).toBeUndefined()
   })
 
   it("reads `multiTurn` as the RESUME capability it is actually set from", () => {

@@ -243,3 +243,57 @@ describe("computeExternalAgentProfileDigest", () => {
     expect(b.digest).toBe(a.digest)
   })
 })
+
+describe("user-declared layer", () => {
+  const webCell = (profile: { effective: Record<string, { level: string; evidence: string }> }) =>
+    profile.effective["web.search"]
+
+  // Every protocol row ships `web.search: unknown` on purpose — whether a build
+  // reaches the web is a property of the binary, not the wire.
+  it("leaves web.search unknown when the user declared nothing", () => {
+    const profile = buildDeclaredCapabilityProfile({ protocol: "codex-app-server" })
+    expect(webCell(profile)).toEqual({ level: "unknown", evidence: "none" })
+  })
+
+  it("fills the unknown from the user's declaration, stamped as a claim", () => {
+    const profile = buildDeclaredCapabilityProfile({
+      protocol: "codex-app-server",
+      userDeclared: { "web.search": "native" },
+    })
+    expect(webCell(profile)).toEqual({ level: "native", evidence: "user-declared" })
+  })
+
+  // A level other than `native` must carry a reason, or a UI can only render an
+  // unexplained "no".
+  it("gives a declared refusal a reason key", () => {
+    const profile = buildDeclaredCapabilityProfile({
+      protocol: "acp",
+      userDeclared: { "web.search": "unsupported" },
+    })
+    expect(webCell(profile)).toEqual({
+      level: "unsupported",
+      evidence: "user-declared",
+      reasonKey: "userDeclared",
+    })
+  })
+
+  // The ladder's whole point: a claim may fill an unknown, never overrule the
+  // protocol. `mcp.dynamic` is `unsupported` on every protocol row.
+  it("cannot widen a protocol-level unsupported", () => {
+    const profile = buildDeclaredCapabilityProfile({
+      protocol: "acp",
+      userDeclared: { "mcp.dynamic": "native" },
+    })
+    expect(profile.effective["mcp.dynamic"].level).toBe("unsupported")
+  })
+
+  // A measurement outranks a claim, in both directions.
+  it("loses to the live layer", () => {
+    const profile = negotiateCapabilityProfile({
+      protocol: "acp",
+      userDeclared: { streaming: "native" },
+      liveFacts: { streaming: { level: "unsupported", evidence: "handshake", reasonKey: "x" } },
+    })
+    expect(profile.effective.streaming.level).toBe("unsupported")
+  })
+})

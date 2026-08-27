@@ -238,6 +238,18 @@ export const createExternalAgentActionsSlice = (
             })
           : agent.validitySnapshot,
         metadata: updates.metadata ? { ...agent.metadata, ...updates.metadata } : agent.metadata,
+        // The user's own statement about this build (merge layer
+        // `user-declared`). Replaced wholesale rather than merged, because the
+        // editor sends the complete declaration every time and a merge would
+        // make a removed row unremovable. An EMPTY object is the CLEAR — the
+        // editor's "work it out" is the absence of a declaration, and absence
+        // needs a spelling that survives a partial update, since omitting the
+        // key here means "leave it alone" like every other field above.
+        declaredCapabilities: updates.declaredCapabilities
+          ? Object.keys(updates.declaredCapabilities).length > 0
+            ? updates.declaredCapabilities
+            : undefined
+          : agent.declaredCapabilities,
         updatedAt: now,
       }
 

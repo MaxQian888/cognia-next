@@ -51,7 +51,6 @@ a way that product can be reached, tagged with a **support tier**:
 | **copilot-cli** | acp-stdio (GitHub Copilot CLI) | executable | acp/stdio | `copilot --acp` | `COPILOT_GITHUB_TOKEN` / `/login` | 238 |
 | **kiro** | acp-stdio (Kiro CLI) | executable | acp/stdio | `kiro-cli acp` | AWS Builder ID login | 269 |
 | **qwen-code** | acp-stdio (Qwen Code) | executable | acp/stdio | `npx -y @qwen-code/qwen-code --acp` | Qwen OAuth / `OPENAI_API_KEY` | 298 |
-| **pi** | acp-stdio (Pi, community adapter) | executable | acp/stdio | `npx -y pi-acp` | Pi settings keys; third-party bridge | 327 |
 | **droid** | acp-stdio (Factory Droid) | executable | acp/stdio | `droid exec --output-format acp` | `FACTORY_API_KEY` / device login | 359 |
 | **cursor** | acp-stdio (Cursor CLI) | executable | acp/stdio | `cursor-agent` (on PATH) | install Cursor CLI | 390 |
 | cursor | mcp-config | documented-only | acp/http | — | Cursor-side MCP config | 410 |
@@ -84,13 +83,13 @@ probe).
 | `copilot-cli` | GitHub Copilot CLI | acp | stdio | `copilot --acp` |
 | `kiro` | Kiro CLI | acp | stdio | `kiro-cli acp` |
 | `qwen-code` | Qwen Code | acp | stdio | `npx -y @qwen-code/qwen-code --acp` |
-| `pi` | Pi (community adapter) | acp | stdio | `npx -y pi-acp` |
 | `droid` | Factory Droid | acp | stdio | `droid exec --output-format acp` |
 | `custom` | — | — | — | `null` (user-defined) |
 
 `ExternalAgentPresetId` (`:26`) is a closed union, but presets are not — see the next section.
-The Pi entry is bridged by the community `pi-acp` adapter (Pi has no native ACP support yet), so it
-is tagged `community-adapter` / `experimental` in the catalog.
+Pi has no ACP entry: it is driven natively over `pi-rpc` by the `pi-rpc` preset. The community
+`pi-acp` bridge that used to appear here was removed along with its runtime and its `npx`
+allowlist entry — see the Pi adapter page.
 
 ### Materializing a config
 

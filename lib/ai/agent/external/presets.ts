@@ -32,7 +32,6 @@ export type ExternalAgentPresetId =
   | "copilot-cli"
   | "kiro"
   | "qwen-code"
-  | "pi"
   | "pi-rpc"
   | "droid"
   | "opencode-acp"
@@ -286,7 +285,6 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "copilot-cli": buildPresetConfig("copilot-cli"),
   kiro: buildPresetConfig("kiro"),
   "qwen-code": buildPresetConfig("qwen-code"),
-  pi: buildPresetConfig("pi"),
   "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
   "opencode-acp": OPENCODE_ACP_PRESET,

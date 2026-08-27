@@ -45,7 +45,8 @@
     "mcp.logs",
     "rate-limit-reporting",
     "subagents.model-selection",
-    "models.list"
+    "models.list",
+    "web.search"
   ],
   "adapterMethodCapabilities": {
     "steer": "steerTurn",
@@ -111,8 +112,9 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "native",
-          "evidence": "adapter-code"
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
         },
         "context-management": {
           "level": "unsupported",
@@ -255,6 +257,10 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -454,6 +460,10 @@
         "models.list": {
           "level": "native",
           "evidence": "protocol-spec"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -666,6 +676,10 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -867,6 +881,10 @@
         "models.list": {
           "level": "native",
           "evidence": "protocol-spec"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -925,8 +943,9 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "native",
-          "evidence": "adapter-code"
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
         },
         "context-management": {
           "level": "unsupported",
@@ -1071,6 +1090,10 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -1129,8 +1152,9 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "native",
-          "evidence": "adapter-code"
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "modelVariantOverlay"
         },
         "context-management": {
           "level": "unsupported",
@@ -1275,6 +1299,10 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     },
@@ -1489,6 +1517,10 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
         }
       }
     }
@@ -1530,17 +1562,6 @@
         }
       }
     },
-    "pi": {
-      "protocol": "acp",
-      "note": "The community pi-acp bridge accepts mcpServers but does not attach them to Pi.",
-      "capabilities": {
-        "mcp": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noPerSessionMcpServers"
-        }
-      }
-    },
     "opencode-remote": {
       "protocol": "opencode",
       "note": "Cognia never starts this server, so it cannot be sandboxed or torn down by us; capability-wise it is identical to the auto-spawn preset.",
@@ -1553,7 +1574,7 @@
     }
   },
   "capabilityNotes": {
-    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure.",
+    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure. Codex takes it on its options channel and Pi has `set_thinking_level`, so those two are `native`. OpenCode expresses the same idea as variants -- named request overlays for one model, its docs' words -- so v2 is `equivalent`, not `native`: `opencode-v2-client.ts` sends the chosen id as the `variant` half of the `ModelRef` on `v2.session.switchModel`, which is the `provider/model#variant` reference OpenCode itself documents. v1 has no such field anywhere in its API, so effort there is only settable in the user's own opencode.json and the row stays `unsupported`.",
     "mcp": "Whether Cognia can attach an MCP server for a session. ACP carries them on `session/new`; Codex has no per-session parameter and reaches the same outcome through a per-thread config override (`equivalent`); the rest have no channel.",
     "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising stable `sessionCapabilities.resume`, with legacy `loadSession` as a fallback, so the row is `unknown` and the handshake answers it.",
     "compaction": "ACP has no compaction method: the only route is a `/compact` or `/compress` the agent chose to advertise, which is a per-session live fact. Pi and Codex have native methods.",

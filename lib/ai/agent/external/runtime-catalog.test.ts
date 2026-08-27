@@ -386,12 +386,11 @@ describe("binding a saved configuration to a runtime", () => {
     ).toBeUndefined()
   })
 
-  it("disambiguates the four npx runtimes by the package they run", () => {
+  it("disambiguates the npx runtimes by the package they run", () => {
     const cases: [string, string][] = [
       ["@zed-industries/codex-acp", "codex-acp"],
       ["@google/gemini-cli", "gemini-cli"],
       ["@qwen-code/qwen-code", "qwen-code"],
-      ["pi-acp", "pi-acp"],
     ]
     for (const [pkg, runtimeId] of cases) {
       const entry = findRuntimeForConfig(

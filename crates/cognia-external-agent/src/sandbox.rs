@@ -150,10 +150,11 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     if target.contains("qwen") {
         roots.push(home.join(".qwen"));
     }
-    // Pi's session store. `pi-acp` is the legacy npx bridge; `pi` is the native
-    // binary driven by the pi-rpc adapter (ADR-0119). Without this root Pi
-    // cannot persist a session, so `--session-id` resume silently starts fresh.
-    if target == "pi-acp" || base == "pi" {
+    // Pi's session store, for the native binary the pi-rpc adapter drives
+    // (ADR-0119). Matched on `base` rather than `contains` because "copilot"
+    // contains "pi". Without this root Pi cannot persist a session, so
+    // `--session-id` resume silently starts fresh.
+    if base == "pi" {
         roots.push(home.join(".pi"));
     }
     if target.contains("copilot") {
@@ -498,10 +499,22 @@ mod tests {
 
     #[test]
     fn npx_package_decides_the_state_root_not_npx() {
+        // Vehicle is Qwen because it is still launched through npx; `pi-acp`,
+        // which this used to use, was removed with the ACP bridge (ADR-0119).
+        let args = vec!["-y".to_string(), "@qwen-code/qwen-code".to_string()];
+        let roots = agent_state_writable_roots("npx", &args, Path::new("/home/dev"));
+        assert!(roots.contains(&PathBuf::from("/home/dev/.qwen")));
+        assert!(roots.contains(&PathBuf::from("/home/dev/.npm")));
+    }
+
+    /// `pi` must match on the base command, never as a substring: the native
+    /// binary is the only Pi launch left, and an `npx` package that merely
+    /// contains "pi" must not inherit Pi's session store.
+    #[test]
+    fn pi_state_root_does_not_leak_to_an_npx_package_containing_pi() {
         let args = vec!["-y".to_string(), "pi-acp".to_string()];
         let roots = agent_state_writable_roots("npx", &args, Path::new("/home/dev"));
-        assert!(roots.contains(&PathBuf::from("/home/dev/.pi")));
-        assert!(roots.contains(&PathBuf::from("/home/dev/.npm")));
+        assert!(!roots.contains(&PathBuf::from("/home/dev/.pi")));
     }
 
     #[test]

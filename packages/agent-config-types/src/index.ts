@@ -2732,6 +2732,18 @@ export interface ConversationSidebarSettings {
   metadata?: ConversationSidebarMetadata[]
   /** How overflowing titles reveal their full text. Defaults to hover. */
   titleMotion?: ConversationSidebarTitleMotion
+  /**
+   * Team ids in the order the user dragged them, for the sidebar's guild
+   * accordion and the icon rail that mirrors it. Ids not listed here (a team
+   * created after the last drag, or one joined on another device) sort after
+   * the listed ones by name, and ids of deleted teams are ignored — read both
+   * halves through `lib/shell/team-order.ts:orderTeams` rather than indexing
+   * this array directly.
+   *
+   * Lives here rather than on the `Team` row so reordering is a preference
+   * that follows the profile, not an edit to shared team data.
+   */
+  teamOrder?: string[]
 }
 
 /**
@@ -3131,6 +3143,22 @@ export interface AppSettings {
      * native tools aren't available and the custom ones are always used.
      */
     nativeOnAnthropic?: boolean
+    /**
+     * Opt-in (default false): use Cognia's multi-provider, host-routed web
+     * tools EVEN WHERE the runtime brings its own search.
+     *
+     * The inverse of {@link nativeOnAnthropic}, and the field that replaces it.
+     * Native-first is now the default (`lib/chat/web-access.ts`): preferring
+     * the provider-backed tools meant a subscriber with no search key was
+     * handed a `web_search` that could only fail, while the natives that would
+     * have worked sat behind an opt-in defaulting off. This is the escape
+     * hatch for someone who wants the multi-provider search anyway — a
+     * provider with better recency/domain filters, or a native they do not
+     * want billed. Honoured only when a search provider is actually
+     * configured; `nativeOnAnthropic` is kept for back-compat and, being
+     * native-first already, is now a no-op when true.
+     */
+    preferCognia?: boolean
     /**
      * Opt-in (default false): allow `web_fetch` to reach private / loopback /
      * link-local hosts (localhost, 10./192.168., 169.254.x cloud metadata, …).

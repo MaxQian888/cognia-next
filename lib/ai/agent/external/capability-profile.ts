@@ -28,6 +28,7 @@ import {
   type ExternalAgentCapabilityCell,
   type ExternalAgentCapabilityId,
   type ExternalAgentCapabilityLayerInput,
+  type ExternalAgentCapabilityLevel,
   type ExternalAgentCapabilityMatrix,
   type ExternalAgentCapabilityProfileV1,
   type ExternalAgentHostCeilings,
@@ -73,8 +74,38 @@ export interface DeclaredCapabilityProfileInput {
    * prove the adapter works.
    */
   pluginDeclaration?: ExternalAgentCapabilityMatrix
+  /**
+   * What the USER declared about their own build of this agent
+   * (`ExternalAgentConfig.declaredCapabilities`) — merge layer `user-declared`.
+   *
+   * Levels only, because that is all a person can honestly supply; the evidence
+   * grade is stamped here so no caller can dress a claim up as a measurement.
+   */
+  userDeclared?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
   hostFacts?: ExternalAgentHostFacts
   ceilings?: ExternalAgentHostCeilings
+}
+
+/**
+ * Turn the user's level-only declaration into merge layer `user-declared`.
+ *
+ * Stamps `evidence: "user-declared"` on every cell — the grade that says
+ * "someone told us" and nothing stronger — and supplies the `reasonKey` the
+ * cell contract requires for any level other than `native`, so a UI can always
+ * render WHY a row reads the way it does.
+ */
+export function userDeclaredCapabilityLayer(
+  declared: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>> | undefined
+): ExternalAgentCapabilityLayerInput {
+  const cells: ExternalAgentCapabilityMatrix = {}
+  for (const [id, level] of Object.entries(declared ?? {})) {
+    if (!level) continue
+    cells[id as ExternalAgentCapabilityId] =
+      level === "native"
+        ? { level, evidence: "user-declared" }
+        : { level, evidence: "user-declared", reasonKey: "userDeclared" }
+  }
+  return { layer: "user-declared", cells }
 }
 
 function fill(
@@ -134,10 +165,20 @@ export function buildDeclaredCapabilityProfile(
   const protocolLayer = protocolCapabilityLayer(input.protocol)
   const refinementLayer = mergeRefinements(input)
 
-  const declared = mergeExternalAgentCapabilities([protocolLayer, refinementLayer]).effective
+  const userLayer = userDeclaredCapabilityLayer(input.userDeclared)
+
+  // The user's declaration joins the STATIC picture: it is known before
+  // connecting, so the preflight has to see it too — an agent the user says
+  // brings its own web search must read that way before the first handshake.
+  const declared = mergeExternalAgentCapabilities([
+    protocolLayer,
+    refinementLayer,
+    userLayer,
+  ]).effective
   const { effective, drift } = mergeExternalAgentCapabilities([
     protocolLayer,
     refinementLayer,
+    userLayer,
     hostFactsCapabilityLayer(hostFacts),
     hostCeilingsCapabilityLayer(ceilings),
   ])
@@ -209,11 +250,18 @@ export function negotiateCapabilityProfile(
   const methodsLayer = adapterMethodCapabilityLayer(input.adapter)
   const hostLayer = hostFactsCapabilityLayer(hostFacts)
 
-  const declared = mergeExternalAgentCapabilities([protocolLayer, refinementLayer]).effective
+  const userLayer = userDeclaredCapabilityLayer(input.userDeclared)
+
+  const declared = mergeExternalAgentCapabilities([
+    protocolLayer,
+    refinementLayer,
+    userLayer,
+  ]).effective
   const { effective, drift } = mergeExternalAgentCapabilities([
     protocolLayer,
     refinementLayer,
     methodsLayer,
+    userLayer,
     // Host facts and handshake facts are both `live`. Handshake facts come
     // second so an agent that explicitly refuses something the host would have
     // provided still reads as refused.

@@ -88,7 +88,7 @@ import { DelegationRulesSection } from "./delegation-rules-section"
 import { DeepSeekHarnessCard } from "./deepseek-harness-card"
 import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
 import { OpencodeStatusCard } from "./opencode-status-card"
-import { PiMigrationCard } from "./pi-migration-card"
+import { PiAuthStatusCard } from "./pi-auth-status-card"
 import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
@@ -142,6 +142,8 @@ interface AgentFormData {
   networkApiKey: string
   // Settings
   defaultPermissionMode: AcpPermissionMode
+  /** Tri-state for `declaredCapabilities["web.search"]`; "" ≡ let us work it out. */
+  declaredWebSearch: "" | "native" | "unsupported"
   description: string
   timeoutMs: string
   retryMaxRetries: string
@@ -197,6 +199,18 @@ const DEFAULT_RETRY_MAX_RETRIES = "3"
 const DEFAULT_RETRY_DELAY_MS = "1000"
 const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
 
+/**
+ * Read the stored declaration back into the tri-state. Only `native` and
+ * `unsupported` are offered: `equivalent` has no meaning a person could supply
+ * here, and `unknown` IS the empty option — so anything else reads as "work it out".
+ */
+function declaredWebSearchOf(
+  declared: LifecycleExternalAgentConfig["declaredCapabilities"]
+): "" | "native" | "unsupported" {
+  const level = declared?.["web.search"]
+  return level === "native" || level === "unsupported" ? level : ""
+}
+
 const DEFAULT_FORM_DATA: AgentFormData = {
   name: "",
   protocol: "acp",
@@ -207,6 +221,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   networkEndpoint: "",
   networkApiKey: "",
   defaultPermissionMode: "default",
+  declaredWebSearch: "",
   description: "",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
@@ -396,6 +411,7 @@ function AgentEditorDialog({
       networkEndpoint: agent.network?.endpoint || "",
       networkApiKey: agent.network?.apiKey || "",
       defaultPermissionMode: agent.defaultPermissionMode || "default",
+      declaredWebSearch: declaredWebSearchOf(agent.declaredCapabilities),
       description: agent.description || "",
       timeoutMs: String(agent.timeout ?? DEFAULT_TIMEOUT_MS),
       retryMaxRetries: String(agent.retryConfig?.maxRetries ?? DEFAULT_RETRY_MAX_RETRIES),
@@ -520,6 +536,17 @@ function AgentEditorDialog({
           : {}),
       }
     }
+
+    // The user's own statement about this build (merge layer `user-declared`).
+    // An absent declaration and a declaration of "unknown" are the same thing,
+    // so "work it out" writes the EMPTY object rather than omitting the key:
+    // every write below this is a partial update, where an omitted key means
+    // "leave it alone" — which on an edit would pin the previous answer with no
+    // way back to it. `{}` is the clear, honoured by `updateAgent` and by
+    // `normalizeExternalAgentConfigInput`.
+    input.declaredCapabilities = formData.declaredWebSearch
+      ? { "web.search": formData.declaredWebSearch }
+      : {}
 
     if (selectedPresetConfig) {
       input.metadata = {
@@ -957,6 +984,35 @@ function AgentEditorDialog({
                     {t(PERMISSION_MODE_LABEL_KEY[mode])}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Does this build reach the web on its own?
+              Nothing in the wire protocol answers it — it is a property of the
+              binary and plan the user installed — so every manifest row ships
+              `unknown` and this is where it stops being unknown. It decides
+              whether Cognia supplies `web_search` for the turn
+              (`lib/chat/web-access.ts`). */}
+          <div className="grid gap-2">
+            <Label>{t("declaredWebSearch")}</Label>
+            <p className="text-sm text-muted-foreground">{t("declaredWebSearchDesc")}</p>
+            <Select
+              value={formData.declaredWebSearch || "auto"}
+              onValueChange={(v) =>
+                setFormData({
+                  ...formData,
+                  declaredWebSearch: v === "auto" ? "" : (v as "native" | "unsupported"),
+                })
+              }
+            >
+              <SelectTrigger data-testid="declared-web-search">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("declaredWebSearchAuto")}</SelectItem>
+                <SelectItem value="native">{t("declaredWebSearchNative")}</SelectItem>
+                <SelectItem value="unsupported">{t("declaredWebSearchNone")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1715,16 +1771,10 @@ function AgentDetail({
           <OpencodeStatusCard agentId={agent.id} connected={isConnected} />
         )}
 
-        {/* Pi: offer the move off the community ACP bridge, and the way back.
-            Renders only for a legacy or already-migrated Pi agent, so nothing
-            else in the list is touched (ADR-0119 never auto-rewrites). */}
-        <PiMigrationCard
-          agent={agent}
-          blockers={runtimeValidity?.executable === false ? ["command_missing"] : []}
-          onApply={(next) => {
-            void applyUpdate(next)
-          }}
-        />
+        {/* Pi native RPC: which providers Pi can actually authenticate (ADR-0119). */}
+        {agent.protocol === "pi-rpc" && (
+          <PiAuthStatusCard agentId={agent.id} connected={isConnected} />
+        )}
       </CardContent>
     </Card>
   )

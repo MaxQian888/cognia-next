@@ -129,12 +129,27 @@ export type ExternalOnlyCapabilityId =
   | "subagents.model-selection"
   /** The backend can enumerate its models without a live session. */
   | "models.list"
+  /**
+   * The agent reaches the web on its own — its runtime carries a web search it
+   * runs without Cognia supplying one.
+   *
+   * Every built-in protocol row ships `unknown`, and that is the honest answer:
+   * whether a Codex or an ACP build has web search on is a property of the
+   * user's own install (a config flag, a plan, a proxy), not of the wire
+   * protocol, and asserting either way from here would be guessing on their
+   * behalf. The verdict arrives from the layer that can actually know — the
+   * user's declaration, or an observation of the agent doing it — and
+   * `lib/chat/web-access.ts` reads the result to decide whether Cognia needs to
+   * supply `web_search` for the turn.
+   */
+  | "web.search"
 
 export const EXTERNAL_ONLY_CAPABILITY_IDS: readonly ExternalOnlyCapabilityId[] = [
   "mcp.logs",
   "rate-limit-reporting",
   "subagents.model-selection",
   "models.list",
+  "web.search",
 ]
 
 export type ExternalAgentCapabilityId = AgentCapabilityId | ExternalOnlyCapabilityId
@@ -192,6 +207,17 @@ export type ExternalAgentCapabilityEvidence =
   | "adapter-code"
   /** The protocol specification has (or lacks) a slot for it. */
   | "protocol-spec"
+  /**
+   * The user told us, about their own agent build.
+   *
+   * The weakest grade that can still back a verdict, and deliberately distinct
+   * from every grade above it: nothing was measured and no vendor stands behind
+   * it, so a UI can render it as "you told us this" rather than as something
+   * Cognia established. It ranks last in strength but sits ABOVE the static
+   * layers in precedence — the spec describes the wire, the user describes the
+   * binary they are actually running.
+   */
+  | "user-declared"
   /** No evidence at all — only valid with level `unknown`. */
   | "none"
 
@@ -202,6 +228,7 @@ export const EXTERNAL_AGENT_CAPABILITY_EVIDENCE: readonly ExternalAgentCapabilit
   "probe",
   "adapter-code",
   "protocol-spec",
+  "user-declared",
   "none",
 ]
 
@@ -238,15 +265,31 @@ export type ExternalAgentCapabilityLayer =
   | "refinement"
   /** 3. Which optional methods Cognia's adapter actually implements. */
   | "adapter-methods"
-  /** 4. What THIS session's handshake and negotiation reported. */
+  /**
+   * 4. What the USER told us about their own agent build.
+   *
+   * Above the static layers because the person running the agent knows things
+   * no checked-in table can — whether their Codex has web search switched on,
+   * which plan it runs under. Below `live` because a handshake or an
+   * observation is a measurement and this is a claim, and when the two
+   * disagree the measurement is right.
+   *
+   * It is a STATIC layer for merge purposes (see `layerMayWiden`): it fills an
+   * `unknown` and may tighten, but it cannot turn a protocol-level
+   * `unsupported` back into `native`. A declaration that needs to do that is
+   * evidence the manifest row is wrong — fix the row.
+   */
+  | "user-declared"
+  /** 5. What THIS session's handshake and negotiation reported. */
   | "live"
-  /** 5. Host / platform / policy ceilings. Intersect only — never widen. */
+  /** 6. Host / platform / policy ceilings. Intersect only — never widen. */
   | "ceiling"
 
 export const EXTERNAL_AGENT_CAPABILITY_LAYERS: readonly ExternalAgentCapabilityLayer[] = [
   "protocol",
   "refinement",
   "adapter-methods",
+  "user-declared",
   "live",
   "ceiling",
 ]
@@ -431,6 +474,8 @@ export const EXTERNAL_CAPABILITY_REASON_KEYS = {
   sidecarOnly: "sidecarOnly",
   adapterMethodMissing: "adapterMethodMissing",
   pluginUndeclared: "pluginUndeclared",
+  /** The user said so about their own agent build (layer `user-declared`). */
+  userDeclared: "userDeclared",
 } as const
 
 export type ExternalCapabilityReasonKey =

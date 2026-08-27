@@ -24,7 +24,8 @@
       "probe": "运行时探测所得",
       "adapter-code": "来自 Cognia 适配器",
       "protocol-spec": "来自协议规范",
-      "none": "无证据"
+      "none": "无证据",
+      "user-declared": "你声明的"
     },
     "reason": {
       "agentOwned": "由外部 Agent 自行处理",
@@ -32,12 +33,14 @@
       "sidecarOnly": "只有内建 Agent 会上报这一项",
       "perThreadConfigOverride": "通过每个线程的配置覆盖传递",
       "codexOptionsChannel": "通过 Codex options 通道传递",
+      "modelVariantOverlay": "以模型变体（variant）的形式下发",
       "noMidTurnApproval": "该传输层无法在回合中途发起审批",
       "launchTimeAuthorityOnly": "权限只在启动时授予，运行中无法更改",
       "noPerSessionMcpServers": "该 Agent 协议没有按会话传递 MCP 的通道",
       "cancelKillsRuntime": "取消会结束整个运行时，而不只是当前回合",
       "notNegotiated": "Agent 在 initialize 阶段未声明该能力",
       "committedRepliesOnly": "该通道只上报已提交的回复",
+      "attachmentStoreUnavailable": "该运行时没有可接收附件字节的存储",
       "nativeSummarizeRoute": "由服务方自带的 summarize 路径提供",
       "noManifestRow": "没有任何清单描述该协议的能力",
       "adapterMethodMissing": "Cognia 适配器尚未实现该方法",
@@ -57,7 +60,8 @@
       "negotiatedNoThinking": "Agent 声明没有思考等级控制",
       "negotiatedNoToolExecution": "Agent 声明不执行工具",
       "advertisedCompactCommand": "Agent 提供了 /compact 命令",
-      "noAdvertisedCompactCommand": "Agent 未提供 /compact 命令"
+      "noAdvertisedCompactCommand": "Agent 未提供 /compact 命令",
+      "userDeclared": "这是你为该 agent 声明的"
     },
     "adapterMethod": {
       "steerTurn": "Cognia 适配器已实现 steerTurn",
@@ -473,22 +477,6 @@
     "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
     "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",
     "piManagePackages": "管理 Pi 扩展包",
-    "piMigration": {
-      "blocker": {
-        "command_missing": "未安装 Pi，或其不在 PATH 中。",
-        "runtime_version_unsupported": "已安装的 Pi 版本低于所支持的版本。",
-        "sandbox_unavailable": "本机沙箱不可用，因此无法在此运行 Pi。"
-      },
-      "continuityNote": "你的设置与该智能体的 ID 会保留。切换后的首次运行会新建一个 Pi 会话，当前对话不会延续。",
-      "legacyDescription": "此智能体通过社区 pi-acp 桥运行。切换到 Pi 原生协议后可使用思考等级、实时引导、上下文压缩与会话分叉。",
-      "migrateAction": "切换到原生 Pi",
-      "migratedDescription": "此智能体已运行在 Pi 原生协议上。",
-      "rollbackAction": "切回桥接方式",
-      "rollbackNote": "切回只会恢复之前的连接设置，会话与记录都会保留。",
-      "statusLegacy": "社区 ACP 桥",
-      "statusNative": "原生 RPC",
-      "title": "Pi 连接方式"
-    },
     "piSandboxNote": "Pi 始终在严格沙箱内运行，且仅支持 macOS 与 Linux，不存在无沙箱回退。",
     "piSectionTitle": "Pi 运行时",
     "presetGalleryEmpty": "暂无可用预设。",
@@ -533,7 +521,32 @@
     "transportHttpLabel": "HTTP (远程)",
     "transportStdioLabel": "Stdio (本地进程)",
     "useThisPreset": "使用该预设",
-    "workingDirectory": "工作目录"
+    "workingDirectory": "工作目录",
+    "declaredWebSearch": "自带联网搜索",
+    "declaredWebSearchAuto": "交给我们判断",
+    "declaredWebSearchDesc": "这个 agent 自己能不能联网。协议层面回答不了——取决于你装的是哪个版本、什么套餐——所以要么你告诉我们，要么交给我们判断，Cognia 会在能供给时提供搜索工具。",
+    "declaredWebSearchNative": "是——它自己会搜",
+    "declaredWebSearchNone": "否——由 Cognia 提供搜索",
+    "piAuth": {
+      "title": "Pi 凭证",
+      "notConnected": "连接该智能体后，可查看 Pi 能通过认证的提供方。",
+      "refresh": "重新检查凭证",
+      "readOnlyNote": "Cognia 只向 Pi 询问状态，从不读取、刷新或保存你的 Pi 凭证。",
+      "listingUnreadable": "读不到 Pi 的模型列表，因此无从检查。这与你的凭证是否有效无关。",
+      "noProviders": "Pi 报告没有任何可用模型。请先在 Pi 中登录一个提供方，再发送提示词。",
+      "unknownProvider": "未知提供方",
+      "configureHint": "缺失的提供方需要在 Pi 自身中配置——Cognia 无法代你登录。",
+      "status": {
+        "ready": "可用",
+        "not_ready": "未登录",
+        "invalid": "无效",
+        "unreadable": "无法检查"
+      },
+      "authType": {
+        "api_key": "API 密钥",
+        "oauth": "OAuth"
+      }
+    }
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",

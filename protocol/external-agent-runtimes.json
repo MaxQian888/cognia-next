@@ -11,8 +11,7 @@
     "runtimes": {
       "codex-acp": "Zed's Codex ACP shim. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @zed-industries/codex-acp` until one is.",
       "gemini-cli": "Google's Gemini CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @google/gemini-cli --acp`.",
-      "qwen-code": "Qwen Code CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @qwen-code/qwen-code --acp`.",
-      "pi-acp": "Pi's ACP adapter. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y pi-acp`."
+      "qwen-code": "Qwen Code CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @qwen-code/qwen-code --acp`."
     }
   },
   "runtimes": [
@@ -26,9 +25,16 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "codex",
       "launchArgs": ["app-server"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://developers.openai.com/codex/app-server"
     },
     {
@@ -47,7 +53,10 @@
         "timeoutMs": 20000
       },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://github.com/zed-industries/codex-acp"
     },
     {
@@ -60,9 +69,16 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "claude-agent-acp",
       "launchArgs": [],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://github.com/agentclientprotocol/claude-agent-acp"
     },
     {
@@ -81,7 +97,10 @@
         "timeoutMs": 20000
       },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://github.com/google-gemini/gemini-cli"
     },
     {
@@ -94,9 +113,16 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "copilot",
       "launchArgs": ["--acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server"
     },
     {
@@ -109,9 +135,16 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "kiro-cli",
       "launchArgs": ["acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://kiro.dev/docs/cli/acp/"
     },
     {
@@ -130,7 +163,10 @@
         "timeoutMs": 20000
       },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": true },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": true
+      },
       "docsUrl": "https://github.com/QwenLM/qwen-code"
     },
     {
@@ -143,29 +179,17 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "pi",
       "launchArgs": ["--mode", "rpc"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
-      "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://pi.dev/docs/latest/rpc"
-    },
-    {
-      "runtimeId": "pi-acp",
-      "presetIds": ["pi"],
-      "displayName": "Pi ACP adapter",
-      "ownership": "system",
-      "protocol": "acp",
-      "transport": "stdio",
-      "platforms": ["darwin", "linux"],
-      "systemCommand": "npx",
-      "launchArgs": ["-y", "pi-acp"],
       "versionProbe": {
-        "args": ["-y", "pi-acp", "--version"],
+        "args": ["--version"],
         "parser": "semver-anywhere",
-        "timeoutMs": 20000
+        "timeoutMs": 10000
       },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://github.com/svkozak/pi-acp"
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://pi.dev/docs/latest/rpc"
     },
     {
       "runtimeId": "droid",
@@ -177,9 +201,16 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "droid",
       "launchArgs": ["exec", "--output-format", "acp-daemon"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://docs.factory.ai/"
     },
     {
@@ -192,9 +223,16 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "cursor-agent",
       "launchArgs": ["acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://cursor.com/docs/cli/acp"
     },
     {
@@ -207,9 +245,16 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "opencode",
       "launchArgs": [],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://opencode.ai/docs/server/"
     },
     {
@@ -222,10 +267,17 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "opencode",
       "launchArgs": ["acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
       "supportedRange": ">=1.18.14",
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://opencode.ai/docs/acp/"
     },
     {
@@ -237,7 +289,10 @@
       "transport": "sse",
       "platforms": ["darwin", "linux", "win32"],
       "distributions": [],
-      "sandbox": { "required": false, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": false,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://opencode.ai/docs/server/"
     },
     {
@@ -249,7 +304,10 @@
       "transport": "sse",
       "platforms": ["darwin", "linux", "win32"],
       "distributions": [],
-      "sandbox": { "required": false, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": false,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://opencode.ai/v2/docs/build/client"
     },
     {
@@ -264,9 +322,16 @@
       "protocol": "dsh-sdk",
       "transport": "stdio",
       "platforms": ["darwin", "linux"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 15000 },
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
       "distributions": [],
-      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
       "docsUrl": "https://github.com/deepseek-ai/deepseek-harness"
     }
   ]

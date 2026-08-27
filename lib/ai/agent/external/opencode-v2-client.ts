@@ -4,6 +4,7 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
 import type {
   AcpAvailableCommand,
+  AcpConfigOption,
   AcpPermissionResponse,
   AcpSessionModelState,
   ExternalAgentConfig,
@@ -119,12 +120,47 @@ function stepTokenUsage(data: Record<string, unknown> | undefined): ExternalAgen
   }
 }
 
+/**
+ * The config-option id the variant picker is exposed under.
+ *
+ * OpenCode has no reasoning-LEVEL control. What it has is variants: its docs
+ * call them "named request overlays for one model, commonly used for reasoning
+ * effort or token budgets", selected per session as the `#variant` half of a
+ * `provider/model#variant` reference. So the honest control is a picker over
+ * THIS model's variants, not a low/medium/high slider whose tiers OpenCode
+ * never defined.
+ */
+const VARIANT_OPTION_ID = "variant"
+
+/**
+ * The "no overlay" choice — the base model with none of its variants applied.
+ *
+ * It cannot collide with a real variant id: OpenCode parses a model reference
+ * by splitting on the first `#`, so everything after it is the id and a `#`
+ * can never appear inside one. An empty string would have been the obvious
+ * sentinel, but Radix rejects `value=""` on a select item, and the picker this
+ * feeds is a Radix select.
+ */
+const NO_VARIANT = "#none"
+
 export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   readonly protocol = "opencode-v2"
 
   private client?: OpencodeClient
   private commands: AcpAvailableCommand[] = []
   private models = new Map<string, AcpSessionModelState>()
+  /**
+   * Variant ids per `provider/model`, from `v2.model.list()`.
+   *
+   * Kept because a variant is only meaningful against the model that declares
+   * it, and OpenCode does not fall back: its docs warn that "an unknown variant
+   * fails model resolution instead of silently using the base model". Offering
+   * or forwarding one we did not read back from the catalog would turn a picker
+   * into a way to break the next turn.
+   */
+  private modelVariants = new Map<string, string[]>()
+  /** The variant each session currently runs under, absent when it is on base. */
+  private sessionVariants = new Map<string, string>()
   private nativeCompactionUnsupported = false
 
   async connect(config: ExternalAgentConfig): Promise<void> {
@@ -189,6 +225,8 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     this.client = undefined
     this.commands = []
     this.models.clear()
+    this.modelVariants.clear()
+    this.sessionVariants.clear()
     this._sessions.clear()
     this._connectionStatus = "disconnected"
   }
@@ -246,6 +284,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     await this.cancel(sessionId)
     this._sessions.delete(sessionId)
     this.models.delete(sessionId)
+    this.sessionVariants.delete(sessionId)
   }
 
   async *prompt(
@@ -372,20 +411,101 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   }
 
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    // Switching models drops the variant. Variants are declared per model, and
+    // OpenCode fails model resolution on an unknown one rather than ignoring
+    // it — so carrying the old model's overlay across would not degrade to the
+    // base model, it would break the next turn.
+    await this.switchModel(sessionId, modelId, undefined)
+  }
+
+  getSessionModels(sessionId: string): AcpSessionModelState | undefined {
+    return this.models.get(sessionId)
+  }
+
+  // --------------------------------------------------------------------------
+  // Session config options (synthesized — model variant)
+  //
+  // OpenCode V2 has no ACP-style config-option surface, so this synthesizes one
+  // the same way the Codex adapter synthesizes its reasoning-effort picker: the
+  // existing session panel renders it with no new chat UI. The value it writes
+  // is real — it rides `v2.session.switchModel` as the `variant` half of the
+  // model reference, which is the channel OpenCode's own `provider/model#variant`
+  // syntax names.
+  // --------------------------------------------------------------------------
+
+  getConfigOptions(sessionId: string): AcpConfigOption[] | undefined {
+    if (!this._sessions.has(sessionId)) return undefined
+    const variants = this.variantsForSession(sessionId)
+    // A model with no variants gets no picker at all. An empty select would
+    // claim a control that has nothing to choose between, which is the same
+    // silent lie as claiming the capability outright.
+    if (variants.length === 0) return []
+    return [
+      {
+        id: VARIANT_OPTION_ID,
+        name: "Model variant",
+        description: "Reasoning effort and token budget overlays declared by this model.",
+        category: "thought_level",
+        type: "select",
+        currentValue: this.sessionVariants.get(sessionId) ?? NO_VARIANT,
+        options: [
+          { value: NO_VARIANT, name: "Base model", description: "No variant overlay." },
+          ...variants.map((variant) => ({ value: variant, name: variant })),
+        ],
+      },
+    ]
+  }
+
+  async setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string | boolean
+  ): Promise<AcpConfigOption[]> {
+    if (!this._sessions.has(sessionId)) throw new Error(`Session not found: ${sessionId}`)
+    if (configId !== VARIANT_OPTION_ID) throw new Error(`Unknown config option: ${configId}`)
+    if (typeof value !== "string") {
+      throw new Error(`Config option ${configId} requires a string value`)
+    }
+    const variant = value === NO_VARIANT ? undefined : value
+    // Refuse a variant this model never published. OpenCode would answer with a
+    // model-resolution failure on the next prompt instead of here, which reads
+    // as "the agent broke" rather than "that variant does not exist".
+    if (variant && !this.variantsForSession(sessionId).includes(variant)) {
+      throw new Error(`OpenCode V2 model has no variant "${variant}"`)
+    }
+    const modelId = this.models.get(sessionId)?.currentModelId
+    if (!modelId) throw new Error("OpenCode V2 session has no model to apply a variant to")
+    await this.switchModel(sessionId, modelId, variant)
+    return this.getConfigOptions(sessionId) ?? []
+  }
+
+  /** The variant ids the session's CURRENT model declares. */
+  private variantsForSession(sessionId: string): string[] {
+    const modelId = this.models.get(sessionId)?.currentModelId
+    return (modelId && this.modelVariants.get(modelId)) || []
+  }
+
+  /**
+   * The one place a model reference is written, so model and variant can never
+   * be sent as a mismatched pair.
+   */
+  private async switchModel(
+    sessionId: string,
+    modelId: string,
+    variant: string | undefined
+  ): Promise<void> {
     const [providerID, id] = modelId.split("/", 2)
     if (!providerID || !id) throw new Error("OpenCode V2 model must use provider/model format")
     unwrap(
       await this.requireClient().v2.session.switchModel({
         sessionID: sessionId,
-        model: { providerID, id },
+        model: { providerID, id, ...(variant ? { variant } : {}) },
       })
     )
     const current = this.models.get(sessionId)
     if (current) this.models.set(sessionId, { ...current, currentModelId: modelId })
-  }
-
-  getSessionModels(sessionId: string): AcpSessionModelState | undefined {
-    return this.models.get(sessionId)
+    if (variant) this.sessionVariants.set(sessionId, variant)
+    else this.sessionVariants.delete(sessionId)
   }
 
   getAvailableCommands(): AcpAvailableCommand[] {
@@ -465,6 +585,20 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         name: readString(model.name) ?? readString(model.id) ?? "Unknown model",
       }))
       .filter((model) => !model.modelId.startsWith("/") && !model.modelId.endsWith("/"))
+    // `ModelV2Info.variants` is the only place the ids are published. A model
+    // with none simply gets no entry, and `getConfigOptions` then offers no
+    // picker rather than an empty one.
+    this.modelVariants.clear()
+    for (const model of rawModels) {
+      const modelId = `${readString(model.providerID) ?? ""}/${readString(model.id) ?? ""}`
+      if (modelId.startsWith("/") || modelId.endsWith("/")) continue
+      const variants = Array.isArray(model.variants)
+        ? (model.variants as Array<Record<string, unknown>>)
+            .map((variant) => readString(variant.id))
+            .filter((id): id is string => !!id)
+        : []
+      if (variants.length > 0) this.modelVariants.set(modelId, variants)
+    }
     this.models.set("__default__", {
       availableModels,
       currentModelId: availableModels[0]?.modelId ?? "",
@@ -472,10 +606,6 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   }
 
   private attachRuntimeMetadata(session: ExternalAgentSession): void {
-    session.metadata = {
-      ...session.metadata,
-      availableCommands: this.getAvailableCommands(),
-    }
     const defaultModels = this.models.get("__default__")
     const model = readString(session.metadata?.model)
     if (defaultModels) {
@@ -483,6 +613,17 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         ...defaultModels,
         currentModelId: model ?? defaultModels.currentModelId,
       })
+    }
+    const variant = readString(session.metadata?.modelVariant)
+    if (variant) this.sessionVariants.set(session.id, variant)
+    else this.sessionVariants.delete(session.id)
+    // `configOptions` on the session is what seeds the panel before any event
+    // arrives (`use-external-agent` reads it on activation), so the variant
+    // picker is there from the first render instead of after the first change.
+    session.metadata = {
+      ...session.metadata,
+      availableCommands: this.getAvailableCommands(),
+      configOptions: this.getConfigOptions(session.id),
     }
   }
 
@@ -501,6 +642,11 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         directory: info.location?.directory,
         parentID: info.parentID,
         model: info.model ? `${info.model.providerID}/${info.model.id}` : undefined,
+        // `SessionV2Info.model` is a `ModelRef`, so the variant a session was
+        // created or switched onto is readable back rather than inferred — the
+        // picker opens on what OpenCode is actually running, including for a
+        // session this process did not create.
+        modelVariant: info.model?.variant,
         preview: true,
       },
     }

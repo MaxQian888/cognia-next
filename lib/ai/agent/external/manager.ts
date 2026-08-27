@@ -471,6 +471,20 @@ export class ExternalAgentManager {
     return adapter instanceof OpenCodeClientAdapter ? adapter : null
   }
 
+  /**
+   * Return the live Pi RPC adapter for an agent, or null when the agent isn't
+   * connected through the native `pi-rpc` protocol.
+   *
+   * Pi's credential diagnostic lives on the adapter rather than the generic
+   * {@link ProtocolAdapter} contract because it is not a protocol call at all —
+   * it shells `pi auth check`, which only Pi has. Mirrors
+   * {@link getCodexAppServerAdapter} and {@link getOpenCodeAdapter}.
+   */
+  getPiRpcAdapter(agentId: string): PiRpcClientAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof PiRpcClientAdapter ? adapter : null
+  }
+
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setSessionModel) {
@@ -3193,6 +3207,12 @@ export class ExternalAgentManager {
         protocol: instance.config.protocol,
         ...(presetId ? { presetId } : {}),
         adapter: adapter as unknown as Record<string, unknown>,
+        // What the user told us about THIS agent build (layer `user-declared`)
+        // — the only source that can answer a question the wire protocol does
+        // not, e.g. whether their Codex has web search switched on.
+        ...(instance.config.declaredCapabilities
+          ? { userDeclared: instance.config.declaredCapabilities }
+          : {}),
         hostFacts: this.resolveHostFacts(),
         ceilings: this.resolveHostCeilings(),
         liveFacts: liveCapabilityFacts({

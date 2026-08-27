@@ -117,6 +117,14 @@ function fakeClient() {
                 name: "Claude",
                 enabled: true,
                 status: "active",
+                variants: [{ id: "thinking" }, { id: "deep" }],
+              },
+              {
+                id: "gpt-5",
+                providerID: "openai",
+                name: "GPT-5",
+                enabled: true,
+                status: "active",
               },
             ],
           })
@@ -354,7 +362,10 @@ describe("OpenCodeV2ClientAdapter", () => {
       location: { directory: "/workspace" },
     })
     expect(adapter.getSessionModels(created.id)).toEqual({
-      availableModels: [{ modelId: "anthropic/claude", name: "Claude" }],
+      availableModels: [
+        { modelId: "anthropic/claude", name: "Claude" },
+        { modelId: "openai/gpt-5", name: "GPT-5" },
+      ],
       currentModelId: "anthropic/claude",
     })
 
@@ -408,6 +419,103 @@ describe("OpenCodeV2ClientAdapter", () => {
     expect(adapter.connectionStatus).toBe("disconnected")
     expect(await adapter.healthCheck()).toBe(false)
     await expect(adapter.createSession()).rejects.toThrow(/not connected/i)
+  })
+
+  it("forwards the reasoning-effort pick as the model reference's variant", async () => {
+    const client = fakeClient()
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const created = await adapter.createSession()
+
+    // The picker offers exactly what THIS model published, plus the base. It is
+    // seeded onto the session too, so the panel renders it before any event.
+    expect(adapter.getConfigOptions(created.id)).toEqual([
+      expect.objectContaining({
+        id: "variant",
+        category: "thought_level",
+        type: "select",
+        currentValue: "#none",
+        options: [
+          expect.objectContaining({ value: "#none" }),
+          { value: "thinking", name: "thinking" },
+          { value: "deep", name: "deep" },
+        ],
+      }),
+    ])
+    expect(adapter.getSession(created.id)?.metadata?.configOptions).toHaveLength(1)
+
+    const updated = await adapter.setConfigOption(created.id, "variant", "deep")
+    // This is the whole point: the pick reaches OpenCode as the `variant` half
+    // of the ModelRef — the `provider/model#variant` reference its docs define.
+    expect(client.v2.session.switchModel).toHaveBeenLastCalledWith({
+      sessionID: created.id,
+      model: { providerID: "anthropic", id: "claude", variant: "deep" },
+    })
+    expect(updated[0]).toEqual(expect.objectContaining({ currentValue: "deep" }))
+
+    // Back to base sends no variant at all rather than an empty one.
+    await adapter.setConfigOption(created.id, "variant", "#none")
+    expect(client.v2.session.switchModel).toHaveBeenLastCalledWith({
+      sessionID: created.id,
+      model: { providerID: "anthropic", id: "claude" },
+    })
+  })
+
+  it("refuses a variant the model never published, and drops it on a model switch", async () => {
+    const client = fakeClient()
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const created = await adapter.createSession()
+
+    // OpenCode fails model resolution on an unknown variant instead of falling
+    // back to the base model, so an unknown id has to fail HERE — otherwise the
+    // next prompt dies and reads as the agent breaking.
+    await expect(adapter.setConfigOption(created.id, "variant", "xhigh")).rejects.toThrow(
+      /no variant "xhigh"/
+    )
+    expect(client.v2.session.switchModel).not.toHaveBeenCalled()
+    await expect(adapter.setConfigOption(created.id, "effort", "deep")).rejects.toThrow(
+      /Unknown config option/
+    )
+    await expect(adapter.setConfigOption("missing", "variant", "deep")).rejects.toThrow(
+      /Session not found/
+    )
+
+    // A variant belongs to one model. Switching models must not carry it over.
+    await adapter.setConfigOption(created.id, "variant", "thinking")
+    await adapter.setSessionModel(created.id, "openai/gpt-5")
+    expect(client.v2.session.switchModel).toHaveBeenLastCalledWith({
+      sessionID: created.id,
+      model: { providerID: "openai", id: "gpt-5" },
+    })
+    // gpt-5 publishes no variants, so there is nothing to pick and no picker.
+    expect(adapter.getConfigOptions(created.id)).toEqual([])
+    expect(adapter.getConfigOptions("missing")).toBeUndefined()
+  })
+
+  it("opens the picker on the variant the server says the session is already using", async () => {
+    const client = fakeClient()
+    client.v2.session.get.mockReturnValue(
+      response({
+        data: {
+          ...sessionInfo(),
+          model: { providerID: "anthropic", id: "claude", variant: "deep" },
+        },
+      })
+    )
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+
+    // Resumed, not created here — the variant is read back off `SessionV2Info`
+    // rather than remembered, so a session this process never started opens on
+    // what OpenCode is actually running.
+    const resumed = await adapter.resumeSession("s1")
+    expect(adapter.getConfigOptions(resumed.id)?.[0]).toEqual(
+      expect.objectContaining({ currentValue: "deep" })
+    )
   })
 
   it("blocks PII-bearing prompts before the V2 prompt endpoint is called", async () => {

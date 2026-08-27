@@ -24,25 +24,23 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
     ])
   })
 
-  it("offers Pi both a native RPC surface and the legacy ACP bridge", () => {
+  it("offers Pi exactly one surface: its own native RPC", () => {
     const surfaces = EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS.pi.surfaces
-    expect(surfaces.map((s) => s.presetId)).toEqual(["pi-rpc", "pi"])
+    expect(surfaces.map((s) => s.presetId)).toEqual(["pi-rpc"])
 
     // The native surface must spawn `pi` itself. Routing it back through
-    // `npx pi-acp` would silently reinstate the community bridge this ADR
-    // exists to remove, and nothing downstream would notice.
-    const native = surfaces.find((s) => s.presetId === "pi-rpc")!
+    // `npx pi-acp` would reinstate the community bridge that was removed with
+    // its runtime, and nothing downstream would notice.
+    const native = surfaces[0]
     expect(native.protocol).toBe("pi-rpc")
     expect(native.transport).toBe("stdio")
     expect(native.process).toEqual({ command: "pi", args: ["--mode", "rpc"] })
 
-    // The bridge stays reachable and stays ACP — migration is explicit, so
-    // the old surface must keep working until the user opts out of it.
-    const bridged = surfaces.find((s) => s.presetId === "pi")!
-    expect(bridged.protocol).toBe("acp")
-    expect(bridged.process?.args).toContain("pi-acp")
-    expect(bridged.setupHint).toContain("Pi >= 0.80.4")
-    expect(bridged.setupHint).toContain("Node.js >= 22")
+    // No surface may reach the deleted bridge, whatever it is named.
+    for (const surface of surfaces) {
+      expect(surface.process?.command).not.toBe("npx")
+      expect(JSON.stringify(surface.process?.args ?? [])).not.toContain("pi-acp")
+    }
   })
 
   it("describes current Gemini and Copilot authentication choices accurately", () => {
@@ -99,7 +97,6 @@ describe("new ACP agent surfaces", () => {
     { presetId: "copilot-cli", command: "copilot", args: ["--acp"] },
     { presetId: "kiro", command: "kiro-cli", args: ["acp"] },
     { presetId: "qwen-code", command: "npx", args: ["-y", "@qwen-code/qwen-code", "--acp"] },
-    { presetId: "pi", command: "npx", args: ["-y", "pi-acp"] },
     {
       presetId: "droid",
       command: "droid",
@@ -121,12 +118,11 @@ describe("new ACP agent surfaces", () => {
     }
   )
 
-  it("marks the Pi surface as a community adapter", () => {
-    const found = findExternalAgentSurfaceByPresetId("pi")
-    expect(found?.surface.tags).toEqual(
-      expect.arrayContaining(["community-adapter", "experimental"])
-    )
-    expect(found?.surface.limitationNote).toMatch(/community adapter/i)
+  it("no longer resolves the removed Pi ACP bridge", () => {
+    // `pi` used to name the community bridge surface. Resolving it again would
+    // mean some caller can still reach `npx -y pi-acp`.
+    expect(findExternalAgentSurfaceByPresetId("pi")).toBeNull()
+    expect(findExternalAgentSurfaceByPresetId("pi-rpc")?.surface.protocol).toBe("pi-rpc")
   })
 })
 

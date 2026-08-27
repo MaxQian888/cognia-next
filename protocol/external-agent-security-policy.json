@@ -38,12 +38,11 @@
       "@qwen-code/qwen-code",
       "@zed-industries/claude-code-acp",
       "@zed-industries/codex-acp",
-      "opencode-ai",
-      "pi-acp"
+      "opencode-ai"
     ]
   },
   "agentStateWritableRoots": {
-    "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs the exact forms because \"copilot\" contains \"pi\". A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
+    "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs `base` rather than \"contains\" because \"copilot\" contains \"pi\". No rule uses \"target\" today: its only user was the `pi-acp` npx bridge, removed with that runtime. The mode is kept because it is the only correct match for an npx package name, which the next bridge will need. A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
     "rules": [
       {
         "match": "contains",
@@ -64,11 +63,6 @@
         "match": "contains",
         "values": ["qwen"],
         "roots": [".qwen"]
-      },
-      {
-        "match": "target",
-        "values": ["pi-acp"],
-        "roots": [".pi"]
       },
       {
         "match": "base",

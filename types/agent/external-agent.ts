@@ -10,7 +10,11 @@
 // Protocol Types
 // ============================================================================
 
-import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
+import type {
+  ExternalAgentCapabilityId,
+  ExternalAgentCapabilityLevel,
+  ExternalAgentCapabilityProfileV1,
+} from "@cognia/agent-config-types/external-agent-capability"
 import type {
   AgentCapabilities as SdkAcpAgentCapabilities,
   Annotations as SdkAcpAnnotations,
@@ -1421,6 +1425,23 @@ export interface ExternalAgentConfig {
   /** Last known runtime validity snapshot (best-effort projection) */
   validitySnapshot?: ExternalAgentValiditySnapshot
 
+  /**
+   * What the USER says their own build of this agent can do — merge layer
+   * `user-declared` (`@cognia/agent-config-types/external-agent-capability`).
+   *
+   * Levels only; the profile builder stamps the evidence grade. It exists
+   * because some capabilities are properties of the binary someone installed,
+   * not of the wire protocol: whether a Codex build has web search switched on
+   * is in their `config.toml` and their plan, and no checked-in manifest row
+   * can honestly answer it. Every such row ships `unknown`, and this is how it
+   * stops being unknown without Cognia guessing.
+   *
+   * A declaration fills an `unknown` and may tighten; it cannot widen a
+   * protocol-level `unsupported` back to `native` (see `layerMayWiden`). A
+   * live handshake or observation outranks it.
+   */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
+
   /** Creation timestamp */
   createdAt?: Date
   /** Last updated timestamp */
@@ -1446,6 +1467,8 @@ export interface CreateExternalAgentInput {
   tags?: string[]
   metadata?: Record<string, unknown>
   validitySnapshot?: ExternalAgentValiditySnapshot
+  /** @see ExternalAgentConfig.declaredCapabilities */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
 }
 
 /**
@@ -1466,6 +1489,8 @@ export interface UpdateExternalAgentInput {
   tags?: string[]
   metadata?: Record<string, unknown>
   validitySnapshot?: ExternalAgentValiditySnapshot
+  /** @see ExternalAgentConfig.declaredCapabilities */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
 }
 
 /**

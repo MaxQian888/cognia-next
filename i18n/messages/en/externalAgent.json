@@ -24,7 +24,8 @@
       "probe": "observed by a live probe",
       "adapter-code": "from Cognia's adapter",
       "protocol-spec": "from the protocol specification",
-      "none": "no evidence"
+      "none": "no evidence",
+      "user-declared": "you told us"
     },
     "reason": {
       "agentOwned": "the external agent runs this itself",
@@ -32,12 +33,14 @@
       "sidecarOnly": "only the built-in agent reports this",
       "perThreadConfigOverride": "carried as a per-thread config override",
       "codexOptionsChannel": "carried on the Codex options channel",
+      "modelVariantOverlay": "carried as a named model variant",
       "noMidTurnApproval": "this transport cannot carry a mid-turn approval",
       "launchTimeAuthorityOnly": "authority is granted at launch and cannot change mid-run",
       "noPerSessionMcpServers": "the agent protocol has no per-session MCP channel",
       "cancelKillsRuntime": "cancelling ends the whole runtime, not just the turn",
       "notNegotiated": "the agent did not advertise it during initialize",
       "committedRepliesOnly": "this channel reports committed replies only",
+      "attachmentStoreUnavailable": "this runtime has no attachment store to hand the bytes to",
       "nativeSummarizeRoute": "served by the provider's own summarize route",
       "noManifestRow": "nothing describes this protocol's capabilities",
       "adapterMethodMissing": "Cognia's adapter does not implement it",
@@ -57,7 +60,8 @@
       "negotiatedNoThinking": "the agent advertised no thinking control",
       "negotiatedNoToolExecution": "the agent advertised no tool execution",
       "advertisedCompactCommand": "the agent advertises a /compact command",
-      "noAdvertisedCompactCommand": "the agent advertises no /compact command"
+      "noAdvertisedCompactCommand": "the agent advertises no /compact command",
+      "userDeclared": "you declared this for this agent"
     },
     "adapterMethod": {
       "steerTurn": "Cognia's adapter implements steerTurn",
@@ -473,22 +477,6 @@
     "piExtensionPolicyTrustedProject": "Also trust project-local files",
     "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",
     "piManagePackages": "Manage Pi packages",
-    "piMigration": {
-      "blocker": {
-        "command_missing": "Pi is not installed, or not on PATH.",
-        "runtime_version_unsupported": "The installed Pi is older than the supported version.",
-        "sandbox_unavailable": "The sandbox is unavailable on this machine, so Pi cannot run here."
-      },
-      "continuityNote": "Your settings and this agent's ID are kept. The first run after switching starts a new Pi session — the current conversation is not carried across.",
-      "legacyDescription": "This agent runs through the community pi-acp bridge. Switching to Pi's native protocol adds thinking levels, steering, compaction and session forks.",
-      "migrateAction": "Switch to native Pi",
-      "migratedDescription": "This agent runs on Pi's native protocol.",
-      "rollbackAction": "Switch back to the bridge",
-      "rollbackNote": "Switching back restores the previous connection settings only. Sessions and transcripts are kept.",
-      "statusLegacy": "Community ACP bridge",
-      "statusNative": "Native RPC",
-      "title": "Pi connection"
-    },
     "piSandboxNote": "Pi always runs inside the strict sandbox, on macOS and Linux only. There is no unsandboxed fallback.",
     "piSectionTitle": "Pi runtime",
     "presetGalleryEmpty": "No presets available.",
@@ -533,7 +521,32 @@
     "transportHttpLabel": "HTTP (remote)",
     "transportStdioLabel": "Stdio (local process)",
     "useThisPreset": "Use this preset",
-    "workingDirectory": "Working Directory"
+    "workingDirectory": "Working Directory",
+    "declaredWebSearch": "Brings its own web search",
+    "declaredWebSearchAuto": "Work it out",
+    "declaredWebSearchDesc": "Whether this agent build reaches the web on its own. Nothing in the protocol says — it depends on the binary and plan you installed — so tell us, or leave it to us and Cognia supplies web search when it can.",
+    "declaredWebSearchNative": "Yes — it searches the web itself",
+    "declaredWebSearchNone": "No — Cognia should supply search",
+    "piAuth": {
+      "title": "Pi credentials",
+      "notConnected": "Connect the agent to check which providers Pi can authenticate.",
+      "refresh": "Re-check credentials",
+      "readOnlyNote": "Cognia asks Pi for a status only. It never reads, refreshes or stores your Pi credentials.",
+      "listingUnreadable": "Could not read Pi's model list, so there is nothing to check. This says nothing about your credentials.",
+      "noProviders": "Pi reports no usable model. Sign in to a provider in Pi before sending a prompt.",
+      "unknownProvider": "Unknown provider",
+      "configureHint": "Configure the missing providers in Pi itself — Cognia cannot sign in on your behalf.",
+      "status": {
+        "ready": "Ready",
+        "not_ready": "Not signed in",
+        "invalid": "Invalid",
+        "unreadable": "Could not check"
+      },
+      "authType": {
+        "api_key": "API key",
+        "oauth": "OAuth"
+      }
+    }
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",

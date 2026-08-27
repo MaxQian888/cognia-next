@@ -655,6 +655,17 @@ export function normalizeExternalAgentConfigInput(
     },
     tags: input.tags,
     metadata,
+    // What the user declared about their own build (merge layer
+    // `user-declared`). Carried verbatim: the profile builder is what stamps an
+    // evidence grade on it, and doing that here would let a stored config claim
+    // a stronger provenance than "someone typed it".
+    //
+    // An empty object is the editor's "work it out" — the same clear sentinel
+    // `updateAgent` honours — and a declaration of nothing is not a
+    // declaration, so it is stored as absence rather than as an empty blob.
+    ...(input.declaredCapabilities && Object.keys(input.declaredCapabilities).length > 0
+      ? { declaredCapabilities: input.declaredCapabilities }
+      : {}),
     createdAt: now,
     updatedAt: now,
   }

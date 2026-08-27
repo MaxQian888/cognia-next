@@ -41,14 +41,15 @@ describe("allowlists", () => {
   })
 
   it("keeps the npx bridges the presets use", () => {
-    for (const pkg of [
-      "@zed-industries/codex-acp",
-      "@google/gemini-cli",
-      "@qwen-code/qwen-code",
-      "pi-acp",
-    ]) {
+    for (const pkg of ["@zed-industries/codex-acp", "@google/gemini-cli", "@qwen-code/qwen-code"]) {
       expect(EXTERNAL_AGENT_NPX_ALLOWLIST).toContain(pkg)
     }
+  })
+
+  it("no longer admits the removed Pi ACP bridge", () => {
+    // Pi launches its own binary now. Re-adding the package here would restore
+    // an unpinned `npx` launch that the runtime catalog no longer waives.
+    expect(EXTERNAL_AGENT_NPX_ALLOWLIST).not.toContain("pi-acp")
   })
 })
 
@@ -71,7 +72,9 @@ describe("agentStateWritableRoots", () => {
     // than by substring.
     expect(agentStateWritableRoots("copilot")).not.toContain(".pi")
     expect(agentStateWritableRoots("pi")).toContain(".pi")
-    expect(agentStateWritableRoots("npx", ["-y", "pi-acp"])).toContain(".pi")
+    // And an npx package merely containing "pi" gets nothing: the rule matches
+    // the BASE command, so the removed bridge cannot reach Pi's session store.
+    expect(agentStateWritableRoots("npx", ["-y", "pi-acp"])).not.toContain(".pi")
   })
 
   it("strips a Windows executable suffix", () => {
