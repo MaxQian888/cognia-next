@@ -11734,6 +11734,16 @@
       }
     }
   },
+  "hostConsent": {
+    "approve": "Approve",
+    "codeLabel": "Request code",
+    "deny": "Deny",
+    "description": "{device} is asking for temporary host-admin access. Approving grants a short-lived lease that expires on its own and is revoked when the device disconnects.",
+    "failed": "The host did not accept that answer. It may have expired, or already been answered elsewhere.",
+    "more": "{count} more waiting",
+    "operationsLabel": "This would allow",
+    "title": "Approve host access?"
+  },
   "import": {
     "dialog": {
       "applyButton": "Apply",
@@ -28666,6 +28676,8 @@
         "togglePin": "Toggle pin"
       },
       "credentialField": {
+        "awaitingConsent": "Waiting for approval on the host.",
+        "awaitingConsentWithCode": "Waiting for approval on the host — code {code}.",
         "hideAria": "Hide value",
         "loadingPlaceholder": "Loading…",
         "retry": "Retry",

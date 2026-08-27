@@ -5180,8 +5180,7 @@
     "host_admin_lease_issue": {
       "type": "object",
       "required": [
-        "operations",
-        "confirmed"
+        "operations"
       ],
       "properties": {
         "operations": {
@@ -5196,10 +5195,6 @@
           "format": "int64",
           "minimum": 0,
           "description": "Also accepted as `ttlSeconds`."
-        },
-        "confirmed": {
-          "type": "boolean",
-          "example": false
         }
       },
       "additionalProperties": false
@@ -5207,6 +5202,30 @@
     "host_admin_lease_revoke": {
       "type": "object",
       "properties": {},
+      "additionalProperties": false
+    },
+    "host_consent_pending": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "host_consent_respond": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "approve"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The request's `id`, or the short `code` a console approver types."
+        },
+        "approve": {
+          "type": "boolean",
+          "example": false
+        }
+      },
       "additionalProperties": false
     },
     "host_state_snapshot": {

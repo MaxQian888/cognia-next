@@ -2,17 +2,24 @@ const mockIssue = jest.fn()
 const mockProfile = jest.fn()
 
 jest.mock("@/lib/tauri/admin-lease", () => ({
+  // The error CLASS stays real: this module distinguishes "the host is waiting
+  // on a human" from every other refusal by identity, so a stubbed class would
+  // silently collapse the two.
+  ...jest.requireActual("@/lib/tauri/admin-lease"),
   issueHostAdminLease: (...args: unknown[]) => mockIssue(...args),
 }))
 jest.mock("@/lib/platform/capabilities", () => ({
   detectHostProfile: () => mockProfile(),
 }))
 
+import { HostConsentRequiredError } from "@/lib/tauri/admin-lease"
 import {
   CREDENTIAL_LEASE_OPERATIONS,
   DENIED_COOLDOWN_MS,
+  PENDING_NO_CODE,
   __resetCredentialLeaseForTests,
   clearCredentialLease,
+  credentialConsentCode,
   credentialLeaseRequired,
   ensureCredentialLease,
 } from "./credential-lease"
@@ -166,5 +173,59 @@ describe("clearCredentialLease", () => {
     clearCredentialLease()
 
     expect(connectorDeviceLease()).toBeNull()
+  })
+})
+
+describe("pending approval", () => {
+  it("remembers the code the host is waiting on", async () => {
+    mockIssue.mockRejectedValue(
+      new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED: … (code A1B2C3D4)", "A1B2C3D4")
+    )
+
+    await expect(ensureCredentialLease()).resolves.toBe("unavailable")
+
+    expect(credentialConsentCode()).toBe("A1B2C3D4")
+  })
+
+  it("still reports a pending approval when the host named no code", async () => {
+    // "waiting on a human" and "refused outright" end differently, so they must
+    // stay distinguishable even against a host older than ADR-0153.
+    mockIssue.mockRejectedValue(new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED", null))
+
+    await ensureCredentialLease()
+
+    expect(credentialConsentCode()).toBe(PENDING_NO_CODE)
+  })
+
+  it("reports no pending approval for an ordinary refusal", async () => {
+    mockIssue.mockRejectedValue(new Error("REMOTE_SCOPE_DENIED: not a host admin"))
+
+    await ensureCredentialLease()
+
+    expect(credentialConsentCode()).toBeNull()
+  })
+
+  it("forgets the code once a lease is held", async () => {
+    mockIssue.mockRejectedValueOnce(
+      new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED: … (code ZZ)", "ZZ")
+    )
+    await ensureCredentialLease()
+    clearCredentialLease()
+
+    mockIssue.mockResolvedValueOnce({ token: "t", operations: [], expiresAt: Date.now() + HOUR })
+    await ensureCredentialLease()
+
+    expect(credentialConsentCode()).toBeNull()
+  })
+
+  it("forgets the code on an explicit retry", async () => {
+    mockIssue.mockRejectedValue(
+      new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED: … (code YY)", "YY")
+    )
+    await ensureCredentialLease()
+
+    clearCredentialLease()
+
+    expect(credentialConsentCode()).toBeNull()
   })
 })

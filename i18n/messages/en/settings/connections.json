@@ -1355,6 +1355,8 @@
     "title": "Run operators"
   },
   "credentialField": {
+    "awaitingConsent": "Waiting for approval on the host.",
+    "awaitingConsentWithCode": "Waiting for approval on the host — code {code}.",
     "hideAria": "Hide value",
     "loadingPlaceholder": "Loading…",
     "retry": "Retry",

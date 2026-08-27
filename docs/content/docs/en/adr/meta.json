@@ -150,6 +150,7 @@
     "0149-a-person-is-not-a-device",
     "0150-repository-supply-and-object-cache",
     "0151-stacks-as-first-class",
-    "0152-connector-controls-name-their-host"
+    "0152-connector-controls-name-their-host",
+    "0153-the-host-obtains-the-confirmation"
   ]
 }

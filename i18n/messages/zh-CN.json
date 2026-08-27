@@ -11734,6 +11734,16 @@
       }
     }
   },
+  "hostConsent": {
+    "approve": "同意",
+    "codeLabel": "请求码",
+    "deny": "拒绝",
+    "description": "{device} 正在申请临时的宿主管理员权限。同意后会签发一段短期租约，到期自动失效，设备断开连接即被撤销。",
+    "failed": "宿主没有接受这个答复。它可能已经过期，或者已经在别处被回答过了。",
+    "more": "还有 {count} 个请求在等待",
+    "operationsLabel": "将被允许",
+    "title": "同意宿主访问？"
+  },
   "import": {
     "dialog": {
       "applyButton": "应用",
@@ -28666,6 +28676,8 @@
         "togglePin": "切换置顶"
       },
       "credentialField": {
+        "awaitingConsent": "正在等待宿主端的批准。",
+        "awaitingConsentWithCode": "正在等待宿主端的批准 —— 请求码 {code}。",
         "hideAria": "隐藏内容",
         "loadingPlaceholder": "读取中…",
         "retry": "重试",

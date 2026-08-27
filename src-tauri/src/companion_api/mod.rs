@@ -44,6 +44,7 @@ pub mod event_channels;
 pub mod event_leases;
 pub mod external_bridge;
 pub mod healthz;
+pub mod host_consent;
 pub mod host_identity;
 pub mod idempotency;
 pub mod jwt;

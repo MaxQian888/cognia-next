@@ -75,6 +75,7 @@ import { SettingsLoadFailedBanner } from "@/components/error/settings-load-faile
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
+import { HostConsentPrompt } from "@/components/host-consent/host-consent-prompt"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
@@ -396,6 +397,14 @@ export default async function RootLayout({
                              * "Report issue" and `/report` open the unified
                              * "Report a problem" dialog through here. */}
                             <ReportProblemHost />
+                            {/* ADR-0153 — a paired device asking for an admin
+                             * lease is refused until a human answers here.
+                             * Mounted for every shell, not behind
+                             * DesktopOnlyInitializers: a headless host has no
+                             * screen, so another paired device is the only
+                             * interactive approver it has. Renders null unless
+                             * the host says this device may answer. */}
+                            <HostConsentPrompt />
                             {/* Single consumer for every HITL approval gate in
                              * `usePendingGatesStore` — ADR-0022 team gates
                              * (budget / deadlock / teammate-fix / replan /

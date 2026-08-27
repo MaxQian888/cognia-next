@@ -1195,6 +1195,46 @@ fn connector_keyring_arms_are_step_up_not_service_only() {
     }
 }
 
+/// ADR-0153 — the approver side must not need the thing it grants.
+///
+/// `host_consent_respond` answers the request that unblocks
+/// `host_admin_lease_issue`. If either it or the lease command were step-up
+/// gated, answering would require a lease and minting a lease would require an
+/// answer: a loop with no entry, and one that only shows up on a device plane
+/// nobody exercises in a unit test.
+#[test]
+fn the_consent_arms_are_not_gated_by_the_lease_they_grant() {
+    for name in [
+        "host_consent_pending",
+        "host_consent_respond",
+        "host_admin_lease_issue",
+    ] {
+        assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+        assert!(
+            !STEP_UP_COMMANDS.contains(&name),
+            "{name} must not require the lease it exists to grant"
+        );
+        assert!(
+            !is_service_only_command(name),
+            "{name} must be reachable from a device plane — on a headless host \
+             another paired device is the only approver there is"
+        );
+        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+            .expect("consent arm must have a manifest descriptor");
+        assert_eq!(descriptor.capability, "host.admin", "{name}");
+    }
+}
+
+/// Answering is administrator work and moves real authority, so it is
+/// control-gated like the lease itself. Listing is not: a device has to be able
+/// to discover it is an approver, and the arm already refuses without
+/// `host.admin`.
+#[test]
+fn answering_is_control_gated_and_listing_is_not() {
+    assert!(CONTROL_COMMANDS.contains(&"host_consent_respond"));
+    assert!(!CONTROL_COMMANDS.contains(&"host_consent_pending"));
+}
+
 /// The rest of the connector plane stays where it was. Nothing an operator
 /// does in Settings needs to open a raw websocket or drive Matrix crypto, so
 /// widening the whole family would trade a real boundary for nothing.

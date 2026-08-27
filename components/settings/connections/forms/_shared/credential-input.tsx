@@ -53,9 +53,11 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+import { PENDING_NO_CODE, credentialConsentCode } from "@/lib/connectors/credential-lease"
 
 /** @see the module docblock — each value implies a different meaning for an empty input. */
-export type CredentialFieldStatus = "new" | "loading" | "loaded" | "unset" | "stored" | "error"
+export type CredentialFieldStatus =
+  "new" | "loading" | "loaded" | "unset" | "stored" | "awaiting-consent" | "error"
 
 export interface CredentialInputProps {
   id: string
@@ -118,7 +120,7 @@ export function CredentialInput({
   const masked = sensitive && !revealed
 
   const effectivePlaceholder =
-    status === "stored"
+    status === "stored" || status === "awaiting-consent"
       ? t("storedPlaceholder")
       : status === "loading"
         ? t("loadingPlaceholder")
@@ -214,6 +216,31 @@ function CredentialStatusLine({
     return (
       <p id={id} className="text-xs text-muted-foreground">
         {t("statusUnset")}
+      </p>
+    )
+  }
+
+  if (status === "awaiting-consent") {
+    const code = credentialConsentCode()
+    return (
+      <p id={id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <LoaderIcon className="size-3 shrink-0 animate-spin" aria-hidden />
+        <span className="min-w-0">
+          {code && code !== PENDING_NO_CODE
+            ? t("awaitingConsentWithCode", { code })
+            : t("awaitingConsent")}
+        </span>
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={disabled}
+            className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2 disabled:opacity-50"
+          >
+            <RotateCwIcon className="size-3" aria-hidden />
+            {t("retry")}
+          </button>
+        ) : null}
       </p>
     )
   }

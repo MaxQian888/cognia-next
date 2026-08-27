@@ -14,9 +14,15 @@ jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: jest.fn(() => true),
 }))
 
+const mockSubscribeConsent = jest.fn()
+jest.mock("@/lib/host-consent/client", () => ({
+  subscribeToHostConsent: (handler: unknown) => mockSubscribeConsent(handler),
+}))
+
 jest.mock("@/lib/connectors/credential-lease", () => ({
   ensureCredentialLease: jest.fn(async () => "not-required"),
   clearCredentialLease: jest.fn(),
+  credentialConsentCode: jest.fn(() => null),
 }))
 
 import {
@@ -26,7 +32,11 @@ import {
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import { useCapability } from "@/hooks/use-host-profile"
-import { clearCredentialLease, ensureCredentialLease } from "@/lib/connectors/credential-lease"
+import {
+  clearCredentialLease,
+  credentialConsentCode,
+  ensureCredentialLease,
+} from "@/lib/connectors/credential-lease"
 import { isCredentialReadRefused, useAdapterCredentials } from "./use-adapter-credentials"
 
 const mockGet = connectorsKeyringGet as jest.Mock
@@ -36,6 +46,7 @@ const mockDelete = connectorsKeyringDelete as jest.Mock
 const mockCapability = useCapability as jest.Mock
 const mockEnsureLease = ensureCredentialLease as jest.Mock
 const mockClearLease = clearCredentialLease as jest.Mock
+const mockConsentCode = credentialConsentCode as jest.Mock
 
 /** Stored keyring contents for the current test. */
 function stored(values: Record<string, string | null>): void {
@@ -48,6 +59,8 @@ beforeEach(() => {
   stored({})
   mockList.mockResolvedValue([])
   mockEnsureLease.mockResolvedValue("not-required")
+  mockConsentCode.mockReturnValue(null)
+  mockSubscribeConsent.mockReturnValue(() => undefined)
 })
 
 function renderCreds(
@@ -445,5 +458,93 @@ describe("admin lease", () => {
 
     expect(result.current.retry).toBeUndefined()
     expect(result.current.status("appKey")).toBe("new")
+  })
+})
+
+describe("awaiting a host approval", () => {
+  it("separates a pending approval from a value this shell may never see", async () => {
+    // Both come back as a refused read. Only one of them ends by itself, and
+    // a form that renders them identically tells the operator to give up on
+    // the one that was about to succeed.
+    mockConsentCode.mockReturnValue("A1B2C3D4")
+    mockGet.mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED: approve on the host"))
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.status("appKey")).toBe("awaiting-consent")
+    expect(result.current.refused).toBe(true)
+  })
+
+  it("stays `stored` when the refusal was not a pending approval", async () => {
+    mockConsentCode.mockReturnValue(null)
+    mockGet.mockRejectedValue(new Error("REMOTE_SCOPE_DENIED: missing_capability"))
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.status("appKey")).toBe("stored")
+  })
+
+  it("does not block a save on a credential it could not read", async () => {
+    mockConsentCode.mockReturnValue("A1B2C3D4")
+    mockGet.mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED: approve on the host"))
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.missingRequired(["appKey"])).toEqual([])
+  })
+})
+
+describe("recovering from an out-of-band approval", () => {
+  it("re-reads when an approval lands instead of waiting to be poked", async () => {
+    let notify: (r: { state: string }) => void = () => {}
+    mockSubscribeConsent.mockImplementation((handler: (r: { state: string }) => void) => {
+      notify = handler
+      return () => undefined
+    })
+    mockConsentCode.mockReturnValue("A1B2C3D4")
+    mockGet.mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED"))
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.status("appKey")).toBe("awaiting-consent"))
+
+    // The approver said yes on their own screen.
+    mockConsentCode.mockReturnValue(null)
+    stored({ appKey: "k", appSecret: "s" })
+    await act(async () => {
+      notify({ state: "approved" })
+    })
+
+    await waitFor(() => expect(result.current.status("appKey")).toBe("loaded"))
+    // The refusal cooldown has to go too, or the retry is answered from cache.
+    expect(mockClearLease).toHaveBeenCalled()
+  })
+
+  it("ignores a denial rather than spinning on it", async () => {
+    let notify: (r: { state: string }) => void = () => {}
+    mockSubscribeConsent.mockImplementation((handler: (r: { state: string }) => void) => {
+      notify = handler
+      return () => undefined
+    })
+    mockConsentCode.mockReturnValue("A1B2C3D4")
+    mockGet.mockRejectedValue(new Error("REMOTE_CONSENT_REQUIRED"))
+
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.status("appKey")).toBe("awaiting-consent"))
+    mockClearLease.mockClear()
+
+    await act(async () => {
+      notify({ state: "denied" })
+    })
+
+    expect(mockClearLease).not.toHaveBeenCalled()
+  })
+
+  it("does not subscribe when nothing is waiting on a human", async () => {
+    const { result } = renderCreds()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(mockSubscribeConsent).not.toHaveBeenCalled()
   })
 })

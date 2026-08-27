@@ -28,7 +28,7 @@
  * immediately, which is what the unlock affordance on a `stored` field does.
  */
 
-import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
+import { HostConsentRequiredError, issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import type { HostProfile } from "@/lib/platform/capabilities"
 import {
   DEVICE_PLANE_CONNECTOR_COMMANDS,
@@ -54,9 +54,13 @@ const EXPIRY_SKEW_MS = 30_000
 /** How long a refusal suppresses further consent prompts. */
 export const DENIED_COOLDOWN_MS = 30_000
 
+/** Stands in for a pending approval whose host named no code. */
+export const PENDING_NO_CODE = "pending"
+
 let expiresAt = 0
 let deniedUntil = 0
 let inFlight: Promise<CredentialLeaseState> | null = null
+let consentCode: string | null = null
 
 /**
  * True on the profiles whose keyring lives on a paired host.
@@ -92,16 +96,21 @@ export async function ensureCredentialLease(): Promise<CredentialLeaseState> {
         deniedUntil = Date.now() + DENIED_COOLDOWN_MS
         setConnectorDeviceLease(null)
         expiresAt = 0
+        consentCode = null
         return "unavailable"
       }
       setConnectorDeviceLease(lease.token)
       expiresAt = lease.expiresAt
       deniedUntil = 0
+      consentCode = null
       return "held"
-    } catch {
-      // Denied, unreachable, or not permitted on this device — all three mean
-      // the same thing to a form, and the keyring call that follows produces
-      // the message the operator actually sees.
+    } catch (error) {
+      // Denied, unreachable, or not permitted on this device. Only one of
+      // those is worth telling the operator apart: a host waiting on a human
+      // (ADR-0153) is a state that ends by itself, and the code is what a
+      // console approver needs. Everything else stays a flat refusal.
+      consentCode =
+        error instanceof HostConsentRequiredError ? (error.consentCode ?? PENDING_NO_CODE) : null
       deniedUntil = Date.now() + DENIED_COOLDOWN_MS
       setConnectorDeviceLease(null)
       expiresAt = 0
@@ -125,7 +134,20 @@ export function clearCredentialLease(): void {
   expiresAt = 0
   deniedUntil = 0
   inFlight = null
+  consentCode = null
   setConnectorDeviceLease(null)
+}
+
+/**
+ * The code identifying the approval the host is waiting on, or `null` when it
+ * is not waiting on one.
+ *
+ * {@link PENDING_NO_CODE} stands in for a host that asked for consent without
+ * naming a code, so "an approval is pending" stays distinguishable from "the
+ * request was refused outright" even against an older host.
+ */
+export function credentialConsentCode(): string | null {
+  return consentCode
 }
 
 /** Test seam: reset module state without asserting on the transport. */

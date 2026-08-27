@@ -1,6 +1,12 @@
 /**
  * @jest-environment jsdom
  */
+const mockConsentCode = jest.fn(() => null as string | null)
+jest.mock("@/lib/connectors/credential-lease", () => ({
+  PENDING_NO_CODE: "pending",
+  credentialConsentCode: () => mockConsentCode(),
+}))
+
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -22,7 +28,7 @@ jest.mock("next-intl", () => {
   return {
     useTranslations: (namespace?: string) => {
       const prefix = (namespace ?? "").replace(/^settings\.connections\.?/, "")
-      return (key: string) => {
+      return (key: string, values?: Record<string, unknown>) => {
         const path = prefix ? `${prefix}.${key}` : key
         let cursor: unknown = en
         for (const seg of path.split(".")) {
@@ -32,7 +38,14 @@ jest.mock("next-intl", () => {
           cursor = (cursor as Record<string, unknown>)[seg]
         }
         if (typeof cursor !== "string") throw new Error(`not a string: ${path}`)
-        return cursor
+        // Substituting is the point of a placeholder: a translator that
+        // returned `{code}` verbatim would let a message ship with an argument
+        // nobody passes and still look correct in this suite.
+        return Object.entries(values ?? {}).reduce(
+          (acc, [name, value]) =>
+            acc.replace(new RegExp(`\\{\\s*${name}\\s*\\}`, "g"), String(value)),
+          cursor as string
+        )
       }
     },
   }
@@ -209,5 +222,39 @@ describe("CredentialInput", () => {
         expect(typeof block![key]).toBe("string")
       }
     }
+  })
+})
+
+describe("awaiting a host approval", () => {
+  beforeEach(() => mockConsentCode.mockReturnValue(null))
+
+  it("says the host is waiting, and names the code a console approver needs", () => {
+    mockConsentCode.mockReturnValue("A1B2C3D4")
+    renderInput({ status: "awaiting-consent", onRetry: jest.fn() })
+
+    expect(screen.getByText(/Waiting for approval on the host/)).toBeInTheDocument()
+    expect(screen.getByText(/A1B2C3D4/)).toBeInTheDocument()
+  })
+
+  it("drops the code when the host named none rather than printing a placeholder", () => {
+    mockConsentCode.mockReturnValue("pending")
+    renderInput({ status: "awaiting-consent" })
+
+    expect(screen.getByText("Waiting for approval on the host.")).toBeInTheDocument()
+  })
+
+  it("offers a retry, because the answer arrives out of band", () => {
+    const onRetry = jest.fn()
+    renderInput({ status: "awaiting-consent", onRetry })
+    fireEvent.click(screen.getByText("Retry"))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the stored placeholder so an empty box still means keep", () => {
+    renderInput({ status: "awaiting-consent", placeholder: "paste the app secret" })
+    expect(document.getElementById("cred")).toHaveAttribute(
+      "placeholder",
+      "Saved — leave blank to keep it"
+    )
   })
 })

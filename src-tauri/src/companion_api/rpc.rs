@@ -407,6 +407,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "external_bridge_relay_disable",
     "host_admin_lease_issue",
     "host_admin_lease_revoke",
+    // ADR-0153 — the approver side of the lease. Neither is step-up gated: a
+    // lease is what they grant, so requiring one to reach them is a loop.
+    "host_consent_pending",
+    "host_consent_respond",
     "mcp_server_status",
     "mcp_server_start",
     "mcp_server_stop",
@@ -1293,6 +1297,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "logs_list_files",
     // Fleet snapshot — same call always returns the current live snapshot.
     "fleet_get_snapshot",
+    // ADR-0153 — approver-side read; must never be served from the 60 s
+    // idempotency cache, or an answered request keeps re-appearing.
+    "host_consent_pending",
 ];
 
 // ---------------------------------------------------------------------------
@@ -1343,6 +1350,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "external_bridge_relay_disable",
     "host_admin_lease_issue",
     "host_admin_lease_revoke",
+    "host_consent_respond",
     "browser_session_ensure",
     "browser_session_close",
     "browser_navigate",

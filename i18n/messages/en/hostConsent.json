@@ -1,0 +1,10 @@
+{
+  "approve": "Approve",
+  "codeLabel": "Request code",
+  "deny": "Deny",
+  "description": "{device} is asking for temporary host-admin access. Approving grants a short-lived lease that expires on its own and is revoked when the device disconnects.",
+  "failed": "The host did not accept that answer. It may have expired, or already been answered elsewhere.",
+  "more": "{count} more waiting",
+  "operationsLabel": "This would allow",
+  "title": "Approve host access?"
+}

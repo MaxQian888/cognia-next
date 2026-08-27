@@ -497,6 +497,8 @@ commands.allow = [
   "github_workspace_remove",
   "github_workspace_stat",
   "greet",
+  "host_consent_pending",
+  "host_consent_respond",
   "integration_ingress_ack",
   "integration_ingress_deadletter",
   "integration_ingress_deadletters",

@@ -588,18 +588,13 @@ fn authorize_approval(
     }
     match descriptor.approval {
         CommandApproval::None => Ok(()),
-        CommandApproval::Interactive if request.command == "host_admin_lease_issue" => {
-            if request.args.get("confirmed").and_then(Value::as_bool) == Some(true) {
-                Ok(())
-            } else {
-                Err(ExecutionError::new(
-                    &request.request_id,
-                    StatusCode::PRECONDITION_REQUIRED,
-                    "interactive_approval_required",
-                    "explicit host confirmation is required",
-                ))
-            }
-        }
+        // The command that MINTS a lease cannot be asked to present one. Its
+        // interactive approval is enforced inside the dispatch arm, by
+        // `host_consent` — a human answering on the host. This arm used to
+        // accept `args.confirmed == true` instead, which let the caller assert
+        // its own confirmation; that is the hole `host_consent` closes, and
+        // re-adding an argument check here would reopen it.
+        CommandApproval::Interactive if request.command == "host_admin_lease_issue" => Ok(()),
         CommandApproval::Interactive => {
             let lease = request
                 .args

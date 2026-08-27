@@ -382,6 +382,28 @@ impl DispatchHost {
         }
     }
 
+    /// Publish a host-originated event on `topic`, whichever host this is.
+    ///
+    /// The desktop `emit`s and lets `event_channels`'s forwarder relay the
+    /// frame onto the bus for paired devices; a headless host has no Tauri
+    /// runtime, so it publishes straight to the bus. Emitting AND publishing on
+    /// the desktop would deliver the frame twice to every remote subscriber,
+    /// which is why this is a match and not a helper that does both.
+    ///
+    /// The topic must be catalogued in `event_channels::EVENT_CHANNELS`, or it
+    /// reaches the desktop renderer and no remote client at all.
+    pub fn publish_host_event(&self, topic: &str, payload: serde_json::Value) {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Emitter as _;
+                let _ = app.emit(topic, payload);
+            }
+            Self::Headless(services) => {
+                services.event_bus.publish(topic.to_string(), payload);
+            }
+        }
+    }
+
     /// Apply this host's OS confinement to an already policy-validated spawn.
     ///
     /// The desktop wraps children in its sandbox host (the local Tauri command

@@ -219,6 +219,16 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "/goal lifecycle transitions for remote watchers",
     },
     EventChannelSpec {
+        pattern: "host-consent://requested",
+        audience: ChannelAudience::Any,
+        default_on: true,
+        tauri_forwarded: true,
+        note: "escalation ask for an admin lease, and its answer; device id plus \
+               the operation names, no secrets. Must reach paired devices by \
+               default — on a headless host another device IS the approver, and \
+               a channel nobody subscribed to would leave the ask unanswerable.",
+    },
+    EventChannelSpec {
         pattern: "automation:consent-request",
         audience: ChannelAudience::Any,
         default_on: true,
@@ -975,6 +985,7 @@ mod tests {
                 "fleet://update",
                 "git://status-changed",
                 "goal://status",
+                "host-consent://requested",
                 "host-state://action",
                 "notification://remote",
                 "ocr://download-progress",
@@ -1246,6 +1257,10 @@ mod tests {
             (
                 "automation:consent-request",
                 super::super::commands::AUTOMATION_CONSENT_CHANNEL,
+            ),
+            (
+                "host-consent://requested",
+                super::super::host_consent::CONSENT_CHANNEL,
             ),
             (
                 "codeserver://instance-exited",

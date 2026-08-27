@@ -1355,6 +1355,8 @@
     "title": "运行操作员"
   },
   "credentialField": {
+    "awaitingConsent": "正在等待宿主端的批准。",
+    "awaitingConsentWithCode": "正在等待宿主端的批准 —— 请求码 {code}。",
     "hideAria": "隐藏内容",
     "loadingPlaceholder": "读取中…",
     "retry": "重试",

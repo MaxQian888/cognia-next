@@ -1485,6 +1485,12 @@ pub fn run() {
             automation::commands::automation_kill_switch_engaged,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
+            // ADR-0153 — the desktop operator answers a paired device's
+            // escalation from their own screen. The `_rpc` arms in
+            // rpc/native_tools.rs are invisible to the renderer, which
+            // reaches commands through Tauri IPC.
+            companion_api::host_consent::host_consent_pending,
+            companion_api::host_consent::host_consent_respond,
             automation::commands::automation_drain_init_failure,
             automation::commands::desktop_pick_session_start,
             automation::commands::desktop_pick_session_cancel,

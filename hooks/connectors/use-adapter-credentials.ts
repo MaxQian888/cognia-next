@@ -51,7 +51,12 @@ import {
   connectorsKeyringList,
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
-import { clearCredentialLease, ensureCredentialLease } from "@/lib/connectors/credential-lease"
+import {
+  clearCredentialLease,
+  credentialConsentCode,
+  ensureCredentialLease,
+} from "@/lib/connectors/credential-lease"
+import { subscribeToHostConsent } from "@/lib/host-consent/client"
 import { useCapability } from "@/hooks/use-host-profile"
 // Type-only: the hook produces exactly the states the field renders, and
 // sharing the union is what stops the two from drifting apart.
@@ -121,6 +126,8 @@ interface FieldState {
 
 interface ReadState {
   identity: string
+  /** True when the host is waiting on a human before it will answer at all. */
+  awaitingConsent: boolean
   fields: Record<string, FieldState>
   derived: Record<string, boolean>
   refused: boolean
@@ -206,6 +213,10 @@ export function useAdapterCredentials({
       // comes back refused. `ensureCredentialLease` is a cache hit for the
       // second dialog and a no-op wherever the keyring is local.
       await ensureCredentialLease()
+      // "The host is waiting for a human" ends by itself; "this shell may not
+      // see it" does not. Reading the distinction here rather than from the
+      // keyring error keeps it out of every per-field catch below.
+      const awaitingConsent = credentialConsentCode() !== null
 
       const fields: Record<string, FieldState> = {}
       let refused = false
@@ -229,7 +240,12 @@ export function useAdapterCredentials({
             ]
           } catch (err) {
             const denied = isCredentialReadRefused(err)
-            return [name, { original: null, status: denied ? "stored" : "error" }, denied]
+            const status: CredentialFieldStatus = denied
+              ? awaitingConsent
+                ? "awaiting-consent"
+                : "stored"
+              : "error"
+            return [name, { original: null, status }, denied]
           }
         })
       )
@@ -250,13 +266,29 @@ export function useAdapterCredentials({
         }
       }
 
-      if (!cancelled) setRead({ identity, fields, derived, refused })
+      if (!cancelled) setRead({ identity, awaitingConsent, fields, derived, refused })
     })()
 
     return () => {
       cancelled = true
     }
   }, [wantsRead, adapterId, accountList, derivedList, identity, attempt])
+
+  // An approval arrives out of band, on someone else's screen. Without this the
+  // operator would be told "waiting for approval", watch it be granted, and
+  // still face an unchanged form until they thought to press retry — and the
+  // refusal cooldown would make even that a no-op for thirty seconds.
+  //
+  // Any approval is worth a retry: a device does not know its own id, the read
+  // is idempotent, and the worst case is one wasted round trip.
+  useEffect(() => {
+    if (!resolved?.awaitingConsent) return
+    return subscribeToHostConsent((request) => {
+      if (request.state !== "approved") return
+      clearCredentialLease()
+      setAttempt((n) => n + 1)
+    })
+  }, [resolved?.awaitingConsent])
 
   const statusFor = useCallback(
     (account: string): CredentialFieldStatus => {

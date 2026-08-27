@@ -226,6 +226,9 @@ impl Drop for WsPresenceGuard {
     fn drop(&mut self) {
         crate::companion_api::metrics::ws_client_disconnected();
         super::admin_lease::revoke_device(&self.device_id);
+        // The ask goes with the leases: a disconnected device must not come
+        // back to an approval granted for a session it no longer holds.
+        super::host_consent::forget_device(&self.device_id);
     }
 }
 

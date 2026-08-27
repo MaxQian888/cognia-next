@@ -1085,6 +1085,7 @@ async fn teardown(
     dispatcher: Option<tokio::task::JoinHandle<()>>,
 ) {
     crate::companion_api::admin_lease::revoke_device(device_id);
+    crate::companion_api::host_consent::forget_device(device_id);
     if let Some(d) = dispatcher {
         d.abort();
     }
@@ -1184,7 +1185,6 @@ mod tests {
             "rtc-teardown-device",
             vec!["external_bridge_start".into()],
             Some(600),
-            true,
             true,
         )
         .unwrap();

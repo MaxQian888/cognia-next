@@ -1379,6 +1379,71 @@
         "$ref": "#/$defs/GitWorktree"
       }
     },
+    "HostAdminLease": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::admin_lease::IssuedAdminLease",
+      "required": ["token", "operations", "expiresAt"],
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostConsentRequest": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::host_consent::ConsentRequest",
+      "required": ["id", "code", "deviceId", "operations", "state", "requestedAt", "expiresAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": ["pending", "approved", "denied"]
+        },
+        "requestedAt": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostConsentRequestList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/HostConsentRequest"
+      }
+    },
     "IntegerResult": {
       "type": "integer"
     },
@@ -4247,10 +4312,16 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "host_admin_lease_issue": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/HostAdminLease"
     },
     "host_admin_lease_revoke": {
       "$ref": "#/$defs/NullResult"
+    },
+    "host_consent_pending": {
+      "$ref": "#/$defs/HostConsentRequestList"
+    },
+    "host_consent_respond": {
+      "$ref": "#/$defs/HostConsentRequest"
     },
     "host_capabilities": {
       "$ref": "#/$defs/LegacyRecord"

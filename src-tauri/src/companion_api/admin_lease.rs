@@ -41,22 +41,23 @@ fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
+/// Mint a lease.
+///
+/// There is deliberately no `confirmed` parameter. It used to be one — a bool
+/// the CALLER sent and this function checked, which is not a check. The
+/// confirmation now happens before this is ever reached: `host_consent` records
+/// the ask, a human answers it on the host, and the dispatch arm consumes that
+/// answer. Passing the confirmation as an argument again would restore exactly
+/// the hole that removed it.
 pub fn issue(
     device_id: &str,
     operations: Vec<String>,
     ttl_seconds: Option<u64>,
-    confirmed: bool,
     owner_authorized: bool,
 ) -> Result<IssuedAdminLease, String> {
     if !owner_authorized {
         return Err(
             "REMOTE_SCOPE_DENIED: only an explicitly registered host owner may issue an admin lease"
-                .into(),
-        );
-    }
-    if !confirmed {
-        return Err(
-            "REMOTE_CONSENT_REQUIRED: explicit owner confirmation is required for an admin lease"
                 .into(),
         );
     }
@@ -127,20 +128,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lease_is_bound_to_device_operation_and_confirmation() {
+    fn a_lease_is_bound_to_its_device_and_its_operations() {
         assert!(issue(
             "device-a",
             vec!["skills_install_atomic".into()],
             None,
-            false,
-            true
-        )
-        .is_err());
-        assert!(issue(
-            "device-a",
-            vec!["skills_install_atomic".into()],
-            None,
-            true,
             false
         )
         .is_err());
@@ -148,7 +140,6 @@ mod tests {
             "device-a",
             vec!["skills_install_atomic".into()],
             Some(600),
-            true,
             true,
         )
         .unwrap();
@@ -161,6 +152,6 @@ mod tests {
 
     #[test]
     fn ttl_cannot_exceed_thirty_minutes() {
-        assert!(issue("device", vec!["*".into()], Some(1801), true, true).is_err());
+        assert!(issue("device", vec!["*".into()], Some(1801), true).is_err());
     }
 }

@@ -15874,7 +15874,6 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "confirmed",
           "operations"
         ],
         "properties": {
@@ -15891,10 +15890,6 @@
             "minimum": 0,
             "description": "Also accepted as `ttlSeconds`."
           },
-          "confirmed": {
-            "type": "boolean",
-            "example": false
-          },
           "ttlSeconds": {
             "type": "integer",
             "format": "int64",
@@ -15907,9 +15902,28 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "admin-leases"
+        "x-cognia-wire-source": "companion_api::admin_lease::IssuedAdminLease",
+        "required": [
+          "token",
+          "operations",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -15961,6 +15975,185 @@
         "additionalProperties": true,
         "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "host"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_consent_pending",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "host_consent_pending (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "companion_api::host_consent::ConsentRequest",
+          "required": [
+            "id",
+            "code",
+            "deviceId",
+            "operations",
+            "state",
+            "requestedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "accountId": {
+              "type": "string"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "denied"
+              ]
+            },
+            "requestedAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "expiresAt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "host_consent_respond",
+      "category": "system",
+      "resource": "host",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "host_consent_respond (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "approve"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The request's `id`, or the short `code` a console approver types."
+          },
+          "approve": {
+            "type": "boolean",
+            "example": false
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The request's `id`, or the short `code` a console approver types."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "request_id"
+                ]
+              },
+              {
+                "required": [
+                  "requestId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::host_consent::ConsentRequest",
+        "required": [
+          "id",
+          "code",
+          "deviceId",
+          "operations",
+          "state",
+          "requestedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ]
+          },
+          "requestedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -36851,5 +37044,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "09534a7b036487068ae61397c95d7f2b0f9175647bc3802780619137a6101a56"
+  "catalogHash": "e7de5898c23e983b50319fcad7b77fc03f52401fb90aece39aa9e4be675b0158"
 }

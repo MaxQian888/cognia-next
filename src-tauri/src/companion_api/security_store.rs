@@ -733,6 +733,25 @@ impl SecurityStore {
         Ok(found.flatten())
     }
 
+    /// Whether this device is the tenant's Owner, i.e. the deployment's trust
+    /// root rather than a member acting under it.
+    ///
+    /// Only `active` Owners count. A revoked or suspended Owner row must not
+    /// keep authorizing anything, which is the whole point of revoking it.
+    pub fn is_owner_device(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<bool, SecurityStoreError> {
+        let count: i64 = self.conn.lock().query_row(
+            "SELECT COUNT(*) FROM devices \
+             WHERE tenant_id = ?1 AND id = ?2 AND role = 'owner' AND status = 'active'",
+            params![tenant_id, device_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn has_capability(
         &self,
         tenant_id: &str,

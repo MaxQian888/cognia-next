@@ -112,10 +112,15 @@ settings controls gate on, and its three blocks are the three real answers:
 | Standalone browser / unpaired phone | refused | no | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
 | Headless | local | local | yes (no UI today) | — |
 
-A leased credential read is not silent: the lease covers all four operations
-at once and lasts until it expires, so the operator is asked once per session
-rather than once per field. A field the shell has not been granted renders
-`stored` with an unlock beside it.
+A leased credential read is not silent, and since ADR-0153 it is not
+self-granted either. The lease covers all four operations at once and lasts
+until it expires, so the operator is asked once per session rather than once
+per field — but a **member** device only gets one after an administrator
+answers `host_consent_respond`, on the desktop or on another paired device.
+The tenant's **Owner** device is its own root and is not asked, which is what
+keeps a one-device deployment from deadlocking on an approver that does not
+exist. A field the shell has not been granted renders `stored` with an unlock
+beside it, or `awaiting-consent` while the host is waiting on that answer.
 
 Three controls answer `needs-desktop-shell` on every host but the desktop,
 including headless: the cloudflared child process, personal-WeChat QR login and

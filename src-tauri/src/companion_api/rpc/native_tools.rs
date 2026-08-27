@@ -32,6 +32,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "external_bridge_relay_disable",
     "host_admin_lease_issue",
     "host_admin_lease_revoke",
+    "host_consent_pending",
+    "host_consent_respond",
     "mcp_server_start",
     "mcp_server_restart",
     "mcp_server_stop",
@@ -403,32 +405,120 @@ pub(super) async fn dispatch(
         "host_admin_lease_issue" => {
             let operations: Vec<String> = required(&args, "operations")?;
             let ttl_seconds: Option<u64> = optional_aliased(&args, "ttl_seconds", "ttlSeconds")?;
-            let confirmed: bool = required(&args, "confirmed")?;
-            let owner_authorized = if scope == Some("owner") || scope == Some("service") {
-                true
-            } else {
-                account_id
-                    .zip(super::super::security_store::security_store())
-                    .is_some_and(|(tenant_id, security)| {
-                        security
-                            .has_capability(tenant_id, device_id, "host.admin")
-                            .unwrap_or(false)
-                    })
+            let owner_authorized = host_admin_authorized(device_id, account_id, scope);
+
+            // `confirmed` is deliberately NOT read from the arguments any more.
+            // It was a bool the caller sent and the host checked, which is not
+            // a check — the only client wrote `true` unconditionally, and
+            // `authorize_approval` special-cased this command so its
+            // `approval: interactive` never met a real gate. The confirmation
+            // is now something the host obtains; see `host_consent`.
+            let confirmed = match scope {
+                // Outside the device plane entirely: the loopback service
+                // principal IS the Brain plane's authority, and `owner` is the
+                // Owner API's DPoP-proved principal. Neither has anyone to ask,
+                // and neither can be impersonated by a paired device.
+                Some("service") | Some("owner") => true,
+                // The tenant's Owner DEVICE is the deployment's trust root, and
+                // on `_rpc` it arrives with `scope: "device"` like everyone
+                // else. Asking it for someone else's approval is a bootstrap
+                // deadlock: a fresh headless deployment has exactly one paired
+                // device, and requiring a second one to exist before the first
+                // can configure anything means nothing can ever be configured.
+                // Asking it to approve ITSELF is the self-attestation this
+                // whole change removes. So it is trusted, and every non-Owner
+                // device is not — which is also decision L23: configuring a
+                // connector is administrator work.
+                _ if is_owner_device(device_id, account_id) => true,
+                _ => super::super::host_consent::take_approved(device_id, &operations),
             };
-            super::super::admin_lease::issue(
-                device_id,
-                operations,
-                ttl_seconds,
-                confirmed,
-                owner_authorized,
-            )
-            .map_err(external_bridge_rpc_error)
-            .and_then(to_json)
+
+            if !confirmed {
+                let ask =
+                    super::super::host_consent::request(device_id, account_id, operations.clone());
+                host.publish_host_event(
+                    super::super::host_consent::CONSENT_CHANNEL,
+                    serde_json::to_value(&ask).unwrap_or(Value::Null),
+                );
+                // 428, and the code travels in the message so a console
+                // approver has something to type. The requester retries; the
+                // ask is idempotent, so retrying does not queue a second one.
+                Err(external_bridge_rpc_error(format!(
+                    "REMOTE_CONSENT_REQUIRED: this device needs approval on the host (code {})",
+                    ask.code
+                )))
+            } else {
+                super::super::admin_lease::issue(
+                    device_id,
+                    operations,
+                    ttl_seconds,
+                    owner_authorized,
+                )
+                .map_err(external_bridge_rpc_error)
+                .and_then(to_json)
+            }
         }
 
         "host_admin_lease_revoke" => {
             super::super::admin_lease::revoke_device(device_id);
+            // An open ask outlives nothing: a device that just gave up its
+            // leases has no business collecting an approval granted for them.
+            super::super::host_consent::forget_device(device_id);
             Ok(Value::Null)
+        }
+
+        // ── Host escalation consent (ADR-0153) ───────────────────────────────
+        //
+        // The approver side of `host_admin_lease_issue`. Both arms are host
+        // admin work, so both need `host.admin`; NEITHER requires an admin
+        // lease, because a lease is the thing being approved and requiring one
+        // to grant one is a loop with no entry.
+        "host_consent_pending" => {
+            if !host_admin_authorized(device_id, account_id, scope) {
+                return Err(external_bridge_rpc_error(
+                    "REMOTE_SCOPE_DENIED: listing escalation requests requires host.admin".into(),
+                ));
+            }
+            let open = super::super::host_consent::pending();
+            // A device is shown only what it may answer. The self-approval rule
+            // lives in `host_consent::resolve`, but a list that included the
+            // caller's own ask would offer an action the host is about to
+            // refuse — and on the requesting device that row is the one the
+            // operator is most likely to tap.
+            let visible: Vec<_> = match scope {
+                Some("service") | Some("owner") => open,
+                _ => open
+                    .into_iter()
+                    .filter(|entry| entry.device_id != device_id)
+                    .collect(),
+            };
+            to_json(visible)
+        }
+
+        "host_consent_respond" => {
+            if !host_admin_authorized(device_id, account_id, scope) {
+                return Err(external_bridge_rpc_error(
+                    "REMOTE_SCOPE_DENIED: answering an escalation request requires host.admin"
+                        .into(),
+                ));
+            }
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
+            let approve: bool = required(&args, "approve")?;
+            // A device answers as itself so it cannot answer for itself; the
+            // desktop operator and the host console answer as the host.
+            let approver = match scope {
+                Some("service") | Some("owner") => super::super::host_consent::Approver::Host,
+                _ => super::super::host_consent::Approver::Device(device_id),
+            };
+            let answered = super::super::host_consent::resolve(&request_id, approve, approver)
+                .map_err(external_bridge_rpc_error)?;
+            // Same channel as the ask: an approver surface elsewhere needs to
+            // drop the row it is still showing.
+            host.publish_host_event(
+                super::super::host_consent::CONSENT_CHANNEL,
+                serde_json::to_value(&answered).unwrap_or(Value::Null),
+            );
+            to_json(answered)
         }
 
         // ── MCP server ────────────────────────────────────────────────────────
@@ -591,4 +681,39 @@ mod tests {
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
     }
+}
+
+/// Whether this caller may act as a host administrator.
+///
+/// `owner` and `service` are off the device plane — the desktop operator and
+/// the loopback console — so they pass without a capability lookup. Everyone
+/// else is a paired device and needs `host.admin` granted to it explicitly,
+/// which is what keeps a multi-tenant member device out of the escalation path
+/// entirely (decision L23).
+fn host_admin_authorized(device_id: &str, account_id: Option<&str>, scope: Option<&str>) -> bool {
+    if scope == Some("owner") || scope == Some("service") {
+        return true;
+    }
+    account_id
+        .zip(super::super::security_store::security_store())
+        .is_some_and(|(tenant_id, security)| {
+            security
+                .has_capability(tenant_id, device_id, "host.admin")
+                .unwrap_or(false)
+        })
+}
+
+/// Whether this caller is the tenant's Owner device.
+///
+/// Separate from [`host_admin_authorized`] on purpose: `host.admin` is a
+/// capability an Owner may grant to a member, and a member holding it still
+/// needs someone to approve its escalations. Only the Owner is the root.
+fn is_owner_device(device_id: &str, account_id: Option<&str>) -> bool {
+    account_id
+        .zip(super::super::security_store::security_store())
+        .is_some_and(|(tenant_id, security)| {
+            security
+                .is_owner_device(tenant_id, device_id)
+                .unwrap_or(false)
+        })
 }

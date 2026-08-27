@@ -6579,6 +6579,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "host_consent_pending",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "host_consent_respond",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "host_capabilities",
       "target": "execution",
       "operation": "read",
