@@ -252,6 +252,16 @@ const REGISTRY = [
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
+  // `node --test` over the live-IM harness (scripts/smoke/im-live/). Pure
+  // logic — markers, redaction, the diagnostic table, the per-conversation
+  // lock, and every driver against a local fake server — so it needs no
+  // credentials and no running app. Jest ignores `scripts/**/*.test.mjs` and
+  // scripts/smoke/ has no other aggregate, so without this entry these suites
+  // would run nowhere. (`scripts/dev/im-test-target.test.mjs` deliberately is
+  // NOT in this glob: `scripts:test:ci` already globs `scripts/dev/*.test.mjs`,
+  // and the sidecar bundle guard is likewise already covered by
+  // `scripts:test:build`'s `scripts/build/*.test.mjs`.)
+  { script: "im:test:unit", group: "gate-tests" },
   { script: "test:coverage:runner:test", group: "gate-tests" },
   { script: "sidecar:codeserver-agent:test", group: "gate-tests" },
 

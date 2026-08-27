@@ -84,6 +84,15 @@ export const EXEMPTIONS = {
   "i18n:sort": "writer — the check half is i18n:sort:check",
 
   // --- deliberately unregistered checks ---
+  "im:test:contract":
+    "jest subset over the connector transport/contract/dedup/rate-limit suites — owned by test.yml, which already runs every one of them as part of `test`",
+  "im:test:target":
+    "launcher, not a check — boots the desktop app with its model endpoint pointed at a deterministic fixture and blocks until the operator stops it",
+  "im:test:doctor":
+    "live IM preflight — needs real Telegram/Slack/Discord/Lark/Matrix sandbox credentials AND a running desktop app, so it can never run inside the fast gate matrix",
+  "im:test:live":
+    "live IM P0 scenario — posts real messages into real conversations from real sandbox credentials against a running desktop app; can never run inside the fast gate matrix",
+
   "test:conformance":
     "ADR-0090 conformance suite — drives the REAL sidecar + Agent SDK + claude-code subprocess (minutes per case) and needs the cognia-server binary (`conformance:prepare`). Runs as its own CI job, not inside the fast gate matrix",
   "i18n:sort:check":

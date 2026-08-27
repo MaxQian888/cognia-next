@@ -101,6 +101,71 @@ export interface MockAnthropicServer {
 }
 
 /**
+ * Marker the local live-IM harness (`scripts/smoke/im-live/`) stamps into the
+ * message it sends from the driver identity. Shape:
+ * `cognia-e2e:<platform>:<runId>:turn-<n>` — kept in sync with
+ * `scripts/smoke/im-live/marker.mjs`.
+ */
+const LIVE_MARKER_RE = /cognia-e2e:[a-z0-9-]+:[0-9a-f]+:turn-\d+/g
+
+/** Every text-bearing field of a captured payload, joined for marker scanning. */
+function collectPayloadText(payload: MessagesRequestPayload | undefined): string {
+  if (!payload) return ""
+  const parts: string[] = []
+  const system: unknown = payload.system
+  if (typeof system === "string") parts.push(system)
+  else if (Array.isArray(system)) {
+    for (const block of system) {
+      if (block && typeof block === "object" && "text" in block) {
+        parts.push(String((block as { text: unknown }).text))
+      }
+    }
+  }
+  for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+    const content: unknown = message?.content
+    if (typeof content === "string") {
+      parts.push(content)
+      continue
+    }
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (block && typeof block === "object" && "text" in block) {
+        parts.push(String((block as { text: unknown }).text))
+      }
+    }
+  }
+  return parts.join("\n")
+}
+
+/** Redacted projection of one captured `/v1/messages` call. */
+export interface RedactedMessagesHit {
+  model: string
+  stream: boolean
+  messageCount: number
+  /** De-duplicated `cognia-e2e:…` markers found anywhere in the payload. */
+  markers: string[]
+}
+
+/**
+ * Project a captured payload down to what a cross-process test runner may see.
+ *
+ * The in-process `messagesCalls` array holds full prompts; those can carry a
+ * user's real conversation, workspace paths and injected system prompt, so the
+ * HTTP control plane never returns them. Callers get the routing facts they
+ * need to assert on (which model, streaming or not, how many turns) plus the
+ * harness markers — nothing else. Mirrors `redactedHit()` in
+ * `tests/conformance/anthropic-server/server.mjs`.
+ */
+export function redactMessagesHit(payload: MessagesRequestPayload): RedactedMessagesHit {
+  return {
+    model: payload?.model ?? "",
+    stream: payload?.stream === true,
+    messageCount: Array.isArray(payload?.messages) ? payload.messages.length : 0,
+    markers: [...new Set(collectPayloadText(payload).match(LIVE_MARKER_RE) ?? [])],
+  }
+}
+
+/**
  * Write one Anthropic Messages SSE response carrying `chunks` as text deltas.
  * Shared by the explicit `stream-text` scenario AND any request that sets
  * `stream: true` (the Claude Agent SDK / claude-code CLI the chat sidecar
@@ -384,6 +449,25 @@ export function createMockAnthropicServer(): MockAnthropicServer {
   // to specs. These endpoints let a spec (running in the Playwright node
   // process) mutate the SAME instance over HTTP — drive an error/slow-stream
   // scenario for the real chat path, then reset it so the next test sees echo.
+  // Token guard. `/__control/*` can reset scenarios and read the request log,
+  // so a runner in another process must prove it owns this instance. The check
+  // is OPT-IN: with `E2E_ANTHROPIC_CONTROL_TOKEN` unset the channel stays open,
+  // which is what the in-repo Playwright helpers (global-setup +
+  // helpers/anthropic-control.ts) rely on. `pnpm im:test:target` always sets it.
+  // Registered before the routes so Express reaches it first.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.use("/__control", (req: any, res: any, next: any) => {
+    const expected = process.env.E2E_ANTHROPIC_CONTROL_TOKEN
+    if (!expected) return next()
+    if (req.headers["x-cognia-control-token"] === expected) return next()
+    res.status(401).json({ error: "control token mismatch" })
+  })
+  // Redacted request log — the only way a separate process can prove a prompt
+  // actually reached the model endpoint. See `redactMessagesHit`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.get("/__control/requests", (_req: any, res: any) => {
+    res.json({ count: messagesCalls.length, hits: messagesCalls.map(redactMessagesHit) })
+  })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.post("/__control/messages-scenario", (req: any, res: any) => {
     scenario = req.body as MessagesScenario
@@ -398,7 +482,9 @@ export function createMockAnthropicServer(): MockAnthropicServer {
   return {
     async start(port = 0): Promise<void> {
       await new Promise<void>((resolve) => {
-        server = app.listen(port, () => {
+        // Loopback only: this fixture answers unauthenticated /v1/messages
+        // calls, so it must never be reachable from the LAN.
+        server = app.listen(port, "127.0.0.1", () => {
           const addr = server!.address()
           _port = typeof addr === "object" && addr ? addr.port : port
           resolve()

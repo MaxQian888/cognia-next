@@ -1,0 +1,238 @@
+---
+title: "Local Live Testing"
+description: "Drive a real Telegram, Slack, Discord, Lark or Matrix conversation against your configured Cognia bot, with the model swapped for a deterministic fixture."
+---
+
+# Local Live Testing
+
+Every other connector test in this repo fakes at least one end. The mocked E2E
+suites fake the platform; `scripts/lark-live-smoke.mts` hits the real Feishu API
+but only outbound, through a Node stand-in for Tauri. Neither proves the thing
+you actually care about: that a real message, pushed by a real platform, through
+the real transport (Feishu's long connection and every webhook signature live in
+Rust), past the real admission gates and the PII gate, comes back as a real
+reply.
+
+This harness closes that loop. The only substitution is the model: a
+deterministic fixture stands in for Anthropic so assertions are stable and the
+runs cost nothing.
+
+```text
+test identity → real IM platform → your configured Cognia bot → connector inbound
+→ admission + PII gate → deterministic model fixture → connector outbound
+→ real IM platform → test identity observes the reply
+```
+
+## What you need
+
+Two identities per platform — a **driver** that posts, and the **target** bot
+you already run in Cognia — plus a dedicated conversation only these two are in.
+The driver never reuses Cognia's own adapter code; it talks to the platform's
+API directly, so one bug cannot cancel itself out on both sides.
+
+The target bot must already be configured, enabled, and set to auto-reply in
+that conversation. This harness **never writes** your database, keyring, or
+connector configuration.
+
+## Commands
+
+```bash
+pnpm im:test:target
+```
+
+Terminal 1. Starts a loopback-only model fixture, then launches `pnpm tauri dev`
+with `ANTHROPIC_BASE_URL` pointed at it. Leave it running. It publishes
+`test-results/im-live/target.json` (mode `0600`) so the runner can find the
+fixture and authenticate to its control plane.
+
+```bash
+pnpm im:test:doctor -- --platform telegram
+```
+
+Terminal 2. Preflight only — posts nothing. Checks the driver's identity really
+differs from the target's, the credential has the right shape, the conversation
+is reachable, and the fixture is up.
+
+```bash
+pnpm im:test:live -- --platform telegram
+```
+
+The P0 scenario. Use `--platform all` for every platform (it refuses to start
+unless all five are configured; add `--allow-unconfigured` to run what you have
+and report the rest as `NOT_CONFIGURED`).
+
+Two more commands need no credentials and no running app:
+
+```bash
+pnpm im:test:unit
+```
+
+```bash
+pnpm im:test:contract
+```
+
+`im:test:unit` covers the harness itself. `im:test:contract` aggregates the
+existing connector transport, contract, dedup and rate-limit suites. Note one
+gap it does **not** close: `slack/transport-socket-mode.test.ts` has no
+disconnect/reconnect case, where Discord and Matrix both do — a green contract
+run is not proof of full protocol coverage. The Rust half (signature
+verification and webhook replay protection under
+`crates/cognia-connectors/src/sigverify/` and `replay_guard.rs`) runs under
+`cargo test`, not these scripts.
+
+## What the P0 scenario does
+
+1. Takes a per-conversation lock, so two runners cannot corrupt each other.
+2. Runs `doctor`. A failure stops here, before anything is posted.
+3. Resets the fixture's request log.
+4. **Turn 1** — @-mentions the target bot with an unpredictable marker,
+   `cognia-e2e:<platform>:<runId>:turn-1`.
+5. Waits concurrently for the fixture to capture that marker **and** for the
+   bot's reply to appear in the conversation.
+6. **Turn 2** — replies to the bot's own message. Turn 1 and turn 2 are not the
+   same test: `lib/connectors/conversation-admission.ts` admits a group message
+   on either `selfMentioned` **or** `isReplyToSelf`, so running both proves both
+   paths.
+7. Keeps watching for a further 10 seconds. A second answer to the same turn is
+   a duplicate-consumption failure.
+8. Deletes the test messages (set `IM_LIVE_KEEP=1` to keep them).
+9. Writes redacted evidence to `test-results/im-live/<runId>/<platform>.json` —
+   ids, timings, marker facts, and the fixture hit. Never message text.
+
+## Configuration
+
+Put these in `.env.im-live.local` (already covered by `.gitignore`), or pass
+them inline. Every field names its own variable, so no platform can pick up
+another's credential.
+
+```bash
+# Telegram
+IM_LIVE_TELEGRAM_DRIVER_BOT_TOKEN=
+IM_LIVE_TELEGRAM_TARGET_CHAT_ID=
+IM_LIVE_TELEGRAM_TARGET_BOT_USERNAME=
+# IM_LIVE_TELEGRAM_API_BASE=https://api.telegram.org   # e.g. a Test DC
+
+# Slack — a USER token (xoxp-), not a bot token. See below.
+IM_LIVE_SLACK_DRIVER_USER_TOKEN=
+IM_LIVE_SLACK_TARGET_CHANNEL_ID=
+IM_LIVE_SLACK_TARGET_BOT_USER_ID=
+
+# Discord
+IM_LIVE_DISCORD_DRIVER_BOT_TOKEN=
+IM_LIVE_DISCORD_TARGET_CHANNEL_ID=
+IM_LIVE_DISCORD_TARGET_BOT_USER_ID=
+
+# Lark / Feishu
+IM_LIVE_LARK_DRIVER_APP_ID=
+IM_LIVE_LARK_DRIVER_APP_SECRET=
+IM_LIVE_LARK_TARGET_CHAT_ID=
+IM_LIVE_LARK_TARGET_BOT_OPEN_ID=
+
+# Matrix
+IM_LIVE_MATRIX_HOMESERVER=
+IM_LIVE_MATRIX_DRIVER_ACCESS_TOKEN=
+IM_LIVE_MATRIX_TARGET_ROOM_ID=
+IM_LIVE_MATRIX_TARGET_USER_ID=
+
+# Optional
+# IM_LIVE_TURN_TIMEOUT_MS=120000
+# IM_LIVE_DUPLICATE_WINDOW_MS=10000
+# IM_LIVE_KEEP=1
+```
+
+Nothing here is ever printed or written to disk: secrets are registered with a
+redactor, and common token shapes are caught even when they arrive inside a
+platform's own error message.
+
+## Preconditions that bite
+
+These are the failures that look like a broken product but are not. `doctor`
+catches the ones it can see; the rest are listed here because the runner cannot
+read your app's configuration from another process.
+
+### Every platform
+
+- **Only one enabled adapter per platform in Cognia**, or make sure every
+  same-platform instance has completed its identity probe. When a second enabled
+  adapter of the same platform has no confirmed identity, the sibling-bot
+  anti-loop gate (`lib/connectors/bus.ts` step 9.6) **fails closed**: the
+  driver's message is recorded in history and no AI turn ever runs. It looks
+  exactly like a dead transport.
+- **In a group the bot must be @-mentioned** (turn 1) or replied to (turn 2).
+  Confirm the conversation's trigger policy is not scoped somewhere else.
+- **Clear the active provider's custom Base URL**, or point it at the fixture.
+  A base URL configured in the vault overrides the one
+  `pnpm im:test:target` injects (`src-tauri/src/claude/host.rs`
+  `inject_provider_env`), and the turn goes to a real model. That is reported as
+  `MODEL_NOT_INTERCEPTED`, never as a pass.
+
+### Telegram
+
+- Enable **Bot-to-Bot** for the driver.
+- **Turn privacy mode off** for the driver bot (@BotFather → `/setprivacy` →
+  Disable, then remove and re-add it to the group). With privacy mode on the
+  driver can post but never *see* the target's reply. `doctor` checks this.
+- The driver's token must not be consumed by anything else — `getUpdates` and a
+  registered webhook are mutually exclusive, and a second poller steals updates.
+  `doctor` checks for a registered webhook.
+
+### Slack
+
+- The driver **must** be a user OAuth token. `lib/connectors/adapters/slack/parse.ts`
+  drops every event carrying `bot_id`, unconditionally, so a second Slack app can
+  never reach the target. `doctor` rejects a bot token outright.
+- The driver user has to have joined the channel.
+
+### Discord
+
+- The target bot needs the **`MESSAGE_CONTENT`** privileged intent, or it
+  receives the message with an empty body.
+- The driver bot needs View Channel + Send Messages in the guild.
+
+### Lark / Feishu
+
+- The target app needs the **include-bot class permission** to receive another
+  bot's group messages at all.
+- **Permission, event-subscription and bot-capability changes need a new app
+  version published** before they take effect. A missing event after a config
+  change is usually an unpublished version, not code.
+- One app supports at most 50 long connections, and a cluster delivers to **one
+  of them at random rather than broadcasting** — never run two runners against
+  the same App ID.
+
+### Matrix
+
+- Use an **unencrypted room**. This harness sends plaintext events; `doctor`
+  refuses an encrypted room rather than letting the run time out.
+- The driver account must have joined the room.
+
+## When a run fails
+
+The runner can see exactly two things — whether the prompt reached the fixture,
+and what the bot posted. It cannot read your app's audit rows. So instead of
+guessing one cause it maps the two observations to a verdict and a shortlist:
+
+| Fixture hit | Bot replied | Verdict | What it means |
+| --- | --- | --- | --- |
+| no | no | `TIMEOUT` | The message was dropped before the AI turn. Candidates: transport not connected; the sibling-bot gate failing closed; no @-mention; chat allow/block list; quiet hours; the PII gate (`reason: "pii_blocked"`). |
+| **no** | **yes** | **`MODEL_NOT_INTERCEPTED`** | The loop works, but a **real model** answered and was billed. The vault's provider overrode the base URL, the turn carried a frozen execution spec (`sidecar/dispatch/subprocess-env.mjs` rebuilds the subprocess environment from an allowlist), or the app was started with plain `pnpm tauri dev`. |
+| yes | no | `FAIL` | The model ran; outbound failed. Check the outbound queue for dead letters, the bot's permission to post, and the circuit breaker. |
+| yes | wrong marker | `FAIL` | The reply belongs to another turn — usually a second runner or a human in the same conversation. |
+| yes | two marked replies | `FAIL` | The inbound event was consumed twice, or two bots are answering each other. |
+
+Every candidate is printed with the file that implements the rule, so you can
+read the actual gate instead of trusting the list. The evidence file keeps the
+platform message ids, so you can go find the message even after a failure.
+
+## Scope
+
+Covered: text round-trips over each platform's primary transport (Telegram long
+polling, Slack Socket Mode, Discord Gateway, Lark long connection, Matrix
+`/sync`).
+
+Not covered here: secondary transports (webhooks and Discord's interaction HTTP
+endpoint stay in the contract tests), media and attachments, buttons, cards and
+modals, install/OAuth flows, Matrix E2EE, real-model answer quality, and public
+webhook tunnels. Event replay, disconnects and resume cannot be provoked on
+demand from a platform, so they stay in `pnpm im:test:contract` rather than being
+faked here.
