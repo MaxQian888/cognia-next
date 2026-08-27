@@ -17,6 +17,7 @@
 
 import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
 import type { PluginContextPanelAPI } from "@/lib/plugin/api/context-panel-api"
+import type { SreTimelineDraft, SreValidationResult } from "./evidence"
 import type { SreRuntime } from "./runtime"
 
 export interface SrePanelRuntime {
@@ -35,6 +36,8 @@ export interface SreToolActivity {
   tool: string
   evidenceIds: string[]
   at: string
+  timelineDraft?: SreTimelineDraft
+  validation?: SreValidationResult
 }
 
 /** How many recent queries the panel can offer to pin. Older ones fall off. */

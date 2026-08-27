@@ -1,6 +1,6 @@
 import type { PluginTool, PluginToolContext, PluginToolDef } from "@/types/plugin"
 import manifestJson from "../plugin.json"
-import type { SreTimelineDraft } from "./evidence"
+import type { SreTimelineDraft, SreValidationResult } from "./evidence"
 import type { SrePluginContext } from "./runtime"
 import { createSreRuntime, type SreRuntime } from "./runtime"
 import { notifySreToolActivity } from "./panel-runtime"
@@ -50,7 +50,7 @@ export function createSreTools(
       execute: async (args, toolCtx) => {
         assertActive(toolCtx, lifecycleSignal)
         const result = await handler(args)
-        publishActivity(definition.name, result)
+        publishActivity(definition.name, args, result)
         return result
       },
     }
@@ -60,12 +60,20 @@ export function createSreTools(
 /**
  * Tell the panel what the agent just fetched.
  *
- * Only the three query tools carry evidence ids; `sre_validate_timeline`
- * returns a verdict and is deliberately not published — it pins nothing, and
- * counting it would inflate the "agent pinned evidence N times" line the panel
- * shows into something that no longer means what it says.
+ * Queries publish their evidence ids. Timeline validation also publishes the
+ * exact draft and verdict so the panel can offer them for explicit adoption.
  */
-function publishActivity(tool: string, result: unknown): void {
+function publishActivity(tool: string, args: Record<string, unknown>, result: unknown): void {
+  if (tool === "sre_validate_timeline") {
+    notifySreToolActivity({
+      tool,
+      evidenceIds: [],
+      at: new Date().toISOString(),
+      timelineDraft: args as unknown as SreTimelineDraft,
+      validation: result as SreValidationResult,
+    })
+    return
+  }
   const evidenceIds = (result as { evidenceIds?: unknown } | null)?.evidenceIds
   if (!Array.isArray(evidenceIds)) return
   notifySreToolActivity({

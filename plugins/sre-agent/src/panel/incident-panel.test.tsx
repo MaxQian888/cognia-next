@@ -48,6 +48,7 @@ function stubRuntime(overrides: Record<string, unknown> = {}) {
       evidenceIds: ids ?? [],
       provider: "qwen-timeout-fallback",
     }),
+    resolveEvidenceIds: (ids: string[]) => ids,
     validateTimeline: async () => ({ ok: true, issues: [], evidenceCount: 1 }),
     ...overrides,
   }
@@ -199,6 +200,78 @@ describe("IncidentPanel", () => {
     )
     // Only what the backend actually returned is pinned.
     await waitFor(() => expect(dexie.store.get("inc_1")?.evidenceIds).toEqual(["log_003"]))
+  })
+
+  it("pins trace and metric evidence already fetched by the agent", async () => {
+    const queryLogs = jest.fn(async () => ({
+      ok: true,
+      records: [],
+      evidenceIds: [],
+      provider: "qwen-timeout-fallback",
+    }))
+    const resolveEvidenceIds = jest.fn((ids: string[]) => ids)
+    activity = [
+      {
+        tool: "sre_query_trace",
+        evidenceIds: ["span_002"],
+        at: "2026-08-04T12:20:00.000Z",
+      },
+      {
+        tool: "sre_query_metrics",
+        evidenceIds: ["metric_001"],
+        at: "2026-08-04T12:21:00.000Z",
+      },
+    ]
+    const dexie = fakeDexie([incident()])
+    bridge = {
+      runtime: stubRuntime({ queryLogs, resolveEvidenceIds }),
+      dexie,
+      contextPanels: null,
+    }
+    renderPanel()
+
+    await userEvent.click(await screen.findByTestId("sre-incident-row"))
+    await userEvent.click(screen.getByTestId("sre-pin-agent-evidence"))
+
+    await waitFor(() =>
+      expect(dexie.store.get("inc_1")?.evidenceIds).toEqual(["span_002", "metric_001"])
+    )
+    expect(resolveEvidenceIds).toHaveBeenCalledWith(["span_002", "metric_001"])
+    expect(queryLogs).not.toHaveBeenCalled()
+  })
+
+  it("lets the user apply the latest timeline drafted and validated by the agent", async () => {
+    activity = [
+      {
+        tool: "sre_validate_timeline",
+        evidenceIds: [],
+        at: "2026-08-04T12:20:00.000Z",
+        timelineDraft: {
+          rows: [
+            {
+              time: "12:02:54.312",
+              component: "gateway",
+              event: "fallback",
+              signals: ["fallback"],
+              evidenceIds: ["log_004"],
+              sources: ["logs"],
+              confidence: 0.93,
+              flags: ["fallback"],
+            },
+          ],
+        },
+        validation: { ok: true, issues: [], evidenceCount: 1 },
+      },
+    ]
+    const dexie = fakeDexie([incident({ evidenceIds: ["log_004"] })])
+    bridge = { runtime: stubRuntime(), dexie, contextPanels: null }
+    renderPanel()
+
+    await userEvent.click(await screen.findByTestId("sre-incident-row"))
+    await userEvent.click(screen.getByTestId("sre-apply-agent-timeline"))
+
+    await waitFor(() => expect(dexie.store.get("inc_1")?.timeline).toHaveLength(1))
+    expect(dexie.store.get("inc_1")?.validation?.ok).toBe(true)
   })
 
   it("reports agent activity honestly when there has been none", async () => {

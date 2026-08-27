@@ -51,6 +51,7 @@ export const I18N_MESSAGES = {
     "plugin.sre-agent.agent.idle":
       "No agent activity yet — ask the SRE Incident Diagnostician in the conversation to investigate.",
     "plugin.sre-agent.agent.pinLatest": "Pin the agent's latest {count}",
+    "plugin.sre-agent.agent.applyTimeline": "Apply the agent's validated timeline",
 
     "plugin.sre-agent.lens.title": "Log lens",
     "plugin.sre-agent.lens.expand": "Widen the panel",
@@ -140,6 +141,7 @@ export const I18N_MESSAGES = {
     "plugin.sre-agent.agent.observed": "Agent 已取证 {count} 次",
     "plugin.sre-agent.agent.idle": "还没有 Agent 活动 — 在对话里让 SRE 诊断员开始调查。",
     "plugin.sre-agent.agent.pinLatest": "把 Agent 最近取的 {count} 条加入",
+    "plugin.sre-agent.agent.applyTimeline": "采用 Agent 已校验的时间线",
 
     "plugin.sre-agent.lens.title": "日志透镜",
     "plugin.sre-agent.lens.expand": "加宽面板",

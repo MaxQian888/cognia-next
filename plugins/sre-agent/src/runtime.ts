@@ -72,6 +72,7 @@ export interface SreRuntime {
   facets(input: SreQueryLogsInput, fields: readonly string[], limit?: number): Promise<SreFacet[]>
   sources(): Promise<SreIngestSource[]>
   validateTimeline(input: SreTimelineDraft): Promise<SreValidationResult>
+  resolveEvidenceIds(ids: readonly string[]): string[]
   evidenceSnapshot(): SreEvidence[]
 }
 
@@ -232,6 +233,8 @@ export function createSreRuntime(
     },
 
     validateTimeline: async (input) => validateTimelineDraft(input, evidencePool.values()),
+
+    resolveEvidenceIds: (ids) => ids.filter((id) => evidencePool.has(id)),
 
     evidenceSnapshot: () =>
       redactSensitiveValue([

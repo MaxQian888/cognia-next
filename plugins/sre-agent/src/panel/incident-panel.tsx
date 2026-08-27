@@ -12,6 +12,7 @@ import { FIXTURE_ALERT } from "../fixtures"
 import type { SreRuntime } from "../runtime"
 import { defaultIncidentWindow } from "../runtime"
 import {
+  applyTimeline,
   applyValidation,
   attachEvidence,
   compareIncidents,
@@ -67,14 +68,52 @@ export function activityForIncident(
   return activity.filter((entry) => entry.at >= incident.createdAt)
 }
 
+/**
+ * Evidence the agent fetched that this incident has not pinned, split by how
+ * pinning it has to re-fetch it.
+ *
+ * Log evidence is re-read through `queryLogs` (the ids only address rows inside
+ * a window); everything else resolves out of the runtime's pool. The split
+ * lives here, in one place, because the badge counts these ids and the pin
+ * button acts on them — computing it twice is how a button that says "pin 7"
+ * ends up pinning a different 7.
+ */
+export function unpinnedAgentEvidenceByKind(
+  activity: readonly SreToolActivity[],
+  incident: SreIncident
+): { logIds: string[]; pooledIds: string[] } {
+  const pinned = new Set(incident.evidenceIds)
+  const entries = activityForIncident(activity, incident)
+  const collect = (fromLogs: boolean) => [
+    ...new Set(
+      entries
+        .filter((entry) => (entry.tool === "sre_query_logs") === fromLogs)
+        .flatMap((entry) => entry.evidenceIds)
+        .filter((id) => !pinned.has(id))
+    ),
+  ]
+  return { logIds: collect(true), pooledIds: collect(false) }
+}
+
 /** Evidence the agent fetched that this incident has not pinned. */
 export function unpinnedAgentEvidence(
   activity: readonly SreToolActivity[],
   incident: SreIncident
 ): string[] {
-  const pinned = new Set(incident.evidenceIds)
-  const ids = activityForIncident(activity, incident).flatMap((entry) => entry.evidenceIds)
-  return [...new Set(ids)].filter((id) => !pinned.has(id))
+  const { logIds, pooledIds } = unpinnedAgentEvidenceByKind(activity, incident)
+  return [...new Set([...logIds, ...pooledIds])]
+}
+
+/** Latest timeline the agent submitted to the validator for this incident. */
+export function latestAgentTimeline(
+  activity: readonly SreToolActivity[],
+  incident: SreIncident
+): SreToolActivity | null {
+  return (
+    [...activityForIncident(activity, incident)]
+      .reverse()
+      .find((entry) => entry.timelineDraft && entry.validation) ?? null
+  )
 }
 
 /**
@@ -221,6 +260,24 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
     [runtime, save]
   )
 
+  const pinAgentEvidence = useCallback(
+    async (incident: SreIncident) => {
+      if (!runtime) return
+      const { logIds, pooledIds } = unpinnedAgentEvidenceByKind(activity, incident)
+      const resolved = runtime.resolveEvidenceIds(pooledIds)
+      const logs =
+        logIds.length > 0
+          ? await runtime.queryLogs({
+              environment: incident.environment,
+              ...incident.window,
+              ids: logIds,
+            })
+          : null
+      save(attachEvidence(incident, [...(logs?.evidenceIds ?? []), ...resolved], nowIso()))
+    },
+    [activity, runtime, save]
+  )
+
   const validate = useCallback(
     async (incident: SreIncident) => {
       if (!runtime) return
@@ -269,7 +326,12 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
   }
 
   const unpinned = selected ? unpinnedAgentEvidence(activity, selected) : []
-  const observed = selected ? activityForIncident(activity, selected).length : 0
+  const observed = selected
+    ? activityForIncident(activity, selected).filter((entry) => entry.evidenceIds.length > 0).length
+    : 0
+  const agentTimeline = selected ? latestAgentTimeline(activity, selected) : null
+  const agentTimelineDraft = agentTimeline?.timelineDraft
+  const agentTimelineValidation = agentTimeline?.validation
 
   return (
     <div ref={containerRef} className="flex h-full flex-col" data-testid="sre-panel">
@@ -324,7 +386,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
                   variant="outline"
                   size="sm"
                   className="h-6 px-2 text-xs"
-                  onClick={() => void pin(selected, unpinned)}
+                  onClick={() => void pinAgentEvidence(selected)}
                   data-testid="sre-pin-agent-evidence"
                 >
                   {t("agent.pinLatest", { count: unpinned.length })}
@@ -346,6 +408,20 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
               validating={validating}
               onValidate={() => void validate(selected)}
             />
+            {agentTimelineDraft && agentTimelineValidation ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => {
+                  const withTimeline = applyTimeline(selected, agentTimelineDraft, nowIso())
+                  save(applyValidation(withTimeline, agentTimelineValidation, nowIso()))
+                }}
+                data-testid="sre-apply-agent-timeline"
+              >
+                {t("agent.applyTimeline")}
+              </Button>
+            ) : null}
 
             <ConclusionCard
               incident={selected}

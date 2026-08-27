@@ -1,5 +1,7 @@
 import type { PluginToolContext } from "@/types/plugin"
 import { FIXTURE_END, FIXTURE_START, FIXTURE_TRACE_ID } from "./fixtures"
+import { clearSrePanelRuntime, recentSreToolActivity, setSrePanelRuntime } from "./panel-runtime"
+import { createSreRuntime } from "./runtime"
 import { createSreTools, SRE_TOOL_NAMES } from "./tools"
 
 const context = (overrides: Partial<PluginToolContext> = {}): PluginToolContext => ({
@@ -8,6 +10,8 @@ const context = (overrides: Partial<PluginToolContext> = {}): PluginToolContext 
 })
 
 describe("createSreTools", () => {
+  afterEach(() => clearSrePanelRuntime())
+
   it("registers the SRE tool contract with JSON schemas", () => {
     const tools = createSreTools({ pluginId: "sre-agent" })
 
@@ -58,6 +62,36 @@ describe("createSreTools", () => {
     )
 
     expect(validation).toMatchObject({ ok: true })
+  })
+
+  it("publishes a validated timeline for explicit adoption by the panel", async () => {
+    const runtime = createSreRuntime({ pluginId: "sre-agent" })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
+    const tools = createSreTools({ pluginId: "sre-agent" }, undefined, runtime)
+    const draft = {
+      rows: [
+        {
+          time: "12:02:54.312",
+          component: "gateway",
+          event: "fallback",
+          signals: ["fallback"],
+          evidenceIds: [],
+          sources: ["logs"],
+          confidence: 0.93,
+          flags: ["fallback"],
+        },
+      ],
+    }
+
+    const validation = await tools[3].execute(draft, context())
+
+    expect(recentSreToolActivity()).toEqual([
+      expect.objectContaining({
+        tool: "sre_validate_timeline",
+        timelineDraft: draft,
+        validation,
+      }),
+    ])
   })
 
   it("rejects missing required runtime boundaries", async () => {
