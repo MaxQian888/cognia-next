@@ -26,6 +26,18 @@ lib/skills/built-in-catalog.generated.ts
 # esbuild owns this generated CommonJS bundle; formatting it would make the
 # committed artifact diverge from `pnpm plugin-convert:bundle`.
 crates/cognia-cli/assets/plugin-convert.cjs
+# Same arrangement for the workflow-app embed bundle: esbuild writes it
+# (`pnpm workflow-app:embed:build`), so Prettier reformatting it would put the
+# committed file permanently out of step with the generator — and lint-staged
+# would reformat it again on every commit that touches it.
+public/cognia-workflow-app.js
+# The two browser-plane catalogs are generator output compared byte-for-byte by
+# their own drift checks (`pnpm lucide:check`, `pnpm plugin:builtin:build`).
+# `generate-lucide-catalog.mjs` writes a single unindented line on purpose —
+# 1.6k icons, read only by the bundler — so Prettier reformatting either file
+# would make its check report drift on a clean tree.
+lib/icons/lucide-catalog.generated.json
+lib/plugin/core/browser-builtin-assets.generated.json
 # Companion API specs and CLI catalog are canonical generator output. Prettier
 # rewrites compact schema arrays and makes `companion-api:check` report drift.
 docs/api/mobile-companion-api.openapi.yaml

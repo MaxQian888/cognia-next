@@ -1,142 +1,124 @@
 // Generated from scripts/build/cognia-workflow-app.ts; do not edit directly.
-"use strict"
-;(() => {
+"use strict";
+(() => {
   // scripts/build/cognia-workflow-app.ts
-  var MESSAGE_VERSION = 1
+  var MESSAGE_VERSION = 1;
   function isLoopbackHostname(hostname) {
-    return (
-      hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname)
-    )
+    return hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
   }
   function safeOrigin(value, baseHref = window.location.href) {
     try {
-      const url = new URL(value, baseHref)
-      if (
-        url.protocol !== "https:" &&
-        !(url.protocol === "http:" && isLoopbackHostname(url.hostname))
-      ) {
-        return void 0
+      const url = new URL(value, baseHref);
+      if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) {
+        return void 0;
       }
-      return url.origin
+      return url.origin;
     } catch {
-      return void 0
+      return void 0;
     }
   }
   function isEmbedGrant(value) {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      typeof value.sessionToken === "string" &&
-      value.sessionToken.length > 0
-    )
+    return typeof value === "object" && value !== null && typeof value.sessionToken === "string" && value.sessionToken.length > 0;
   }
   var CogniaWorkflowApp = class extends HTMLElement {
     static {
-      this.observedAttributes = ["app", "api-base", "portal-url"]
+      this.observedAttributes = ["app", "api-base", "portal-url"];
     }
     get oidcToken() {
-      return this._oidcToken
+      return this._oidcToken;
     }
     set oidcToken(value) {
-      this._oidcToken = typeof value === "string" ? value : void 0
-      if (this.isConnected) this.render()
+      this._oidcToken = typeof value === "string" ? value : void 0;
+      if (this.isConnected) this.render();
     }
     connectedCallback() {
-      this.render()
+      this.render();
     }
     attributeChangedCallback() {
-      if (this.isConnected) this.render()
+      if (this.isConnected) this.render();
     }
     disconnectedCallback() {
-      if (this.onMessage) window.removeEventListener("message", this.onMessage)
-      this.controller?.abort()
+      if (this.onMessage) window.removeEventListener("message", this.onMessage);
+      this.controller?.abort();
     }
     invalidConfig() {
-      this.dispatchEvent(new CustomEvent("cognia-error", { detail: { code: "invalid_config" } }))
+      this.dispatchEvent(new CustomEvent("cognia-error", { detail: { code: "invalid_config" } }));
     }
     render() {
-      if (this.onMessage) window.removeEventListener("message", this.onMessage)
-      this.controller?.abort()
-      this.replaceChildren()
-      const app = this.getAttribute("app")?.trim()
-      const apiBase = safeOrigin(this.getAttribute("api-base") || window.location.origin)
-      let portalUrl
+      if (this.onMessage) window.removeEventListener("message", this.onMessage);
+      this.controller?.abort();
+      this.replaceChildren();
+      const app = this.getAttribute("app")?.trim();
+      const apiBase = safeOrigin(this.getAttribute("api-base") || window.location.origin);
+      let portalUrl;
       try {
-        portalUrl = new URL(this.getAttribute("portal-url") || "/portal", window.location.href)
+        portalUrl = new URL(this.getAttribute("portal-url") || "/portal", window.location.href);
       } catch {
-        this.invalidConfig()
-        return
+        this.invalidConfig();
+        return;
       }
       if (!app || !apiBase || !safeOrigin(portalUrl.href)) {
-        this.invalidConfig()
-        return
+        this.invalidConfig();
+        return;
       }
-      portalUrl.searchParams.set("app", app)
-      portalUrl.searchParams.set("api", apiBase)
-      portalUrl.searchParams.set("embed", "1")
-      const portalOrigin = portalUrl.origin
-      const iframe = document.createElement("iframe")
-      iframe.src = portalUrl.href
-      iframe.title = this.getAttribute("title") || "Cognia Workflow App"
-      iframe.referrerPolicy = "no-referrer"
-      iframe.sandbox.add("allow-forms", "allow-scripts", "allow-same-origin", "allow-downloads")
-      iframe.style.cssText = "display:block;width:100%;min-height:480px;border:0"
-      this.append(iframe)
-      this.iframe = iframe
-      this.portalOrigin = portalOrigin
+      portalUrl.searchParams.set("app", app);
+      portalUrl.searchParams.set("api", apiBase);
+      portalUrl.searchParams.set("embed", "1");
+      const portalOrigin = portalUrl.origin;
+      const iframe = document.createElement("iframe");
+      iframe.src = portalUrl.href;
+      iframe.title = this.getAttribute("title") || "Cognia Workflow App";
+      iframe.referrerPolicy = "no-referrer";
+      iframe.sandbox.add("allow-forms", "allow-scripts", "allow-same-origin", "allow-downloads");
+      iframe.style.cssText = "display:block;width:100%;min-height:480px;border:0";
+      this.append(iframe);
+      this.iframe = iframe;
+      this.portalOrigin = portalOrigin;
       this.onMessage = (event) => {
-        if (
-          event.source !== iframe.contentWindow ||
-          event.origin !== this.portalOrigin ||
-          !event.data ||
-          typeof event.data !== "object" ||
-          event.data.version !== MESSAGE_VERSION
-        ) {
-          return
+        if (event.source !== iframe.contentWindow || event.origin !== this.portalOrigin || !event.data || typeof event.data !== "object" || event.data.version !== MESSAGE_VERSION) {
+          return;
         }
         if (event.data.type === "cognia.workflow-app.ready") {
-          this.dispatchEvent(new CustomEvent("cognia-ready", { detail: event.data }))
+          this.dispatchEvent(new CustomEvent("cognia-ready", { detail: event.data }));
         }
-      }
-      window.addEventListener("message", this.onMessage)
-      this.controller = new AbortController()
-      const headers = {}
-      const oidcToken = this.oidcToken?.trim()
-      if (oidcToken) headers.Authorization = `Bearer ${oidcToken}`
+      };
+      window.addEventListener("message", this.onMessage);
+      this.controller = new AbortController();
+      const headers = {};
+      const oidcToken = this.oidcToken?.trim();
+      if (oidcToken) headers.Authorization = `Bearer ${oidcToken}`;
       void Promise.all([
         fetch(`${apiBase}/api/apps/${encodeURIComponent(app)}/embed-token`, {
           headers,
           credentials: "omit",
-          signal: this.controller.signal,
+          signal: this.controller.signal
         }).then(async (response) => {
-          if (!response.ok) throw new Error(`embed_token_${response.status}`)
-          const grant = await response.json()
-          if (!isEmbedGrant(grant)) throw new Error("embed_token_invalid_response")
-          return grant
+          if (!response.ok) throw new Error(`embed_token_${response.status}`);
+          const grant = await response.json();
+          if (!isEmbedGrant(grant)) throw new Error("embed_token_invalid_response");
+          return grant;
         }),
-        new Promise((resolve) => iframe.addEventListener("load", () => resolve(), { once: true })),
-      ])
-        .then(([grant]) => {
-          iframe.contentWindow?.postMessage(
-            {
-              type: "cognia.workflow-app.init",
-              version: MESSAGE_VERSION,
-              parentOrigin: window.location.origin,
-              sessionToken: grant.sessionToken,
-            },
-            portalOrigin
-          )
-        })
-        .catch((error) => {
-          if (!(error instanceof DOMException && error.name === "AbortError")) {
-            this.dispatchEvent(
-              new CustomEvent("cognia-error", { detail: { code: "bootstrap_failed" } })
-            )
-          }
-        })
+        new Promise((resolve) => iframe.addEventListener("load", () => resolve(), { once: true }))
+      ]).then(([grant]) => {
+        iframe.contentWindow?.postMessage(
+          {
+            type: "cognia.workflow-app.init",
+            version: MESSAGE_VERSION,
+            parentOrigin: window.location.origin,
+            sessionToken: grant.sessionToken
+          },
+          portalOrigin
+        );
+      }).catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          this.dispatchEvent(
+            new CustomEvent("cognia-error", { detail: { code: "bootstrap_failed" } })
+          );
+        }
+      });
     }
-  }
+  };
   if (!customElements.get("cognia-workflow-app")) {
-    customElements.define("cognia-workflow-app", CogniaWorkflowApp)
+    customElements.define("cognia-workflow-app", CogniaWorkflowApp);
   }
-})()
+})();
