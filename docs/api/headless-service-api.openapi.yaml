@@ -4089,6 +4089,685 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_companion_capability:
+    post:
+      operationId: internalRpcBrowserCompanionCapability
+      tags:
+        - headless-rpc
+      summary: browser_companion_capability (browser.read-own)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - schemaVersion
+                  - limits
+                  - supportedCaptureModes
+                  - workspaces
+                  - appearance
+                properties:
+                  schemaVersion:
+                    type: integer
+                    const: 1
+                  limits:
+                    type: object
+                    required:
+                      - instructionBytes
+                      - selectionBytes
+                      - readableTextBytes
+                      - requestBytes
+                    properties:
+                      instructionBytes:
+                        type: integer
+                        minimum: 1
+                      selectionBytes:
+                        type: integer
+                        minimum: 1
+                      readableTextBytes:
+                        type: integer
+                        minimum: 1
+                      requestBytes:
+                        type: integer
+                        minimum: 1
+                    additionalProperties: false
+                  supportedCaptureModes:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - metadata
+                        - selection
+                        - readable-page
+                  workspaces:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - label
+                        - isDefault
+                      properties:
+                        id:
+                          type: string
+                          minLength: 1
+                        label:
+                          type: string
+                        isDefault:
+                          type: boolean
+                      additionalProperties: false
+                  appearance:
+                    type: object
+                    required:
+                      - mode
+                      - cssVars
+                      - radiusBaseRem
+                      - pillRadiusPx
+                      - density
+                    properties:
+                      mode:
+                        type: string
+                        enum:
+                          - light
+                          - dark
+                      cssVars:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      radiusBaseRem:
+                        type: number
+                        minimum: 0
+                      pillRadiusPx:
+                        type: number
+                        minimum: 0
+                      density:
+                        type: string
+                        enum:
+                          - compact
+                          - comfortable
+                          - spacious
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_context_get:
+    post:
+      operationId: internalRpcBrowserContextGet
+      tags:
+        - headless-rpc
+      summary: browser_context_get (browser.read-own)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - submissionId
+              properties:
+                submissionId:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - submissionId
+                  - sessionId
+                  - status
+                  - updatedAt
+                  - deepLink
+                properties:
+                  submissionId:
+                    type: string
+                    minLength: 1
+                  sessionId:
+                    type: string
+                    minLength: 1
+                  status:
+                    type: string
+                    enum:
+                      - submitting
+                      - queued
+                      - running
+                      - needs_input
+                      - completed
+                      - cancelled
+                      - failed
+                      - host_unavailable
+                  updatedAt:
+                    type: integer
+                  errorCode:
+                    type: string
+                  deepLink:
+                    type: string
+                    minLength: 1
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_context_list:
+    post:
+      operationId: internalRpcBrowserContextList
+      tags:
+        - headless-rpc
+      summary: browser_context_list (browser.read-own)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                cursor:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - submissionId
+                        - sessionId
+                        - title
+                        - sourceHost
+                        - captureMode
+                        - status
+                        - submittedAt
+                        - updatedAt
+                        - deepLink
+                      properties:
+                        submissionId:
+                          type: string
+                          minLength: 1
+                        sessionId:
+                          type: string
+                          minLength: 1
+                        title:
+                          type: string
+                        sourceHost:
+                          type: string
+                        captureMode:
+                          type: string
+                          enum:
+                            - metadata
+                            - selection
+                            - readable-page
+                        status:
+                          type: string
+                          enum:
+                            - submitting
+                            - queued
+                            - running
+                            - needs_input
+                            - completed
+                            - cancelled
+                            - failed
+                            - host_unavailable
+                        submittedAt:
+                          type: integer
+                        updatedAt:
+                          type: integer
+                        deepLink:
+                          type: string
+                          minLength: 1
+                      additionalProperties: false
+                  cursor:
+                    type: string
+                    minLength: 1
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_context_submit:
+    post:
+      operationId: internalRpcBrowserContextSubmit
+      tags:
+        - headless-rpc
+      summary: browser_context_submit (browser.submit)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - submissionId
+                - workspaceId
+                - instruction
+                - context
+              properties:
+                submissionId:
+                  type: string
+                  minLength: 1
+                workspaceId:
+                  type: string
+                  minLength: 1
+                instruction:
+                  type: string
+                  minLength: 1
+                  maxLength: 8192
+                suggestedTitle:
+                  type: string
+                  maxLength: 200
+                context:
+                  type: object
+                  required:
+                    - schemaVersion
+                    - captureMode
+                    - url
+                    - title
+                    - capturedAt
+                  properties:
+                    schemaVersion:
+                      type: integer
+                      const: 1
+                    captureMode:
+                      type: string
+                      enum:
+                        - metadata
+                        - selection
+                        - readable-page
+                    url:
+                      type: string
+                      minLength: 1
+                      maxLength: 4096
+                    title:
+                      type: string
+                      maxLength: 1024
+                    capturedAt:
+                      type: integer
+                    selection:
+                      type: object
+                      required:
+                        - text
+                        - truncated
+                      properties:
+                        text:
+                          type: string
+                          maxLength: 32768
+                        truncated:
+                          type: boolean
+                      additionalProperties: false
+                    readableText:
+                      type: object
+                      required:
+                        - text
+                        - truncated
+                        - originalCharacterCount
+                      properties:
+                        text:
+                          type: string
+                          maxLength: 131072
+                        truncated:
+                          type: boolean
+                        originalCharacterCount:
+                          type: integer
+                          minimum: 0
+                      additionalProperties: false
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - submissionId
+                  - sessionId
+                  - acceptedAt
+                  - status
+                  - deepLink
+                properties:
+                  submissionId:
+                    type: string
+                    minLength: 1
+                  sessionId:
+                    type: string
+                    minLength: 1
+                  acceptedAt:
+                    type: integer
+                  status:
+                    type: string
+                    enum:
+                      - submitting
+                      - queued
+                      - running
+                      - needs_input
+                      - completed
+                      - cancelled
+                      - failed
+                      - host_unavailable
+                  deepLink:
+                    type: string
+                    minLength: 1
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/browser_downloads:
     post:
       operationId: internalRpcBrowserDownloads
@@ -71735,6 +72414,10 @@ components:
           - browser_back
           - browser_capability
           - browser_close_page
+          - browser_companion_capability
+          - browser_context_get
+          - browser_context_list
+          - browser_context_submit
           - browser_downloads
           - browser_drag
           - browser_evaluate
@@ -72384,10 +73067,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 563
-  generatedRequestSchemaCount: 563
+  internalCommandCount: 567
+  generatedRequestSchemaCount: 567
   runtimeInferredRequestSchemaCount: 74
-  contractRequestSchemaCount: 489
+  contractRequestSchemaCount: 493
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 563
+  generatedResponseSchemaCount: 567
   loopbackOnly: true

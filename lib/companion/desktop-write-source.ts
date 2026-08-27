@@ -310,6 +310,17 @@ export async function dispatchCommand(
   if (isScheduledTaskRpc(command)) {
     return dispatchScheduledTaskRpc(command, payload)
   }
+  // Browser Companion. Its own module rather than four `case` arms because the
+  // submit path creates a session and enqueues a turn — see
+  // `lib/browser-companion/host-dispatch.ts` for why it needs the HostState
+  // authority and why it is handed in rather than reached for.
+  const { isBrowserCompanionCommand, dispatchBrowserCompanionCommand } =
+    await import("@/lib/browser-companion/host-dispatch")
+  if (isBrowserCompanionCommand(command)) {
+    return dispatchBrowserCompanionCommand(command, payload, (request) =>
+      resolveHostStateService(request, bridge)
+    )
+  }
   switch (command) {
     case "character_upsert":
       return characterUpsert(payload)

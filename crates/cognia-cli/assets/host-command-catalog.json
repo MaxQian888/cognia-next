@@ -2748,6 +2748,493 @@
       "outputTyped": true
     },
     {
+      "name": "browser_companion_capability",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "read",
+      "capability": "browser.read-own",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "browser_companion_capability (browser.read-own)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "limits",
+          "supportedCaptureModes",
+          "workspaces",
+          "appearance"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "limits": {
+            "type": "object",
+            "required": [
+              "instructionBytes",
+              "selectionBytes",
+              "readableTextBytes",
+              "requestBytes"
+            ],
+            "properties": {
+              "instructionBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "selectionBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "readableTextBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "requestBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "supportedCaptureModes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "metadata",
+                "selection",
+                "readable-page"
+              ]
+            }
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label",
+                "isDefault"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string"
+                },
+                "isDefault": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "appearance": {
+            "type": "object",
+            "required": [
+              "mode",
+              "cssVars",
+              "radiusBaseRem",
+              "pillRadiusPx",
+              "density"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ]
+              },
+              "cssVars": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "radiusBaseRem": {
+                "type": "number",
+                "minimum": 0
+              },
+              "pillRadiusPx": {
+                "type": "number",
+                "minimum": 0
+              },
+              "density": {
+                "type": "string",
+                "enum": [
+                  "compact",
+                  "comfortable",
+                  "spacious"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_context_get",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "read",
+      "capability": "browser.read-own",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "browser_context_get (browser.read-own)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "submissionId"
+        ],
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "submissionId",
+          "sessionId",
+          "status",
+          "updatedAt",
+          "deepLink"
+        ],
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitting",
+              "queued",
+              "running",
+              "needs_input",
+              "completed",
+              "cancelled",
+              "failed",
+              "host_unavailable"
+            ]
+          },
+          "updatedAt": {
+            "type": "integer"
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "deepLink": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_context_list",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "read",
+      "capability": "browser.read-own",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "browser_context_list (browser.read-own)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "submissionId",
+                "sessionId",
+                "title",
+                "sourceHost",
+                "captureMode",
+                "status",
+                "submittedAt",
+                "updatedAt",
+                "deepLink"
+              ],
+              "properties": {
+                "submissionId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "title": {
+                  "type": "string"
+                },
+                "sourceHost": {
+                  "type": "string"
+                },
+                "captureMode": {
+                  "type": "string",
+                  "enum": [
+                    "metadata",
+                    "selection",
+                    "readable-page"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "submitting",
+                    "queued",
+                    "running",
+                    "needs_input",
+                    "completed",
+                    "cancelled",
+                    "failed",
+                    "host_unavailable"
+                  ]
+                },
+                "submittedAt": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "integer"
+                },
+                "deepLink": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_context_submit",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "browser.submit",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "browser_context_submit (browser.submit)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "submissionId",
+          "workspaceId",
+          "instruction",
+          "context"
+        ],
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instruction": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
+          "suggestedTitle": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "context": {
+            "type": "object",
+            "required": [
+              "schemaVersion",
+              "captureMode",
+              "url",
+              "title",
+              "capturedAt"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "type": "integer",
+                "const": 1
+              },
+              "captureMode": {
+                "type": "string",
+                "enum": [
+                  "metadata",
+                  "selection",
+                  "readable-page"
+                ]
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "capturedAt": {
+                "type": "integer"
+              },
+              "selection": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "truncated"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 32768
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "readableText": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "truncated",
+                  "originalCharacterCount"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 131072
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "originalCharacterCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "submissionId",
+          "sessionId",
+          "acceptedAt",
+          "status",
+          "deepLink"
+        ],
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptedAt": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitting",
+              "queued",
+              "running",
+              "needs_input",
+              "completed",
+              "cancelled",
+              "failed",
+              "host_unavailable"
+            ]
+          },
+          "deepLink": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_downloads",
       "category": "development",
       "resource": "browser",
@@ -37393,5 +37880,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "62356b0ed26ff4a78379741946103529d4710b27134fe21c747e3bca399481fa"
+  "catalogHash": "f08e7707fe58e92c084af9a1c909961dc5b021adbff6c2adc1fbbbf31c1d30ee"
 }

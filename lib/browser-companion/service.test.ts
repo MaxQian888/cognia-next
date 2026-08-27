@@ -1,0 +1,294 @@
+import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
+
+import {
+  BrowserCompanionError,
+  browserCompanionCapability,
+  browserSubmissionDeepLink,
+  getBrowserContextSubmission,
+  listBrowserContextSubmissions,
+  submitBrowserContext,
+  type BrowserCompanionDeps,
+} from "./service"
+
+const APPEARANCE = {
+  mode: "dark" as const,
+  cssVars: { "--background": "oklch(0.145 0 0)" },
+  radiusBaseRem: 0.625,
+  pillRadiusPx: 9999,
+  density: "comfortable" as const,
+}
+
+interface Harness {
+  deps: BrowserCompanionDeps
+  rows: Map<string, BrowserSubmissionRow>
+  createdSessions: { title: string; projectId: string }[]
+  enqueued: { sessionId: string; messageId: string; text: string }[]
+  statuses: Map<string, BrowserSubmissionRow["status"]>
+  sessionStatusThrows: boolean
+}
+
+function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
+  const rows = new Map<string, BrowserSubmissionRow>()
+  const createdSessions: Harness["createdSessions"] = []
+  const enqueued: Harness["enqueued"] = []
+  const statuses = new Map<string, BrowserSubmissionRow["status"]>()
+  const state = { sessionStatusThrows: false }
+  let sessionCounter = 0
+  const deps: BrowserCompanionDeps = {
+    now: () => 1_700_000_000_000,
+    listWorkspaces: async () => [
+      { id: "ws-default", label: "Default", isDefault: true },
+      { id: "ws-other", label: "Other", isDefault: false },
+    ],
+    appearance: () => APPEARANCE,
+    createSession: async (input) => {
+      createdSessions.push(input)
+      sessionCounter += 1
+      return { id: `session-${sessionCounter}` }
+    },
+    enqueueMessage: async (input) => {
+      enqueued.push(input)
+    },
+    recordSubmission: async (row) => {
+      rows.set(row.submissionId, row)
+    },
+    readSubmission: async (id) => rows.get(id),
+    listSubmissions: async (deviceId, limit) =>
+      [...rows.values()]
+        .filter((row) => row.deviceId === deviceId)
+        .sort((left, right) => right.submittedAt - left.submittedAt)
+        .slice(0, limit),
+    sessionStatus: async (sessionId) => {
+      if (state.sessionStatusThrows) throw new Error("runtime unreachable")
+      return statuses.get(sessionId) ?? "running"
+    },
+    ...overrides,
+  }
+  return {
+    deps,
+    rows,
+    createdSessions,
+    enqueued,
+    statuses,
+    get sessionStatusThrows() {
+      return state.sessionStatusThrows
+    },
+    set sessionStatusThrows(value: boolean) {
+      state.sessionStatusThrows = value
+    },
+  }
+}
+
+function payload(overrides: Record<string, unknown> = {}) {
+  return {
+    submissionId: "sub-1",
+    workspaceId: "ws-default",
+    instruction: "Summarise the pricing",
+    context: {
+      schemaVersion: 1,
+      captureMode: "selection",
+      url: "https://example.com/pricing",
+      title: "Pricing",
+      capturedAt: 1_699_000_000_000,
+      selection: { text: "Team plan is $20", truncated: false },
+    },
+    ...overrides,
+  }
+}
+
+describe("browserCompanionCapability", () => {
+  it("describes the limits, modes, workspaces and appearance", async () => {
+    const h = harness()
+    const capability = await browserCompanionCapability(h.deps)
+    expect(capability.schemaVersion).toBe(1)
+    expect(capability.supportedCaptureModes).toEqual(["metadata", "selection", "readable-page"])
+    expect(capability.workspaces[0]).toMatchObject({ id: "ws-default", isDefault: true })
+    expect(capability.appearance).toEqual(APPEARANCE)
+    expect(capability.limits.readableTextBytes).toBeGreaterThan(0)
+  })
+})
+
+describe("submitBrowserContext", () => {
+  it("creates the session in the chosen workspace and enqueues one message", async () => {
+    const h = harness()
+    const receipt = await submitBrowserContext(h.deps, "browser-a", payload())
+    expect(h.createdSessions).toEqual([{ title: "Summarise the pricing", projectId: "ws-default" }])
+    expect(h.enqueued).toHaveLength(1)
+    expect(receipt).toMatchObject({
+      submissionId: "sub-1",
+      sessionId: "session-1",
+      status: "queued",
+      deepLink: "cognia://session/session-1",
+    })
+  })
+
+  it("sends the fenced prompt, not the raw page", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    const text = h.enqueued[0].text
+    expect(text.startsWith("Summarise the pricing")).toBe(true)
+    expect(text).toContain("<untrusted_content>")
+    expect(text).toContain("Team plan is $20")
+  })
+
+  it("derives the message id from the submission so a retry cannot double-post", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    expect(h.enqueued[0].messageId).toBe("browser-sub-1")
+  })
+
+  it("replays the original receipt instead of creating a second session", async () => {
+    const h = harness()
+    const first = await submitBrowserContext(h.deps, "browser-a", payload())
+    const second = await submitBrowserContext(h.deps, "browser-a", payload())
+    expect(second).toEqual(first)
+    expect(h.createdSessions).toHaveLength(1)
+    expect(h.enqueued).toHaveLength(1)
+  })
+
+  it("refuses to replay another device's submission id", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    await expect(submitBrowserContext(h.deps, "browser-b", payload())).rejects.toMatchObject({
+      code: "submission_owned_elsewhere",
+    })
+  })
+
+  it("refuses a workspace the Host did not offer", async () => {
+    // The panel's dropdown is populated from this same list, so a mismatch is
+    // stale state — not a licence to land a task in an unchosen project.
+    const h = harness()
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ workspaceId: "ws-not-mine" }))
+    ).rejects.toMatchObject({ code: "unknown_workspace" })
+    expect(h.createdSessions).toHaveLength(0)
+  })
+
+  it("refuses an unbound caller before touching anything", async () => {
+    const h = harness()
+    await expect(submitBrowserContext(h.deps, "", payload())).rejects.toBeInstanceOf(
+      BrowserCompanionError
+    )
+    expect(h.createdSessions).toHaveLength(0)
+  })
+
+  it("turns a validation rejection into a code the panel can act on", async () => {
+    const h = harness()
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ instruction: "" }))
+    ).rejects.toMatchObject({ code: "malformed" })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ instruction: "x".repeat(9_000) }))
+    ).rejects.toMatchObject({ code: "payload_too_large" })
+    await expect(
+      submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({ context: { ...payload().context, selection: undefined } })
+      )
+    ).rejects.toMatchObject({ code: "capture_mode_mismatch" })
+  })
+
+  it("records the row before starting the turn", async () => {
+    // A crash between the two must leave a recorded submission whose turn
+    // HostState redrives, never a running turn the panel cannot show.
+    const order: string[] = []
+    const h = harness({
+      recordSubmission: async () => {
+        order.push("record")
+      },
+      enqueueMessage: async () => {
+        order.push("enqueue")
+      },
+    })
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    expect(order).toEqual(["record", "enqueue"])
+  })
+
+  it("stores only the hostname and the byte count, never the page text", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    const row = h.rows.get("sub-1")
+    expect(row).toMatchObject({ sourceHost: "example.com", captureMode: "selection" })
+    expect(row?.contentBytes).toBe("Team plan is $20".length)
+    expect(JSON.stringify(row)).not.toContain("Team plan is $20")
+    expect(JSON.stringify(row)).not.toContain("/pricing")
+  })
+
+  it("marks the row truncated when anything was cut", async () => {
+    const h = harness()
+    await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({
+        context: { ...payload().context, selection: { text: "clipped", truncated: true } },
+      })
+    )
+    expect(h.rows.get("sub-1")?.truncated).toBe(true)
+  })
+})
+
+describe("listBrowserContextSubmissions", () => {
+  it("returns only this device's submissions, with live status", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    await submitBrowserContext(h.deps, "browser-b", payload({ submissionId: "sub-2" }))
+    h.statuses.set("session-1", "completed")
+
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items.map((item) => item.submissionId)).toEqual(["sub-1"])
+    expect(page.items[0].status).toBe("completed")
+    expect(page.items[0].deepLink).toBe(browserSubmissionDeepLink("session-1"))
+  })
+
+  it("clamps the limit rather than trusting it", async () => {
+    const seen: number[] = []
+    const h = harness({
+      listSubmissions: async (_deviceId, limit) => {
+        seen.push(limit)
+        return []
+      },
+    })
+    await listBrowserContextSubmissions(h.deps, "browser-a", { limit: 5_000 })
+    await listBrowserContextSubmissions(h.deps, "browser-a", { limit: 0 })
+    await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(seen).toEqual([50, 1, 20])
+  })
+
+  it("falls back to the recorded status when the runtime cannot be read", async () => {
+    // A temporarily unreachable runtime must not rewrite history as failed.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.sessionStatusThrows = true
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items[0].status).toBe("queued")
+  })
+})
+
+describe("getBrowserContextSubmission", () => {
+  it("reads one submission back", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.statuses.set("session-1", "needs_input")
+    await expect(
+      getBrowserContextSubmission(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).resolves.toMatchObject({ status: "needs_input", sessionId: "session-1" })
+  })
+
+  it("gives the same answer for missing and someone else's", async () => {
+    // Distinguishing them would let one browser probe another's ids.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    const missing = getBrowserContextSubmission(h.deps, "browser-b", { submissionId: "nope" })
+    const theirs = getBrowserContextSubmission(h.deps, "browser-b", { submissionId: "sub-1" })
+    await expect(missing).rejects.toMatchObject({ code: "submission_not_found" })
+    await expect(theirs).rejects.toMatchObject({ code: "submission_not_found" })
+  })
+
+  it("requires a submission id", async () => {
+    const h = harness()
+    await expect(
+      getBrowserContextSubmission(h.deps, "browser-a", { submissionId: 7 })
+    ).rejects.toMatchObject({ code: "malformed" })
+  })
+})

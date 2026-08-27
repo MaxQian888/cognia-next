@@ -124,6 +124,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "backup_import",
     "external_agent_list",
     "external_agent_update",
+    "browser_companion_capability",
+    "browser_context_submit",
+    "browser_context_list",
+    "browser_context_get",
     "perf_close_lease",
     "perf_hotspots",
     "perf_lease_snapshot",
@@ -766,14 +770,30 @@ pub(super) async fn dispatch(
         // + permission mode). TS-side dispatch arms in
         // `lib/companion/desktop-write-source.ts`.
         | "external_agent_list"
-        | "external_agent_update" => {
+        | "external_agent_update"
+        // Browser Companion — a captured page becomes a new session on the
+        // renderer, so it rides the same generic bridge. Deliberately NOT in
+        // CONTROL_COMMANDS: that gate maps to `GrantKind::Control`, and a
+        // browser device holds none of those. Its authority is the descriptor
+        // capability `browser.submit` / `browser.read-own` alone.
+        | "browser_companion_capability"
+        | "browser_context_submit"
+        | "browser_context_list"
+        | "browser_context_get" => {
             // ADR-0060: some TS dispatch arms must know the authenticated
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
             let args = inject_caller_event_streams(name, args, device_id);
             let args = inject_caller_device_grants(name, args, state, device_id, account_id);
-            let args = if super::host_state::COMMANDS.contains(&name) {
+            // Browser Companion joins the HostState binding because its submit
+            // arm reaches the same authority: it needs the verified account and
+            // this Host's opaque id to construct the `message.enqueue` it
+            // submits. The binding OVERWRITES whatever the client sent, which is
+            // the whole point — a browser must not be able to name an account.
+            let args = if super::host_state::COMMANDS.contains(&name)
+                || super::BROWSER_COMPANION_COMMANDS.contains(&name)
+            {
                 super::host_state::bind_authority(args, state, account_id, device_id)?
             } else {
                 args

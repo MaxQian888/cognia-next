@@ -1046,6 +1046,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_session_get",
     "browser_capability",
     "browser_runtime_status",
+    // Browser Companion (ADR-XXXX) — the extension's whole surface. Four
+    // commands, one of which writes; see `rpc/browser_companion.rs`.
+    "browser_companion_capability",
+    "browser_context_submit",
+    "browser_context_list",
+    "browser_context_get",
     "browser_session_close",
     "browser_navigate",
     "browser_snapshot",
@@ -1100,6 +1106,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_capability",
     "browser_runtime_status",
     "browser_session_get",
+    "browser_companion_capability",
+    "browser_context_list",
+    "browser_context_get",
     "browser_snapshot",
     "browser_read_console",
     "browser_read_network",
@@ -1718,6 +1727,18 @@ pub(crate) fn device_can_control(device_id: &str) -> bool {
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
+/// The Browser Companion's four commands.
+///
+/// Named once so the dispatch binding and the caller-id injection cannot
+/// disagree about which commands are the extension's — a mismatch would leave
+/// one of them reading an unbound account or an unbound device.
+pub(super) const BROWSER_COMPANION_COMMANDS: &[&str] = &[
+    "browser_companion_capability",
+    "browser_context_submit",
+    "browser_context_list",
+    "browser_context_get",
+];
+
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // Remote Session Control — the attach registry keys watchers by device and
     // the host routes a `permission_request` to whoever is attached. Trusting
@@ -1743,6 +1764,14 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "provider_diagnostics_history",
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
+    // Browser Companion — `browser.read-own` is scoped to the device that made
+    // a submission, and the submission row records which browser sent it. Both
+    // depend on an id the renderer cannot work out for itself and that a
+    // client must not be able to choose.
+    "browser_companion_capability",
+    "browser_context_submit",
+    "browser_context_list",
+    "browser_context_get",
     "workflow_trigger_manual",
     "workflow_handoff_create",
     "device_capabilities_report",
