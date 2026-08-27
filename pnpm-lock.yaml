@@ -894,8 +894,8 @@ importers:
         specifier: ^8.0.1
         version: 8.0.1(@capacitor/core@8.5.0)
       '@capgo/capacitor-native-biometric':
-        specifier: ^8.6.4
-        version: 8.6.4(@capacitor/core@8.5.0)
+        specifier: ^8.6.7
+        version: 8.6.7(@capacitor/core@8.5.0)
       '@capgo/capacitor-navigation-bar':
         specifier: ^8.2.6
         version: 8.2.6(@capacitor/core@8.5.0)
@@ -2313,8 +2313,8 @@ packages:
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
 
-  '@capgo/capacitor-native-biometric@8.6.4':
-    resolution: {integrity: sha512-ANzDZQU1tcFV2m/kVhOu/ajC/quWoG2hgShd9zJxr6tyIxEsnSvpblyLz5bpbT59aq06QsFV0lexZRWCVXxh/g==}
+  '@capgo/capacitor-native-biometric@8.6.7':
+    resolution: {integrity: sha512-Xlj8rk5sDq5mAU+leOGAj0XzTelwJMJx8O9cXLyW3rCGhPhCtrAEziFaPHBlEp0Vco3q6hbsZAkQ4KodfcuVZg==}
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
 
@@ -15739,7 +15739,7 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.5.0
 
-  '@capgo/capacitor-native-biometric@8.6.4(@capacitor/core@8.5.0)':
+  '@capgo/capacitor-native-biometric@8.6.7(@capacitor/core@8.5.0)':
     dependencies:
       '@capacitor/core': 8.5.0
 
