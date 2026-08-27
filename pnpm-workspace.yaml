@@ -7,6 +7,7 @@ packages:
   - web
   - mobile
   - cli
+  - browser-extension
   - packages/*
   - services/workspace-runtime
 
@@ -49,6 +50,9 @@ overrides:
 # packages whose scripts are informational or unnecessary at install time.
 allowBuilds:
   "@parcel/watcher": true
+  # WXT's postinstall generates the .wxt/ type surface the extension
+  # workspace compiles against; without it `tsc` there sees no entrypoints.
+  wxt: true
   "@swc/core": true
   core-js: false
   core-js-pure: false
@@ -56,6 +60,10 @@ allowBuilds:
   node-pty: true
   onnxruntime-node: true
   protobufjs: true
+  # Pulled in transitively by WXT's publishing toolchain. Its install script
+  # only compiles a native fallback for a Node 0.10-era `spawnSync` shim that
+  # every supported Node already has built in.
+  spawn-sync: false
   tesseract.js: true
   unrs-resolver: true
 

@@ -50,6 +50,14 @@ export const TS_ROOTS = [
   "web/components/",
   "web/hooks/",
   "web/lib/",
+  // The browser extension's own three roots (ADR-0154). Its entrypoints under
+  // `browser-extension/src/app/` are excluded for the same reason `web/app/`
+  // is: they are the thin shells that hand the real `chrome.*` surface to code
+  // that takes it as a parameter, and everything worth asserting lives on the
+  // other side of that seam.
+  "browser-extension/src/components/",
+  "browser-extension/src/hooks/",
+  "browser-extension/src/lib/",
 ]
 /**
  * Carve-outs the rule names explicitly.

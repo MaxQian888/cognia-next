@@ -7,7 +7,6 @@ function recordingSigner(): DeviceSigner & { signed: string[] } {
   const signed: string[] = []
   return {
     deviceId: "device-a",
-    thumbprint: "thumb-a",
     signed,
     async sign(data) {
       signed.push(new TextDecoder().decode(data))
@@ -122,7 +121,7 @@ describe("createDeviceProof", () => {
       "verify",
     ])
     const proof = await createDeviceProof({
-      signer: signerFromCryptoKey("device-a", "thumb-a", pair.privateKey),
+      signer: signerFromCryptoKey("device-a", pair.privateKey),
       nonce: "n",
       method: "POST",
       path: "/api/auth/token",

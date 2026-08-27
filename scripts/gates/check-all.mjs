@@ -93,6 +93,10 @@ const REGISTRY = [
   // or extra key in either locale fails typecheck" — and until this entry
   // existed, nothing on a PR ever ran that check.
   { script: "web:typecheck", group: "types" },
+  // The extension workspace is excluded from the root tsc (chrome globals,
+  // its own JSX transform), exactly like `web`, so it needs its own entry or
+  // it would be typechecked by nothing.
+  { script: "browser-ext:typecheck", group: "types" },
 
   // ADR-0148 — panel surfaces go through <Surface>, corners and depth go
   // through the token scale. Ratcheted against a baseline: the list may shrink,

@@ -1,0 +1,38 @@
+{
+  // Both: the root config carries the repo's compiler conventions, and the
+  // generated one carries WXT's own — the `#imports` virtual module, the
+  // entrypoint globals, and the alias `paths` derived from wxt.config.ts.
+  // Later wins, which is what makes `#imports` resolvable.
+  "extends": ["../tsconfig.json", "./.wxt/tsconfig.json"],
+  "compilerOptions": {
+    // The root config narrows `types` to `["node"]`. This workspace needs the
+    // Chrome extension globals and the Jest globals for its co-located tests,
+    // and `types` is replaced wholesale by a child config rather than merged.
+    // `@testing-library/jest-dom` is listed rather than picked up from a setup
+    // file: the root config narrows `types`, and this workspace's `tsc` never
+    // loads jest.setup.dom.ts, so `toBeInTheDocument` would be an error here
+    // while passing at runtime.
+    "types": ["chrome", "node", "jest", "@testing-library/jest-dom"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    "jsx": "react-jsx",
+    // `@ext/*` is this workspace, and there is deliberately no `@/…` here.
+    //
+    // The panel's primitives come from `@cognia/plugin-ui`, which exists for
+    // exactly this situation: a separately-built surface that renders against
+    // the CSS custom properties the host publishes, carrying no colours of its
+    // own. Aliasing the app's `components/ui/` instead would have worked, but
+    // those import `@/lib/utils`, whose `isTauri` re-export would drag the
+    // whole Tauri transport into a bundle that has to stay auditable.
+    "paths": {
+      "@ext/*": ["./*"],
+      "@cognia/plugin-ui": ["../packages/plugin-ui/src/index.ts"],
+      "@cognia/plugin-ui/*": ["../packages/plugin-ui/src/*"],
+      "@cognia/companion-client": ["../packages/companion-client/src/index.ts"],
+      "@cognia/companion-client/*": ["../packages/companion-client/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "wxt.config.ts"],
+  "exclude": ["node_modules", ".wxt", "build", ".output"]
+}

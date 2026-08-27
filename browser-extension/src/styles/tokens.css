@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+/*
+ * The side panel's fallback palette.
+ *
+ * Deliberately only a fallback. Once paired, the Host sends its *resolved*
+ * appearance and `applyAppearance` writes those values onto <html>, which is
+ * how the panel matches a user's custom theme, imported VSCode theme, or
+ * high-contrast palette — none of which is knowable here at build time.
+ *
+ * What is below is the stock light/dark palette from `app/globals.css`,
+ * present so the pairing screen (which by definition has no Host to ask) is
+ * not unstyled. A drift between this and the app's default is cosmetic and
+ * bounded: it is only ever visible before the first successful capability
+ * call.
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --pill-radius: 9999px;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.545 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.62 0.17 145);
+  --warning: oklch(0.75 0.17 80);
+  --info: oklch(0.6 0.13 220);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+/*
+ * `prefers-color-scheme` only, guarded so an explicit choice wins in both
+ * directions — the same three-state shape the app uses. The panel gets an
+ * explicit `.dark` class from `applyAppearance` once the Host has answered.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --destructive-foreground: oklch(0.145 0 0);
+    --success: oklch(0.72 0.18 150);
+    --warning: oklch(0.82 0.18 85);
+    --info: oklch(0.7 0.15 220);
+    --border: oklch(0.269 0 0);
+    --input: oklch(0.269 0 0);
+    --ring: oklch(0.556 0 0);
+  }
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.145 0 0);
+  --success: oklch(0.72 0.18 150);
+  --warning: oklch(0.82 0.18 85);
+  --info: oklch(0.7 0.15 220);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* ADR-0148's proportional scale, not shadcn's fixed ±px offsets: with a
+     fixed offset a base of 0 still leaves `rounded-xl` at 4px, so "square"
+     was never reachable. Multipliers land on the same values at the default
+     base and collapse to 0 with it.
+
+     Both chains are here because the panel imports the app's own `ui/`
+     components verbatim, and those are written against the unnamed one
+     (`rounded-md`, `rounded-lg`, `rounded-xl`). Omitting it would leave them
+     on Tailwind's stock radii while everything around them followed the
+     Host — visibly two different products in one panel. */
+  --radius-sm: max(0px, calc(var(--radius) * 0.6));
+  --radius-md: max(0px, calc(var(--radius) * 0.8));
+  --radius-lg: max(0px, var(--radius));
+  --radius-xl: max(0px, calc(var(--radius) * 1.4));
+  --radius-control: max(0px, calc(var(--radius) * 0.8));
+  --radius-panel: max(0px, calc(var(--radius) * 1.2));
+  --radius-stage: max(0px, calc(var(--radius) * 1.4));
+  --radius-pill: var(--pill-radius);
+}
+
+/*
+ * `<Surface>` reads `--surface-bg` rather than a `bg-*` utility, so the tier
+ * a component declares decides its ground. `Card` and `Alert` are built on it,
+ * which is why the panel needs these three rules to render them at all — a
+ * Surface with no `--surface-bg` is transparent.
+ *
+ * No wallpaper translucency here: the side panel has no background image
+ * behind it, so the app's `color-mix` variants would be mixing against
+ * nothing.
+ */
+[data-surface-layer="base"] {
+  --surface-bg: var(--background);
+}
+[data-surface-layer="raised"] {
+  --surface-bg: var(--card);
+}
+[data-surface-layer="overlay"] {
+  --surface-bg: var(--popover);
+}
+
+body {
+  /* The panel paints its own ground: the browser's side-panel host does not,
+     and a transparent body shows through to whatever Chrome puts behind it. */
+  background-color: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+}

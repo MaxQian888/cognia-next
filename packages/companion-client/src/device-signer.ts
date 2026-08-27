@@ -11,27 +11,25 @@
  * over afterwards, by design — the key cannot be read back out of the
  * extension even by the extension.
  *
- * `thumbprint` is `hex(SHA-256(publicKeyPem))` — a hash of the PEM *text*, not
- * an RFC 7638 JWK thumbprint. That is what the Rust side computes, and the two
- * must agree or every request fails `token_key_mismatch`.
+ * There is deliberately no `thumbprint` on this interface. The Host binds the
+ * access token to the registered key and checks it server-side
+ * (`token_key_mismatch`); the proof itself carries no key material, so a
+ * client-held thumbprint would be a field nothing reads. It also could not be
+ * recomputed on the browser side, where the private key is non-extractable and
+ * WebCrypto offers no way to derive its public half — so the field would have
+ * had to be stored, and a stored copy of a derived value is a thing that can
+ * disagree with what it was derived from.
  */
 export interface DeviceSigner {
   deviceId: string
-  /** `hex(SHA-256(publicKeyPem))`. */
-  thumbprint: string
   /** Raw ECDSA P-256 / SHA-256 signature over `data`, in IEEE P1363 form. */
   sign(data: Uint8Array): Promise<Uint8Array>
 }
 
 /** Build a signer from a WebCrypto private key. */
-export function signerFromCryptoKey(
-  deviceId: string,
-  thumbprint: string,
-  privateKey: CryptoKey
-): DeviceSigner {
+export function signerFromCryptoKey(deviceId: string, privateKey: CryptoKey): DeviceSigner {
   return {
     deviceId,
-    thumbprint,
     async sign(data) {
       const signature = await crypto.subtle.sign(
         { name: "ECDSA", hash: "SHA-256" },
@@ -54,7 +52,6 @@ export function signerFromCryptoKey(
  */
 export async function signerFromJwk(
   deviceId: string,
-  thumbprint: string,
   privateKeyJwk: JsonWebKey
 ): Promise<DeviceSigner> {
   const key = await crypto.subtle.importKey(
@@ -64,5 +61,5 @@ export async function signerFromJwk(
     false,
     ["sign"]
   )
-  return signerFromCryptoKey(deviceId, thumbprint, key)
+  return signerFromCryptoKey(deviceId, key)
 }

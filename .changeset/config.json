@@ -14,7 +14,7 @@
   "access": "restricted",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": ["docs", "web", "mobile"],
+  "ignore": ["docs", "web", "mobile", "@cognia/browser-extension"],
   "privatePackages": {
     "version": true,
     "tag": false

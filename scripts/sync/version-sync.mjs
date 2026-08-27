@@ -15,6 +15,7 @@
  *   - sidecar/vscode-ext-host/package.json
  *   - mobile/package.json            (Capacitor shell)
  *   - docs/package.json
+ *   - browser-extension/package.json (WXT copies it into the manifest)
  *
  * Deliberately EXCLUDED (they version independently of the app): everything
  * under `services/`, the `crates/cognia-plugin-template*` scaffolds,
@@ -51,6 +52,9 @@ export const TARGETS = [
   { path: "sidecar/vscode-ext-host/package.json", kind: "json" },
   { path: "mobile/package.json", kind: "json" },
   { path: "docs/package.json", kind: "json" },
+  // WXT reads the manifest version out of package.json, so the extension
+  // users see and the app it pairs with report the same number.
+  { path: "browser-extension/package.json", kind: "json" },
 ]
 
 const JSON_VERSION_RE = /"version":\s*"([^"]+)"/

@@ -1,0 +1,35 @@
+{
+  "name": "@cognia/browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cognia Browser Companion \u2014 a Chrome/Edge side panel that hands the page you are reading to the Cognia app running on this machine.",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@cognia/companion-client": "workspace:*",
+    "@cognia/plugin-ui": "workspace:*",
+    "lucide-react": "^1.31.0",
+    "radix-ui": "^1.6.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/chrome": "^0.1.43",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@wxt-dev/module-react": "^1.2.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "wxt": "^0.20.26"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

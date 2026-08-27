@@ -1,0 +1,511 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type {
+  BrowserCaptureMode,
+  BrowserContextSubmissionSummaryV1,
+} from "@cognia/companion-client"
+import { BROWSER_CONTEXT_LIMITS, utf8ByteLength } from "@cognia/companion-client"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from "@cognia/plugin-ui"
+
+import { applyAppearance, isAppliedAppearance } from "@ext/src/lib/appearance/apply-appearance"
+import { STORAGE_KEYS, type BrowserApi } from "@ext/src/lib/browser-api"
+import {
+  CAPTURE_REQUEST_KEY,
+  isFreshCaptureRequest,
+  type CaptureRequest,
+} from "@ext/src/lib/capture/capture-request"
+import { normalizeCaptureUrl } from "@ext/src/lib/capture/normalize-url"
+import {
+  createHostClient,
+  pairWithHost,
+  restoreSigner,
+  type HostClient,
+  type PairingRecord,
+} from "@ext/src/lib/client"
+import {
+  captureModeFor,
+  isCompatible,
+  panelStateForError,
+  pollIntervalFor,
+  type CapturedPage,
+  type PanelState,
+} from "@ext/src/lib/panel-state"
+import { CapturePreview } from "./capture-preview"
+import { PairScreen } from "./pair-screen"
+import { RecentList } from "./recent-list"
+
+export interface SidePanelProps {
+  api: BrowserApi
+  /** Test seam. Defaults to the real network client. */
+  makeClient?: typeof createHostClient
+  now?: () => number
+}
+
+/**
+ * The whole side panel.
+ *
+ * State lives here rather than in the service worker because MV3 reclaims the
+ * worker whenever it likes, and a captured page held there would vanish
+ * mid-review with no event to notice it. The panel is alive exactly while the
+ * user is looking at it, which is also exactly when this state is meaningful.
+ *
+ * Nothing captured ever reaches storage. The page text, the selection and the
+ * instruction live in React state and die with the panel; what persists is the
+ * public pairing record, the Host's appearance, and the last workspace choice.
+ */
+export function SidePanel({
+  api,
+  makeClient = createHostClient,
+  now = () => Date.now(),
+}: SidePanelProps) {
+  const [state, setState] = useState<PanelState>({ kind: "loading" })
+  const [instruction, setInstruction] = useState("")
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const [wholePage, setWholePage] = useState(false)
+  const [includeFullUrl, setIncludeFullUrl] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const clientRef = useRef<HostClient | null>(null)
+
+  // Paint before anything else. The stored appearance is the Host's last
+  // answer, so a panel reopened offline still looks like the app rather than
+  // flashing the fallback palette and then correcting itself.
+  useEffect(() => {
+    void api.read<unknown>(STORAGE_KEYS.appearance).then((stored) => {
+      if (isAppliedAppearance(stored)) applyAppearance(document.documentElement, stored)
+    })
+  }, [api])
+
+  /**
+   * Work out where this browser stands with the Host.
+   *
+   * Returns the answer rather than applying it. Setting state from inside an
+   * async function that an effect calls is the shape React's own lint rule
+   * objects to — and the objection is fair: it makes "what does connecting
+   * decide?" unanswerable without tracing every branch's side effects. As a
+   * pure-ish resolver, the branches are one `switch` worth of reading.
+   */
+  const resolveConnection = useCallback(async (): Promise<{
+    state: PanelState
+    workspaceId?: string | null
+  }> => {
+    const pairing = await api.read<PairingRecord>(STORAGE_KEYS.pairing)
+    if (!pairing) return { state: { kind: "unpaired" } }
+    const signer = await restoreSigner(pairing)
+    if (!signer) {
+      // The public record survived but the key did not — a profile copied
+      // between machines, or IndexedDB cleared. Treat it as unpaired rather
+      // than as an error: the remedy is the same and the state is honest.
+      await api.remove([STORAGE_KEYS.pairing])
+      return { state: { kind: "unpaired" } }
+    }
+    const client = makeClient({ pairing, signer })
+    clientRef.current = client
+    try {
+      const capability = await client.capability()
+      if (!isCompatible(capability)) {
+        return {
+          state: { kind: "incompatible", hostSchemaVersion: capability.schemaVersion },
+        }
+      }
+      applyAppearance(document.documentElement, capability.appearance)
+      void api.write(STORAGE_KEYS.appearance, capability.appearance)
+      const stored = await api.read<string>(STORAGE_KEYS.lastWorkspaceId)
+      const chosen =
+        capability.workspaces.find((w) => w.id === stored) ??
+        capability.workspaces.find((w) => w.isDefault) ??
+        capability.workspaces[0]
+      const recent = await client.list().then((page) => page.items)
+      return {
+        state: { kind: "ready", pairing, capability, recent, captured: null },
+        workspaceId: chosen?.id ?? null,
+      }
+    } catch (error) {
+      return { state: panelStateForError(error, pairing) }
+    }
+  }, [api, makeClient])
+
+  const connect = useCallback(async () => {
+    const next = await resolveConnection()
+    setState(next.state)
+    if (next.workspaceId !== undefined) setWorkspaceId(next.workspaceId)
+  }, [resolveConnection])
+
+  useEffect(() => {
+    let cancelled = false
+    void resolveConnection().then((next) => {
+      if (cancelled) return
+      setState(next.state)
+      if (next.workspaceId !== undefined) setWorkspaceId(next.workspaceId)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [resolveConnection])
+
+  const runCapture = useCallback(
+    async (whole: boolean) => {
+      const tab = await api.activeTab()
+      if (!tab) return
+      const decision = normalizeCaptureUrl(tab.url, includeFullUrl)
+      if (!decision.ok) {
+        setSubmitError(api.message("captureRestricted"))
+        return
+      }
+      const extracted = await api.extract(tab.id, whole)
+      const selection = clip(extracted.selection, BROWSER_CONTEXT_LIMITS.selectionBytes)
+      const readable = clip(extracted.readableText, BROWSER_CONTEXT_LIMITS.readableTextBytes)
+      setSubmitError(null)
+      setWholePage(whole)
+      setState((current) =>
+        current.kind === "ready"
+          ? {
+              ...current,
+              captured: {
+                tabId: tab.id,
+                title: extracted.title || tab.title,
+                url: decision.url,
+                rawUrl: tab.url,
+                selection,
+                readableText: readable
+                  ? { ...readable, originalCharacterCount: extracted.readableCharacterCount }
+                  : null,
+                capturedAt: now(),
+                strippedQuery: decision.strippedQuery || decision.strippedFragment,
+              },
+            }
+          : current
+      )
+    },
+    [api, includeFullUrl, now]
+  )
+
+  // Pick up a capture the background worker recorded, once the panel is
+  // connected. Consumed immediately: leaving it in storage would re-capture on
+  // every panel open, which is precisely the "reads the page without being
+  // asked" behaviour the design forbids.
+  const ready = state.kind === "ready"
+  useEffect(() => {
+    if (!ready) return
+    let cancelled = false
+    void api.read<CaptureRequest>(CAPTURE_REQUEST_KEY).then(async (request) => {
+      if (!request || cancelled) return
+      await api.remove([CAPTURE_REQUEST_KEY])
+      if (!isFreshCaptureRequest(request, now())) return
+      await runCapture(request.mode === "page")
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ready, api, now, runCapture])
+
+  const recent = state.kind === "ready" ? state.recent : EMPTY
+  const pollMs = useMemo(() => pollIntervalFor(recent), [recent])
+
+  // Poll only while the panel is visible. A hidden side panel is one the user
+  // is not reading, and a request every three seconds for a list nobody is
+  // looking at is a cost with no reader.
+  useEffect(() => {
+    if (state.kind !== "ready") return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stopped = false
+    const tick = async () => {
+      if (stopped || document.visibilityState !== "visible") {
+        timer = setTimeout(() => void tick(), pollMs)
+        return
+      }
+      try {
+        const page = await clientRef.current?.list()
+        if (page && !stopped) {
+          setState((current) =>
+            current.kind === "ready" ? { ...current, recent: page.items } : current
+          )
+        }
+      } catch {
+        // A failed poll is not a state change: the pairing is still good and
+        // the next tick may succeed. Only an explicit refusal demotes us.
+      }
+      timer = setTimeout(() => void tick(), pollMs)
+    }
+    timer = setTimeout(() => void tick(), pollMs)
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [state.kind, pollMs])
+
+  const onPair = useCallback(
+    async (code: string) => {
+      setState({ kind: "pairing" })
+      const granted = (await api.hasLoopbackPermission()) || (await api.requestLoopbackPermission())
+      const outcome = await pairWithHost({
+        code,
+        extensionOrigin: api.extensionOrigin(),
+        hasPermission: granted,
+        displayName: navigator.userAgent.includes("Edg/") ? "Edge" : "Chrome",
+      })
+      if (!outcome.ok) {
+        setState({ kind: "unpaired", failure: outcome.failure })
+        return
+      }
+      await api.write(STORAGE_KEYS.pairing, outcome.pairing)
+      await connect()
+    },
+    [api, connect]
+  )
+
+  const onSubmit = useCallback(async () => {
+    if (state.kind !== "ready" || !state.captured || !workspaceId) return
+    const captured = state.captured
+    const mode: BrowserCaptureMode = captureModeFor(captured, wholePage)
+    setSubmitting(true)
+    setSubmitError(null)
+    // Minted once and reused across retries: a fresh id per attempt is exactly
+    // what would turn one user action into two sessions.
+    const submissionId = crypto.randomUUID()
+    try {
+      await clientRef.current?.submit({
+        submissionId,
+        workspaceId,
+        instruction: instruction.trim(),
+        context: {
+          schemaVersion: 1,
+          captureMode: mode,
+          url: captured.url,
+          title: captured.title,
+          capturedAt: captured.capturedAt,
+          ...(mode === "metadata" ? {} : {}),
+          ...(mode !== "metadata" && captured.selection ? { selection: captured.selection } : {}),
+          ...(mode === "readable-page" && captured.readableText
+            ? { readableText: captured.readableText }
+            : {}),
+        },
+      })
+      void api.write(STORAGE_KEYS.lastWorkspaceId, workspaceId)
+      setInstruction("")
+      setState((current) => (current.kind === "ready" ? { ...current, captured: null } : current))
+      const page = await clientRef.current?.list()
+      if (page) {
+        setState((current) =>
+          current.kind === "ready" ? { ...current, recent: page.items } : current
+        )
+      }
+    } catch (error) {
+      setSubmitError(
+        api.message("submitFailed", [error instanceof Error ? error.message : String(error)])
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }, [api, instruction, state, wholePage, workspaceId])
+
+  if (state.kind === "loading") return <div className="p-4" data-testid="panel-loading" />
+
+  if (state.kind === "unpaired" || state.kind === "pairing") {
+    return (
+      <PairScreen
+        api={api}
+        busy={state.kind === "pairing"}
+        failure={state.kind === "unpaired" ? state.failure : undefined}
+        onSubmit={(code) => void onPair(code)}
+      />
+    )
+  }
+
+  if (state.kind === "revoked") {
+    return (
+      <Notice
+        testId="panel-revoked"
+        title={api.message("revoked")}
+        action={api.message("reconnect")}
+        onAction={() => setState({ kind: "unpaired" })}
+      />
+    )
+  }
+
+  if (state.kind === "incompatible") {
+    return <Notice testId="panel-incompatible" title={api.message("incompatible")} />
+  }
+
+  if (state.kind === "host-offline") {
+    return (
+      <Notice
+        testId="panel-offline"
+        title={api.message("hostOffline")}
+        detail={api.message("hostOfflineHint")}
+        action={api.message("retry")}
+        onAction={() => void connect()}
+      />
+    )
+  }
+
+  // Derived, not stored. The address the user is agreeing to is a function of
+  // what was captured and whether they asked for the query string back — and
+  // re-deriving it beats re-extracting the page, which could silently hand
+  // back different text than the one they reviewed.
+  const captured = state.captured ? withDisplayUrl(state.captured, includeFullUrl) : null
+  const mode: BrowserCaptureMode = captured ? captureModeFor(captured, wholePage) : "metadata"
+
+  return (
+    <div className="flex flex-col gap-4 p-3">
+      <section className="space-y-2">
+        <h1 className="text-sm font-semibold">{api.message("captureTitle")}</h1>
+        {captured ? (
+          <>
+            <CapturePreview
+              api={api}
+              page={captured}
+              mode={mode}
+              limits={state.capability.limits}
+              includeFullUrl={includeFullUrl}
+              onToggleFullUrl={setIncludeFullUrl}
+            />
+            <div className="space-y-1.5">
+              <Label htmlFor="cognia-workspace" className="text-xs text-muted-foreground">
+                {api.message("workspaceLabel")}
+              </Label>
+              <Select value={workspaceId ?? undefined} onValueChange={setWorkspaceId}>
+                <SelectTrigger
+                  id="cognia-workspace"
+                  className="w-full"
+                  data-testid="workspace-select"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {state.capability.workspaces.map((workspace) => (
+                    // The label is the item's only child on purpose: a nested
+                    // element leaves the option with no accessible name, and a
+                    // listbox of unnamed options is unusable by keyboard.
+                    <SelectItem key={workspace.id} value={workspace.id}>
+                      {workspace.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Textarea
+              rows={3}
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              placeholder={api.message("instructionPlaceholder")}
+              aria-label={api.message("instructionPlaceholder")}
+              data-testid="instruction"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => void onSubmit()}
+                disabled={submitting || !instruction.trim() || !workspaceId}
+                data-testid="submit"
+              >
+                {submitting ? api.message("submitting") : api.message("submit")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  setState((current) =>
+                    current.kind === "ready" ? { ...current, captured: null } : current
+                  )
+                }
+              >
+                {api.message("clearCapture")}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground" data-testid="capture-empty">
+            {api.message("captureEmpty")}
+          </p>
+        )}
+        {submitError ? (
+          <Alert variant="destructive" data-testid="submit-error">
+            <AlertDescription>{submitError}</AlertDescription>
+          </Alert>
+        ) : null}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {api.message("recentTitle")}
+        </h2>
+        <RecentList api={api} items={state.recent} />
+      </section>
+    </div>
+  )
+}
+
+const EMPTY: BrowserContextSubmissionSummaryV1[] = []
+
+/**
+ * The address as it will actually be sent.
+ *
+ * Derived at render rather than stored, so toggling "include the full address"
+ * cannot drift from what was captured — and re-deriving beats re-extracting,
+ * which could silently hand back different page text than the one the user
+ * reviewed. A capture that no longer normalizes keeps the URL it was captured
+ * with; the submit path re-checks the scheme anyway.
+ */
+function withDisplayUrl(page: CapturedPage, includeFullUrl: boolean): CapturedPage {
+  const decision = normalizeCaptureUrl(page.rawUrl, includeFullUrl)
+  return decision.ok ? { ...page, url: decision.url } : page
+}
+
+function Notice({
+  testId,
+  title,
+  detail,
+  action,
+  onAction,
+}: {
+  testId: string
+  title: string
+  detail?: string
+  action?: string
+  onAction?: () => void
+}) {
+  return (
+    <div className="space-y-2 p-4" data-testid={testId}>
+      <Alert>
+        <AlertTitle>{title}</AlertTitle>
+        {detail ? <AlertDescription>{detail}</AlertDescription> : null}
+      </Alert>
+      {action && onAction ? (
+        <Button variant="outline" onClick={onAction}>
+          {action}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Cut text to a byte ceiling on a character boundary, and say whether it was
+ * cut.
+ *
+ * Bytes, not characters, because that is the unit the contract is denominated
+ * in — and the loop steps back a character at a time so a multi-byte
+ * codepoint is never split into a replacement character.
+ */
+function clip(
+  value: string | null,
+  limitBytes: number
+): { text: string; truncated: boolean } | null {
+  if (!value) return null
+  if (utf8ByteLength(value) <= limitBytes) return { text: value, truncated: false }
+  let cut = value.length
+  while (cut > 0 && utf8ByteLength(value.slice(0, cut)) > limitBytes) {
+    cut = Math.max(0, cut - Math.ceil((utf8ByteLength(value.slice(0, cut)) - limitBytes) / 4) - 1)
+  }
+  return { text: value.slice(0, cut), truncated: true }
+}

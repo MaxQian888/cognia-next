@@ -1,0 +1,80 @@
+{
+  "extensionName": { "message": "Cognia 浏览器伴侣" },
+  "extensionDescription": {
+    "message": "把你正在读的页面交给 Cognia。不捕获就什么都不读。"
+  },
+  "actionTitle": { "message": "打开 Cognia" },
+  "captureCommand": { "message": "把此页面捕获给 Cognia" },
+  "contextMenuSelection": { "message": "把选中内容发给 Cognia" },
+  "contextMenuPage": { "message": "把此页面发给 Cognia" },
+
+  "pairTitle": { "message": "连接到 Cognia" },
+  "pairIntro": {
+    "message": "在这台电脑上打开 Cognia，进入 设置 → Companion → 浏览器伴侣，生成一个配对码。"
+  },
+  "pairPlaceholder": { "message": "粘贴配对码" },
+  "pairSubmit": { "message": "连接" },
+  "pairing": { "message": "连接中…" },
+  "pairWrongFormat": { "message": "这看起来不像 Cognia 的配对码。" },
+  "pairVersionMismatch": { "message": "这个配对码来自更新版本的 Cognia，请先更新扩展。" },
+  "pairExpired": { "message": "配对码已过期，请在 Cognia 里重新生成。" },
+  "pairPermissionNeeded": { "message": "Cognia 需要访问这台电脑 127.0.0.1 的权限。" },
+  "pairPermissionDenied": { "message": "没有这个权限，扩展根本连不上 Cognia。" },
+  "pairGrant": { "message": "授予访问权限" },
+  "pairFailed": {
+    "message": "配对失败：$REASON$",
+    "placeholders": { "reason": { "content": "$1" } }
+  },
+
+  "captureTitle": { "message": "发送到 Cognia" },
+  "captureEmpty": {
+    "message": "还没有捕获任何内容。请使用工具栏按钮、快捷键，或在页面上右键。"
+  },
+  "captureRestricted": {
+    "message": "这个页面无法捕获。只有普通的 http 和 https 页面可以发送。"
+  },
+  "captureModeMetadata": { "message": "仅标题与地址" },
+  "captureModeSelection": { "message": "你选中的内容" },
+  "captureModeReadable": { "message": "整页正文" },
+  "captureTruncated": { "message": "已截断以适配上限" },
+  "captureBytes": { "message": "$BYTES$ KB", "placeholders": { "bytes": { "content": "$1" } } },
+  "captureFullUrl": { "message": "包含完整地址" },
+  "captureFullUrlHint": {
+    "message": "默认关闭：查询串里常常带着会话令牌和搜索词。"
+  },
+  "instructionPlaceholder": { "message": "希望 Cognia 用它做什么？" },
+  "workspaceLabel": { "message": "工作区" },
+  "submit": { "message": "开始任务" },
+  "submitting": { "message": "启动中…" },
+  "submitFailed": {
+    "message": "任务启动失败：$REASON$",
+    "placeholders": { "reason": { "content": "$1" } }
+  },
+  "retry": { "message": "重试" },
+  "clearCapture": { "message": "丢弃" },
+
+  "recentTitle": { "message": "最近" },
+  "recentEmpty": { "message": "从这里开启的任务会出现在这个列表里。" },
+  "openInCognia": { "message": "在 Cognia 中打开" },
+  "continueInCognia": { "message": "在 Cognia 中继续" },
+
+  "statusSubmitting": { "message": "启动中" },
+  "statusQueued": { "message": "排队中" },
+  "statusRunning": { "message": "运行中" },
+  "statusNeedsInput": { "message": "等待你" },
+  "statusCompleted": { "message": "已完成" },
+  "statusCancelled": { "message": "已停止" },
+  "statusFailed": { "message": "失败" },
+  "statusHostUnavailable": { "message": "Cognia 已离线" },
+
+  "hostOffline": { "message": "这台电脑上的 Cognia 没有响应。" },
+  "hostOfflineHint": { "message": "请打开应用，检查 设置 → Companion → 浏览器访问。" },
+  "revoked": { "message": "这个浏览器已不再与 Cognia 配对。" },
+  "reconnect": { "message": "重新配对" },
+  "incompatible": { "message": "这个扩展相对这台电脑上的 Cognia 太旧了。" },
+
+  "settingsTitle": { "message": "设置" },
+  "disconnect": { "message": "断开这个浏览器" },
+  "clearLocal": { "message": "清除本地数据" },
+  "diagnostics": { "message": "连接详情" }
+}

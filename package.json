@@ -7,6 +7,9 @@
   },
   "packageManager": "pnpm@11.18.0",
   "scripts": {
+    "browser-ext:build": "pnpm --filter @cognia/browser-extension run build",
+    "browser-ext:typecheck": "pnpm --filter @cognia/browser-extension run typecheck",
+    "browser-ext:zip": "pnpm --filter @cognia/browser-extension run zip",
     "agent:host:package": "node scripts/build/package-agent-host.mjs",
     "agent:host:verify": "node scripts/build/verify-agent-host-package.mjs",
     "agent:host:smoke": "node scripts/smoke/agent-sdk-bundled-host.mjs",

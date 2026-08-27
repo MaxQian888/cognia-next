@@ -1,0 +1,86 @@
+{
+  "extensionName": { "message": "Cognia Browser Companion" },
+  "extensionDescription": {
+    "message": "Hand the page you are reading to Cognia. Nothing is read until you capture it."
+  },
+  "actionTitle": { "message": "Open Cognia" },
+  "captureCommand": { "message": "Capture this page for Cognia" },
+  "contextMenuSelection": { "message": "Send selection to Cognia" },
+  "contextMenuPage": { "message": "Send this page to Cognia" },
+
+  "pairTitle": { "message": "Connect to Cognia" },
+  "pairIntro": {
+    "message": "Open Cognia on this computer, go to Settings → Companion → Browser Companion, and generate a pairing code."
+  },
+  "pairPlaceholder": { "message": "Paste the pairing code" },
+  "pairSubmit": { "message": "Connect" },
+  "pairing": { "message": "Connecting…" },
+  "pairWrongFormat": { "message": "That does not look like a Cognia pairing code." },
+  "pairVersionMismatch": {
+    "message": "This code is from a newer Cognia. Update the extension."
+  },
+  "pairExpired": { "message": "That code has expired. Generate a new one in Cognia." },
+  "pairPermissionNeeded": {
+    "message": "Cognia needs permission to reach 127.0.0.1 on this computer."
+  },
+  "pairPermissionDenied": {
+    "message": "Without that permission the extension cannot reach Cognia at all."
+  },
+  "pairGrant": { "message": "Grant access" },
+  "pairFailed": {
+    "message": "Pairing failed: $REASON$",
+    "placeholders": { "reason": { "content": "$1" } }
+  },
+
+  "captureTitle": { "message": "Send to Cognia" },
+  "captureEmpty": {
+    "message": "Nothing captured yet. Use the toolbar button, the shortcut, or the right-click menu on a page."
+  },
+  "captureRestricted": {
+    "message": "This page cannot be captured. Only ordinary http and https pages can be sent."
+  },
+  "captureModeMetadata": { "message": "Title and address only" },
+  "captureModeSelection": { "message": "Your selection" },
+  "captureModeReadable": { "message": "Whole page text" },
+  "captureTruncated": { "message": "Trimmed to fit" },
+  "captureBytes": { "message": "$BYTES$ KB", "placeholders": { "bytes": { "content": "$1" } } },
+  "captureFullUrl": { "message": "Include the full address" },
+  "captureFullUrlHint": {
+    "message": "Off by default: query strings often carry session tokens and search terms."
+  },
+  "instructionPlaceholder": { "message": "What should Cognia do with this?" },
+  "workspaceLabel": { "message": "Workspace" },
+  "submit": { "message": "Start task" },
+  "submitting": { "message": "Starting…" },
+  "submitFailed": {
+    "message": "Could not start the task: $REASON$",
+    "placeholders": { "reason": { "content": "$1" } }
+  },
+  "retry": { "message": "Try again" },
+  "clearCapture": { "message": "Discard" },
+
+  "recentTitle": { "message": "Recent" },
+  "recentEmpty": { "message": "Tasks you start from here will appear in this list." },
+  "openInCognia": { "message": "Open in Cognia" },
+  "continueInCognia": { "message": "Continue in Cognia" },
+
+  "statusSubmitting": { "message": "Starting" },
+  "statusQueued": { "message": "Queued" },
+  "statusRunning": { "message": "Running" },
+  "statusNeedsInput": { "message": "Waiting for you" },
+  "statusCompleted": { "message": "Done" },
+  "statusCancelled": { "message": "Stopped" },
+  "statusFailed": { "message": "Failed" },
+  "statusHostUnavailable": { "message": "Cognia is offline" },
+
+  "hostOffline": { "message": "Cognia is not responding on this computer." },
+  "hostOfflineHint": { "message": "Open the app and check Settings → Companion → Browser access." },
+  "revoked": { "message": "This browser is no longer paired with Cognia." },
+  "reconnect": { "message": "Pair again" },
+  "incompatible": { "message": "This extension is too old for the Cognia on this computer." },
+
+  "settingsTitle": { "message": "Settings" },
+  "disconnect": { "message": "Disconnect this browser" },
+  "clearLocal": { "message": "Clear local data" },
+  "diagnostics": { "message": "Connection details" }
+}

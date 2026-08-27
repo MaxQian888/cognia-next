@@ -5,7 +5,6 @@ import type { DeviceSigner } from "./device-signer"
 
 const SIGNER: DeviceSigner = {
   deviceId: "device-a",
-  thumbprint: "thumb-a",
   sign: async () => new Uint8Array([9]),
 }
 

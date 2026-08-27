@@ -70,6 +70,15 @@
         "zod",
       ],
     },
+    "browser-extension": {
+      // WXT discovers entrypoints by directory convention, so without this
+      // knip sees every one of them as an unimported file.
+      "entry": ["src/app/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}"],
+      // Tailwind is consumed by the `@import` in `src/styles/tokens.css`,
+      // which knip does not follow into CSS.
+      "ignoreDependencies": ["^tailwindcss$"],
+    },
     "crates/cognia-plugin-template-vscode-extension": {},
     "mobile": {
       "entry": ["scripts/*.{js,mjs,ts}"],
