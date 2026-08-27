@@ -150,6 +150,14 @@ const LARK_CREDENTIALS = ["appId", "appSecret", "verificationToken", "encryptKey
 const LARK_REQUIRED_CREDENTIALS = ["appId", "appSecret", "verificationToken"] as const
 const LARK_DERIVED_CREDENTIALS = ["user_token", "user_refresh_token"] as const
 
+/**
+ * Every keyring account a Lark bot can own — the OAuth-minted user tokens
+ * included. `credentialsRef` is the only vocabulary `removeAdapterInstance`
+ * purges from and `ctx.secrets.list()` probes, so omitting them left them in
+ * the OS keyring after the bot was deleted.
+ */
+const LARK_KEYRING_ACCOUNTS = [...LARK_CREDENTIALS, ...LARK_DERIVED_CREDENTIALS] as const
+
 export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkConfigDialogProps) {
   const t = useTranslations("settings.connections.lark")
   const isNew = row === null
@@ -373,7 +381,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
           settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: [...LARK_CREDENTIALS],
+            accounts: [...LARK_KEYRING_ACCOUNTS],
           },
           trigger: defaultTriggerPolicyFor("lark"),
           defaultMode: "auto",
@@ -389,6 +397,12 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
           transportMode,
           settings: nextSettings,
           muted,
+          // Repair a row created before the OAuth-minted accounts were listed,
+          // so the purge on delete reaches them.
+          credentialsRef: {
+            keyringService: row.credentialsRef?.keyringService ?? "com.cognia.platforms",
+            accounts: [...LARK_KEYRING_ACCOUNTS],
+          },
         }
         // updateAdapterInstance preserves keys that aren't in the patch — only
         // explicitly pass quietHours when it has changed so an existing row

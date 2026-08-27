@@ -231,13 +231,32 @@ export function resolveImEffectiveConfig(input: {
   // Derived from the axis fields when a row has them and from the legacy pair
   // otherwise, so no backfill is owed. `mode` below stays as the compat
   // mirror; these are what consumers should read.
+  //
+  // The conversation layer wins as a WHOLE, not field by field. A chat that
+  // pinned `mode` and no axis MEANS the mode it pinned: mixing its mode with
+  // the bot's axis default would let a bot-wide `defaultAutonomy: "act"`
+  // outrank `/mode manual` — the conversation would read "manual" everywhere
+  // while the bot kept answering. So a conversation-level `mode` suppresses the
+  // adapter-level axis defaults, and `projectStoredMode` derives from that mode
+  // instead.
+  const conversationPinsMode = override?.mode !== undefined
+  const autonomyLayer =
+    override?.autonomy ?? (conversationPinsMode ? undefined : adapter.defaultAutonomy)
+  const engagementLayer =
+    override?.engagement ?? (conversationPinsMode ? undefined : adapter.defaultEngagement)
+  // Authority's conversation-level spelling is `approvalMode`, not `mode` — a
+  // chat switched to manual has said nothing about permissions — so it is the
+  // one that suppresses the bot default here.
+  const authorityLayer =
+    override?.authority ??
+    (override?.approvalMode !== undefined ? undefined : adapter.defaultAuthority)
   const projected = projectStoredMode({
     mode: override?.mode ?? system.mode,
     targetKind: target.effective.kind as ImTargetKind,
-    autonomy: override?.autonomy ?? adapter.defaultAutonomy,
-    engagement: override?.engagement ?? adapter.defaultEngagement,
+    autonomy: autonomyLayer,
+    engagement: engagementLayer,
     approvalMode: override?.approvalMode,
-    authority: override?.authority ?? adapter.defaultAuthority,
+    authority: authorityLayer,
   })
 
   const modeSource: ImConfigSource =
@@ -265,7 +284,9 @@ export function resolveImEffectiveConfig(input: {
     effective: projected.autonomy,
     // An axis value that was never written derives from `mode`, so it inherits
     // `mode`'s provenance rather than claiming a default nobody chose.
-    source: axisSource(override?.autonomy, adapter.defaultAutonomy, modeSource),
+    // `autonomyLayer`, not `adapter.defaultAutonomy`: a bot default the
+    // conversation's own `mode` suppressed is not where this value came from.
+    source: axisSource(override?.autonomy, autonomyLayer, modeSource),
   }
   const engagement: EffectiveConfigValue<EngagementMode> = {
     requested: override?.engagement,
@@ -275,7 +296,7 @@ export function resolveImEffectiveConfig(input: {
     source:
       override?.engagement !== undefined
         ? "conversation-override"
-        : adapter.defaultEngagement !== undefined
+        : engagementLayer !== undefined
           ? "adapter-default"
           : projected.engagement === "human"
             ? modeSource

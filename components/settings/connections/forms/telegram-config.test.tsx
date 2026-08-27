@@ -75,7 +75,12 @@ async function clickSave(): Promise<void> {
 beforeEach(() => {
   jest.clearAllMocks()
   mockCapability.mockReturnValue(true)
-  mockConnectorsKeyringGet.mockResolvedValue(null)
+  // An EXISTING row means a bot whose credentials are in the keyring — that is
+  // what the form reads back, and what `missingRequired` checks a save against.
+  // Tests about an absent credential override this per case.
+  mockConnectorsKeyringGet.mockImplementation(async (_id: string, name: string) =>
+    name === "botToken" ? "123:STOREDTOKEN" : name === "secretToken" ? "stored-secret" : null
+  )
   mockKeyringList.mockResolvedValue([])
 })
 
@@ -418,7 +423,11 @@ describe("TelegramConfigDialog — webhook secret requirement", () => {
   })
 
   it("blocks a webhook save when nothing is stored in the keyring either", async () => {
-    mockConnectorsKeyringGet.mockResolvedValue(null)
+    // The bot token IS stored — this is about the webhook secret alone, so the
+    // save must fail on that and not on a credential that is present.
+    mockConnectorsKeyringGet.mockImplementation(async (_id: string, name: string) =>
+      name === "botToken" ? "123:STOREDTOKEN" : null
+    )
     const webhookRow: AdapterInstanceRow = {
       id: "cai_webhook",
       type: "telegram",

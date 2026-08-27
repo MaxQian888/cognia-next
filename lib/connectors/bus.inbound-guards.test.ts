@@ -48,6 +48,13 @@ jest.mock("./inbound-ocr", () => ({
 jest.mock("@/lib/governance/producers/connector", () => ({
   recordConnectorRouteGovernance: async () => "connector-decision",
 }))
+// The consent card's own projection (bindings + outbound enqueue) has its own
+// suite; here only the bus's decision to ASK is under test.
+const mockRequestMediaGrant = jest.fn(async (_input: unknown) => undefined)
+jest.mock("@/lib/connectors/hitl/media-grant", () => ({
+  ...jest.requireActual("@/lib/connectors/hitl/media-grant"),
+  requestMediaGrant: (input: unknown) => mockRequestMediaGrant(input),
+}))
 
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
@@ -385,5 +392,120 @@ describe("media model gate — the bus stamps the decision", () => {
     await bus.flushInboundTurns()
 
     expect(seen[0]?.mediaModelPolicy).toBe("local_extract_only")
+  })
+})
+
+/**
+ * The in-chat consent card is the only thing that can turn a withheld
+ * attachment into a grant, so WHEN the bus decides to ask is part of the gate.
+ */
+describe("media model gate — asking for consent", () => {
+  /** A sender whose local identity id differs from its platform id. */
+  function fromPeer(event: NormalizedInboundEvent): NormalizedInboundEvent {
+    return {
+      ...event,
+      sender: { ...event.sender, id: "usr_local_42", remoteUserId: "tg_99887766" },
+    }
+  }
+
+  it("asks once, scoped to the sender's PLATFORM id", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+
+    await bus.dispatchInboundFull(fromPeer(imageEvent(adapterId, "m1")))
+    await bus.flushInboundTurns()
+
+    expect(mockRequestMediaGrant).toHaveBeenCalledTimes(1)
+    // `authorizeConnectorCallback` compares the presser against
+    // `event.user.remoteUserId`, so a LOCAL identity id here denies the very
+    // person whose message was blocked.
+    expect(mockRequestMediaGrant).toHaveBeenCalledWith(
+      expect.objectContaining({ initiatorUserId: "tg_99887766", provider: "anthropic" })
+    )
+
+    // Asked once per conversation, not once per photo.
+    await bus.dispatchInboundFull(fromPeer(imageEvent(adapterId, "m2")))
+    await bus.flushInboundTurns()
+    expect(mockRequestMediaGrant).toHaveBeenCalledTimes(1)
+  })
+
+  // A grant the operator already wrote must not be re-asked; re-asking reads
+  // as the bot forgetting. The provider mismatch is audited instead.
+  it("does not ask when a live grant is already on the conversation", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+    await getDb().conversationOverrides.put({
+      id: "ov-1",
+      conversationKey: `telegram:${adapterId}:chatA`,
+      mediaModelGrant: { policy: "allow_cloud_binary", providers: ["ollama"], grantedAt: 1 },
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    expect(mockRequestMediaGrant).not.toHaveBeenCalled()
+    expect(await auditKinds()).toContain("inbound.media_model_blocked")
+  })
+
+  // An EXPIRED grant is not a live one — its window is what the operator let
+  // run out — so it does not suppress the ask.
+  it("asks again once a grant has expired", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+    await getDb().conversationOverrides.put({
+      id: "ov-1",
+      conversationKey: `telegram:${adapterId}:chatA`,
+      mediaModelGrant: {
+        policy: "allow_cloud_binary",
+        providers: ["anthropic"],
+        grantedAt: 1,
+        expiresAt: 2,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    expect(mockRequestMediaGrant).toHaveBeenCalledTimes(1)
+  })
+
+  // `manual-store` means the work belongs to a person and no model will run.
+  // A consent card there is a bot the operator silenced speaking up to ask
+  // permission for something it will never do.
+  it("stays quiet in a conversation whose turns do not run", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic", defaultMode: "manual" })
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    expect(mockRequestMediaGrant).not.toHaveBeenCalled()
+    // The gate itself still ran — the stamp has to be on the event either way.
+    expect(await auditKinds()).toContain("inbound.media_model_blocked")
+  })
+
+  // A failed projection must not silence the ask for the whole process: the
+  // conversation is released from the asked-set so the next photo retries.
+  it("re-asks after a failed projection", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+    mockRequestMediaGrant.mockRejectedValueOnce(new Error("delivery gateway down"))
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+    expect(mockRequestMediaGrant).toHaveBeenCalledTimes(1)
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m2"))
+    await bus.flushInboundTurns()
+    expect(mockRequestMediaGrant).toHaveBeenCalledTimes(2)
   })
 })

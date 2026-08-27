@@ -25,6 +25,7 @@ import { draftApprovalIdempotencyKey, segmentsToMessageParts, type ManualReplyIn
 import {
   applyOptimisticOverrideMutation,
   conversationKeyOfMutation,
+  encodeOverrideMutationClears,
   type ConversationOverrideMutation,
 } from "./override-mutation"
 import { markPendingOverrideMutation } from "./pending-overrides"
@@ -138,11 +139,16 @@ export async function mutateOverrideRemotely(
   const key = conversationKeyOfMutation(mutation)
   const release = key ? markPendingOverrideMutation(key) : () => undefined
   try {
+    // The queue row is dispatched as JSON, which deletes `undefined`-valued
+    // keys — and `undefined` is how every override editor spells "clear this
+    // field". Encoded to `null` so the clear survives the wire; the host
+    // decodes it back inside `applyConversationOverrideMutation`.
+    const wireMutation = encodeOverrideMutationClears(mutation)
     const queueRow = await enqueue({
       command: INBOX_WRITE_COMMANDS.override,
       idempotencyKey: crypto.randomUUID(),
       label: options.label,
-      payload: { mutation },
+      payload: { mutation: wireMutation },
     })
     await applyOptimisticOverrideMutation(mutation)
     return queueRow

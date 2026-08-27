@@ -102,10 +102,15 @@ export function AdaptersTab() {
   )
 
   // Contributions are registered when a plugin is enabled and dropped when it
-  // is disabled, so the picker's kind list cannot be a module constant. Keyed
-  // on the adapter list because that is what re-renders this tab; a plugin
-  // toggled while the tab is open lands on the next configuration change.
-  const pluginConnectors = useMemo(() => listPluginConnectors(), [])
+  // is disabled, so the picker's kind list cannot be a module constant — and it
+  // cannot be captured once at mount either. Keyed on the adapter list, which
+  // is what re-renders this tab; a plugin toggled while the tab is open lands
+  // on the next configuration change rather than never.
+  // `adapters` is a re-read trigger, not an input — the registry is module
+  // state the linter cannot see, so an "unnecessary" dependency is the only way
+  // to express "recompute when this tab next hears about a change".
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pluginConnectors = useMemo(() => listPluginConnectors(), [adapters])
   const pluginKinds = useMemo(
     () => pluginConnectors.map((registration) => registration.type),
     [pluginConnectors]

@@ -325,6 +325,15 @@ describe("MatrixConfigDialog — edit existing", () => {
     updatedAt: 1,
   }
 
+  // A bot that is actually configured: the keyring holds its access token, so
+  // the field prefills and an untouched save is a rename, not a clear. Without
+  // a stored value the save is correctly refused — see the "clearing" spec.
+  beforeEach(() => {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+      name === "accessToken" ? "syt_stored" : null
+    )
+  })
+
   it("renders the edit title and updates without re-entering the token", async () => {
     render(<MatrixConfigDialog open onOpenChange={jest.fn()} row={row} />)
     expect(screen.getByText(/edit matrix connector/i)).toBeInTheDocument()
@@ -339,6 +348,20 @@ describe("MatrixConfigDialog — edit existing", () => {
     // Token left blank → keyring untouched.
     expect(mockConnectorsKeyringSet).not.toHaveBeenCalled()
     expect(mockEmitCredentialsRotated).toHaveBeenCalledWith("mx-1")
+  })
+
+  // The field prefills, so an emptied box on an EXISTING bot is a deliberate
+  // clear that `persist` would carry out — deleting the only credential Matrix
+  // authenticates with. The gate has to be `missingRequired`, not `isNew`.
+  it("refuses to save when the prefilled token is cleared", async () => {
+    render(<MatrixConfigDialog open onOpenChange={jest.fn()} row={row} />)
+    await screen.findByDisplayValue("syt_stored")
+    fireEvent.change(screen.getByLabelText(/^access token/i), { target: { value: "" } })
+    await clickSave()
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 
   it("reports update failures without rotating credentials", async () => {

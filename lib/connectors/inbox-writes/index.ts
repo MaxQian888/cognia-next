@@ -105,7 +105,9 @@ export interface SendManualReplyOutcome extends Omit<ManualReplyResult, "jobId">
  * enqueue directly; thin clients relay through the durable queue. The
  * idempotency key is minted ONCE here and threaded through every layer.
  */
-export async function sendManualReply(input: SendManualReplyInput): Promise<SendManualReplyOutcome> {
+export async function sendManualReply(
+  input: SendManualReplyInput
+): Promise<SendManualReplyOutcome> {
   const route = resolveRouteOrThrow(INBOX_WRITE_COMMANDS.send)
   const segments: MessageSegment[] =
     input.segments && input.segments.length > 0
@@ -190,7 +192,10 @@ export interface MutateConversationOverrideOptions {
 export async function mutateConversationOverride(
   mutation: ConversationOverrideMutation,
   options: MutateConversationOverrideOptions = {}
-): Promise<{ route: Exclude<InboxWriteRoute, "unavailable">; conversationKey: string | undefined }> {
+): Promise<{
+  route: Exclude<InboxWriteRoute, "unavailable">
+  conversationKey: string | undefined
+}> {
   const route = resolveRouteOrThrow(INBOX_WRITE_COMMANDS.override)
   if (route === "local") {
     await applyConversationOverrideMutation(mutation, { via: options.via })
@@ -211,12 +216,18 @@ export {
   type InboxWriteRoute,
   type InboxWriteCommand,
 } from "./route"
-export { useInboxWriteRoute, useInboxWriteReadiness, type InboxWriteReadiness } from "./use-inbox-write-route"
+export {
+  useInboxWriteRoute,
+  useInboxWriteReadiness,
+  type InboxWriteReadiness,
+} from "./use-inbox-write-route"
 export {
   applyConversationOverrideMutation,
   applyOptimisticOverrideMutation,
   isConversationOverrideMutation,
   conversationKeyOfMutation,
+  encodeOverrideMutationClears,
+  decodeOverrideMutationClears,
   type ConversationOverrideMutation,
   type ConversationOverrideMutationKind,
 } from "./override-mutation"

@@ -27,6 +27,7 @@ import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-ga
 import { recordAndCheckInbound } from "@/lib/connectors/dedup"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
 import { buildHelpSurface, type HelpSurfaceMode } from "./build-help-surface"
@@ -65,7 +66,12 @@ function buildSurfaceForRow(
     quickCommands: normalizeQuickCommandList(
       (row.settings as { quickCommands?: unknown } | undefined)?.quickCommands
     ),
-    atStrategy: row.atResponseStrategy,
+    // Resolved, not raw. The settings UI writes `inboundActivationPolicy`, so
+    // reading `atResponseStrategy` here left the "how to get me to reply"
+    // section absent on every bot configured through the current forms — and
+    // stale on a legacy row whose policy has since been changed. Same resolver
+    // the bus admits on and the header chip reports.
+    atStrategy: resolveInboundActivationPolicy(row),
     skillFamilies: row.lastKnownSkillCapabilities,
     welcomeText: row.welcomeText,
   })

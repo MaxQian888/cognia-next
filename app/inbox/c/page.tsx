@@ -81,11 +81,7 @@ function ConversationDetail({
   // rather than papering over with a default.
   const resolvedBinding = useResolvedBinding(
     session?.platformBinding
-      ? {
-          adapterId: session.platformBinding.adapterId,
-          conversationKey,
-          characterId: session.characterId,
-        }
+      ? { adapterId: session.platformBinding.adapterId, conversationKey }
       : null
   )
 

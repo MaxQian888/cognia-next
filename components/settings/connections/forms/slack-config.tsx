@@ -155,6 +155,21 @@ const SLACK_CREDENTIALS = [
 ] as const
 const SLACK_DERIVED_CREDENTIALS = ["userToken"] as const
 
+/**
+ * Every keyring account a Slack bot can own, which is what `credentialsRef`
+ * has to carry: it is the ONLY vocabulary `removeAdapterInstance` purges from
+ * and `ctx.secrets.list()` probes, and the OS keyring has no enumerate
+ * primitive to fall back on. Listing only the transport pair left the OAuth
+ * client secret and the minted user token in the keyring after the bot was
+ * deleted, reported as a clean purge.
+ *
+ * Not transport-conditional, unlike the old list: an account that is not
+ * stored is simply absent from a probe, whereas one that is missing from this
+ * list is unreachable — and the transport can be toggled after creation
+ * without `credentialsRef` ever being rewritten.
+ */
+const SLACK_KEYRING_ACCOUNTS = [...SLACK_CREDENTIALS, ...SLACK_DERIVED_CREDENTIALS] as const
+
 export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
   const router = useRouter()
@@ -290,16 +305,26 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && !botToken.trim()) {
-      toast.error(t("botTokenRequired"))
-      return
-    }
-    if (isNew && transport === "events-api-webhook" && !signingSecret.trim()) {
-      toast.error(t("signingSecretRequired"))
-      return
-    }
-    if (isNew && transport === "socket-mode" && !appToken.trim()) {
-      toast.error(t("appTokenRequired"))
+    // `missingRequired`, not `isNew && !x.trim()`: the fields prefill now, so an
+    // emptied box on an EXISTING bot is a deliberate clear that `persist` will
+    // carry out — deleting the credential the adapter authenticates with. It
+    // reports a credential only when it is genuinely absent, never when this
+    // shell merely could not read it.
+    const missingCredentials = credentials.missingRequired([
+      "botToken",
+      ...(transport === "events-api-webhook" ? ["signingSecret"] : []),
+      ...(transport === "socket-mode" ? ["appToken"] : []),
+    ])
+    if (missingCredentials.length > 0) {
+      toast.error(
+        t(
+          missingCredentials[0] === "botToken"
+            ? "botTokenRequired"
+            : missingCredentials[0] === "signingSecret"
+              ? "signingSecretRequired"
+              : "appTokenRequired"
+        )
+      )
       return
     }
     if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
@@ -336,11 +361,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: [
-              "botToken",
-              ...(transport === "events-api-webhook" ? ["signingSecret"] : []),
-              ...(transport === "socket-mode" ? ["appToken"] : []),
-            ],
+            accounts: [...SLACK_KEYRING_ACCOUNTS],
           },
           trigger: defaultTriggerPolicyFor("slack"),
           defaultMode: "auto",
@@ -357,6 +378,13 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           settings: nextSettings,
           muted,
           quietHours: quietHours ?? undefined,
+          // Repair a row created before this list was complete, so the purge on
+          // delete reaches the OAuth credentials this dialog has been writing
+          // all along.
+          credentialsRef: {
+            keyringService: row.credentialsRef?.keyringService ?? "com.cognia.platforms",
+            accounts: [...SLACK_KEYRING_ACCOUNTS],
+          },
         })
       }
 

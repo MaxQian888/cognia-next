@@ -42,9 +42,16 @@ export function AdapterTriggerPolicy({ adapterId }: { adapterId: string }) {
       typeof window === "undefined" ? undefined : getDb().adapterInstances.get(adapterId),
     [adapterId]
   )
+  // Keyed on the STORED POLICY, not on `updatedAt`. Every write to the row
+  // bumps `updatedAt` — another settings card saving, a `lastMissingScopes`
+  // update, a companion sync — and remounting on those threw away an
+  // in-progress edit across twelve controls with nothing to show for it. The
+  // draft only owes a re-seed when the thing it drafts actually changed
+  // underneath it, which includes this card's own save.
+  const triggerIdentity = row ? JSON.stringify(row.trigger ?? null) : "loading"
   return (
     <TriggerPolicyDraftCard
-      key={`${adapterId}:${row?.updatedAt ?? "loading"}`}
+      key={`${adapterId}:${triggerIdentity}`}
       adapterId={adapterId}
       row={row}
     />

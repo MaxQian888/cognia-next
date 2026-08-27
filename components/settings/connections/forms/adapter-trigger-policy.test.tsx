@@ -98,3 +98,43 @@ it("repairs a half-policy back to the platform's recommended profile", async () 
     "settings.adapter.trigger"
   )
 })
+
+// The draft is keyed on the STORED POLICY, not on `updatedAt`. Every write to
+// the adapter row bumps `updatedAt` — another settings card saving, a
+// `lastMissingScopes` update, a companion sync — and remounting on those threw
+// away an in-progress edit across twelve controls with nothing to show for it.
+it("keeps an in-progress edit when an unrelated field on the row changes", async () => {
+  const user = userEvent.setup()
+  const { rerender } = render(<AdapterTriggerPolicy adapterId="a" />)
+
+  await user.click(screen.getByTestId("adapter-trigger-rule-self-mention-switch"))
+  expect(screen.getByTestId("adapter-trigger-rule-self-mention-switch")).toBeChecked()
+
+  // Something else wrote the row: `updatedAt` moves, the policy does not.
+  Object.assign(mockRow, { updatedAt: 2, lastMissingScopes: ["channels:history"] })
+  rerender(<AdapterTriggerPolicy adapterId="a" />)
+
+  expect(screen.getByTestId("adapter-trigger-rule-self-mention-switch")).toBeChecked()
+})
+
+// ...but a real change to the thing being drafted still re-seeds, which is
+// also what makes this card's own save land back in the editor.
+it("re-seeds when the stored policy itself changes underneath", async () => {
+  const user = userEvent.setup()
+  const { rerender } = render(<AdapterTriggerPolicy adapterId="a" />)
+
+  await user.click(screen.getByTestId("adapter-trigger-rule-self-mention-switch"))
+  expect(screen.getByTestId("adapter-trigger-rule-self-mention-switch")).toBeChecked()
+
+  Object.assign(mockRow, {
+    updatedAt: 3,
+    trigger: {
+      rules: [{ kind: "private-default" }],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    },
+  })
+  rerender(<AdapterTriggerPolicy adapterId="a" />)
+
+  expect(screen.getByTestId("adapter-trigger-rule-self-mention-switch")).not.toBeChecked()
+})

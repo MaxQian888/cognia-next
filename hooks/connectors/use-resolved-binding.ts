@@ -18,13 +18,12 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { resolveBinding, type ResolvedBinding } from "@/lib/connectors/policy-resolve"
+import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getDb } from "@/lib/db/schema"
 
 export interface ResolvableBinding {
   adapterId: string
   conversationKey: string
-  /** The session's own character, which outranks the adapter default. */
-  characterId?: string
 }
 
 export function useResolvedBinding(
@@ -32,7 +31,6 @@ export function useResolvedBinding(
 ): ResolvedBinding | null {
   const adapterId = binding?.adapterId
   const conversationKey = binding?.conversationKey
-  const sessionCharacterId = binding?.characterId
 
   return (
     useLiveQuery<ResolvedBinding | null>(async () => {
@@ -40,16 +38,17 @@ export function useResolvedBinding(
       const db = getDb()
       const adapter = await db.adapterInstances.get(adapterId)
       if (!adapter) return null
-      const override =
-        (await db.conversationOverrides.where("conversationKey").equals(conversationKey).first()) ??
-        null
-      // Mirrors the bus: an explicitly disabled character contributes no
-      // layer at all, rather than falling back to the adapter default.
+      const override = (await readForResolution(conversationKey)) ?? null
+      // The bus's own two layers, in the bus's order (`bus.ts`
+      // `runInboundPipeline`): an explicitly disabled character contributes no
+      // layer at all, and there is deliberately NO session layer — the session's
+      // `characterId` does not reach `resolveBinding` on the inbound path, so
+      // reading it here would describe a policy the bot never runs.
       const characterId = override?.characterDisabled
         ? undefined
-        : (override?.characterId ?? sessionCharacterId ?? adapter.defaultCharacterId)
+        : (override?.characterId ?? adapter.defaultCharacterId)
       const character = characterId ? ((await db.characters.get(characterId)) ?? null) : null
       return resolveBinding({ adapter, character, override })
-    }, [adapterId, conversationKey, sessionCharacterId]) ?? null
+    }, [adapterId, conversationKey]) ?? null
   )
 }

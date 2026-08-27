@@ -105,13 +105,87 @@ export function conversationKeyOfMutation(mutation: unknown): string | undefined
 }
 
 /**
+ * The record-valued members whose keys are override COLUMNS. Only these carry
+ * `undefined`-as-clear; `setAssignee.assignee` and friends sit at the mutation
+ * level and use `null` as a real value, so they must not be touched.
+ */
+function patchRecordOf(
+  mutation: ConversationOverrideMutation
+): Record<string, unknown> | undefined {
+  if (mutation.kind === "upsert") return mutation.input as unknown as Record<string, unknown>
+  if (mutation.kind === "patch" || mutation.kind === "configSection") {
+    return mutation.patch as Record<string, unknown>
+  }
+  return undefined
+}
+
+/**
+ * Wire-encode a mutation's clears.
+ *
+ * `undefined` is how every override editor says "drop this field" — the mode
+ * switcher clearing the composition axes, the override form clearing `trigger`
+ * or `a2uiEnabled`. `JSON.stringify` DELETES such keys, so a mutation relayed
+ * from a thin client reached the host with the clear missing entirely and
+ * `{...existing, ...patch}` kept the stale value: the operator's edit was
+ * silently swallowed on exactly the shells that cannot write locally.
+ *
+ * `null` is the one absence JSON preserves, and no override column uses it as
+ * a value, so it is free to mean "clear" on the wire. {@link decodeOverrideMutationClears}
+ * turns it back before anything touches Dexie.
+ */
+export function encodeOverrideMutationClears(
+  mutation: ConversationOverrideMutation
+): ConversationOverrideMutation {
+  const record = patchRecordOf(mutation)
+  if (!record) return mutation
+  const encoded: Record<string, unknown> = {}
+  let sawClear = false
+  for (const key of Object.keys(record)) {
+    if (record[key] === undefined) {
+      encoded[key] = null
+      sawClear = true
+    } else {
+      encoded[key] = record[key]
+    }
+  }
+  if (!sawClear) return mutation
+  return mutation.kind === "upsert"
+    ? { ...mutation, input: encoded as unknown as ConversationOverrideInput }
+    : { ...mutation, patch: encoded as OverridePatch }
+}
+
+/** Inverse of {@link encodeOverrideMutationClears}; a no-op on a local mutation. */
+export function decodeOverrideMutationClears(
+  mutation: ConversationOverrideMutation
+): ConversationOverrideMutation {
+  const record = patchRecordOf(mutation)
+  if (!record) return mutation
+  const decoded: Record<string, unknown> = {}
+  let sawNull = false
+  for (const key of Object.keys(record)) {
+    if (record[key] === null) {
+      decoded[key] = undefined
+      sawNull = true
+    } else {
+      decoded[key] = record[key]
+    }
+  }
+  if (!sawNull) return mutation
+  return mutation.kind === "upsert"
+    ? { ...mutation, input: decoded as unknown as ConversationOverrideInput }
+    : { ...mutation, patch: decoded as OverridePatch }
+}
+
+/**
  * Structural validation for a value that arrived over the wire
  * (`conversation_overrides_update { mutation }`). Checks the discriminator,
  * the conversation key, and the per-kind required fields — deep field
  * validation of `patch` / `input` is left to the Dexie primitives, which
  * only accept known override columns.
  */
-export function isConversationOverrideMutation(value: unknown): value is ConversationOverrideMutation {
+export function isConversationOverrideMutation(
+  value: unknown
+): value is ConversationOverrideMutation {
   if (!value || typeof value !== "object") return false
   const m = value as Record<string, unknown>
   if (!CONVERSATION_OVERRIDE_MUTATION_KINDS.includes(m.kind as ConversationOverrideMutationKind)) {
@@ -145,7 +219,9 @@ export function isConversationOverrideMutation(value: unknown): value is Convers
       const validAssignee =
         assignee === null ||
         (isObject(assignee) &&
-          ["human", "character", "team"].includes((assignee as { kind?: unknown }).kind as string) &&
+          ["human", "character", "team"].includes(
+            (assignee as { kind?: unknown }).kind as string
+          ) &&
           typeof (assignee as { id?: unknown }).id === "string")
       return validAssignee && optionalString(m.sessionId) && optionalString(m.via)
     }
@@ -177,9 +253,14 @@ export interface ApplyOverrideMutationOptions {
  * row when the primitive yields one, `undefined` for trail-only / delete.
  */
 export async function applyConversationOverrideMutation(
-  mutation: ConversationOverrideMutation,
+  relayed: ConversationOverrideMutation,
   options: ApplyOverrideMutationOptions = {}
 ): Promise<ConversationOverrideRow | undefined> {
+  // A relayed mutation spells its clears `null` (see
+  // {@link encodeOverrideMutationClears}); a local one already has `undefined`
+  // and passes through untouched. Decoded here rather than in the host arm so
+  // every caller of this function gets it.
+  const mutation = decodeOverrideMutationClears(relayed)
   switch (mutation.kind) {
     case "upsert":
       return upsertByConversationKey(mutation.input)
@@ -259,8 +340,11 @@ export async function applyConversationOverrideMutation(
  * the optimistic step is skipped (the sync will materialise the row).
  */
 export async function applyOptimisticOverrideMutation(
-  mutation: ConversationOverrideMutation
+  relayed: ConversationOverrideMutation
 ): Promise<void> {
+  // Same decode as the authoritative path, so the local mirror and the host
+  // agree about which fields the operator cleared.
+  const mutation = decodeOverrideMutationClears(relayed)
   const patchLocal = async (
     conversationKey: string,
     patch: OverridePatch,

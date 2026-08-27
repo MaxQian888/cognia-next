@@ -476,20 +476,40 @@ export class ConnectorBus {
     if (this.mediaGrantAsked.has(event.conversationKey)) return
     // A grant already covering another provider is still a grant the operator
     // wrote; re-asking would read as the bot forgetting. The provider mismatch
-    // is already audited as `provider_not_granted`.
+    // is already audited as `provider_not_granted`. An EXPIRED grant is not
+    // that — its window is what the operator chose to let run out — so it does
+    // not suppress the ask.
+    const existingGrant = override?.mediaModelGrant
+    if (
+      existingGrant?.policy === "allow_cloud_binary" &&
+      !(typeof existingGrant.expiresAt === "number" && existingGrant.expiresAt <= now)
+    ) {
+      return
+    }
     const provider = override?.providerOverride ?? adapterRow.defaultProvider
     if (!provider) return
+    // Marked BEFORE the await so two inbound jobs racing on the same
+    // conversation cannot both project a card, and released again on failure so
+    // a delivery-gateway outage does not silence the ask for the whole process.
     this.mediaGrantAsked.add(event.conversationKey)
-    const { requestMediaGrant } = await import("@/lib/connectors/hitl/media-grant")
-    await requestMediaGrant({
-      adapterId: event.adapterId,
-      conversationKey: event.conversationKey,
-      conversationRef: event.conversationRef,
-      deliveryTarget: deliveryTargetFromEvent(event),
-      provider,
-      initiatorUserId: event.sender.id,
-      now,
-    })
+    try {
+      const { requestMediaGrant } = await import("@/lib/connectors/hitl/media-grant")
+      await requestMediaGrant({
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
+        conversationRef: event.conversationRef,
+        deliveryTarget: deliveryTargetFromEvent(event),
+        provider,
+        // The PLATFORM id, which is what `authorizeConnectorCallback` compares
+        // the presser against — a local identity id would deny the very person
+        // whose message was blocked.
+        initiatorUserId: event.sender.remoteUserId,
+        now,
+      })
+    } catch (err) {
+      this.mediaGrantAsked.delete(event.conversationKey)
+      throw err
+    }
   }
 
   private async runInboundPipeline(
@@ -1063,9 +1083,19 @@ export class ConnectorBus {
       // Ask, once, when a grant is what would unblock this. `pii_gate` is not
       // grant-fixable — that text failed redaction, and consent to send media
       // is not consent to send the identifiers inside it.
-      const grantWouldHelp = mediaDecision.blocked.some(
-        (block) => block.reason === "no_local_text" || block.reason === "provider_not_granted"
-      )
+      //
+      // Only where a turn actually runs. `manual-store` and `store-only` mean
+      // the work belongs to a person and no model will be invoked, so a consent
+      // card there is a bot the operator silenced speaking up to ask permission
+      // for something it will never do — and collecting a grant with nothing to
+      // unblock. The gate itself still runs above: the stamp has to be on the
+      // event either way.
+      const turnWillRun = decision === "ai-run" || decision === "draft-prepare"
+      const grantWouldHelp =
+        turnWillRun &&
+        mediaDecision.blocked.some(
+          (block) => block.reason === "no_local_text" || block.reason === "provider_not_granted"
+        )
       if (grantWouldHelp) {
         await this.maybeRequestMediaGrant(event, adapterRow, override, now).catch(() => undefined)
       }
@@ -2594,11 +2624,22 @@ export class ConnectorBus {
       const provider = String(resolvedBinding.payload?.["provider"] ?? "")
       try {
         const { applyMediaGrantCallback } = await import("@/lib/connectors/hitl/media-grant")
+        const grantConversationKey =
+          resolvedConversationKey ?? resolvedBinding.conversationKey ?? ""
+        // A conversation that has never been customised has no override row,
+        // and the write cannot create one without the session it belongs to.
+        // Resolving it here is what keeps the FIRST press of "Allow" from
+        // throwing into `callback.handler_failed` while the card claims the
+        // grant applies from the next message.
+        const grantSessionId = grantConversationKey
+          ? (await findSessionByConversationKey(grantConversationKey))?.id
+          : undefined
         const { granted } = await applyMediaGrantCallback({
           adapterId: event.adapterId,
-          conversationKey: resolvedConversationKey ?? resolvedBinding.conversationKey ?? "",
+          conversationKey: grantConversationKey,
           decision,
           provider,
+          ...(grantSessionId ? { sessionId: grantSessionId } : {}),
         })
         await appendAudit({
           adapterId: event.adapterId,

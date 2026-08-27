@@ -431,10 +431,19 @@
       "providers": "允许的供应商",
       "revoke": "撤销"
     },
+    "mediaGrantUnavailable": {
+      "nextStep": "待该机器人可用后重新打开本对话框。",
+      "reason": "无法读取本会话所属的机器人，此处的授权将无法指定服务方。"
+    },
     "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
     "reset": "取消",
     "save": "保存",
-    "saving": "正在保存…"
+    "saving": "正在保存…",
+    "triggerUnavailable": {
+      "nextStep": "待该机器人可用后重新打开本对话框。",
+      "reason": "无法读取本会话所属的机器人，因此没有可覆盖的策略。",
+      "title": "本会话何时回复"
+    }
   },
   "conversationRow": {
     "draftCount": "{count, plural, other {# 条草稿}}",

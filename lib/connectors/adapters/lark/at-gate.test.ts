@@ -91,15 +91,51 @@ describe("shouldRespondToMessage", () => {
     )
   })
 
-  describe("strategy = always", () => {
-    it("group message without @bot still passes", () => {
+  // Lark only pushes unmentioned group events once the operator has proven it,
+  // so `always` still needs a mention until `deliveryReadiness` says otherwise.
+  // These assert the answer `admitConversationEvent` gives — the prediction has
+  // to agree with the host, not with the field's face value.
+  describe("strategy = always, delivery unverified", () => {
+    it("group message without @bot reports delivery_unverified", () => {
       const adapter = makeAdapter({ atResponseStrategy: "always" })
+      const event = makeEvent({}, "group", false)
+      expect(shouldRespondToMessage(event, adapter)).toEqual({
+        allowed: false,
+        reason: "delivery_unverified",
+      })
+    })
+
+    it("channel message without @bot reports delivery_unverified", () => {
+      const adapter = makeAdapter({ atResponseStrategy: "always" })
+      const event = makeEvent({}, "channel", false)
+      expect(shouldRespondToMessage(event, adapter)).toEqual({
+        allowed: false,
+        reason: "delivery_unverified",
+      })
+    })
+
+    it("group message WITH @bot passes", () => {
+      const adapter = makeAdapter({ atResponseStrategy: "always" })
+      const event = makeEvent({}, "group", true)
+      expect(shouldRespondToMessage(event, adapter)).toEqual({ allowed: true })
+    })
+  })
+
+  describe("strategy = always, delivery verified", () => {
+    it("group message without @bot passes", () => {
+      const adapter = makeAdapter({
+        atResponseStrategy: "always",
+        deliveryReadiness: "all_messages_verified",
+      })
       const event = makeEvent({}, "group", false)
       expect(shouldRespondToMessage(event, adapter)).toEqual({ allowed: true })
     })
 
-    it("channel message without @bot still passes", () => {
-      const adapter = makeAdapter({ atResponseStrategy: "always" })
+    it("channel message without @bot passes", () => {
+      const adapter = makeAdapter({
+        atResponseStrategy: "always",
+        deliveryReadiness: "all_messages_verified",
+      })
       const event = makeEvent({}, "channel", false)
       expect(shouldRespondToMessage(event, adapter)).toEqual({ allowed: true })
     })

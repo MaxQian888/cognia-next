@@ -121,10 +121,16 @@ function pickChatId(event: NormalizedInboundEvent): string {
  * predicted from a field the current settings UI no longer writes and disagreed
  * with the host for every adapter configured since.
  *
+ * Every other branch `admitConversationEvent` decides is reproduced here,
+ * including the Lark `delivery_unverified` gate that `always` and
+ * `mention_activates` both pass through — a prediction that answered "allowed"
+ * where the host answers "delivery_unverified" is worse than no prediction.
+ *
  * One branch it cannot fully reproduce: `mention_activates` in a thread also
  * admits a follow-up inside an ALREADY-ACTIVE window, which lives in stored
  * activation state this pure function has no access to. It predicts the
- * first-contact answer there, which is the conservative one.
+ * first-contact answer there (`topic_activation_required`), which is the
+ * conservative one and names the state that would decide.
  *
  * Only `kind === "create"` events are gated — edit / delete / system events
  * pass through unchanged because admission is about responding to fresh
@@ -160,22 +166,47 @@ export function shouldRespondToMessage(
   // is exactly what that policy is for.
   if (isDm) return { allowed: true }
 
+  // A reply to one of OUR messages is as direct an address as a mention, and
+  // `defaultGroupChatPolicy()` gates on both — so this gate has to accept it or
+  // the `reply-to-bot` trigger rule never reaches the bus. Strict
+  // `parentSenderId` matching keeps it from over-matching; the parent is filled
+  // by the adapter parser here, and by `gateInboundEvent` from the
+  // delivered-message ledger for the wire shapes that omit it.
+  const addressesUs = event.mentions.selfMentioned || isReplyToSelf(event)
+  // `delivery_unverified` tests `selfMentioned` ALONE, matching the host: that
+  // gate is about whether the platform will push unmentioned group events to
+  // us at all, which a reply says nothing about.
+  const deliveryVerified = adapter.deliveryReadiness === "all_messages_verified"
+
   switch (policy) {
     case "always":
-      return { allowed: true }
+      // Lark only delivers unmentioned group messages once the operator has
+      // proven it — until then `always` still needs a mention, exactly as
+      // `admitConversationEvent` decides it.
+      if (adapter.type !== "lark" || deliveryVerified) return { allowed: true }
+      return event.mentions.selfMentioned
+        ? { allowed: true }
+        : { allowed: false, reason: "delivery_unverified" }
     case "direct_only":
       return { allowed: false, reason: "at_direct_only" }
     case "mention_each":
+      return addressesUs ? { allowed: true } : { allowed: false, reason: "at_mention_required" }
     case "mention_activates":
-      // A reply to one of OUR messages is as direct an address as a mention,
-      // and `defaultGroupChatPolicy()` gates on both — so this gate has to
-      // accept it or the `reply-to-bot` trigger rule never reaches the bus.
-      // Strict `parentSenderId` matching keeps it from over-matching; the
-      // parent is filled by the adapter parser here, and by
-      // `gateInboundEvent` from the delivered-message ledger for the wire
-      // shapes that omit it.
-      if (event.mentions.selfMentioned || isReplyToSelf(event)) return { allowed: true }
-      return { allowed: false, reason: "at_mention_required" }
+      // Activation is limited to explicit thread scopes; a parent group keeps
+      // requiring a mention every time.
+      if (event.channel.kind !== "thread") {
+        return addressesUs ? { allowed: true } : { allowed: false, reason: "at_mention_required" }
+      }
+      if (!deliveryVerified) {
+        return event.mentions.selfMentioned
+          ? { allowed: true }
+          : { allowed: false, reason: "delivery_unverified" }
+      }
+      if (addressesUs) return { allowed: true }
+      // The one branch a pure function cannot reproduce: an already-open
+      // activation window would admit this. Predicting first contact is the
+      // conservative answer, and it names the state that decides.
+      return { allowed: false, reason: "topic_activation_required" }
   }
 }
 

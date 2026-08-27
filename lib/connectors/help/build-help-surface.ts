@@ -32,11 +32,22 @@
 
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
+import type { InboundActivationPolicy } from "@/types/connectors/policy"
 import type { IMQuickCommand, IMQuickCommandAction } from "@/lib/connectors/quick-commands"
 
 export type HelpSurfaceMode = "welcome" | "help"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
+
+/**
+ * What the card can be told about group admission.
+ *
+ * Both vocabularies, because the dispatcher now hands it the resolved
+ * `InboundActivationPolicy` — the value the bus actually admits on — while the
+ * legacy `AtResponseStrategy` spellings stay accepted so a caller holding a
+ * pre-migration row still gets a hint rather than a missing label.
+ */
+export type HelpAtStrategy = AtResponseStrategy | InboundActivationPolicy
 
 export interface HelpSurfaceLabels {
   /** Card title in help mode. */
@@ -56,7 +67,7 @@ export interface HelpSurfaceLabels {
   /** Heading above the @-strategy hint. */
   atStrategyHeading: string
   /** Per-strategy hint sentence. */
-  atStrategy: Record<AtResponseStrategy, string>
+  atStrategy: Record<HelpAtStrategy, string>
   /** Mirror-only prefix for "send X to trigger" (text-only platforms). */
   sendToTrigger: string
 }
@@ -72,8 +83,12 @@ export const DEFAULT_HELP_SURFACE_LABELS: HelpSurfaceLabels = {
   atStrategyHeading: "如何让我回复",
   atStrategy: {
     always: "在任意消息下我都会回复。",
-    mention_only: "在群聊里请 @我 我才会回复；私聊无需 @。",
+    mention_each: "在群聊里请 @我 我才会回复；私聊无需 @。",
+    mention_activates: "在群聊里 @我 一次即可，之后的追问我也会接着回复；私聊无需 @。",
     direct_only: "请私聊我；群聊中我不会回复。",
+    // Legacy spelling of `mention_each`, kept so a pre-migration row still
+    // resolves a label instead of rendering `undefined`.
+    mention_only: "在群聊里请 @我 我才会回复；私聊无需 @。",
   },
   sendToTrigger: "发送",
 }
@@ -86,8 +101,8 @@ export interface BuildHelpSurfaceInput {
   displayName: string
   /** Configured quick commands (already normalised). */
   quickCommands: IMQuickCommand[]
-  /** Operator-configured at-mention strategy; omitted ⇒ no hint line. */
-  atStrategy?: AtResponseStrategy
+  /** Resolved group-admission policy; omitted ⇒ no hint line. */
+  atStrategy?: HelpAtStrategy
   /** Built-in skill families this channel exposes; omitted ⇒ no skills line. */
   skillFamilies?: readonly PlatformSkillCapability[]
   /** Operator-authored welcome intro (welcome mode only). */

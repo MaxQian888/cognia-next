@@ -152,6 +152,59 @@ describe("diagnostics", () => {
     expect(screen.getByTestId("trigger-warning-rate-limit-blocks-everything")).toBeInTheDocument()
   })
 
+  // `Number("")` is `0` and finite, so an emptied box used to COMMIT 0 — and a
+  // 0 is not a small limit, it is a bot that answers nobody (the evaluator
+  // blocks at `recent.length >= limit`). The box must be allowed to go empty
+  // without the model taking a value the operator never typed.
+  it("does not commit a rate limit of 0 when the box is merely cleared", async () => {
+    const user = userEvent.setup()
+    const onPolicy = jest.fn()
+    render(<Harness initial={emptyTriggerPolicyDraft()} onPolicy={onPolicy} />)
+
+    await user.click(screen.getByTestId("trigger-blocker-rate-limit-switch"))
+    onPolicy.mockClear()
+    const field = screen.getByTestId("trigger-rate-user") as HTMLInputElement
+    await user.clear(field)
+
+    // The box shows empty — the operator is mid-edit, not done.
+    expect(field.value).toBe("")
+    // ...but nothing committed a 0, so no policy claims to block everything.
+    expect(screen.queryByTestId("trigger-warning-rate-limit-blocks-everything")).toBeNull()
+    for (const [policy] of onPolicy.mock.calls as [TriggerPolicy][]) {
+      const limit = policy.blockers.find((b) => b.kind === "rate-limit")
+      if (limit && limit.kind === "rate-limit") expect(limit.perUserPerMin).toBeGreaterThan(0)
+    }
+  })
+
+  it("restores the last committed value when a cleared box loses focus", async () => {
+    const user = userEvent.setup()
+    render(<Harness initial={emptyTriggerPolicyDraft()} />)
+
+    await user.click(screen.getByTestId("trigger-blocker-rate-limit-switch"))
+    const field = screen.getByTestId("trigger-rate-user") as HTMLInputElement
+    const committed = field.value
+    await user.clear(field)
+    await user.tab()
+
+    expect(field.value).toBe(committed)
+  })
+
+  it("still lets the operator clear and retype a whole new value", async () => {
+    const user = userEvent.setup()
+    const onPolicy = jest.fn()
+    render(<Harness initial={emptyTriggerPolicyDraft()} onPolicy={onPolicy} />)
+
+    await user.click(screen.getByTestId("trigger-blocker-rate-limit-switch"))
+    const field = screen.getByTestId("trigger-rate-user") as HTMLInputElement
+    await user.clear(field)
+    await user.type(field, "42")
+
+    expect(field.value).toBe("42")
+    const last = onPolicy.mock.calls.at(-1)?.[0] as TriggerPolicy
+    const limit = last.blockers.find((b) => b.kind === "rate-limit")
+    expect(limit && limit.kind === "rate-limit" && limit.perUserPerMin).toBe(42)
+  })
+
   // The one policy shape the per-kind slots cannot hold. It is still evaluated
   // by the bus, so hiding it would be a lie about what the bot does.
   it("reports a rule the slots cannot show, instead of dropping it", () => {

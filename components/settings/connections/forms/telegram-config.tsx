@@ -170,7 +170,10 @@ export function TelegramConfigDialog({
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && !botToken.trim()) {
+    // `missingRequired`, not `isNew && !botToken.trim()`: the field prefills
+    // now, so an emptied box on an EXISTING bot is a deliberate clear that
+    // `persist` will carry out — deleting the token the adapter polls with.
+    if (credentials.missingRequired(["botToken"]).length > 0) {
       toast.error(t("botTokenRequired"))
       return
     }

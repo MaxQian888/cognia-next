@@ -1001,4 +1001,51 @@ describe("media_grant callback", () => {
     const kinds = (await getDb().connectorAudit.toArray()).map((row) => row.kind)
     expect(kinds).toContain("media_grant.granted")
   })
+
+  // A conversation that has never been customised has NO override row — the
+  // bus only creates one on demand — and the write cannot create one without
+  // the session it belongs to. The first press of "Allow" therefore used to
+  // throw into `callback.handler_failed`, silently, while the card promised
+  // the grant applied from the next message.
+  it("writes the grant for a conversation that has no override row yet", async () => {
+    const freshKey = "telegram:adp_tg:c_fresh"
+    await getDb().sessions.put({
+      id: "ses_fresh",
+      title: "Fresh",
+      createdAt: 1,
+      updatedAt: 1,
+      platformConversationKey: freshKey,
+      platformBinding: { adapterId: "adp_tg", conversationKey: freshKey },
+    } as never)
+    expect(
+      await getDb().conversationOverrides.where("conversationKey").equals(freshKey).first()
+    ).toBeUndefined()
+
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "mga:fresh",
+      kind: "media_grant",
+      surfaceId: "media_grant:fresh",
+      componentId: "always",
+      conversationKey: freshKey,
+      payload: { decision: "allow_always", provider: "anthropic" },
+    })
+    const bus = getBus()
+    bus.callbackHandler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "mga:fresh", value: "mga:fresh", conversationKey: freshKey })
+    )
+
+    const row = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(freshKey)
+      .first()
+    expect(row?.mediaModelGrant).toMatchObject({
+      policy: "allow_cloud_binary",
+      providers: ["anthropic"],
+    })
+    const kinds = (await getDb().connectorAudit.toArray()).map((r) => r.kind)
+    expect(kinds).toContain("media_grant.granted")
+    expect(kinds).not.toContain("callback.handler_failed")
+  })
 })

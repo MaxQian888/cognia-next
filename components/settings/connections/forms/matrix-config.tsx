@@ -176,7 +176,11 @@ export function MatrixConfigDialog({
       toast.error(t("homeserverRequired"))
       return
     }
-    if (isNew && !accessToken.trim()) {
+    // `missingRequired`, not `isNew && !accessToken.trim()`: the field prefills
+    // now, so an emptied box on an EXISTING bot is a deliberate clear that
+    // `persist` will carry out — deleting the only credential this adapter
+    // authenticates with.
+    if (credentials.missingRequired(MATRIX_CREDENTIALS).length > 0) {
       toast.error(t("accessTokenRequired"))
       return
     }

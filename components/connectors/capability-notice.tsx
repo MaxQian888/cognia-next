@@ -27,7 +27,7 @@
  * The two vocabularies stay separate — see that module for why.
  */
 
-import type { ReactNode } from "react"
+import { useCallback, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
 import { UnavailableNotice } from "@/components/connectors/unavailable-notice"
@@ -46,16 +46,24 @@ export interface CapabilityUnavailableText {
 /**
  * Localize one cause. Exported so the capability matrix card can render the
  * same words in its own compact list instead of keeping a second vocabulary.
+ *
+ * Memoized on `t`, so consumers get a stable identity: the matrix card calls it
+ * once per suppressed capability and the Inbox notices call it on every
+ * conversation re-render, and a fresh closure each time defeats any memo built
+ * on top of it.
  */
 export function useCapabilityUnavailableText(): (
   cause: CapabilityUnavailableCause,
   detail?: string
 ) => CapabilityUnavailableText {
   const t = useTranslations("connectors.capability")
-  return (cause, detail) => ({
-    reason: t(`reason.${cause}`, { detail: detail ?? "" }),
-    nextStep: isActionableCause(cause) ? t(`nextStep.${cause}`) : null,
-  })
+  return useCallback(
+    (cause: CapabilityUnavailableCause, detail?: string) => ({
+      reason: t(`reason.${cause}`, { detail: detail ?? "" }),
+      nextStep: isActionableCause(cause) ? t(`nextStep.${cause}`) : null,
+    }),
+    [t]
+  )
 }
 
 export interface CapabilityNoticeProps {

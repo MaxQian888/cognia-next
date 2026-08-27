@@ -431,10 +431,19 @@
       "providers": "Allowed providers",
       "revoke": "Revoke"
     },
+    "mediaGrantUnavailable": {
+      "nextStep": "Reopen this dialog once the conversation's bot is available.",
+      "reason": "This chat's bot could not be read, so a grant here could not name a provider."
+    },
     "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
     "reset": "Cancel",
     "save": "Save",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "triggerUnavailable": {
+      "nextStep": "Reopen this dialog once the conversation's bot is available.",
+      "reason": "This chat's bot could not be read, so there is no policy to override from.",
+      "title": "When this conversation answers"
+    }
   },
   "conversationRow": {
     "draftCount": "{count, plural, =1 {1 draft} other {# drafts}}",

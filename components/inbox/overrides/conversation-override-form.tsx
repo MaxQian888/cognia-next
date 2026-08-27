@@ -39,6 +39,7 @@ import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { EscalationPolicyEditor } from "./escalation-policy-editor"
+import { UnavailableNotice } from "@/components/connectors/unavailable-notice"
 import { ConversationTriggerOverride } from "./conversation-trigger-override"
 import { MediaGrantEditor } from "./media-grant-editor"
 import type { MediaModelGrant } from "@/lib/connectors/media-model-gate"
@@ -558,18 +559,30 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         />
       </div>
 
-      {/* Whether this chat answers at all. Rendered only once the bot's policy
-       * is known: taking a part over seeds it from what the chat currently
-       * evaluates, and seeding from a placeholder would silence the chat. */}
-      {inheritedTrigger && (
-        <div className="border-b pb-5">
+      {/* Whether this chat answers at all. The editor itself needs the bot's
+       * policy — taking a part over seeds it from what the chat currently
+       * evaluates, and seeding from a placeholder would silence the chat — but
+       * an absent section reads as a feature that was never built (ADR-0152),
+       * so the section stays and says why it cannot be edited. */}
+      <div className="border-b pb-5">
+        {inheritedTrigger ? (
           <ConversationTriggerOverride
             baseline={inheritedTrigger}
             value={trigger}
             onChange={setTrigger}
           />
-        </div>
-      )}
+        ) : (
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium">{t("triggerUnavailable.title")}</h4>
+            <UnavailableNotice
+              cause="adapter-row-unreadable"
+              reason={t("triggerUnavailable.reason")}
+              nextStep={t("triggerUnavailable.nextStep")}
+              data-testid="conv-override-trigger-unavailable"
+            />
+          </div>
+        )}
+      </div>
 
       <div className="space-y-2">
         <Label htmlFor="conv-override-character-state">{t("fields.character")}</Label>
@@ -694,12 +707,14 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
           </div>
         </div>
-        {/* Rendered only once the bot row is readable: the switch seeds the
+        {/* Editable only once the bot row is readable: the switch seeds the
          * grant with the provider this conversation resolves to, and seeding
          * from an unloaded row would produce a grant naming nobody — which the
-         * resolver reads as no grant at all. */}
-        {adapterRow && (
-          <div className="border-t pt-4">
+         * resolver reads as no grant at all. Rendered either way, because a
+         * missing consent control is indistinguishable from one that was never
+         * built (ADR-0152). */}
+        <div className="border-t pt-4">
+          {adapterRow ? (
             <MediaGrantEditor
               value={mediaGrant}
               onChange={setMediaGrant}
@@ -711,8 +726,18 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               // provider, and a grant naming none grants nothing.
               effectiveProvider={providerOverride.trim() || adapterRow.defaultProvider}
             />
-          </div>
-        )}
+          ) : (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">{t("mediaGrant.label")}</h4>
+              <UnavailableNotice
+                cause="adapter-row-unreadable"
+                reason={t("mediaGrantUnavailable.reason")}
+                nextStep={t("mediaGrantUnavailable.nextStep")}
+                data-testid="conv-override-media-grant-unavailable"
+              />
+            </div>
+          )}
+        </div>
         {/* Default-ALLOW, and the only member of this group that is — no
          * destructive marker, because switching it OFF is the restriction. */}
         <div className="flex items-start gap-3 border-t pt-4">

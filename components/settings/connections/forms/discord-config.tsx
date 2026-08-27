@@ -169,13 +169,19 @@ export function DiscordConfigDialog({
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && !botToken.trim()) {
-      toast.error(t("botTokenRequired"))
-      return
-    }
     const useWebhook = transport === "webhook"
-    if (useWebhook && isNew && !publicKey.trim()) {
-      toast.error(t("publicKeyRequiredForWebhook"))
+    // `missingRequired`, not `isNew && !x.trim()`: the fields prefill now, so an
+    // emptied box on an EXISTING bot is a deliberate clear that `persist` will
+    // carry out — deleting the token the gateway connects with, or the Ed25519
+    // key the webhook gate verifies against.
+    const missingCredentials = credentials.missingRequired([
+      "botToken",
+      ...(useWebhook ? ["publicKey"] : []),
+    ])
+    if (missingCredentials.length > 0) {
+      toast.error(
+        t(missingCredentials[0] === "botToken" ? "botTokenRequired" : "publicKeyRequiredForWebhook")
+      )
       return
     }
     if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {

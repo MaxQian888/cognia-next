@@ -103,7 +103,18 @@ async function clickSave(): Promise<void> {
 
 beforeEach(() => {
   mockCapability.mockReturnValue(true)
-  mockKeyringGet.mockResolvedValue(null)
+  // An EXISTING row means a bot whose credentials are in the keyring — that is
+  // what the form reads back, and what `missingRequired` checks a save against.
+  // Tests about an absent credential override this per case.
+  mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+    name === "botToken"
+      ? "xoxb-stored"
+      : name === "signingSecret"
+        ? "stored-signing-secret"
+        : name === "appToken"
+          ? "xapp-stored"
+          : null
+  )
   mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockTunnel.running = false
@@ -218,8 +229,19 @@ describe("SlackConfigDialog — create new", () => {
         expect.objectContaining({
           type: "slack",
           transportMode: "gateway",
+          // Every account a Slack bot can own, not just this transport's pair:
+          // `credentialsRef.accounts` is the only vocabulary the purge on
+          // delete and `ctx.secrets.list()` have, and the OAuth credentials
+          // this dialog writes were being stranded in the keyring.
           credentialsRef: expect.objectContaining({
-            accounts: ["botToken", "appToken"],
+            accounts: [
+              "botToken",
+              "signingSecret",
+              "appToken",
+              "clientId",
+              "clientSecret",
+              "userToken",
+            ],
           }),
         })
       )
@@ -871,6 +893,9 @@ describe("SlackConfigDialog — credential prefill", () => {
     mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
       if (name === "botToken") return "s3cret"
       if (name === "clientId") return "123.456"
+      // `prefillRow` has no persisted transport, so the dialog opens in Socket
+      // Mode — where the app token is required and a save is blocked without it.
+      if (name === "appToken") return "xapp-stored"
       return null
     })
   }
@@ -910,5 +935,44 @@ describe("SlackConfigDialog — credential prefill", () => {
     expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("")
     // A blank box nobody could read must never be taken for a deletion.
     expect(mockKeyringDelete).not.toHaveBeenCalled()
+  })
+
+  // Prefilling changed what an empty box MEANS: on an existing bot it is now a
+  // deliberate clear, and `persist` carries it out. Validating only `isNew`
+  // let an operator delete the token the adapter authenticates with — the bot
+  // goes offline, with no warning and nothing to undo.
+  it("refuses to save when a prefilled required credential is emptied", async () => {
+    storedCredentials()
+    openExisting()
+    const field = screen.getByLabelText(/bot token/i) as HTMLInputElement
+    await waitFor(() => expect(field.value).toBe("s3cret"))
+
+    fireEvent.change(field, { target: { value: "" } })
+    const save = screen.getByRole("button", { name: /save/i })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
+    )
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  // The guard is about REQUIRED credentials only — an optional one this
+  // transport does not use must still be clearable.
+  it("still allows clearing a credential the transport does not require", async () => {
+    storedCredentials()
+    openExisting()
+    const clientId = screen.getByLabelText(/client id/i) as HTMLInputElement
+    await waitFor(() => expect(clientId.value).toBe("123.456"))
+
+    fireEvent.change(clientId, { target: { value: "" } })
+    const save = screen.getByRole("button", { name: /save/i })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+
+    await waitFor(() => expect(mockUpdateAdapterInstance).toHaveBeenCalled())
+    expect(mockKeyringDelete).toHaveBeenCalledWith(prefillRow.id, "clientId")
   })
 })

@@ -17,6 +17,7 @@
  * allow/blocklists were unreachable in the product.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon } from "lucide-react"
 
@@ -52,6 +53,59 @@ export interface TriggerPolicyEditorProps {
    * has actually taken over. Omitted means all three, which is the bot scope.
    */
   sections?: { rules?: boolean; blockers?: boolean; storeUnmatched?: boolean }
+}
+
+/**
+ * Integer input that tolerates a transiently EMPTY box.
+ *
+ * The draft holds numbers, so a purely controlled input cannot represent "the
+ * operator cleared this and is about to retype it" — and committing that empty
+ * string as `Number("") === 0` is what silenced bots: the evaluator blocks at
+ * `recent.length >= limit`, so a saved 0 blocks the first message of every
+ * minute. Keeping the raw text here lets the box go empty without the MODEL
+ * ever taking a value the operator did not type; blur snaps the display back
+ * to the last committed number.
+ */
+function IntegerField({
+  id,
+  testId,
+  min,
+  disabled,
+  value,
+  onCommit,
+  className,
+}: {
+  id: string
+  testId: string
+  min: number
+  disabled?: boolean
+  value: number
+  onCommit: (next: number) => void
+  className?: string
+}) {
+  const [raw, setRaw] = useState<string | null>(null)
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={min}
+      className={className}
+      disabled={disabled}
+      value={raw ?? String(value)}
+      onChange={(event) => {
+        const next = event.target.value
+        setRaw(next)
+        // Empty, or something `type=number` handed back unparseable: show it,
+        // commit nothing, leave the last good value in the draft.
+        if (next.trim() === "") return
+        const parsed = Number(next)
+        if (!Number.isFinite(parsed)) return
+        onCommit(Math.max(0, Math.round(parsed)))
+      }}
+      onBlur={() => setRaw(null)}
+      data-testid={testId}
+    />
+  )
 }
 
 interface ToggleRowProps {
@@ -126,8 +180,18 @@ export function TriggerPolicyEditor({
     warning.startsWith("rate-limit") || warning.includes("blocklist") ? showBlockers : showRules
   )
 
-  /** Parse a bounded positive integer, keeping the previous value on garbage. */
+  /**
+   * Parse a bounded positive integer, keeping the previous value on garbage.
+   *
+   * Used only by the per-tenant ceiling, whose model type includes `undefined`
+   * and which therefore handles the empty box itself (blank = no ceiling). The
+   * empty-string guard stays as defence: `Number.isFinite` alone does not catch
+   * it, because `Number("")` is `0` — and a 0 here is not a small limit, it is
+   * a bot that answers nobody (the evaluator blocks at `recent.length >= limit`).
+   * The number fields that CANNOT hold `undefined` use {@link IntegerField}.
+   */
   const positiveInt = (raw: string, previous: number): number => {
+    if (raw.trim() === "") return previous
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) return previous
     return Math.max(0, Math.round(parsed))
@@ -367,50 +431,32 @@ export function TriggerPolicyEditor({
                 <Label htmlFor={`${idPrefix}-rate-user`} className="text-xs">
                   {t("blockers.rateLimit.perUser")}
                 </Label>
-                <Input
+                <IntegerField
                   id={`${idPrefix}-rate-user`}
-                  type="number"
+                  testId={`${idPrefix}-rate-user`}
                   min={1}
                   className="h-8"
                   disabled={disabled}
-                  value={String(value.blockers.rateLimit.perUserPerMin)}
-                  onChange={(e) =>
-                    patchBlockers({
-                      rateLimit: {
-                        ...value.blockers.rateLimit,
-                        perUserPerMin: positiveInt(
-                          e.target.value,
-                          value.blockers.rateLimit.perUserPerMin
-                        ),
-                      },
-                    })
+                  value={value.blockers.rateLimit.perUserPerMin}
+                  onCommit={(perUserPerMin) =>
+                    patchBlockers({ rateLimit: { ...value.blockers.rateLimit, perUserPerMin } })
                   }
-                  data-testid={`${idPrefix}-rate-user`}
                 />
               </div>
               <div className="space-y-1">
                 <Label htmlFor={`${idPrefix}-rate-channel`} className="text-xs">
                   {t("blockers.rateLimit.perChannel")}
                 </Label>
-                <Input
+                <IntegerField
                   id={`${idPrefix}-rate-channel`}
-                  type="number"
+                  testId={`${idPrefix}-rate-channel`}
                   min={1}
                   className="h-8"
                   disabled={disabled}
-                  value={String(value.blockers.rateLimit.perChannelPerMin)}
-                  onChange={(e) =>
-                    patchBlockers({
-                      rateLimit: {
-                        ...value.blockers.rateLimit,
-                        perChannelPerMin: positiveInt(
-                          e.target.value,
-                          value.blockers.rateLimit.perChannelPerMin
-                        ),
-                      },
-                    })
+                  value={value.blockers.rateLimit.perChannelPerMin}
+                  onCommit={(perChannelPerMin) =>
+                    patchBlockers({ rateLimit: { ...value.blockers.rateLimit, perChannelPerMin } })
                   }
-                  data-testid={`${idPrefix}-rate-channel`}
                 />
               </div>
               <div className="space-y-1">
@@ -468,22 +514,16 @@ export function TriggerPolicyEditor({
               <Label htmlFor={`${idPrefix}-cooldown-secs`} className="text-xs">
                 {t("blockers.cooldown.secs")}
               </Label>
-              <Input
+              <IntegerField
                 id={`${idPrefix}-cooldown-secs`}
-                type="number"
+                testId={`${idPrefix}-cooldown-secs`}
                 min={0}
                 className="h-8 sm:w-40"
                 disabled={disabled}
-                value={String(value.blockers.cooldown.secs)}
-                onChange={(e) =>
-                  patchBlockers({
-                    cooldown: {
-                      ...value.blockers.cooldown,
-                      secs: positiveInt(e.target.value, value.blockers.cooldown.secs),
-                    },
-                  })
+                value={value.blockers.cooldown.secs}
+                onCommit={(secs) =>
+                  patchBlockers({ cooldown: { ...value.blockers.cooldown, secs } })
                 }
-                data-testid={`${idPrefix}-cooldown-secs`}
               />
             </div>
           </ToggleRow>

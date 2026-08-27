@@ -15,6 +15,8 @@ import {
   applyConversationOverrideMutation,
   applyOptimisticOverrideMutation,
   conversationKeyOfMutation,
+  decodeOverrideMutationClears,
+  encodeOverrideMutationClears,
   isConversationOverrideMutation,
   type ConversationOverrideMutation,
 } from "./override-mutation"
@@ -40,7 +42,10 @@ describe("conversationKeyOfMutation", () => {
   it("reads the key off every kind", () => {
     expect(conversationKeyOfMutation({ kind: "setPinned", conversationKey: KEY })).toBe(KEY)
     expect(
-      conversationKeyOfMutation({ kind: "upsert", input: { conversationKey: KEY, sessionId: SESSION } })
+      conversationKeyOfMutation({
+        kind: "upsert",
+        input: { conversationKey: KEY, sessionId: SESSION },
+      })
     ).toBe(KEY)
   })
 
@@ -78,9 +83,7 @@ describe("isConversationOverrideMutation — wire validation", () => {
     }
     // Every kind in the union is covered by the fixtures above — otherwise a
     // new kind could ship with no wire validation at all.
-    expect(new Set(valid.map((m) => m.kind)).size).toBe(
-      CONVERSATION_OVERRIDE_MUTATION_KINDS.length
-    )
+    expect(new Set(valid.map((m) => m.kind)).size).toBe(CONVERSATION_OVERRIDE_MUTATION_KINDS.length)
   })
 
   it("rejects malformed values a hostile / stale client could send", () => {
@@ -137,8 +140,16 @@ describe("applyConversationOverrideMutation — host semantics", () => {
     })
     expect((await readForResolution(KEY))?.status).toBe("resolved")
 
-    await applyConversationOverrideMutation({ kind: "addLabel", conversationKey: KEY, labelId: "l1" })
-    await applyConversationOverrideMutation({ kind: "addLabel", conversationKey: KEY, labelId: "l2" })
+    await applyConversationOverrideMutation({
+      kind: "addLabel",
+      conversationKey: KEY,
+      labelId: "l1",
+    })
+    await applyConversationOverrideMutation({
+      kind: "addLabel",
+      conversationKey: KEY,
+      labelId: "l2",
+    })
     expect((await readForResolution(KEY))?.labelIds).toEqual(["l1", "l2"])
 
     await applyConversationOverrideMutation({
@@ -148,7 +159,11 @@ describe("applyConversationOverrideMutation — host semantics", () => {
     })
     expect((await readForResolution(KEY))?.labelIds).toEqual(["l2"])
 
-    await applyConversationOverrideMutation({ kind: "setPinned", conversationKey: KEY, pinned: true })
+    await applyConversationOverrideMutation({
+      kind: "setPinned",
+      conversationKey: KEY,
+      pinned: true,
+    })
     expect((await readForResolution(KEY))?.pinned).toBe(true)
     await applyConversationOverrideMutation({
       kind: "setArchived",
@@ -288,5 +303,106 @@ describe("applyOptimisticOverrideMutation — thin-client mirror", () => {
     await seedRow()
     await applyOptimisticOverrideMutation({ kind: "delete", conversationKey: KEY })
     expect(await readForResolution(KEY)).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Wire-encoded clears
+// ---------------------------------------------------------------------------
+
+/** What the companion transport does to a payload: `JSON.stringify(args)`. */
+function overTheWire(mutation: ConversationOverrideMutation): ConversationOverrideMutation {
+  return JSON.parse(JSON.stringify(mutation)) as ConversationOverrideMutation
+}
+
+describe("override mutation clears survive the relay", () => {
+  // `undefined` is how every override editor says "drop this field", and
+  // `JSON.stringify` deletes such keys outright — so a relayed clear used to
+  // reach the host missing entirely and `{...existing, ...patch}` kept the
+  // stale value.
+  it("loses an undefined clear when it is NOT encoded", () => {
+    const raw: ConversationOverrideMutation = {
+      kind: "upsert",
+      input: { conversationKey: KEY, sessionId: SESSION, mode: "manual", autonomy: undefined },
+    }
+    expect("autonomy" in overTheWire(raw).input).toBe(false)
+  })
+
+  it("round-trips an undefined clear through JSON", () => {
+    const raw: ConversationOverrideMutation = {
+      kind: "upsert",
+      input: { conversationKey: KEY, sessionId: SESSION, mode: "manual", autonomy: undefined },
+    }
+    const decoded = decodeOverrideMutationClears(overTheWire(encodeOverrideMutationClears(raw)))
+    expect(decoded.kind).toBe("upsert")
+    const input = (decoded as { input: Record<string, unknown> }).input
+    expect("autonomy" in input).toBe(true)
+    expect(input.autonomy).toBeUndefined()
+    expect(input.mode).toBe("manual")
+  })
+
+  it("encodes clears inside a configSection patch too", () => {
+    const raw: ConversationOverrideMutation = {
+      kind: "configSection",
+      adapterId: "tg-1",
+      conversationKey: KEY,
+      section: "behavior",
+      patch: { trigger: undefined, a2uiEnabled: false },
+    }
+    const wire = overTheWire(encodeOverrideMutationClears(raw)) as {
+      patch: Record<string, unknown>
+    }
+    expect(wire.patch.trigger).toBeNull()
+    expect(wire.patch.a2uiEnabled).toBe(false)
+    const decoded = decodeOverrideMutationClears(
+      wire as unknown as ConversationOverrideMutation
+    ) as { patch: Record<string, unknown> }
+    expect("trigger" in decoded.patch).toBe(true)
+    expect(decoded.patch.trigger).toBeUndefined()
+  })
+
+  // `setAssignee` carries `assignee: null` as a REAL value ("unassign"), and it
+  // lives at the mutation level rather than inside a column patch — so the
+  // encoding must not touch it in either direction.
+  it("leaves a mutation-level null alone", () => {
+    const unassign: ConversationOverrideMutation = {
+      kind: "setAssignee",
+      conversationKey: KEY,
+      assignee: null,
+    }
+    expect(encodeOverrideMutationClears(unassign)).toEqual(unassign)
+    expect(decodeOverrideMutationClears(unassign)).toEqual(unassign)
+  })
+
+  it("returns the same object when there is nothing to encode", () => {
+    const plain: ConversationOverrideMutation = {
+      kind: "patch",
+      conversationKey: KEY,
+      patch: { mode: "auto" },
+    }
+    expect(encodeOverrideMutationClears(plain)).toBe(plain)
+    expect(decodeOverrideMutationClears(plain)).toBe(plain)
+  })
+
+  it("applies a relayed clear to the row, exactly as a local one would", async () => {
+    await seedRow()
+    await applyConversationOverrideMutation({
+      kind: "patch",
+      conversationKey: KEY,
+      patch: { mode: "auto", autonomy: "act" },
+    })
+    expect((await readForResolution(KEY))?.autonomy).toBe("act")
+
+    const relayed = overTheWire(
+      encodeOverrideMutationClears({
+        kind: "patch",
+        conversationKey: KEY,
+        patch: { mode: "manual", autonomy: undefined },
+      })
+    )
+    await applyConversationOverrideMutation(relayed)
+    const row = await readForResolution(KEY)
+    expect(row?.mode).toBe("manual")
+    expect(row?.autonomy).toBeUndefined()
   })
 })

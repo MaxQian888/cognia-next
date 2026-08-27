@@ -78,7 +78,12 @@ async function clickSave(): Promise<void> {
 
 beforeEach(() => {
   mockCapability.mockReturnValue(true)
-  mockKeyringGet.mockResolvedValue(null)
+  // An EXISTING row means a bot whose credentials are in the keyring — that is
+  // what the form reads back, and what `missingRequired` checks a save against.
+  // Tests about an absent credential override this per case.
+  mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+    name === "botToken" ? "stored-bot-token" : name === "publicKey" ? "stored-public-key" : null
+  )
   mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockTunnel.running = false

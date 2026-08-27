@@ -329,6 +329,76 @@ describe("composed-mode axes", () => {
     expect(result.autonomy).toMatchObject({ effective: "suggest", source: "adapter-default" })
     expect(result.authority).toMatchObject({ effective: "plan", source: "adapter-default" })
   })
+
+  // The conversation layer wins as a WHOLE. Mixing a chat's `mode` with the
+  // bot's axis default let `defaultAutonomy: "act"` outrank `/mode manual` —
+  // the chat read "manual" in the chip, in `/status` and in this facade while
+  // the bus kept routing it as a running turn.
+  it("lets a conversation's mode outrank the bot's axis defaults", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAutonomy: "act", defaultEngagement: "inline" },
+      override: override({ mode: "manual" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.mode.effective).toBe("manual")
+    expect(result.autonomy.effective).toBe("observe")
+    expect(result.engagement.effective).toBe("human")
+    // And it must not claim the bot default it just suppressed.
+    expect(result.autonomy.source).toBe("conversation-override")
+  })
+
+  // `/mode` clears the conversation's own axes on purpose, so this is the
+  // shape the clear actually lands in.
+  it("keeps the bot's axis default when the conversation pins no mode", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAutonomy: "act" },
+      override: override({ pinned: true }),
+      rule: null,
+      system: { mode: "manual" },
+    })
+    expect(result.autonomy).toMatchObject({ effective: "act", source: "adapter-default" })
+  })
+
+  // An explicit conversation axis still beats the mode it sits next to — the
+  // fix narrows which BOT-level value applies, it does not demote the chat's.
+  it("still prefers an explicit conversation axis over its own mode", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAutonomy: "act" },
+      override: override({ mode: "manual", autonomy: "suggest" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.autonomy).toMatchObject({
+      effective: "suggest",
+      source: "conversation-override",
+    })
+  })
+
+  // Authority's conversation-level spelling is `approvalMode`, not `mode`: a
+  // chat switched to manual has said nothing about permissions.
+  it("does not let a conversation's mode suppress the bot's authority default", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAuthority: "plan" },
+      override: override({ mode: "manual" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.authority).toMatchObject({ effective: "plan", source: "adapter-default" })
+  })
+
+  it("lets a conversation's approvalMode outrank the bot's authority default", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAuthority: "plan" },
+      override: override({ approvalMode: "yolo" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.authority).toMatchObject({
+      effective: "bypassPermissions",
+      source: "conversation-override",
+    })
+  })
 })
 
 describe("session layer", () => {
