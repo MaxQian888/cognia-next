@@ -63,15 +63,10 @@ export function ConnectorPolicyList() {
             size="sm"
             role="button"
             tabIndex={0}
-            onClick={() =>
-              setSelected({
-                id: adapter.id,
-                displayName: adapter.displayName,
-                defaultMode: adapter.defaultMode,
-                muted: adapter.muted,
-                quietHours: adapter.quietHours,
-              })
-            }
+            // The whole row, not a field-by-field copy. The copy silently
+            // dropped every field it did not list, which is why the sheet's
+            // activation controls were always seeded empty.
+            onClick={() => setSelected(adapter)}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault()

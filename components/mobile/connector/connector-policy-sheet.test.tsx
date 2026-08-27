@@ -10,16 +10,17 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       title: `Settings for ${vars?.name ?? ""}`,
-      description: "Choose how this conversation handles incoming messages.",
-      defaultMode: "Default mode",
-      defaultModeHelp: "help",
+      description: "How this bot behaves in every chat it is in.",
       modeAuto: "Auto",
       modeDraft: "Draft",
       modeManual: "Manual",
-      muted: "Mute this conversation",
+      muted: "Mute this bot",
       mutedHelp: "help",
       quietHours: "Quiet hours",
       quietHoursHelp: "help",
+      capabilitiesHelp: "help",
+      triggerSection: "When this bot replies",
+      triggerHelp: "help",
       from: "From",
       to: "To",
       save: "Save",
@@ -64,6 +65,13 @@ function makePolicy(overrides: Partial<ConnectorPolicy> = {}): ConnectorPolicy {
   }
 }
 
+/** The wire payload the sheet handed to the outbound queue. */
+const sentPayload = () =>
+  (enqueueMock.mock.calls[0][0] as { payload: Record<string, unknown> }).payload
+
+/** The optimistic patch the sheet applied to its own mirror. */
+const mirrorPatch = () => updateMock.mock.calls[0][1] as Record<string, unknown>
+
 beforeEach(() => {
   updateMock.mockClear()
   modifyMock.mockClear()
@@ -80,7 +88,7 @@ describe("<ConnectorPolicySheet />", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("saves without quiet hours: Dexie update, quietHours cleared, RPC enqueued with null", async () => {
+  it("saves without quiet hours: one Dexie update, RPC enqueued with an explicit null", async () => {
     const onOpenChange = jest.fn()
     const user = userEvent.setup()
     render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={onOpenChange} />)
@@ -93,27 +101,19 @@ describe("<ConnectorPolicySheet />", () => {
         expect.objectContaining({ defaultMode: "auto", muted: false })
       )
     )
-    // No quiet window → the row's stale quietHours is dropped via modify.
-    expect(modifyMock).toHaveBeenCalled()
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "adapter_update_policy",
-        payload: expect.objectContaining({ id: "ad-1", quietHours: null }),
-      })
-    )
+    // The unset now rides on the same `update` — `undefined` in a Dexie patch
+    // removes the key, so there is no second `modify` pass to keep in sync.
+    expect(modifyMock).not.toHaveBeenCalled()
+    expect(Object.keys(mirrorPatch())).toContain("quietHours")
+    expect(mirrorPatch().quietHours).toBeUndefined()
+    expect(sentPayload()).toMatchObject({ id: "ad-1", quietHours: null })
     expect(toastSuccess).toHaveBeenCalledWith("Settings saved.")
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
   it("saves a full quiet-hours window when both bounds are set", async () => {
     const user = userEvent.setup()
-    render(
-      <ConnectorPolicySheet
-        open
-        policy={makePolicy({ muted: true })}
-        onOpenChange={jest.fn()}
-      />
-    )
+    render(<ConnectorPolicySheet open policy={makePolicy({ muted: true })} onOpenChange={jest.fn()} />)
 
     fireEvent.change(screen.getByTestId("policy-quiet-from"), { target: { value: "22:00" } })
     fireEvent.change(screen.getByTestId("policy-quiet-to"), { target: { value: "07:00" } })
@@ -128,18 +128,7 @@ describe("<ConnectorPolicySheet />", () => {
         })
       )
     )
-    // The modifier still runs — it is now also what clears the bot's axis
-    // defaults — but it must leave a saved quiet-hours window alone.
-    const row: Record<string, unknown> = { quietHours: { from: "22:00", to: "07:00" } }
-    modifyMock.mock.calls.forEach(([fn]) => (fn as (r: unknown) => void)(row))
-    expect(row.quietHours).toBeDefined()
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          quietHours: expect.objectContaining({ from: "22:00", to: "07:00" }),
-        }),
-      })
-    )
+    expect(sentPayload().quietHours).toMatchObject({ from: "22:00", to: "07:00" })
   })
 
   it("persists the shared behavior fields and converts activation TTL hours", async () => {
@@ -147,13 +136,11 @@ describe("<ConnectorPolicySheet />", () => {
     render(
       <ConnectorPolicySheet
         open
-        policy={
-          makePolicy({
-            inboundActivationPolicy: "always",
-            activeRunDispatchMode: "steer",
-            activationTtlMs: 7_200_000,
-          })
-        }
+        policy={makePolicy({
+          inboundActivationPolicy: "always",
+          activeRunDispatchMode: "steer",
+          activationTtlMs: 7_200_000,
+        })}
         onOpenChange={jest.fn()}
       />
     )
@@ -173,24 +160,164 @@ describe("<ConnectorPolicySheet />", () => {
         })
       )
     )
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ activationTtlMs: 10_800_000 }),
-      })
-    )
+    expect(sentPayload().activationTtlMs).toBe(10_800_000)
   })
 
-  it("normalizes an invalid activation TTL to inherit", async () => {
+  it("normalizes an invalid activation TTL to unpinned", async () => {
     const user = userEvent.setup()
     render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
     fireEvent.change(screen.getByTestId("behavior-ttl"), { target: { value: "0" } })
     await user.click(screen.getByTestId("policy-save"))
-    await waitFor(() =>
-      expect(updateMock).toHaveBeenCalledWith(
-        "ad-1",
-        expect.objectContaining({ activationTtlMs: undefined })
+    await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+    expect(sentPayload().activationTtlMs).toBeNull()
+    expect(mirrorPatch().activationTtlMs).toBeUndefined()
+  })
+
+  describe("composition axes", () => {
+    // Every control below was already rendered by the behaviour editor this
+    // sheet mounts. None of them was seeded, captured, or relayed: the phone
+    // moved a slider, said "saved", and the bot kept routing on what it had.
+    it("seeds the axes the bot actually holds and relays them back", async () => {
+      const user = userEvent.setup()
+      render(
+        <ConnectorPolicySheet
+          open
+          policy={makePolicy({
+            defaultAutonomy: "confirm",
+            defaultEngagement: "background",
+            defaultAuthority: "acceptEdits",
+            a2uiEnabled: false,
+          })}
+          onOpenChange={jest.fn()}
+        />
       )
-    )
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      expect(sentPayload()).toMatchObject({
+        defaultAutonomy: "confirm",
+        defaultEngagement: "background",
+        defaultAuthority: "acceptEdits",
+        a2uiEnabled: false,
+      })
+    })
+
+    it("carries an unpinned axis as null, which is the only way JSON can say 'clear'", async () => {
+      const user = userEvent.setup()
+      render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      expect(sentPayload()).toMatchObject({
+        defaultAutonomy: null,
+        defaultEngagement: null,
+        defaultAuthority: null,
+        a2uiEnabled: null,
+      })
+      // …and the mirror drops the same keys, rather than keeping a value the
+      // host is about to forget.
+      expect(Object.keys(mirrorPatch())).toEqual(
+        expect.arrayContaining(["defaultAutonomy", "defaultEngagement", "defaultAuthority"])
+      )
+      expect(mirrorPatch().defaultAutonomy).toBeUndefined()
+    })
+
+    it("derives the mirror from the payload, so the two cannot disagree", async () => {
+      const user = userEvent.setup()
+      render(
+        <ConnectorPolicySheet
+          open
+          policy={makePolicy({ defaultAutonomy: "act" })}
+          onOpenChange={jest.fn()}
+        />
+      )
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      const payload = sentPayload()
+      const patch = mirrorPatch()
+      for (const [key, value] of Object.entries(payload)) {
+        if (key === "id") continue
+        expect(patch[key]).toEqual(value === null ? undefined : value)
+      }
+    })
+  })
+
+  describe("host capability ceiling", () => {
+    it("sends no clamp at all when every capability is allowed", async () => {
+      const user = userEvent.setup()
+      render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      // `[everything]` and "no ceiling" mean the same thing; storing the list
+      // would freeze the bot out of any capability added later.
+      expect(sentPayload().hostCapabilityCeiling).toBeNull()
+    })
+
+    it("clamps the capabilities the operator turned off", async () => {
+      const user = userEvent.setup()
+      render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+
+      await user.click(screen.getByTestId("policy-capability-ocr"))
+      await user.click(screen.getByTestId("policy-capability-computer_use"))
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      expect(sentPayload().hostCapabilityCeiling).toEqual(["goal_driving", "schedule_tools"])
+    })
+
+    it("seeds from a stored clamp instead of showing everything on", () => {
+      render(
+        <ConnectorPolicySheet
+          open
+          policy={makePolicy({ hostCapabilityCeiling: ["ocr"] })}
+          onOpenChange={jest.fn()}
+        />
+      )
+      expect(screen.getByTestId("policy-capability-ocr")).toBeChecked()
+      expect(screen.getByTestId("policy-capability-computer_use")).not.toBeChecked()
+    })
+  })
+
+  describe("trigger policy", () => {
+    const trigger = {
+      rules: [{ kind: "private-default" as const }],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    }
+
+    it("stays out of the payload while the operator never opens it", async () => {
+      const user = userEvent.setup()
+      render(
+        <ConnectorPolicySheet open policy={makePolicy({ trigger })} onOpenChange={jest.fn()} />
+      )
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      // Absent means "leave it". Sending one on every save would let a mirror
+      // that had not synced yet overwrite the bot's real gating with an empty
+      // policy — a bot that answers nobody.
+      expect(sentPayload()).not.toHaveProperty("trigger")
+    })
+
+    it("relays the whole policy once a rule is changed", async () => {
+      const user = userEvent.setup()
+      render(
+        <ConnectorPolicySheet open policy={makePolicy({ trigger })} onOpenChange={jest.fn()} />
+      )
+
+      await user.click(screen.getByTestId("policy-trigger-toggle"))
+      await user.click(screen.getByTestId("mobile-trigger-rule-self-mention-switch"))
+      await user.click(screen.getByTestId("policy-save"))
+
+      await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
+      expect(sentPayload().trigger).toEqual({
+        rules: [{ kind: "private-default" }, { kind: "self-mention" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      })
+    })
   })
 
   it("re-seeds the form when the sheet opens for a different adapter", async () => {
@@ -204,6 +331,7 @@ describe("<ConnectorPolicySheet />", () => {
           id: "ad-2",
           displayName: "Support Discord",
           quietHours: { from: "21:00", to: "08:00", tz: "UTC" },
+          hostCapabilityCeiling: ["ocr"],
         })}
         onOpenChange={jest.fn()}
       />
@@ -211,6 +339,7 @@ describe("<ConnectorPolicySheet />", () => {
     expect(screen.getByText("Settings for Support Discord")).toBeInTheDocument()
     expect((screen.getByTestId("policy-quiet-from") as HTMLInputElement).value).toBe("21:00")
     expect((screen.getByTestId("policy-quiet-to") as HTMLInputElement).value).toBe("08:00")
+    expect(screen.getByTestId("policy-capability-goal_driving")).not.toBeChecked()
   })
 
   it("surfaces a save failure as an error toast and keeps the sheet open", async () => {
@@ -223,22 +352,5 @@ describe("<ConnectorPolicySheet />", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Save failed: boom"))
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
-  })
-
-  // Routing prefers the composition axes, so a `defaultAutonomy` pinned in
-  // desktop settings would otherwise outrank whatever mode this sheet saves.
-  it("clears the bot's axis defaults when a mode is saved", async () => {
-    const user = userEvent.setup()
-    render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
-    await user.click(screen.getByTestId("policy-save"))
-
-    await waitFor(() => expect(modifyMock).toHaveBeenCalled())
-    const row: Record<string, unknown> = {
-      defaultAutonomy: "observe",
-      defaultEngagement: "human",
-    }
-    modifyMock.mock.calls.forEach(([fn]) => (fn as (r: unknown) => void)(row))
-    expect(row.defaultAutonomy).toBeUndefined()
-    expect(row.defaultEngagement).toBeUndefined()
   })
 })

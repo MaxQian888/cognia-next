@@ -15760,18 +15760,19 @@
       }
     },
     "connectorPolicy": {
+      "capabilitiesHelp": "这是上限而非授权——打开之后，仍需每个会话各自允许。",
       "defaultMode": "默认模式",
       "defaultModeHelp": "Auto：AI 自动回复；Draft：起草草稿等你确认；Manual：完全手动。",
-      "description": "选择此会话如何处理收到的消息。",
+      "description": "这个机器人在它所在的每个会话里的行为。",
       "from": "起始",
-      "listDescription": "按连接器设置回复模式、静音与免打扰时段。",
+      "listDescription": "按机器人设置回复行为、静音、免打扰时段与入站门槛。",
       "listTitle": "回复策略",
       "modeAuto": "自动",
       "modeDraft": "草稿",
       "modeManual": "手动",
-      "muted": "静音此会话",
+      "muted": "静音此机器人",
       "mutedBadge": "已静音",
-      "mutedHelp": "仍能收到消息，但不会自动回复。",
+      "mutedHelp": "仍然收得到消息，但所有对外回复都会被拦下。",
       "queueLabel": "已排队——桌面上线后会同步。",
       "quietHours": "免打扰时段",
       "quietHoursHelp": "此时段内不发出自动回复。",
@@ -15779,8 +15780,10 @@
       "saveFailed": "保存失败：{message}",
       "saved": "已保存。",
       "saving": "保存中…",
-      "title": "会话设置",
-      "to": "结束"
+      "title": "{name} 设置",
+      "to": "结束",
+      "triggerHelp": "不动它，宿主就保留现有的入站门槛。",
+      "triggerSection": "何时回复"
     },
     "conversation": {
       "autoScroll": "流式时自动滚动",

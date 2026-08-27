@@ -105,12 +105,12 @@ no route to.
 `connectorControlReach` (`lib/connectors/control-reach.ts`) is what the
 settings controls gate on, and its three blocks are the three real answers:
 
-| Host | Inbox writes | Credentials | Other connector controls | What the screen says |
-| --- | --- | --- | --- | --- |
-| Desktop | local | local | yes | nothing — everything works |
-| Cloud / mobile companion | relayed | leased | no | `runs-on-host` — the bot runs on the paired host; replying, per-conversation settings and credential editing keep working here |
-| Standalone browser / unpaired phone | refused | no | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
-| Headless | local | local | yes (no UI today) | — |
+| Host | Inbox writes | Bot policy | Credentials | Other connector controls | What the screen says |
+| --- | --- | --- | --- | --- | --- |
+| Desktop | local | local | local | yes | nothing — everything works |
+| Cloud / mobile companion | relayed | relayed | leased | no | `runs-on-host` — the bot runs on the paired host; replying, per-conversation settings, bot policy and credential editing keep working here |
+| Standalone browser / unpaired phone | refused | refused | no | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
+| Headless | local | local | local | yes (no UI today) | — |
 
 A leased credential read is not silent, and since ADR-0153 it is not
 self-granted either. The lease covers all four operations at once and lasts
@@ -126,6 +126,43 @@ Three controls answer `needs-desktop-shell` on every host but the desktop,
 including headless: the cloudflared child process, personal-WeChat QR login and
 Matrix password login need the desktop process itself, not a reachable runtime.
 See [ADR-0152](../../adr/0152-connector-controls-name-their-host).
+
+## Bot policy is a fifth relayed write
+
+`adapter_update_policy` is `target: client`: the paired host applies it against
+its own Dexie, on the same plane the four Inbox writes ride rather than the
+`service` plane the rest of the admin surface lives on. It carries what a bot
+*does*, never how it authenticates — the composition axes, group activation and
+active-run dispatch, the A2UI tri-state, the host-capability ceiling, mute, the
+quiet-hours window, and the inbound trigger policy.
+
+Two conventions make it a patch and not a replace:
+
+- **Absent means "leave it"; `null` means "unpin it".** JSON has no `undefined`,
+  so an omitted key cannot carry a clear. That is why every optional field is
+  nullable on the wire: without it, an axis pinned once from desktop settings
+  could never be un-pinned from a phone.
+- **A malformed field is refused, not dropped.** The arm throws before writing
+  anything. A silently discarded trigger rule is a bot answering messages the
+  operator believed it would ignore.
+
+`lib/connectors/adapter-policy-relay.ts` owns both halves.
+`parseAdapterPolicyRelay` groups the payload into the same
+`AdapterConfigSection`s the desktop cards write, so a change made from a phone
+leaves the same per-section `adapter.config_changed` breadcrumbs, attributed to
+`"mobile"`. `adapterPolicyMirrorPatch` derives the client's optimistic Dexie
+patch **from the payload it is about to send**, so a mirror cannot claim a
+policy the host is not running. The mobile sheet used to build the two
+independently and they drifted in both directions: it cleared axes locally that
+the wire could not carry, and it sent activation fields the wire's
+`additionalProperties: false` rejected outright — either way the phone said
+"saved" and the next sync pull put the old values back.
+
+The trigger policy is the one field left out of the payload unless its
+disclosure was opened and something changed. A trigger rule has no id and its
+order is not meaningful, so a policy can only be replaced wholesale — and a
+relay that always sent one would let a not-yet-synced mirror overwrite a bot's
+real gating with an empty policy, which is a bot that answers nobody.
 
 ## Shells that cannot write
 

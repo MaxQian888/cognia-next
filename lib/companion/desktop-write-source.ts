@@ -37,6 +37,8 @@
  *   - `desktop-write-source.workflow-api.test.ts` — the `workflow_api_*` delegation
  */
 
+import { parseAdapterPolicyRelay } from "@/lib/connectors/adapter-policy-relay"
+import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { isConnectorRuntimeOwnedHere } from "@/lib/connectors/bootstrap/install-connector-runtime"
@@ -1274,48 +1276,26 @@ async function mcpSetToolRules(payload: Record<string, unknown>): Promise<null> 
   return null
 }
 
-type ConnectorMode = "auto" | "manual" | "draft"
-
+/**
+ * Apply one bot's policy relayed from a paired client.
+ *
+ * `parseAdapterPolicyRelay` owns the wire vocabulary and the absent-vs-null
+ * distinction; this arm owns only the writing. Each section lands through
+ * `updateAdapterConfigSection`, so a change made from a phone leaves the same
+ * `adapter.config_changed` breadcrumb as the desktop card that owns those
+ * fields — attributed to `"mobile"`, the source this queue has always been
+ * spelled with (it covers every paired client, phone or not).
+ *
+ * Sections are applied in order and each is its own transaction. A malformed
+ * field throws before any of them run, so a rejected request never leaves half
+ * a policy behind; a failure *between* sections is reported to the caller with
+ * the earlier sections already committed, which is the same granularity the
+ * desktop cards have — they are separate saves there too.
+ */
 async function adapterUpdatePolicy(payload: Record<string, unknown>): Promise<null> {
-  const id = payload.id as string | undefined
-  if (!id) throw new Error("adapter_update_policy.id is required")
-
-  // Apply a per-field patch so we can distinguish "leave unchanged" from
-  // "clear" — the latter is needed for quietHours, where a missing field
-  // means "no quiet window". Dexie's `UpdateSpec` requires real types; we
-  // narrow each branch.
-  const updates: Partial<{
-    defaultMode: ConnectorMode
-    muted: boolean
-    quietHours: { from: string; to: string; tz: string }
-    updatedAt: number
-  }> = { updatedAt: Date.now() }
-  if (
-    payload.defaultMode === "auto" ||
-    payload.defaultMode === "manual" ||
-    payload.defaultMode === "draft"
-  ) {
-    updates.defaultMode = payload.defaultMode
-  }
-  if (typeof payload.muted === "boolean") updates.muted = payload.muted
-
-  const qh = payload.quietHours as { from?: unknown; to?: unknown; tz?: unknown } | null | undefined
-  if (qh && typeof qh === "object") {
-    if (typeof qh.from === "string" && typeof qh.to === "string" && typeof qh.tz === "string") {
-      updates.quietHours = { from: qh.from, to: qh.to, tz: qh.tz }
-    }
-  }
-  await getDb().adapterInstances.update(id, updates)
-  // If the caller explicitly sent `quietHours: null`, drop the existing
-  // window via a follow-up modify. Dexie's UpdateSpec rejects `null` for
-  // non-nullable fields, so we hand-roll the unset.
-  if (qh === null) {
-    await getDb()
-      .adapterInstances.where("id")
-      .equals(id)
-      .modify((row) => {
-        delete row.quietHours
-      })
+  const { id, sections } = parseAdapterPolicyRelay(payload)
+  for (const { section, patch } of sections) {
+    await updateAdapterConfigSection(id, section, patch, "mobile")
   }
   return null
 }

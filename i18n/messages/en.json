@@ -15760,18 +15760,19 @@
       }
     },
     "connectorPolicy": {
+      "capabilitiesHelp": "A ceiling, not a grant — turning one on still leaves each conversation to allow it.",
       "defaultMode": "Default mode",
       "defaultModeHelp": "Auto replies via AI. Draft requires your approval. Manual silences AI.",
-      "description": "Choose how this conversation handles incoming messages.",
+      "description": "How this bot behaves in every chat it is in.",
       "from": "From",
-      "listDescription": "Per-connector reply mode, mute, and quiet hours.",
+      "listDescription": "Per-bot reply behaviour, mute, quiet hours, and inbound gating.",
       "listTitle": "Reply policies",
       "modeAuto": "Auto",
       "modeDraft": "Draft",
       "modeManual": "Manual",
-      "muted": "Mute this conversation",
+      "muted": "Mute this bot",
       "mutedBadge": "Muted",
-      "mutedHelp": "Inbound messages still arrive; outbound replies are blocked.",
+      "mutedHelp": "Inbound messages still arrive; every outbound reply is blocked.",
       "queueLabel": "Queued — desktop will apply when online.",
       "quietHours": "Quiet hours",
       "quietHoursHelp": "Outbound replies pause during this window.",
@@ -15779,8 +15780,10 @@
       "saveFailed": "Save failed: {message}",
       "saved": "Settings saved.",
       "saving": "Saving…",
-      "title": "Conversation settings",
-      "to": "To"
+      "title": "{name} settings",
+      "to": "To",
+      "triggerHelp": "Left untouched, the host keeps the gating it already has.",
+      "triggerSection": "When this bot replies"
     },
     "conversation": {
       "autoScroll": "Auto-scroll while streaming",

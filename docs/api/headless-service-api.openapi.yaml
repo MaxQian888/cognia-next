@@ -229,6 +229,9 @@ paths:
           application/json:
             schema:
               type: object
+              description: "Relay one bot's policy from a paired client to the host that runs it. An absent key leaves the stored
+                value alone; an explicit null clears it. That distinction is why every optional axis is nullable rather
+                than merely omitted: JSON drops `undefined`, so omission cannot mean \"unpin this\"."
               required:
                 - id
               properties:
@@ -253,6 +256,244 @@ paths:
                       type: string
                     tz:
                       type: string
+                defaultAutonomy:
+                  type:
+                    - string
+                    - "null"
+                  enum:
+                    - observe
+                    - suggest
+                    - confirm
+                    - act
+                    - autopilot
+                    - null
+                defaultEngagement:
+                  type:
+                    - string
+                    - "null"
+                  enum:
+                    - inline
+                    - background
+                    - human
+                    - null
+                defaultAuthority:
+                  type:
+                    - string
+                    - "null"
+                  enum:
+                    - plan
+                    - default
+                    - acceptEdits
+                    - bypassPermissions
+                    - null
+                inboundActivationPolicy:
+                  type:
+                    - string
+                    - "null"
+                  enum:
+                    - mention_each
+                    - mention_activates
+                    - always
+                    - direct_only
+                    - null
+                activeRunDispatchMode:
+                  type:
+                    - string
+                    - "null"
+                  enum:
+                    - queue
+                    - steer
+                    - null
+                activationTtlMs:
+                  type:
+                    - integer
+                    - "null"
+                  minimum: 1
+                a2uiEnabled:
+                  type:
+                    - boolean
+                    - "null"
+                hostCapabilityCeiling:
+                  type:
+                    - array
+                    - "null"
+                  items:
+                    type: string
+                    enum:
+                      - computer_use
+                      - ocr
+                      - goal_driving
+                      - schedule_tools
+                trigger:
+                  description: Full inbound gating policy for this bot. Replaces the stored policy wholesale — the editor always sends
+                    every rule and blocker, because a per-rule patch has nothing stable to address (rules carry no id
+                    and their order is not meaningful).
+                  type: object
+                  required:
+                    - rules
+                    - blockers
+                    - storeUnmatchedInDraftMode
+                  properties:
+                    rules:
+                      type: array
+                      items:
+                        oneOf:
+                          - type: object
+                            required:
+                              - kind
+                            properties:
+                              kind:
+                                type: string
+                                const: private-default
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                            properties:
+                              kind:
+                                type: string
+                                const: self-mention
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                            properties:
+                              kind:
+                                type: string
+                                const: reply-to-bot
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - prefixes
+                            properties:
+                              kind:
+                                type: string
+                                const: slash-command
+                              prefixes:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - words
+                              - caseInsensitive
+                            properties:
+                              kind:
+                                type: string
+                                const: keyword
+                              words:
+                                type: array
+                                items:
+                                  type: string
+                              caseInsensitive:
+                                type: boolean
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - userIds
+                            properties:
+                              kind:
+                                type: string
+                                const: user-allowlist
+                              userIds:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - channelIds
+                            properties:
+                              kind:
+                                type: string
+                                const: channel-allowlist
+                              channelIds:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                    blockers:
+                      type: array
+                      items:
+                        oneOf:
+                          - type: object
+                            required:
+                              - kind
+                              - userIds
+                            properties:
+                              kind:
+                                type: string
+                                const: user-blocklist
+                              userIds:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - channelIds
+                            properties:
+                              kind:
+                                type: string
+                                const: channel-blocklist
+                              channelIds:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - words
+                            properties:
+                              kind:
+                                type: string
+                                const: keyword-blocklist
+                              words:
+                                type: array
+                                items:
+                                  type: string
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - perUserPerMin
+                              - perChannelPerMin
+                            properties:
+                              kind:
+                                type: string
+                                const: rate-limit
+                              perUserPerMin:
+                                type: integer
+                                minimum: 0
+                              perChannelPerMin:
+                                type: integer
+                                minimum: 0
+                              perTenantPerMin:
+                                type: integer
+                                minimum: 0
+                            additionalProperties: false
+                          - type: object
+                            required:
+                              - kind
+                              - secs
+                            properties:
+                              kind:
+                                type: string
+                                const: cooldown-after-bot-reply
+                              secs:
+                                type: integer
+                                minimum: 0
+                            additionalProperties: false
+                    storeUnmatchedInDraftMode:
+                      type: boolean
+                  additionalProperties: false
               additionalProperties: false
       responses:
         "200":

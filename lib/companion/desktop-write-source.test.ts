@@ -1461,13 +1461,25 @@ describe("dispatchCommand: adapter_update_policy", () => {
   const quietHours = { from: "22:00", to: "07:00", tz: "Asia/Shanghai" }
 
   beforeEach(async () => {
+    await getDb().connectorAudit.clear()
     await getDb().adapterInstances.put({
       id: "ad1",
       defaultMode: "manual",
       muted: false,
       quietHours,
+      defaultAutonomy: "observe",
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
     } as never)
   })
+
+  const auditSections = async () =>
+    (await getDb().connectorAudit.where("adapterId").equals("ad1").toArray())
+      .filter((row) => row.kind === "adapter.config_changed")
+      .map((row) => row.fields as { section: string; source: string; changedKeys: string[] })
 
   it("applies only the fields the caller actually sent", async () => {
     await dispatchCommand("adapter_update_policy", { id: "ad1", muted: true })
@@ -1476,33 +1488,123 @@ describe("dispatchCommand: adapter_update_policy", () => {
     // Untouched fields survive — this is a patch, not a replace.
     expect(row?.defaultMode).toBe("manual")
     expect(row?.quietHours).toEqual(quietHours)
+    expect(row?.defaultAutonomy).toBe("observe")
   })
 
-  it("accepts the three known modes and ignores anything else", async () => {
-    await dispatchCommand("adapter_update_policy", { id: "ad1", defaultMode: "auto" })
-    expect((await getDb().adapterInstances.get("ad1"))?.defaultMode).toBe("auto")
-
-    await dispatchCommand("adapter_update_policy", { id: "ad1", defaultMode: "chaos" })
-    expect((await getDb().adapterInstances.get("ad1"))?.defaultMode).toBe("auto")
+  it("pins the composition axes the phone now sends", async () => {
+    // These were rendered by the mobile sheet, sent, and rejected wholesale by
+    // the contract's `additionalProperties: false` — the phone showed a mode
+    // the host was never routing on.
+    await dispatchCommand("adapter_update_policy", {
+      id: "ad1",
+      defaultMode: "auto",
+      defaultAutonomy: "act",
+      defaultEngagement: "background",
+      defaultAuthority: "acceptEdits",
+      inboundActivationPolicy: "always",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 7_200_000,
+      a2uiEnabled: false,
+    })
+    const row = await getDb().adapterInstances.get("ad1")
+    expect(row).toMatchObject({
+      defaultMode: "auto",
+      defaultAutonomy: "act",
+      defaultEngagement: "background",
+      defaultAuthority: "acceptEdits",
+      inboundActivationPolicy: "always",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 7_200_000,
+      a2uiEnabled: false,
+    })
   })
 
-  it("replaces a complete quiet window and ignores a partial one", async () => {
+  it("unpins an axis on an explicit null", async () => {
+    await dispatchCommand("adapter_update_policy", { id: "ad1", defaultAutonomy: null })
+    const row = await getDb().adapterInstances.get("ad1")
+    expect(row).toBeDefined()
+    expect(row).not.toHaveProperty("defaultAutonomy")
+  })
+
+  it("replaces the trigger policy wholesale", async () => {
+    const trigger = {
+      rules: [
+        { kind: "self-mention" },
+        { kind: "keyword", words: ["ship"], caseInsensitive: true },
+      ],
+      blockers: [{ kind: "cooldown-after-bot-reply", secs: 45 }],
+      storeUnmatchedInDraftMode: true,
+    }
+    await dispatchCommand("adapter_update_policy", { id: "ad1", trigger })
+    expect((await getDb().adapterInstances.get("ad1"))?.trigger).toEqual(trigger)
+  })
+
+  it("clamps and un-clamps the host capability ceiling", async () => {
+    await dispatchCommand("adapter_update_policy", { id: "ad1", hostCapabilityCeiling: ["ocr"] })
+    expect((await getDb().adapterInstances.get("ad1"))?.hostCapabilityCeiling).toEqual(["ocr"])
+
+    await dispatchCommand("adapter_update_policy", { id: "ad1", hostCapabilityCeiling: null })
+    expect(await getDb().adapterInstances.get("ad1")).not.toHaveProperty("hostCapabilityCeiling")
+  })
+
+  it("refuses an unknown mode instead of pretending it saved", async () => {
+    // The old arm dropped anything it did not recognise, so the phone reported
+    // success and the bot kept its previous mode.
+    await expect(
+      dispatchCommand("adapter_update_policy", { id: "ad1", defaultMode: "chaos" })
+    ).rejects.toThrow(/defaultMode must be/)
+    expect((await getDb().adapterInstances.get("ad1"))?.defaultMode).toBe("manual")
+  })
+
+  it("refuses a partial quiet window rather than keeping the old one silently", async () => {
     const next = { from: "23:00", to: "06:00", tz: "UTC" }
     await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: next })
     expect((await getDb().adapterInstances.get("ad1"))?.quietHours).toEqual(next)
 
-    await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: { from: "01:00" } })
+    await expect(
+      dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: { from: "01:00" } })
+    ).rejects.toThrow(/quietHours/)
     expect((await getDb().adapterInstances.get("ad1"))?.quietHours).toEqual(next)
   })
 
   it("unsets the quiet window on an explicit null", async () => {
-    // Dexie's UpdateSpec rejects `null` for a non-nullable field, so the handler
-    // hand-rolls the unset through `modify` — the distinction between "leave
-    // unchanged" (absent) and "clear" (null) is the whole point of this arm.
+    // Absent means "leave unchanged", null means "clear" — that distinction is
+    // the whole point of the arm, and `undefined` in a Dexie patch is what
+    // removes the key.
     await dispatchCommand("adapter_update_policy", { id: "ad1", quietHours: null })
     const row = await getDb().adapterInstances.get("ad1")
     expect(row).toBeDefined()
     expect(row?.quietHours).toBeUndefined()
+  })
+
+  it("leaves one audit breadcrumb per section, attributed to the relay", async () => {
+    await dispatchCommand("adapter_update_policy", {
+      id: "ad1",
+      defaultMode: "auto",
+      muted: true,
+      hostCapabilityCeiling: [],
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    })
+    const audit = await auditSections()
+    expect(audit.map((entry) => entry.section).sort()).toEqual([
+      "behavior",
+      "delivery",
+      "permissions",
+      "trigger",
+    ])
+    expect(audit.every((entry) => entry.source === "mobile")).toBe(true)
+    expect(audit.find((entry) => entry.section === "delivery")?.changedKeys).toEqual(["muted"])
+  })
+
+  it("writes nothing at all when the payload names only the id", async () => {
+    await dispatchCommand("adapter_update_policy", { id: "ad1" })
+    expect(await auditSections()).toEqual([])
+  })
+
+  it("refuses an id that names no adapter", async () => {
+    await expect(
+      dispatchCommand("adapter_update_policy", { id: "nope", muted: true })
+    ).rejects.toThrow(/Adapter instance not found/)
   })
 
   it("requires an id", async () => {
