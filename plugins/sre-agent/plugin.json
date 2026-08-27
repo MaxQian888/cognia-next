@@ -171,6 +171,9 @@
     }
   ],
   "main": "src/index.ts",
+  "dexie": {
+    "tables": [{ "name": "incidents", "schema": "&id, status, updatedAt, sessionId" }]
+  },
   "author": { "name": "cognia-next" },
   "license": "MIT",
   "minAppVersion": "0.1.0",
