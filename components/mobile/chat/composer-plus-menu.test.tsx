@@ -5,6 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ComposerPlusMenu } from "./composer-plus-menu"
+import { useChatStore } from "@/stores/chat"
 
 // Jest 30 + TS strict: jest.fn() with an explicit impl widens its type
 // so any call signature is accepted. The `(...args: unknown[])` shape lets
@@ -23,6 +24,47 @@ const selectionFeedbackMock = jest.fn(async () => ({ kind: "ok" as const }))
 jest.mock("@/lib/capacitor/haptics", () => ({
   selectionFeedback: () => selectionFeedbackMock(),
 }))
+// vaul drives its drag from real pointer events and reads transforms out of
+// `getComputedStyle`, which jsdom does not provide — a `userEvent` click on
+// anything inside the sheet dies in vaul's own `onPointerUp`. Flatten the
+// primitives: the sheet mechanics belong to `components/ui/drawer`, this suite
+// is about what the menu offers. (Same pattern as attach-menu.test.tsx's
+// Popover mock.) `onCloseAutoFocus` is dropped rather than spread — it is not a
+// DOM attribute.
+// Controllable registry reads. Both are module-level maps seeded by their own
+// module load, so `requireActual` + a spy on the one function keeps every other
+// consumer in the graph untouched.
+const availableDocsMock = jest.fn((): unknown[] => [])
+jest.mock("@/lib/docs-providers/registry", () => ({
+  ...jest.requireActual<typeof import("@/lib/docs-providers/registry")>(
+    "@/lib/docs-providers/registry"
+  ),
+  listAvailableDocsProviders: () => availableDocsMock(),
+}))
+const chatCapabilitiesMock = jest.fn((): unknown[] => [])
+jest.mock("@/lib/external-services/catalog", () => ({
+  ...jest.requireActual<typeof import("@/lib/external-services/catalog")>(
+    "@/lib/external-services/catalog"
+  ),
+  listExternalCapabilities: () => chatCapabilitiesMock(),
+}))
+
+jest.mock("@/components/ui/drawer", () => ({
+  Drawer: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
+    open ? <>{children}</> : null,
+  DrawerContent: ({
+    children,
+    onCloseAutoFocus: _onCloseAutoFocus,
+    ...rest
+  }: {
+    children: React.ReactNode
+    onCloseAutoFocus?: (e: Event) => void
+  } & React.HTMLAttributes<HTMLDivElement>) => <div {...rest}>{children}</div>,
+  DrawerHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DrawerTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+  DrawerDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+}))
+
 jest.mock("@/lib/capacitor/_shared", () => ({
   makeDefaultLoader: () => async () => {
     throw new Error("voice-recorder unavailable in tests")
@@ -52,6 +94,19 @@ jest.mock("next-intl", () => ({
       unsupported: "Unsupported.",
       permissionDeniedCamera: "Camera permission required.",
       permissionDeniedMic: "Mic permission required.",
+      sheetDescription: "Sheet description",
+      // Shared with the desktop menu (`chat.composer.attachMenu`). The mock is
+      // namespace-agnostic, so one flat map covers both `useTranslations` calls.
+      attachGroup: "Attach",
+      turnGroup: "This turn",
+      extendGroup: "Extend",
+      cloudDocs: "Cloud document",
+      records: "Reference a record",
+      planMode: "Plan mode",
+      goal: "Set a goal",
+      slashCommands: "Slash commands",
+      externalServices: "External services",
+      issue: "Issue",
     }
     return map[key] ?? key
   },
@@ -62,6 +117,9 @@ beforeEach(() => {
   pickMultipleMock.mockReset()
   showToastMock.mockReset().mockResolvedValue({ kind: "ok" })
   selectionFeedbackMock.mockReset().mockResolvedValue({ kind: "ok" })
+  availableDocsMock.mockReset().mockReturnValue([])
+  chatCapabilitiesMock.mockReset().mockReturnValue([])
+  useChatStore.getState().setPermissionMode(null)
 })
 
 describe("<ComposerPlusMenu />", () => {
@@ -292,60 +350,97 @@ describe("<ComposerPlusMenu />", () => {
   })
 })
 
-describe("attachmentToFiles", () => {
-  // jsdom has no fetch for data: URLs — stub it to return a Blob-shaped
-  // response like the browser/WebView would.
-  const realFetch = globalThis.fetch
-  beforeEach(() => {
-    globalThis.fetch = jest.fn(async () => ({
-      blob: async () => new Blob(["img-bytes"], { type: "image/png" }),
-    })) as unknown as typeof fetch
-  })
-  afterEach(() => {
-    globalThis.fetch = realFetch
+describe("<ComposerPlusMenu /> groups", () => {
+  async function openMenu(props: Partial<React.ComponentProps<typeof ComposerPlusMenu>> = {}) {
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={jest.fn()} showVoice={false} {...props} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    return user
+  }
+
+  it("groups the sheet into attach / this turn / extend", async () => {
+    await openMenu({ onInsert: jest.fn() })
+    expect(screen.getByText("Attach")).toBeInTheDocument()
+    expect(screen.getByText("This turn")).toBeInTheDocument()
+    expect(screen.getByText("Extend")).toBeInTheDocument()
   })
 
-  it("passes file/files payloads through untouched", async () => {
-    const { attachmentToFiles } = await import("./composer-plus-menu")
-    const file = new File(["x"], "a.txt", { type: "text/plain" })
-    expect(await attachmentToFiles({ kind: "file", file })).toEqual([file])
-    expect(await attachmentToFiles({ kind: "files", files: [file] })).toEqual([file])
+  it("hides every typing entry when onInsert is absent", async () => {
+    await openMenu()
+    expect(screen.queryByTestId("composer-plus-records")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("composer-plus-goal")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("composer-plus-slash")).not.toBeInTheDocument()
+    // Plan mode writes the store directly, so it survives without a way to type.
+    expect(screen.getByTestId("composer-plus-plan-mode")).toBeInTheDocument()
   })
 
-  it("converts a base64 photo into a typed File", async () => {
-    const { attachmentToFiles } = await import("./composer-plus-menu")
-    const files = await attachmentToFiles({ kind: "photo", base64: "AAAA", mime: "image/png" })
-    expect(files).toHaveLength(1)
-    expect(files[0]!.type).toBe("image/png")
-    expect(files[0]!.name).toMatch(/^photo-\d+\.png$/)
+  it("hides cloud documents on a host with no available provider", async () => {
+    await openMenu({ onInsert: jest.fn() })
+    expect(availableDocsMock).toHaveBeenCalled()
+    expect(screen.queryByTestId("composer-plus-cloud-docs")).not.toBeInTheDocument()
   })
 
-  it("returns [] for a photo with neither base64 nor uri", async () => {
-    const { attachmentToFiles } = await import("./composer-plus-menu")
-    expect(await attachmentToFiles({ kind: "photo", mime: "image/jpeg" })).toEqual([])
+  it("drills into cloud documents and types the provider prefix", async () => {
+    availableDocsMock.mockReturnValue([{ id: "lark", mentionPrefix: "lark:" }])
+    const onInsert = jest.fn()
+    const user = await openMenu({ onInsert })
+    await user.click(screen.getByTestId("composer-plus-cloud-docs"))
+    await user.click(screen.getByTestId("composer-plus-docs-lark"))
+    expect(onInsert).toHaveBeenCalledWith("@lark:")
+    // ...and the sheet closed behind it, so the panel it opened is visible.
+    expect(screen.queryByTestId("composer-plus-menu")).not.toBeInTheDocument()
   })
 
-  it("converts an album multi-pick into one File per item", async () => {
-    const { attachmentToFiles } = await import("./composer-plus-menu")
-    const files = await attachmentToFiles({
-      kind: "photos",
-      items: [
-        { uri: "blob:1", mime: "image/jpeg" },
-        { uri: "blob:2", mime: "image/png" },
-      ],
-    })
-    expect(files.map((f) => f.type)).toEqual(["image/jpeg", "image/png"])
+  it("drills into records, goes back, then types an entity prefix", async () => {
+    const onInsert = jest.fn()
+    const user = await openMenu({ onInsert })
+    await user.click(screen.getByTestId("composer-plus-records"))
+    expect(screen.getByTestId("composer-plus-record-issue")).toBeInTheDocument()
+    // The grid is gone while drilled in — one panel at a time.
+    expect(screen.queryByTestId("composer-plus-camera")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("composer-plus-back"))
+    expect(screen.getByTestId("composer-plus-camera")).toBeInTheDocument()
+    await user.click(screen.getByTestId("composer-plus-records"))
+    await user.click(screen.getByTestId("composer-plus-record-issue"))
+    expect(onInsert).toHaveBeenCalledWith("@issue:")
   })
 
-  it("converts a voice recording into an audio File", async () => {
-    const { attachmentToFiles } = await import("./composer-plus-menu")
-    const files = await attachmentToFiles({
-      kind: "voice",
-      recordingDataUrl: "data:audio/aac;base64,AAAA",
-      mimeType: "audio/aac",
-    })
-    expect(files).toHaveLength(1)
-    expect(files[0]!.name).toMatch(/^voice-\d+\.aac$/)
-    expect(files[0]!.type).toBe("audio/aac")
+  it("reopens on the root panel after drilling in and closing", async () => {
+    const user = await openMenu({ onInsert: jest.fn() })
+    await user.click(screen.getByTestId("composer-plus-records"))
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    expect(screen.getByTestId("composer-plus-camera")).toBeInTheDocument()
+  })
+
+  it("toggles the session permission mode from the plan-mode row", async () => {
+    const user = await openMenu()
+    await user.click(screen.getByTestId("composer-plus-plan-mode"))
+    expect(useChatStore.getState().permissionMode).toBe("plan")
+  })
+
+  it("types the goal and slash prefixes", async () => {
+    const onInsert = jest.fn()
+    const user = await openMenu({ onInsert })
+    await user.click(screen.getByTestId("composer-plus-goal"))
+    expect(onInsert).toHaveBeenCalledWith("/goal ")
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    await user.click(screen.getByTestId("composer-plus-slash"))
+    expect(onInsert).toHaveBeenCalledWith("/")
+  })
+
+  it("shows the external-services row only with a handler AND a reachable capability", async () => {
+    chatCapabilitiesMock.mockReturnValue([{ capabilityId: "a" }])
+    await openMenu()
+    expect(screen.queryByTestId("composer-plus-services")).not.toBeInTheDocument()
+  })
+
+  it("routes the external-services row to settings", async () => {
+    chatCapabilitiesMock.mockReturnValue([{ capabilityId: "a" }, { capabilityId: "b" }])
+    const onOpenExternalServices = jest.fn()
+    const user = await openMenu({ onOpenExternalServices })
+    await user.click(screen.getByTestId("composer-plus-services"))
+    expect(onOpenExternalServices).toHaveBeenCalled()
+    expect(screen.queryByTestId("composer-plus-menu")).not.toBeInTheDocument()
   })
 })

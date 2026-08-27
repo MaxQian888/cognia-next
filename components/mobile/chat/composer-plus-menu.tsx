@@ -1,9 +1,34 @@
 "use client"
 
 /**
- * Mobile chat composer Plus menu (Wave 2.6).
+ * Mobile chat composer `+` menu.
  *
- * Surfaces the four attachment paths used in mobile chat:
+ * Same three groups as the desktop `ComposerAttachMenu` — ADD (what goes into
+ * this message), THIS TURN (how the turn runs), EXTEND (what else can be
+ * reached) — but not the same surface, because a phone is not a small desktop:
+ *
+ *   - It is a bottom DRAWER, not a popover anchored above the composer. On a
+ *     phone the composer is usually sitting on top of the software keyboard,
+ *     which leaves a couple of hundred pixels above it; a popover with three
+ *     groups in it would be squeezed or flipped. A drawer anchors to the
+ *     viewport, takes focus (so the keyboard steps aside on its own), gets
+ *     swipe-to-dismiss for free, and — via `useBackDismiss` — closes on the
+ *     Android hardware back button instead of navigating away.
+ *   - The media pickers stay a TILE GRID (the WeChat/Telegram idiom: big,
+ *     thumb-sized, glanceable) while everything else is a full-width row. Two
+ *     affordances, because the two halves are different kinds of action: one
+ *     produces an attachment, the other changes what the turn can do.
+ *   - Every row clears the 44pt touch floor (`touch-target`), and the sheet
+ *     pads itself past the home indicator.
+ *
+ * What is NOT here, and why: folder references, screen capture and the smart
+ * snapshot need a real filesystem/desktop screen, and the skill recorder is
+ * native desktop automation. Cloud documents are not special-cased at all —
+ * `listAvailableDocsProviders()` filters by host, so the built-in `hosts:
+ * ["tauri"]` providers drop out on their own and a mobile-capable provider
+ * would appear here the day one is registered.
+ *
+ * Attachment branches (unchanged):
  *
  *   - Camera   → `lib/capacitor/camera.ts:pickPhoto({ source: "camera" })`
  *   - Album    → `lib/capacitor/camera.ts:pickMultiplePhotos`
@@ -20,23 +45,49 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CameraIcon, FileIcon, ImageIcon, MicIcon, PaperclipIcon, XIcon } from "lucide-react"
+import {
+  AtSignIcon,
+  CameraIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloudIcon,
+  FileIcon,
+  ImageIcon,
+  LightbulbIcon,
+  MicIcon,
+  PlugIcon,
+  PlusIcon,
+  SlashIcon,
+  TargetIcon,
+  XIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+} from "@/components/ui/drawer"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
+import { useChatStore, useComposerPermissionMode } from "@/stores/chat"
+import { useComposerSessionId } from "@/components/chat/composer/composer-session-context"
+import { listAvailableDocsProviders } from "@/lib/docs-providers/registry"
+import { listEntityMentionSources } from "@/lib/chat/mentions/entity-sources"
+import { listExternalCapabilities } from "@/lib/external-services/catalog"
 import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
 import { makeDefaultLoader, withPlugin } from "@/lib/capacitor/_shared"
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
+import {
+  packPhotoAsSendContent,
+  packUriAsImageBlock,
+  packFileAsImageBlock,
+  type ComposerAttachment,
+} from "./composer-attachment"
 import { cn } from "@/lib/utils"
-
-export type ComposerAttachment =
-  | { kind: "photo"; base64?: string; uri?: string; mime: string }
-  | { kind: "photos"; items: Array<{ uri: string; mime: string }> }
-  | { kind: "file"; file: File }
-  | { kind: "files"; files: File[] }
-  | { kind: "voice"; recordingDataUrl: string; mimeType: string; durationMs?: number }
 
 export interface ComposerPlusMenuProps {
   /**
@@ -72,8 +123,27 @@ export interface ComposerPlusMenuProps {
   fileAccept?: string
   /** Turn capabilities colocated under the same `+` trigger. */
   capabilities?: React.ReactNode
+  /**
+   * Type something into the composer on the user's behalf.
+   *
+   * Same contract as the desktop menu: `@lark:`, `@issue:`, `/goal ` and `/`
+   * already open their own panels from the composer's trigger detection (which
+   * runs on mobile too — `ComposerPopover` is only overridden for `@file` /
+   * `@agent`), so the menu puts the user in front of that panel instead of
+   * reimplementing it. Absent ⇒ those entries hide.
+   */
+  onInsert?: (text: string) => void
+  /**
+   * Open the external-services settings. The menu only COUNTS what this turn
+   * can reach — a service capability is an agent-facing tool with no per-turn
+   * action to offer — and sends the user where it can be changed.
+   */
+  onOpenExternalServices?: () => void
   className?: string
 }
+
+/** Which panel the sheet is showing. One level of drill-down, in place. */
+type MenuView = "root" | "docs" | "records"
 
 interface VoiceRecorderShape {
   requestAudioRecordingPermission(): Promise<{ value: boolean }>
@@ -96,14 +166,47 @@ export function ComposerPlusMenu({
   showVoice = true,
   fileAccept,
   capabilities,
+  onInsert,
+  onOpenExternalServices,
   className,
 }: ComposerPlusMenuProps) {
   const t = useTranslations("mobile.composerPlus")
+  const tMenu = useTranslations("chat.composer.attachMenu")
+  const tEntities = useTranslations("chat.composer.popover.entityKinds")
+  const tDocs = useTranslations("docsProviders")
   const [open, setOpen] = useState(false)
+  const [view, setView] = useState<MenuView>("root")
   const [recording, setRecording] = useState(false)
+  const setPermissionMode = useChatStore((s) => s.setPermissionMode)
+  const composerSessionId = useComposerSessionId()
+  // THIS composer's conversation, matching the `setPermissionMode` write below.
+  // The store-level `permissionMode` mirrors the ACTIVE session, which is not
+  // necessarily the one this sheet was opened over.
+  const permissionMode = useComposerPermissionMode(composerSessionId)
+
+  // Read at render, not at module load: all three registries are populated by
+  // initializers and by plugins, so a snapshot taken once would leave a sheet
+  // that never grows a provider the user just connected. `listAvailable…` is
+  // the host-filtered read — see the header note on cloud documents.
+  const docsProviders = listAvailableDocsProviders()
+  const entitySources = listEntityMentionSources()
+  const chatServices = listExternalCapabilities({ surface: "chat" })
+
+  useBackDismiss(open, () => closeMenu())
+
+  /** Close, and put the sheet back on the root for the next open. */
+  function closeMenu() {
+    setOpen(false)
+    setView("root")
+  }
+
+  const insertAndClose = (text: string) => {
+    closeMenu()
+    onInsert?.(text)
+  }
 
   const onCamera = async () => {
-    setOpen(false)
+    closeMenu()
     void selectionFeedback()
     const result = await pickPhoto({ source: "camera", resultType: "base64" })
     if (result.kind === "captured") {
@@ -133,7 +236,7 @@ export function ComposerPlusMenu({
   }
 
   const onAlbum = async () => {
-    setOpen(false)
+    closeMenu()
     void selectionFeedback()
     const result = await pickMultiplePhotos({ limit: 9 })
     if (result.kind === "picked") {
@@ -173,7 +276,7 @@ export function ComposerPlusMenu({
         }
       }
     }
-    setOpen(false)
+    closeMenu()
     e.target.value = "" // reset so the same files can be chosen again
   }
 
@@ -209,7 +312,7 @@ export function ComposerPlusMenu({
   const onVoiceStop = async () => {
     const result = await withPlugin(voiceLoader, async (rec) => rec.stopRecording())
     setRecording(false)
-    setOpen(false)
+    closeMenu()
     if (result && "kind" in result && (result.kind === "unsupported" || result.kind === "error")) {
       onError?.("error", t("voiceStopFailed"))
       return
@@ -226,201 +329,328 @@ export function ComposerPlusMenu({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <div className={cn(className)}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("toggleAria")}
-            className="touch-target rounded-full text-muted-foreground"
-            data-testid="composer-plus-toggle"
-          >
-            {open ? <XIcon /> : <PaperclipIcon />}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          side="top"
-          align="start"
-          sideOffset={8}
+    <div className={cn(className)}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={t("toggleAria")}
+        aria-expanded={open}
+        onClick={() => (open ? closeMenu() : setOpen(true))}
+        className="touch-target rounded-pill text-muted-foreground"
+        data-testid="composer-plus-toggle"
+      >
+        {open ? <XIcon /> : <PlusIcon />}
+      </Button>
+      <Drawer
+        open={open}
+        onOpenChange={(next) => {
+          if (next) setOpen(true)
+          else closeMenu()
+        }}
+      >
+        <DrawerContent
           role="menu"
           data-testid="composer-plus-menu"
-          className="grid w-64 grid-cols-3 gap-2 rounded-xl border border-border bg-background p-3 shadow-lg"
+          // The sheet's whole job is to hand focus back to the message: a row
+          // that types `@issue:` is useless if closing the sheet then yanks
+          // focus to the trigger and drops the caret (and, on iOS, the
+          // keyboard) the panel needs.
+          onCloseAutoFocus={(e) => e.preventDefault()}
         >
-          <PlusItem
-            icon={<CameraIcon className="size-5" />}
-            label={t("camera")}
-            onSelect={onCamera}
-            testId="composer-plus-camera"
-          />
-          <PlusItem
-            icon={<ImageIcon className="size-5" />}
-            label={t("album")}
-            onSelect={onAlbum}
-            testId="composer-plus-album"
-          />
-          <label
-            className="flex flex-col items-center gap-1 rounded-md p-2 text-center text-xs active:bg-muted/60"
-            data-testid="composer-plus-file"
-          >
-            <FileIcon className="size-5" />
-            <span>{t("file")}</span>
-            <input
-              type="file"
-              multiple
-              accept={fileAccept}
-              className="sr-only"
-              onChange={onFilePicked}
-              data-testid="composer-plus-file-input"
-            />
-          </label>
-          {!showVoice ? null : recording ? (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => void onVoiceStop()}
-              className="col-span-3 gap-2 text-xs"
-              data-testid="composer-plus-voice-stop"
-            >
-              <MicIcon className="animate-pulse" />
-              <span>{t("voiceStop")}</span>
-            </Button>
-          ) : (
-            <PlusItem
-              icon={<MicIcon className="size-5" />}
-              label={t("voice")}
-              onSelect={() => void onVoiceStart()}
-              testId="composer-plus-voice"
-            />
-          )}
-          {capabilities ? (
-            <div className="col-span-3 flex flex-wrap items-center gap-2 border-t border-border pt-2">
-              {capabilities}
-            </div>
-          ) : null}
-        </PopoverContent>
-      </div>
-    </Popover>
+          <DrawerHeader className="sr-only">
+            <DrawerTitle>{t("toggleAria")}</DrawerTitle>
+            <DrawerDescription>{t("sheetDescription")}</DrawerDescription>
+          </DrawerHeader>
+          {/* `min-h-0` is load-bearing: `DrawerContent` is a flex column capped at
+              85vh, and a flex child defaults to `min-height:auto`, which refuses to
+              shrink below its content. Without it the sheet does not scroll — it
+              simply clips the last group off the bottom of the screen.
+
+              The bottom gutter is 24px BEFORE the safe-area inset: the last row
+              is a 44pt tap target, and on a phone with no inset to inherit
+              (Android, a pre-notch iPhone) a 16px gutter put it inside the
+              reach of the OS gesture bar. */}
+          <div className="min-h-0 overflow-y-auto px-2 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+            {view === "docs" ? (
+              <SubPanel title={tMenu("cloudDocs")} onBack={() => setView("root")}>
+                {docsProviders.map((provider) => (
+                  <PlusRow
+                    key={provider.id}
+                    icon={<CloudIcon className="size-4" />}
+                    // Keyed by provider id so a newly registered provider needs
+                    // one message, not a branch here; `registry-i18n.test.ts`
+                    // pins the catalogue against the registry because
+                    // `lint:i18n` cannot follow a template key.
+                    label={tDocs(`name.${provider.id}` as "name.lark")}
+                    onSelect={() => insertAndClose(`@${provider.mentionPrefix}`)}
+                    testId={`composer-plus-docs-${provider.id}`}
+                  />
+                ))}
+              </SubPanel>
+            ) : view === "records" ? (
+              <SubPanel title={tMenu("records")} onBack={() => setView("root")}>
+                {entitySources.map((source) => (
+                  <PlusRow
+                    key={source.entityKind}
+                    icon={<AtSignIcon className="size-4" />}
+                    label={tEntities(source.entityKind as "issue")}
+                    onSelect={() => insertAndClose(`@${source.prefix}`)}
+                    testId={`composer-plus-record-${source.entityKind}`}
+                  />
+                ))}
+              </SubPanel>
+            ) : (
+              <>
+                <GroupLabel>{tMenu("attachGroup")}</GroupLabel>
+                {/* Four across is the phone idiom and the widest that keeps a
+                    one-line label at 320px — but the chat composer hides voice,
+                    and three tiles in a four-column grid read as a missing
+                    fourth rather than as three. */}
+                <div
+                  className={cn(
+                    "grid gap-1 px-1",
+                    showVoice && !recording ? "grid-cols-4" : "grid-cols-3"
+                  )}
+                >
+                  <PlusTile
+                    icon={<CameraIcon className="size-6" />}
+                    label={t("camera")}
+                    onSelect={onCamera}
+                    testId="composer-plus-camera"
+                  />
+                  <PlusTile
+                    icon={<ImageIcon className="size-6" />}
+                    label={t("album")}
+                    onSelect={onAlbum}
+                    testId="composer-plus-album"
+                  />
+                  <label
+                    className={cn(TILE_CLASS, "cursor-pointer")}
+                    data-testid="composer-plus-file"
+                  >
+                    <FileIcon className="size-6" />
+                    <span className="text-[11px] leading-tight">{t("file")}</span>
+                    <input
+                      type="file"
+                      multiple
+                      accept={fileAccept}
+                      className="sr-only"
+                      onChange={onFilePicked}
+                      data-testid="composer-plus-file-input"
+                    />
+                  </label>
+                  {showVoice && !recording ? (
+                    <PlusTile
+                      icon={<MicIcon className="size-6" />}
+                      label={t("voice")}
+                      onSelect={() => void onVoiceStart()}
+                      testId="composer-plus-voice"
+                    />
+                  ) : null}
+                </div>
+                {showVoice && recording ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => void onVoiceStop()}
+                    className="mt-2 w-full gap-2"
+                    data-testid="composer-plus-voice-stop"
+                  >
+                    <MicIcon className="animate-pulse" />
+                    <span>{t("voiceStop")}</span>
+                  </Button>
+                ) : null}
+                {/* A referenced record goes INTO the message, so it belongs to
+                    this group — it is a row rather than a tile because it opens
+                    a list instead of producing an attachment. */}
+                {onInsert && docsProviders.length > 0 ? (
+                  <PlusRow
+                    icon={<CloudIcon className="size-4" />}
+                    label={tMenu("cloudDocs")}
+                    onSelect={() => setView("docs")}
+                    chevron
+                    testId="composer-plus-cloud-docs"
+                  />
+                ) : null}
+                {onInsert && entitySources.length > 0 ? (
+                  <PlusRow
+                    icon={<AtSignIcon className="size-4" />}
+                    label={tMenu("records")}
+                    onSelect={() => setView("records")}
+                    chevron
+                    testId="composer-plus-records"
+                  />
+                ) : null}
+
+                <GroupLabel className="mt-2 border-t border-border pt-3">
+                  {tMenu("turnGroup")}
+                </GroupLabel>
+                <PlusRow
+                  icon={<LightbulbIcon className="size-4" />}
+                  label={tMenu("planMode")}
+                  active={permissionMode === "plan"}
+                  onSelect={() => {
+                    setPermissionMode(
+                      permissionMode === "plan" ? "default" : "plan",
+                      composerSessionId
+                    )
+                    closeMenu()
+                  }}
+                  testId="composer-plus-plan-mode"
+                />
+                {onInsert ? (
+                  <PlusRow
+                    icon={<TargetIcon className="size-4" />}
+                    label={tMenu("goal")}
+                    onSelect={() => insertAndClose("/goal ")}
+                    testId="composer-plus-goal"
+                  />
+                ) : null}
+                {capabilities ? (
+                  <div className="flex flex-wrap items-center gap-2 px-2 py-2">{capabilities}</div>
+                ) : null}
+
+                <GroupLabel className="mt-2 border-t border-border pt-3">
+                  {tMenu("extendGroup")}
+                </GroupLabel>
+                {onInsert ? (
+                  <PlusRow
+                    icon={<SlashIcon className="size-4" />}
+                    label={tMenu("slashCommands")}
+                    onSelect={() => insertAndClose("/")}
+                    testId="composer-plus-slash"
+                  />
+                ) : null}
+                {onOpenExternalServices && chatServices.length > 0 ? (
+                  <PlusRow
+                    icon={<PlugIcon className="size-4" />}
+                    label={tMenu("externalServices", { count: chatServices.length })}
+                    onSelect={() => {
+                      closeMenu()
+                      onOpenExternalServices()
+                    }}
+                    testId="composer-plus-services"
+                  />
+                ) : null}
+              </>
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    </div>
   )
 }
 
-interface PlusItemProps {
+/** 44pt floor on both axes — every row and tile in the sheet is thumb-sized. */
+const TILE_CLASS =
+  "flex min-h-[4.25rem] flex-col items-center justify-center gap-1.5 rounded-panel p-2 text-center text-[11px] font-normal leading-tight active:bg-muted/60"
+
+const ROW_CLASS =
+  "touch-target flex w-full items-center gap-3 rounded-control px-2 text-left text-sm active:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
+
+function GroupLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p
+      className={cn(
+        "px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
+        className
+      )}
+    >
+      {children}
+    </p>
+  )
+}
+
+/**
+ * A drill-down panel: one back row, then the submenu's own items. The back row
+ * is a full-width button so the way out is also the largest target — the same
+ * reason the root entries are rows rather than a header with a chevron in it.
+ */
+function SubPanel({
+  title,
+  onBack,
+  children,
+}: {
+  title: string
+  onBack: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onBack}
+        className={cn(ROW_CLASS, "font-medium")}
+        data-testid="composer-plus-back"
+      >
+        <ChevronLeftIcon className="size-4 text-muted-foreground" />
+        <span className="flex-1">{title}</span>
+      </button>
+      <div className="mt-1 border-t border-border pt-1">{children}</div>
+    </>
+  )
+}
+
+function PlusTile({
+  icon,
+  label,
+  onSelect,
+  testId,
+}: {
   icon: React.ReactNode
   label: string
   onSelect: () => void
   testId?: string
-}
-
-function PlusItem({ icon, label, onSelect, testId }: PlusItemProps) {
+}) {
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
       role="menuitem"
       onClick={onSelect}
       data-testid={testId}
-      className="h-auto flex-col items-center gap-1 p-2 text-center text-xs font-normal"
+      className={TILE_CLASS}
     >
       {icon}
       <span>{label}</span>
-    </Button>
+    </button>
   )
 }
 
-// ---------------------------------------------------------------------------
-// SendContent packing helpers (Mobile completeness Phase 2.5)
-//
-// `SendContent` already accepts an `image` block with inline base64
-// (`{ type: "image", source: { type: "base64", data, media_type } }`), so
-// no new RPC is required. These helpers translate the camera / album /
-// file results into that shape so the chat composer can ship the image
-// through `onSend`'s normal path (`claude_send` → SDK image block).
-// ---------------------------------------------------------------------------
-
-export function packPhotoAsSendContent(base64: string, mime: string): SendContentBlock[] {
-  return [
-    {
-      type: "image",
-      source: { type: "base64", media_type: mime, data: base64 },
-    },
-  ]
+function PlusRow({
+  icon,
+  label,
+  onSelect,
+  active,
+  chevron,
+  testId,
+}: {
+  icon: React.ReactNode
+  label: string
+  onSelect: () => void
+  active?: boolean
+  /** Renders the "opens a submenu" affordance. */
+  chevron?: boolean
+  testId?: string
+}) {
+  // A row that carries state is a checkable menu item, not a pressed button:
+  // `aria-pressed` is not defined for `menuitem`, so a screen reader would read
+  // "Plan mode" with no indication that it is on.
+  const checkable = active !== undefined
+  return (
+    <button
+      type="button"
+      role={checkable ? "menuitemcheckbox" : "menuitem"}
+      aria-checked={checkable ? active : undefined}
+      onClick={onSelect}
+      data-testid={testId}
+      className={ROW_CLASS}
+    >
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="flex-1 truncate">{label}</span>
+      {active ? <span aria-hidden className="size-1.5 rounded-full bg-primary" /> : null}
+      {chevron ? <ChevronRightIcon aria-hidden className="size-4 text-muted-foreground" /> : null}
+    </button>
+  )
 }
 
-async function packUriAsImageBlock(item: {
-  uri: string
-  mime: string
-}): Promise<SendContentBlock | null> {
-  if (typeof fetch !== "function") return null
-  const response = await fetch(item.uri)
-  const blob = await response.blob()
-  const data = await blobToBase64(blob)
-  if (!data) return null
-  return {
-    type: "image",
-    source: { type: "base64", media_type: item.mime, data },
-  }
-}
-
-async function packFileAsImageBlock(file: File): Promise<SendContentBlock | null> {
-  const data = await blobToBase64(file)
-  if (!data) return null
-  return {
-    type: "image",
-    source: { type: "base64", media_type: file.type || "image/jpeg", data },
-  }
-}
-
-/**
- * Fold a plus-menu attachment into plain `File`s so hosts with a file-based
- * attachment pipeline (the shared chat composer's `acceptFiles`) can reuse
- * their existing size/count/type gates instead of growing a parallel path.
- * Voice payloads become an audio File; hosts that can't send audio should
- * hide the branch via `showVoice={false}` rather than dropping it here.
- */
-export async function attachmentToFiles(attachment: ComposerAttachment): Promise<File[]> {
-  switch (attachment.kind) {
-    case "file":
-      return [attachment.file]
-    case "files":
-      return attachment.files
-    case "photo": {
-      const source = attachment.base64
-        ? `data:${attachment.mime};base64,${attachment.base64}`
-        : attachment.uri
-      if (!source) return []
-      const blob = await (await fetch(source)).blob()
-      const ext = attachment.mime.split("/")[1] ?? "jpeg"
-      return [new File([blob], `photo-${Date.now()}.${ext}`, { type: attachment.mime })]
-    }
-    case "photos": {
-      const files = await Promise.all(
-        attachment.items.map(async (item, i) => {
-          const blob = await (await fetch(item.uri)).blob()
-          const ext = item.mime.split("/")[1] ?? "jpeg"
-          return new File([blob], `photo-${Date.now()}-${i}.${ext}`, { type: item.mime })
-        })
-      )
-      return files
-    }
-    case "voice": {
-      const blob = await (await fetch(attachment.recordingDataUrl)).blob()
-      const ext = attachment.mimeType.includes("aac") ? "aac" : "webm"
-      return [new File([blob], `voice-${Date.now()}.${ext}`, { type: attachment.mimeType })]
-    }
-  }
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = typeof reader.result === "string" ? reader.result : ""
-      const base64 = url.includes(",") ? (url.split(",")[1] ?? "") : url
-      resolve(base64)
-    }
-    reader.onerror = () => reject(reader.error ?? new Error("blob read failed"))
-    reader.readAsDataURL(blob)
-  })
-}
