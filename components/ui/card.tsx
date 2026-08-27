@@ -14,6 +14,12 @@ import { cn } from "@/lib/utils"
  * `rounded-xl` did. The settings-panel fork now clears the tier by setting the
  * variable rather than by painting `bg-transparent` over it — a variable never
  * has to win a specificity fight against the background utility.
+ *
+ * It does still have to beat the tier rule that assigned it, though, and
+ * `[data-surface-layer="raised"]` is unlayered in `globals.css` while this
+ * utility is not. `[data-settings-panel] [data-slot="card"]` there restates the
+ * clear unlayered; without it this class is inert and settings sections render
+ * as tinted blocks. Keep the two together.
  */
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
