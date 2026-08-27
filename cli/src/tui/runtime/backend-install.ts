@@ -16,9 +16,11 @@
  *    streams its output, with the same enriched PATH the resolver uses so
  *    `npm` / `brew` / `curl` are found even from a minimal environment.
  *
- * Agents still run through `npx` (Gemini, Qwen, the Codex ACP shim, Pi) fetch
- * on demand. Claude's adapter is intentionally installed once: making every
- * chat startup depend on npm/DNS left the UI stuck at "Starting agent".
+ * Agents still run through `npx` (Gemini, Qwen, the Codex ACP shim) fetch on
+ * demand. Claude's adapter is intentionally installed once: making every chat
+ * startup depend on npm/DNS left the UI stuck at "Starting agent". Pi launches
+ * a bare `pi`, so it needs a plan of its own rather than inheriting the `npx`
+ * one.
  */
 import { spawn as nodeSpawn } from "node:child_process"
 import readline from "node:readline"
@@ -142,6 +144,18 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
     name: "GitHub Copilot CLI",
     methods: [npm("npm", "@github/copilot")],
     docsUrl: "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server",
+  },
+  pi: {
+    // Pi's own certified floor is 0.84.1 (ADR-0119), but the plan installs the
+    // current release rather than pinning it: the preset rejects anything
+    // BELOW the floor and merely marks anything above as unverified, so a pin
+    // would freeze users onto an older build than the one Cognia will happily
+    // run.
+    command: "pi",
+    runtimeId: "pi",
+    name: "Pi",
+    methods: [npm("npm", "@earendil-works/pi-coding-agent")],
+    docsUrl: "https://pi.dev/docs/latest/rpc",
   },
   opencode: {
     command: "opencode",

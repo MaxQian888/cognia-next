@@ -10,7 +10,7 @@ import { chmodSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { spawn as spawnPty, type IDisposable, type IPty } from "node-pty"
+import type { IDisposable, IPty } from "node-pty"
 
 import { agentInvoke, agentListen } from "./host-branch"
 
@@ -203,6 +203,7 @@ export async function acpTerminalCreate(
 ): Promise<string> {
   assertPtyHost()
   ensurePtyHelperExecutable()
+  const { spawn: spawnPty } = await import("node-pty")
   const defaultOutputByteLimit = normalizeByteLimit(outputByteLimit)
   const inheritedEnv = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)

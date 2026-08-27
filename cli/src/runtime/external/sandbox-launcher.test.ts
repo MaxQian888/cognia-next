@@ -98,10 +98,10 @@ describe("external-agent sandbox launcher", () => {
   it.each([
     ["npx", ["-y", "@google/gemini-cli", "--acp"], ".gemini"],
     ["npx", ["-y", "@qwen-code/qwen-code", "--acp"], ".qwen"],
-    ["npx", ["-y", "pi-acp"], ".pi"],
-    // Native Pi spawns the `pi` binary directly, not through the npx bridge,
-    // so it needs its own arm of `agentStateWritableRoots` — without it Pi
-    // cannot read its own credentials or write its session files.
+    // Pi spawns its own binary; the `npx -y pi-acp` bridge that used to appear
+    // here was removed with its runtime. `agentStateWritableRoots` matches Pi
+    // on the BASE command — without this arm Pi cannot read its own
+    // credentials or write its session files.
     ["pi", ["--mode", "rpc"], ".pi"],
     ["copilot", ["--acp"], ".copilot"],
     ["kiro-cli", ["acp"], ".kiro"],

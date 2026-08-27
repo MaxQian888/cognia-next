@@ -228,7 +228,6 @@ describe("NodeExternalAgentBackend", () => {
     ["npx", ["-y", "@agentclientprotocol/claude-agent-acp"]],
     ["npx", ["-y", "@google/gemini-cli", "--acp"]],
     ["npx", ["-y", "@qwen-code/qwen-code", "--acp"]],
-    ["npx", ["-y", "pi-acp"]],
     ["pi", ["--mode", "rpc"]],
     ["copilot", ["--acp"]],
     ["kiro-cli", ["acp"]],

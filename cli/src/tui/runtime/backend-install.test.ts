@@ -2,7 +2,7 @@
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
-import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
+import { EXTERNAL_AGENT_RUNTIMES, findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
 
 import {
   INSTALL_PLANS,
@@ -230,6 +230,41 @@ describe("catalog reconciliation", () => {
     const unbound = Object.values(INSTALL_PLANS).filter((plan) => !plan.runtimeId)
     // Node provides `npx`; it is a prerequisite, not an agent runtime.
     expect(unbound.map((plan) => plan.command)).toEqual(["npx"])
+  })
+
+  it("offers an install plan for every runtime that launches its own binary", () => {
+    // The direction that matters, and the one that was missing: catalog -> plans.
+    // The two existing reconciliation tests both walk plans -> catalog, so a
+    // runtime with NO plan at all was invisible to them. That is exactly how
+    // native Pi shipped with `resolveInstallPlan("pi") === undefined`, leaving
+    // a missing `pi` with neither an install offer nor a docs link.
+    //
+    // `npx` runtimes are excluded on purpose: they resolve themselves on every
+    // start, so the only thing to install is Node, which has its own entry.
+    const ownBinary = EXTERNAL_AGENT_RUNTIMES.filter(
+      (entry) => entry.systemCommand && entry.systemCommand !== "npx"
+    )
+    // Guard the walk itself: an empty catalog read would make the assertion
+    // below pass while checking nothing.
+    expect(ownBinary.length).toBeGreaterThanOrEqual(8)
+
+    const uncovered = ownBinary
+      .filter((entry) => !INSTALL_PLANS[entry.systemCommand as string])
+      .map((entry) => `${entry.runtimeId} (${entry.systemCommand})`)
+    expect(uncovered).toEqual([])
+  })
+
+  it("points each plan at the runtime that actually launches its command", () => {
+    // A plan may be docs-only, but it must not claim a runtime whose
+    // `systemCommand` is something else — that would install the wrong binary.
+    const mismatched = Object.values(INSTALL_PLANS)
+      .filter((plan) => plan.runtimeId)
+      .filter((plan) => {
+        const entry = findRuntimeById(plan.runtimeId as string)
+        return entry ? entry.systemCommand !== plan.command : false
+      })
+      .map((plan) => `${plan.command} -> ${plan.runtimeId}`)
+    expect(mismatched).toEqual([])
   })
 
   it("marks every global install method as user-managed", () => {

@@ -76,8 +76,7 @@ const BINARY_ALLOWLIST = new Set([
   "copilot",
   "kiro-cli",
   "droid",
-  // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119). The
-  // `pi-acp` npx bridge below stays for the legacy compatibility preset.
+  // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
   "pi",
 ])
 const NPX_ALLOWLIST = new Set([
@@ -87,7 +86,6 @@ const NPX_ALLOWLIST = new Set([
   "@anthropic-ai/claude-code",
   "@google/gemini-cli",
   "@qwen-code/qwen-code",
-  "pi-acp",
   "opencode-ai",
 ])
 const CONFIG_ENV_KEYS = new Set([
