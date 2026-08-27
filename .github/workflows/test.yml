@@ -497,6 +497,73 @@ jobs:
           # CPU trying to recompress the archive.
           compression-level: 0
 
+  # The browser extension's own lane. A separate job rather than a row in the
+  # `e2e` matrix above, because it shares none of that job's setup: it needs no
+  # static export, no dev server and no mock fleet — it needs `wxt build` and a
+  # full Chromium, and it launches its own persistent context per test. Wiring
+  # it into the matrix would make a 15-second suite wait on `build-e2e` and
+  # then download an export it never opens.
+  e2e-browser-extension:
+    name: E2E browser extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # `chromium`, not `chromium-headless-shell`. The fixture launches with
+      # `channel: "chromium"` because the headless shell has no extension
+      # support at all, and the failure mode is a context that simply never
+      # reports a service worker.
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cached browsers)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+
+      # Runs in full on pull requests too, unlike the sharded suite above: the
+      # whole lane is ~15s, so there is nothing to gain by tagging a subset and
+      # a regression caught here is one that ships to a store.
+      - name: Run the browser extension E2E lane
+        run: pnpm run test:e2e:browser-ext
+        env:
+          CI: "true"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-browser-extension-report
+          path: playwright-report/
+          retention-days: 7
+
   e2e-report:
     name: E2E Merged Report
     runs-on: ubuntu-latest

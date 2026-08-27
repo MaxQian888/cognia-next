@@ -44,6 +44,17 @@ const crossBrowserEnabled = process.env.PLAYWRIGHT_CROSS_BROWSER === "1"
 const staticMode = process.env.PLAYWRIGHT_STATIC === "1"
 const isCI = Boolean(process.env.CI)
 
+// The three directories no ordinary web project may pick up. `browser-extension`
+// joins tauri and mobile because its specs launch their OWN browser — a
+// persistent context with `--load-extension`, which only Chromium supports —
+// so running them under the firefox/webkit projects would start a browser that
+// is then ignored and assert against one that was never configured.
+const WEB_PROJECT_IGNORE = [
+  "**/tests/e2e/tauri/**",
+  "**/tests/e2e/mobile/**",
+  "**/tests/e2e/browser-extension/**",
+]
+
 export default defineConfig({
   testDir: "./tests/e2e",
   // Visual baselines are generated from the same checked-in web fonts and
@@ -130,19 +141,19 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+      testIgnore: WEB_PROJECT_IGNORE,
     },
     ...(crossBrowserEnabled
       ? [
           {
             name: "firefox",
             use: { ...devices["Desktop Firefox"] },
-            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+            testIgnore: WEB_PROJECT_IGNORE,
           },
           {
             name: "webkit",
             use: { ...devices["Desktop Safari"] },
-            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+            testIgnore: WEB_PROJECT_IGNORE,
           },
         ]
       : []),
@@ -169,6 +180,21 @@ export default defineConfig({
           },
         ]
       : []),
+    // Browser Companion extension — a real Chrome MV3 extension in a real
+    // Chromium. Its fixture overrides `context` with
+    // `chromium.launchPersistentContext(--load-extension)`, so this project
+    // contributes the test directory and the budget and nothing else: the
+    // `use` block below would be ignored. It needs `browser-extension/build/`
+    // to exist; `pnpm browser-ext:e2e` builds first, and the fixture fails
+    // with that instruction rather than with a missing-file stack.
+    {
+      name: "browser-extension",
+      testDir: "./tests/e2e/browser-extension",
+      // Each test launches its own Chromium and copies a ~400 KB profile, on
+      // top of the app boot every other project pays. Measured at 3-6s per
+      // test; the budget is the shared 60s.
+      timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
+    },
     // Tauri project — runs IPC-bound flows against a real Tauri shell
     // over WebView2 CDP. The per-test fixture in `tests/e2e/tauri/fixtures.ts`
     // calls `chromium.connectOverCDP(process.env.PLAYWRIGHT_TAURI_CDP_WS)`

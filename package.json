@@ -289,6 +289,7 @@
     "test:db-fixture:candidates": "node scripts/test/audit-db-fixtures.mjs --list-candidates",
     "test:e2e": "playwright test",
     "test:e2e:build": "cross-env NEXT_PUBLIC_E2E=1 pnpm run build",
+    "test:e2e:browser-ext": "pnpm run browser-ext:build && cross-env PLAYWRIGHT_NO_SERVER=1 PLAYWRIGHT_NO_GLOBAL_SETUP=1 playwright test --project=browser-extension",
     "test:e2e:changed": "playwright test --only-changed=origin/dev",
     "test:e2e:install": "playwright install chromium webkit",
     "test:e2e:mobile": "playwright test --project=mobile-pixel-7 tests/e2e/mobile/",

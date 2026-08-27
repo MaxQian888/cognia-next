@@ -102,6 +102,8 @@ export const EXEMPTIONS = {
   "test:evals": "eval suite — owned by test.yml",
   "cli:test": "jest project for cli/ — owned by test.yml",
   "test:e2e": "playwright — owned by test.yml",
+  "test:e2e:browser-ext":
+    "playwright browser-extension lane — owned by test.yml's e2e-browser-extension job. Not in the gate matrix: it launches a full Chromium per test with --load-extension, which the gate runner has no browser install for",
   "test:e2e:build": "playwright fixture build — owned by test.yml",
   "test:e2e:changed": "playwright dev helper — owned by test.yml",
   "test:e2e:install": "playwright browser install — setup, not a gate",
