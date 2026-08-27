@@ -375,6 +375,12 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/pet-overlay",
   "/pet-popup",
   "/plugin-auth/callback",
+  // An unauthenticated end-user portal for a published workflow app. Its API
+  // origin comes from the `?api=` query parameter, so it boots no account, no
+  // runtime target and no transport — the same category as `/status`. There is
+  // no runtime here to classify, and its reachability tracks the `?api=` host
+  // rather than this app's connection state.
+  "/portal",
   "/selection-toolbar",
   "/share-target",
   // A public, read-only document served by the lightweight route shell — it
@@ -450,6 +456,32 @@ export function resolveSurfaceAvailability(
     return contract.standalone === "read-only"
       ? { state: "read-only", reason: "operation-unavailable" }
       : { state: "available", reason: "local-executor" }
+  }
+  // Read the contract's own companion column before consulting the host.
+  //
+  // Everything below this point asks about the *host* — is the vault open, is
+  // the manifest compatible, are we online. A surface declared `companion:
+  // "full"` with `offline: "local"` answers none of those questions: it runs in
+  // this client and needs nothing else, which is exactly `/pair` and
+  // `/onboarding` — how a companion acquires a host in the first place. Gating
+  // them on having one walls off the only exits, and the remedy for
+  // `requires-pairing` is a link to `/pair` — so the page that fixes the state
+  // was refusing to render for exactly the state it fixes.
+  //
+  // `offline: "local"` is what narrows the exemption, and it has to. `companion:
+  // "full"` on its own also covers `/servers` and `/share/view`, which declare
+  // `offline: "cached-read"` precisely BECAUSE they depend on the host — the
+  // Ops Controller's credentials come out of the vault. Exempting those
+  // reported a locked vault and a dead connection as `available`, and made
+  // their own `cached-read` column unreachable. They fall through instead.
+  if (contract.companion === "hidden") {
+    return { state: "unsupported", reason: "operation-unavailable" }
+  }
+  if (contract.companion === "full" && contract.offline === "local") {
+    return { state: "available", reason: "local-executor" }
+  }
+  if (contract.companion === "read-only") {
+    return { state: "read-only", reason: "operation-unavailable" }
   }
   if (snapshot.vaultState === "locked") {
     return { state: "requires-unlock", reason: "vault-locked" }

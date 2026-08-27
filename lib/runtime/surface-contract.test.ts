@@ -3,11 +3,13 @@ import path from "node:path"
 
 import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 import type { RuntimeSnapshot } from "./operation-availability"
+import { resolveRuntimeRecovery } from "./recovery-resolver"
 import {
   SURFACE_CONTRACTS,
   getSurfaceContract,
   getSurfaceContractForRoute,
   isInternalRouteExempt,
+  resolveSurfaceAvailability,
   shouldShowSurface,
 } from "./surface-contract"
 
@@ -80,4 +82,111 @@ it("shows a host surface only when the Companion advertises the operation", () =
       host: { ...companion.host!, operations: [] },
     })
   ).toBe(false)
+})
+
+describe("resolveSurfaceAvailability reads the contract's companion column", () => {
+  const unpaired = (): RuntimeSnapshot =>
+    snapshot({
+      target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
+      vaultState: "unavailable",
+      connectionState: "connecting",
+    })
+
+  it("lets a self-contained companion-full surface render without a host", () => {
+    // These are how a companion ACQUIRES a host. Gating them on having one is a
+    // closed loop: the remedy for `requires-pairing` links to `/pair`. What
+    // earns the exemption is `offline: "local"` — needing nothing else at all.
+    for (const id of ["pair", "onboarding"]) {
+      const contract = getSurfaceContract(id)
+      expect(contract).not.toBeNull()
+      expect(contract!.companion).toBe("full")
+      expect(contract!.offline).toBe("local")
+      expect(resolveSurfaceAvailability(contract!, unpaired())).toEqual({
+        state: "available",
+        reason: "local-executor",
+      })
+    }
+  })
+
+  it("still gates a companion-full surface that declares a host dependency", () => {
+    // `companion: "full"` alone is not the question. `/servers` and
+    // `/share/view` declare `offline: "cached-read"` precisely BECAUSE they
+    // read through the host — the Ops Controller's credentials come out of the
+    // vault — so exempting them reported a locked vault and a dead connection
+    // as `available` and made their own `cached-read` column unreachable.
+    for (const id of ["servers", "share-view"]) {
+      const contract = getSurfaceContract(id)
+      expect(contract).not.toBeNull()
+      expect(contract!.companion).toBe("full")
+      expect(contract!.offline).toBe("cached-read")
+      expect(resolveSurfaceAvailability(contract!, unpaired())).toEqual({
+        state: "requires-pairing",
+        reason: "companion-not-paired",
+      })
+      expect(
+        resolveSurfaceAvailability(
+          contract!,
+          snapshot({
+            target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
+            vaultState: "locked",
+          })
+        )
+      ).toEqual({ state: "requires-unlock", reason: "vault-locked" })
+      // And the column they declare is reachable again.
+      expect(
+        resolveSurfaceAvailability(
+          contract!,
+          snapshot({
+            target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
+            connectionState: "offline",
+          })
+        )
+      ).toEqual({ state: "read-only", reason: "offline-cache" })
+    }
+  })
+
+  it("still walls off a companion-remote surface when there is no pairing", () => {
+    const chat = getSurfaceContract("chat")!
+    expect(chat.companion).toBe("remote")
+    expect(resolveSurfaceAvailability(chat, unpaired())).toEqual({
+      state: "requires-pairing",
+      reason: "companion-not-paired",
+    })
+  })
+
+  it("still walls off a companion-remote surface when the vault is locked", () => {
+    const chat = getSurfaceContract("chat")!
+    expect(resolveSurfaceAvailability(chat, { ...unpaired(), vaultState: "locked" })).toEqual({
+      state: "requires-unlock",
+      reason: "vault-locked",
+    })
+  })
+
+  it("keeps a companion-full surface reachable through a locked vault too", () => {
+    const pair = getSurfaceContract("pair")!
+    expect(resolveSurfaceAvailability(pair, { ...unpaired(), vaultState: "locked" })).toEqual({
+      state: "available",
+      reason: "local-executor",
+    })
+  })
+})
+
+it("closes the pairing loop instead of pointing at a page that refuses to render", () => {
+  // The remedy for `requires-pairing` is a link to /pair. Before the companion
+  // column was read, /pair resolved to `requires-pairing` itself, so the only
+  // exit refused to render for exactly the state it exists to fix.
+  const unpaired: RuntimeSnapshot = snapshot({
+    target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
+    vaultState: "unavailable",
+    connectionState: "connecting",
+  })
+
+  const chat = resolveSurfaceAvailability(getSurfaceContract("chat")!, unpaired)
+  expect(chat.state).toBe("requires-pairing")
+
+  const recovery = resolveRuntimeRecovery(chat, "web")
+  expect(recovery).toEqual({ kind: "route", href: "/pair?mode=add" })
+
+  // …and the page that link leads to actually renders.
+  expect(resolveSurfaceAvailability(getSurfaceContract("pair")!, unpaired).state).toBe("available")
 })

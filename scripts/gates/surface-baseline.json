@@ -360,7 +360,6 @@
   "components/settings/shortcuts/unified-shortcuts-section.tsx": 1,
   "components/settings/subscription/add-account-dialog/anthropic.tsx": 1,
   "components/settings/subscription/import-export-buttons.tsx": 1,
-  "components/settings/system/crash-log-settings.tsx": 1,
   "components/settings/tray-section.tsx": 3,
   "components/settings/webhooks/webhooks-section.tsx": 1,
   "components/settings/workspace-trust/workspace-trust-section.tsx": 1,
