@@ -2,7 +2,7 @@
 import { createChromeBrowserApi } from "./chrome-browser-api"
 
 interface ChromeStub {
-  tabs: { query: jest.Mock; create: jest.Mock }
+  tabs: { query: jest.Mock; create: jest.Mock; get: jest.Mock }
   scripting: { executeScript: jest.Mock }
   storage: { local: { get: jest.Mock; set: jest.Mock; remove: jest.Mock } }
   permissions: { contains: jest.Mock; request: jest.Mock }
@@ -15,6 +15,7 @@ function stub(): ChromeStub {
     tabs: {
       query: jest.fn(async () => [{ id: 7, url: "https://example.com/a", title: "A" }]),
       create: jest.fn(async () => undefined),
+      get: jest.fn(async (id: number) => ({ id, url: "https://example.com/b", title: "B" })),
     },
     scripting: { executeScript: jest.fn(async () => [{ result: { title: "A" } }]) },
     storage: {
@@ -43,6 +44,18 @@ describe("createChromeBrowserApi", () => {
     // A tab with no URL is one the extension has no `activeTab` grant for.
     chromeStub.tabs.query.mockResolvedValueOnce([])
     expect(await api.activeTab()).toBeNull()
+  })
+
+  it("resolves a tab by id, and treats a closed one as absent", async () => {
+    const chromeStub = stub()
+    const api = createChromeBrowserApi()
+    expect(await api.tabById(7)).toEqual({ id: 7, url: "https://example.com/b", title: "B" })
+
+    // `chrome.tabs.get` REJECTS for a tab that has closed rather than
+    // resolving null, and a closed tab is ordinary here: a recorded capture
+    // request may be up to a minute old.
+    chromeStub.tabs.get.mockRejectedValueOnce(new Error("No tab with id: 7."))
+    expect(await api.tabById(7)).toBeNull()
   })
 
   it("injects the extractor by value into exactly one tab", async () => {

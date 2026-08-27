@@ -25,6 +25,15 @@ export function createChromeBrowserApi(): BrowserApi {
       return { id: tab.id, url: tab.url, title: tab.title ?? "" }
     },
 
+    async tabById(id): Promise<TabRef | null> {
+      // `chrome.tabs.get` rejects rather than resolving null for a tab that
+      // has closed, and a closed tab is an ordinary outcome here: the request
+      // may have been recorded up to a minute ago.
+      const tab = await chrome.tabs.get(id).catch(() => null)
+      if (!tab?.id || !tab.url) return null
+      return { id: tab.id, url: tab.url, title: tab.title ?? "" }
+    },
+
     async extract(tabId, wholePage): Promise<ExtractionResult> {
       // `func` rather than `files`: the extractor is a pure function over the
       // live DOM, and injecting it by value keeps it in one module with its

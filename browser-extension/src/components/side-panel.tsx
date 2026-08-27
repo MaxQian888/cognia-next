@@ -163,10 +163,26 @@ export function SidePanel({
     }
   }, [resolveConnection])
 
+  /**
+   * Read a page and put it in the preview.
+   *
+   * `tabId` names the tab the user actually gestured on. It matters because
+   * the gesture and this call are not in the same moment: a context-menu click
+   * happens in the background worker, which records the request and opens the
+   * panel, and the panel may be starting from nothing. By then "the active
+   * tab" can be a different page — or, when the panel is a tab rather than a
+   * side panel, the panel itself. Falling back to the active tab is right only
+   * for the panel's own capture button, where the gesture *is* here.
+   */
   const runCapture = useCallback(
-    async (whole: boolean) => {
-      const tab = await api.activeTab()
-      if (!tab) return
+    async (whole: boolean, tabId?: number) => {
+      const tab = tabId === undefined ? await api.activeTab() : await api.tabById(tabId)
+      if (!tab) {
+        // A recorded request whose tab has since closed. Saying so beats
+        // silently doing nothing, which reads as the extension being broken.
+        if (tabId !== undefined) setSubmitError(api.message("captureNoGrant"))
+        return
+      }
       const decision = normalizeCaptureUrl(tab.url, includeFullUrl)
       if (!decision.ok) {
         setSubmitError(api.message("captureRestricted"))
@@ -222,7 +238,7 @@ export function SidePanel({
       if (!request || cancelled) return
       await api.remove([CAPTURE_REQUEST_KEY])
       if (!isFreshCaptureRequest(request, now())) return
-      await runCapture(request.mode === "page")
+      await runCapture(request.mode === "page", request.tabId)
     })
     return () => {
       cancelled = true

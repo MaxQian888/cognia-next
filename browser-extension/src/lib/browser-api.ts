@@ -29,6 +29,14 @@ export interface ExtractionResult {
 export interface BrowserApi {
   /** The active tab, or `null` when there is none we may touch. */
   activeTab(): Promise<TabRef | null>
+  /**
+   * One tab by id, or `null` when it is gone.
+   *
+   * Separate from {@link activeTab} because a capture the background worker
+   * recorded names the tab the user gestured on, and by the time the panel
+   * opens the active tab may be a different one — or the panel itself.
+   */
+  tabById(id: number): Promise<TabRef | null>
   /** Run the extractor in `tabId` and return what it found. */
   extract(tabId: number, wholePage: boolean): Promise<ExtractionResult>
   /** Read a value from `chrome.storage.local`. */

@@ -12,6 +12,7 @@ import type {
 
 import type { BrowserApi } from "@ext/src/lib/browser-api"
 import { STORAGE_KEYS } from "@ext/src/lib/browser-api"
+import { CAPTURE_REQUEST_KEY } from "@ext/src/lib/capture/capture-request"
 import { SidePanel } from "./side-panel"
 
 const CAPABILITY: BrowserCompanionCapabilityV1 = {
@@ -57,6 +58,7 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     store,
     api: {
       activeTab: async () => ({ id: 1, url: "https://example.com/a?x=1", title: "A page" }),
+      tabById: async (id) => ({ id, url: `https://example.com/tab-${id}`, title: `Tab ${id}` }),
       extract: async () => ({
         title: "A page",
         url: "https://example.com/a?x=1",
@@ -320,5 +322,41 @@ describe("SidePanel capture and settings", () => {
     fireEvent.click(screen.getByTestId("clear-local"))
     await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearance)).toBeUndefined())
     expect(state.store.get(STORAGE_KEYS.pairing)).toBeDefined()
+  })
+
+  it("captures the tab the gesture named, not whichever is active now", async () => {
+    // The background worker records a tab id precisely because the two moments
+    // are not the same one: a context-menu click happens in the worker, which
+    // opens a panel that may be starting from nothing, and by the time it
+    // mounts the active tab can be a different page — or, when the panel is
+    // rendered as a tab, the panel itself. Re-querying the active tab throws
+    // away the only record of what the user pointed at.
+    const state = harness({
+      store: new Map<string, unknown>([
+        [STORAGE_KEYS.pairing, PAIRING],
+        [CAPTURE_REQUEST_KEY, { tabId: 42, mode: "selection", requestedAt: 1_000 }],
+      ]) as never,
+      api: {
+        activeTab: async () => ({ id: 1, url: "https://elsewhere.example/", title: "Elsewhere" }),
+      } as never,
+    })
+    renderPanel(state)
+
+    expect(await screen.findByTestId("capture-url")).toHaveTextContent("https://example.com/tab-42")
+    // And consumed, so reopening the panel does not re-read a page nobody
+    // asked about a second time.
+    await waitFor(() => expect(state.store.get(CAPTURE_REQUEST_KEY)).toBeUndefined())
+  })
+
+  it("says so when the recorded tab has closed", async () => {
+    const state = harness({
+      store: new Map<string, unknown>([
+        [STORAGE_KEYS.pairing, PAIRING],
+        [CAPTURE_REQUEST_KEY, { tabId: 42, mode: "page", requestedAt: 1_000 }],
+      ]) as never,
+      api: { tabById: async () => null } as never,
+    })
+    renderPanel(state)
+    expect(await screen.findByTestId("submit-error")).toBeInTheDocument()
   })
 })
