@@ -103,6 +103,7 @@
     "rejectAll": "全部拒绝",
     "removeSelectionAria": "移除选区 {title}",
     "selectionChipCommentLabel": "{title} · 批注",
+    "selectionChipEntityLabel": "{kind}：{title}",
     "selectionChipExternalAppLabel": "{app}",
     "selectionChipExternalLabel": "{app} · {title}",
     "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",

@@ -220,3 +220,63 @@ describe("ComposerAttachMenu", () => {
     expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
   })
 })
+
+// The rebuilt `+`: three groups, and every entry that cannot reach its target
+// hides rather than rendering dead.
+describe("ComposerAttachMenu — grouped menu", () => {
+  it("hides the typing entries when it has no way to type", () => {
+    renderMenu()
+    expect(screen.queryByText("Reference a record")).toBeNull()
+    expect(screen.queryByText("Slash commands")).toBeNull()
+    expect(screen.queryByText("Set a goal")).toBeNull()
+  })
+
+  it("offers the namespace entries once it can type", () => {
+    const onInsert = jest.fn()
+    render(
+      <TooltipProvider>
+        <ComposerAttachMenu onPickFiles={jest.fn()} onInsert={onInsert} />
+      </TooltipProvider>
+    )
+    expect(screen.getByText("This turn")).toBeInTheDocument()
+    expect(screen.getByText("Extend")).toBeInTheDocument()
+    expect(screen.getByText("Slash commands")).toBeInTheDocument()
+  })
+
+  it("seeds the composer instead of owning a picker", async () => {
+    const onInsert = jest.fn()
+    render(
+      <TooltipProvider>
+        <ComposerAttachMenu onPickFiles={jest.fn()} onInsert={onInsert} />
+      </TooltipProvider>
+    )
+    await clickLabel("Slash commands")
+    expect(onInsert).toHaveBeenCalledWith("/")
+  })
+
+  it("drills into the record namespaces in place, and back out", async () => {
+    const onInsert = jest.fn()
+    render(
+      <TooltipProvider>
+        <ComposerAttachMenu onPickFiles={jest.fn()} onInsert={onInsert} />
+      </TooltipProvider>
+    )
+    await clickLabel("Reference a record")
+    // The submenu replaced the root panel — the other groups are gone.
+    expect(screen.queryByText("This turn")).toBeNull()
+    await clickLabel("Reference a record")
+    expect(screen.getByText("This turn")).toBeInTheDocument()
+  })
+
+  it("toggles plan mode for this composer's session", async () => {
+    render(
+      <TooltipProvider>
+        <ComposerAttachMenu onPickFiles={jest.fn()} />
+      </TooltipProvider>
+    )
+    await clickLabel("Plan mode")
+    expect(useChatStore.getState().permissionMode).toBe("plan")
+    await clickLabel("Plan mode")
+    expect(useChatStore.getState().permissionMode).toBe("default")
+  })
+})

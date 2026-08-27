@@ -103,6 +103,7 @@
     "rejectAll": "Reject all",
     "removeSelectionAria": "Remove selection {title}",
     "selectionChipCommentLabel": "{title} · comment",
+    "selectionChipEntityLabel": "{kind}: {title}",
     "selectionChipExternalAppLabel": "{app}",
     "selectionChipExternalLabel": "{app} · {title}",
     "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",

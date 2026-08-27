@@ -173,6 +173,41 @@ export interface PluginSelectionRef extends ContextSelectionBase {
 }
 
 /**
+ * A first-party Cognia record the user pointed at from the composer's `@` menu
+ * — a memory, an issue, a plan, another conversation, an artifact.
+ *
+ * ONE variant for all of them, with the noun in `entityKind`, and that is a
+ * deliberate departure from the "one variant per kind" rule the union follows
+ * elsewhere. The rule earns its keep when each kind carries different FIELDS
+ * (a range, a url, a candidate id). These carry the same three — which record,
+ * what it is called, where to open it — and differ only in the noun, so five
+ * near-identical variants would buy five copies of the same switch arm rather
+ * than a single compile error worth having. The noun still drives the chip icon
+ * and the prompt heading through a table keyed on `entityKind`, so adding one
+ * is a table entry that the exhaustiveness test names.
+ *
+ * NOT the same thing as {@link PluginSelectionRef}: that one exists because the
+ * host cannot know a plugin's vocabulary. These nouns ARE the host's vocabulary.
+ */
+export interface EntitySelectionRef extends ContextSelectionBase {
+  kind: "entity"
+  entityKind: EntitySelectionKind
+  /** The record's own id — memory id, issue id, plan id, session id, artifact id. */
+  entityId: string
+  /**
+   * How the record reads to a human beyond its title, e.g. an issue's
+   * `COG-14 · in_progress`. Shown on the chip's second line, never in the
+   * prompt (the heading already names the kind).
+   */
+  subtitle?: string
+  /** In-app route the chip links back to, when the kind has one. */
+  href?: string
+}
+
+/** The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@artifact:` reach. */
+export type EntitySelectionKind = "memory" | "issue" | "plan" | "session" | "artifact"
+
+/**
  * Anything the user can stage as context for their next message.
  *
  * A discriminated union rather than four parallel staging arrays: the composer
@@ -188,6 +223,7 @@ export type ContextSelectionRef =
   | WebSelectionRef
   | ExternalSelectionRef
   | PluginSelectionRef
+  | EntitySelectionRef
 
 export interface ArtifactWorkspaceState {
   scope: ArtifactWorkspaceScope

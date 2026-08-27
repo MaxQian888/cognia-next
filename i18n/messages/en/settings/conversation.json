@@ -197,6 +197,7 @@
     "title": "Composer style",
     "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
     "skinLabel": "Style",
+    "followsPack": "Following the active style pack. Pick a style to pin your own.",
     "adjustLabel": "Adjust",
     "adjustHint": "Fine-tune the chosen style. Mobile keeps its minimum touch targets whatever you set here.",
     "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
@@ -213,8 +214,8 @@
     },
     "skins": {
       "classic": {
-        "label": "Classic (current look)",
-        "hint": "The composer as it is today. This is the default and stays untouched."
+        "label": "Classic",
+        "hint": "The composer as it was before styles existed. It takes no adjustments."
       },
       "airy": {
         "label": "Airy",

@@ -1,7 +1,14 @@
 {
+  "assistanceModel": {
+    "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
+    "heading": "Assistance model",
+    "model": "Model",
+    "provider": "Provider",
+    "useDefault": "Use chat default"
+  },
   "description": "LLM help for writing your messages — enhancement, inline completion, and suggestions.",
   "enhance": {
-    "hint": "Rewrite or vary your draft with a model from the composer toolbar.",
+    "hint": "Rewrite or vary your draft with a model, from the wand in the message box.",
     "label": "Prompt enhancement"
   },
   "followUps": {
@@ -14,8 +21,8 @@
     "label": "Inline autocomplete"
   },
   "ghostTextLocal": {
-    "label": "Local suggestions only",
-    "hint": "Complete from your own history and commands without calling a model."
+    "hint": "Complete from your own history and commands without calling a model.",
+    "label": "Local suggestions only"
   },
   "starters": {
     "hint": "Suggest opening prompts on the empty chat screen.",

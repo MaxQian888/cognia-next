@@ -5,9 +5,17 @@
 // and `.skinOverrides` through the settings store `save`, live (same pattern as
 // `appearance/components/density-card.tsx`).
 //
-// `classic` is presented as "the current look", not as one option among five
-// equals — it is the default, it is what every existing user is already seeing,
-// and it deliberately takes no adjustments.
+// Which skin is the DEFAULT is the active style pack's call, not this card's
+// (ADR-0148): Soft and Studio default to `classic`, Sharp defaults to `sharp`.
+// So the card has to resolve the same way the box does — `composerBehavior.skin`
+// if the user pinned one, otherwise the pack's — or it reports a look nobody is
+// looking at. It used to fall straight back to `DEFAULT_COMPOSER_SKIN`, which
+// under the Sharp pack meant the picker said "Classic", the hint said "the
+// composer as it is today", and the Adjust group sat greyed out claiming classic
+// takes no adjustments — all while the composer rendered a squared-off `sharp`
+// box that DOES take them. Hence `packSkin` below, and the "following the pack"
+// line: an inherited default and a pinned one look identical in the select
+// otherwise.
 
 import { useTranslations } from "next-intl"
 
@@ -25,12 +33,12 @@ import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   COMPOSER_SKIN_IDS,
-  DEFAULT_COMPOSER_SKIN,
   resolveComposerSkin,
   type ComposerSendShape,
   type ComposerSkinId,
   type ComposerSkinOverrides,
 } from "@/lib/chat/composer-skin"
+import { resolveStylePack } from "@/types/appearance/style-pack"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 type ComposerBehavior = NonNullable<AppSettings["composerBehavior"]>
@@ -43,12 +51,18 @@ export function ComposerSkinCard() {
   const save = useSettingsStore((s) => s.save)
 
   const cb: ComposerBehavior = settings?.composerBehavior ?? {}
-  const skinId: ComposerSkinId = cb.skin ?? DEFAULT_COMPOSER_SKIN
   const overrides: ComposerSkinOverrides = cb.skinOverrides ?? {}
-  const isClassic = skinId === "classic"
-  // What the box will actually render, floors and clamps included — so the
-  // preview cannot promise geometry the resolver would refuse.
-  const resolved = resolveComposerSkin(cb, { isMobile: false })
+  // Same two lines `components/chat/composer.tsx` runs before it draws the box.
+  const packSkin = resolveStylePack(settings?.stylePack).composerSkin
+  // What the box will actually render, pack default and floors and clamps
+  // included — so the preview cannot promise geometry the resolver would refuse,
+  // nor a skin the resolver would not pick.
+  const resolved = resolveComposerSkin(cb, { isMobile: false, packSkin })
+  const skinId: ComposerSkinId = resolved.id
+  const isClassic = resolved.isClassic
+  // No stored choice — or a stored id this build no longer knows — means the row
+  // belongs to the pack, and switching packs will move it.
+  const followsPack = cb.skin !== resolved.id
 
   function update(patch: Partial<ComposerBehavior>): void {
     void save({ composerBehavior: { ...cb, ...patch } })
@@ -74,6 +88,10 @@ export function ComposerSkinCard() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {/* No "· Default" marker on the pack's row: shadcn's SelectItem puts
+                its children inside Radix `ItemText`, which `SelectValue` mirrors
+                into the closed trigger, so the badge would ride along there too.
+                `followsPack` below carries that information where it matters. */}
             {COMPOSER_SKIN_IDS.map((id) => (
               <SelectItem key={id} value={id}>
                 {t(`skins.${id}.label`)}
@@ -82,6 +100,11 @@ export function ComposerSkinCard() {
           </SelectContent>
         </Select>
         <p className="text-[11px] text-muted-foreground">{t(`skins.${skinId}.hint`)}</p>
+        {followsPack ? (
+          <p className="text-[11px] text-muted-foreground" data-testid="composer-skin-follows-pack">
+            {t("followsPack")}
+          </p>
+        ) : null}
       </div>
 
       {/* Adjustments. `classic` takes none by design, so rather than hiding the

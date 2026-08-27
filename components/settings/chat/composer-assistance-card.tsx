@@ -10,6 +10,10 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import {
+  ModelOverrideFields,
+  useUtilityProviderOptions,
+} from "@/components/settings/common/model-override-fields"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 type ComposerAssistance = NonNullable<AppSettings["composerAssistance"]>
@@ -59,6 +63,7 @@ export function ComposerAssistanceCard() {
   const debounceMs = ca.ghostText?.debounceMs ?? DEFAULT_DEBOUNCE
   const startersEnabled = ca.suggestions?.starters !== false
   const followUpsEnabled = ca.suggestions?.followUps !== false
+  const providers = useUtilityProviderOptions()
 
   function update(patch: Partial<ComposerAssistance>): void {
     void save({ composerAssistance: { ...ca, ...patch } })
@@ -135,6 +140,28 @@ export function ComposerAssistanceCard() {
         checked={followUpsEnabled}
         onChange={(next) => update({ suggestions: { ...ca.suggestions, followUps: next } })}
       />
+
+      {/* `composerAssistance.model` was readable by all four helpers above and
+          writable by nobody — the one knob that lets them run on a provider
+          the renderer actually holds a key for. Same fields the conversation
+          title / timeline label configs use, so the utility overrides all
+          present alike. */}
+      <div className="space-y-3 border-t pt-4">
+        <div className="space-y-0.5">
+          <Label className="text-sm">{t("assistanceModel.heading")}</Label>
+          <p className="text-xs text-muted-foreground">{t("assistanceModel.description")}</p>
+        </div>
+        <ModelOverrideFields
+          value={ca.model}
+          providers={providers}
+          onChange={(patch) => update({ model: { ...ca.model, ...patch } })}
+          labels={{
+            provider: t("assistanceModel.provider"),
+            model: t("assistanceModel.model"),
+            useDefault: t("assistanceModel.useDefault"),
+          }}
+        />
+      </div>
     </div>
   )
 }

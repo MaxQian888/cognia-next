@@ -48,7 +48,7 @@ import { DragOverlay } from "./drag-overlay"
 import { MobileGhostAccept } from "./mobile-ghost-accept"
 import { ComposerAttachMenu } from "./attach-menu"
 import { ComposerPlusMenu } from "@/components/mobile/chat/composer-plus-menu"
-import type { ComposerAttachment } from "@/components/mobile/chat/composer-plus-menu"
+import type { ComposerAttachment } from "@/components/mobile/chat/composer-attachment"
 import type { SendButtonState } from "./send-button-mode"
 import { composerSkinVars, type ResolvedComposerSkin } from "@/lib/chat/composer-skin"
 
@@ -135,6 +135,13 @@ export interface ComposerBoxProps {
    * where the template library is not reachable anyway.
    */
   saveAsTemplate?: (() => void) | null
+  /**
+   * The prompt-enhance wand, or null when the feature is off / there is
+   * nothing to rewrite. Rendered as a third floating corner control beside
+   * the save-as-template bookmark — the caller styles the button, this box
+   * owns only where it sits and how much room the text gives up for it.
+   */
+  enhance?: ReactNode
 
   // ── inline completion ───────────────────────────────────────────────────
   ghost: { ghost: string; candidates: readonly unknown[]; index: number; dismiss: () => void }
@@ -150,6 +157,10 @@ export interface ComposerBoxProps {
   captureSmartSnapshot: (options?: { delayMs?: number; switchPrompt?: boolean }) => void
   smartSnapshotPending: boolean
   capabilityMenu: ReactNode
+  /** Type on the user's behalf — the `+` menu's namespace entries use it. */
+  onInsertText?: (text: string) => void
+  /** Route to external-services settings from the `+` menu. */
+  onOpenExternalServices?: () => void
   isDragging: boolean
   onDragEnter: (e: DragEvent<HTMLDivElement>) => void
   onDragOver: (e: DragEvent<HTMLDivElement>) => void
@@ -199,6 +210,7 @@ export function ComposerBox({
   paramState,
   preview,
   saveAsTemplate,
+  enhance,
   ghost,
   ghostSourceLabel,
   acceptGhost,
@@ -210,6 +222,8 @@ export function ComposerBox({
   captureSmartSnapshot,
   smartSnapshotPending,
   capabilityMenu,
+  onInsertText,
+  onOpenExternalServices,
   isDragging,
   onDragEnter,
   onDragOver,
@@ -243,6 +257,20 @@ export function ComposerBox({
     const ghostEl = ghostOverlayRef.current
     if (ghostEl) ghostEl.style.transform = offset
   }, [textInput.value, textareaRef, chipOverlayRef, ghostOverlayRef])
+
+  // The floating corner controls fill right-to-left from the text's trailing
+  // edge: preview toggle, then the bookmark, then the wand. Each is 24px in a
+  // 24px step, so the slots are fixed classes rather than arithmetic — and the
+  // count decides how much trailing room the text has to give up, which every
+  // layer painting that text has to agree on (see `padEndClass`).
+  const cornerSlots = ["end-1", "end-7", "end-13"] as const
+  let takenSlots = 0
+  const previewSlot = preview ? cornerSlots[takenSlots++] : null
+  const saveSlot = saveAsTemplate ? cornerSlots[takenSlots++] : null
+  const enhanceSlot = enhance ? cornerSlots[takenSlots++] : null
+  // `pe-10` is the historic reservation for one control. Two and three need
+  // their own, or the first line of the message runs under the buttons.
+  const padEndClass = takenSlots >= 3 ? "pe-20" : takenSlots === 2 ? "pe-14" : "pe-10"
 
   return (
     <div
@@ -291,6 +319,16 @@ export function ComposerBox({
       <div
         className={cn(
           "order-2 flex shrink-0 items-center gap-0.5",
+          // An in-box layout puts this cluster on its OWN line, shared with the
+          // status toolbar and the send button. Those three are 32 / 28 / 32
+          // tall, so the box's `items-end` lined up their bottoms and left the
+          // icons riding ~4px above the chip text beside them. Centre them on
+          // the line instead — its height is the tallest child either way.
+          compactLayout && "self-center",
+          // ...and pull the cluster back by the glyph's own inset (a 16px icon
+          // in a 32px button) so the "+" sits on the same left edge as the
+          // first character of the message above it (the textarea's `px-1`).
+          compactLayout && !isMobile && "-ms-1",
           !isMobile && !compactLayout && "@sm/composer:order-none"
         )}
       >
@@ -309,6 +347,8 @@ export function ComposerBox({
             onAttach={onPlusAttach}
             onError={(_code, message) => toast.error(message)}
             capabilities={capabilityMenu}
+            {...(onInsertText ? { onInsert: onInsertText } : {})}
+            {...(onOpenExternalServices ? { onOpenExternalServices } : {})}
           />
         ) : (
           // One paperclip for both attachment models: files inline, folders
@@ -320,6 +360,12 @@ export function ComposerBox({
             onSmartSnapshot={() => void captureSmartSnapshot({ delayMs: 2200, switchPrompt: true })}
             smartSnapshotPending={smartSnapshotPending}
             capabilities={capabilityMenu}
+            {...(onInsertText ? { onInsert: onInsertText } : {})}
+            {...(onOpenExternalServices ? { onOpenExternalServices } : {})}
+            // One control size for the whole action row: the voice buttons
+            // beside it are already 32, and a 36px paperclip made the left end
+            // of the row read as a different scale from everything else on it.
+            className={compactLayout ? "size-8" : undefined}
           />
         )}
 
@@ -344,7 +390,8 @@ export function ComposerBox({
               "block min-h-9 w-full break-words whitespace-pre-wrap",
               compactLayout && "min-h-14 py-1.5",
               skin.mono && "font-mono",
-              TEXTAREA_TYPOGRAPHY
+              TEXTAREA_TYPOGRAPHY,
+              padEndClass
             )}
             data-testid="composer-param-preview"
             style={{ maxHeight: `${maxHeightRem}rem`, overflowY: "auto" }}
@@ -360,6 +407,7 @@ export function ComposerBox({
           // Same family as the textarea, or the pills drift out from under the
           // glyphs on a mono skin.
           mono={skin.mono}
+          padEndClass={padEndClass}
           // The overlay IS the visible text (see the textarea below), so it has
           // to stand down whenever something else is painting the same words:
           // an IME composition (the textarea takes its glyphs back) and the
@@ -375,6 +423,7 @@ export function ComposerBox({
           // preview's substituted text.
           ghost={preview?.on ? "" : ghost.ghost}
           mono={skin.mono}
+          padEndClass={padEndClass}
           sourceLabel={ghostSourceLabel}
           // Position + cycle hint only make sense with an alternative to
           // move to, and Alt+] is unreachable on touch.
@@ -416,7 +465,8 @@ export function ComposerBox({
             !compactLayout && textInput.value.length === 0 && "h-9 overflow-hidden",
             // A skin may ask for the code font; classic never does.
             skin.mono && "font-mono",
-            TEXTAREA_TYPOGRAPHY
+            TEXTAREA_TYPOGRAPHY,
+            padEndClass
           )}
           disabled={disabled}
           name="message"
@@ -462,11 +512,10 @@ export function ComposerBox({
                 // click aimed here, and the hover never lit up either.
                 className={cn(
                   "absolute top-0 z-[3] size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground",
-                  // The corner slot belongs to the preview toggle when there is
-                  // one to show. With no parameters in the message there is no
-                  // toggle, and holding its place left the bookmark hanging one
-                  // slot in from an empty edge.
-                  preview ? "end-7" : "end-1"
+                  // Slots are claimed in order, so the bookmark only sits one
+                  // step in when there is actually a preview toggle at the edge
+                  // — holding an empty place left it hanging off nothing.
+                  saveSlot
                 )}
                 onClick={saveAsTemplate}
               >
@@ -488,7 +537,10 @@ export function ComposerBox({
                 }
                 aria-pressed={preview.on}
                 data-testid="composer-param-preview-toggle"
-                className="absolute end-1 top-0 z-[3] size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground aria-pressed:text-foreground"
+                className={cn(
+                  "absolute top-0 z-[3] size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground aria-pressed:text-foreground",
+                  previewSlot
+                )}
                 onClick={preview.toggle}
               >
                 {preview.on ? (
@@ -503,6 +555,11 @@ export function ComposerBox({
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {enhance ? (
+          <span className={cn("absolute top-0 z-[3] flex items-center", enhanceSlot)}>
+            {enhance}
+          </span>
+        ) : null}
         <CharCounter />
         <MobileGhostAccept
           visible={isMobile && !!ghost.ghost}
@@ -511,11 +568,12 @@ export function ComposerBox({
         />
       </div>
 
-      {toolbar ? <div className="order-2 min-w-0 flex-1 self-end">{toolbar}</div> : null}
+      {toolbar ? <div className="order-2 min-w-0 flex-1 self-center">{toolbar}</div> : null}
 
       <div
         className={cn(
           "order-3 ms-auto flex shrink-0 items-center",
+          compactLayout && "self-center",
           !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ms-0"
         )}
       >

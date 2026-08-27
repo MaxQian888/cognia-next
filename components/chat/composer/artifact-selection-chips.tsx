@@ -17,6 +17,7 @@
 
 import { useTranslations } from "next-intl"
 import {
+  DatabaseIcon,
   FileDiff,
   FileCodeIcon,
   GlobeIcon,
@@ -44,6 +45,7 @@ const KIND_ICONS = {
   web: GlobeIcon,
   external: ScanTextIcon,
   plugin: PuzzleIcon,
+  entity: DatabaseIcon,
 } as const
 
 /** Stable-ish identity for the React key; the index disambiguates repeats. */
@@ -61,11 +63,16 @@ function selectionKey(sel: ContextSelectionRef): string {
       return `external:${sel.candidateId}`
     case "plugin":
       return `plugin:${sel.pluginId}:${sel.ref ?? sel.title}`
+    case "entity":
+      return `entity:${sel.entityKind}:${sel.entityId}`
   }
 }
 
 export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsProps = {}) {
   const t = useTranslations("artifacts.review")
+  // The `@memory:` / `@issue:` / … nouns live with the picker's own copy, not
+  // with the review panel's — one catalogue per vocabulary.
+  const tEntity = useTranslations("chat.composer.popover.entityKinds")
   const composerSessionId = useComposerSessionId()
   // This pane's conversation, matching the `remove` / `promote` writes below —
   // and `remove` takes an INDEX, so reading a different slice than the one
@@ -122,6 +129,14 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
       case "plugin":
         return t("selectionChipPluginLabel", {
           source: sel.sourceLabel,
+          title: sel.title,
+        })
+      case "entity":
+        // The kind noun is localized (`tEntity`), the record title is not —
+        // it is the user's own text and must read back exactly as they saw it
+        // in the picker.
+        return t("selectionChipEntityLabel", {
+          kind: tEntity(sel.entityKind),
           title: sel.title,
         })
     }

@@ -25,6 +25,20 @@ type Story = StoryObj<typeof meta>
 // off, partial streaming on.
 export const Default: Story = {}
 
+// The Sharp style pack with no pinned composer skin. The picker must read
+// "Sharp", carry Sharp's geometry (radius 0), keep the Adjust knobs live, and
+// say the row is inherited — under the old fallback it claimed "Classic
+// (current look)" and greyed the knobs out while the box rendered Sharp.
+export const SharpPackDefault: Story = {
+  beforeEach: () => {
+    resetStore(useSettingsStore)
+    seedStore(useSettingsStore, {
+      loaded: true,
+      settings: makeAppSettings({ stylePack: { packId: "sharp" } }),
+    })
+  },
+}
+
 // Title generation and the timeline minimap both disabled → the nested model
 // override editors collapse.
 export const GenerationDisabled: Story = {

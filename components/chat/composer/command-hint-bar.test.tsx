@@ -110,3 +110,31 @@ describe("resolveCommandHint — past the first argument", () => {
     expect(resolveCommandHint(trigger, commandMap, value)?.command.name).toBe("review")
   })
 })
+
+describe("resolveCommandHint — mentions inside a command's arguments", () => {
+  // `@` in a command's argument region returns a MENTION trigger (that is what
+  // opens the file picker for `/review @src/a`). Standing down there dropped
+  // the hint at exactly the moment the arguments it describes were being typed.
+  it("keeps naming the command a file mention sits inside", () => {
+    const hint = hintFor("/review @src/a")
+    expect(hint?.command.name).toBe("review")
+  })
+
+  it("keeps naming it for a namespaced mention too", () => {
+    expect(hintFor("/review @issue:rac")?.command.name).toBe("review")
+  })
+
+  it("never reports missing params while a mention token is being built", () => {
+    // The caret is inside a token the user is still typing, so the arguments
+    // are demonstrably being supplied.
+    expect(hintFor("/review @")?.missingParams).toBe(false)
+  })
+
+  it("still returns null for a mention on an ordinary line", () => {
+    expect(hintFor("see @src/a")).toBeNull()
+  })
+
+  it("returns null when the named command is unknown", () => {
+    expect(hintFor("/nosuch @src/a")).toBeNull()
+  })
+})

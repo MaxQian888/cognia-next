@@ -49,6 +49,60 @@ describe("ComposerSkinCard — choosing a skin", () => {
   })
 })
 
+// The pack supplies the DEFAULT skin (ADR-0148). A card that fell back to
+// `classic` regardless reported a look nobody was seeing under Sharp — and
+// greyed out the knobs that skin actually accepts.
+describe("ComposerSkinCard — the active style pack supplies the default", () => {
+  it("reports the pack's skin, not classic, when nothing is pinned", () => {
+    mockSettings = { stylePack: { packId: "sharp" } }
+    render(<ComposerSkinCard />)
+    expect(resolvedSummary()).toContain("sharp")
+    expect(resolvedSummary()).not.toContain("classic")
+  })
+
+  it("shows the pack skin's own hint and geometry", () => {
+    mockSettings = { stylePack: { packId: "sharp" } }
+    render(<ComposerSkinCard />)
+    expect(screen.getByText("skins.sharp.hint")).toBeInTheDocument()
+    // sharp is radius 0; classic's 16 would be the old lie.
+    expect(resolvedSummary()).toContain(":0:")
+  })
+
+  it("leaves the knobs live under a non-classic pack default", () => {
+    mockSettings = { stylePack: { packId: "sharp" } }
+    render(<ComposerSkinCard />)
+    expect(screen.getByTestId("skin-radius")).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("adjustHint")).toBeInTheDocument()
+  })
+
+  it("lets an explicit choice beat the pack", () => {
+    mockSettings = { composerBehavior: { skin: "airy" }, stylePack: { packId: "sharp" } }
+    render(<ComposerSkinCard />)
+    expect(resolvedSummary()).toContain("airy")
+  })
+
+  it("says the row is inherited only while nothing is pinned", () => {
+    mockSettings = { stylePack: { packId: "sharp" } }
+    const { unmount } = render(<ComposerSkinCard />)
+    expect(screen.getByTestId("composer-skin-follows-pack")).toBeInTheDocument()
+    unmount()
+
+    mockSettings = { composerBehavior: { skin: "sharp" }, stylePack: { packId: "sharp" } }
+    render(<ComposerSkinCard />)
+    expect(screen.queryByTestId("composer-skin-follows-pack")).not.toBeInTheDocument()
+  })
+
+  it("treats a skin id this build does not know as inherited", () => {
+    mockSettings = {
+      composerBehavior: { skin: "from-the-future" as never },
+      stylePack: { packId: "sharp" },
+    }
+    render(<ComposerSkinCard />)
+    expect(resolvedSummary()).toContain("sharp")
+    expect(screen.getByTestId("composer-skin-follows-pack")).toBeInTheDocument()
+  })
+})
+
 describe("ComposerSkinCard — classic takes no adjustments", () => {
   it("disables every knob under classic", () => {
     render(<ComposerSkinCard />)
@@ -119,7 +173,18 @@ describe("ComposerSkinCard — every skin has copy", () => {
   const en = jest.requireActual("@/i18n/messages/en.json") as Record<string, never>
   const zh = jest.requireActual("@/i18n/messages/zh-CN.json") as Record<string, never>
 
-  it.each(["classic", "airy", "dense", "full", "focus"])(
+  it("has copy for the follows-the-pack line in both locales", () => {
+    for (const bundle of [en, zh]) {
+      const skin = (
+        bundle as unknown as {
+          settings: { conversation: { composerSkin: Record<string, unknown> } }
+        }
+      ).settings.conversation.composerSkin
+      expect(skin.followsPack).toEqual(expect.any(String))
+    }
+  })
+
+  it.each(["classic", "airy", "dense", "full", "focus", "sharp"])(
     "%s is translated in both locales",
     (id) => {
       for (const bundle of [en, zh]) {

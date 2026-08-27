@@ -37,7 +37,7 @@ import { showMainWindow } from "@/lib/tauri/pet-window"
 import {
   attachmentToFiles,
   type ComposerAttachment,
-} from "@/components/mobile/chat/composer-plus-menu"
+} from "@/components/mobile/chat/composer-attachment"
 
 /** Shared with the Host attachment-upload manifest so a remote client is held
  *  to the same ceiling as the desktop paperclip. */

@@ -3,8 +3,8 @@
  * message, so the assistant sees the exact material the user pointed at plus
  * their comment. Pure + framework-free for easy testing.
  *
- * Six kinds share this pipeline (artifact / file / comment / web / external /
- * plugin). Each gets
+ * Seven kinds share this pipeline (artifact / file / comment / web / external /
+ * plugin / entity). Each gets
  * its own heading so the assistant can tell a snippet it may be asked to revise
  * from a page it may only cite — the artifact heading is load-bearing for that
  * reason, not decoration.
@@ -13,6 +13,7 @@
 import type {
   ArtifactSelectionRef,
   ContextSelectionRef,
+  EntitySelectionKind,
   FileSelectionRef,
 } from "@/types/artifact/artifact"
 import type { ContextCommentAnchor } from "@/types/context-comment"
@@ -62,6 +63,24 @@ function citationLines(citation: { startLine?: number; endLine?: number }): stri
   return end > citation.startLine ? `:${citation.startLine}-${end}` : `:${citation.startLine}`
 }
 
+/**
+ * How each referenced record is NAMED to the assistant.
+ *
+ * English, like every other string in this file: it is prompt scaffolding, not
+ * UI copy, and must not follow the user's locale. The noun is load-bearing —
+ * "Conversation" tells the model the block is a transcript it may cite, where
+ * "Plan" tells it the block is work it may be asked to continue. Collapsing
+ * them into one generic heading is exactly the information the model needs to
+ * tell those two apart.
+ */
+const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
+  memory: "Stored memory",
+  issue: "Issue",
+  plan: "Plan",
+  session: "Another conversation",
+  artifact: "Artifact",
+}
+
 function headingFor(sel: ContextSelectionRef): string {
   switch (sel.kind) {
     case "artifact":
@@ -81,6 +100,8 @@ function headingFor(sel: ContextSelectionRef): string {
       const truncation = sel.truncated ? " (truncated to 20,000 characters)" : ""
       return `Selection from app "${sel.sourceApp}"${sourceTitle}${truncation}:`
     }
+    case "entity":
+      return `${ENTITY_NOUNS[sel.entityKind]} "${sel.title}"${sel.subtitle ? ` (${sel.subtitle})` : ""}:`
     case "plugin": {
       // Citations are the point of this kind: without them the assistant is
       // told some prose and cannot tell which code it describes.

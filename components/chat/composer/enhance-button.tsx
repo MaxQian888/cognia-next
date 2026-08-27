@@ -2,9 +2,10 @@
 
 // Prompt-enhancement toolbar action for the composer. A Wand button opens a
 // menu of rewrite modes (improve / concise / detailed / technical / simpler /
-// variants); picking one sends the current draft through `enhancePrompt`
-// (renderer utility LLM client + PII gate) and shows the result in a preview
-// dialog the user can apply or dismiss. This is the UI that activates the
+// variants); picking one sends the current draft through `enhancePrompt` (PII
+// gate, then the renderer utility client if a BYOK key resolves, otherwise one
+// headless turn) and shows the result in a preview dialog the user can apply
+// or dismiss. This is the UI that activates the
 // otherwise-dormant query-expansion engine (see `lib/chat/completion/enhance`).
 
 import { useCallback, useState } from "react"
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildHeadlessTurnLlmClient } from "@/lib/ai/headless-turn-llm-client"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { enhancePrompt, ENHANCE_MODES, type EnhanceMode } from "@/lib/chat/completion/enhance"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -39,6 +41,14 @@ interface EnhanceButtonProps {
   onApply: (next: string) => void
   session: ChatSession | null | undefined
   disabled?: boolean
+  /** Trigger styling — the composer hands it the box's corner-control look. */
+  className?: string
+  /**
+   * Take the user to provider settings. Wired to the "no model" toast: that
+   * message names a state with exactly one fix, and a dead-end toast made a
+   * fixable install read as a broken feature.
+   */
+  onOpenProviderSettings?: () => void
 }
 
 type Preview =
@@ -46,7 +56,14 @@ type Preview =
   | { kind: "variants"; variants: string[] }
   | null
 
-export function EnhanceButton({ value, onApply, session, disabled }: EnhanceButtonProps) {
+export function EnhanceButton({
+  value,
+  onApply,
+  session,
+  disabled,
+  className,
+  onOpenProviderSettings,
+}: EnhanceButtonProps) {
   const t = useTranslations("chat.composer.enhance")
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<Preview>(null)
@@ -55,14 +72,30 @@ export function EnhanceButton({ value, onApply, session, disabled }: EnhanceButt
     async (mode: EnhanceMode) => {
       if (busy) return
       const appSettings = useSettingsStore.getState().settings
-      const client = buildUtilityLlmClient({
-        session: session ?? null,
-        appSettings,
-        override: appSettings?.composerAssistance?.model,
-        featureId: "composer-enhance",
-      })
+      // Direct provider call first: with a BYOK key configured this is the
+      // cheap fast model (and honours the `composerAssistance.model` override).
+      // It resolves to null on the app's primary auth mode, though — a Claude
+      // subscription's bearer lives in the keyring and is never handed to the
+      // renderer — so a wand that stopped there answered "no model configured"
+      // on a fully configured install. Fall back to one headless turn over the
+      // same transport the chat uses.
+      const client =
+        buildUtilityLlmClient({
+          session: session ?? null,
+          appSettings,
+          override: appSettings?.composerAssistance?.model,
+          featureId: "composer-enhance",
+        }) ?? buildHeadlessTurnLlmClient({ session: session ?? null, label: "Prompt enhancement" })
       if (!client) {
-        toast.error(t("toast.noModel"))
+        // The action is the whole point of the message — but only when the
+        // caller gave us somewhere to send them.
+        if (onOpenProviderSettings) {
+          toast.error(t("toast.noModel"), {
+            action: { label: t("toast.openSettings"), onClick: onOpenProviderSettings },
+          })
+        } else {
+          toast.error(t("toast.noModel"))
+        }
         return
       }
       setBusy(true)
@@ -87,7 +120,7 @@ export function EnhanceButton({ value, onApply, session, disabled }: EnhanceButt
         setBusy(false)
       }
     },
-    [busy, session, value, t]
+    [busy, session, value, t, onOpenProviderSettings]
   )
 
   const apply = useCallback(
@@ -109,7 +142,7 @@ export function EnhanceButton({ value, onApply, session, disabled }: EnhanceButt
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-7"
+                className={cn("size-7", className)}
                 disabled={disabled || busy}
                 aria-label={t("trigger")}
                 data-testid="composer-enhance-trigger"

@@ -34,7 +34,19 @@ export function resolveCommandHint(
   commandMap: ReadonlyMap<string, SlashCommand>,
   value: string
 ): { command: SlashCommand; missingParams: boolean } | null {
-  if (!trigger || trigger.kind !== "slash") return null
+  if (!trigger) return null
+  // A mention inside this command's argument region returns a MENTION trigger
+  // (that is what opens the file picker for `/review @src/a`), which used to
+  // make the bar vanish at exactly the moment the arguments it describes were
+  // being typed. `withinCommand` names the command that mention sits inside.
+  if (trigger.kind !== "slash") {
+    if (!trigger.withinCommand) return null
+    const hostCommand = commandMap.get(trigger.withinCommand)
+    if (!hostCommand) return null
+    // Never "missing params" here: the caret is inside a token the user is
+    // still building, so the arguments are demonstrably being supplied.
+    return { command: hostCommand, missingParams: false }
+  }
   // Only once the caret has moved PAST the command word — while the name is
   // still being typed the popover itself is the affordance. Both argument
   // states qualify: inside the first argument token (`argumentStart` set) and

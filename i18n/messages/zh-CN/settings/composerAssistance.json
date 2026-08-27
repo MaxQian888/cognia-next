@@ -1,7 +1,14 @@
 {
+  "assistanceModel": {
+    "description": "这些辅助功能调用哪个模型。默认走聊天供应商上的便宜模型——如果那个供应商没存 API key，在这里另选一个。",
+    "heading": "辅助模型",
+    "model": "模型",
+    "provider": "供应商",
+    "useDefault": "跟随聊天默认"
+  },
   "description": "用 LLM 帮你撰写消息——润色、行内补全与建议。",
   "enhance": {
-    "hint": "在 composer 工具栏用模型改写或生成草稿的多个版本。",
+    "hint": "用输入框里的魔杖按钮改写草稿或生成多个版本。",
     "label": "提示词润色"
   },
   "followUps": {
@@ -14,8 +21,8 @@
     "label": "行内自动补全"
   },
   "ghostTextLocal": {
-    "label": "仅本地建议",
-    "hint": "只用你自己的历史记录和命令补全，不调用模型。"
+    "hint": "只用你自己的历史记录和命令补全，不调用模型。",
+    "label": "仅本地建议"
   },
   "starters": {
     "hint": "在空聊天页推荐起始提示。",

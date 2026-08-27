@@ -380,7 +380,7 @@ function GenericBottomToolbar({
     return (
       <div
         ref={rootRef}
-        className="flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground"
+        className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-muted-foreground"
         data-testid="composer-toolbar-embedded"
         data-toolbar-layout="folded"
       >
@@ -389,7 +389,7 @@ function GenericBottomToolbar({
           disabled={isStreaming}
           className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
         />
-        {foldedOverflow}
+        <span className="ml-auto flex shrink-0 items-center pl-2">{foldedOverflow}</span>
       </div>
     )
   }
@@ -397,12 +397,19 @@ function GenericBottomToolbar({
   // Both narrow layouts pack the tail into "⋯"; the wide one lays it out.
   // `rail` is `embedded` in a quieter voice: same roster, same order,
   // monospace so it reads as a status line rather than a control strip.
+  //
+  // Same three zones as the wide row, for the same reason: sitting INSIDE the
+  // box this run shares its line with the attach cluster and the send button,
+  // and packing every chip against the right edge (`justify-end`) left a dead
+  // gap the width of half the composer between the "+" and the model picker,
+  // with the ambient numbers crowding the send key. Controls start where the
+  // icons end; the read-only tail is pinned right by the auto margin.
   if (layout === "embedded" || layout === "rail") {
     return (
       <div
         ref={rootRef}
         className={cn(
-          "flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground",
+          "flex min-w-0 flex-1 items-center gap-1 text-[11px] text-muted-foreground",
           layout === "rail" && "font-mono text-[10px] tracking-tight"
         )}
         data-testid="composer-toolbar-embedded"
@@ -411,9 +418,14 @@ function GenericBottomToolbar({
         {runConfigGroup}
         <ToolbarDivider />
         {runtimeControl}
-        {sessionStatus}
-        {contextIndicator}
-        {overflow}
+        <div
+          className="ml-auto flex shrink-0 items-center gap-0.5 pl-2"
+          data-testid="composer-status-cluster"
+        >
+          {sessionStatus}
+          {contextIndicator}
+          {overflow}
+        </div>
       </div>
     )
   }

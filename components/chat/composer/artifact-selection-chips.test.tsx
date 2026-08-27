@@ -233,3 +233,76 @@ describe("ArtifactSelectionChips", () => {
     expect(state.contextSelections.map((c) => c.title)).toEqual(["Focused only"])
   })
 })
+
+describe("entity chips", () => {
+  const entity = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "issue" as const,
+    entityId: "iss_1",
+    title: "Fix the broker race",
+    subtitle: "COG-14 · in_progress",
+    snapshot: "body",
+    comment: "",
+    ...over,
+  })
+
+  it("labels the chip with the localized kind noun and the record's own title", () => {
+    act(() => useChatStore.getState().addContextSelection(entity()))
+    render(
+      <ComposerSessionProvider sessionId={null}>
+        <ArtifactSelectionChips />
+      </ComposerSessionProvider>
+    )
+    // The kind is translated; the title is the user's own text and is not.
+    expect(screen.getByText(/selectionChipEntityLabel/)).toHaveTextContent("Fix the broker race")
+    expect(screen.getByText(/selectionChipEntityLabel/)).toHaveTextContent("issue")
+  })
+
+  it("renders one chip per referenced record", () => {
+    act(() => {
+      useChatStore.getState().addContextSelection(entity())
+      useChatStore
+        .getState()
+        .addContextSelection(
+          entity({ entityKind: "memory", entityId: "m1", title: "Prefers pnpm" })
+        )
+    })
+    render(
+      <ComposerSessionProvider sessionId={null}>
+        <ArtifactSelectionChips />
+      </ComposerSessionProvider>
+    )
+    expect(screen.getAllByText(/selectionChipEntityLabel/)).toHaveLength(2)
+  })
+
+  it("keeps two records of different kinds apart even when their ids collide", () => {
+    // The React key is `entity:<kind>:<id>` — ids are only unique within a kind.
+    act(() => {
+      useChatStore.getState().addContextSelection(entity({ entityKind: "issue", entityId: "x" }))
+      useChatStore.getState().addContextSelection(entity({ entityKind: "plan", entityId: "x" }))
+    })
+    render(
+      <ComposerSessionProvider sessionId={null}>
+        <ArtifactSelectionChips />
+      </ComposerSessionProvider>
+    )
+    expect(screen.getAllByText(/selectionChipEntityLabel/)).toHaveLength(2)
+  })
+
+  it("never claims an entity chip is the artifact edit target", () => {
+    // Only an artifact can receive a revision proposal; a staged record has
+    // nothing for the hunks to diff against.
+    act(() => {
+      useChatStore.getState().addContextSelection(entity())
+      useChatStore.getState().addContextSelection(sel())
+      useChatStore.getState().addContextSelection(sel({ artifactId: "a2" }))
+    })
+    render(
+      <ComposerSessionProvider sessionId={null}>
+        <ArtifactSelectionChips />
+      </ComposerSessionProvider>
+    )
+    const badges = screen.getAllByText(/editTargetBadge/)
+    expect(badges).toHaveLength(1)
+  })
+})

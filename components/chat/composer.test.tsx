@@ -512,13 +512,12 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
   })
 
-  it("places Enhance, web search, and Skills inside the desktop `+` menu", () => {
+  it("places web search and Skills inside the desktop `+` menu", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
 
     fireEvent.click(screen.getByTestId("composer-attach-menu"))
 
-    expect(screen.getByTestId("composer-enhance-trigger")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Toggle web search" })).toBeInTheDocument()
     expect(screen.getByTestId("composer-skill-trigger")).toBeInTheDocument()
   })
@@ -529,9 +528,27 @@ describe("Composer — mobile (Claude-style) layout", () => {
 
     fireEvent.click(screen.getByTestId("composer-plus-toggle"))
 
-    expect(screen.getByTestId("composer-enhance-trigger")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Toggle web search" })).toBeInTheDocument()
     expect(screen.getByTestId("composer-skill-trigger")).toBeInTheDocument()
+  })
+
+  // The wand rewrites what is IN the box, so it lives on the box — beside the
+  // save-as-template bookmark — not behind the `+` menu that holds the turn
+  // capabilities. Both corner controls appear on the same condition: there is
+  // something written to act on.
+  it("shows the enhance wand beside the bookmark once there is a draft, no menu needed", async () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+
+    expect(screen.queryByTestId("composer-enhance-trigger")).toBeNull()
+
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "make this better" } })
+    })
+
+    expect(screen.getByTestId("composer-enhance-trigger")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-save-as-template")).toBeInTheDocument()
   })
 
   it("keeps the drag overlay up when a non-file dragleave interleaves a file drag", () => {

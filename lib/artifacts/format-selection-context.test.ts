@@ -285,3 +285,61 @@ describe("plugin selections", () => {
     expect(out).toContain("Comment: look here")
   })
 })
+
+describe("entity selections", () => {
+  const base = { kind: "entity" as const, comment: "", snapshot: "body" }
+
+  it("names the record kind so the model can tell a transcript from a plan", () => {
+    expect(
+      formatContextSelectionsForLLM([
+        { ...base, entityKind: "plan", entityId: "p1", title: "Ship the picker" },
+      ])
+    ).toContain('Plan "Ship the picker":')
+  })
+
+  it("uses a distinct noun per kind", () => {
+    const headings = (["memory", "issue", "plan", "session", "artifact"] as const).map(
+      (entityKind) =>
+        formatContextSelectionsForLLM([{ ...base, entityKind, entityId: "x", title: "T" }]).split(
+          "\n"
+        )[2]
+    )
+    expect(new Set(headings).size).toBe(5)
+  })
+
+  it("appends the subtitle when the record has one", () => {
+    expect(
+      formatContextSelectionsForLLM([
+        {
+          ...base,
+          entityKind: "issue",
+          entityId: "i1",
+          title: "Fix the race",
+          subtitle: "COG-14 · in_progress",
+        },
+      ])
+    ).toContain('Issue "Fix the race" (COG-14 · in_progress):')
+  })
+
+  it("omits the parenthetical when there is no subtitle", () => {
+    expect(
+      formatContextSelectionsForLLM([
+        { ...base, entityKind: "memory", entityId: "m1", title: "Prefers pnpm" },
+      ])
+    ).toContain('Stored memory "Prefers pnpm":')
+  })
+
+  it("carries the user's comment like every other kind", () => {
+    expect(
+      formatContextSelectionsForLLM([
+        {
+          ...base,
+          comment: "does this still apply?",
+          entityKind: "memory",
+          entityId: "m1",
+          title: "Prefers pnpm",
+        },
+      ])
+    ).toContain("Comment: does this still apply?")
+  })
+})

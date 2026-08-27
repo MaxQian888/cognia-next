@@ -40,6 +40,12 @@ interface ComposerGhostTextProps {
   cycleHint?: string
   /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
   mono?: boolean
+  /**
+   * Right-side inset reserved for the box's floating corner controls, matching
+   * whatever the textarea got. Same reason as the chip overlay: a different
+   * wrap width puts the ghost on a different line from the caret it trails.
+   */
+  padEndClass?: string
 }
 
 const BADGE_CLASS =
@@ -47,7 +53,7 @@ const BADGE_CLASS =
 
 const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>(
   function ComposerGhostText(
-    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint, mono },
+    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint, mono, padEndClass },
     innerRef
   ) {
     if (!ghost) return null
@@ -64,7 +70,8 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
           className={cn(
             "block min-h-9 w-full break-words whitespace-pre-wrap",
             mono && OVERLAY_MONO_CLASS,
-            TEXTAREA_TYPOGRAPHY
+            TEXTAREA_TYPOGRAPHY,
+            padEndClass
           )}
           style={{ fontSize: OVERLAY_FONT_SIZE }}
         >

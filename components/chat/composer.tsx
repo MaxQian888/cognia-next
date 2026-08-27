@@ -97,6 +97,7 @@ import {
   type MentionMode,
 } from "./composer-trigger"
 import type { RemoteDocStagingItem } from "@/hooks/chat/use-remote-doc-staging"
+import { useEntityMentionStaging } from "@/hooks/chat/use-entity-mention-staging"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
@@ -111,6 +112,7 @@ import { ContextChipBar } from "./composer/context-chip-bar"
 import { hasSlashCompletion } from "./composer/slash-completion"
 import { useLinkFolding } from "./composer/hooks/use-link-folding"
 import { CommandHintBar } from "./composer/command-hint-bar"
+import { ScheduleSuggestion } from "./composer/schedule-suggestion"
 import { resolveSendButton } from "./composer/send-button-mode"
 import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { nextPermissionMode } from "./permission-mode-indicator"
@@ -402,6 +404,8 @@ interface InnerProps {
   onSubmitShell: (command: string) => Promise<boolean>
   /** Open the shortcut cheatsheet (bound to `?` on an empty input). */
   onOpenCheatsheet: () => void
+  /** Open a settings tab — the enhance wand's "no model" toast uses it. */
+  onOpenSettings: (tab: SettingsTab) => void
   handleRef?: Ref<ComposerHandle>
   /** Non-zero when the session has pending connector drafts to review. */
   pendingDraftCount?: number
@@ -434,6 +438,10 @@ function ComposerInner(props: InnerProps) {
   // Non-LLM composer behavior toggles (AppSettings.composerBehavior). Each
   // defaults ON via `!== false` so an absent block preserves prior behavior.
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  // Opt-out (`!== false`), like every other composer-assistance switch.
+  const enhanceEnabled = useSettingsStore(
+    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
+  )
   const compactLayout = props.compactLayout === true
   const sendOnEnter = composerBehavior?.sendOnEnter !== false
   const clearAfterSendEnabled = composerBehavior?.clearAfterSend !== false
@@ -614,6 +622,14 @@ function ComposerInner(props: InnerProps) {
     return [...mentionableSubagents, ...markdownAgents.filter((t) => !seen.has(t.id))]
   }, [isCombinedMention, mentionableSubagents, markdownAgents])
   // `@skill:` / `@preset:` namespaced mention sources (general chat only).
+  // Scope for the `@memory:` / `@issue:` / … sources. The SESSION's workspace,
+  // not the focused one: a background pane composing into another workspace's
+  // conversation must offer that workspace's records, matching how the send
+  // path resolves everything else about the turn.
+  const entityContext = useMemo(
+    () => ({ projectId: props.session?.projectId ?? null, sessionId: props.session?.id ?? null }),
+    [props.session?.projectId, props.session?.id]
+  )
   const chatSkills = useMentionableSkills(isCombinedMention)
   const chatPresets = useMentionablePresets(isCombinedMention)
   const applyPreset = useApplyPreset()
@@ -1246,6 +1262,10 @@ function ComposerInner(props: InnerProps) {
     stageRemoteDocRef.current = stageRemoteDoc
   }, [stageRemoteDoc])
 
+  // `stageEntity` is stable already (it closes over the session id and the
+  // translator), so it needs no latest-value ref — it can be named in the deps.
+  const stageEntity = useEntityMentionStaging({ sessionId: props.session?.id ?? null })
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
@@ -1373,6 +1393,9 @@ function ComposerInner(props: InnerProps) {
               useChatStore.getState().addReferencedWorkflowElement(el, props.session?.id ?? null),
             applyPreset: (preset, session) => applyPreset(preset, session).then(() => {}),
             stageRemoteDoc: (item) => stageRemoteDocRef.current(item),
+            stageEntity: (item) => stageEntity(item.candidate),
+            recordMention: (ref) =>
+              useChatStore.getState().addCitedRef(ref, props.session?.id ?? null),
             session: props.session,
             clearWorkflowHighlight: () => props.workflowMention?.onHighlight?.([]),
             strings: {
@@ -1390,6 +1413,7 @@ function ComposerInner(props: InnerProps) {
       insertReplacement,
       removeTriggerToken,
       applyPreset,
+      stageEntity,
       props,
       dismissPopover,
       noteCommandUsed,
@@ -2554,6 +2578,21 @@ function ComposerInner(props: InnerProps) {
           saveAsTemplate={
             controller.textInput.value.trim().length > 0 ? () => setSaveTemplateOpen(true) : null
           }
+          enhance={
+            // Same gate as the bookmark beside it: a wand over an empty box has
+            // nothing to rewrite, and `enhancePrompt` would only answer
+            // "empty". Off entirely when the user disabled the feature.
+            enhanceEnabled && controller.textInput.value.trim().length > 0 ? (
+              <EnhanceButton
+                value={controller.textInput.value}
+                onApply={(next) => controller.textInput.setInput(next)}
+                session={props.session}
+                disabled={props.disabled || props.status === "streaming"}
+                className="size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                onOpenProviderSettings={() => props.onOpenSettings("api-key")}
+              />
+            ) : null
+          }
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
           isComposing={isComposing}
@@ -2571,6 +2610,18 @@ function ComposerInner(props: InnerProps) {
           captureSmartSnapshot={captureSmartSnapshot}
           smartSnapshotPending={smartSnapshotPending}
           capabilityMenu={capabilityMenu}
+          // The `+` menu's namespace entries (`@lark:`, `@issue:`, `/goal`)
+          // work by TYPING: the composer's own trigger detection is what opens
+          // each panel, so the menu puts the caret in front of it rather than
+          // owning a second picker. Append, never replace — a half-written
+          // message is not the menu's to discard.
+          onInsertText={(text) => {
+            const current = controller.textInput.value
+            const needsSpace = current.length > 0 && !/\s$/.test(current)
+            controller.textInput.setInput(`${current}${needsSpace ? " " : ""}${text}`)
+            textareaRef.current?.focus()
+          }}
+          onOpenExternalServices={() => props.onOpenSettings("services")}
           isDragging={isDragging}
           onDragEnter={onDragEnter}
           onDragOver={onDragOver}
@@ -2597,6 +2648,25 @@ function ComposerInner(props: InnerProps) {
           commandMap={commandMap}
           value={controller.textInput.value}
         />
+
+        {/* Reads scheduling intent out of what is being typed and offers the
+            scheduler's create form pre-filled. Never intercepts the turn —
+            Enter still sends. See `components/chat/composer/schedule-suggestion`.
+
+            General direct chat ONLY, on the same `isCombinedMention` condition
+            the entity sources use. This one component serves every composer in
+            the app, and "turn this into a scheduled task?" is an offer to LEAVE
+            for `/scheduler` — which in the workflow editor's chat tab means
+            abandoning the graph being authored, and in a team or IM-draft
+            composer means walking out of a conversation that is not the user's
+            alone. A direct chat is the only place that detour is harmless. */}
+        {isCombinedMention ? (
+          <ScheduleSuggestion
+            value={controller.textInput.value}
+            sessionId={props.session?.id}
+            className="mx-1"
+          />
+        ) : null}
 
         <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
@@ -2637,6 +2707,7 @@ function ComposerInner(props: InnerProps) {
           chatAgents={chatAgents}
           chatSkills={chatSkills}
           chatPresets={chatPresets}
+          entityContext={entityContext}
           chatTemplates={chatTemplates}
           workflowElements={props.workflowMention?.elements}
           onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
@@ -2740,12 +2811,8 @@ function ComposerCapabilityMenu({
   status: PromptStatus
   disabled?: boolean
 }) {
-  const controller = usePromptInputController()
   const ephemeralSkillIds = useComposerEphemeralSkillIds(session?.id ?? null) ?? []
   const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
-  const enhanceEnabled = useSettingsStore(
-    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
-  )
   const tSkill = useTranslations("skills.composer.skillPicker")
   const [pickerOpen, setPickerOpen] = useState(false)
   const isMobile = usePlatform() === "mobile"
@@ -2754,15 +2821,11 @@ function ComposerCapabilityMenu({
 
   return (
     <>
+      {/* The prompt-enhance wand used to live here. It rewrites what is in the
+          box, so it belongs ON the box: it now sits beside the save-as-template
+          bookmark in the input's corner, in the same icon-button style, where
+          it is visible without opening a menu first. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="composer-capability-menu">
-        {enhanceEnabled ? (
-          <EnhanceButton
-            value={controller.textInput.value}
-            onApply={(next) => controller.textInput.setInput(next)}
-            session={session}
-            disabled={controlsDisabled}
-          />
-        ) : null}
         <WebSearchToggle disabled={controlsDisabled} />
         <Button
           type="button"
@@ -2842,6 +2905,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // transcript, and those echoes are persisted messages.
   const appendMessageToSession = useChatStore((s) => s.appendMessageToSession)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
+  const clearCitedRefs = useChatStore((s) => s.clearCitedRefs)
   const clearContextSelections = useChatStore((s) => s.clearContextSelections)
 
   // Same effective-cwd chain the send path uses — a selected workspace must
@@ -3229,12 +3293,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       await onSend(content, attachmentResult.manifest, templateRun)
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
+      // Same lifetime as the chips they describe: the citations rode exactly
+      // this message. Cleared AFTER `onSend` so the controller has already read
+      // them into `metadata.mentions`.
+      clearCitedRefs(session?.id ?? null)
       useArtifactStore.getState().consumeReviewReceipts(sentReceipts)
       return true
     },
     [
       onSend,
       clearReferencedPaths,
+      clearCitedRefs,
       clearContextSelections,
       pushSystemMessage,
       tAttach,
@@ -3338,6 +3407,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onSubmitMemory={handleMemorySubmit}
               onSubmitShell={handleBashSubmit}
               onOpenCheatsheet={() => setCheatsheetOpen(true)}
+              onOpenSettings={onOpenSettings}
               handleRef={ref}
               pendingDraftCount={pendingDrafts.length}
               mentionMode={mentionMode}
