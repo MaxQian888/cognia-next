@@ -44,6 +44,7 @@ import { SyncStatusCard } from "./sync-status-card"
 import { LogtoLoginCard } from "./logto-login-card"
 import { CollaborationCard } from "./collaboration-card"
 import { RemoteBrowserCard } from "./remote-browser-card"
+import { BrowserAccessCard } from "./browser-access-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -237,6 +238,10 @@ export function CompanionSection() {
         <ServerStatusCard />
         <TunnelCard />
         <MdnsCard />
+        {/* Beside the other reachability cards, not under "cloud": this is how
+            a browser on THIS machine reaches the Host, and it is the only door
+            a tab has — the HTTPS listener above is unreachable from one. */}
+        <BrowserAccessCard />
         <WebRtcCard />
       </CompanionGroup>
       <CompanionGroup id="pairing" title={t("pairing")} defaultOpen>
