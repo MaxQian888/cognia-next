@@ -250,7 +250,22 @@ mod tests {
         assert!(r.contains("templateInstances"));
         assert!(r.contains("connectorDrafts"));
         assert!(r.contains("outboundQueue"));
-        assert_eq!(r.list().len(), 24);
+        // No literal total. This was `24` and went stale the moment a table was
+        // legitimately added — the same rot `command_manifest.rs` records: a
+        // hardcoded inventory count goes red on every correct addition, and a
+        // permanently-red test teaches people to ignore it. What the count was
+        // ever standing in for is asserted directly instead: `register` keys on
+        // the name, so a duplicated descriptor would silently collapse into one
+        // row and none of the `contains` checks above would notice.
+        let defaults = default_tables();
+        assert_eq!(r.list().len(), defaults.len());
+        let unique: std::collections::HashSet<&str> =
+            defaults.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            unique.len(),
+            defaults.len(),
+            "duplicate name in default_tables()"
+        );
         assert!(!r.contains("ohai"));
     }
 

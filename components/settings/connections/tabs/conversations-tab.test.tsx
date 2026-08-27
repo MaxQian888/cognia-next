@@ -22,25 +22,29 @@ jest.mock("next/navigation", () => ({
   redirect: jest.fn(),
 }))
 
-const mockDbDelete = jest.fn().mockResolvedValue(undefined)
-const mockDbUpdate = jest.fn().mockResolvedValue(1)
-
 jest.mock("@/lib/db/schema", () => ({
   getDb: jest.fn(() => ({
     conversationOverrides: {
       orderBy: jest.fn().mockReturnThis(),
       reverse: jest.fn().mockReturnThis(),
       toArray: jest.fn().mockResolvedValue([]),
-      delete: mockDbDelete,
-      update: mockDbUpdate,
     },
   })),
 }))
 
-jest.mock("@/lib/db/conversation-overrides", () => ({
-  setPinned: jest.fn().mockResolvedValue(undefined),
-  setArchived: jest.fn().mockResolvedValue(undefined),
-  upsertByConversationKey: jest.fn().mockResolvedValue({}),
+// ADR-0131 moved every write on this tab behind the cross-shell facade: the
+// component describes the mutation and `lib/connectors/inbox-writes` decides
+// where it runs. The suite still asserted the pre-ADR by-id Dexie helpers
+// (`setPinned("ov1", true)`, `conversationOverrides.delete("ov1")`), which the
+// component had stopped calling — and the facade throws
+// `InboxWriteUnavailableError` under jsdom, where the shell declares no
+// `connector-runtime` capability, so the clicks failed before reaching them.
+// Asserting the mutation envelope is what this component is actually
+// responsible for; the routing has its own tests.
+const mockMutateOverride = jest.fn().mockResolvedValue(undefined)
+
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  mutateConversationOverride: (...args: unknown[]) => mockMutateOverride(...args),
 }))
 
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -56,10 +60,6 @@ jest.mock("dexie-react-hooks", () => ({
 // ---------------------------------------------------------------------------
 
 import { ConversationsTab } from "./conversations-tab"
-import { setPinned, setArchived } from "@/lib/db/conversation-overrides"
-
-const mockSetPinned = setPinned as jest.Mock
-const mockSetArchived = setArchived as jest.Mock
 
 function makeOverride(
   id: string,
@@ -83,9 +83,7 @@ function makeOverride(
 describe("ConversationsTab", () => {
   beforeEach(() => {
     mockOverrides = []
-    mockSetPinned.mockReset().mockResolvedValue(undefined)
-    mockSetArchived.mockReset().mockResolvedValue(undefined)
-    mockDbDelete.mockReset().mockResolvedValue(undefined)
+    mockMutateOverride.mockReset().mockResolvedValue(undefined)
     mockPush.mockReset()
   })
 
@@ -118,12 +116,19 @@ describe("ConversationsTab", () => {
     expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("conv:telegram:123")}`)
   })
 
+  // Addressed by conversation KEY, not row id: a thin client only ever knows
+  // the key, and the key is the unique index the host resolves against.
   it("pin button toggles pinned state", async () => {
     mockOverrides = [makeOverride("ov1", "conv:telegram:123", { pinned: false })]
     render(<ConversationsTab />)
     fireEvent.click(screen.getByTestId("pin-btn-ov1"))
     await waitFor(() => {
-      expect(mockSetPinned).toHaveBeenCalledWith("ov1", true)
+      expect(mockMutateOverride).toHaveBeenCalledWith({
+        kind: "setPinned",
+        conversationKey: "conv:telegram:123",
+        pinned: true,
+        sessionId: "s1",
+      })
     })
   })
 
@@ -132,8 +137,23 @@ describe("ConversationsTab", () => {
     render(<ConversationsTab />)
     fireEvent.click(screen.getByTestId("archive-btn-ov1"))
     await waitFor(() => {
-      expect(mockSetArchived).toHaveBeenCalledWith("ov1", true)
+      expect(mockMutateOverride).toHaveBeenCalledWith({
+        kind: "setArchived",
+        conversationKey: "conv:telegram:123",
+        archived: true,
+        sessionId: "s1",
+      })
     })
+  })
+
+  it("pin and archive send the opposite of the row's current state", async () => {
+    mockOverrides = [makeOverride("ov1", "conv:telegram:123", { pinned: true, archived: true })]
+    render(<ConversationsTab />)
+    fireEvent.click(screen.getByTestId("pin-btn-ov1"))
+    fireEvent.click(screen.getByTestId("archive-btn-ov1"))
+    await waitFor(() => expect(mockMutateOverride).toHaveBeenCalledTimes(2))
+    expect(mockMutateOverride).toHaveBeenCalledWith(expect.objectContaining({ pinned: false }))
+    expect(mockMutateOverride).toHaveBeenCalledWith(expect.objectContaining({ archived: false }))
   })
 
   it("delete button removes the override", async () => {
@@ -141,7 +161,10 @@ describe("ConversationsTab", () => {
     render(<ConversationsTab />)
     fireEvent.click(screen.getByTestId("delete-btn-ov1"))
     await waitFor(() => {
-      expect(mockDbDelete).toHaveBeenCalledWith("ov1")
+      expect(mockMutateOverride).toHaveBeenCalledWith({
+        kind: "delete",
+        conversationKey: "conv:telegram:123",
+      })
     })
   })
 

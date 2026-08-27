@@ -227,9 +227,12 @@ describe("dispatchCommand: settings + backup", () => {
     expect(res.override.id).toBe("co1")
   })
 
-  it("conversation_overrides_update requires input", async () => {
+  it("conversation_overrides_update refuses a payload carrying neither envelope", async () => {
+    // ADR-0131 added the `{ mutation }` envelope beside the legacy `{ input }`
+    // one and reworded the refusal to name both. The assertion still pinned the
+    // old wording, so the suite was red on a message that had been improved.
     await expect(dispatchCommand("conversation_overrides_update", {})).rejects.toThrow(
-      /input is required/
+      /requires `mutation` or legacy `input`/
     )
   })
 

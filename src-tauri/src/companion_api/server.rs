@@ -878,6 +878,18 @@ mod tests {
         }
     }
 
+    /// The peer address the make-service inserts for every real connection.
+    ///
+    /// `middleware::pre_auth_rate_limit` extracts `ConnectInfo` BY VALUE, so a
+    /// `oneshot` request without it is rejected by the extractor with 500
+    /// before routing happens at all. In a test asserting a route is ABSENT
+    /// that reads as the opposite of the truth — 500 says "matched and broke",
+    /// 404 says "no such route" — which is how four route tests went red
+    /// without any route changing.
+    fn test_peer() -> axum::extract::ConnectInfo<std::net::SocketAddr> {
+        axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 34567)))
+    }
+
     fn test_state() -> SharedState {
         use crate::companion_api::{
             deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
@@ -1050,6 +1062,7 @@ mod tests {
             axum::http::Request::builder()
                 .method("POST")
                 .uri("/api/v1/terminal/socket-ticket")
+                .extension(test_peer())
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
@@ -1160,6 +1173,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/ws/v1/terminal")
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1201,6 +1215,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/connectors/health")
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1214,11 +1229,6 @@ mod tests {
         // layer — see `acp_route_requires_socket_ticket`.
         assert_eq!(resp.status().as_u16(), 404, "desktop has no ingress");
 
-        // The pre-auth rate limiter requires a peer address; oneshot has no
-        // TCP connection, so inject ConnectInfo the way the make-service
-        // would.
-        let peer = axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 34567)));
-
         crate::headless::install_headless_services(Some(
             crate::headless::HeadlessServices::stub_for_tests(),
         ));
@@ -1227,7 +1237,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/connectors/health")
-                    .extension(peer.clone())
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1243,7 +1253,7 @@ mod tests {
                 axum::http::Request::builder()
                     .method("POST")
                     .uri("/connectors/webhook/telegram/ghost")
-                    .extension(peer.clone())
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1255,7 +1265,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/integrations/mcp/oauth/callback")
-                    .extension(peer)
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1424,6 +1434,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/ws/browser/session-1")
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
@@ -1435,6 +1446,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/ws/v1/browser/session-1")
+                    .extension(test_peer())
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )

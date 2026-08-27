@@ -8,7 +8,7 @@
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { enqueueOutboundMany } from "@/lib/db/outbound-jobs"
 import { startOutboundRunner, isInQuietHours, msUntilQuietEnd } from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
 
@@ -41,17 +41,32 @@ function makeAdapter(id: string, send: () => Promise<OutboundResult>): PlatformA
   } as unknown as PlatformAdapter
 }
 
-async function enqueue(adapterId: string, conversationKey: string) {
-  return enqueueOutbound({
-    adapterId,
-    conversationKey,
-    request: {
-      conversationRef: { platform: "telegram", adapterId },
-      segments: [{ type: "text", text: "msg" }],
-      metadata: { idempotencyKey: crypto.randomUUID() },
-    },
-    source: "ai-run",
-  })
+/**
+ * Enqueue against the SAME clock the runner is given.
+ *
+ * `enqueueOutboundMany` stamps `nextAttemptAt` from its `now`, and the runner
+ * only drains rows whose `nextAttemptAt <= its own now`. Enqueuing on the wall
+ * clock while running the drain at a pinned 2024 timestamp left every row
+ * `pending` forever — the runner was correct and the test was asking it to
+ * dispatch work that, on its clock, had not been scheduled yet.
+ */
+async function enqueue(adapterId: string, conversationKey: string, now: number) {
+  const [row] = await enqueueOutboundMany(
+    [
+      {
+        adapterId,
+        conversationKey,
+        request: {
+          conversationRef: { platform: "telegram", adapterId },
+          segments: [{ type: "text", text: "msg" }],
+          metadata: { idempotencyKey: crypto.randomUUID() },
+        },
+        source: "ai-run",
+      },
+    ],
+    { now }
+  )
+  return row
 }
 
 async function runForTicks(
@@ -157,7 +172,7 @@ describe("muted adapter", () => {
     // Simulate adapter instance returning muted=true
     adapterInstanceOverride = { muted: true }
 
-    await enqueue(adapterId, "tg:muted:1")
+    await enqueue(adapterId, "tg:muted:1", now)
 
     const adapters = new Map<string, PlatformAdapter>([
       [adapterId, makeAdapter(adapterId, async () => ({ ok: true }))],
@@ -185,8 +200,7 @@ describe("muted adapter", () => {
 describe("quiet hours adapter", () => {
   it("defers job when current time is within quiet window", async () => {
     const adapterId = "adp_quiet_on"
-    // Use the real current time so pickNextDue picks up the job
-    const fixedNow = Date.now()
+    const fixedNow = new Date("2024-05-01T12:00:00Z").getTime()
     const clock = () => fixedNow
 
     adapterInstanceOverride = {
@@ -194,7 +208,7 @@ describe("quiet hours adapter", () => {
       quietHours: { from: "00:00", to: "23:59", tz: "UTC" }, // always in window
     }
 
-    await enqueue(adapterId, "tg:quiet:1")
+    await enqueue(adapterId, "tg:quiet:1", fixedNow)
 
     const adapters = new Map<string, PlatformAdapter>([
       [adapterId, makeAdapter(adapterId, async () => ({ ok: true }))],
@@ -225,7 +239,7 @@ describe("quiet hours adapter", () => {
       quietHours: { from: "22:00", to: "06:00", tz: "UTC" },
     }
 
-    await enqueue(adapterId, "tg:quiet:2")
+    await enqueue(adapterId, "tg:quiet:2", fixedNow)
 
     const adapters = new Map<string, PlatformAdapter>([
       [adapterId, makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_ok" }))],
@@ -248,7 +262,7 @@ describe("quiet hours adapter", () => {
     // No quiet hours
     adapterInstanceOverride = { muted: false }
 
-    await enqueue(adapterId, "tg:quiet:3")
+    await enqueue(adapterId, "tg:quiet:3", fixedNow)
 
     const adapters = new Map<string, PlatformAdapter>([
       [adapterId, makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_ok2" }))],

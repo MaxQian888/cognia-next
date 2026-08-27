@@ -13,6 +13,7 @@ jest.mock("@/lib/connectors/inbox-writes", () => ({
 }))
 
 import { DraftEditor } from "./draft-editor"
+import inboxMessages from "@/i18n/messages/en/inbox.json"
 import { approveInboxDraft, rejectInboxDraft } from "@/lib/connectors/inbox-writes"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -113,10 +114,16 @@ describe("DraftEditor", () => {
     expect(screen.getByTestId("draft-segment-readonly-3")).toHaveTextContent("doc.pdf")
   })
 
-  it("falls back to the [segment] label for non-url, non-file segment kinds", () => {
+  it("names the kind and says it is unsupported for non-url, non-file segments", () => {
+    // The assertion used to pin a hardcoded "[segment]". The row now carries a
+    // badge with the segment's own kind plus localized copy, so it is read from
+    // the catalogue the component actually renders rather than restated here —
+    // otherwise the test goes red on every rewording of a correct string.
     const draft = makeDraft([{ type: "mention", handle: "@alice" } as unknown as MessageSegment])
     render(<DraftEditor draft={draft} onClose={() => {}} />)
-    expect(screen.getByTestId("draft-segment-readonly-0")).toHaveTextContent("[segment]")
+    const row = screen.getByTestId("draft-segment-readonly-0")
+    expect(row).toHaveTextContent("mention")
+    expect(row).toHaveTextContent(inboxMessages.draftEditor.segmentFallback)
   })
 
   it("a2ui segments render as a read-only preview with the plain-text mirror (G5)", () => {
