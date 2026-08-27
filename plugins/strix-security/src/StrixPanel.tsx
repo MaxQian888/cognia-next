@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ShieldAlert } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { PluginViewProps } from "@/types/plugin/plugin-view"
+import type { ContextPanelRenderProps } from "@/types/context-workbench"
 import { toSarifLog } from "@cognia/security-findings"
 import { downloadBlob } from "@/lib/connectors/audit-export"
 import type {
@@ -15,6 +15,7 @@ import type {
   StrixFinding,
   SuppressionRule,
 } from "./types"
+import { PANEL_ID } from "./ids"
 import { peekStrixRuntime } from "./runtime"
 import { usePluginT } from "./use-plugin-t"
 import {
@@ -59,7 +60,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 type Tab = "scan" | "history"
 
-export function StrixPanel(_props: PluginViewProps) {
+export function StrixPanel(_props: ContextPanelRenderProps) {
   const t = usePluginT()
   const rt = peekStrixRuntime()
 
@@ -224,6 +225,12 @@ export function StrixPanel(_props: PluginViewProps) {
     [terminal, dexie]
   )
 
+  // Announce a running scan on the panel's own rail button. Without it the
+  // only way to learn a scan is still going is to come back and look.
+  useEffect(() => {
+    rt?.contextPanels?.setBadge(PANEL_ID, scanning ? 1 : 0)
+  }, [rt, scanning])
+
   const onCancel = useCallback(() => abortRef.current?.abort(), [])
 
   const onView = useCallback((runId: string) => {
@@ -270,12 +277,10 @@ export function StrixPanel(_props: PluginViewProps) {
   const preflightOk = Boolean(preflight?.docker && preflight?.strix)
 
   return (
+    // No title bar of its own: the Context Workbench draws the panel header
+    // (icon + label + width controls). Drawing a second one stacked two
+    // identical titles and ate 48px of a 360px column.
     <div className="flex h-full flex-col" data-testid="strix-panel">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <ShieldAlert className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">{t("panel.title")}</span>
-      </div>
-
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as Tab)}

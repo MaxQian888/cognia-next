@@ -169,6 +169,11 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // module `manifest.contextPanels` would import the renderer from.
   "sre-agent": ["field_missing:context-panel"],
   "stagehand-mcp": ["field_missing:mcp-server-preset"],
+  // Class 1: the security panel moved from a left-rail view container to the
+  // right-hand Context Workbench, registered through
+  // `ctx.contextPanels.register` in `activate()` for the same builtin://
+  // reason as sre-agent and prompt-templates.
+  "strix-security": ["field_missing:context-panel"],
   "test-lsp-contribution": [],
   "wasm-example-formatter": [],
   "web-clone": [],

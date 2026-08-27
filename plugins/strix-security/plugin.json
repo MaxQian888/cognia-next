@@ -4,8 +4,14 @@
   "version": "0.1.0",
   "description": "Run Strix autonomous AI penetration tests from a dedicated panel and browse the findings. Desktop only — requires a local Docker daemon and the strix CLI on PATH.",
   "type": "frontend",
-  "capabilities": ["view-container", "commands"],
-  "permissions": ["terminal:spawn", "terminal:write", "terminal:kill"],
+  "capabilities": ["context-panel", "commands"],
+  "permissions": [
+    "terminal:spawn",
+    "terminal:write",
+    "terminal:kill",
+    "extension:ui",
+    "session:read"
+  ],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "Apache-2.0",
@@ -14,16 +20,6 @@
     "cognia": ">=0.1.0"
   },
   "activationEvents": ["startup", "onCommand:security"],
-  "viewsContainers": [
-    {
-      "id": "security",
-      "title": "Security",
-      "icon": "ShieldAlert",
-      "location": "rail",
-      "when": "platform.tauri",
-      "hideHeader": true
-    }
-  ],
   "dexie": {
     "tables": [
       {
