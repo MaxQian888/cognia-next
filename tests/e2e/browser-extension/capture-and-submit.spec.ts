@@ -280,6 +280,60 @@ test.describe("submitting a capture", () => {
   })
 })
 
+test.describe("following a task without leaving the browser", () => {
+  test("reads the answer, and only when asked for it", async ({
+    panel,
+    mockHost,
+    serviceWorker,
+    context,
+  }) => {
+    await captureFixturePage({ panel, mockHost, serviceWorker, context }, { mode: "selection" })
+    await panel.getByTestId("instruction").fill("Summarize this")
+    await panel.getByTestId("submit").click()
+    await expect(panel.getByTestId("recent-list")).toBeVisible()
+
+    const submissionId = mockHost.submissions()[0].submissionId
+    mockHost.setAnswer(submissionId, "The team plan is $20 per seat.")
+    mockHost.setStatus(submissionId, "completed")
+
+    // Nothing has been read yet: the list is polled and an answer is the
+    // largest thing this contract returns.
+    const before = mockHost
+      .requests()
+      .filter((request) => request.path.endsWith("browser_context_result")).length
+    expect(before).toBe(0)
+
+    await panel.getByTestId(`recent-answer-toggle-${submissionId}`).click()
+    await expect(panel.getByTestId(`recent-answer-${submissionId}`)).toContainText(
+      "The team plan is $20 per seat."
+    )
+  })
+
+  test("stops a running task, and says so when the desktop is driving it", async ({
+    panel,
+    mockHost,
+    serviceWorker,
+    context,
+  }) => {
+    await captureFixturePage({ panel, mockHost, serviceWorker, context }, { mode: "selection" })
+    await panel.getByTestId("instruction").fill("Summarize this")
+    await panel.getByTestId("submit").click()
+    await expect(panel.getByTestId("recent-list")).toBeVisible()
+    const submissionId = mockHost.submissions()[0].submissionId
+    mockHost.setStatus(submissionId, "running")
+
+    // A refusal because somebody else holds the wheel is not a failure, and
+    // the panel must not report one.
+    mockHost.setDrivenElsewhere(true)
+    await panel.getByTestId(`recent-stop-${submissionId}`).click()
+    await expect(panel.getByTestId("submit-error")).toContainText(/driving this task/i)
+
+    mockHost.setDrivenElsewhere(false)
+    await panel.getByTestId(`recent-stop-${submissionId}`).click()
+    await expect.poll(() => mockHost.submissions()[0].status).toBe("cancelled")
+  })
+})
+
 test.describe("the Host's appearance", () => {
   test("is applied to the panel rather than approximated by it", async ({ panel, mockHost }) => {
     await pairThroughPanel(panel, mockHost.issueEnrollment())

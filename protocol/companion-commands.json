@@ -770,6 +770,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "browser_context_cancel",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "browser.submit",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "browser_context_get",
       "target": "execution",
       "operation": "read",
@@ -783,6 +795,18 @@
     },
     {
       "name": "browser_context_list",
+      "target": "execution",
+      "operation": "read",
+      "capability": "browser.read-own",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "browser_context_result",
       "target": "execution",
       "operation": "read",
       "capability": "browser.read-own",

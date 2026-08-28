@@ -3,6 +3,8 @@ import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 import {
   BrowserCompanionError,
   browserCompanionCapability,
+  cancelBrowserContext,
+  getBrowserContextResult,
   browserSubmissionDeepLink,
   getBrowserContextSubmission,
   listBrowserContextSubmissions,
@@ -27,6 +29,9 @@ interface Harness {
   statuses: Map<string, BrowserSubmissionRow["status"]>
   sessionStatusThrows: boolean
   followsSystem: boolean
+  answers: Map<string, { text: string; at: number }>
+  aborted: string[]
+  abortRefused: boolean
 }
 
 function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
@@ -34,7 +39,9 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
   const createdSessions: Harness["createdSessions"] = []
   const enqueued: Harness["enqueued"] = []
   const statuses = new Map<string, BrowserSubmissionRow["status"]>()
-  const state = { sessionStatusThrows: false, followsSystem: false }
+  const answers = new Map<string, { text: string; at: number }>()
+  const aborted: string[] = []
+  const state = { sessionStatusThrows: false, followsSystem: false, abortRefused: false }
   let sessionCounter = 0
   const deps: BrowserCompanionDeps = {
     now: () => 1_700_000_000_000,
@@ -82,6 +89,11 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
       return statuses.get(sessionId) ?? "running"
     },
     capabilityRevision: async () => "rev-1",
+    latestAnswer: async (sessionId) => answers.get(sessionId) ?? null,
+    abortTurn: async (sessionId) => {
+      aborted.push(sessionId)
+      return !state.abortRefused
+    },
     ...overrides,
   }
   return {
@@ -90,6 +102,8 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
     createdSessions,
     enqueued,
     statuses,
+    answers,
+    aborted,
     get sessionStatusThrows() {
       return state.sessionStatusThrows
     },
@@ -101,6 +115,12 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
     },
     set followsSystem(value: boolean) {
       state.followsSystem = value
+    },
+    get abortRefused() {
+      return state.abortRefused
+    },
+    set abortRefused(value: boolean) {
+      state.abortRefused = value
     },
   }
 }
@@ -563,5 +583,87 @@ describe("getBrowserContextSubmission", () => {
     await expect(
       getBrowserContextSubmission(h.deps, "browser-a", { submissionId: 7 })
     ).rejects.toMatchObject({ code: "malformed" })
+  })
+})
+
+describe("getBrowserContextResult", () => {
+  it("carries the answer alongside the status, not instead of it", async () => {
+    // A result IS a status with the answer attached: a running task has one and
+    // not the other, and two shapes would make the panel ask twice for one row.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.answers.set("session-1", { text: "The team plan is $20.", at: 5_000 })
+    h.statuses.set("session-1", "completed")
+
+    await expect(
+      getBrowserContextResult(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "session-1",
+      text: "The team plan is $20.",
+      truncated: false,
+      answeredAt: 5_000,
+    })
+  })
+
+  it("omits the answer while there is none, rather than sending an empty one", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    const result = await getBrowserContextResult(h.deps, "browser-a", { submissionId: "sub-1" })
+    expect(result).not.toHaveProperty("text")
+  })
+
+  it("cuts a long answer on a character boundary and says it did", async () => {
+    // Bytes, not characters: a CJK answer reaches the ceiling at roughly a
+    // third of the character count, so a character cap means something
+    // different per language.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.answers.set("session-1", { text: "汉".repeat(20_000), at: 1 })
+    const result = await getBrowserContextResult(h.deps, "browser-a", { submissionId: "sub-1" })
+    expect(result.truncated).toBe(true)
+    expect(result.text).not.toContain("\ufffd")
+    expect(Buffer.byteLength(result.text ?? "", "utf8")).toBeLessThanOrEqual(32 * 1024)
+  })
+
+  it("answers another device's submission exactly as a missing one", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    await expect(
+      getBrowserContextResult(h.deps, "browser-b", { submissionId: "sub-1" })
+    ).rejects.toMatchObject({ code: "submission_not_found" })
+  })
+})
+
+describe("cancelBrowserContext", () => {
+  it("stops the task and reads the status back", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.statuses.set("session-1", "cancelled")
+    await expect(
+      cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).resolves.toMatchObject({ status: "cancelled" })
+    expect(h.aborted).toEqual(["session-1"])
+  })
+
+  it("names a refusal by another driver rather than calling it a failure", async () => {
+    // `turn.abort` needs live control, so the Host refuses while a desktop
+    // holds the attach lease. The run is fine and somebody else is driving it,
+    // which is a different thing to tell a person than "this broke".
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.abortRefused = true
+    await expect(
+      cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).rejects.toMatchObject({ code: "session_driven_elsewhere" })
+  })
+
+  it("will not stop a task belonging to another device", async () => {
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    await expect(
+      cancelBrowserContext(h.deps, "browser-b", { submissionId: "sub-1" })
+    ).rejects.toMatchObject({ code: "submission_not_found" })
+    expect(h.aborted).toEqual([])
   })
 })

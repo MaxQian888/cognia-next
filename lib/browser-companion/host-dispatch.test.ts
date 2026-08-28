@@ -10,14 +10,16 @@ import {
 } from "./host-dispatch"
 
 describe("browser companion command surface", () => {
-  it("names exactly the four commands the manifest registers", () => {
+  it("names exactly the commands the manifest registers", () => {
     // The Rust side has its own copy (`rpc.rs::BROWSER_COMPANION_COMMANDS`)
     // because the dispatch binding and the caller-id injection both key off
     // it. A mismatch would leave one of them reading an unbound account.
     expect([...BROWSER_COMPANION_COMMANDS].sort()).toEqual([
       "browser_companion_capability",
+      "browser_context_cancel",
       "browser_context_get",
       "browser_context_list",
+      "browser_context_result",
       "browser_context_submit",
     ])
   })
@@ -69,11 +71,16 @@ describe("the Rust and TypeScript command lists agree", () => {
       // else would be unreachable for the only client that calls it.
       expect(["browser.submit", "browser.read-own"]).toContain(descriptor?.capability)
     }
-    // The write is the only one on the idempotency ledger, and it must be:
-    // that ledger is what makes a retried submission replay instead of
-    // creating a second session.
+    // Both writes are on the idempotency ledger, and the submit must be: that
+    // ledger is what makes a retried submission replay instead of creating a
+    // second session.
     expect(byName.get("browser_context_submit")?.idempotency).toBe("required")
+    expect(byName.get("browser_context_cancel")?.idempotency).toBe("required")
     expect(byName.get("browser_context_list")?.idempotency).toBe("structural")
+    expect(byName.get("browser_context_result")?.idempotency).toBe("structural")
+    // Reading an answer is a read; stopping a task is not.
+    expect(byName.get("browser_context_result")?.capability).toBe("browser.read-own")
+    expect(byName.get("browser_context_cancel")?.capability).toBe("browser.submit")
   })
 })
 

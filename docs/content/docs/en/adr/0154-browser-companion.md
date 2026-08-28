@@ -218,10 +218,13 @@ Internal only. Browser Access is off by default, and the extension is
 distributed through an unlisted store listing.
 
 The kill switch is the Browser Access toggle itself, and it acts on three
-things at different moments. Turning it off refuses new enrollments and new
-submissions on the very next request — `companion_browser_access_set` mirrors
-the saved switch into the process-global that
-`rpc/data_sync.rs` consults, so neither waits for a restart. The plaintext
+things at different moments. Turning it off refuses **every write a browser can
+make** on the very next request — a new enrollment, a new submission, and
+stopping a running task — because the switch governs whether this Host accepts
+a browser acting on it at all, not only whether it accepts new work.
+`companion_browser_access_set` mirrors the saved switch into the
+process-global that `rpc/data_sync.rs` consults, so none of them waits for a
+restart. The plaintext
 listener stays bound until the server does restart, which is deliberate rather
 than a gap: the reads a paired panel makes keep answering on it, so a browser
 that already started tasks can still see their status and open them in Cognia.

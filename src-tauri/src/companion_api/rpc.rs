@@ -1104,6 +1104,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_context_submit",
     "browser_context_list",
     "browser_context_get",
+    "browser_context_result",
+    "browser_context_cancel",
     "browser_session_close",
     "browser_navigate",
     "browser_snapshot",
@@ -1161,6 +1163,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_companion_capability",
     "browser_context_list",
     "browser_context_get",
+    "browser_context_result",
     "browser_snapshot",
     "browser_read_console",
     "browser_read_network",
@@ -1806,6 +1809,8 @@ pub(super) const BROWSER_COMPANION_COMMANDS: &[&str] = &[
     "browser_context_submit",
     "browser_context_list",
     "browser_context_get",
+    "browser_context_result",
+    "browser_context_cancel",
 ];
 
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
@@ -1841,6 +1846,8 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "browser_context_submit",
     "browser_context_list",
     "browser_context_get",
+    "browser_context_result",
+    "browser_context_cancel",
     "workflow_trigger_manual",
     "workflow_handoff_create",
     "device_capabilities_report",

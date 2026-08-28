@@ -38,6 +38,7 @@ import {
   APPEARANCE_OVERRIDES,
   STATUSES_WITH_A_REASON,
   appearanceOverrideMessage,
+  stopFailureMessage,
   captureModeFor,
   isAppearanceOverride,
   preferredModeFor,
@@ -93,6 +94,9 @@ export function SidePanel({
   const [hasPermission, setHasPermission] = useState(false)
   const [override, setOverride] = useState<AppearanceOverride>("follow-host")
   const [failureCodes, setFailureCodes] = useState<Record<string, string>>({})
+  const [answers, setAnswers] = useState<Record<string, { text?: string; truncated?: boolean }>>({})
+  const [expanded, setExpanded] = useState<string[]>([])
+  const [stopping, setStopping] = useState<string | null>(null)
   const clientRef = useRef<HostClient | null>(null)
   const pendingSubmissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
   // Ids already asked about, so an answered row is not re-fetched every poll —
@@ -432,6 +436,68 @@ export function SidePanel({
     }
   }, [state.kind, pollMs, api])
 
+  /**
+   * Show or hide one task's answer, fetching it the first time.
+   *
+   * Fetched on demand rather than with the list: the list is polled and an
+   * answer is the largest thing this contract returns, so pulling every one on
+   * every tick would move kilobytes for rows nobody is reading. Re-fetched on
+   * every expand, because a running task's answer changes.
+   */
+  const toggleAnswer = useCallback(
+    (submissionId: string) => {
+      setExpanded((current) =>
+        current.includes(submissionId)
+          ? current.filter((id) => id !== submissionId)
+          : [...current, submissionId]
+      )
+      if (expanded.includes(submissionId)) return
+      void clientRef.current
+        ?.result(submissionId)
+        .then((detail) => {
+          setAnswers((current) => ({
+            ...current,
+            [submissionId]: { text: detail.text, truncated: detail.truncated },
+          }))
+        })
+        .catch(() => {
+          // The row stays expanded and shows "no answer yet", which is what an
+          // unreadable result and an unwritten one look like from here.
+          setAnswers((current) => ({ ...current, [submissionId]: {} }))
+        })
+    },
+    [expanded]
+  )
+
+  /**
+   * Stop one task.
+   *
+   * The Host's refusal codes matter here more than usual: "another device is
+   * driving this" is not a failure, it is a different place to press the
+   * button, and saying "could not be stopped" would send somebody looking for
+   * a fault that is not there.
+   */
+  const stopTask = useCallback(
+    async (submissionId: string) => {
+      setStopping(submissionId)
+      setSubmitError(null)
+      try {
+        await clientRef.current?.cancel(submissionId)
+        const page = await clientRef.current?.list()
+        if (page) {
+          setState((current) =>
+            current.kind === "ready" ? { ...current, recent: page.items } : current
+          )
+        }
+      } catch (error) {
+        setSubmitError(stopFailureMessage((error as { code?: string })?.code, api.message))
+      } finally {
+        setStopping(null)
+      }
+    },
+    [api]
+  )
+
   const onPair = useCallback(
     async (code: string) => {
       setState({ kind: "pairing" })
@@ -767,7 +833,16 @@ export function SidePanel({
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {api.message("recentTitle")}
         </h2>
-        <RecentList api={api} items={state.recent} failureCodes={failureCodes} />
+        <RecentList
+          api={api}
+          items={state.recent}
+          failureCodes={failureCodes}
+          answers={answers}
+          expanded={expanded}
+          onToggleAnswer={toggleAnswer}
+          onStop={(submissionId) => void stopTask(submissionId)}
+          stopping={stopping}
+        />
       </section>
 
       <section className="space-y-1 border-t border-border pt-3">

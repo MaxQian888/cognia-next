@@ -58,6 +58,11 @@ interface Harness {
   detailReads: string[]
   /** The `preferredMode` each `capability()` call carried, in order. */
   capabilityCalls: (string | undefined)[]
+  /** `browser_context_result` answers, by submission id. */
+  answers: Map<string, { text?: string; truncated?: boolean }>
+  resultReads: string[]
+  cancelled: string[]
+  cancelError?: unknown
   /** What `list()` reports as the Host's capability revision. */
   capabilityRevision?: string
   invalidations: string[]
@@ -74,6 +79,9 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     details: new Map(),
     detailReads: [],
     capabilityCalls: [],
+    answers: new Map(),
+    resultReads: [],
+    cancelled: [],
     invalidations: [],
     ...overrides,
     // After the spread, not before: `overrides` carries its own `store`, and
@@ -136,6 +144,30 @@ function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 
       items: state.recent,
       ...(state.capabilityRevision ? { capabilityRevision: state.capabilityRevision } : {}),
     }),
+    result: async (submissionId: string) => {
+      state.resultReads.push(submissionId)
+      const answer = state.answers.get(submissionId)
+      if (!answer) throw new Error("submission_not_found")
+      return {
+        submissionId,
+        sessionId: "session-1",
+        status: "completed" as const,
+        updatedAt: 1,
+        deepLink: "cognia://session/session-1",
+        ...answer,
+      }
+    },
+    cancel: async (submissionId: string) => {
+      state.cancelled.push(submissionId)
+      if (state.cancelError) throw state.cancelError
+      return {
+        submissionId,
+        sessionId: "session-1",
+        status: "cancelled" as const,
+        updatedAt: 1,
+        deepLink: "cognia://session/session-1",
+      }
+    },
     get: async (submissionId: string) => {
       state.detailReads.push(submissionId)
       const detail = state.details.get(submissionId)
@@ -596,6 +628,86 @@ describe("SidePanel capture and settings", () => {
     await new Promise((resolve) => setTimeout(resolve, 4_000))
     expect(state.capabilityCalls).toHaveLength(2)
   }, 20_000)
+
+  const RUNNING_ROW = {
+    submissionId: "sub-1",
+    sessionId: "session-1",
+    title: "A guide",
+    sourceHost: "example.com",
+    captureMode: "selection" as const,
+    status: "running" as const,
+    submittedAt: 1,
+    updatedAt: 2,
+    deepLink: "cognia://session/session-1",
+  }
+
+  it("fetches an answer only when the user asks to see it", async () => {
+    // An answer is the largest thing this contract returns and the list is
+    // polled, so pulling every one on every tick would move kilobytes for rows
+    // nobody is reading.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [{ ...RUNNING_ROW, status: "completed" }],
+      answers: new Map([["sub-1", { text: "The team plan is $20.", truncated: false }]]),
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    expect(state.resultReads).toEqual([])
+
+    fireEvent.click(screen.getByTestId("recent-answer-toggle-sub-1"))
+    await screen.findByText("The team plan is $20.")
+    expect(state.resultReads).toEqual(["sub-1"])
+
+    fireEvent.click(screen.getByTestId("recent-answer-toggle-sub-1"))
+    await waitFor(() => expect(screen.queryByTestId("recent-answer-sub-1")).toBeNull())
+  })
+
+  it("says an answer is missing rather than showing an empty one", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [RUNNING_ROW],
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    fireEvent.click(screen.getByTestId("recent-answer-toggle-sub-1"))
+    await screen.findByText("resultPending")
+  })
+
+  it("stops a running task and refreshes the list", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [RUNNING_ROW],
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    fireEvent.click(screen.getByTestId("recent-stop-sub-1"))
+    await waitFor(() => expect(state.cancelled).toEqual(["sub-1"]))
+  })
+
+  it("offers no stop on a task that has already finished", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [{ ...RUNNING_ROW, status: "completed" }],
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    expect(screen.queryByTestId("recent-stop-sub-1")).toBeNull()
+  })
+
+  it("says who is driving rather than reporting a failure", async () => {
+    // `turn.abort` needs live control, so the Host refuses while the desktop
+    // holds the lease. "Could not be stopped" would send somebody looking for
+    // a fault that is not there.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [RUNNING_ROW],
+      cancelError: Object.assign(new Error("busy"), { code: "session_driven_elsewhere" }),
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    fireEvent.click(screen.getByTestId("recent-stop-sub-1"))
+    await screen.findByText("stopDrivenElsewhere")
+  })
 
   it("drops the cached token when the device turns out to be revoked", async () => {
     // The token is dead and its refresh will be refused too. Leaving it in the

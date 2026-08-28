@@ -3,6 +3,7 @@ import {
   POLL_ACTIVE_MS,
   POLL_IDLE_MS,
   STATUSES_WITH_A_REASON,
+  STOPPABLE_STATUSES,
   SUPPORTED_SCHEMA_VERSION,
   appearanceOverrideMessage,
   captureModeFor,
@@ -13,6 +14,7 @@ import {
   pollIntervalFor,
   preferredModeFor,
   selectedTargetId,
+  stopFailureMessage,
   targetLabel,
   targetsForWorkspace,
   type CapturedPage,
@@ -216,5 +218,21 @@ describe("preferredModeFor", () => {
     // `followsSystem` arrives with the first capability response, so the first
     // call of a session cannot carry it.
     expect(preferredModeFor("follow-host", undefined, true)).toBeUndefined()
+  })
+})
+
+describe("stopping a task", () => {
+  it("offers a stop only where there is something to stop", () => {
+    // `needs_input` is in the set on purpose: a run that stopped to ask
+    // something the panel deliberately cannot answer is exactly a run somebody
+    // may want to end from here rather than open Cognia to abandon.
+    expect([...STOPPABLE_STATUSES].sort()).toEqual(["needs_input", "queued", "running"])
+  })
+
+  it("names a refusal by another driver rather than calling it a failure", () => {
+    const message = (key: string) => `i18n:${key}`
+    expect(stopFailureMessage("session_driven_elsewhere", message)).toBe("i18n:stopDrivenElsewhere")
+    expect(stopFailureMessage("something_else", message)).toBe("i18n:stopFailed")
+    expect(stopFailureMessage(undefined, message)).toBe("i18n:stopFailed")
   })
 })

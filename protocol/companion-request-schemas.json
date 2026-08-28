@@ -855,6 +855,19 @@
       },
       "additionalProperties": false
     },
+    "browser_context_cancel": {
+      "type": "object",
+      "required": [
+        "submissionId"
+      ],
+      "properties": {
+        "submissionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "browser_context_get": {
       "type": "object",
       "required": [
@@ -877,6 +890,19 @@
           "maximum": 50
         },
         "cursor": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "browser_context_result": {
+      "type": "object",
+      "required": [
+        "submissionId"
+      ],
+      "properties": {
+        "submissionId": {
           "type": "string",
           "minLength": 1
         }

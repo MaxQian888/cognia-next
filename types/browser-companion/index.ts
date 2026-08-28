@@ -18,6 +18,7 @@ export type {
   BrowserContextSubmissionSummaryPageV1,
   BrowserContextSubmissionSummaryV1,
   BrowserContextSubmitRequestV1,
+  BrowserContextResultV1,
   BrowserContextSubmitResponseV1,
   BrowserDeliveryTargetKind,
   BrowserDeliveryTargetV1,
@@ -28,6 +29,7 @@ export type {
 
 export {
   BROWSER_CAPTURE_MODES,
+  BROWSER_RESULT_TEXT_BYTES,
   BROWSER_CONTEXT_LIMITS,
   BROWSER_TERMINAL_STATUSES,
   isTerminalBrowserSubmissionStatus,

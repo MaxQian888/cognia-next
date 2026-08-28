@@ -28,6 +28,8 @@ import { browserStatusForRun } from "./run-status"
 import {
   BrowserCompanionError,
   browserCompanionCapability,
+  cancelBrowserContext,
+  getBrowserContextResult,
   getBrowserContextSubmission,
   listBrowserContextSubmissions,
   submitBrowserContext,
@@ -40,6 +42,8 @@ export const BROWSER_COMPANION_COMMANDS: readonly string[] = [
   "browser_context_submit",
   "browser_context_list",
   "browser_context_get",
+  "browser_context_result",
+  "browser_context_cancel",
 ]
 
 export function isBrowserCompanionCommand(command: string): boolean {
@@ -67,6 +71,10 @@ export async function dispatchBrowserCompanionCommand(
       })
     case "browser_context_get":
       return getBrowserContextSubmission(deps, deviceId, payload)
+    case "browser_context_result":
+      return getBrowserContextResult(deps, deviceId, payload)
+    case "browser_context_cancel":
+      return cancelBrowserContext(deps, deviceId, payload)
     default:
       throw new BrowserCompanionError("unknown_command", `unknown command: ${command}`)
   }
@@ -99,6 +107,8 @@ export function createBrowserCompanionDeps(
         ),
         ...(await hostAppearance()),
       }),
+    latestAnswer: latestAssistantAnswer,
+    abortTurn: (sessionId) => abortOnHostAuthority(payload, resolveHostState, sessionId),
     recordSubmission: putBrowserSubmission,
     readSubmission: getBrowserSubmission,
     listSubmissions: listBrowserSubmissions,
@@ -248,4 +258,92 @@ async function enqueueOnHostAuthority(
       `the Host refused the message: ${receipt?.outcome ?? "no receipt"}`
     )
   }
+}
+
+/**
+ * The last thing the assistant said in a session.
+ *
+ * Text parts only. A tool call, a file part or a reasoning block is not an
+ * answer, and concatenating them would hand the panel a wall of machinery
+ * instead of the reply — the deep link is how somebody reads the rest.
+ *
+ * `null` rather than an empty string when there is nothing yet, so the caller
+ * can tell "the task has not answered" from "the task answered with nothing".
+ */
+async function latestAssistantAnswer(
+  sessionId: string
+): Promise<{ text: string; at: number } | null> {
+  const { listMessages } = await import("@/lib/db/messages")
+  const messages = await listMessages(sessionId)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== "assistant") continue
+    const text = (message.parts ?? [])
+      .filter(
+        (part): part is { type: "text"; text: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: unknown }).type === "text" &&
+          typeof (part as { text?: unknown }).text === "string"
+      )
+      .map((part) => part.text)
+      .join("")
+      .trim()
+    if (!text) continue
+    const at = message.metadata?.createdAt
+    return { text, at: typeof at === "number" ? at : Date.now() }
+  }
+  return null
+}
+
+/**
+ * Abort the turn running on a session, on the **Host's** authority.
+ *
+ * Same argument as the enqueue above, and the same constructed caller: the
+ * action is built here, for a session the caller has already been proved to own
+ * (`getBrowserContextSubmission` answers a submission belonging to another
+ * device exactly as it answers a missing one), with a fixed intent kind and a
+ * batch of one.
+ *
+ * `turn.abort` is a live-control intent, so `isSecondClaimant` refuses it while
+ * another device holds the attach lease. That refusal is returned as `false`
+ * rather than thrown: it means the run is healthy and the desktop is driving
+ * it, which is a different thing to tell somebody than "this failed".
+ */
+async function abortOnHostAuthority(
+  payload: Record<string, unknown>,
+  resolveHostState: HostStateResolver,
+  sessionId: string
+): Promise<boolean> {
+  const active = getActiveRuntimeTargetContext()
+  if (!active) {
+    throw new BrowserCompanionError(
+      "runtime_target_unavailable",
+      "this Host has no active runtime target"
+    )
+  }
+  const service = await resolveHostState({ ...payload, runtimeTargetId: active.targetId })
+  const status = await service.status()
+  const action: HostStateAction = {
+    channel: sessionStateChannel(active.targetId, sessionId),
+    accountId: active.accountId,
+    runtimeTargetId: active.targetId,
+    hostId: status.hostId,
+    hostGeneration: status.hostGeneration,
+    sessionId,
+    clientId: "browser-companion",
+    clientSeq: Date.now(),
+    // Not derived from a submission id: a person may stop the same task twice,
+    // and the second press must reach the runtime rather than replay the first
+    // receipt.
+    actionId: `browser-abort:${sessionId}:${Date.now()}`,
+    createdAt: Date.now(),
+    action: { kind: "turn.abort" },
+  }
+  const response = await service.submit(
+    { accountId: active.accountId, runtimeTargetId: active.targetId, actions: [action] },
+    { deviceId: "host:browser-companion", grants: ["workspace.write"] }
+  )
+  const receipt = response.results[0]
+  return receipt?.outcome === "applied" || receipt?.outcome === "duplicate"
 }

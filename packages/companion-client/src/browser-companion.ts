@@ -229,6 +229,29 @@ export interface BrowserContextSubmissionStatusV1 {
 }
 
 /**
+ * What a task answered, for the panel to show without leaving the browser.
+ *
+ * Extends the status reply rather than being a separate shape, because a
+ * result is a status with the answer attached — a task that is still running
+ * has one and not the other, and two shapes would make the panel ask twice.
+ *
+ * `text` is the last assistant message, capped in **bytes** and flagged when it
+ * was cut. Not the whole transcript: the panel is a side panel, the transcript
+ * is what Cognia is for, and a submission's own page text is already in there.
+ */
+export interface BrowserContextResultV1 extends BrowserContextSubmissionStatusV1 {
+  /** Absent until the task has actually said something. */
+  text?: string
+  /** Whether {@link text} is shorter than what the task produced. */
+  truncated?: boolean
+  /** When the answer was written, epoch milliseconds. */
+  answeredAt?: number
+}
+
+/** Byte ceiling on a returned answer. */
+export const BROWSER_RESULT_TEXT_BYTES = 32 * 1024
+
+/**
  * The Host's resolved appearance, handed to the extension so the side panel
  * looks like the app rather than like an approximation of it.
  *

@@ -96,6 +96,8 @@ export interface RecordedSubmission {
   targetId?: string
   /** The whole serialized request, so a test can assert on its size. */
   requestBytes: number
+  /** What the task answered, when a test has set one. */
+  answer?: string
   /** Present only when the capture carried one. */
   selectionText?: string
   readableText?: string
@@ -138,6 +140,10 @@ export interface MockHost {
   setCapabilityRevision(next: string): void
   /** Change the mode the Host resolves its palette in, as a theme change does. */
   setAppearanceMode(mode: "light" | "dark"): void
+  /** Give a submission an answer, as a finished run would. */
+  setAnswer(submissionId: string, text: string): void
+  /** Refuse every stop, as a Host does while another device holds the lease. */
+  setDrivenElsewhere(driven: boolean): void
   /** Make every later authenticated call answer `device_unavailable`. */
   revokeDevices(): void
   /** Refuse every connection, as a stopped Host would. */
@@ -191,6 +197,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
   // panel that is already open.
   let revision = "rev-1"
   let appearanceMode: "light" | "dark" = appearance.mode
+  let drivenElsewhere = false
 
   const challenges = new Map<string, { nonce: string; expiresAt: number }>()
   const enrollments = new Map<string, { expiresAt: number; spent: boolean }>()
@@ -409,7 +416,10 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     }
 
     const idempotencyKey = header(request, "idempotency-key")
-    const writes = command === "browser_context_submit"
+    // Both writes declare `idempotency: required`, and the reads declare
+    // `structural` — which the Host refuses a key on. Mirroring both directions
+    // is what makes the extension's own header rule testable here.
+    const writes = command === "browser_context_submit" || command === "browser_context_cancel"
     if (writes && !idempotencyKey) {
       send(400, errorBody("idempotency_key_required", `${command} requires an Idempotency-Key`))
       return
@@ -449,6 +459,27 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
         return ok(acceptSubmission(body as unknown as BrowserContextSubmitRequestV1))
       case "browser_context_list":
         return ok({ items: summaries(), capabilityRevision: revision })
+      case "browser_context_result": {
+        const row = submissions.find((item) => item.submissionId === body.submissionId)
+        if (!row) return send(404, errorBody("submission_not_found", "no such submission"))
+        return ok({
+          ...summaryOf(row),
+          ...(row.answer ? { text: row.answer, truncated: false, answeredAt: row.updatedAt } : {}),
+        })
+      }
+      case "browser_context_cancel": {
+        const row = submissions.find((item) => item.submissionId === body.submissionId)
+        if (!row) return send(404, errorBody("submission_not_found", "no such submission"))
+        if (drivenElsewhere) {
+          return send(
+            409,
+            errorBody("session_driven_elsewhere", "another device is driving this task")
+          )
+        }
+        row.status = "cancelled"
+        row.updatedAt = Date.now()
+        return ok(summaryOf(row))
+      }
       case "browser_context_get": {
         const row = submissions.find((item) => item.submissionId === body.submissionId)
         if (!row) return send(404, errorBody("submission_not_found", "no such submission"))
@@ -639,6 +670,13 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     },
     setAppearanceMode(mode) {
       appearanceMode = mode
+    },
+    setAnswer(submissionId, text) {
+      const row = submissions.find((item) => item.submissionId === submissionId)
+      if (row) row.answer = text
+    },
+    setDrivenElsewhere(driven) {
+      drivenElsewhere = driven
     },
     setStatus(submissionId, status) {
       const row = submissions.find((item) => item.submissionId === submissionId)

@@ -79,6 +79,36 @@ describe("RecentList", () => {
     expect(screen.queryByTestId("recent-reason-sub-2")).toBeNull()
   })
 
+  it("shows an expanded answer and flags one that was cut", () => {
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ status: "completed" })]}
+        answers={{ "sub-1": { text: "The team plan is $20.", truncated: true } }}
+        expanded={["sub-1"]}
+        onToggleAnswer={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("recent-answer-sub-1")).toHaveTextContent("The team plan is $20.")
+    // "the task said this" and "the task said this much of it" are different
+    // claims, and the row makes the second one rather than implying the first.
+    expect(screen.getByText("resultTruncated")).toBeInTheDocument()
+  })
+
+  it("offers a stop only on a task that is still going", () => {
+    const onStop = jest.fn()
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ status: "running" }), item({ submissionId: "sub-2", status: "completed" })]}
+        onStop={onStop}
+      />
+    )
+    fireEvent.click(screen.getByTestId("recent-stop-sub-1"))
+    expect(onStop).toHaveBeenCalledWith("sub-1")
+    expect(screen.queryByTestId("recent-stop-sub-2")).toBeNull()
+  })
+
   it("keeps one row per submission", () => {
     render(
       <RecentList

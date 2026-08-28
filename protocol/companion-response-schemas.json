@@ -351,6 +351,42 @@
       },
       "additionalProperties": false
     },
+    "BrowserSubmissionResult": {
+      "type": "object",
+      "required": ["submissionId", "sessionId", "status", "updatedAt", "deepLink"],
+      "properties": {
+        "submissionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "$ref": "#/$defs/BrowserSubmissionStatus"
+        },
+        "updatedAt": {
+          "type": "integer"
+        },
+        "errorCode": {
+          "type": "string"
+        },
+        "deepLink": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "answeredAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
     "BrowserSubmissionStatus": {
       "type": "string",
       "enum": [
@@ -4489,11 +4525,17 @@
     "browser_companion_capability": {
       "$ref": "#/$defs/BrowserCompanionCapability"
     },
+    "browser_context_cancel": {
+      "$ref": "#/$defs/BrowserSubmissionStatusResult"
+    },
     "browser_context_get": {
       "$ref": "#/$defs/BrowserSubmissionStatusResult"
     },
     "browser_context_list": {
       "$ref": "#/$defs/BrowserSubmissionSummaryPage"
+    },
+    "browser_context_result": {
+      "$ref": "#/$defs/BrowserSubmissionResult"
     },
     "browser_context_submit": {
       "$ref": "#/$defs/BrowserSubmissionReceipt"

@@ -37,6 +37,7 @@
  */
 import type {
   BrowserCompanionCapabilityV1,
+  BrowserContextResultV1,
   BrowserDeliveryTargetV1,
   BrowserContextSubmissionStatusV1,
   BrowserContextSubmissionSummaryPageV1,
@@ -44,7 +45,11 @@ import type {
   BrowserContextSubmitResponseV1,
   BrowserSubmissionStatus,
 } from "@/types/browser-companion"
-import { BROWSER_CAPTURE_MODES, BROWSER_CONTEXT_LIMITS } from "@/types/browser-companion"
+import {
+  BROWSER_CAPTURE_MODES,
+  BROWSER_CONTEXT_LIMITS,
+  BROWSER_RESULT_TEXT_BYTES,
+} from "@/types/browser-companion"
 import { utf8ByteLength } from "@cognia/companion-client"
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 
@@ -123,6 +128,22 @@ export interface BrowserCompanionDeps {
    * ask — it read the capability once, on connect.
    */
   capabilityRevision: (deviceId: string) => Promise<string>
+  /**
+   * The last thing the assistant said in a session, or `null` while it has not
+   * said anything yet.
+   *
+   * The last message rather than the transcript: the panel is a side panel, and
+   * the conversation is what the deep link is for.
+   */
+  latestAnswer: (sessionId: string) => Promise<{ text: string; at: number } | null>
+  /**
+   * Stop the turn running on a session.
+   *
+   * Returns `false` when the Host refuses because somebody else is driving that
+   * session right now — a distinct outcome from an error, and the panel says so
+   * rather than reporting a failure the user cannot act on from a browser.
+   */
+  abortTurn: (sessionId: string) => Promise<boolean>
 }
 
 /** `cognia://session/<id>` — the link that opens the task on the desktop. */
@@ -413,6 +434,85 @@ export async function getBrowserContextSubmission(
     ...(row.errorCode ? { errorCode: row.errorCode } : {}),
     deepLink: browserSubmissionDeepLink(row.sessionId),
   }
+}
+
+/**
+ * What a task answered, for a submission this device owns.
+ *
+ * The status half is `getBrowserContextSubmission`'s, because a result *is* a
+ * status with the answer attached: a running task has one and not the other,
+ * and splitting them would make the panel ask twice for one row.
+ *
+ * The text is capped in UTF-8 bytes rather than characters, for the same reason
+ * every other limit in this contract is: a CJK answer hits a byte ceiling at
+ * roughly a third of the character count, so a character cap silently means
+ * something different per language. `truncated` is carried explicitly because
+ * "the task said this" and "the task said this much of it" are different
+ * claims.
+ */
+export async function getBrowserContextResult(
+  deps: BrowserCompanionDeps,
+  deviceId: string,
+  payload: { submissionId?: unknown }
+): Promise<BrowserContextResultV1> {
+  const status = await getBrowserContextSubmission(deps, deviceId, payload)
+  const answer = await deps.latestAnswer(status.sessionId)
+  if (!answer) return status
+  const clipped = clipToBytes(answer.text, BROWSER_RESULT_TEXT_BYTES)
+  return {
+    ...status,
+    text: clipped.text,
+    truncated: clipped.truncated,
+    answeredAt: answer.at,
+  }
+}
+
+/**
+ * Stop the task a submission started.
+ *
+ * On the Host's authority, and for a session this device owns — the ownership
+ * check is `getBrowserContextSubmission`'s, which answers a submission
+ * belonging to another device exactly as it answers a missing one.
+ *
+ * A refusal because somebody else is holding the wheel is reported as its own
+ * code rather than as a failure. It is the honest answer: the run is fine, the
+ * desktop is driving it, and the remedy is over there. Reporting it as failed
+ * would tell the user their task broke.
+ */
+export async function cancelBrowserContext(
+  deps: BrowserCompanionDeps,
+  deviceId: string,
+  payload: { submissionId?: unknown }
+): Promise<BrowserContextSubmissionStatusV1> {
+  const status = await getBrowserContextSubmission(deps, deviceId, payload)
+  const stopped = await deps.abortTurn(status.sessionId)
+  if (!stopped) {
+    throw new BrowserCompanionError(
+      "session_driven_elsewhere",
+      "another device is driving this task; stop it there"
+    )
+  }
+  // Read the status back rather than assuming `cancelled`: an abort is a
+  // request to the runtime, and what the run does with it is the runtime's
+  // answer, not this function's.
+  return getBrowserContextSubmission(deps, deviceId, payload)
+}
+
+/**
+ * Cut text to a byte ceiling on a character boundary, and say whether it was
+ * cut.
+ *
+ * The loop steps back a character at a time so a multi-byte codepoint is never
+ * split into a replacement character — the same shape the extension's own
+ * clipper has, for the same reason.
+ */
+function clipToBytes(value: string, limitBytes: number): { text: string; truncated: boolean } {
+  if (utf8ByteLength(value) <= limitBytes) return { text: value, truncated: false }
+  let cut = value.length
+  while (cut > 0 && utf8ByteLength(value.slice(0, cut)) > limitBytes) {
+    cut = Math.max(0, cut - Math.ceil((utf8ByteLength(value.slice(0, cut)) - limitBytes) / 4) - 1)
+  }
+  return { text: value.slice(0, cut), truncated: true }
 }
 
 /**

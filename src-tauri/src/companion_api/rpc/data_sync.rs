@@ -139,6 +139,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "browser_context_submit",
     "browser_context_list",
     "browser_context_get",
+    "browser_context_result",
+    "browser_context_cancel",
     "perf_close_lease",
     "perf_hotspots",
     "perf_lease_snapshot",
@@ -820,7 +822,9 @@ pub(super) async fn dispatch(
         | "browser_companion_capability"
         | "browser_context_submit"
         | "browser_context_list"
-        | "browser_context_get" => {
+        | "browser_context_get"
+        | "browser_context_result"
+        | "browser_context_cancel" => {
             // The kill switch, checked per request rather than only at boot.
             //
             // `BrowserAccessConfig.enabled` used to be read exactly once, when
@@ -835,7 +839,7 @@ pub(super) async fn dispatch(
             // open them in Cognia, which is exactly what "leaving existing
             // sessions reachable" means. They are also polled every few
             // seconds, and this is a file read.
-            if name == "browser_context_submit"
+            if matches!(name, "browser_context_submit" | "browser_context_cancel")
                 && !crate::companion_api::browser_access::submissions_enabled()
             {
                 return Err(RpcError::browser_submissions_disabled());

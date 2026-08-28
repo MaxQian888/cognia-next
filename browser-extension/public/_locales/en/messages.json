@@ -151,6 +151,30 @@
   "continueInCognia": {
     "message": "Continue in Cognia"
   },
+  "resultShow": {
+    "message": "Show the answer"
+  },
+  "resultHide": {
+    "message": "Hide the answer"
+  },
+  "resultPending": {
+    "message": "No answer yet."
+  },
+  "resultTruncated": {
+    "message": "Shortened — open it in Cognia to read the rest."
+  },
+  "stop": {
+    "message": "Stop"
+  },
+  "stopping": {
+    "message": "Stopping…"
+  },
+  "stopDrivenElsewhere": {
+    "message": "Cognia is driving this task right now. Stop it there."
+  },
+  "stopFailed": {
+    "message": "This task could not be stopped."
+  },
   "statusSubmitting": {
     "message": "Starting"
   },

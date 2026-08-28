@@ -16,6 +16,7 @@ import {
   expectCompanionJson,
   signerFromCryptoKey,
   type BrowserCompanionCapabilityV1,
+  type BrowserContextResultV1,
   type BrowserContextSubmissionStatusV1,
   type BrowserContextSubmissionSummaryPageV1,
   type BrowserContextSubmitRequestV1,
@@ -161,6 +162,16 @@ export interface HostClient {
    * rejection here says nothing about whether the id exists.
    */
   get(submissionId: string): Promise<BrowserContextSubmissionStatusV1>
+  /** The status, plus what the task said, when it has said anything. */
+  result(submissionId: string): Promise<BrowserContextResultV1>
+  /**
+   * Stop the task a submission started.
+   *
+   * Refuses with `session_driven_elsewhere` when another device is holding the
+   * wheel — the run is fine and the desktop is driving it, which the panel says
+   * rather than reporting a failure the user cannot act on from here.
+   */
+  cancel(submissionId: string): Promise<BrowserContextSubmissionStatusV1>
   invalidate(): void
 }
 
@@ -194,6 +205,13 @@ export function createHostClient({
     if (command === "browser_context_submit" && typeof args.submissionId === "string") {
       headers["Idempotency-Key"] = args.submissionId
     }
+    // `cancel` declares `idempotency: required` too, and the Host parses the
+    // header as a UUID. A fresh one per press rather than the submission id: a
+    // person may stop the same task twice, and replaying the first receipt
+    // would make the second press do nothing while reporting success.
+    if (command === "browser_context_cancel") {
+      headers["Idempotency-Key"] = crypto.randomUUID()
+    }
     const body = await expectCompanionJson(
       fetchImpl(`${pairing.baseUrl}${path}`, {
         method: "POST",
@@ -219,6 +237,10 @@ export function createHostClient({
       call<BrowserContextSubmissionSummaryPageV1>("browser_context_list", limit ? { limit } : {}),
     get: (submissionId) =>
       call<BrowserContextSubmissionStatusV1>("browser_context_get", { submissionId }),
+    result: (submissionId) =>
+      call<BrowserContextResultV1>("browser_context_result", { submissionId }),
+    cancel: (submissionId) =>
+      call<BrowserContextSubmissionStatusV1>("browser_context_cancel", { submissionId }),
     invalidate: () => session.invalidate(),
   }
 }

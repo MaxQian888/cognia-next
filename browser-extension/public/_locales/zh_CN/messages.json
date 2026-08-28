@@ -151,6 +151,30 @@
   "continueInCognia": {
     "message": "在 Cognia 中继续"
   },
+  "resultShow": {
+    "message": "查看回答"
+  },
+  "resultHide": {
+    "message": "收起回答"
+  },
+  "resultPending": {
+    "message": "还没有回答。"
+  },
+  "resultTruncated": {
+    "message": "已截断 —— 在 Cognia 里打开可以看到完整内容。"
+  },
+  "stop": {
+    "message": "停止"
+  },
+  "stopping": {
+    "message": "正在停止…"
+  },
+  "stopDrivenElsewhere": {
+    "message": "Cognia 正在操作这个任务，请到那边停止。"
+  },
+  "stopFailed": {
+    "message": "无法停止这个任务。"
+  },
   "statusSubmitting": {
     "message": "启动中"
   },

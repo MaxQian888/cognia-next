@@ -271,3 +271,26 @@ export function preferredModeFor(
   if (!followsSystem) return undefined
   return systemPrefersDark ? "dark" : "light"
 }
+
+/**
+ * Statuses a browser may stop.
+ *
+ * `needs_input` is in the set on purpose: a run that stopped to ask something
+ * the panel deliberately cannot answer is exactly a run somebody may want to
+ * end from here rather than open Cognia to abandon.
+ */
+export const STOPPABLE_STATUSES: readonly BrowserSubmissionStatus[] = [
+  "queued",
+  "running",
+  "needs_input",
+]
+
+/** The message for a refused stop, keyed by what the Host actually said. */
+export function stopFailureMessage(
+  code: string | undefined,
+  message: (key: string) => string
+): string {
+  return code === "session_driven_elsewhere"
+    ? message("stopDrivenElsewhere")
+    : message("stopFailed")
+}
