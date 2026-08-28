@@ -27,6 +27,7 @@ import {
   Route,
   PackageIcon,
   Boxes,
+  ServerCog,
 } from "lucide-react"
 import Link from "next/link"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
@@ -36,6 +37,7 @@ import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecy
 import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
+import { HostExternalAgentConfigs } from "./host-external-agent-configs"
 import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
 import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
 import { isTauri } from "@/lib/tauri"
@@ -1790,6 +1792,7 @@ type DetailView =
   | { kind: "global" }
   | { kind: "delegation" }
   | { kind: "runtimes" }
+  | { kind: "host" }
   | { kind: "agent"; id: string }
 
 /** A single entry in the left navigation rail. */
@@ -1827,6 +1830,7 @@ function RailItem({
 export function ExternalAgentSettings() {
   const t = useTranslations("externalAgent.settings")
   const tRuntimes = useTranslations("externalAgent.runtimes")
+  const tHostConfigs = useTranslations("externalAgent.hostConfigs")
   const tCommon = useTranslations("common")
   const tErrors = useTranslations("externalAgent.lifecycleErrors")
 
@@ -2076,6 +2080,19 @@ export function ExternalAgentSettings() {
                 onClick={() => setView({ kind: "runtimes" })}
                 dataTestId="nav-runtimes"
               />
+              {/* Agents the paired host owns. A rail entry rather than a
+                  section stacked under the local list, because the two answer
+                  different questions — "what have I configured here" versus
+                  "what can actually run over there" — and interleaving them
+                  made a browser's unrunnable local agents look equivalent to
+                  the host's runnable ones. */}
+              <RailItem
+                icon={ServerCog}
+                label={tHostConfigs("title")}
+                active={view.kind === "host"}
+                onClick={() => setView({ kind: "host" })}
+                dataTestId="nav-host-configs"
+              />
             </nav>
 
             <div className="space-y-1.5">
@@ -2213,6 +2230,8 @@ export function ExternalAgentSettings() {
                 existed with no caller: a verdict was computed for nobody. This
                 is where they surface. */}
             {view.kind === "runtimes" && <RuntimeGovernancePanel />}
+
+            {view.kind === "host" && <HostExternalAgentConfigs />}
 
             {view.kind === "gallery" && (
               <div className="space-y-4">

@@ -91,6 +91,22 @@
   },
   "executionPlan": "执行计划",
   "externalAgents": "外部代理",
+  "hostConfigs": {
+    "title": "宿主端智能体",
+    "description": "存放在已配对宿主上的外部智能体。配置与运行都在宿主端，因此它能告诉你每一个是否已就绪。",
+    "loading": "正在加载宿主配置…",
+    "count": "{count, plural, =0 {暂无配置} other {# 个配置}}",
+    "recheck": "重新检查就绪状态",
+    "revision": "修订 {seq}",
+    "toggleLabel": "启用 {name}",
+    "deleteLabel": "删除 {name}",
+    "emptyTitle": "该宿主上尚未配置智能体",
+    "emptyDescription": "可在宿主端新建，或从本地复制一个过去。凭据始终在宿主端配置，绝不会从这里发送。",
+    "unavailableTitle": "没有宿主配置",
+    "unavailableNoHost": "先配对一个宿主，才能配置真正可运行的外部智能体。",
+    "unavailableUnsupported": "已配对的宿主不支持宿主端外部智能体。升级后即可在这里管理。",
+    "unavailableManifestMissing": "正在等待已配对的宿主上报其支持的能力。"
+  },
   "lifecycle": {
     "statusLabel": {
       "needsCredentials": "缺少凭据",
