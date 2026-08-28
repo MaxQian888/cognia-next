@@ -150,4 +150,54 @@ describe("CodexAppServerStatusCard", () => {
     expect(screen.queryByTestId("codex-account-section")).not.toBeInTheDocument()
     expect(screen.queryByTestId("codex-rate-limits")).not.toBeInTheDocument()
   })
+
+  describe("managed policy", () => {
+    it("lists the limits the local Codex's admin config imposes", () => {
+      hookValue.status = {
+        mcpServers: [],
+        skills: [],
+        configRequirements: {
+          allowedSandboxModes: ["read-only", "workspace-write"],
+          allowedApprovalPolicies: ["on-request"],
+          allowedPermissionProfiles: { ":workspace": true, ":full": false },
+        },
+        configRequirementsUnsupported: false,
+      }
+      renderCard()
+      const badges = screen.getByTestId("codex-managed-policy")
+      expect(badges).toHaveTextContent("read-only")
+      expect(badges).toHaveTextContent("workspace-write")
+      expect(badges).toHaveTextContent("on-request")
+      expect(badges).toHaveTextContent(":workspace")
+      // A profile mapped to `false` is present but forbidden — listing it would
+      // offer the user something the admin already refused.
+      expect(badges).not.toHaveTextContent(":full")
+    })
+
+    it("says it could not look, rather than claiming there are no limits", () => {
+      // "No limits found" and "cannot look" are different claims, and only one
+      // of them means the administrator allowed everything.
+      hookValue.status = {
+        mcpServers: [],
+        skills: [],
+        configRequirementsUnsupported: true,
+      }
+      renderCard()
+      expect(screen.getByTestId("codex-requirements-unsupported")).toBeInTheDocument()
+      expect(screen.queryByTestId("codex-managed-policy")).not.toBeInTheDocument()
+    })
+
+    it("distinguishes a Codex that declares no limits from one that cannot be asked", () => {
+      hookValue.status = {
+        mcpServers: [],
+        skills: [],
+        configRequirements: null,
+        configRequirementsUnsupported: false,
+      }
+      renderCard()
+      expect(screen.queryByTestId("codex-requirements-unsupported")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("codex-managed-policy")).not.toBeInTheDocument()
+      expect(screen.getByText(/declares no managed limits/i)).toBeInTheDocument()
+    })
+  })
 })

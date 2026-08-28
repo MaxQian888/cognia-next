@@ -668,6 +668,71 @@ describe("CodexAppServerAdapter", () => {
     })
   })
 
+  describe("managed configuration requirements", () => {
+    it("refuses a forbidden sandbox BEFORE sending thread/start", async () => {
+      responders["configRequirements/read"] = () => ({
+        requirements: { allowedSandboxModes: ["read-only", "workspace-write"] },
+      })
+      const adapter = await connectedAdapter()
+      await Promise.resolve()
+
+      // `bypassPermissions` forces `danger-full-access`, which this managed
+      // Codex forbids.
+      await expect(
+        adapter.createSession({ permissionMode: "bypassPermissions" })
+      ).rejects.toMatchObject({ code: "managed_policy_refused" })
+
+      // The point of a proactive clamp: the request never reaches the wire,
+      // because 0.150.1 has no typed refusal to recognise on the way back.
+      expect(lastWritten((m) => m.method === "thread/start")).toBeUndefined()
+    })
+
+    it("sends normally when the managed config permits the request", async () => {
+      responders["configRequirements/read"] = () => ({
+        requirements: { allowedSandboxModes: ["danger-full-access"] },
+      })
+      responders["thread/start"] = () => ({ thread: { id: "thr_ok" } })
+      const adapter = await connectedAdapter()
+      await Promise.resolve()
+
+      const session = await adapter.createSession({ permissionMode: "bypassPermissions" })
+      expect(session.id).toBe("thr_ok")
+      expect(lastWritten((m) => m.method === "thread/start")).toBeDefined()
+    })
+
+    it("reports a Codex without the method as unsupported, never as unconstrained", async () => {
+      // "No limits found" and "cannot look" are different claims, and only one
+      // of them means the administrator allowed everything.
+      responders["configRequirements/read"] = () => ({
+        __error: { code: -32601, message: "Method not found" },
+      })
+      responders["thread/start"] = () => ({ thread: { id: "thr_old" } })
+      const adapter = await connectedAdapter()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(adapter.getStatus().configRequirementsUnsupported).toBe(true)
+      expect(adapter.getStatus().configRequirements).toBeUndefined()
+      // And it constrains nothing, so an older Codex behaves exactly as before.
+      await expect(
+        adapter.createSession({ permissionMode: "bypassPermissions" })
+      ).resolves.toMatchObject({ id: "thr_old" })
+    })
+
+    it("constrains nothing when the managed config declares no limits", async () => {
+      responders["configRequirements/read"] = () => ({ requirements: {} })
+      responders["thread/start"] = () => ({ thread: { id: "thr_free" } })
+      const adapter = await connectedAdapter()
+      await Promise.resolve()
+
+      expect(adapter.getStatus().configRequirements).toBeNull()
+      expect(adapter.getStatus().configRequirementsUnsupported).toBe(false)
+      await expect(
+        adapter.createSession({ permissionMode: "bypassPermissions" })
+      ).resolves.toMatchObject({ id: "thr_free" })
+    })
+  })
+
   describe("session extension support", () => {
     it("starts at unknown and marks supported after a successful thread/list", async () => {
       responders["thread/list"] = () => ({

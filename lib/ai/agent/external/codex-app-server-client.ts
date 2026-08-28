@@ -37,6 +37,8 @@ import {
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { withCodexMcpServers } from "./codex-mcp-config"
+import type { CodexConfigRequirements } from "./codex-config-requirements"
+import { assertCodexRequestAllowed, mapCodexConfigRequirements } from "./codex-config-requirements"
 import { JsonRpcPeer } from "./json-rpc-peer"
 import { buildAgentEnv } from "./env-builder"
 import { spawnReclaimingOrphan } from "./spawn-reclaim"
@@ -334,6 +336,18 @@ export interface CodexAppServerStatus {
    * `undefined` until the roots are applied (or when there are none).
    */
   extraSkillRootsUnsupported?: boolean
+  /**
+   * `configRequirements/read` — the local Codex's managed/enterprise limits.
+   * `null` means "read it, and this Codex constrains nothing"; `undefined`
+   * means not fetched.
+   */
+  configRequirements?: CodexConfigRequirements | null
+  /**
+   * `true` when the connected Codex CLI has no `configRequirements/read`, so no
+   * managed limits can be read and none are enforced. Surfaced rather than
+   * assumed: "no limits found" and "cannot look" are different claims.
+   */
+  configRequirementsUnsupported?: boolean
 }
 
 /**
@@ -493,6 +507,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       // Best-effort account + rate-limit snapshot for the status card; older
       // CLIs without the account surface degrade silently via callOptional.
       void this.refreshAccount()
+      // Managed/enterprise limits, so a request they forbid is refused before it
+      // is sent — Codex has no typed refusal to recognise afterwards.
+      void this.refreshConfigRequirements()
       // Re-register configured extra skill folders — the app-server never
       // persists them across restarts, so every connect must re-apply.
       void this.applyConfiguredExtraSkillRoots()
@@ -766,6 +783,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       options?.mcpServers
     )
     if (config) params.config = config
+
+    // A managed Codex can forbid the sandbox mode or approval policy this
+    // request carries. Checked HERE rather than on the way back: 0.150.1 has no
+    // typed refusal (`CodexErrorInfo` offers only `badRequest`/`sandboxError`),
+    // so once the rejection arrives the reason no longer exists.
+    assertCodexRequestAllowed(
+      {
+        sandbox: readString(params.sandbox),
+        approvalPolicy: readString(params.approvalPolicy),
+      },
+      this.status.configRequirements
+    )
 
     const result = await this.peer.sendRequest<{ thread?: { id?: string } }>("thread/start", params)
     const threadId = result?.thread?.id
@@ -1275,6 +1304,16 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     // the sandbox on the very next turn instead of waiting for a reconnect.
     const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata, session?.permissionMode)
     if (sandboxPolicy) params.sandboxPolicy = sandboxPolicy
+
+    // Same managed-policy gate as `thread/start`. The sandbox arrives here as
+    // the tagged `SandboxPolicy` union, so compare on its wire mode.
+    assertCodexRequestAllowed(
+      {
+        sandbox: toWireSandboxMode(sandboxPolicy?.type),
+        approvalPolicy: readString(params.approvalPolicy),
+      },
+      this.status.configRequirements
+    )
 
     const result = await this.peer.sendRequest<{ turn?: { id?: string } }>("turn/start", params)
     const turnId = result?.turn?.id
@@ -2762,6 +2801,32 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * account, and the status listeners are always notified so the UI reflects
    * whatever we did learn.
    */
+  /**
+   * Read the local Codex's managed/enterprise limits.
+   *
+   * Best-effort and non-fatal: a CLI without the method degrades through
+   * `callOptional`'s `-32601` path and is reported as *unsupported*, never as
+   * *unconstrained* — the two look identical from outside and only one of them
+   * means the administrator allowed everything.
+   */
+  async refreshConfigRequirements(): Promise<void> {
+    try {
+      const raw = await this.callOptional<Record<string, unknown>>("configRequirements/read")
+      if (raw === undefined) {
+        this.status = { ...this.status, configRequirementsUnsupported: true }
+      } else {
+        this.status = {
+          ...this.status,
+          configRequirements: mapCodexConfigRequirements(raw),
+          configRequirementsUnsupported: false,
+        }
+      }
+    } catch (error) {
+      log.warn("Codex config requirements read failed", { error })
+    }
+    this.notifyStatus()
+  }
+
   async refreshAccount(): Promise<void> {
     try {
       const account = await this.callOptional<{

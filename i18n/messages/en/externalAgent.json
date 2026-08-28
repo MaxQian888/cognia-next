@@ -300,6 +300,12 @@
     "chatFailurePolicyStrict": "Strict failure (no fallback)",
     "codexAppServer": {
       "account": "Account",
+      "managedPolicy": "Managed policy",
+      "managedPolicyApproval": "approval: {value}",
+      "managedPolicyNone": "This Codex declares no managed limits.",
+      "managedPolicyProfile": "profile: {value}",
+      "managedPolicySandbox": "sandbox: {value}",
+      "managedPolicyUnsupported": "This Codex has no managed-policy surface, so no limits can be read. That is not the same as having none.",
       "mcpServers": "MCP servers",
       "noMcpServers": "No MCP servers configured.",
       "noSkills": "No skills found.",

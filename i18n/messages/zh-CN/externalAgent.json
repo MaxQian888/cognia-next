@@ -300,6 +300,12 @@
     "chatFailurePolicyStrict": "严格失败（不回退）",
     "codexAppServer": {
       "account": "账号",
+      "managedPolicy": "受管策略",
+      "managedPolicyApproval": "审批：{value}",
+      "managedPolicyNone": "此 Codex 未声明任何受管限制。",
+      "managedPolicyProfile": "配置档：{value}",
+      "managedPolicySandbox": "沙盒：{value}",
+      "managedPolicyUnsupported": "此 Codex 没有受管策略接口，无法读取限制。这与「没有限制」并不是一回事。",
       "mcpServers": "MCP 服务器",
       "noMcpServers": "未配置 MCP 服务器。",
       "noSkills": "未发现技能。",

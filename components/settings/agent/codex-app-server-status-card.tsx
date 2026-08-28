@@ -1,7 +1,7 @@
 "use client"
 
 import { useTranslations, useFormatter } from "next-intl"
-import { Gauge, RefreshCw, Server, Sparkles, UserRound } from "lucide-react"
+import { Gauge, RefreshCw, Server, ShieldCheck, Sparkles, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -107,6 +107,45 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
           )}
         </div>
       )}
+
+      {/* Managed/enterprise limits (configRequirements/read). Cognia refuses a
+          request these forbid before sending it, because Codex has no typed
+          refusal error to recognise afterwards. */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          {t("managedPolicy")}
+        </div>
+        {status.configRequirementsUnsupported ? (
+          // Inert on purpose, and labelled so: this Codex cannot be asked, which
+          // is not the same claim as "this Codex restricts nothing".
+          <p className="text-xs text-muted-foreground" data-testid="codex-requirements-unsupported">
+            {t("managedPolicyUnsupported")}
+          </p>
+        ) : !status.configRequirements ? (
+          <p className="text-xs text-muted-foreground">{t("managedPolicyNone")}</p>
+        ) : (
+          <div className="flex flex-wrap gap-1" data-testid="codex-managed-policy">
+            {status.configRequirements.allowedSandboxModes?.map((mode) => (
+              <Badge key={`sandbox-${mode}`} variant="outline" className="text-[10px]">
+                {t("managedPolicySandbox", { value: mode })}
+              </Badge>
+            ))}
+            {status.configRequirements.allowedApprovalPolicies?.map((policy) => (
+              <Badge key={`approval-${policy}`} variant="outline" className="text-[10px]">
+                {t("managedPolicyApproval", { value: policy })}
+              </Badge>
+            ))}
+            {Object.entries(status.configRequirements.allowedPermissionProfiles ?? {})
+              .filter(([, allowed]) => allowed)
+              .map(([id]) => (
+                <Badge key={`profile-${id}`} variant="outline" className="text-[10px]">
+                  {t("managedPolicyProfile", { value: id })}
+                </Badge>
+              ))}
+          </div>
+        )}
+      </div>
 
       <div className="space-y-1">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">

@@ -118,6 +118,13 @@ export type ExternalAgentBranchReasonCode =
   // A per-host runtime budget (concurrent process cap) is exhausted and no
   // idle process could be reclaimed.
   | "resource_limit"
+  // The LOCAL runtime's own managed/enterprise configuration forbids the
+  // sandbox mode, approval policy or permission profile the request carries.
+  // Distinct from `permission_denied`, which is a per-tool decision made by the
+  // user during a turn; this one is an administrator's standing limit and no
+  // amount of in-turn approval will lift it. Detected before the request is
+  // sent, because Codex has no typed refusal error to recognise afterwards.
+  | "managed_policy_refused"
 
 /**
  * Canonical branch outcome for external-agent orchestration.
