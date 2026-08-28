@@ -9,6 +9,7 @@ import {
   submitBrowserContext,
   type BrowserCompanionDeps,
 } from "./service"
+import { listDeliveryTargets } from "./targets"
 
 const APPEARANCE = {
   mode: "dark" as const,
@@ -58,6 +59,20 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
         .filter((row) => row.deviceId === deviceId)
         .sort((left, right) => right.submittedAt - left.submittedAt)
         .slice(0, limit),
+    // The real catalogue over the harness's rows. Stubbing it would make every
+    // "the target must be one the Host offered" assertion vacuous, since the
+    // stub would be the thing deciding what was offered.
+    listDeliveryTargets: async (deviceId) =>
+      listDeliveryTargets(
+        {
+          listSubmissions: async (id, limit) =>
+            [...rows.values()]
+              .filter((row) => row.deviceId === id)
+              .sort((left, right) => right.submittedAt - left.submittedAt)
+              .slice(0, limit),
+        },
+        deviceId
+      ),
     sessionStatus: async (sessionId) => {
       if (state.sessionStatusThrows) throw new Error("runtime unreachable")
       return statuses.get(sessionId) ?? "running"
@@ -99,7 +114,7 @@ function payload(overrides: Record<string, unknown> = {}) {
 describe("browserCompanionCapability", () => {
   it("describes the limits, modes, workspaces and appearance", async () => {
     const h = harness()
-    const capability = await browserCompanionCapability(h.deps)
+    const capability = await browserCompanionCapability(h.deps, "browser-a")
     expect(capability.schemaVersion).toBe(1)
     expect(capability.supportedCaptureModes).toEqual(["metadata", "selection", "readable-page"])
     expect(capability.workspaces[0]).toMatchObject({ id: "ws-default", isDefault: true })
@@ -175,6 +190,94 @@ describe("submitBrowserContext", () => {
     // with `errorCode: undefined` still carries the key and would be spread
     // onto every later status response.
     expect(h.rows.get("sub-1")).not.toHaveProperty("errorCode")
+  })
+
+  it("appends to a conversation this device started, without creating a second one", async () => {
+    const h = harness()
+    const first = await submitBrowserContext(h.deps, "browser-a", payload())
+    const second = await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ submissionId: "sub-2", targetId: `session:${first.sessionId}` })
+    )
+
+    expect(second.sessionId).toBe(first.sessionId)
+    expect(h.createdSessions).toHaveLength(1)
+    expect(h.enqueued.map((entry) => entry.sessionId)).toEqual([first.sessionId, first.sessionId])
+    // The conversation keeps its own title. Overwriting it with whatever page
+    // was captured second would rename a task from under whoever is reading it.
+    expect(h.rows.get("sub-2")?.title).toBe(h.rows.get("sub-1")?.title)
+  })
+
+  it("refuses a session the Host never offered this device", async () => {
+    // The whole bound on the append path. `session:session-9` is a well-formed
+    // id, and the only thing that stops a browser from naming a conversation it
+    // did not start is that the Host did not put it in the catalogue.
+    const h = harness()
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "session:session-9" }))
+    ).rejects.toMatchObject({ code: "unknown_target" })
+    expect(h.createdSessions).toHaveLength(0)
+  })
+
+  it("refuses another device's session even when it exists", async () => {
+    const h = harness()
+    const theirs = await submitBrowserContext(h.deps, "browser-b", payload())
+    await expect(
+      submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({ submissionId: "sub-2", targetId: `session:${theirs.sessionId}` })
+      )
+    ).rejects.toMatchObject({ code: "unknown_target" })
+  })
+
+  it("refuses a target that belongs to a different workspace", async () => {
+    const h = harness()
+    const first = await submitBrowserContext(h.deps, "browser-a", payload())
+    await expect(
+      submitBrowserContext(
+        h.deps,
+        "browser-a",
+        payload({
+          submissionId: "sub-2",
+          workspaceId: "ws-other",
+          targetId: `session:${first.sessionId}`,
+        })
+      )
+    ).rejects.toMatchObject({ code: "unknown_target" })
+  })
+
+  it("treats a submission that names no target as a new task", async () => {
+    // The wire contract keeps `targetId` optional so an extension built before
+    // targets existed keeps working, and this is what that means.
+    const h = harness()
+    const response = await submitBrowserContext(h.deps, "browser-a", payload())
+    expect(response.sessionId).toBe("session-1")
+    expect(h.rows.get("sub-1")?.targetId).toBe("chat:new")
+  })
+
+  it("refuses a redrive that changes where the work goes", async () => {
+    // Same id, same page, different destination. Every other field agrees, so
+    // nothing else in `describesSameCapture` can tell these apart — and
+    // honouring it would append to a task the caller asked to be created fresh.
+    let fail = false
+    const h = harness({
+      enqueueMessage: async () => {
+        if (fail) throw new Error("HostState unavailable")
+      },
+    })
+    const seed = await submitBrowserContext(h.deps, "browser-a", payload({ submissionId: "seed" }))
+
+    fail = true
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
+      "HostState unavailable"
+    )
+
+    fail = false
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: `session:${seed.sessionId}` }))
+    ).rejects.toMatchObject({ code: "submission_payload_mismatch" })
   })
 
   it("reports a missing runtime as host_unavailable rather than throwing", async () => {

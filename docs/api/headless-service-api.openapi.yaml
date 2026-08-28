@@ -4453,6 +4453,34 @@ paths:
                         isDefault:
                           type: boolean
                       additionalProperties: false
+                  deliveryTargets:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - kind
+                        - label
+                        - isDefault
+                      properties:
+                        id:
+                          type: string
+                          minLength: 1
+                        kind:
+                          type: string
+                          enum:
+                            - chat
+                            - session
+                        label:
+                          type: string
+                        isDefault:
+                          type: boolean
+                        workspaceId:
+                          type: string
+                          minLength: 1
+                        detail:
+                          type: string
+                      additionalProperties: false
                   appearance:
                     type: object
                     required:
@@ -4877,6 +4905,9 @@ paths:
                   type: string
                   minLength: 1
                 workspaceId:
+                  type: string
+                  minLength: 1
+                targetId:
                   type: string
                   minLength: 1
                 instruction:
@@ -19783,12 +19814,9 @@ paths:
                     type: object
                     required:
                       - runId
-                      - config
                     properties:
                       runId:
                         type: string
-                      config:
-                        type: object
                     additionalProperties: false
                   record:
                     type: object

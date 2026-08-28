@@ -125,6 +125,14 @@ export interface BrowserContextSubmitRequestV1 {
   submissionId: string
   /** From {@link BrowserCompanionCapabilityV1.workspaces}. */
   workspaceId: string
+  /**
+   * From {@link BrowserCompanionCapabilityV1.deliveryTargets}.
+   *
+   * Optional so an extension built before targets existed keeps working
+   * unchanged: absent means the Host's default target, which is a new task —
+   * the only thing that submission could ever have meant.
+   */
+  targetId?: string
   instruction: string
   /** Overrides the title derived from the page, when the user typed one. */
   suggestedTitle?: string
@@ -235,6 +243,75 @@ export interface BrowserCompanionWorkspaceV1 {
 }
 
 /**
+ * What a submission may be aimed at, beyond which workspace it lands in.
+ *
+ * ## Why the extension is allowed to choose one
+ *
+ * `browser.submit` is argued as one closed effect, and the argument survives a
+ * list because the list is the Host's. The extension picks a label out of what
+ * the Host offered and sends back the id it was given; the Host resolves that
+ * id against its own catalogue and builds the action itself. That is exactly
+ * the shape `workspaceId` already had — an id outside the offered set is
+ * refused as stale state, not honoured as a new capability — and it is the
+ * reason a target id is opaque here. Nothing in it is parsed by the extension,
+ * and nothing in it is trusted by the Host.
+ *
+ * What the extension still cannot do is unchanged: it names no session, no
+ * model, no tool set and no permission mode, and it cannot construct a target
+ * that was not offered.
+ *
+ * ## Why `kind` is here at all
+ *
+ * Only so the panel can say what will happen — "start a new task" reads
+ * differently from "add to the task you started on this page". It is a label
+ * hint, never an instruction: the Host derives the effect from its own
+ * catalogue entry, so a client that sent a `kind` disagreeing with the id it
+ * quoted would change nothing.
+ */
+export type BrowserDeliveryTargetKind = "chat" | "session"
+
+export interface BrowserDeliveryTargetV1 {
+  /** Opaque to the extension. Minted and re-resolved by the Host. */
+  id: string
+  kind: BrowserDeliveryTargetKind
+  /**
+   * What to show.
+   *
+   * For `session` this is the conversation's own title — user data, and the
+   * same in any language. For `chat` it is an English fallback: the Host cannot
+   * know the browser's UI language (nothing in the request carries one), so a
+   * Cognia panel renders its own translation for that kind and any other client
+   * shows this verbatim.
+   */
+  label: string
+  /**
+   * Whether the panel should preselect this one.
+   *
+   * Exactly one target is the default. A Host that offered none would leave the
+   * panel choosing for the user out of list order, which is not a decision the
+   * extension is in a position to make.
+   */
+  isDefault: boolean
+  /**
+   * The workspace this target belongs to, when it belongs to one.
+   *
+   * Absent means "available in every workspace" — `chat:new` is, because a new
+   * task is created in whichever workspace the user picked. A target that names
+   * one is filtered to it, because a session already lives somewhere and
+   * offering it under a different workspace would promise a move that the
+   * submission does not perform.
+   */
+  workspaceId?: string
+  /**
+   * A one-line note under the label, when the label alone is ambiguous.
+   *
+   * Two sessions started from the same page have the same title; what tells
+   * them apart is when they ran and how they are doing.
+   */
+  detail?: string
+}
+
+/**
  * What the Host can do, asked once per panel open.
  *
  * The limits travel with it rather than being compiled into the extension:
@@ -248,4 +325,14 @@ export interface BrowserCompanionCapabilityV1 {
   supportedCaptureModes: BrowserCaptureMode[]
   workspaces: BrowserCompanionWorkspaceV1[]
   appearance: BrowserCompanionAppearanceV1
+  /**
+   * Where a submission may be aimed, default first.
+   *
+   * Optional, and `schemaVersion` deliberately stays `1`. The panel compares
+   * that version for equality, so bumping it would make every already-installed
+   * extension declare the Host incompatible and refuse to do anything — over an
+   * addition none of them needs. Absent means an older Host that only starts
+   * new tasks, which is what the panel falls back to.
+   */
+  deliveryTargets?: BrowserDeliveryTargetV1[]
 }

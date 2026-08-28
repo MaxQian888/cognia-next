@@ -40,6 +40,9 @@ import {
   isCompatible,
   panelStateForError,
   pollIntervalFor,
+  selectedTargetId,
+  targetLabel,
+  targetsForWorkspace,
   type CapturedPage,
   type PanelState,
 } from "@ext/src/lib/panel-state"
@@ -74,6 +77,7 @@ export function SidePanel({
   const [state, setState] = useState<PanelState>({ kind: "loading" })
   const [instruction, setInstruction] = useState("")
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const [preferredTargetId, setPreferredTargetId] = useState<string | null>(null)
   const [wholePage, setWholePage] = useState(false)
   const [includeFullUrl, setIncludeFullUrl] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -385,10 +389,18 @@ export function SidePanel({
     if (state.kind !== "ready" || !state.captured || !workspaceId) return
     const captured = withDisplayUrl(state.captured, includeFullUrl)
     const mode: BrowserCaptureMode = captureModeFor(captured, wholePage)
+    // Recomputed here from the same two helpers the control renders from,
+    // rather than read out of state: one rule for "which target is selected"
+    // means the value sent is by construction the one on screen.
+    const chosenTarget = selectedTargetId(
+      targetsForWorkspace(state.capability.deliveryTargets, workspaceId),
+      preferredTargetId
+    )
     setSubmitting(true)
     setSubmitError(null)
     const draft = {
       workspaceId,
+      ...(chosenTarget ? { targetId: chosenTarget } : {}),
       instruction: instruction.trim(),
       context: {
         schemaVersion: 1 as const,
@@ -411,6 +423,11 @@ export function SidePanel({
     // re-extraction of the same URL.
     const fingerprint = JSON.stringify([
       workspaceId,
+      // Where it goes is part of what makes this the same submission. Leaving
+      // it out would let a retry that changed the destination reuse the first
+      // one's id, which the Host refuses — as a mismatch the user cannot see
+      // the cause of.
+      chosenTarget,
       draft.instruction,
       mode,
       captured.url,
@@ -434,12 +451,23 @@ export function SidePanel({
       void api.write(STORAGE_KEYS.lastWorkspaceId, workspaceId)
       setInstruction("")
       setState((current) => (current.kind === "ready" ? { ...current, captured: null } : current))
-      const page = await clientRef.current?.list()
-      if (page) {
-        setState((current) =>
-          current.kind === "ready" ? { ...current, recent: page.items } : current
-        )
-      }
+      // Both, because a submission changes both: the recent list gains a row,
+      // and the target catalogue gains the conversation it just started. The
+      // catalogue is only re-read here and on connect — it is a small list that
+      // changes when the user does something, not on its own.
+      const [page, capability] = await Promise.all([
+        clientRef.current?.list(),
+        clientRef.current?.capability().catch(() => undefined),
+      ])
+      setState((current) =>
+        current.kind === "ready"
+          ? {
+              ...current,
+              ...(page ? { recent: page.items } : {}),
+              ...(capability && isCompatible(capability) ? { capability } : {}),
+            }
+          : current
+      )
     } catch (error) {
       setSubmitError(
         api.message("submitFailed", [error instanceof Error ? error.message : String(error)])
@@ -447,7 +475,7 @@ export function SidePanel({
     } finally {
       setSubmitting(false)
     }
-  }, [api, includeFullUrl, instruction, state, wholePage, workspaceId])
+  }, [api, includeFullUrl, instruction, preferredTargetId, state, wholePage, workspaceId])
 
   /**
    * Forget this browser entirely.
@@ -534,6 +562,11 @@ export function SidePanel({
   // back different text than the one they reviewed.
   const captured = state.captured ? withDisplayUrl(state.captured, includeFullUrl) : null
   const mode: BrowserCaptureMode = captured ? captureModeFor(captured, wholePage) : "metadata"
+  // Derived at render rather than held in state, so changing the workspace can
+  // never leave a target selected that the new workspace does not offer — the
+  // Host would refuse that submission, correctly and inexplicably.
+  const offeredTargets = targetsForWorkspace(state.capability.deliveryTargets, workspaceId)
+  const targetId = selectedTargetId(offeredTargets, preferredTargetId)
 
   return (
     <div className="flex flex-col gap-4 p-3">
@@ -573,6 +606,34 @@ export function SidePanel({
                 </SelectContent>
               </Select>
             </div>
+            {/* Only when there is a choice. A Host that offers one target — an
+                older one, or a browser that has started nothing yet — would
+                otherwise get a dropdown whose every state is the same. */}
+            {offeredTargets.length > 1 ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="cognia-target" className="text-xs text-muted-foreground">
+                  {api.message("targetLabel")}
+                </Label>
+                <Select
+                  value={targetId ?? undefined}
+                  onValueChange={(next) => setPreferredTargetId(next)}
+                >
+                  <SelectTrigger id="cognia-target" className="w-full" data-testid="target-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {offeredTargets.map((target) => (
+                      // The label is the item's only child, as with workspaces:
+                      // a nested element leaves the option with no accessible
+                      // name and the listbox unusable by keyboard.
+                      <SelectItem key={target.id} value={target.id}>
+                        {targetLabel(target, api.message)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <Textarea
               rows={3}
               value={instruction}

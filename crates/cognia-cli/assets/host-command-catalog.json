@@ -3041,6 +3041,45 @@
               "additionalProperties": false
             }
           },
+          "deliveryTargets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "label",
+                "isDefault"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "chat",
+                    "session"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "isDefault": {
+                  "type": "boolean"
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
           "appearance": {
             "type": "object",
             "required": [
@@ -3297,6 +3336,10 @@
             "minLength": 1
           },
           "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetId": {
             "type": "string",
             "minLength": 1
           },
@@ -10649,15 +10692,11 @@
           "run": {
             "type": "object",
             "required": [
-              "runId",
-              "config"
+              "runId"
             ],
             "properties": {
               "runId": {
                 "type": "string"
-              },
-              "config": {
-                "type": "object"
               }
             },
             "additionalProperties": false
@@ -42629,5 +42668,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "5385b8d52f6c3ee06e5085b863b47949909944a38ac11d774cea24a7a320fb1f"
+  "catalogHash": "35b17280dbba1981a0837afaf6e1ad258ea560593b7bf51d01f8f59142e57ed1"
 }

@@ -23,6 +23,7 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 
 import { buildBrowserCompanionAppearance } from "./appearance"
+import { listDeliveryTargets } from "./targets"
 import { browserStatusForRun } from "./run-status"
 import {
   BrowserCompanionError,
@@ -57,7 +58,7 @@ export async function dispatchBrowserCompanionCommand(
   const deps = createBrowserCompanionDeps(payload, resolveHostState)
   switch (command) {
     case "browser_companion_capability":
-      return browserCompanionCapability(deps)
+      return browserCompanionCapability(deps, deviceId)
     case "browser_context_submit":
       return submitBrowserContext(deps, deviceId, payload)
     case "browser_context_list":
@@ -84,6 +85,8 @@ export function createBrowserCompanionDeps(
       return { id: session.id }
     },
     enqueueMessage: (input) => enqueueOnHostAuthority(payload, resolveHostState, input),
+    listDeliveryTargets: (callerDeviceId) =>
+      listDeliveryTargets({ listSubmissions: listBrowserSubmissions }, callerDeviceId),
     recordSubmission: putBrowserSubmission,
     readSubmission: getBrowserSubmission,
     listSubmissions: listBrowserSubmissions,
@@ -158,9 +161,16 @@ async function hostAppearance(): Promise<BrowserCompanionCapabilityV1["appearanc
  * with anything else. `browser.submit` is the capability for that one closed
  * effect, which is the same shape `agent.worker` has.
  *
- * If this ever needs to submit a second intent kind, it must stop constructing
- * the caller and start deriving it, because at that point the browser would be
- * choosing.
+ * A delivery target does not change this. The browser picks an entry out of a
+ * catalogue the Host built and quotes its id back; the Host looks that id up
+ * (never parses it) and builds the action from the entry it found. The intent
+ * kind is still `message.enqueue`, still constructed here, still a batch of
+ * one. What varies is which session it names, and every session it can name is
+ * one this device started — see `targets.ts`.
+ *
+ * If this ever needs to submit a second intent *kind*, it must stop
+ * constructing the caller and start deriving it, because at that point the
+ * browser would be choosing.
  */
 async function enqueueOnHostAuthority(
   payload: Record<string, unknown>,

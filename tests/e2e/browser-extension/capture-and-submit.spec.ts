@@ -44,10 +44,15 @@ async function captureFixturePage(
   {
     mode,
     query = "?utm_source=newsletter&token=secret#section-3",
-  }: { mode: "selection" | "page"; query?: string }
+    alreadyPaired = false,
+  }: { mode: "selection" | "page"; query?: string; alreadyPaired?: boolean }
 ): Promise<{ pageUrl: string; content: Page }> {
-  await pairThroughPanel(panel, mockHost.issueEnrollment())
-  await expect(panel.getByTestId("capture-empty")).toBeVisible()
+  // A code is spent the moment it is redeemed, so a second capture in one test
+  // must not pair again — it is the same browser, still connected.
+  if (!alreadyPaired) {
+    await pairThroughPanel(panel, mockHost.issueEnrollment())
+    await expect(panel.getByTestId("capture-empty")).toBeVisible()
+  }
 
   const pageUrl = mockHost.servePage("article", CAPTURE_FIXTURE_HTML)
   const content = await context.newPage()
@@ -177,6 +182,38 @@ test.describe("submitting a capture", () => {
     expect(
       rpc.filter((request) => !request.path.endsWith("submit")).every((r) => !r.idempotencyKey)
     ).toBe(true)
+  })
+
+  test("adds to a task it already started, instead of starting a second one", async ({
+    panel,
+    mockHost,
+    serviceWorker,
+    context,
+  }) => {
+    await captureFixturePage({ panel, mockHost, serviceWorker, context }, { mode: "selection" })
+    await panel.getByTestId("instruction").fill("Summarize this")
+    await panel.getByTestId("submit").click()
+    await expect(panel.getByTestId("recent-list")).toBeVisible()
+
+    // The catalogue the panel is about to offer is the one the Host rebuilt
+    // after that submission — the control does not exist until there is a
+    // second thing to pick.
+    await captureFixturePage(
+      { panel, mockHost, serviceWorker, context },
+      { mode: "selection", alreadyPaired: true }
+    )
+    await panel.getByTestId("target-select").click()
+    await panel.getByRole("option", { name: mockHost.submissions()[0].title }).click()
+    await panel.getByTestId("instruction").fill("And the pricing?")
+    await panel.getByTestId("submit").click()
+
+    await expect.poll(() => mockHost.submissions().length).toBe(2)
+    // Two submissions, one conversation. That is the whole claim.
+    expect(mockHost.sessionIds()).toHaveLength(1)
+    expect(mockHost.submissions()[1].sessionId).toBe(mockHost.submissions()[0].sessionId)
+    expect(mockHost.submissions()[1].targetId).toBe(
+      `session:${mockHost.submissions()[0].sessionId}`
+    )
   })
 
   test("clears the draft, so the next capture starts empty", async ({

@@ -64,12 +64,19 @@ export function validateBrowserSubmission(
       limit: limits.requestBytes,
     })
   }
-  const { submissionId, workspaceId, instruction, suggestedTitle, context } = payload
+  const { submissionId, workspaceId, targetId, instruction, suggestedTitle, context } = payload
   if (!nonEmptyString(submissionId)) return reject({ code: "malformed", field: "submissionId" })
   if (!nonEmptyString(workspaceId)) return reject({ code: "malformed", field: "workspaceId" })
   if (!nonEmptyString(instruction)) return reject({ code: "malformed", field: "instruction" })
   if (suggestedTitle !== undefined && typeof suggestedTitle !== "string") {
     return reject({ code: "malformed", field: "suggestedTitle" })
+  }
+  // Shape only. Whether this names something that exists is not a validation
+  // question: the answer lives in a catalogue only the Host can build, and
+  // deciding it here would mean either duplicating that lookup or letting a
+  // well-formed id through as if it had been checked.
+  if (targetId !== undefined && !nonEmptyString(targetId)) {
+    return reject({ code: "malformed", field: "targetId" })
   }
   const instructionBytes = utf8ByteLength(instruction)
   if (instructionBytes > limits.instructionBytes) {
@@ -87,6 +94,7 @@ export function validateBrowserSubmission(
   const request: BrowserContextSubmitRequestV1 = {
     submissionId,
     workspaceId,
+    ...(typeof targetId === "string" ? { targetId } : {}),
     instruction,
     ...(typeof suggestedTitle === "string" && suggestedTitle.trim()
       ? { suggestedTitle: suggestedTitle.trim() }

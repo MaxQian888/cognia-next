@@ -155,6 +155,31 @@ The four `runtimeTargetId` values name a *client's* execution identity, and
 **is** the host. An extension executes nothing. What the user actually chooses is
 a workspace (ADR-0144), which is what the request carries.
 
+**9a. Where a task lands is also chosen from a list the Host declares.**
+
+The capability response carries `deliveryTargets`, and the submission quotes
+back an id from it. This does not weaken decision 5, and the reason is the same
+one that makes `workspaceId` safe: the list is the Host's. The extension picks a
+label out of what it was handed; the Host resolves that id by **looking it up in
+a catalogue it just built**, never by parsing the string. An id outside the list
+is refused as stale client state, exactly as an unoffered workspace is. The
+browser still names no session it was not offered, constructs no action, and
+chooses no model, tool set or permission mode.
+
+The first two kinds are `chat` — a new task, the only thing a submission could
+mean before this existed and still the default when none is named — and
+`session`, which appends to a conversation **this device started**. That bound is
+the `browserSubmissions` ledger: the catalogue is built from the rows this
+device wrote, so a browser is never offered a conversation started on the
+desktop or by a second paired browser. A `session` target also carries the
+workspace its conversation lives in, and a submission naming a mismatched pair
+is refused — the append does not move a conversation between workspaces, and
+offering it under one it does not belong to would promise that it does.
+
+`targetId` is optional on the wire and `schemaVersion` stays `1`. The panel
+compares that version for equality, so bumping it would make every installed
+extension declare the Host incompatible over an addition none of them needs.
+
 **10. The side panel's appearance is sent by the Host, not compiled into the
 extension.**
 

@@ -8,6 +8,9 @@ import {
   isCompatible,
   panelStateForError,
   pollIntervalFor,
+  selectedTargetId,
+  targetLabel,
+  targetsForWorkspace,
   type CapturedPage,
 } from "./panel-state"
 import type { PairingRecord } from "./client"
@@ -122,5 +125,48 @@ describe("failureReasonMessage", () => {
     // Every other status either has not failed or failed inside the run, where
     // the row carries no `errorCode` to fetch.
     expect([...STATUSES_WITH_A_REASON].sort()).toEqual(["failed", "host_unavailable"])
+  })
+})
+
+describe("delivery targets", () => {
+  const NEW_TASK = { id: "chat:new", kind: "chat" as const, label: "New task", isDefault: true }
+  const IN_DEFAULT = {
+    id: "session:a",
+    kind: "session" as const,
+    label: "A guide",
+    isDefault: false,
+    workspaceId: "ws-default",
+  }
+  const IN_OTHER = { ...IN_DEFAULT, id: "session:b", workspaceId: "ws-other" }
+
+  it("offers a workspace-less target everywhere and a bound one only where it lives", () => {
+    // A new task is created in whichever workspace is selected; a conversation
+    // already lives in one, and the submission does not move it.
+    expect(
+      targetsForWorkspace([NEW_TASK, IN_DEFAULT, IN_OTHER], "ws-default").map((t) => t.id)
+    ).toEqual(["chat:new", "session:a"])
+  })
+
+  it("treats an older Host that sends none as new-tasks-only", () => {
+    expect(targetsForWorkspace(undefined, "ws-default")).toEqual([])
+  })
+
+  it("drops a selection the new workspace does not offer", () => {
+    // Keeping it would send a `targetId` the Host refuses — correctly, and
+    // inexplicably to somebody who only changed the workspace.
+    const offered = targetsForWorkspace([NEW_TASK, IN_DEFAULT, IN_OTHER], "ws-other")
+    expect(selectedTargetId(offered, "session:a")).toBe("chat:new")
+    expect(selectedTargetId(offered, "session:b")).toBe("session:b")
+  })
+
+  it("falls back to the Host's default rather than to list order", () => {
+    expect(selectedTargetId([IN_DEFAULT, NEW_TASK], null)).toBe("chat:new")
+    expect(selectedTargetId([], null)).toBeNull()
+  })
+
+  it("localizes the chrome and passes through the user's own data", () => {
+    const message = (key: string) => `i18n:${key}`
+    expect(targetLabel(NEW_TASK, message)).toBe("i18n:targetNewTask")
+    expect(targetLabel(IN_DEFAULT, message)).toBe("A guide")
   })
 })

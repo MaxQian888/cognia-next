@@ -28,6 +28,16 @@ const CAPABILITY: BrowserCompanionCapabilityV1 = {
     { id: "ws-default", label: "Default", isDefault: true },
     { id: "ws-other", label: "Other", isDefault: false },
   ],
+  deliveryTargets: [
+    { id: "chat:new", kind: "chat", label: "New task", isDefault: true },
+    {
+      id: "session:session-1",
+      kind: "session",
+      label: "A guide",
+      isDefault: false,
+      workspaceId: "ws-default",
+    },
+  ],
   appearance: {
     mode: "light",
     cssVars: { "--background": "oklch(1 0 0)" },
@@ -93,11 +103,11 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
   return state as never
 }
 
-function clientFactory(state: Harness) {
+function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 = CAPABILITY) {
   return () => ({
     capability: async () => {
       if (state.capabilityError) throw state.capabilityError
-      return CAPABILITY
+      return capability
     },
     submit: async (request: unknown) => {
       state.submitAttempts.push(request)
@@ -147,9 +157,13 @@ jest.mock("@ext/src/lib/client", () => {
   }
 })
 
-function renderPanel(state: Harness) {
+function renderPanel(state: Harness, capability: BrowserCompanionCapabilityV1 = CAPABILITY) {
   return render(
-    <SidePanel api={state.api} makeClient={clientFactory(state) as never} now={() => 1_000} />
+    <SidePanel
+      api={state.api}
+      makeClient={clientFactory(state, capability) as never}
+      now={() => 1_000}
+    />
   )
 }
 
@@ -376,6 +390,65 @@ describe("SidePanel capture and settings", () => {
     // And a landed submission stops being pending, or the next unrelated
     // capture would inherit this one's id.
     await waitFor(() => expect(state.store.has(STORAGE_KEYS.pendingSubmission)).toBe(false))
+  })
+
+  it("sends the delivery target the user chose", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+
+    // Radix renders its listbox on open; the trigger is what a person clicks.
+    fireEvent.click(screen.getByTestId("target-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "A guide" }))
+    fireEvent.click(screen.getByTestId("submit"))
+
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).toMatchObject({ targetId: "session:session-1" })
+  })
+
+  it("defaults to a new task, and says so in this browser's language", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    // The Host sends an English fallback for this one because it cannot know
+    // the browser's UI language; the panel renders its own string.
+    expect(screen.getByTestId("target-select")).toHaveTextContent("targetNewTask")
+
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).toMatchObject({ targetId: "chat:new" })
+  })
+
+  it("offers no target control when the Host offers no choice", async () => {
+    // An older Host, or a browser that has started nothing yet. A dropdown
+    // whose every state is the same is not a control.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state, { ...CAPABILITY, deliveryTargets: undefined })
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    expect(screen.queryByTestId("target-select")).toBeNull()
+
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).not.toHaveProperty("targetId")
+  })
+
+  it("hides a target that does not belong to the chosen workspace", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+
+    fireEvent.click(screen.getByTestId("workspace-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "Other" }))
+    // The session lives in ws-default, so the only target left is the new task
+    // — and with one target there is no control at all.
+    await waitFor(() => expect(screen.queryByTestId("target-select")).toBeNull())
   })
 
   it("explains a failed submission with the reason the Host recorded", async () => {

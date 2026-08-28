@@ -41,6 +41,32 @@ export interface BrowserSubmissionRow {
    * one; see `describesSameCapture` for what happens then.
    */
   urlFingerprint?: string
+  /**
+   * The workspace the submission landed in.
+   *
+   * Recorded so a past submission can be offered as an append target only under
+   * the workspace its conversation actually lives in — offering it elsewhere
+   * would promise a move the append does not perform.
+   *
+   * Optional because a row written before this field existed does not have one.
+   * Such a row is offered in every workspace, which is what it was before the
+   * field existed; narrowing it would need a session read this table is
+   * deliberately independent of.
+   */
+  workspaceId?: string
+  /**
+   * The delivery target the submission named, as the Host resolved it.
+   *
+   * Recorded because a redrive has to agree with the original on *where* the
+   * work goes, not only on which page it carries. A row created for a new task
+   * and a retry naming an append to that same task look identical on every
+   * other field, and honouring the second would silently do the opposite of
+   * what the second one asked.
+   *
+   * Optional because a row written before targets existed does not have one;
+   * such a row is treated as the default target, which is what it was.
+   */
+  targetId?: string
   captureMode: BrowserCaptureMode
   /** Bytes of page content sent, for the local diagnostics line. */
   contentBytes: number

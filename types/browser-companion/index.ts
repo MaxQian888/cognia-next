@@ -19,6 +19,8 @@ export type {
   BrowserContextSubmissionSummaryV1,
   BrowserContextSubmitRequestV1,
   BrowserContextSubmitResponseV1,
+  BrowserDeliveryTargetKind,
+  BrowserDeliveryTargetV1,
   BrowserPageContextV1,
   BrowserReadableText,
   BrowserSubmissionStatus,

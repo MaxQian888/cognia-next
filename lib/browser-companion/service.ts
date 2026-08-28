@@ -37,6 +37,7 @@
  */
 import type {
   BrowserCompanionCapabilityV1,
+  BrowserDeliveryTargetV1,
   BrowserContextSubmissionStatusV1,
   BrowserContextSubmissionSummaryPageV1,
   BrowserContextSubmitRequestV1,
@@ -50,6 +51,7 @@ import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 import { sha256Hex } from "@/lib/share/hash"
 
 import { buildBrowserContextPrompt, sourceHostOf } from "./build-prompt"
+import { NEW_CHAT_TARGET_ID, resolveDeliveryTarget, sessionIdOfTarget } from "./targets"
 import { validateBrowserSubmission, type BrowserSubmissionRejection } from "./limits"
 
 /** A refusal the side panel can act on, rather than an English sentence. */
@@ -75,6 +77,8 @@ export interface BrowserCompanionDeps {
   now: () => number
   /** The workspaces a submission may be aimed at, default first. */
   listWorkspaces: () => Promise<{ id: string; label: string; isDefault: boolean }[]>
+  /** What this device may aim a submission at, default first. */
+  listDeliveryTargets: (deviceId: string) => Promise<BrowserDeliveryTargetV1[]>
   /**
    * The Host's resolved appearance for the side panel.
    *
@@ -108,7 +112,8 @@ export function browserSubmissionDeepLink(sessionId: string): string {
 }
 
 export async function browserCompanionCapability(
-  deps: BrowserCompanionDeps
+  deps: BrowserCompanionDeps,
+  deviceId: string
 ): Promise<BrowserCompanionCapabilityV1> {
   return {
     schemaVersion: 1,
@@ -116,6 +121,10 @@ export async function browserCompanionCapability(
     supportedCaptureModes: [...BROWSER_CAPTURE_MODES],
     workspaces: await deps.listWorkspaces(),
     appearance: await deps.appearance(),
+    // Device-scoped like every other read: the targets beyond "new task" are
+    // this browser's own past submissions, so an unbound caller is offered the
+    // one target that names nothing.
+    deliveryTargets: await deps.listDeliveryTargets(deviceId),
   }
 }
 
@@ -187,15 +196,41 @@ export async function submitBrowserContext(
     )
   }
 
+  // Same rule, one level up. The target is looked up in a catalogue this
+  // process just built, never parsed out of the request: a lookup can only
+  // return something the Host offered, while a parse would let a browser name
+  // any session on this machine by writing its id down.
+  const target = resolveDeliveryTarget(await deps.listDeliveryTargets(deviceId), request.targetId)
+  if (!target) {
+    throw new BrowserCompanionError(
+      "unknown_target",
+      "the chosen delivery target is not available on this Host, or not in this workspace"
+    )
+  }
+  if (target.workspaceId && target.workspaceId !== request.workspaceId) {
+    // The panel filters targets by workspace, so the pair can only disagree
+    // when the panel is showing a stale catalogue. Honouring it would append to
+    // a conversation in a workspace the user did not pick, which is a move the
+    // submission does not perform and cannot undo.
+    throw new BrowserCompanionError(
+      "unknown_target",
+      "the chosen delivery target belongs to a different workspace"
+    )
+  }
+
   const { prompt, derivedTitle } = buildBrowserContextPrompt(
     request.context,
     request.instruction,
     request.suggestedTitle
   )
-  const session = await deps.createSession({
-    title: derivedTitle,
-    projectId: request.workspaceId,
-  })
+  // An append reuses the conversation the target names; only a new task creates
+  // one. Deciding it here rather than inside `createSession` keeps the two
+  // effects visible side by side, which is the difference the capability
+  // argument turns on.
+  const appendTo = sessionIdOfTarget(target)
+  const session = appendTo
+    ? { id: appendTo }
+    : await deps.createSession({ title: derivedTitle, projectId: request.workspaceId })
 
   const now = deps.now()
   // Persist the recoverable intent first, then settle the status only after
@@ -205,9 +240,13 @@ export async function submitBrowserContext(
     submissionId: request.submissionId,
     deviceId,
     sessionId: session.id,
-    title: derivedTitle,
+    // The append keeps the conversation's own title. Overwriting it with the
+    // page just captured would rename a task from under whoever is reading it.
+    title: appendTo ? target.label : derivedTitle,
     sourceHost: sourceHostOf(request.context.url),
     urlFingerprint,
+    workspaceId: request.workspaceId,
+    targetId: target.id,
     captureMode: request.context.captureMode,
     contentBytes: capturedContentBytes(request),
     truncated: capturedTruncated(request),
@@ -395,8 +434,19 @@ function describesSameCapture(
   urlFingerprint: string
 ): boolean {
   if (row.urlFingerprint && row.urlFingerprint !== urlFingerprint) return false
+  // Where it goes, not only what it carries. A row created for a new task and a
+  // retry asking to append to that same task agree on every other field, and
+  // honouring the second would do the opposite of what it asked while looking
+  // like a recovery. A row from before targets existed has no `targetId` and is
+  // compared against the default, which is what it was.
+  if ((row.targetId ?? NEW_CHAT_TARGET_ID) !== (request.targetId ?? NEW_CHAT_TARGET_ID)) {
+    return false
+  }
+  // An append keeps the conversation's title, so the derived one describes the
+  // page rather than the row and cannot be compared against it.
+  const titleMatches = row.targetId?.startsWith("session:") ? true : row.title === derivedTitle
   return (
-    row.title === derivedTitle &&
+    titleMatches &&
     row.sourceHost === sourceHostOf(request.context.url) &&
     row.captureMode === request.context.captureMode &&
     row.contentBytes === capturedContentBytes(request) &&

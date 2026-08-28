@@ -892,6 +892,10 @@
           "type": "string",
           "minLength": 1
         },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
         "instruction": {
           "type": "string",
           "minLength": 1,

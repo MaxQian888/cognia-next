@@ -12,6 +12,7 @@
 import type {
   BrowserCompanionCapabilityV1,
   BrowserContextSubmissionSummaryV1,
+  BrowserDeliveryTargetV1,
   BrowserSubmissionStatus,
 } from "@cognia/companion-client"
 
@@ -154,4 +155,53 @@ export function failureReasonMessage(
     default:
       return message("reasonOther", [code])
   }
+}
+
+/**
+ * The targets offered for one workspace, in the order the Host sent them.
+ *
+ * A target with no `workspaceId` belongs everywhere — a new task is created in
+ * whichever workspace is selected. One that names a workspace is filtered to
+ * it, because the conversation it appends to already lives there and the
+ * submission does not move it.
+ *
+ * An older Host sends none. That is not an error state: it only ever started
+ * new tasks, which is what an empty list here means to the panel.
+ */
+export function targetsForWorkspace(
+  targets: BrowserDeliveryTargetV1[] | undefined,
+  workspaceId: string | null
+): BrowserDeliveryTargetV1[] {
+  if (!targets) return []
+  return targets.filter((target) => !target.workspaceId || target.workspaceId === workspaceId)
+}
+
+/**
+ * Which target should be selected, given what is on offer.
+ *
+ * `preferred` survives a workspace change only if it is still offered there;
+ * otherwise the Host's default wins. Keeping a stale selection would send a
+ * `targetId` the Host refuses, and the refusal would be correct and
+ * unexplainable to the person who never changed it.
+ */
+export function selectedTargetId(
+  offered: BrowserDeliveryTargetV1[],
+  preferred: string | null
+): string | null {
+  if (preferred && offered.some((target) => target.id === preferred)) return preferred
+  return offered.find((target) => target.isDefault)?.id ?? offered[0]?.id ?? null
+}
+
+/**
+ * What to show for a target.
+ *
+ * Session titles are the user's own data and are shown as the Host sent them.
+ * "New task" is chrome: the Host has no way to know this browser's UI language,
+ * so it sends an English fallback and the panel renders its own translation.
+ */
+export function targetLabel(
+  target: BrowserDeliveryTargetV1,
+  message: (key: string) => string
+): string {
+  return target.kind === "chat" ? message("targetNewTask") : target.label
 }

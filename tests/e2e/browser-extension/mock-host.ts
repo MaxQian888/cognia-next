@@ -92,6 +92,8 @@ export interface RecordedSubmission {
   captureMode: string
   sourceHost: string
   title: string
+  /** The delivery target the panel named, absent when it named none. */
+  targetId?: string
   /** The whole serialized request, so a test can assert on its size. */
   requestBytes: number
   /** Present only when the capture carried one. */
@@ -414,6 +416,10 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
           supportedCaptureModes: ["metadata", "selection", "readable-page"],
           workspaces,
           appearance,
+          // Rebuilt on every call, as the real Host does: the catalogue gains
+          // the conversation a submission just started, and the panel re-reads
+          // it after submitting for exactly that reason.
+          deliveryTargets: deliveryTargets(),
         } satisfies BrowserCompanionCapabilityV1)
       case "browser_context_submit":
         return ok(acceptSubmission(body as unknown as BrowserContextSubmitRequestV1))
@@ -438,8 +444,11 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     const now = Date.now()
     const row: RecordedSubmission = {
       submissionId: request.submissionId,
-      sessionId,
+      // An append reuses the conversation the target names, so one user action
+      // still produces one session — which `sessionIds()` is asserted on.
+      sessionId: appendTarget(request) ?? sessionId,
       workspaceId: request.workspaceId,
+      ...(request.targetId ? { targetId: request.targetId } : {}),
       instruction: request.instruction,
       captureMode: request.context.captureMode,
       sourceHost: hostOf(request.context.url),
@@ -454,13 +463,27 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     submissions.push(row)
     const response = {
       submissionId: row.submissionId,
-      sessionId,
+      sessionId: row.sessionId,
       acceptedAt: now,
       status: "queued" satisfies BrowserSubmissionStatus,
-      deepLink: `cognia://session/${sessionId}`,
+      deepLink: `cognia://session/${row.sessionId}`,
     }
     idempotency.set(request.submissionId, response)
     return response
+  }
+
+  /**
+   * The conversation an append target names, refusing one never offered.
+   *
+   * The real Host resolves a target by looking it up in a catalogue it just
+   * built; this does the same against the submissions it holds, so a panel that
+   * sent an id nobody offered is refused here rather than quietly served.
+   */
+  function appendTarget(request: BrowserContextSubmitRequestV1): string | undefined {
+    if (!request.targetId || request.targetId === "chat:new") return undefined
+    const offered = deliveryTargets().find((target) => target.id === request.targetId)
+    if (!offered) throw new Error(`unknown_target: ${request.targetId}`)
+    return request.targetId.slice("session:".length)
   }
 
   function summaryOf(row: RecordedSubmission): BrowserContextSubmissionSummaryV1 {
@@ -479,6 +502,28 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
 
   function summaries(): BrowserContextSubmissionSummaryV1[] {
     return [...submissions].reverse().map(summaryOf)
+  }
+
+  /**
+   * The catalogue, built the way the real Host builds it.
+   *
+   * From the submissions this mock has accepted, not from a fixture: the panel
+   * treats an id it was not offered as a refusal, so a hand-written list would
+   * pass while the real pairing of "what the Host offers" and "what the panel
+   * may send" went untested.
+   */
+  function deliveryTargets(): NonNullable<BrowserCompanionCapabilityV1["deliveryTargets"]> {
+    return [
+      { id: "chat:new", kind: "chat", label: "New task", isDefault: true },
+      ...[...submissions].reverse().map((row) => ({
+        id: `session:${row.sessionId}`,
+        kind: "session" as const,
+        label: row.title,
+        isDefault: false,
+        workspaceId: row.workspaceId,
+        detail: row.sourceHost,
+      })),
+    ]
   }
 
   function consumeChallenge(challengeId: string, nonce: string): boolean {
