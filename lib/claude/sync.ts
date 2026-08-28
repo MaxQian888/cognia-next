@@ -322,7 +322,7 @@ export interface ProjectMcpImportPreview {
  * Claude Code adapter's parser rather than duplicating it.
  */
 export async function previewProjectMcpImport(cwd: string): Promise<ProjectMcpImportPreview> {
-  if (!isTauri() || !cwd.trim()) return { exists: false, drafts: [] }
+  if (!cwd.trim()) return { exists: false, drafts: [] }
   try {
     const cfg = await readProjectMcpConfig(cwd)
     return {

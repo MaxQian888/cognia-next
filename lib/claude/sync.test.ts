@@ -517,10 +517,16 @@ describe("project-scoped .mcp.json import", () => {
     expect(preview.drafts).toEqual([expect.objectContaining({ name: "docs", transport: "stdio" })])
   })
 
-  it("returns an empty preview off-desktop or without a workspace", async () => {
+  it("uses the active transport off-desktop and skips an empty workspace", async () => {
     mIsTauri.mockReturnValue(false)
-    expect(await previewProjectMcpImport("/repo")).toEqual({ exists: false, drafts: [] })
-    mIsTauri.mockReturnValue(true)
+    mProject.mockResolvedValueOnce(projectCfg(null, false))
+    expect(await previewProjectMcpImport("/repo")).toEqual({
+      path: "/repo/.mcp.json",
+      exists: false,
+      drafts: [],
+    })
+    expect(mProject).toHaveBeenCalledWith("/repo")
+    mProject.mockClear()
     expect(await previewProjectMcpImport("   ")).toEqual({ exists: false, drafts: [] })
     expect(mProject).not.toHaveBeenCalled()
   })
