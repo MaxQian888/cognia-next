@@ -152,6 +152,102 @@ describe("search()", () => {
     expect(incrementSearchUsageMock).toHaveBeenCalledWith("perplexity", expect.any(Number), true)
   })
 
+  it("tries preferred providers first in the requested order, then global priority", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+      exa: makeSettings("exa", { priority: 3 }),
+    }
+    routeSearchMock
+      .mockRejectedValueOnce(new Error("preferred failed"))
+      .mockRejectedValueOnce(new Error("second preferred failed"))
+      .mockResolvedValueOnce({
+        provider: "tavily",
+        query: "q",
+        results: [],
+        responseTime: 1,
+      })
+
+    const result = await search("q", {
+      providerSettings: settings,
+      preferredProviders: ["exa", "perplexity", "exa"],
+      maxRetries: 0,
+    })
+
+    expect(result.provider).toBe("tavily")
+    expect(routeSearchMock.mock.calls.map((call) => call[1])).toEqual([
+      "exa",
+      "perplexity",
+      "tavily",
+    ])
+  })
+
+  it("post-filters includeDomains and falls back when a provider has no compliant results", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock
+      .mockResolvedValueOnce({
+        provider: "tavily",
+        query: "q",
+        answer: "off-domain answer",
+        results: [{ title: "Other", url: "https://other.test/a", content: "x", score: 1 }],
+        responseTime: 1,
+      })
+      .mockResolvedValueOnce({
+        provider: "perplexity",
+        query: "q",
+        results: [
+          { title: "Docs", url: "https://docs.example.com/a", content: "x", score: 1 },
+          { title: "Other", url: "https://other.test/b", content: "y", score: 0.5 },
+        ],
+        responseTime: 1,
+      })
+
+    const result = await search("q", {
+      providerSettings: settings,
+      includeDomains: ["example.com"],
+      maxRetries: 0,
+    })
+
+    expect(routeSearchMock).toHaveBeenCalledTimes(2)
+    expect(result.provider).toBe("perplexity")
+    expect(result.results.map((item) => item.url)).toEqual(["https://docs.example.com/a"])
+    expect(result.totalResults).toBe(1)
+  })
+
+  it("returns an empty filtered response when no provider has a compliant domain", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock
+      .mockResolvedValueOnce({
+        provider: "tavily",
+        query: "q",
+        answer: "must not escape the domain constraint",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+        responseTime: 1,
+      })
+      .mockResolvedValueOnce({
+        provider: "perplexity",
+        query: "q",
+        results: [{ title: "B", url: "not a valid URL", content: "b", score: 1 }],
+        responseTime: 1,
+      })
+
+    const result = await search("q", {
+      providerSettings: settings,
+      includeDomains: ["allowed.test"],
+      maxRetries: 0,
+    })
+
+    expect(result.results).toEqual([])
+    expect(result.answer).toBeUndefined()
+    expect(result.totalResults).toBe(0)
+  })
+
   it("does not fall back when fallback disabled", async () => {
     const settings = {
       tavily: makeSettings("tavily"),

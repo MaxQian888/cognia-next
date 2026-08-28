@@ -1788,7 +1788,7 @@ describe("incrementSearchUsage", () => {
 // ---- Custom search sources ----
 
 describe("custom search sources", () => {
-  const source = { id: "src1", name: "Source 1", url: "https://x.com" }
+  const source = { id: "src1", name: "Source 1", url: "https://x.com", domain: "x.com" }
 
   it("addCustomSearchSource adds a new entry", async () => {
     useSettingsStore.setState({ settings: baseSettings({ customSearchSources: [] }) })

@@ -14,6 +14,7 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
+  mergeWebSearchSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import {
   runTitleTask,
@@ -127,7 +128,11 @@ export interface TeamSendOptions {
   steerDrain?: boolean
   /** Stamp an edited replacement into the original user message's branch group. */
   branchTag?: { groupId: string; index: number }
+  /** Search sources resolved by the composer before this team turn. */
+  webSearchContext?: SendOptions["webSearchContext"]
 }
+
+const pendingTeamWebSearchContext = new Map<string, SendOptions["webSearchContext"]>()
 
 /** Neither a drain nor a regenerate writes the user turn a second time. */
 function skipsUserTurn(opts?: TeamSendOptions): boolean {
@@ -309,7 +314,8 @@ export function useTeamChat() {
   const drainSteerInto = useCallback((sessionId: string) => {
     maybeDrainSteer(
       sessionId,
-      (payload) => void sendRef.current?.(payload, { sessionId, steerDrain: true })
+      (payload, webSearchContext) =>
+        void sendRef.current?.(payload, { sessionId, steerDrain: true, webSearchContext })
     )
   }, [])
 
@@ -369,6 +375,7 @@ export function useTeamChat() {
             id: entryId,
             text,
             blocks: blocks.length > 0 ? blocks : undefined,
+            webSearchContext: opts?.webSearchContext,
           })
           return
         }
@@ -384,6 +391,8 @@ export function useTeamChat() {
           )
         return
       }
+      if (opts?.webSearchContext) pendingTeamWebSearchContext.set(sessionId, opts.webSearchContext)
+      else pendingTeamWebSearchContext.delete(sessionId)
       const team = await getTeam(session.teamId)
       if (!team) {
         useChatStore.getState().setSessionDiagnostic(
@@ -665,6 +674,7 @@ export function useTeamChat() {
         const hadError = useChatStore.getState().sessions[sessionId]?.status === "error"
         const wasInterrupted = interruptedRef.current.has(sessionId)
         pendingTeamBranchTags.delete(sessionId)
+        pendingTeamWebSearchContext.delete(sessionId)
         useChatStore.getState().setSessionStatus(sessionId, "idle")
         useUIStore.getState().clearMemberStatusFor(sessionId)
         useUIStore.getState().clearStopRequestsFor(sessionId)
@@ -1522,6 +1532,10 @@ async function handleTeamEvent(
           tagged = mergeAgentKnowledgeSourcesIntoLastAssistant(
             tagged,
             ctx?.options.agentKnowledgeContext
+          )
+          tagged = mergeWebSearchSourcesIntoLastAssistant(
+            tagged,
+            pendingTeamWebSearchContext.get(teamSessionId)
           )
           tagged = attachInteractiveGrounding(tagged, ctx?.options)
           const completedAt = Date.now()

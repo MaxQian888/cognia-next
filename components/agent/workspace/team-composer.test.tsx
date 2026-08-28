@@ -69,6 +69,27 @@ jest.mock("@/components/chat/composer", () => {
             >
               send-attachment
             </button>
+            <button
+              type="button"
+              data-testid="mock-send-web"
+              onClick={() =>
+                (
+                  props.onSend as (
+                    content: unknown,
+                    manifest: undefined,
+                    templateRun: unknown,
+                    metadata: { webSearchContext: { provider: string; results: unknown[] } }
+                  ) => Promise<void>
+                )("@codex search", undefined, null, {
+                  webSearchContext: {
+                    provider: "tavily",
+                    results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+                  },
+                })
+              }
+            >
+              send-web
+            </button>
           </div>
         )
       }
@@ -131,6 +152,19 @@ describe("TeamComposer", () => {
     // wait a microtask for the async handler to settle
     await Promise.resolve()
     expect(onSend).toHaveBeenCalledWith("@codex hi there")
+  })
+
+  it("forwards pre-search metadata from Composer to the team send callback", async () => {
+    const onSend = jest.fn()
+    renderComposer(onSend)
+    fireEvent.click(screen.getByTestId("mock-send-web"))
+    await Promise.resolve()
+    expect(onSend).toHaveBeenCalledWith("@codex search", {
+      webSearchContext: {
+        provider: "tavily",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+      },
+    })
   })
 
   it("flattens block content into text and surfaces a warning for image blocks", async () => {

@@ -18,7 +18,7 @@ import {
 import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@cognia/web-search/search-cache"
-import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@cognia/web-search/types"
+import { DEFAULT_SEARCH_PROVIDER_SETTINGS, type SearchProviderType } from "@cognia/web-search/types"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.cache")
@@ -26,7 +26,7 @@ const log = createLogger("settings.search.cache")
 export function SearchCacheSettings() {
   const tc = useTranslations("searchCache")
   const [stats, setStats] = useState(() => getSearchCache().getStats())
-  const [selectedProvider, setSelectedProvider] = useState<string>("all")
+  const [selectedProvider, setSelectedProvider] = useState<SearchProviderType | "all">("all")
 
   const settings = useSettingsStore((s) => s.settings)
   const setSearchCacheEnabled = useSettingsStore((s) => s.setSearchCacheEnabled)
@@ -47,7 +47,7 @@ export function SearchCacheSettings() {
     if (selectedProvider === "all") {
       getSearchCache().clear()
     } else {
-      getSearchCache().invalidate(`search:${selectedProvider}`)
+      getSearchCache().invalidateProvider(selectedProvider)
     }
     log.info("cache_cleared", { provider: selectedProvider, sizeBefore })
     refreshStats()
@@ -137,7 +137,10 @@ export function SearchCacheSettings() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Select value={selectedProvider} onValueChange={setSelectedProvider}>
+            <Select
+              value={selectedProvider}
+              onValueChange={(value) => setSelectedProvider(value as SearchProviderType | "all")}
+            >
               <SelectTrigger className="h-8 text-xs w-40">
                 <SelectValue />
               </SelectTrigger>

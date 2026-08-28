@@ -61,6 +61,8 @@ export interface SearchOptions {
   recency?: SearchRecency
   country?: string
   language?: string
+  /** Provider-neutral safe-search level. Unsupported providers ignore it. */
+  safeSearch?: SafeSearchLevel
 }
 
 /**
@@ -644,6 +646,15 @@ export interface CustomSearchSource {
   id: string
   name: string
   icon?: string
+  domain: string
+}
+
+/** Persisted custom-source shape from before domains became mandatory. */
+export interface LegacyCustomSearchSource {
+  id: string
+  name: string
+  icon?: string
+  domain?: string
 }
 
 /** Search safe search level */

@@ -37,6 +37,7 @@ import {
 } from "@/lib/connectors/effective-capabilities"
 import { capabilityAvailability } from "@/lib/connectors/capability-availability"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import type { ComposerTurnMetadata } from "@/components/chat/composer"
 
 function ConversationInner() {
   const params = useSearchParams()
@@ -156,11 +157,23 @@ function ConversationDetail({
   const send = isTeamSession ? teamChat.send : directChat.send
   const handleSend = (
     content: Parameters<typeof send>[0],
-    manifest?: readonly AttachmentManifestEntry[]
+    manifest?: readonly AttachmentManifestEntry[],
+    _templateRun?: unknown,
+    turnMetadata?: ComposerTurnMetadata
   ) =>
     isTeamSession
-      ? teamChat.send(content, { attachmentManifest: manifest })
-      : directChat.send(content, undefined, { attachmentManifest: manifest })
+      ? teamChat.send(content, {
+          attachmentManifest: manifest,
+          ...(turnMetadata?.webSearchContext
+            ? { webSearchContext: turnMetadata.webSearchContext }
+            : {}),
+        })
+      : directChat.send(content, undefined, {
+          attachmentManifest: manifest,
+          ...(turnMetadata?.webSearchContext
+            ? { webSearchContext: turnMetadata.webSearchContext }
+            : {}),
+        })
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   const regenerate = isTeamSession ? teamChat.regenerate : directChat.regenerate
   const editAndResend = isTeamSession ? teamChat.editAndResend : directChat.editAndResend

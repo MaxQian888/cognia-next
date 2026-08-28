@@ -23,13 +23,55 @@
 import { useChatStore, type ChatStatus } from "@/stores/chat"
 import { buildSteerPayload, steerMetaOf, type SteerState } from "@/lib/claude/steer"
 import { persistMessages } from "@/lib/db/messages"
-import type { SendContent } from "@cognia/agent-config-types"
+import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
 
 /** Sessions whose imminent settle must drain the steer queue even if the turn
  * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end
  * always drains regardless of this set. */
 export const steerArmed = new Set<string>()
+
+type WebSearchContext = NonNullable<SendOptions["webSearchContext"]>
+
+/** Merge sources from several pre-searched follow-ups without duplicating URLs. */
+export function mergeSteerWebSearchContexts(
+  contexts: Array<SendOptions["webSearchContext"]>
+): SendOptions["webSearchContext"] {
+  const available = contexts.filter((context): context is WebSearchContext => Boolean(context))
+  if (available.length === 0) return undefined
+  const byUrl = new Map<string, WebSearchContext["results"][number]>()
+  for (const context of available) {
+    for (const result of context.results) {
+      if (!byUrl.has(result.url)) byUrl.set(result.url, result)
+    }
+  }
+  // `provider` is a single provider id everywhere else that writes it — the UI
+  // renders it as one ("via {provider}") and callers compare it to a known id.
+  // Joining several into "tavily, brave" produced a value that is not an id at
+  // all, so keep the first contributor's rather than inventing a compound one.
+  return { provider: available[0].provider, results: [...byUrl.values()] }
+}
+
+/** Attach a live-accepted follow-up's sources to the turn that is already running. */
+export function mergeSteerWebSearchIntoLastSend(
+  sessionId: string,
+  webSearchContext: SendOptions["webSearchContext"]
+): void {
+  if (!webSearchContext) return
+  const store = useChatStore.getState()
+  const last = store.lastSendBySession[sessionId]
+  if (!last) return
+  store.setLastSend(sessionId, {
+    ...last,
+    options: {
+      ...last.options,
+      webSearchContext: mergeSteerWebSearchContexts([
+        last.options.webSearchContext,
+        webSearchContext,
+      ]),
+    },
+  })
+}
 
 /** Live status for a session (its slice, falling back to the active mirror). */
 export function sessionStatusOf(sessionId: string): ChatStatus {
@@ -215,7 +257,10 @@ export function discardPendingSteer(sessionId: string, entryId: string): void {
  * and MUST pass `steerDrain` so it does not append the user message a second
  * time: each entry is already on screen from its optimistic append.
  */
-export function maybeDrainSteer(sessionId: string, replay: (content: SendContent) => void): void {
+export function maybeDrainSteer(
+  sessionId: string,
+  replay: (content: SendContent, webSearchContext?: SendOptions["webSearchContext"]) => void
+): void {
   steerArmed.delete(sessionId)
   // The turn is over, so its lane is too. The replay below re-enters `send`,
   // which records the new turn's lane for itself.
@@ -230,5 +275,8 @@ export function maybeDrainSteer(sessionId: string, replay: (content: SendContent
   // persists the transcript, and a later flip would race that write.
   const drained = new Set(queue.map((entry) => entry.id))
   patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), { state: "applied" })
-  replay(buildSteerPayload(queue))
+  replay(
+    buildSteerPayload(queue),
+    mergeSteerWebSearchContexts(queue.map((entry) => entry.webSearchContext))
+  )
 }

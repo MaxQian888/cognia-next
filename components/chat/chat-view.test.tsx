@@ -217,7 +217,9 @@ describe("ChatPane", () => {
     const props = makeProps()
     const { rerender } = render(<ChatPane {...props} />)
 
-    await waitFor(() => expect(props.onSend).toHaveBeenCalledWith("Configure WebDAV", undefined))
+    await waitFor(() =>
+      expect(props.onSend).toHaveBeenCalledWith("Configure WebDAV", undefined, undefined, undefined)
+    )
     expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1")
 
     rerender(<ChatPane {...props} />)
@@ -246,7 +248,25 @@ describe("ChatPane", () => {
       await onSend("summarize", manifest)
     })
 
-    expect(props.onSend).toHaveBeenCalledWith("summarize", manifest)
+    expect(props.onSend).toHaveBeenCalledWith("summarize", manifest, undefined, undefined)
+  })
+
+  it("forwards pre-search turn metadata from Composer", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    const onSend = mockComposerProps.at(-1)?.onSend as (...args: unknown[]) => Promise<void>
+    const metadata = {
+      webSearchContext: {
+        provider: "tavily",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+      },
+    }
+
+    await act(async () => {
+      await onSend("question", undefined, null, metadata)
+    })
+
+    expect(props.onSend).toHaveBeenCalledWith("question", undefined, null, metadata)
   })
 
   it("binds Composer to this pane's streaming status", () => {

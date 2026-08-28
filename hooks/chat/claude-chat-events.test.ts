@@ -1,4 +1,17 @@
 /** @jest-environment jsdom */
+const applySdkEventMock = jest.fn()
+const mergeWebSearchSourcesMock = jest.fn((messages: unknown, _context?: unknown) => messages)
+
+jest.mock("@/lib/claude/adapter", () => {
+  const actual = jest.requireActual("@/lib/claude/adapter")
+  return {
+    ...actual,
+    applySdkEvent: (...args: unknown[]) => applySdkEventMock(...args),
+    mergeWebSearchSourcesIntoLastAssistant: (messages: unknown, context: unknown) =>
+      mergeWebSearchSourcesMock(messages, context),
+  }
+})
+
 import { handleEvent, isTeamSubSession } from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
@@ -8,6 +21,54 @@ describe("Claude chat event seam", () => {
   it("exports event routing and filters team sub-sessions", () => {
     expect(typeof handleEvent).toBe("function")
     expect(isTeamSubSession("team::char::member")).toBe(true)
+  })
+})
+
+describe("pre-search source folding", () => {
+  it("reads the current turn's cached web context at turnComplete", async () => {
+    const webSearchContext = {
+      provider: "tavily",
+      results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+    }
+    useChatStore.setState({
+      sessions: {
+        s1: {
+          ...(useChatStore.getState().sessions.s1 ?? {}),
+          messages: [],
+          status: "streaming",
+          pendingApprovals: [],
+        },
+      },
+      openSessionIds: ["s1"],
+      lastSendBySession: {
+        s1: { content: "q", options: { webSearchContext }, attemptIndex: 0 },
+      },
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "answer" }] }],
+      turnComplete: true,
+    })
+    mergeWebSearchSourcesMock.mockImplementationOnce((messages) => messages)
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+
+    await handleEvent(
+      { type: "event", sessionId: "s1", event: { type: "result" } } as never,
+      { current: "s1" },
+      { current: [] },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry,
+        getExecutionHandle: () => undefined,
+      } as never
+    ).catch(() => {})
+
+    expect(mergeWebSearchSourcesMock).toHaveBeenCalledWith(expect.any(Array), webSearchContext)
   })
 })
 
@@ -23,7 +84,11 @@ describe("sidecar log frames", () => {
    * is not the one that runs.
    */
   const dispatch = async (evt: unknown) => {
-    const registry = new SessionCoalescingRegistry(() => {})
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
     await handleEvent(
       evt as never,
       ref<string | null>("s1"),

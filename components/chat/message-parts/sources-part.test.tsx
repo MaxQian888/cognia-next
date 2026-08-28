@@ -80,6 +80,23 @@ describe("SourcesPart", () => {
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"))
   })
 
+  it("renders a Cognia pre-search source as a clickable web source", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [
+        {
+          id: "c1",
+          title: "Configured search result",
+          url: "https://example.com/result",
+          origin: "cognia-web",
+        },
+      ],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getByTestId("sources-part-origin")).toHaveTextContent("Cognia Web")
+    expect(screen.getByRole("link")).toHaveAttribute("href", "https://example.com/result")
+  })
+
   it("omits anchor for sources without url", () => {
     const part: SourcesPartType = {
       type: "sources",

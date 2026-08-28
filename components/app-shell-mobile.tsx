@@ -71,7 +71,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { ComposerHandle } from "@/components/chat/composer"
+import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
@@ -249,15 +249,24 @@ export function AppShellMobile() {
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      turnMetadata?: ComposerTurnMetadata
     ) => {
       try {
         if (isTeamSession) {
-          await teamChat.send(content, { attachmentManifest: manifest })
+          await teamChat.send(content, {
+            attachmentManifest: manifest,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
+          })
         } else {
           await directChat.send(content, undefined, {
             attachmentManifest: manifest,
             templateRun,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
           })
         }
         void impact("light")
@@ -279,10 +288,11 @@ export function AppShellMobile() {
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      turnMetadata?: ComposerTurnMetadata
     ) => {
       if (useChatStore.getState().activeSessionId) {
-        await handleSend(content, manifest, templateRun)
+        await handleSend(content, manifest, templateRun, turnMetadata)
         return
       }
       const s = await create({ kind: "direct" })
@@ -292,6 +302,9 @@ export function AppShellMobile() {
         sessionId: s.id,
         attachmentManifest: manifest,
         templateRun,
+        ...(turnMetadata?.webSearchContext
+          ? { webSearchContext: turnMetadata.webSearchContext }
+          : {}),
       })
       void impact("light")
     },

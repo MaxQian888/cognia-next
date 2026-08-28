@@ -59,6 +59,22 @@ describe("generateSearchCacheKey", () => {
     expect(r1).not.toBe(r3)
   })
 
+  it("differs by safe-search level", () => {
+    const off = generateSearchCacheKey("q", "tavily", { safeSearch: "off" })
+    const strict = generateSearchCacheKey("q", "tavily", { safeSearch: "strict" })
+    expect(off).not.toBe(strict)
+  })
+
+  it("includes ordered preferred providers in the policy key", () => {
+    const first = generateSearchCacheKey("q", undefined, {
+      preferredProviders: ["exa", "tavily"],
+    })
+    const second = generateSearchCacheKey("q", undefined, {
+      preferredProviders: ["tavily", "exa"],
+    })
+    expect(first).not.toBe(second)
+  })
+
   it("starts with 'search:'", () => {
     expect(generateSearchCacheKey("q")).toMatch(/^search:/)
   })
@@ -155,6 +171,18 @@ describe("SearchCache", () => {
     expect(matchingKey).toMatch(/^search:/)
     cache.invalidate(matchingKey)
     expect(cache.getStats().size).toBe(1)
+  })
+
+  it("invalidateProvider removes entries produced by that provider", () => {
+    const cache = new SearchCache()
+    cache.set("a", makeResponse({ provider: "tavily", query: "a" }))
+    cache.set("b", makeResponse({ provider: "exa", query: "b" }))
+    cache.set("c", makeResponse({ provider: "tavily", query: "c" }))
+
+    expect(cache.invalidateProvider("tavily")).toBe(2)
+    expect(cache.has("a")).toBe(false)
+    expect(cache.has("b")).toBe(true)
+    expect(cache.has("c")).toBe(false)
   })
 
   it("has() returns false for expired entries and cleans them up", () => {

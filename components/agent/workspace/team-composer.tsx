@@ -22,7 +22,11 @@ import { forwardRef, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Loader2Icon, SquareIcon } from "lucide-react"
-import { Composer, type ComposerHandle } from "@/components/chat/composer"
+import {
+  Composer,
+  type ComposerHandle,
+  type ComposerTurnMetadata,
+} from "@/components/chat/composer"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SendContent } from "@cognia/agent-config-types"
@@ -32,7 +36,7 @@ import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 export interface TeamComposerProps {
   mentionables: readonly MentionTarget[]
   /** Invoked with the raw textarea text. Empty inputs are filtered before this. */
-  onSend: (rawText: string) => void | Promise<void>
+  onSend: (rawText: string, turnMetadata?: ComposerTurnMetadata) => void | Promise<void>
   onStop?: () => void | Promise<void>
   disabled?: boolean
   /**
@@ -51,7 +55,12 @@ export const TeamComposer = forwardRef<ComposerHandle, TeamComposerProps>(functi
   const t = useTranslations("agentTeamsWorkspace.chat.composer")
   const tStreaming = useTranslations("agentTeamsWorkspace.chat")
   const handleSend = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      _templateRun?: unknown,
+      turnMetadata?: ComposerTurnMetadata
+    ) => {
       if (manifest?.length) {
         toast.warning(t("attachmentsNotSupported"))
         return
@@ -62,7 +71,8 @@ export const TeamComposer = forwardRef<ComposerHandle, TeamComposerProps>(functi
       if (Array.isArray(content) && content.some((b) => b.type === "image")) {
         toast.warning(t("imageNotSupported"))
       }
-      await onSend(trimmed)
+      if (turnMetadata) await onSend(trimmed, turnMetadata)
+      else await onSend(trimmed)
     },
     [onSend, t]
   )

@@ -192,7 +192,9 @@ jest.mock("@/components/chat/chat-view", () => ({
     showHeader?: boolean
     onSend?: (
       content: unknown,
-      manifest?: readonly [{ filename: string; mediaType: string; kind: "document" }]
+      manifest?: readonly [{ filename: string; mediaType: string; kind: "document" }],
+      templateRun?: unknown,
+      turnMetadata?: unknown
     ) => Promise<void>
     onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
   }) => (
@@ -207,6 +209,17 @@ jest.mock("@/components/chat/chat-view", () => ({
           void onSend?.("hi", [
             { filename: "report.txt", mediaType: "text/plain", kind: "document" },
           ]).catch(() => {})
+        }}
+      />
+      <button
+        data-testid="chat-send-web-stub"
+        onClick={() => {
+          void onSend?.("web", undefined, null, {
+            webSearchContext: {
+              provider: "tavily",
+              results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+            },
+          }).catch(() => {})
         }}
       />
       <button
@@ -733,6 +746,32 @@ describe("<AppShellMobile />", () => {
       })
     )
     expect(directSend).not.toHaveBeenCalled()
+  })
+
+  it("forwards pre-search sources on mobile before direct dispatch", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-web",
+        title: "Web",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-web"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("chat-send-web-stub"))
+    await waitFor(() =>
+      expect(directSend).toHaveBeenCalledWith("web", undefined, {
+        attachmentManifest: undefined,
+        templateRun: null,
+        webSearchContext: {
+          provider: "tavily",
+          results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+        },
+      })
+    )
   })
 
   it("fires an error haptic when a send throws", async () => {

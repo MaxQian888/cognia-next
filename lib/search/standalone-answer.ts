@@ -26,6 +26,9 @@ import {
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
+import { searchWithAppSettings } from "./configured-search"
+import { redactText } from "@cognia/redact"
+import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 import { useSettingsStore } from "@/stores/settings"
 
 export {
@@ -45,23 +48,32 @@ export {
 export async function runStandaloneSearchAnswer(
   params: RunStandaloneSearchParams
 ): Promise<StandaloneSearchAnswer> {
-  return runStandaloneSearchAnswerCore(params, {
-    getConfig: () => {
-      const settings = useSettingsStore.getState().settings
-      return {
-        providerSettings: settings?.searchProviders,
-        maxResults: settings?.searchMaxResults,
-        maxRetries: settings?.searchMaxRetries,
-      }
+  return runStandaloneSearchAnswerCore(
+    {
+      ...params,
+      searchImpl:
+        params.searchImpl ?? ((query, options) => searchWithAppSettings(query, { options })),
     },
-    resolveModel: () => {
-      const settings = useSettingsStore.getState().settings
-      const resolution = resolveStandaloneProvider(settings)
-      if (resolution.kind !== "resolved") return null
-      return createFeatureProviderModel(resolution, {
-        fetch: getStreamingFetch(),
-        headers: browserDirectHeaders(resolution.protocol),
-      })
-    },
-  })
+    {
+      getConfig: () => {
+        const settings = useSettingsStore.getState().settings
+        return {
+          providerSettings: settings?.searchProviders,
+          maxResults: settings?.searchMaxResults,
+          maxRetries: settings?.searchMaxRetries,
+        }
+      },
+      resolveModel: () => {
+        const settings = useSettingsStore.getState().settings
+        const resolution = resolveStandaloneProvider(settings)
+        if (resolution.kind !== "resolved") return null
+        return createFeatureProviderModel(resolution, {
+          fetch: getStreamingFetch(),
+          headers: browserDirectHeaders(resolution.protocol),
+        })
+      },
+      sanitizeText: (text) => redactText(text).redacted,
+      wrapUntrustedContent,
+    }
+  )
 }

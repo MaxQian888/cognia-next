@@ -42,6 +42,7 @@ jest.mock("@/lib/claude/adapter", () => ({
   mergeMemorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeProjectKnowledgeSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeTwinSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+  mergeWebSearchSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
 }))
 
 const runTurnMemoryMock = jest.fn().mockResolvedValue(undefined)
@@ -175,7 +176,12 @@ interface ChatStateLike {
   pendingApprovals: unknown[]
   /** Sessions with a visible pane — mirrors the real store's open-pane list. */
   openSessionIds: string[]
-  steerQueue: Array<{ id: string; text: string; blocks?: unknown[] }>
+  steerQueue: Array<{
+    id: string
+    text: string
+    blocks?: unknown[]
+    webSearchContext?: unknown
+  }>
   /** Per-session status override surfaced through the `sessions` getter. */
   statusBySession: Record<string, string | undefined>
   /** Derived slice map: the active session's slice built from the flat fields. */
@@ -1665,8 +1671,11 @@ describe("useTeamChat — event handler coverage", () => {
     chatState.replaceMessages.mockImplementation((messages: unknown[]) => {
       chatState.messages = messages
     })
-    const { applySdkEvent: applySdkEventMock, mergeMemorySourcesIntoLastAssistant: mergeMock } =
-      jest.requireMock("@/lib/claude/adapter")
+    const {
+      applySdkEvent: applySdkEventMock,
+      mergeMemorySourcesIntoLastAssistant: mergeMock,
+      mergeWebSearchSourcesIntoLastAssistant: mergeWebMock,
+    } = jest.requireMock("@/lib/claude/adapter")
     const memoryContext = {
       retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.9 }],
       proceduralCount: 0,
@@ -1685,6 +1694,11 @@ describe("useTeamChat — event handler coverage", () => {
       turnComplete: true,
     }))
     ;(mergeMock as jest.Mock).mockClear()
+    ;(mergeWebMock as jest.Mock).mockClear()
+    const webSearchContext = {
+      provider: "tavily",
+      results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+    }
 
     let emitTeamEvent: ((evt: unknown) => void) | null = null
     onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
@@ -1704,7 +1718,7 @@ describe("useTeamChat — event handler coverage", () => {
     const { result } = renderHook(() => useTeamChat())
     await flush()
     await act(async () => {
-      await result.current.send("hi")
+      await result.current.send("hi", { webSearchContext })
       await new Promise<void>((r) => setTimeout(r, 30))
     })
 
@@ -1712,6 +1726,10 @@ describe("useTeamChat — event handler coverage", () => {
     expect(mergeMock).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: "a-alice" })]),
       memoryContext
+    )
+    expect(mergeWebMock).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "a-alice" })]),
+      webSearchContext
     )
     // …and persisted the merged list.
     expect(persistMessagesMock).toHaveBeenCalled()
@@ -3005,12 +3023,16 @@ describe("useTeamChat — direct-chat parity (steer / lease / per-session)", () 
     chatState.statusBySession = { "team-1": "streaming" }
     const { result } = renderHook(() => useTeamChat())
     await flush()
+    const webSearchContext = {
+      provider: "tavily",
+      results: [{ title: "Source", url: "https://example.com", content: "Result", score: 0.9 }],
+    }
     await act(async () => {
-      await result.current.send("follow-up while busy")
+      await result.current.send("follow-up while busy", { webSearchContext })
     })
     expect(chatState.enqueueSteer).toHaveBeenCalledWith(
       "team-1",
-      expect.objectContaining({ text: "follow-up while busy" })
+      expect.objectContaining({ text: "follow-up while busy", webSearchContext })
     )
     // No second orchestration loop: the session is never loaded and no turn
     // runs. The one write is the optimistic bubble itself — store-only, it

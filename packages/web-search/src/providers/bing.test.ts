@@ -84,6 +84,17 @@ describe("searchWithBing", () => {
     expect(url).toContain("responseFilter=Webpages")
   })
 
+  it.each([
+    ["off", "Off"],
+    ["moderate", "Moderate"],
+    ["strict", "Strict"],
+  ] as const)("maps common safe search level %s to Bing %s", async (safeSearch, expected) => {
+    fetchMock.mockResolvedValueOnce(fakeResp({ json: {} }))
+    await searchWithBing("q", "k", { safeSearch })
+    const url = fetchMock.mock.calls[0][0] as string
+    expect(url).toContain(`safeSearch=${expected}`)
+  })
+
   it("ignores year/any recency", async () => {
     fetchMock.mockResolvedValueOnce(fakeResp({ json: {} }))
     await searchWithBing("q", "k", { recency: "year" })

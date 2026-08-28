@@ -2,11 +2,19 @@
  * @jest-environment jsdom
  */
 
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
+
+type WebSearchContext = SendOptions["webSearchContext"]
 
 interface SliceLike {
   status?: string
-  steerQueue: Array<{ id: string; text: string; blocks?: unknown[] }>
+  steerQueue: Array<{
+    id: string
+    text: string
+    blocks?: unknown[]
+    webSearchContext?: WebSearchContext
+  }>
   messages?: UIMessage[]
 }
 
@@ -15,6 +23,15 @@ const state = {
   status: "idle",
   sessions: {} as Record<string, SliceLike>,
   openSessionIds: [] as string[],
+  lastSendBySession: {} as Record<
+    string,
+    { content: string; options: SendOptions; attemptIndex: number }
+  >,
+  setLastSend: jest.fn(
+    (id: string, entry: { content: string; options: SendOptions; attemptIndex: number }) => {
+      state.lastSendBySession[id] = entry
+    }
+  ),
   clearSteerQueue: jest.fn((id: string) => {
     if (state.sessions[id]) state.sessions[id].steerQueue = []
   }),
@@ -46,6 +63,8 @@ import {
   editPendingSteer,
   isSessionOpen,
   markPendingSteersFailed,
+  mergeSteerWebSearchContexts,
+  mergeSteerWebSearchIntoLastSend,
   maybeDrainSteer,
   promoteAcceptedSteers,
   sessionExternalLane,
@@ -83,6 +102,8 @@ beforeEach(() => {
   state.status = "idle"
   state.sessions = {}
   state.openSessionIds = []
+  state.lastSendBySession = {}
+  state.setLastSend.mockClear()
   state.clearSteerQueue.mockClear()
   state.replaceSessionMessages.mockClear()
   state.updateSteerEntry.mockClear()
@@ -91,6 +112,57 @@ beforeEach(() => {
   steerArmed.clear()
   setSessionExternalLane("s1", null)
   setSessionExternalLane("s2", null)
+})
+
+describe("steer web-search context", () => {
+  const first = {
+    provider: "tavily",
+    results: [
+      { title: "A", url: "https://a.example", content: "first", score: 0.9 },
+      { title: "B", url: "https://b.example", content: "second", score: 0.8 },
+    ],
+  } satisfies NonNullable<WebSearchContext>
+  const second = {
+    provider: "brave",
+    results: [
+      { title: "A duplicate", url: "https://a.example", content: "duplicate", score: 0.7 },
+      { title: "C", url: "https://c.example", content: "third", score: 0.6 },
+    ],
+  } satisfies NonNullable<WebSearchContext>
+
+  it("keeps the first provider id and de-duplicates results by URL", () => {
+    expect(mergeSteerWebSearchContexts([first, undefined, second])).toEqual({
+      provider: "tavily",
+      results: [first.results[0], first.results[1], second.results[1]],
+    })
+  })
+
+  it("attaches a live-accepted follow-up to the running turn snapshot", () => {
+    state.lastSendBySession.s1 = {
+      content: "original",
+      options: { webSearchContext: first },
+      attemptIndex: 0,
+    }
+
+    mergeSteerWebSearchIntoLastSend("s1", second)
+
+    expect(state.setLastSend).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({
+        options: {
+          webSearchContext: {
+            provider: "tavily",
+            results: [first.results[0], first.results[1], second.results[1]],
+          },
+        },
+      })
+    )
+  })
+
+  it("does not create a turn snapshot when the session has no running send", () => {
+    mergeSteerWebSearchIntoLastSend("missing", first)
+    expect(state.setLastSend).not.toHaveBeenCalled()
+  })
 })
 
 describe("appendSteerMessage", () => {
@@ -317,6 +389,34 @@ describe("maybeDrainSteer", () => {
     const text = typeof payload === "string" ? payload : JSON.stringify(payload)
     expect(text).toContain("first")
     expect(text).toContain("second")
+  })
+
+  it("replays the merged search context for every drained follow-up", () => {
+    const first = {
+      provider: "tavily",
+      results: [{ title: "A", url: "https://a.example", content: "first", score: 0.9 }],
+    } satisfies NonNullable<WebSearchContext>
+    const second = {
+      provider: "brave",
+      results: [
+        { title: "A duplicate", url: "https://a.example", content: "duplicate", score: 0.7 },
+        { title: "B", url: "https://b.example", content: "second", score: 0.8 },
+      ],
+    } satisfies NonNullable<WebSearchContext>
+    state.sessions.s1 = {
+      steerQueue: [
+        { id: "a", text: "first", webSearchContext: first },
+        { id: "b", text: "second", webSearchContext: second },
+      ],
+    }
+    const replay = jest.fn()
+
+    maybeDrainSteer("s1", replay)
+
+    expect(replay).toHaveBeenCalledWith(expect.anything(), {
+      provider: "tavily",
+      results: [first.results[0], second.results[1]],
+    })
   })
 
   it("marks the drained entries applied before dispatching the replay", () => {

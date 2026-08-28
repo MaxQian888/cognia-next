@@ -75,6 +75,15 @@ export interface StandaloneAnswerDeps {
    * caller then falls back to the search provider's own answer.
    */
   resolveModel: () => LanguageModel | null
+  /** Host PII gate applied to every user/source string sent to the answer model. */
+  sanitizeText?: (text: string) => string
+  /** Host framing for third-party source text (for example, prompt-injection warnings). */
+  wrapUntrustedContent?: (text: string) => string
+}
+
+export interface StandaloneAnswerPromptGuards {
+  sanitizeText?: (text: string) => string
+  wrapUntrustedContent?: (text: string) => string
 }
 
 /** Default number of sources pulled per query when settings don't specify one. */
@@ -89,12 +98,22 @@ const ANSWER_SYSTEM_PROMPT =
   "and do not invent sources or facts."
 
 /** Build the grounding prompt from the numbered search results. */
-export function buildAnswerPrompt(query: string, results: SearchResult[]): string {
+export function buildAnswerPrompt(
+  query: string,
+  results: SearchResult[],
+  guards: StandaloneAnswerPromptGuards = {}
+): string {
   const blocks = results.map((r, i) => {
     const body = (r.content ?? "").slice(0, SOURCE_CONTENT_MAX)
     return `[${i + 1}] ${r.title}\nURL: ${r.url}\n${body}`.trim()
   })
-  return `Question: ${query}\n\nSources:\n${blocks.join("\n\n")}`
+  const sanitize = guards.sanitizeText ?? ((text: string) => text)
+  const sanitizedQuery = sanitize(query)
+  const sanitizedSources = sanitize(blocks.join("\n\n"))
+  const framedSources = guards.wrapUntrustedContent
+    ? guards.wrapUntrustedContent(sanitizedSources)
+    : sanitizedSources
+  return `Question: ${sanitizedQuery}\n\nSources:\n${framedSources}`
 }
 
 /**
@@ -160,7 +179,10 @@ export async function runStandaloneSearchAnswer(
     const { text } = await generate({
       model,
       system: ANSWER_SYSTEM_PROMPT,
-      prompt: buildAnswerPrompt(query, sources),
+      prompt: buildAnswerPrompt(query, sources, {
+        sanitizeText: deps.sanitizeText,
+        wrapUntrustedContent: deps.wrapUntrustedContent,
+      }),
       abortSignal: params.signal,
     })
     return {

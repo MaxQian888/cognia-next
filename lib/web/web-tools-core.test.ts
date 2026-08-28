@@ -1,20 +1,21 @@
-import { webFetch, webSearch, buildFetchExtractor } from "./web-tools-core"
+import { webFetch, webSearch, buildFetchExtractor, type WebSearchDeps } from "./web-tools-core"
+import { unwrapUntrustedContent } from "./untrusted-content"
+import type { SearchResponse } from "@cognia/web-search/types"
 
-jest.mock("@/lib/search/search-service", () => ({
-  search: jest.fn(),
-}))
+const piiDeepMock = jest.fn()
+
+jest.mock("@cognia/redact", () => {
+  const actual = jest.requireActual("@cognia/redact")
+  return {
+    ...actual,
+    hasNoLeakingPiiDeep: (...args: unknown[]) => piiDeepMock(...args),
+  }
+})
 jest.mock("@cognia/document/parsers/html-parser", () => ({
   parseHTML: jest.fn(async () => ({ text: "readable text", title: "Title" })),
 }))
-jest.mock("@cognia/web-search/types", () => ({
-  DEFAULT_SEARCH_PROVIDER_SETTINGS: {},
-  isProviderConfigured: jest.fn((_id: string, p: { apiKey?: string }) => Boolean(p?.apiKey)),
-}))
-
-import { search } from "@/lib/search/search-service"
 import { parseHTML } from "@cognia/document/parsers/html-parser"
 
-const mockSearch = search as jest.Mock
 const mockParseHTML = parseHTML as jest.Mock
 
 function res(body: string, contentType = "text/html", ok = true, status = 200): Response {
@@ -27,13 +28,49 @@ function res(body: string, contentType = "text/html", ok = true, status = 200): 
 }
 
 beforeEach(() => {
+  const actual = jest.requireActual("@cognia/redact") as {
+    hasNoLeakingPiiDeep: (...args: unknown[]) => boolean
+  }
+  piiDeepMock.mockReset().mockImplementation(actual.hasNoLeakingPiiDeep)
   mockParseHTML.mockReset()
   mockParseHTML.mockResolvedValue({ text: "readable text", title: "Title" })
 })
 
 describe("webFetch", () => {
   it("requires a url", async () => {
-    expect(await webFetch({ url: "" })).toEqual({ ok: false, error: "url is required" })
+    expect(await webFetch({ url: "" })).toEqual({
+      ok: false,
+      code: "invalid-arguments",
+      error: "url is required",
+    })
+  })
+
+  it("rejects outbound fetch inputs that contain unredacted PII", async () => {
+    const fetchImpl = jest.fn(async () => res("ok", "text/plain"))
+    const out = await webFetch(
+      { url: "https://x.test", body: "contact alice@example.com" },
+      { fetchImpl }
+    )
+    expect(out).toEqual({
+      ok: false,
+      code: "blocked",
+      error: "web_fetch blocked: outbound request contains sensitive data",
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("gates the final headers after injecting the configured user agent", async () => {
+    const fetchImpl = jest.fn(async () => res("ok", "text/plain"))
+    const out = await webFetch(
+      { url: "https://x.test" },
+      { fetchImpl, userAgent: "contact alice@example.com" }
+    )
+    expect(out).toEqual({
+      ok: false,
+      code: "blocked",
+      error: "web_fetch blocked: outbound request contains sensitive data",
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it("returns extracted text (NOT the raw body) for HTML responses", async () => {
@@ -43,9 +80,10 @@ describe("webFetch", () => {
       unknown
     >
     expect(out.ok).toBe(true)
-    // Raw (non-distilled) page text is framed as untrusted for injection safety.
+    // Page text is framed as untrusted for injection safety — once, as a
+    // sibling field, so `text` and `title` stay usable verbatim.
     expect(out.text).toContain("readable text")
-    expect(out.text).toContain("Untrusted web content")
+    expect(out.untrustedNotice).toContain("Untrusted web content")
     expect(out.title).toBe("Title")
     expect(out.contentType).toBe("text/html")
     // The raw HTML markup must NOT be sent to the model.
@@ -60,7 +98,7 @@ describe("webFetch", () => {
       unknown
     >
     expect(out.text).toBeUndefined()
-    expect(out.body).toBe("<html>x</html>")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("<html>x</html>")
     expect(mockParseHTML).not.toHaveBeenCalled()
   })
 
@@ -100,7 +138,7 @@ describe("webFetch", () => {
       { fetchImpl: fetchImpl as unknown as typeof fetch, jinaFallback: true }
     )) as Record<string, unknown>
     expect(out.source).toBe("jina")
-    expect(out.title).toBe("JT")
+    expect(unwrapUntrustedContent(String(out.title))).toBe("JT")
     expect(String(out.text).endsWith("x".repeat(300))).toBe(true)
   })
 
@@ -121,7 +159,7 @@ describe("webFetch", () => {
       string,
       unknown
     >
-    expect(out.body).toBe('{"a":1}')
+    expect(unwrapUntrustedContent(String(out.body))).toBe('{"a":1}')
     expect(out.text).toBeUndefined()
     expect(mockParseHTML).not.toHaveBeenCalled()
   })
@@ -133,7 +171,7 @@ describe("webFetch", () => {
       string,
       unknown
     >
-    expect(out.body).toBe("<html></html>")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("<html></html>")
     expect(out.text).toBeUndefined()
   })
 
@@ -144,7 +182,7 @@ describe("webFetch", () => {
       string,
       unknown
     >
-    expect(out.body).toBe("<html>oops</html>")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("<html>oops</html>")
     expect(out.text).toBeUndefined()
   })
 
@@ -156,7 +194,7 @@ describe("webFetch", () => {
       { url: "https://x.test", maxBytes: 4 },
       { fetchImpl: fetchImpl as unknown as typeof fetch, userAgent: "Cognia/1" }
     )) as Record<string, unknown>
-    expect(out.body).toBe("abcd")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("abcd")
     expect(out.truncated).toBe(true)
     const headers = (fetchImpl.mock.calls[0][1]?.headers ?? {}) as Record<string, string>
     expect(headers["User-Agent"]).toBe("Cognia/1")
@@ -169,9 +207,10 @@ describe("webFetch", () => {
       string,
       unknown
     >
-    // Cap applies to the content; the untrusted banner is added on top of it.
-    const content = (out.text as string).replace(/^\[Untrusted[^\]]*\]\n\n/, "")
-    expect(content.length).toBe(40 * 1024)
+    // The cap applies to `text` directly — the frame is one payload-level
+    // `untrustedNotice`, not a banner glued onto each field.
+    expect((out.text as string).length).toBe(40 * 1024)
+    expect(out.untrustedNotice).toContain("Untrusted web content")
     expect(out.truncated).toBe(true)
   })
 
@@ -182,9 +221,8 @@ describe("webFetch", () => {
       { url: "https://x.test", maxBytes: 8, headers: { "User-Agent": "Preset/9" } },
       { fetchImpl: fetchImpl as unknown as typeof fetch, userAgent: "Cognia/1" }
     )) as Record<string, unknown>
-    // maxBytes set → extract cap follows it (banner excluded from the cap).
-    const content = (out.text as string).replace(/^\[Untrusted[^\]]*\]\n\n/, "")
-    expect(content.length).toBe(8)
+    // maxBytes set → extract cap follows it.
+    expect((out.text as string).length).toBe(8)
     expect(out.truncated).toBe(true)
     // No title returned when the parser found none.
     expect(out.title).toBeUndefined()
@@ -200,6 +238,7 @@ describe("webFetch", () => {
       { fetchImpl, summarize }
     )) as Record<string, unknown>
     expect(out.text).toBe("FOCUSED ANSWER")
+    expect(out.untrustedNotice).toContain("Untrusted web content")
     expect(summarize).toHaveBeenCalledWith("readable text", "what is x?", undefined)
   })
 
@@ -223,9 +262,9 @@ describe("webFetch", () => {
       { url: "https://x.test", prompt: "what is x?" },
       { fetchImpl, summarize }
     )) as Record<string, unknown>
-    // Fell back to extracted text → framed as untrusted.
+    // Fell back to extracted text → still framed, once, at payload level.
     expect(out.text).toContain("readable text")
-    expect(out.text).toContain("Untrusted web content")
+    expect(out.untrustedNotice).toContain("Untrusted web content")
   })
 
   it("ignores the prompt when no summarizer is available", async () => {
@@ -237,15 +276,17 @@ describe("webFetch", () => {
     expect(out.text).toContain("readable text")
   })
 
-  it("distilled output is NOT wrapped as untrusted", async () => {
+  it("frames distilled output once at payload level, leaving text verbatim", async () => {
     const fetchImpl = jest.fn(async () => res("<html>full page</html>"))
     const summarize = jest.fn(async () => "FOCUSED ANSWER")
     const out = (await webFetch(
       { url: "https://x.test", prompt: "what is x?" },
       { fetchImpl, summarize }
     )) as Record<string, unknown>
+    // Distillation reduces content but does not make the page trusted; the
+    // frame is a sibling field so `text` stays usable verbatim.
     expect(out.text).toBe("FOCUSED ANSWER")
-    expect(out.text).not.toContain("Untrusted web content")
+    expect(out.untrustedNotice).toContain("Untrusted web content")
   })
 
   it("alwaysDistill runs the summarizer with a generic prompt when no prompt is given", async () => {
@@ -256,6 +297,7 @@ describe("webFetch", () => {
       { fetchImpl, summarize, alwaysDistill: true }
     )) as Record<string, unknown>
     expect(out.text).toBe("GENERIC SUMMARY")
+    expect(out.untrustedNotice).toContain("Untrusted web content")
     expect(summarize).toHaveBeenCalledWith(
       "readable text",
       expect.stringMatching(/key facts/i),
@@ -306,6 +348,7 @@ describe("webFetch", () => {
     })
     expect(await webFetch({ url: "https://x.test" }, { fetchImpl })).toEqual({
       ok: false,
+      code: "execution-failed",
       error: "network down",
     })
   })
@@ -386,7 +429,7 @@ describe("webFetch", () => {
       { fetchImpl }
     )) as Record<string, unknown>
     expect(out.binary).toBeUndefined()
-    expect(out.body).toBe("rawpngbytes")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("rawpngbytes")
   })
 
   it("pages a long page via offset and reports totalLength + nextOffset", async () => {
@@ -417,7 +460,7 @@ describe("webFetch", () => {
       { url: "https://x.test/data", maxBytes: 4, offset: 4 },
       { fetchImpl }
     )) as Record<string, unknown>
-    expect(out.body).toBe("4567")
+    expect(unwrapUntrustedContent(String(out.body))).toBe("4567")
     expect(out.truncated).toBe(true)
     expect(out.totalLength).toBe(10)
     expect(out.nextOffset).toBe(8)
@@ -447,6 +490,25 @@ describe("buildFetchExtractor", () => {
     expect(prompt.length).toBeLessThan(33 * 1024 + 200)
   })
 
+  it("redacts the extraction question and page before calling a cloud model", async () => {
+    const complete = jest.fn(async (_prompt: string) => "ok")
+    const extract = buildFetchExtractor({ complete })
+    await extract("Email alice@example.com", "Find alice@example.com")
+    const [prompt] = complete.mock.calls[0]
+    expect(prompt).not.toContain("alice@example.com")
+    expect(prompt).toContain("<EMAIL_001>")
+  })
+
+  it("fails closed before cloud extraction when redaction leaves sensitive data", async () => {
+    piiDeepMock.mockReturnValue(false)
+    const complete = jest.fn(async () => "ok")
+
+    await expect(buildFetchExtractor({ complete })("page", "question")).rejects.toThrow(
+      "Web extraction blocked"
+    )
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it("tolerates a nullish completion", async () => {
     const complete = jest.fn(async () => undefined as unknown as string)
     const extract = buildFetchExtractor({ complete })
@@ -455,163 +517,144 @@ describe("buildFetchExtractor", () => {
 })
 
 describe("webSearch", () => {
-  beforeEach(() => mockSearch.mockReset())
+  const executor = (
+    response: SearchResponse | Error
+  ): jest.MockedFunction<NonNullable<WebSearchDeps["searchExecutor"]>> => {
+    const implementation: NonNullable<WebSearchDeps["searchExecutor"]> = async () => {
+      if (response instanceof Error) throw response
+      return response
+    }
+    return jest.fn(implementation)
+  }
 
   it("requires a query", async () => {
-    expect(await webSearch({ query: "  " })).toEqual({ ok: false, error: "query is required" })
+    expect(await webSearch({ query: "  " })).toEqual({
+      ok: false,
+      code: "invalid-arguments",
+      error: "query is required",
+    })
   })
 
-  it("errors when no provider is configured", async () => {
+  it("fails closed when the canonical executor is missing", async () => {
+    await expect(webSearch({ query: "hi" })).resolves.toEqual({
+      ok: false,
+      code: "no-search-provider",
+      error:
+        "No web search provider is configured. Enable one and add its API key in Settings → Search.",
+    })
+  })
+
+  it("delegates app policy to one configured search executor", async () => {
+    const searchExecutor = executor({
+      query: "TypeScript",
+      provider: "tavily" as const,
+      results: [{ title: "T", url: "https://t.test", content: "c", score: 0.9 }],
+      responseTime: 1,
+    })
     const out = (await webSearch(
-      { query: "hi" },
-      { providerSettings: { tavily: { providerId: "tavily", enabled: true } } as never }
+      { query: "please tell me about TypeScript", provider: "tavily", maxResults: 3 },
+      { searchExecutor }
     )) as Record<string, unknown>
-    expect(out.ok).toBe(false)
-    expect(String(out.error)).toMatch(/No web search provider/)
+
+    expect(searchExecutor).toHaveBeenCalledWith("please tell me about TypeScript", {
+      provider: "tavily",
+      maxResults: 3,
+    })
+    expect(out).toMatchObject({ ok: true, provider: "tavily" })
   })
 
   it("returns structured results without a duplicate formatted block", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "tavily",
+      query: "hi",
       answer: "the answer",
       results: [{ title: "T", url: "u", content: "c", score: 0.9 }],
+      responseTime: 1,
     })
-    const out = (await webSearch(
-      { query: "hi", maxResults: 3 },
-      {
-        providerSettings: {
-          tavily: { providerId: "tavily", enabled: true, apiKey: "k" },
-        } as never,
-      }
-    )) as Record<string, unknown>
+    const out = (await webSearch({ query: "hi", maxResults: 3 }, { searchExecutor })) as Record<
+      string,
+      unknown
+    >
     expect(out.ok).toBe(true)
     expect(out.provider).toBe("tavily")
     // The duplicate markdown re-serialization is gone.
     expect(out.formatted).toBeUndefined()
     expect((out.results as unknown[]).length).toBe(1)
-    expect(mockSearch).toHaveBeenCalledWith("hi", expect.objectContaining({ maxResults: 3 }))
+    expect(searchExecutor).toHaveBeenCalledWith("hi", { maxResults: 3 })
   })
 
   it("truncates long per-result snippets", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "tavily",
-      answer: null,
+      query: "hi",
+      answer: undefined,
       results: [{ title: "T", url: "u", content: "z".repeat(500), score: 0.5 }],
+      responseTime: 1,
     })
-    const out = (await webSearch(
-      { query: "hi" },
-      {
-        providerSettings: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } } as never,
-      }
-    )) as Record<string, unknown>
+    const out = (await webSearch({ query: "hi" }, { searchExecutor })) as Record<string, unknown>
     const first = (out.results as { content: string }[])[0]
-    expect(first.content.length).toBe(301) // 300 chars + ellipsis
+    // The untrusted frame is carried once by the envelope, not repeated on
+    // every title and snippet, so the snippet itself is the raw text.
+    expect(out.untrustedNotice).toContain("Untrusted web content")
+    expect(first.content).not.toContain("Untrusted web content")
     expect(first.content.endsWith("…")).toBe(true)
   })
 
   it("honors a forced provider + deps.searchMaxResults and keeps publishedDate", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "exa",
-      answer: null,
+      query: "hi",
+      answer: undefined,
       results: [
         { title: "T", url: "u", content: "c", score: 0.5, publishedDate: "2026-01-01" },
-        { title: "T2", url: "u2", content: undefined, score: 0.4 },
+        { title: "T2", url: "u2", content: "", score: 0.4 },
       ],
+      responseTime: 1,
     })
     const out = (await webSearch(
       { query: "hi", provider: "exa" as never },
-      {
-        providerSettings: { exa: { providerId: "exa", enabled: true, apiKey: "k" } } as never,
-        searchMaxResults: 7,
-      }
+      { searchExecutor, searchMaxResults: 7 }
     )) as Record<string, unknown>
-    expect(mockSearch).toHaveBeenCalledWith(
-      "hi",
-      expect.objectContaining({ provider: "exa", maxResults: 7 })
-    )
+    expect(searchExecutor).toHaveBeenCalledWith("hi", { provider: "exa", maxResults: 7 })
     const rows = out.results as { publishedDate?: string; content: unknown }[]
     expect(rows[0].publishedDate).toBe("2026-01-01")
-    expect(rows[1].content).toBeUndefined()
+    expect(unwrapUntrustedContent(String(rows[1].content))).toBe("")
     expect(out.answer).toBeNull()
   })
 
-  const cfg = {
-    providerSettings: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } } as never,
-  }
-
-  it("strips filler from the query before searching", async () => {
-    mockSearch.mockResolvedValue({ provider: "tavily", answer: null, results: [] })
-    const out = (await webSearch({ query: "please tell me about TypeScript" }, cfg)) as Record<
-      string,
-      unknown
-    >
-    expect(mockSearch).toHaveBeenCalledWith("tell me about TypeScript", expect.anything())
-    expect(out.query).toBe("tell me about TypeScript")
-  })
-
-  it("leaves the query untouched when optimizeQuery is false", async () => {
-    mockSearch.mockResolvedValue({ provider: "tavily", answer: null, results: [] })
-    await webSearch({ query: "please tell me about TypeScript" }, { ...cfg, optimizeQuery: false })
-    expect(mockSearch).toHaveBeenCalledWith("please tell me about TypeScript", expect.anything())
-  })
-
-  it("forwards the user's default search options to the service", async () => {
-    mockSearch.mockResolvedValue({ provider: "tavily", answer: null, results: [] })
+  it("forwards the user's default search options to the canonical executor", async () => {
+    const searchExecutor = executor({
+      provider: "tavily" as const,
+      query: "hi",
+      answer: undefined,
+      results: [],
+      responseTime: 1,
+    })
     await webSearch(
       { query: "hi" },
-      { ...cfg, searchOptions: { searchType: "news", includeAnswer: true } as never }
+      { searchExecutor, searchOptions: { searchType: "news", includeAnswer: true } as never }
     )
-    expect(mockSearch).toHaveBeenCalledWith(
-      "hi",
-      expect.objectContaining({ searchType: "news", includeAnswer: true })
-    )
-  })
-
-  it("serves a cache hit without calling the search service", async () => {
-    const cached = {
-      provider: "exa",
-      answer: "cached answer",
-      results: [{ title: "C", url: "https://c.test", content: "c", score: 0.5 }],
-    }
-    const searchCache = {
-      get: jest.fn(() => cached as never),
-      set: jest.fn(),
-    }
-    const out = (await webSearch({ query: "hi" }, { ...cfg, searchCache })) as Record<
-      string,
-      unknown
-    >
-    expect(mockSearch).not.toHaveBeenCalled()
-    expect(searchCache.set).not.toHaveBeenCalled()
-    expect(out.provider).toBe("exa")
-    expect(out.answer).toBe("cached answer")
-  })
-
-  it("populates the cache on a miss", async () => {
-    const response = {
-      provider: "tavily",
-      answer: null,
-      results: [{ title: "T", url: "https://t.test", content: "c", score: 0.9 }],
-    }
-    mockSearch.mockResolvedValue(response)
-    const searchCache = { get: jest.fn(() => null), set: jest.fn() }
-    await webSearch({ query: "hi" }, { ...cfg, searchCache })
-    expect(searchCache.set).toHaveBeenCalledWith("hi", response, undefined, expect.anything())
+    expect(searchExecutor).toHaveBeenCalledWith("hi", {
+      searchType: "news",
+      includeAnswer: true,
+    })
   })
 
   it("filters out blocked domains when source verification is enabled", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "tavily",
-      answer: null,
+      query: "hi",
+      answer: undefined,
       results: [
         { title: "Good", url: "https://good.test/a", content: "g", score: 0.8 },
         { title: "Spam", url: "https://spam.test/b", content: "s", score: 0.7 },
       ],
+      responseTime: 1,
     })
     const out = (await webSearch(
       { query: "hi" },
       {
-        ...cfg,
+        searchExecutor,
         sourceVerification: {
           enabled: true,
           mode: "moderate",
@@ -629,15 +672,17 @@ describe("webSearch", () => {
   })
 
   it("drops everything below the minimum credibility when auto-filter is on", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "tavily",
-      answer: null,
+      query: "hi",
+      answer: undefined,
       results: [{ title: "X", url: "https://x.test/a", content: "x", score: 0.5 }],
+      responseTime: 1,
     })
     const out = (await webSearch(
       { query: "hi" },
       {
-        ...cfg,
+        searchExecutor,
         sourceVerification: {
           enabled: true,
           mode: "strict",
@@ -654,15 +699,17 @@ describe("webSearch", () => {
   })
 
   it("attaches a credibility badge when showVerificationBadges is on", async () => {
-    mockSearch.mockResolvedValue({
+    const searchExecutor = executor({
       provider: "tavily",
-      answer: null,
+      query: "hi",
+      answer: undefined,
       results: [{ title: "X", url: "https://x.test/a", content: "x", score: 0.5 }],
+      responseTime: 1,
     })
     const out = (await webSearch(
       { query: "hi" },
       {
-        ...cfg,
+        searchExecutor,
         sourceVerification: {
           enabled: true,
           mode: "moderate",
@@ -679,14 +726,9 @@ describe("webSearch", () => {
     expect(typeof first.credibility).toBe("string")
   })
 
-  it("surfaces search-service errors", async () => {
-    mockSearch.mockRejectedValue(new Error("provider 500"))
-    const out = (await webSearch(
-      { query: "hi" },
-      {
-        providerSettings: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } } as never,
-      }
-    )) as Record<string, unknown>
-    expect(out).toEqual({ ok: false, error: "provider 500" })
+  it("surfaces canonical executor errors", async () => {
+    const searchExecutor = executor(new Error("provider 500"))
+    const out = (await webSearch({ query: "hi" }, { searchExecutor })) as Record<string, unknown>
+    expect(out).toEqual({ ok: false, code: "execution-failed", error: "provider 500" })
   })
 })

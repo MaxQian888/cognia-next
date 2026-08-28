@@ -1531,6 +1531,43 @@ export interface TwinSourcesContext {
   degraded?: boolean
 }
 
+/** Provider-search context stashed on the send options for this turn. */
+export interface WebSearchSourcesContext {
+  provider: string
+  results: Array<{
+    title: string
+    url: string
+    content: string
+    score: number
+  }>
+}
+
+/** Persist pre-search results as clickable sources on the completed reply. */
+export function webSearchSourcesFromContext(
+  context: WebSearchSourcesContext | undefined | null
+): SourcesPartItem[] {
+  if (!context || context.results.length === 0) return []
+  return context.results.map((result, index) => ({
+    id: `cognia-web-${context.provider}-${index}`,
+    title: result.title || result.url,
+    url: result.url,
+    snippet:
+      result.content.length > 200 ? `${result.content.slice(0, 199).trimEnd()}…` : result.content,
+    origin: "cognia-web",
+    score: result.score,
+  }))
+}
+
+/** Persist pre-search results as clickable sources on the completed reply. */
+export function mergeWebSearchSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  context: WebSearchSourcesContext | undefined | null
+): UIMessage[] {
+  const sources = webSearchSourcesFromContext(context)
+  if (sources.length === 0) return messages
+  return appendSourcesToLastAssistant(messages, sources)
+}
+
 /**
  * Merge twin RAG + style sources onto the last assistant message's
  * SourcesPart. Returns a new messages array (or the same reference when

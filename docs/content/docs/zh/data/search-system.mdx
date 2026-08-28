@@ -6,6 +6,8 @@ description: 十个 Web 搜索 provider 的统一接入层——查询优化、�
 # 搜索系统
 
 Cognia 把"让 AI 上网搜东西"这件事抽象成一个 provider 总线：上层只看到 `search(query, options)`，底下挂着十个 provider（Tavily / Perplexity / Exa / SearchAPI / Serper / SerpAPI / Bing / Google / Google AI / Brave），各自带 general/news/images/videos/academic 几种能力。所有 provider 走同一份 `SearchResponse` 形状，调用方拿到的结果格式始终一致。
+
+应用侧唯一入口是 `lib/search/configured-search.ts:searchWithAppSettings()`；CLI 则注入同形的已解析配置，不依赖 Zustand。该入口统一执行查询优化、PII 脱敏、实时默认参数、安全搜索、Provider 优先与回退、TTL/LRU 缓存、Domain 强过滤、来源可信度策略和用量记录。底层 Provider 总线位于 `packages/web-search/src/`，上层不再各自实现 HTTP 搜索。
 ## 总览
 
 ```mermaid
@@ -54,9 +56,9 @@ flowchart LR
 
 ## 数据类型
 
-所有 provider 都把自己的原生响应折叠成同一份 `SearchResponse`，定义在 `lib/search/types.ts`：
+所有 provider 都把自己的原生响应折叠成同一份 `SearchResponse`，定义在 `packages/web-search/src/types.ts`：
 
-```ts title="lib/search/types.ts"
+```ts title="packages/web-search/src/types.ts"
 export type SearchProviderType =
   | "tavily"
   | "perplexity"
@@ -95,11 +97,11 @@ export interface SearchResponse {
 }
 ```
 
-`SearchOptions` 是 provider 通用入参：`maxResults` / `searchDepth` / `searchType` / `includeAnswer` / `includeRawContent` / `includeDomains` / `excludeDomains` / `recency` / `country` / `language`。Provider 自家专属字段不进通用层 —— 例如 Tavily 的 deep search、SerpAPI 的 SerpAPI-only 参数都靠各自的 provider 函数承接，统一层只暴露 ten 个共有 knob。
+`SearchOptions` 是 provider 通用入参：`maxResults` / `searchDepth` / `searchType` / `includeAnswer` / `includeRawContent` / `includeDomains` / `excludeDomains` / `recency` / `country` / `language` / `safeSearch`。Bing、SearchAPI、SerpAPI 映射到原生安全搜索参数，其余 Provider 明确无操作。`UnifiedSearchOptions.preferredProviders` 让用户选中的 Provider 先尝试，同时保留全局优先级回退；`includeDomains` 始终做后置强过滤，没有合规 URL 的响应不会被视为成功。
 
 ## 统一搜索入口
 
-```ts title="lib/search/search-service.ts"
+```ts title="packages/web-search/src/search-service.ts"
 export async function search(
   query: string,
   options: UnifiedSearchOptions = {}
@@ -119,7 +121,7 @@ export async function search(
 - `searchWithProvider(provider, query, apiKey, opts)` — 一次性调用，不读全局设置。
 - `aggregateSearch(query, providerSettings, opts)` — 并行打所有启用的 provider，结果按 URL 归并去重，按 `score` 重新排序后保留 top 20。
 
-故障回退的语义很简单：捕到错误就尝试下一个 provider，全失败抛 `lastError`。`recordUsage()` 通过动态 `import("@/stores/settings")` 避免循环依赖 —— 测试 / SSR 环境下 store 没就绪也不影响主路径。
+故障回退同时覆盖 Provider 报错和无法满足 Domain 强约束的响应。桌面与 Web 调用方应使用 `searchWithAppSettings()`，从而保证缓存命中不会再次发起 Provider 请求或重复计费。
 
 ## 查询优化
 
@@ -146,10 +148,11 @@ export function optimizeSearchQuery(message: string): string {
 `search-cache.ts` 实现了 LRU + TTL 的搜索结果缓存：
 
 - 默认 `defaultTTL = 5 min`；`searchType === "news"` 时缩到 `newsTTL = 1 min`。
-- Key 由 query / provider / maxResults / type / depth / recency / answer / rawContent / language / country / domain filter 组合哈希得到 —— 任何一项变了都算 cache miss。
+- Key 由 query / provider 顺序 / maxResults / type / depth / recency / safe search / answer / rawContent / language / country / domain filter 组合哈希得到。
+- 缓存条目保留 Provider 元数据，设置页通过 `invalidateProvider(provider)` 精确清理，不再匹配不可读哈希。
 - `CacheStats` 暴露 `hits / misses / hitRate`，调试时可见。
 
-缓存层是可选的；当前 `search()` 主路径没有强制走缓存，由上层（聊天 send 路径、twin runtime）按需挂载。
+应用绑定在每次使用前应用最新 TTL 和容量；非应用宿主仍可选择不挂缓存。
 
 ## 类型路由
 
@@ -177,7 +180,7 @@ const PROVIDER_CAPABILITIES: Record<SearchProviderType, ProviderCapabilities> = 
 每个 provider 都遵循同样的文件结构：
 
 ```
-lib/search/providers/<name>.ts
+packages/web-search/src/providers/<name>.ts
 ├── searchWith<Name>(query, apiKey, options)        // general
 ├── searchNewsWith<Name>(...)                       // 可选
 ├── searchImagesWith<Name>(...)                     // 可选
@@ -211,7 +214,7 @@ lib/search/providers/<name>.ts
 
 搜出来的结果不见得都靠谱 —— `source-verification.ts` 给每条 `SearchResult` 单独打分：
 
-```ts title="lib/search/source-verification.ts"
+```ts title="packages/web-search/src/source-verification.ts"
 export type CredibilityLevel = "high" | "medium" | "low" | "unknown"
 
 export type SourceType =
@@ -262,9 +265,13 @@ void recordUsage(providerConfig.providerId, Date.now() - startTime, true /* or f
 
 搜索系统不是独立的 UI 表面，而是被这些位置消费：
 
-- **聊天 send 路径** —— `lib/claude/build-options.ts` 在 send 之前可触发 web search，把摘要作为 system prompt 附加段。
-- **Twin runtime** —— `lib/twin/runtime/apply-twin-context.ts` 走自己的向量搜索，但 skill 触发"web search"时也走本系统。详见 [向量库](./vector-store) 与 [员工数字孪生](../subsystems/employee-twin)。
-- **插件 search API** —— 插件可以请求 `search` 权限，调用 `searchWithProvider` 时由插件运行时注入受限 API key 表。
+- **会话预搜索** —— Composer 只调用一次统一执行器，将结果按不可信外部内容包装后送入模型，并在最终 Assistant 消息中持久化为可点击的 `cognia-web` 来源。
+- **独立搜索页** —— `/search` 向共享回答管线注入统一执行器；来源正文进入云端综合模型前完成 PII 脱敏和不可信内容包装。
+- **Agent 工具** —— 提升后的 `web_search` 复用同一执行器。`web_fetch` 继续复用 SSRF、平台 Reader、HTML 提取、Jina 回退和缓存，并对出站请求字段及云端摘要正文执行 PII 闸门。
+- **Deep Research** —— 保留搜索→阅读→推理状态机，搜索和页面读取委托给共享实现；旧 Exa/Tavily 插件密钥只作为兼容配置。
+- **CLI** —— 按环境变量 → credentials → 项目配置 → 用户配置解析搜索凭据，不依赖桌面进程或 renderer store；可用时仍优先 Anthropic 原生搜索。
+
+“研究来源”区分 Provider 偏好与 Domain 约束：Wikipedia、arXiv、GitHub、Stack Overflow 是内置 Domain，自定义项必须提供有效 URL/域名。Provider 允许失败后回退，Domain 始终严格生效。
 
 设置 UI 在 Settings → 搜索 provider 下，每个 provider 一张卡片 + 启用/优先级/默认参数 + 测试连接按钮。
 

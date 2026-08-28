@@ -5,7 +5,7 @@ const setTTLMock = jest.fn()
 const setMaxEntriesMock = jest.fn()
 
 const cacheClearMock = jest.fn()
-const cacheInvalidateMock = jest.fn()
+const cacheInvalidateProviderMock = jest.fn()
 const cacheSetConfigMock = jest.fn()
 const cacheGetStatsMock = jest.fn()
 
@@ -36,7 +36,7 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("@cognia/web-search/search-cache", () => ({
   getSearchCache: () => ({
     clear: cacheClearMock,
-    invalidate: cacheInvalidateMock,
+    invalidateProvider: cacheInvalidateProviderMock,
     setConfig: cacheSetConfigMock,
     getStats: cacheGetStatsMock,
   }),
@@ -103,7 +103,7 @@ beforeEach(() => {
   setTTLMock.mockReset()
   setMaxEntriesMock.mockReset()
   cacheClearMock.mockReset()
-  cacheInvalidateMock.mockReset()
+  cacheInvalidateProviderMock.mockReset()
   cacheSetConfigMock.mockReset()
   cacheGetStatsMock.mockReset().mockReturnValue({
     size: 5,
@@ -147,6 +147,18 @@ describe("SearchCacheSettings", () => {
     render(<SearchCacheSettings />)
     fireEvent.click(screen.getByText("clearCache"))
     expect(cacheClearMock).toHaveBeenCalled()
+  })
+
+  it("clears only entries owned by the selected provider", () => {
+    settings = {
+      searchCacheEnabled: true,
+      searchProviders: { tavily: { providerId: "tavily", enabled: true } },
+    }
+    render(<SearchCacheSettings />)
+    fireEvent.change(screen.getByTestId("provider-select"), { target: { value: "tavily" } })
+    fireEvent.click(screen.getByText("clearCache"))
+    expect(cacheInvalidateProviderMock).toHaveBeenCalledWith("tavily")
+    expect(cacheClearMock).not.toHaveBeenCalled()
   })
 
   it("logs cache_enabled_changed when toggled", () => {

@@ -29,7 +29,13 @@ export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
  * steer keeps its attachments when it is finally replayed. `id` is a stable key
  * for per-entry edit/remove in the Run Panel.
  */
-export type SteerEntry = { id: string; text: string; blocks?: SendContentBlock[] }
+export type SteerEntry = {
+  id: string
+  text: string
+  blocks?: SendContentBlock[]
+  /** Pre-search sources attached to this follow-up; replayed with the drained turn. */
+  webSearchContext?: SendOptions["webSearchContext"]
+}
 
 export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
 

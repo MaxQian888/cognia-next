@@ -19,6 +19,7 @@ jest.mock("@cognia/web-search/standalone-answer", () => ({
 const settingsRef: { current: Record<string, unknown> | undefined } = { current: undefined }
 const resolveMock = jest.fn<ProviderResolution, [unknown]>()
 const createModelMock = jest.fn(() => ({ __model: true }))
+const configuredSearchMock = jest.fn()
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ settings: settingsRef.current }) },
@@ -32,6 +33,9 @@ jest.mock("@/lib/ai/provider-consumption", () => ({
 jest.mock("@/lib/runtime/streaming-fetch", () => ({
   getStreamingFetch: () => "fetch-impl",
   browserDirectHeaders: (p: string) => ({ proto: p }),
+}))
+jest.mock("@/lib/search/configured-search", () => ({
+  searchWithAppSettings: (...args: unknown[]) => configuredSearchMock(...args),
 }))
 
 import { runStandaloneSearchAnswer } from "./standalone-answer"
@@ -63,9 +67,24 @@ beforeEach(() => {
 })
 
 describe("lib/search/standalone-answer binding", () => {
-  it("delegates params to the core untouched", async () => {
+  it("injects the configured app search executor into the standalone pipeline", async () => {
     await runStandaloneSearchAnswer({ query: "hello", maxResults: 3 })
-    expect(runCoreMock.mock.calls[0][0]).toEqual({ query: "hello", maxResults: 3 })
+    const params = runCoreMock.mock.calls[0][0] as {
+      query: string
+      maxResults: number
+      searchImpl: (query: string, options: unknown) => Promise<unknown>
+    }
+    expect(params).toMatchObject({ query: "hello", maxResults: 3 })
+    await params.searchImpl("hello", { maxResults: 3 })
+    expect(configuredSearchMock).toHaveBeenCalledWith("hello", {
+      options: { maxResults: 3 },
+    })
+  })
+
+  it("preserves an explicit test search implementation", async () => {
+    const searchImpl = jest.fn()
+    await runStandaloneSearchAnswer({ query: "hello", searchImpl })
+    expect(runCoreMock.mock.calls[0][0]).toEqual({ query: "hello", searchImpl })
   })
 
   it("getConfig reads providerSettings + maxResults from the settings store", async () => {
@@ -106,5 +125,12 @@ describe("lib/search/standalone-answer binding", () => {
     const deps = capturedDeps()
     expect(deps.resolveModel()).toBeNull()
     expect(createModelMock).not.toHaveBeenCalled()
+  })
+
+  it("injects the app PII sanitizer and untrusted-content wrapper", async () => {
+    await runStandaloneSearchAnswer({ query: "hello" })
+    const deps = capturedDeps()
+    expect(deps.sanitizeText?.("alice@example.com")).not.toContain("alice@example.com")
+    expect(deps.wrapUntrustedContent?.("source text")).toContain("Untrusted web content")
   })
 })

@@ -24,6 +24,7 @@ import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/
 import {
   appendSteerMessage,
   isSessionOpen,
+  mergeSteerWebSearchIntoLastSend,
   sessionExternalLane,
   sessionStatusOf,
   setSessionExternalLane,
@@ -578,6 +579,8 @@ export function useClaudeChat() {
          *  re-run with different values — the sent text has the values
          *  substituted in and no longer marks which words they were. */
         templateRun?: ChatTemplateRun | null
+        /** Search sources resolved by the composer before this turn dispatches. */
+        webSearchContext?: SendOptions["webSearchContext"]
         /** Explicit user choice after a failed interactive setup. Scheduled
          * runs never expose or honor this bypass. */
         bypassEnvironmentSetup?: boolean
@@ -656,6 +659,7 @@ export function useClaudeChat() {
               })
               if (queued) {
                 appendSteerMessage(sessionId, optimistic)
+                mergeSteerWebSearchIntoLastSend(sessionId, callOptions?.webSearchContext)
                 setSteerMessageState(sessionId, entryId, "accepted")
                 return
               }
@@ -697,6 +701,7 @@ export function useClaudeChat() {
                 const mgr = getExternalAgentManager()
                 if (mgr.supportsSteering(externalAgentId)) {
                   await mgr.steerSession(externalAgentId, undefined, text)
+                  mergeSteerWebSearchIntoLastSend(sessionId, callOptions?.webSearchContext)
                   setSteerMessageState(sessionId, entryId, "accepted")
                   return
                 }
@@ -716,6 +721,7 @@ export function useClaudeChat() {
                 const { steerSession } = await import("@/lib/claude/ipc")
                 await steerSession(sessionId, content)
               }
+              mergeSteerWebSearchIntoLastSend(sessionId, callOptions?.webSearchContext)
               setSteerMessageState(sessionId, entryId, "accepted")
               return
             } catch (err) {
@@ -727,6 +733,7 @@ export function useClaudeChat() {
             id: entryId,
             text,
             blocks: blocks.length > 0 ? blocks : undefined,
+            webSearchContext: callOptions?.webSearchContext,
           })
           return
         }
@@ -805,6 +812,10 @@ export function useClaudeChat() {
             toDiagnostic(error, { source: "chat", meta: { sessionId } })
           )
         return
+      }
+
+      if (callOptions?.webSearchContext) {
+        sendOptions = { ...sendOptions, webSearchContext: callOptions.webSearchContext }
       }
 
       // ephemeralSkillIds were consumed by buildSendOptions; clear them so
@@ -2105,6 +2116,15 @@ export function useClaudeChat() {
             sendOptions,
           },
         })
+        // Cache finalized options before dispatch. A host can settle the turn
+        // inside the awaited dispatch, and turnComplete reads this exact row to
+        // persist pre-search sources on the assistant reply.
+        useChatStore.getState().setLastSend(sessionId, {
+          content: effectiveContent,
+          options: sendOptions,
+          attemptIndex: 0,
+          routingCommitted: false,
+        })
         // Armed BEFORE the dispatch, not after it. `sendPrompt` is awaited, and
         // a turn can settle inside that await (the host rejects the prompt, an
         // error or `sidecar_exited` frame is processed). The store subscription
@@ -2168,17 +2188,6 @@ export function useClaudeChat() {
             )
           }
         }
-        // Cache the post-routing send so a transient `session_ended.error`
-        // can re-issue the turn against the next entry in the alias's
-        // fallback chain. Set even when there is no alias — the retry
-        // path checks `aliasResolution.fallbackEntries.length` before
-        // doing anything.
-        useChatStore.getState().setLastSend(sessionId, {
-          content: effectiveContent,
-          options: sendOptions,
-          attemptIndex: 0,
-          routingCommitted: false,
-        })
         // Least-busy signal: this turn is now in flight against the resolved
         // deployment; `session_ended` (any flavor) settles it.
         if (sendOptions.provider) {

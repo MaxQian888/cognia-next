@@ -19,7 +19,13 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string) =>
+    ({
+      "domainSources.wikipedia": "Wikipedia",
+      "domainSources.arxiv": "arXiv",
+      "domainSources.github": "GitHub",
+      "domainSources.stackoverflow": "Stack Overflow",
+    })[key] ?? key,
 }))
 
 const mockLogInfo = jest.fn()
@@ -83,9 +89,9 @@ jest.mock("@/components/ui/select", () => ({
   ),
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectItem: ({
     value,
-    children,
     disabled,
   }: {
     value: string
@@ -93,7 +99,7 @@ jest.mock("@/components/ui/select", () => ({
     disabled?: boolean
   }) => (
     <option value={value} disabled={disabled}>
-      {children}
+      {value}
     </option>
   ),
   SelectValue: () => null,
@@ -166,6 +172,23 @@ describe("SearchGlobalSettings", () => {
     expect(mocks.setSearchFallbackEnabled).toHaveBeenCalled()
   })
 
+  it("keeps executor-wide settings writable when proactive pre-search is off", () => {
+    settings = {
+      searchEnabled: false,
+      searchProviders: {
+        tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
+      },
+      defaultSearchSources: [],
+    }
+    render(<SearchGlobalSettings />)
+
+    expect(screen.getAllByRole("switch")[1]).not.toBeDisabled()
+    expect(screen.getByTestId("provider-select")).not.toBeDisabled()
+    for (const slider of screen.getAllByRole("slider")) expect(slider).not.toBeDisabled()
+    expect(screen.getByText("Wikipedia").closest("button")).not.toBeDisabled()
+    expect(screen.getByText("addCustomSource").closest("button")).not.toBeDisabled()
+  })
+
   it("changes default provider", () => {
     settings = {
       searchEnabled: true,
@@ -201,25 +224,46 @@ describe("SearchGlobalSettings", () => {
     expect(mocks.setSearchMaxRetries).toHaveBeenCalledWith(4)
   })
 
-  it("toggles a search source on click", () => {
+  it("shows configured providers and explicit built-in domains", () => {
     settings = {
       searchEnabled: true,
+      searchProviders: {
+        tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
+      },
       defaultSearchSources: [],
     }
     render(<SearchGlobalSettings />)
-    fireEvent.click(screen.getByText("Google"))
-    expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith(["google"])
+    expect(screen.getByText("Tavily")).toBeInTheDocument()
+    expect(screen.queryByText("Google")).not.toBeInTheDocument()
+    expect(screen.getByText("Wikipedia")).toBeInTheDocument()
+    expect(screen.getByText("wikipedia.org")).toBeInTheDocument()
   })
 
-  it("adds a custom research source", () => {
+  it("toggles a configured provider source on click", () => {
+    settings = {
+      searchEnabled: true,
+      searchProviders: {
+        tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
+      },
+      defaultSearchSources: [],
+    }
+    render(<SearchGlobalSettings />)
+    fireEvent.click(screen.getByRole("button", { name: /Tavily/ }))
+    expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith(["tavily"])
+  })
+
+  it("adds a custom research source with a normalized domain", () => {
     settings = { searchEnabled: true }
     render(<SearchGlobalSettings />)
     fireEvent.change(screen.getByPlaceholderText("sourceNamePlaceholder"), {
       target: { value: "My Source" },
     })
+    fireEvent.change(screen.getByPlaceholderText("sourceDomainPlaceholder"), {
+      target: { value: "https://Docs.Example.com/path" },
+    })
     fireEvent.click(screen.getByText("add"))
     expect(mocks.addCustomSearchSource).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "My Source" })
+      expect.objectContaining({ name: "My Source", domain: "docs.example.com" })
     )
   })
 
@@ -228,25 +272,27 @@ describe("SearchGlobalSettings", () => {
     render(<SearchGlobalSettings />)
     const input = screen.getByPlaceholderText("sourceNamePlaceholder")
     fireEvent.change(input, { target: { value: "Enter Source" } })
-    fireEvent.keyDown(input, { key: "Enter" })
+    const domainInput = screen.getByPlaceholderText("sourceDomainPlaceholder")
+    fireEvent.change(domainInput, { target: { value: "example.com" } })
+    fireEvent.keyDown(domainInput, { key: "Enter" })
     expect(mocks.addCustomSearchSource).toHaveBeenCalled()
   })
 
   it("toggles a custom research source", () => {
     settings = {
       searchEnabled: true,
-      customSearchSources: [{ id: "c1", name: "MySrc" }],
+      customSearchSources: [{ id: "c1", name: "MySrc", domain: "my.example" }],
       defaultSearchSources: [],
     }
     render(<SearchGlobalSettings />)
-    fireEvent.click(screen.getByText("MySrc"))
+    fireEvent.click(screen.getByText("MySrc").closest("button")!)
     expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith(["c1"])
   })
 
   it("removes a selected custom research source", () => {
     settings = {
       searchEnabled: true,
-      customSearchSources: [{ id: "c1", name: "MySrc" }],
+      customSearchSources: [{ id: "c1", name: "MySrc", domain: "my.example" }],
       defaultSearchSources: ["c1"],
     }
     render(<SearchGlobalSettings />)
@@ -255,13 +301,13 @@ describe("SearchGlobalSettings", () => {
     expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith([])
   })
 
-  it("removes a selected source on click", () => {
+  it("removes a selected domain source on click", () => {
     settings = {
       searchEnabled: true,
-      defaultSearchSources: ["google"],
+      defaultSearchSources: ["wikipedia"],
     }
     render(<SearchGlobalSettings />)
-    fireEvent.click(screen.getByText("Google"))
+    fireEvent.click(screen.getByRole("button", { name: /Wikipedia/ }))
     expect(mocks.setDefaultSearchSources).toHaveBeenCalledWith([])
   })
 
@@ -269,7 +315,7 @@ describe("SearchGlobalSettings", () => {
     settings = {
       searchEnabled: true,
       defaultSearchSources: ["custom-1"],
-      customSearchSources: [{ id: "custom-1", name: "MyDocs" }],
+      customSearchSources: [{ id: "custom-1", name: "MyDocs", domain: "docs.example" }],
     }
     render(<SearchGlobalSettings />)
     expect(screen.getByText("MyDocs")).toBeInTheDocument()
@@ -282,9 +328,12 @@ describe("SearchGlobalSettings", () => {
     render(<SearchGlobalSettings />)
     const dialogInput = screen.getByPlaceholderText("sourceNamePlaceholder")
     fireEvent.change(dialogInput, { target: { value: "MyDocs" } })
+    fireEvent.change(screen.getByPlaceholderText("sourceDomainPlaceholder"), {
+      target: { value: "docs.example.com" },
+    })
     fireEvent.click(screen.getByText("add"))
     expect(mocks.addCustomSearchSource).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "MyDocs" })
+      expect.objectContaining({ name: "MyDocs", domain: "docs.example.com" })
     )
   })
 
@@ -300,17 +349,44 @@ describe("SearchGlobalSettings", () => {
     render(<SearchGlobalSettings />)
     const dialogInput = screen.getByPlaceholderText("sourceNamePlaceholder")
     fireEvent.change(dialogInput, { target: { value: "MyDocs" } })
-    fireEvent.keyDown(dialogInput, { key: "Enter" })
+    const domainInput = screen.getByPlaceholderText("sourceDomainPlaceholder")
+    fireEvent.change(domainInput, { target: { value: "docs.example.com" } })
+    fireEvent.keyDown(domainInput, { key: "Enter" })
     expect(mocks.addCustomSearchSource).toHaveBeenCalled()
   })
 
   it("logs source_toggled when a source pill is clicked", () => {
     settings = { searchEnabled: true, defaultSearchSources: [] }
     render(<SearchGlobalSettings />)
-    fireEvent.click(screen.getByText("Google"))
+    fireEvent.click(screen.getByRole("button", { name: /Wikipedia/ }))
     expect(mockLogInfo).toHaveBeenCalledWith("source_toggled", {
-      sourceId: "google",
+      sourceId: "wikipedia",
       selected: true,
     })
+  })
+
+  it("rejects an invalid custom source domain", () => {
+    settings = { searchEnabled: true }
+    render(<SearchGlobalSettings />)
+    fireEvent.change(screen.getByPlaceholderText("sourceNamePlaceholder"), {
+      target: { value: "Broken" },
+    })
+    fireEvent.change(screen.getByPlaceholderText("sourceDomainPlaceholder"), {
+      target: { value: "not a domain" },
+    })
+    fireEvent.click(screen.getByText("add"))
+    expect(screen.getByText("invalidSourceDomain")).toHaveAttribute("role", "alert")
+    expect(mocks.addCustomSearchSource).not.toHaveBeenCalled()
+  })
+
+  it("keeps legacy custom sources without a domain visible but disabled", () => {
+    settings = {
+      searchEnabled: true,
+      customSearchSources: [{ id: "legacy", name: "Legacy source" }],
+      defaultSearchSources: ["legacy"],
+    }
+    render(<SearchGlobalSettings />)
+    expect(screen.getByText("Legacy source").closest("button")).toBeDisabled()
+    expect(screen.getByText("sourceNeedsDomain")).toBeInTheDocument()
   })
 })

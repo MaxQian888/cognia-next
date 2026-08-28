@@ -15,6 +15,7 @@ import {
   filterByCredibility,
   sortByCredibility,
   calculateSourceDiversity,
+  applySourceVerificationPolicy,
 } from "./source-verification"
 import type { SearchResponse, SearchResult } from "./types"
 
@@ -363,5 +364,49 @@ describe("calculateSourceDiversity", () => {
       makeResult({ url: "https://github.com" }),
     ])
     expect(div2).toBeGreaterThan(div1)
+  })
+})
+
+describe("applySourceVerificationPolicy", () => {
+  const high = makeResult({ url: "https://cdc.gov/health" })
+  const unknown = makeResult({ url: "https://news.unknown-example.test/story" })
+
+  it("is a no-op when verification is disabled", () => {
+    const results = [unknown, high]
+    expect(applySourceVerificationPolicy(results, { enabled: false })).toBe(results)
+  })
+
+  it("blocks exact domains and their subdomains", () => {
+    const results = [
+      high,
+      makeResult({ url: "https://spam.test/a" }),
+      makeResult({ url: "https://sub.spam.test/b" }),
+    ]
+    expect(
+      applySourceVerificationPolicy(results, {
+        enabled: true,
+        blockedDomains: ["HTTPS://SPAM.TEST/path"],
+      }).map((result) => result.url)
+    ).toEqual([high.url])
+  })
+
+  it("applies normalized minimum credibility and sorts highest first", () => {
+    expect(
+      applySourceVerificationPolicy([unknown, high], {
+        enabled: true,
+        autoFilterLowCredibility: true,
+        minimumCredibilityScore: 0.75,
+      }).map((result) => result.url)
+    ).toEqual([high.url])
+  })
+
+  it("accepts a legacy 0-100 credibility threshold", () => {
+    expect(
+      applySourceVerificationPolicy([unknown, high], {
+        enabled: true,
+        autoFilterLowCredibility: true,
+        minimumCredibilityScore: 75,
+      }).map((result) => result.url)
+    ).toEqual([high.url])
   })
 })

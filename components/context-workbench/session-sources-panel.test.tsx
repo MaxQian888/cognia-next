@@ -54,6 +54,12 @@ const messages: UIMessage[] = [
             snippet: "Use a static export for the desktop shell.",
             origin: "memory",
           },
+          {
+            id: "cognia-web-1",
+            title: "Cognia search result",
+            url: "https://example.com/search-result",
+            origin: "cognia-web",
+          },
         ],
       } as unknown as UIMessage["parts"][number],
       {
@@ -80,6 +86,11 @@ describe("SessionSourcesPanel", () => {
     expect(screen.getByText("report.txt")).toBeInTheDocument()
     expect(screen.getByText("architecture.pdf")).toBeInTheDocument()
     expect(screen.getByText("Preferred deployment target")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Cognia search result/ })).toHaveAttribute(
+      "href",
+      "https://example.com/search-result"
+    )
+    expect(screen.getByText("labels.cogniaWeb")).toBeInTheDocument()
     expect(screen.getByText("web_search")).toBeInTheDocument()
   })
 

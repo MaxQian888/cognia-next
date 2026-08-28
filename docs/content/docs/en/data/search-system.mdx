@@ -8,13 +8,11 @@ description: A unified access layer for ten web search providers — query optim
 Cognia abstracts "letting AI search the web" into a provider bus: the upper layer only sees `search(query, options)`, while ten providers (Tavily / Perplexity / Exa / SearchAPI / Serper / SerpAPI / Bing / Google / Google AI / Brave) hang underneath, each supporting general / news / images / videos / academic capabilities. All providers conform to the same `SearchResponse` shape, so callers always receive a consistent result format.
 
 <TLDR>
-  Unified search entry `lib/search/search-service.ts:search()`, automatically selects provider based
-  on settings + failure fallback. Before querying, `optimizeSearchQuery` strips pleasantries and
-  redundant prefixes; hits on the LRU cache (`search-cache.ts`) return immediately; misses are
-  routed by `SearchType` (`search-type-router.ts`) to the specific provider; results optionally pass
-  through `source-verification.ts` for credibility scoring. Provider interfaces live in
-  `lib/search/providers/`, one file per provider, with connection test functions exported alongside
-  the main search function.
+  App callers use `lib/search/configured-search.ts:searchWithAppSettings()`; CLI callers inject the
+  same resolved policy without Zustand. That entry applies query optimization, PII redaction, live
+  defaults, safe search, provider preference/fallback, the shared TTL/LRU cache, hard domain
+  filtering, source verification, and usage reporting. The framework-independent provider bus lives
+  under `packages/web-search/src/`; callers do not implement provider HTTP requests themselves.
 </TLDR>
 
 ## Overview
@@ -22,9 +20,10 @@ Cognia abstracts "letting AI search the web" into a provider bus: the upper laye
 ```mermaid
 flowchart LR
   subgraph App["Callers"]
-    Chat["Chat send path"]
-    Twin["Twin / Skill"]
-    Plugin["Plugin search API"]
+    Chat["Chat pre-search"]
+    Page["Standalone search"]
+    Agent["Agent / Deep Research"]
+    CLI["CLI"]
   end
 
   subgraph Core["lib/search/"]
@@ -46,8 +45,9 @@ flowchart LR
   end
 
   Chat --> Optimizer
-  Twin --> Optimizer
-  Plugin --> Optimizer
+  Page --> Optimizer
+  Agent --> Optimizer
+  CLI --> Optimizer
   Optimizer --> Cache
   Cache -- "miss" --> Service
   Service --> Router
@@ -65,9 +65,9 @@ flowchart LR
 
 ## Data Types
 
-All providers fold their native responses into the same `SearchResponse`, defined in `lib/search/types.ts`:
+All providers fold their native responses into the same `SearchResponse`, defined in `packages/web-search/src/types.ts`:
 
-```ts title="lib/search/types.ts"
+```ts title="packages/web-search/src/types.ts"
 export type SearchProviderType =
   | "tavily"
   | "perplexity"
@@ -106,11 +106,11 @@ export interface SearchResponse {
 }
 ```
 
-`SearchOptions` is the common input parameter for providers: `maxResults` / `searchDepth` / `searchType` / `includeAnswer` / `includeRawContent` / `includeDomains` / `excludeDomains` / `recency` / `country` / `language`. Provider-specific fields do not enter the common layer — for example, Tavily's deep search and SerpAPI's SerpAPI-only parameters are handled by their respective provider functions, while the unified layer only exposes ten shared knobs.
+`SearchOptions` is the common provider input: `maxResults` / `searchDepth` / `searchType` / `includeAnswer` / `includeRawContent` / `includeDomains` / `excludeDomains` / `recency` / `country` / `language` / `safeSearch`. Bing, SearchAPI, and SerpAPI map safe search to their native parameters; providers without an equivalent treat it as an explicit no-op. `UnifiedSearchOptions.preferredProviders` places selected providers first while preserving global-priority fallback. `includeDomains` is always a hard post-filter: a provider response with no matching URL is not considered a success.
 
 ## Unified Search Entry
 
-```ts title="lib/search/search-service.ts"
+```ts title="packages/web-search/src/search-service.ts"
 export async function search(
   query: string,
   options: UnifiedSearchOptions = {}
@@ -123,14 +123,14 @@ export async function search(
 }
 ```
 
-Four public facades:
+Core public facades:
 
 - `search(query, opts)` — Main entry; allows failure fallback even when a provider is specified.
 - `autoSearch(query, providerSettings, opts)` — No provider passed; automatically picks by priority.
 - `searchWithProvider(provider, query, apiKey, opts)` — One-off call; does not read global settings.
 - `aggregateSearch(query, providerSettings, opts)` — Parallel calls to all enabled providers; results are deduplicated by URL, re-sorted by `score`, and top 20 retained.
 
-Failure fallback semantics are simple: catch an error and try the next provider; if all fail, throw `lastError`. `recordUsage()` avoids circular dependencies via dynamic `import("@/stores/settings")` — the main path is unaffected when the store is not ready in test / SSR environments.
+Failure fallback covers provider errors and responses that cannot satisfy the hard domain constraint. Desktop and web callers should use `searchWithAppSettings()` instead of assembling these options directly; it also ensures cached hits do not create a second provider request or usage charge.
 
 ## Query Optimization
 
@@ -157,10 +157,11 @@ Callers generally invoke `optimizeSearchQuery(userMessage)` before passing to `s
 `search-cache.ts` implements LRU + TTL result caching:
 
 - Default `defaultTTL = 5 min`; `searchType === "news"` shrinks to `newsTTL = 1 min`.
-- Key is a combined hash of query / provider / maxResults / type / depth / recency / answer / rawContent / language / country / domain filter — any change counts as a cache miss.
+- Key is a combined hash of query / provider order / maxResults / type / depth / recency / safe search / answer / rawContent / language / country / domain filter — any change counts as a cache miss.
+- Cache rows retain provider metadata, so Settings can call `invalidateProvider(provider)` instead of trying to match an opaque hash.
 - `CacheStats` exposes `hits / misses / hitRate`, visible during debugging.
 
-The cache layer is optional; the current `search()` main path does not force caching — it is mounted on demand by upper layers (chat send path, twin runtime).
+The app binding applies the latest TTL and capacity before each use. The core cache remains optional for non-app hosts.
 
 ## Type Routing
 
@@ -188,7 +189,7 @@ const PROVIDER_CAPABILITIES: Record<SearchProviderType, ProviderCapabilities> = 
 Each provider follows the same file structure:
 
 ```
-lib/search/providers/<name>.ts
+packages/web-search/src/providers/<name>.ts
 ├── searchWith<Name>(query, apiKey, options)        // general
 ├── searchNewsWith<Name>(...)                       // optional
 ├── searchImagesWith<Name>(...)                     // optional
@@ -222,7 +223,7 @@ Corresponding test files `<name>.test.ts` use `vi.mock(global.fetch)` to verify 
 
 Search results are not always trustworthy — `source-verification.ts` scores each `SearchResult` individually:
 
-```ts title="lib/search/source-verification.ts"
+```ts title="packages/web-search/src/source-verification.ts"
 export type CredibilityLevel = "high" | "medium" | "low" | "unknown"
 
 export type SourceType =
@@ -273,9 +274,13 @@ void recordUsage(providerConfig.providerId, Date.now() - startTime, true /* or f
 
 The search system is not a standalone UI surface; it is consumed by these locations:
 
-- **Chat send path** — `lib/claude/build-options.ts` may trigger web search before send, appending the summary as an additional system prompt segment.
-- **Twin runtime** — `lib/twin/runtime/apply-twin-context.ts` uses its own vector search, but when a skill triggers "web search" it also goes through this system. See [Vector Store](./vector-store) and [Employee Digital Twin](../subsystems/employee-twin).
-- **Plugin search API** — Plugins can request the `search` permission; when calling `searchWithProvider`, the plugin runtime injects a restricted API key table.
+- **Chat pre-search** — the composer calls the configured executor once, frames results as untrusted model context, and persists the same rows as clickable `cognia-web` sources on the final assistant message.
+- **Standalone search** — `/search` injects the configured executor into the shared answer pipeline. Source text is PII-redacted and untrusted-framed before cloud synthesis.
+- **Agent tools** — promoted `web_search` uses the same executor. `web_fetch` reuses the shared SSRF guard, platform readers, HTML extraction, Jina fallback, and cache; outbound request fields and cloud summarization input pass the PII gate.
+- **Deep Research** — keeps its search/read/reason state machine but delegates search and page reading to these shared implementations; legacy Exa/Tavily plugin keys are compatibility config only.
+- **CLI** — resolves search providers from environment, credentials, project config, then user config, and injects them without a desktop process or renderer store. Anthropic-native search remains preferred where available.
+
+The Research Sources selector distinguishes Provider preferences from Domain constraints. Wikipedia, arXiv, GitHub, and Stack Overflow are built-in domains; custom entries require a valid URL/domain. Provider choices are preference-with-fallback, while domain choices are strict.
 
 The settings UI is under Settings → Search Provider, with one card per provider + enable / priority / default parameters + test connection button.
 

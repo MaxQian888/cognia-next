@@ -11,6 +11,7 @@ import type {
   SearchResult,
 } from "./types"
 import { getEnabledProviders, isProviderConfigured } from "./types"
+import { normalizeSearchDomain } from "./search-constants"
 import { getProviderHealth } from "./provider-health"
 import { log } from "./log"
 
@@ -30,6 +31,8 @@ import { testBraveConnection } from "./providers/brave"
 
 export interface UnifiedSearchOptions extends SearchOptions {
   provider?: SearchProviderType
+  /** Providers to try first, in order, before the normal priority-ordered fallback list. */
+  preferredProviders?: SearchProviderType[]
   fallbackEnabled?: boolean
   providerSettings?: Partial<Record<SearchProviderType, SearchProviderSettings>>
   /**
@@ -62,6 +65,7 @@ export async function search(
 ): Promise<SearchResponse> {
   const {
     provider,
+    preferredProviders,
     fallbackEnabled = true,
     providerSettings,
     maxRetries = DEFAULT_MAX_RETRIES,
@@ -90,11 +94,13 @@ export async function search(
     if (!specificProvider?.enabled || !isProviderConfigured(provider, specificProvider)) {
       throw new Error(`Provider ${provider} is not enabled or missing required configuration`)
     }
-    providersToTry = fallbackEnabled
-      ? [specificProvider, ...enabledProviders.filter((p) => p.providerId !== provider)]
-      : [specificProvider]
+    providersToTry = orderProviders(
+      enabledProviders,
+      [provider, ...(preferredProviders ?? [])],
+      !fallbackEnabled
+    )
   } else {
-    providersToTry = enabledProviders
+    providersToTry = orderProviders(enabledProviders, preferredProviders ?? [], false)
   }
 
   // Circuit breaker: try healthy providers first, pushing still-open (recently
@@ -104,6 +110,7 @@ export async function search(
   providersToTry = health.orderByHealth(providersToTry)
 
   let lastError: Error | null = null
+  let lastDomainFilteredResponse: SearchResponse | null = null
 
   for (const providerConfig of providersToTry) {
     const startTime = Date.now()
@@ -111,7 +118,12 @@ export async function search(
       const result = await attemptProviderWithRotation(query, providerConfig, searchOptions, retry)
       health.recordResult(providerConfig.providerId, true)
       void recordUsage(providerConfig.providerId, Date.now() - startTime, true)
-      return result
+      const filteredResult = filterResponseByIncludedDomains(result, searchOptions.includeDomains)
+      if (filteredResult.results.length > 0 || !hasDomainConstraint(searchOptions.includeDomains)) {
+        return filteredResult
+      }
+      lastDomainFilteredResponse = filteredResult
+      if (!fallbackEnabled) return filteredResult
     } catch (error) {
       // A caller-driven abort is not a provider failure — surface it immediately
       // instead of silently trying the next provider.
@@ -127,7 +139,85 @@ export async function search(
     }
   }
 
+  if (lastDomainFilteredResponse) return lastDomainFilteredResponse
   throw lastError || new Error("All search providers failed")
+}
+
+/**
+ * `limitToFirst` narrows the list to the single provider the caller pinned.
+ * It is NOT simply `!fallbackEnabled`: with no explicit `provider`, disabling
+ * fallback has always meant "do not substitute for the provider I named", and
+ * since the caller named none, every enabled provider is still tried in
+ * priority order. Truncating there silently turned a rate-limited primary into
+ * a hard "All search providers failed".
+ */
+function orderProviders(
+  enabledProviders: SearchProviderSettings[],
+  preferredProviders: SearchProviderType[],
+  limitToFirst: boolean
+): SearchProviderSettings[] {
+  const byId = new Map(enabledProviders.map((settings) => [settings.providerId, settings]))
+  const ordered: SearchProviderSettings[] = []
+  const seen = new Set<SearchProviderType>()
+
+  for (const providerId of preferredProviders) {
+    const settings = byId.get(providerId)
+    if (settings && !seen.has(providerId)) {
+      ordered.push(settings)
+      seen.add(providerId)
+    }
+  }
+  for (const settings of enabledProviders) {
+    if (!seen.has(settings.providerId)) {
+      ordered.push(settings)
+      seen.add(settings.providerId)
+    }
+  }
+
+  return limitToFirst ? ordered.slice(0, 1) : ordered
+}
+
+function hasDomainConstraint(includeDomains: string[] | undefined): boolean {
+  return Boolean(includeDomains?.some((domain) => normalizeSearchDomain(domain) !== null))
+}
+
+function urlMatchesIncludedDomains(url: string, includeDomains: string[]): boolean {
+  let hostname: string
+  try {
+    hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "")
+  } catch {
+    return false
+  }
+
+  return includeDomains.some((value) => {
+    const domain = normalizeSearchDomain(value)
+    return domain !== null && (hostname === domain || hostname.endsWith(`.${domain}`))
+  })
+}
+
+function filterResponseByIncludedDomains(
+  response: SearchResponse,
+  includeDomains: string[] | undefined
+): SearchResponse {
+  if (!hasDomainConstraint(includeDomains)) return response
+
+  const domains = includeDomains ?? []
+  const results = response.results.filter((result) =>
+    urlMatchesIncludedDomains(result.url, domains)
+  )
+  const images = response.images?.filter((image) => urlMatchesIncludedDomains(image.url, domains))
+
+  return {
+    ...response,
+    // The provider synthesized `answer` from the unfiltered result set, so it
+    // can cite pages this filter just removed. Keep it only when the filter
+    // removed nothing; a partially-filtered answer is grounded in sources the
+    // caller's domain policy excluded and has no matching citation left.
+    answer: results.length === response.results.length ? response.answer : undefined,
+    results,
+    images: images && images.length > 0 ? images : undefined,
+    totalResults: results.length,
+  }
 }
 
 interface ProviderRetryConfig {

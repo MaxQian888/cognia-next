@@ -1801,6 +1801,7 @@
     "originLabel": {
       "agentKnowledgeBase": "Agent KB",
       "anthropic": "Web",
+      "cogniaWeb": "Cognia Web",
       "footnote": "Note",
       "memory": "Memory",
       "projectKnowledge": "Project",
@@ -1900,6 +1901,7 @@
       "noResults": "No results."
     },
     "webFetch": {
+      "empty": "No content returned.",
       "title": "Web fetch",
       "status": "HTTP {status}",
       "failed": "Fetch failed.",

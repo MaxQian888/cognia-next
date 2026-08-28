@@ -63,6 +63,49 @@ describe("getSettings", () => {
     expect(s.updates).toEqual({ ...DEFAULT_UPDATE_SETTINGS, autoCheck: false })
   })
 
+  it("preserves the complete persisted web-tools policy", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      webTools: {
+        enabled: true,
+        preferCognia: true,
+        nativeOnAnthropic: true,
+        alwaysDistill: true,
+        allowPrivateHosts: true,
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).webTools).toEqual({
+      enabled: true,
+      preferCognia: true,
+      nativeOnAnthropic: true,
+      alwaysDistill: true,
+      allowPrivateHosts: true,
+    })
+  })
+
+  it("normalizes legacy research sources and removes the retired DuckDuckGo choice", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      customSearchSources: [
+        { id: "docs", name: "https://docs.example.com/path" },
+        { id: "needs-domain", name: "Internal handbook" },
+      ],
+      defaultSearchSources: ["google", "wikipedia", "duckduckgo", "docs", "needs-domain"],
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    const settings = await getSettings()
+    expect(settings.customSearchSources).toEqual([
+      { id: "docs", name: "https://docs.example.com/path", domain: "docs.example.com" },
+      { id: "needs-domain", name: "Internal handbook" },
+    ])
+    expect(settings.defaultSearchSources).toEqual(["google", "wikipedia", "docs", "needs-domain"])
+  })
+
   it.each(["edge", "openai-realtime", "removed-provider"])(
     "normalizes an unavailable persisted TTS provider (%s)",
     async (ttsProvider) => {

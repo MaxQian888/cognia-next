@@ -23,5 +23,12 @@ export const UNTRUSTED_CONTENT_NOTICE =
 
 /** Frame raw text as untrusted external content. */
 export function wrapUntrustedContent(text: string): string {
+  if (text.startsWith(`${UNTRUSTED_CONTENT_NOTICE}\n\n`)) return text
   return `${UNTRUSTED_CONTENT_NOTICE}\n\n${text}`
+}
+
+/** Remove the model-only safety frame when rendering trusted local UI chrome. */
+export function unwrapUntrustedContent(text: string): string {
+  const prefix = `${UNTRUSTED_CONTENT_NOTICE}\n\n`
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text
 }

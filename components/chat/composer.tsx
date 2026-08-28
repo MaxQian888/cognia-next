@@ -45,11 +45,14 @@ import {
   type ChatStatus as StoreChatStatus,
 } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
-import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
+import { formatSearchResultsForLLM } from "@/lib/search/search-service"
+import { searchWithAppSettings } from "@/lib/search/configured-search"
+import { resolveWebAccess } from "@/lib/chat/web-access"
+import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
 import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import type { SendContent, ChatSession, Character } from "@cognia/agent-config-types"
+import type { SendContent, SendOptions, ChatSession, Character } from "@cognia/agent-config-types"
 import {
   buildSendContent,
   INLINE_TOKEN_CEILING,
@@ -275,7 +278,8 @@ interface Props {
      * no longer says which words were parameters. Optional, so the hosts that
      * do not record it simply ignore the argument.
      */
-    templateRun?: ChatTemplateRun | null
+    templateRun?: ChatTemplateRun | null,
+    turnMetadata?: ComposerTurnMetadata
   ) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
@@ -314,6 +318,11 @@ interface Props {
    * no list above it to fade from — see the class branch in the wrapper.
    */
   placement?: "docked" | "hero"
+}
+
+/** Metadata assembled before dispatch that must travel with this exact turn. */
+export interface ComposerTurnMetadata {
+  webSearchContext?: SendOptions["webSearchContext"]
 }
 
 /** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
@@ -3169,32 +3178,44 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // formatted results as a system block. We don't fail the send on
       // search errors — fall back to the original message instead.
       let augmented = text
+      let webSearchContext: SendOptions["webSearchContext"]
       // THIS composer's conversation, matching where `WebSearchToggle` writes
       // it. The bare projection is the focused pane, so an unfocused pane's
       // armed toggle was never consumed (and never cleared, so it stayed lit)
       // while a send from the focused pane ran the search it had armed.
       const webOn = selectComposerWebSearchOn(useChatStore.getState(), session?.id ?? null)
-      if (webOn && trimmed) {
-        const settings = useSettingsStore.getState().settings
+      // The SAME verdict `WebSearchToggle` disables itself on — not a private
+      // re-derivation of half of it. `preSearch` also covers the `webTools`
+      // kill switch and "is a provider actually configured", so a toggle armed
+      // before the user turned web tools off cannot still reach the network.
+      const searchSettings = useSettingsStore.getState().settings
+      const proactiveSearchEnabled = resolveWebAccess({
+        ...(searchSettings?.webTools ? { webTools: searchSettings.webTools } : {}),
+        nativeAvailable: false,
+        ...(searchSettings?.searchProviders
+          ? { searchProviders: searchSettings.searchProviders }
+          : {}),
+        ...(searchSettings?.defaultSearchProvider
+          ? { defaultSearchProvider: searchSettings.defaultSearchProvider }
+          : {}),
+        ...(searchSettings?.searchEnabled !== undefined
+          ? { searchEnabled: searchSettings.searchEnabled }
+          : {}),
+      }).preSearch
+      if (webOn && proactiveSearchEnabled && trimmed) {
         try {
-          const resp = await search(trimmed, {
-            providerSettings: settings?.searchProviders,
-            provider: settings?.defaultSearchProvider,
-            fallbackEnabled: settings?.searchFallbackEnabled ?? true,
-            maxRetries: settings?.searchMaxRetries,
-            maxResults: settings?.searchMaxResults ?? 5,
-            searchType: settings?.defaultSearchType,
-            searchDepth: settings?.defaultSearchDepth,
-            recency: settings?.defaultSearchRecency,
-            country: settings?.defaultSearchCountry,
-            language: settings?.defaultSearchLanguage,
-            includeDomains: settings?.defaultIncludeDomains,
-            excludeDomains: settings?.defaultExcludeDomains,
-            includeAnswer: settings?.defaultIncludeAnswer,
-            includeRawContent: settings?.defaultIncludeRawContent,
-          })
-          const ctx = formatSearchResultsForLLM(resp)
+          const resp = await searchWithAppSettings(trimmed)
+          const ctx = wrapUntrustedContent(formatSearchResultsForLLM(resp))
           augmented = `${ctx}\n\n---\n\nUser question: ${text}`
+          webSearchContext = {
+            provider: resp.provider,
+            results: resp.results.map(({ title, url, content, score }) => ({
+              title,
+              url,
+              content,
+              score,
+            })),
+          }
           pushSystemMessage(
             `🔎 ${tWebSearch("searchedVia", {
               provider: resp.provider,
@@ -3209,8 +3230,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             })
           )
         }
-        useChatStore.getState().setWebSearchOnForNextSend(false, session?.id ?? null)
       }
+      if (webOn) useChatStore.getState().setWebSearchOnForNextSend(false, session?.id ?? null)
 
       // ── Context selections ──────────────────────────────────────────
       // Prepend the selected material + comment as context, and record the
@@ -3290,7 +3311,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         setOversizeConfirm(null)
         if (!ok) return false
       }
-      await onSend(content, attachmentResult.manifest, templateRun)
+      if (webSearchContext) {
+        await onSend(content, attachmentResult.manifest, templateRun, { webSearchContext })
+      } else {
+        await onSend(content, attachmentResult.manifest, templateRun)
+      }
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
       // Same lifetime as the chips they describe: the citations rode exactly

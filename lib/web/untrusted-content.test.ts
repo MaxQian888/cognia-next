@@ -1,4 +1,8 @@
-import { UNTRUSTED_CONTENT_NOTICE, wrapUntrustedContent } from "./untrusted-content"
+import {
+  UNTRUSTED_CONTENT_NOTICE,
+  unwrapUntrustedContent,
+  wrapUntrustedContent,
+} from "./untrusted-content"
 import {
   UNTRUSTED_CONTENT_NOTICE as reexportedNotice,
   wrapUntrustedContent as reexportedWrap,
@@ -29,5 +33,12 @@ describe("wrapUntrustedContent", () => {
     // Existing importers were left untouched by the extraction.
     expect(reexportedWrap).toBe(wrapUntrustedContent)
     expect(reexportedNotice).toBe(UNTRUSTED_CONTENT_NOTICE)
+  })
+
+  it("unwraps the model-only frame for local rendering", () => {
+    const wrapped = wrapUntrustedContent("page text")
+    expect(wrapUntrustedContent(wrapped)).toBe(wrapped)
+    expect(unwrapUntrustedContent(wrapped)).toBe("page text")
+    expect(unwrapUntrustedContent("plain text")).toBe("plain text")
   })
 })

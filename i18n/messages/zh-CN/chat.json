@@ -1801,6 +1801,7 @@
     "originLabel": {
       "agentKnowledgeBase": "Agent 知识库",
       "anthropic": "网络",
+      "cogniaWeb": "Cognia 联网",
       "footnote": "脚注",
       "memory": "记忆",
       "projectKnowledge": "项目",
@@ -1900,6 +1901,7 @@
       "noResults": "没有结果。"
     },
     "webFetch": {
+      "empty": "无返回内容。",
       "title": "网页抓取",
       "status": "HTTP {status}",
       "failed": "抓取失败。",

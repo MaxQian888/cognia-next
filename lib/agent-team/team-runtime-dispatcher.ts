@@ -24,6 +24,7 @@ import { nanoid } from "nanoid"
 import type { AgentTeamMessage, TeammateRuntime } from "@/types/agent/agent-team"
 import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
+import type { SendOptions } from "@cognia/agent-config-types"
 import type { MentionTarget } from "./runtime-targets"
 import type { ConversationTurn } from "./conversation-context"
 import { extractAgentFileActivity, type AgentFileActivity } from "./file-activity"
@@ -90,6 +91,8 @@ export interface DispatchTeamMentionParams {
   signal?: AbortSignal
   /** Prior conversation context — surfaces multi-turn history to the runtime. */
   history?: readonly ConversationTurn[]
+  /** Provider search results used for this turn, persisted on the agent reply. */
+  webSearchContext?: SendOptions["webSearchContext"]
 }
 
 export interface DispatchTeamMentionResult {
@@ -120,6 +123,7 @@ const TOOL_CALLS_METADATA_KEY = "toolCalls"
 const TOKEN_USAGE_METADATA_KEY = "tokenUsage"
 const DISPATCH_TARGET_ID_KEY = "dispatchTargetId"
 const DISPATCH_PROMPT_KEY = "dispatchPrompt"
+const WEB_SEARCH_CONTEXT_KEY = "webSearchContext"
 
 /**
  * Dispatch a mention to its runtime and stream the result back into the
@@ -129,7 +133,16 @@ export async function dispatchTeamMention(
   params: DispatchTeamMentionParams,
   deps: TeamRuntimeDispatcherDeps
 ): Promise<DispatchTeamMentionResult> {
-  const { teamId, target, prompt, rawText, userDisplayName = "You", signal, history } = params
+  const {
+    teamId,
+    target,
+    prompt,
+    rawText,
+    userDisplayName = "You",
+    signal,
+    history,
+    webSearchContext,
+  } = params
   const { writer, streamer, onFileActivity } = deps
   const now = () => new Date()
 
@@ -170,6 +183,7 @@ export async function dispatchTeamMention(
       [STREAMING_METADATA_KEY]: true,
       [DISPATCH_TARGET_ID_KEY]: target.id,
       [DISPATCH_PROMPT_KEY]: prompt,
+      [WEB_SEARCH_CONTEXT_KEY]: webSearchContext,
     },
   }
   writer.upsertMessage(placeholder)
@@ -195,6 +209,7 @@ export async function dispatchTeamMention(
         [STREAMING_METADATA_KEY]: true,
         [DISPATCH_TARGET_ID_KEY]: target.id,
         [DISPATCH_PROMPT_KEY]: prompt,
+        [WEB_SEARCH_CONTEXT_KEY]: webSearchContext,
         [TOOL_CALLS_METADATA_KEY]: Array.from(toolCallMap.values()),
       },
     })
@@ -280,6 +295,7 @@ export async function dispatchTeamMention(
         [ERROR_METADATA_KEY]: true,
         [DISPATCH_TARGET_ID_KEY]: target.id,
         [DISPATCH_PROMPT_KEY]: prompt,
+        [WEB_SEARCH_CONTEXT_KEY]: webSearchContext,
         [TOOL_CALLS_METADATA_KEY]: toolCalls.length > 0 ? toolCalls : undefined,
       },
     })
@@ -302,6 +318,7 @@ export async function dispatchTeamMention(
       [RUNTIME_METADATA_KEY]: target.runtime,
       [DISPATCH_TARGET_ID_KEY]: target.id,
       [DISPATCH_PROMPT_KEY]: prompt,
+      [WEB_SEARCH_CONTEXT_KEY]: webSearchContext,
       [TOKEN_USAGE_METADATA_KEY]: tokenUsage as Record<string, unknown> | undefined,
       [TOOL_CALLS_METADATA_KEY]: toolCalls.length > 0 ? toolCalls : undefined,
     },
@@ -323,4 +340,5 @@ export const TEAM_MESSAGE_METADATA_KEYS = {
   TOKEN_USAGE: TOKEN_USAGE_METADATA_KEY,
   DISPATCH_TARGET_ID: DISPATCH_TARGET_ID_KEY,
   DISPATCH_PROMPT: DISPATCH_PROMPT_KEY,
+  WEB_SEARCH_CONTEXT: WEB_SEARCH_CONTEXT_KEY,
 } as const

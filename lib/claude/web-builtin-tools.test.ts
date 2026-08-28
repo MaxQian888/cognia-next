@@ -61,18 +61,32 @@ describe("web-builtin-tools", () => {
     )
   })
 
-  it("routes web_search to the core with provider settings", async () => {
-    const providerSettings = { tavily: { providerId: "tavily", enabled: true } } as never
-    await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, { providerSettings })
+  it("routes web_search to the core with the host search executor", async () => {
+    const searchExecutor = jest.fn()
+    const searchOptions = { recency: "week" } as never
+    await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, { searchExecutor, searchOptions })
     expect(mockSearch).toHaveBeenCalledWith(
       { query: "q" },
-      expect.objectContaining({ providerSettings })
+      expect.objectContaining({ searchExecutor, searchOptions })
     )
+  })
+
+  it("rejects stale web-tool calls after the master switch is disabled", async () => {
+    const out = await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, { enabled: false })
+    // The `code` is the part callers branch on — the sentence is for humans and
+    // is free to change without breaking anyone.
+    expect(out).toEqual({
+      ok: false,
+      code: "web-disabled",
+      error: "Web tools are disabled in Settings.",
+    })
+    expect(mockSearch).not.toHaveBeenCalled()
   })
 
   it("returns an error for an unknown tool name", async () => {
     expect(await runWebBuiltinTool("nope", {}, {})).toEqual({
       ok: false,
+      code: "invalid-arguments",
       error: "unknown web tool: nope",
     })
   })

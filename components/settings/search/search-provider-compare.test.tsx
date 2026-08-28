@@ -1,10 +1,10 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
-const searchMock = jest.fn()
-let settings: { searchProviders?: Record<string, unknown> } = {}
+const searchWithAppSettingsMock = jest.fn()
+let settings: { searchProviders?: Record<string, unknown>; searchSafeSearchLevel?: string } = {}
 
-jest.mock("@/lib/search/search-service", () => ({
-  search: (...args: unknown[]) => searchMock(...args),
+jest.mock("@/lib/search/configured-search", () => ({
+  searchWithAppSettings: (...args: unknown[]) => searchWithAppSettingsMock(...args),
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -54,7 +54,7 @@ jest.mock("@/components/ui/select", () => ({
 import { SearchProviderCompare } from "./search-provider-compare"
 
 beforeEach(() => {
-  searchMock.mockReset()
+  searchWithAppSettingsMock.mockReset()
   mockLogInfo.mockReset()
   mockLogError.mockReset()
   settings = {
@@ -77,7 +77,7 @@ describe("SearchProviderCompare", () => {
   })
 
   it("triggers parallel searches on compare", async () => {
-    searchMock
+    searchWithAppSettingsMock
       .mockResolvedValueOnce({
         provider: "tavily",
         query: "q",
@@ -94,11 +94,24 @@ describe("SearchProviderCompare", () => {
     const input = screen.getByRole("textbox")
     fireEvent.change(input, { target: { value: "react" } })
     fireEvent.click(screen.getByText("compare"))
-    await waitFor(() => expect(searchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(searchWithAppSettingsMock).toHaveBeenCalledTimes(2))
+    expect(searchWithAppSettingsMock).toHaveBeenNthCalledWith(
+      1,
+      "react",
+      expect.objectContaining({
+        settings,
+        useCache: false,
+        options: {
+          provider: "tavily",
+          preferredProviders: ["tavily"],
+          fallbackEnabled: false,
+        },
+      })
+    )
   })
 
   it("renders result columns with parsed hostnames and a noResult column", async () => {
-    searchMock
+    searchWithAppSettingsMock
       .mockResolvedValueOnce({
         provider: "tavily",
         query: "q",
@@ -119,7 +132,7 @@ describe("SearchProviderCompare", () => {
   })
 
   it("displays error on search failure", async () => {
-    searchMock.mockRejectedValueOnce(new Error("network"))
+    searchWithAppSettingsMock.mockRejectedValueOnce(new Error("network"))
     render(<SearchProviderCompare />)
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "q" } })
     fireEvent.click(screen.getByText("compare"))
@@ -127,13 +140,13 @@ describe("SearchProviderCompare", () => {
   })
 
   it("logs compare_started with queryLen only (no raw query)", async () => {
-    searchMock
+    searchWithAppSettingsMock
       .mockResolvedValueOnce({ provider: "tavily", query: "q", results: [], responseTime: 1 })
       .mockResolvedValueOnce({ provider: "brave", query: "q", results: [], responseTime: 1 })
     render(<SearchProviderCompare />)
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "secret-query" } })
     fireEvent.click(screen.getByText("compare"))
-    await waitFor(() => expect(searchMock).toHaveBeenCalled())
+    await waitFor(() => expect(searchWithAppSettingsMock).toHaveBeenCalled())
     expect(mockLogInfo).toHaveBeenCalledWith(
       "compare_started",
       expect.objectContaining({ queryLen: "secret-query".length })
@@ -144,7 +157,7 @@ describe("SearchProviderCompare", () => {
 
   it("logs compare_failed via log.error on rejection", async () => {
     const err = new Error("boom")
-    searchMock.mockRejectedValueOnce(err)
+    searchWithAppSettingsMock.mockRejectedValueOnce(err)
     render(<SearchProviderCompare />)
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "q" } })
     fireEvent.click(screen.getByText("compare"))

@@ -34,12 +34,14 @@ import { AgentTeamAvatar, mentionTargetAvatarSubject } from "./agent-team-avatar
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { stripAgentBlocks } from "@/lib/agent-team/agent-blocks"
 import type { RuntimeAvailabilityMap } from "@/lib/agent-team/use-runtime-availability"
-import type { ComposerHandle } from "@/components/chat/composer"
+import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
 import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { ProjectFileReference } from "@/lib/files/project-file-reference"
 import type { AgentTeamAvatarSubject } from "@/lib/agent-team/avatar"
+import { SourcesPart } from "@/components/chat/message-parts/sources-part"
+import { webSearchSourcesFromContext, type WebSearchSourcesContext } from "@/lib/claude/adapter"
 
 /* ------------------------------------------------------------------ */
 /*  Border color per message type                                       */
@@ -104,6 +106,15 @@ function isStreaming(msg: AgentTeamMessage): boolean {
 
 function isErrored(msg: AgentTeamMessage): boolean {
   return msg.metadata?.[TEAM_MESSAGE_METADATA_KEYS.ERROR] === true
+}
+
+function readWebSearchContext(msg: AgentTeamMessage): WebSearchSourcesContext | null {
+  const value = msg.metadata?.[TEAM_MESSAGE_METADATA_KEYS.WEB_SEARCH_CONTEXT]
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Partial<WebSearchSourcesContext>
+  return typeof candidate.provider === "string" && Array.isArray(candidate.results)
+    ? (candidate as WebSearchSourcesContext)
+    : null
 }
 
 /**
@@ -177,6 +188,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   const errored = isErrored(msg)
   const toolCalls = readToolCalls(msg)
   const tokenUsage = readTokenUsage(msg)
+  const webSources = webSearchSourcesFromContext(readWebSearchContext(msg))
   return (
     <motion.div
       layout
@@ -246,6 +258,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
         </div>
         {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
         {renderMessageBody(msg, streaming, projectRoot, onOpenProjectFile)}
+        {!streaming && msg.senderId !== TEAM_USER_SENDER_ID && webSources.length > 0 && (
+          <SourcesPart part={{ type: "sources", sources: webSources }} defaultOpen />
+        )}
         {streaming && (
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <Loader2Icon className="size-3 animate-spin" />
@@ -276,7 +291,7 @@ export interface AgentTeamChatProps {
    * it via `dispatchTeamMention`.
    */
   mentionables?: readonly MentionTarget[]
-  onSend?: (rawText: string) => void | Promise<void>
+  onSend?: (rawText: string, turnMetadata?: ComposerTurnMetadata) => void | Promise<void>
   /**
    * Stop the current streaming response. Called when the user clicks the
    * stop button in the streaming banner. Should abort the active dispatch

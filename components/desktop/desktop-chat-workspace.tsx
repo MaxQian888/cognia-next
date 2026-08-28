@@ -37,7 +37,7 @@ import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { CanvasShell } from "@/components/canvas/canvas-shell"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
-import type { ComposerHandle } from "@/components/chat/composer"
+import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type {
   ApprovalDecision,
@@ -395,18 +395,28 @@ export function DesktopChatWorkspace() {
       content: SendContent,
       sid: string,
       manifest?: readonly AttachmentManifestEntry[],
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      turnMetadata?: ComposerTurnMetadata
     ) => {
       setTrustPromptNonce((n) => n + 1)
       // Team turns take no `templateRun`: `use-team-chat` writes its own user
       // message and has no metadata channel for it. A team composer simply
       // offers no re-run, rather than recording something nothing reads.
       return isTeamSessionId(sid)
-        ? teamChat.send(content, { sessionId: sid, attachmentManifest: manifest })
+        ? teamChat.send(content, {
+            sessionId: sid,
+            attachmentManifest: manifest,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
+          })
         : directChat.send(content, undefined, {
             sessionId: sid,
             attachmentManifest: manifest,
             templateRun,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
           })
     },
     [directChat, teamChat, isTeamSessionId]
@@ -557,17 +567,27 @@ export function DesktopChatWorkspace() {
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      turnMetadata?: ComposerTurnMetadata
     ) => {
       const active = useChatStore.getState().activeSessionId
       if (active) {
         if (isTeamSessionId(active)) {
-          await teamChat.send(content, { sessionId: active, attachmentManifest: manifest })
+          await teamChat.send(content, {
+            sessionId: active,
+            attachmentManifest: manifest,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
+          })
         } else {
           await directChat.send(content, undefined, {
             sessionId: active,
             attachmentManifest: manifest,
             templateRun,
+            ...(turnMetadata?.webSearchContext
+              ? { webSearchContext: turnMetadata.webSearchContext }
+              : {}),
           })
         }
         return
@@ -577,7 +597,13 @@ export function DesktopChatWorkspace() {
       // quick-start needs no character pick.
       if (selectedGuild.kind === "team") {
         const s = await handleNewTeamConversation(selectedGuild.teamId)
-        await teamChat.send(content, { sessionId: s.id, attachmentManifest: manifest })
+        await teamChat.send(content, {
+          sessionId: s.id,
+          attachmentManifest: manifest,
+          ...(turnMetadata?.webSearchContext
+            ? { webSearchContext: turnMetadata.webSearchContext }
+            : {}),
+        })
       } else {
         const s = await create({
           executionLocation: newChatExecution.location,
@@ -587,6 +613,9 @@ export function DesktopChatWorkspace() {
           sessionId: s.id,
           attachmentManifest: manifest,
           templateRun,
+          ...(turnMetadata?.webSearchContext
+            ? { webSearchContext: turnMetadata.webSearchContext }
+            : {}),
         })
       }
     },

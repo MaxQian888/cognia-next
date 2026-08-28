@@ -53,6 +53,10 @@ describe("dispatchTeamMention", () => {
         target: makeVirtualTarget(),
         prompt: "say hi",
         rawText: "@codex say hi",
+        webSearchContext: {
+          provider: "tavily",
+          results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+        },
       },
       { writer, streamer }
     )
@@ -70,6 +74,10 @@ describe("dispatchTeamMention", () => {
     expect(agent?.content).toBe("Hello there.")
     expect(agent?.senderName).toBe("codex")
     expect(agent?.metadata?.[TEAM_MESSAGE_METADATA_KEYS.STREAMING]).toBeUndefined()
+    expect(agent?.metadata?.[TEAM_MESSAGE_METADATA_KEYS.WEB_SEARCH_CONTEXT]).toEqual({
+      provider: "tavily",
+      results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+    })
 
     expect(writes.length).toBeGreaterThanOrEqual(5)
 
@@ -77,6 +85,9 @@ describe("dispatchTeamMention", () => {
       (w) => w.id === result.agentMessageId && w.content === "Hello "
     )
     expect(intermediate?.metadata?.[TEAM_MESSAGE_METADATA_KEYS.STREAMING]).toBe(true)
+    expect(intermediate?.metadata?.[TEAM_MESSAGE_METADATA_KEYS.WEB_SEARCH_CONTEXT]).toEqual(
+      agent?.metadata?.[TEAM_MESSAGE_METADATA_KEYS.WEB_SEARCH_CONTEXT]
+    )
   })
 
   it("uses a custom user display name when provided", async () => {

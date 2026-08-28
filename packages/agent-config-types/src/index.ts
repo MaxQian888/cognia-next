@@ -963,6 +963,21 @@ export interface SendOptions {
   }
 
   /**
+   * Provider search results injected before this turn. The chat event bridge
+   * persists them on the completed assistant message as clickable sources.
+   * Sidecar-protocol metadata only; the sidecar ignores this field.
+   */
+  webSearchContext?: {
+    provider: string
+    results: Array<{
+      title: string
+      url: string
+      content: string
+      score: number
+    }>
+  }
+
+  /**
    * Long-term memory context injected this turn (ADR — autonomous memory).
    * Set by `resolveSendOptions` when `applyMemoryContext` recalled any
    * semantic/episodic memory. Mirrors `twinContext` — stashed so the chat hook
@@ -2303,16 +2318,15 @@ export interface ChatSession {
    * re-import guard. Reusing that flag here would make the guard skip rows for
    * the wrong reason. This one means "another host owns, or is about to own,
    * the writable copy of this thread", and is enforced by
-   * `lib/chat/session-lock.ts` at every message/session mutation.
+   * `lib/chat/session-write-guard.ts` at every message/session mutation.
    *
    * `state: "frozen"` — a handoff is in flight; aborting clears the field and
    * the thread is writable again. `state: "committed"` — permanent; the row
    * stays read-only forever and links to `targetHostRef`/`targetSessionId`.
    *
-   * Organizational operations (archive, folder, delete) are deliberately NOT
-   * blocked by this lock: a lock that prevents cleanup is a trap. Branching is
-   * also allowed — it creates a *new* writable thread, which does not violate
-   * the one-writable-copy invariant.
+   * Every product mutation is blocked, including organizational changes,
+   * branching, and deletion. Recovery and coordinated abort are protocol
+   * operations and update the row directly only after peer disposition proof.
    *
    * Non-indexed optional column — no Dexie schema bump.
    */

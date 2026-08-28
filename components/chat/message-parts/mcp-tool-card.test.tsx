@@ -92,8 +92,10 @@ describe("isStructuredMcpToolPart", () => {
     }
   })
 
-  it("normalizeToolName strips only the cognia-tools prefix", () => {
+  it("normalizes both promoted Cognia MCP namespaces", () => {
     expect(normalizeToolName("mcp__cognia-tools__grep")).toBe("grep")
+    expect(normalizeToolName("mcp__cognia-plugin-tools__web_search")).toBe("web_search")
+    expect(normalizeToolName("mcp__cognia-plugin-tools__web_fetch")).toBe("web_fetch")
     expect(normalizeToolName("grep")).toBe("grep")
     expect(normalizeToolName("mcp__other-server__grep")).toBe("mcp__other-server__grep")
   })
@@ -412,6 +414,21 @@ describe("MCPToolCard — WebFetch", () => {
     render(<MCPToolCard part={part("tool-WebFetch", "x")} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
+
+  it("routes the promoted snake_case tool to the host card", () => {
+    render(
+      <MCPToolCard
+        part={part(
+          "tool-web_fetch",
+          { ok: true, status: 200, text: "body" },
+          {
+            url: "https://example.com",
+          }
+        )}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-card")).toBeInTheDocument()
+  })
 })
 
 describe("MCPToolCard — WebSearch", () => {
@@ -437,6 +454,19 @@ describe("MCPToolCard — WebSearch", () => {
   it("falls back to ToolBody without query or results", () => {
     render(<MCPToolCard part={part("tool-WebSearch", "raw")} />)
     expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
+  })
+
+  it("routes the promoted snake_case tool to the host card", () => {
+    render(
+      <MCPToolCard
+        part={part(
+          "tool-web_search",
+          { ok: true, provider: "tavily", results: [] },
+          { query: "test" }
+        )}
+      />
+    )
+    expect(screen.getByTestId("mcp-websearch-card")).toBeInTheDocument()
   })
 })
 

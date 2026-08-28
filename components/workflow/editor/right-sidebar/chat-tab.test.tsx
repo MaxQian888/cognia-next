@@ -19,7 +19,12 @@ jest.mock("@/components/chat/chat-view", () => ({
     activeSession: { id: string } | null
     onCreate: () => void
     onUseSample: (text: string) => void
-    onSend: (content: string, manifest?: readonly AttachmentManifestEntry[]) => void | Promise<void>
+    onSend: (
+      content: string,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: unknown,
+      metadata?: { webSearchContext?: { provider: string; results: unknown[] } }
+    ) => void | Promise<void>
   }) => (
     <div data-testid="chatpane" data-session-id={props.activeSession?.id ?? "none"}>
       <button type="button" data-testid="chatpane-create" onClick={() => props.onCreate()}>
@@ -38,6 +43,20 @@ jest.mock("@/components/chat/chat-view", () => ({
         onClick={() => void props.onSend("review the workflow", attachmentManifest)}
       >
         send
+      </button>
+      <button
+        type="button"
+        data-testid="chatpane-send-web"
+        onClick={() =>
+          void props.onSend("search the workflow", undefined, null, {
+            webSearchContext: {
+              provider: "tavily",
+              results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+            },
+          })
+        }
+      >
+        send web
       </button>
     </div>
   ),
@@ -233,6 +252,22 @@ describe("WorkflowEditorChatTab session wiring", () => {
       expect(claudeSend).toHaveBeenCalledWith("review the workflow", undefined, {
         sessionId: "workflow:wf_a",
         attachmentManifest,
+      })
+    )
+  })
+
+  it("preserves pre-search sources through workflow mention expansion", async () => {
+    const user = userEvent.setup()
+    harness()
+    await user.click(screen.getByTestId("chatpane-send-web"))
+    await waitFor(() =>
+      expect(claudeSend).toHaveBeenCalledWith("search the workflow", undefined, {
+        sessionId: "workflow:wf_a",
+        attachmentManifest: undefined,
+        webSearchContext: {
+          provider: "tavily",
+          results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+        },
       })
     )
   })

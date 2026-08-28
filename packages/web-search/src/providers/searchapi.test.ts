@@ -138,6 +138,17 @@ describe("searchWithSearchAPI", () => {
     expect(url).toContain("page=2")
   })
 
+  it.each([
+    ["off", false],
+    ["moderate", true],
+    ["strict", true],
+  ] as const)("maps common safe search level %s", async (safeSearch, active) => {
+    fetchMock.mockResolvedValueOnce(fakeResp({ json: {} }))
+    await searchWithSearchAPI("q", "k", { safeSearch })
+    const url = fetchMock.mock.calls[0][0] as string
+    expect(url.includes("safe=active")).toBe(active)
+  })
+
   it("throws on non-ok response", async () => {
     fetchMock.mockResolvedValueOnce(fakeResp({ ok: false, text: "bad" }))
     await expect(searchWithSearchAPI("q", "k")).rejects.toThrow(/SearchAPI/)

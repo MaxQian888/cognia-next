@@ -86,7 +86,12 @@ jest.mock("@/components/chat/chat-view", () => ({
     onCreate,
     onOpenSettings,
   }: {
-    onSend: (content: string, manifest?: readonly AttachmentManifestEntry[]) => Promise<unknown>
+    onSend: (
+      content: string,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: unknown,
+      metadata?: { webSearchContext?: { provider: string; results: unknown[] } }
+    ) => Promise<unknown>
     onStop: () => void
     onRegenerate: () => void
     onEditResend: (messageId: string, content: string) => void
@@ -100,6 +105,19 @@ jest.mock("@/components/chat/chat-view", () => ({
         onClick={() => void onSend("hello", attachmentManifest).catch(() => undefined)}
       >
         send
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onSend("web", undefined, null, {
+            webSearchContext: {
+              provider: "tavily",
+              results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+            },
+          }).catch(() => undefined)
+        }
+      >
+        send web
       </button>
       <button type="button" onClick={onStop}>
         stop
@@ -153,6 +171,20 @@ describe("ResourceWorkbenchChatPanel", () => {
       sessionId: "resource-session",
       resourceContext: "",
       attachmentManifest,
+    })
+  })
+
+  it("forwards pre-search sources through its scoped embedded session", async () => {
+    render(<ResourceWorkbenchChatPanel />)
+    await userEvent.click(await screen.findByRole("button", { name: "send web" }))
+    expect(send).toHaveBeenCalledWith("web", undefined, {
+      sessionId: "resource-session",
+      resourceContext: "",
+      attachmentManifest: undefined,
+      webSearchContext: {
+        provider: "tavily",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+      },
     })
   })
 

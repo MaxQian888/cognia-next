@@ -150,6 +150,7 @@ jest.mock("@/lib/claude/adapter", () => ({
   })),
   extractUsage: jest.fn(() => null),
   mergeTwinSourcesIntoLastAssistant: (msgs: unknown) => msgs,
+  mergeWebSearchSourcesIntoLastAssistant: jest.fn((msgs: unknown) => msgs),
 }))
 
 const runTurnMemoryMock = jest.fn().mockResolvedValue(undefined)
@@ -356,6 +357,9 @@ interface SliceLike {
   errorDiagnostic: { message?: string } | null
   pendingApprovals: unknown[]
   activeBranchByGroup: Record<string, string>
+  pendingCommandOverrides?: unknown
+  citedRefs?: unknown[]
+  ephemeralSkillIds?: string[]
 }
 const makeSlice = (): SliceLike => ({
   messages: [],
@@ -385,7 +389,10 @@ interface ChatStateLike {
   referencedPaths: unknown[]
   citedRefs: unknown[]
   ephemeralSkillIds: string[]
-  lastSendBySession: Record<string, unknown>
+  lastSendBySession: Record<
+    string,
+    { content: unknown; options: SendOptions; attemptIndex: number }
+  >
   setActiveSession: jest.Mock
   setMessages: jest.Mock
   replaceMessages: jest.Mock
@@ -498,9 +505,11 @@ const chatState: ChatStateLike = {
   clearEphemeralSkillIds: jest.fn(() => {
     chatState.ephemeralSkillIds = []
   }),
-  setLastSend: jest.fn((id: string, e: unknown) => {
-    chatState.lastSendBySession[id] = e
-  }),
+  setLastSend: jest.fn(
+    (id: string, e: { content: unknown; options: SendOptions; attemptIndex: number }) => {
+      chatState.lastSendBySession[id] = e
+    }
+  ),
   clearLastSend: jest.fn((id: string) => {
     delete chatState.lastSendBySession[id]
   }),
@@ -869,6 +878,9 @@ describe("useClaudeChat — actions", () => {
     )
     expect(stopLeaseHeartbeatMock).not.toHaveBeenCalled()
     expect(bindChatTurnContextMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
+    expect(chatState.setLastSend.mock.invocationCallOrder.at(-1)).toBeLessThan(
       sendPromptMock.mock.invocationCallOrder[0]
     )
     expect(sendPromptMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -2487,12 +2499,18 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     }
     const { result } = renderHook(() => useClaudeChat())
     await flush()
+    const webSearchContext = {
+      provider: "tavily",
+      results: [{ title: "Source", url: "https://example.com", content: "Result", score: 0.9 }],
+    }
     await act(async () => {
-      await result.current.send([image, { type: "text", text: "and this" }])
+      await result.current.send([image, { type: "text", text: "and this" }], undefined, {
+        webSearchContext,
+      })
     })
     expect(chatState.enqueueSteer).toHaveBeenCalledWith(
       "sess-1",
-      expect.objectContaining({ text: "and this", blocks: [image] })
+      expect.objectContaining({ text: "and this", blocks: [image], webSearchContext })
     )
     // Busy-gate returns before dispatch — nothing reaches the sidecar.
     expect(sendPromptMock).not.toHaveBeenCalled()
@@ -2524,11 +2542,20 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
 
   it("delivers a steer live through the Anthropic sidecar and skips the queue", async () => {
     chatState.status = "streaming"
+    chatState.lastSendBySession["sess-1"] = {
+      content: "original",
+      options: {},
+      attemptIndex: 0,
+    }
     steerSessionMock.mockResolvedValue({ accepted: true })
     const { result } = renderHook(() => useClaudeChat())
     await flush()
+    const webSearchContext = {
+      provider: "brave",
+      results: [{ title: "Docs", url: "https://docs.example.com", content: "Result", score: 0.8 }],
+    }
     await act(async () => {
-      await result.current.send("actually use Vitest")
+      await result.current.send("actually use Vitest", undefined, { webSearchContext })
     })
     expect(steerSessionMock).toHaveBeenCalledWith("sess-1", "actually use Vitest")
     // Accepted into the running query — nothing to replay later.
@@ -2537,6 +2564,9 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
       metadata?: { steer?: { state: string } }
     }>
     expect(appended.at(-1)?.metadata?.steer?.state).toBe("accepted")
+    expect(chatState.lastSendBySession["sess-1"]?.options.webSearchContext).toEqual(
+      webSearchContext
+    )
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
@@ -2855,6 +2885,30 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
     ]
     expect(typeof lastCall[1].options.spanId).toBe("string")
     expect(typeof lastCall[1].options.traceId).toBe("string")
+  })
+
+  it("caches composer web sources in finalized send options before dispatch", async () => {
+    const webSearchContext = {
+      provider: "tavily",
+      results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", {
+        provider: "anthropic",
+        model: "sonnet",
+        webSearchContext,
+      })
+    })
+
+    const cached = chatState.setLastSend.mock.calls.at(-1)?.[1] as {
+      options: { webSearchContext?: unknown }
+    }
+    expect(cached.options.webSearchContext).toEqual(webSearchContext)
+    expect(chatState.setLastSend.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder.at(-1)!
+    )
   })
 
   it("preserves a caller-provided spanId instead of generating a new one", async () => {

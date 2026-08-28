@@ -1,38 +1,30 @@
 /**
  * Shared implementation for the first-class web tools (web_search + web_fetch).
  *
- * Extracted verbatim from `plugins/web-tools/src/index.ts` so the logic can be
- * reused by BOTH the promoted built-in tools (host-routed via
- * `lib/claude/web-builtin-tools.ts`) and the web-tools plugin's own wrappers.
- * The only behavioral change vs. the plugin is that `webSearch` takes
- * `providerSettings` as an explicit parameter instead of reading the renderer
- * settings store — this is what lets it run on the CLI host (no Zustand store)
- * as well as the desktop renderer.
+ * Shared by the promoted built-in tools and the web-tools plugin wrappers.
+ * Search requires the host-owned canonical executor, so renderer and CLI hosts
+ * supply settings without this module importing Zustand or duplicating policy.
  *
  * Reuses the app's existing infrastructure rather than reimplementing:
- *   - multi-provider web search → `lib/search/search-service`
+ *   - configured multi-provider web search → `lib/search/configured-search-core`
  *   - readable HTML → text extraction → `lib/document/parsers/html-parser`
  */
 
-import { search } from "@/lib/search/search-service"
 import {
-  DEFAULT_SEARCH_PROVIDER_SETTINGS,
-  isProviderConfigured,
   type SearchProviderType,
-  type SearchProviderSettings,
   type SearchOptions,
   type SearchResponse,
-  type SearchResult,
   type SourceVerificationSettings,
 } from "@cognia/web-search/types"
-import { optimizeSearchQuery } from "@cognia/web-search/search-query-optimizer"
-import { verifySource, sortByCredibility } from "@cognia/web-search/source-verification"
+import { applySourceVerificationPolicy, verifySource } from "@cognia/web-search/source-verification"
+import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import { parseHTML } from "@cognia/document/parsers/html-parser"
 import { fetchCacheKey, type FetchCacheLike } from "@/lib/web/fetch-cache"
 import { scrapePlatform } from "@/lib/web/reader/dispatch"
 import { fetchViaJina } from "@/lib/web/reader/jina"
-import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
-import { wrapUntrustedContent } from "./untrusted-content"
+import { assertFetchTargetAllowed, FetchTargetBlockedError } from "@/lib/web/fetch-guard"
+import { UNTRUSTED_CONTENT_NOTICE } from "./untrusted-content"
+import type { PluginHostToolErrorCode } from "@/types/plugin/plugin-host-tools"
 
 /** How `web_fetch` should present the response body. */
 export type FetchFormat = "auto" | "text" | "raw"
@@ -149,7 +141,18 @@ export function buildFetchExtractor(client: FetchExtractorClient): FetchSummariz
   return async (text, prompt, signal) => {
     const bounded =
       text.length > FETCH_EXTRACT_INPUT_MAX ? text.slice(0, FETCH_EXTRACT_INPUT_MAX) : text
-    const out = await client.complete(`Question:\n${prompt}\n\nPage content:\n${bounded}`, {
+    const safePrompt = redactText(prompt).redacted
+    const safeText = redactText(bounded).redacted
+    const extractionPrompt = `Question:\n${safePrompt}\n\nPage content:\n${safeText}`
+    if (
+      !hasNoLeakingPiiDeep({
+        prompt: extractionPrompt,
+        system: FETCH_EXTRACT_SYSTEM_PROMPT,
+      })
+    ) {
+      throw new Error("Web extraction blocked: sensitive data remains after redaction")
+    }
+    const out = await client.complete(extractionPrompt, {
       system: FETCH_EXTRACT_SYSTEM_PROMPT,
       temperature: 0.2,
       maxTokens: 1024,
@@ -159,26 +162,23 @@ export function buildFetchExtractor(client: FetchExtractorClient): FetchSummariz
   }
 }
 
-/** Reused search-result cache shape (a subset of `lib/search/search-cache`'s `SearchCache`). */
-export interface SearchResultCacheLike {
-  get(query: string, provider?: SearchProviderType, options?: SearchOptions): SearchResponse | null
-  set(
-    query: string,
-    response: SearchResponse,
-    provider?: SearchProviderType,
-    options?: SearchOptions
-  ): void
-}
-
+/**
+ * What `webSearch` needs, and nothing more.
+ *
+ * Provider settings, the result cache, fallback and retry counts, and query
+ * optimization all moved into the canonical executor
+ * (`lib/search/configured-search-core`). They are deliberately NOT re-declared
+ * here: fields a host populates but this module never reads read as live
+ * configuration and drift silently.
+ */
 export interface WebSearchDeps {
-  /** The user's configured search-provider settings (keys, enabled flags). */
-  providerSettings?: Partial<Record<SearchProviderType, SearchProviderSettings>>
+  /** Host-owned canonical search policy (settings, PII, cache, fallback, filtering). */
+  searchExecutor?: (
+    query: string,
+    options: SearchOptions & { provider?: SearchProviderType }
+  ) => Promise<SearchResponse>
   /** Default max results when the caller doesn't specify. */
   searchMaxResults?: number
-  /** Whether to fall back to other providers on failure. Default true. */
-  searchFallbackEnabled?: boolean
-  /** Max extra attempts per provider on a transient failure (network / 429 / 5xx). Default 2. */
-  searchMaxRetries?: number
   /**
    * The user's configured default search options (type, depth, recency,
    * country, language, include/exclude domains, includeAnswer). Forwarded to
@@ -187,18 +187,24 @@ export interface WebSearchDeps {
    */
   searchOptions?: SearchOptions
   /**
-   * Reused result cache (`getSearchCache()`); when present, identical queries in
-   * the cache window are served without re-hitting the provider or re-billing.
-   */
-  searchCache?: SearchResultCacheLike
-  /**
    * Source-verification settings. When `enabled`, results are filtered by
    * blocked domains / minimum credibility and sorted by credibility, reusing
    * the existing `lib/search/source-verification` engine.
    */
   sourceVerification?: SourceVerificationSettings
-  /** Strip filler from the model's query before searching. Default true. */
-  optimizeQuery?: boolean
+}
+
+/**
+ * Classify a thrown failure for the structured `code` field.
+ *
+ * The SSRF guard (`assertFetchTargetAllowed`) refuses a target by throwing, so
+ * without this a policy refusal would arrive indistinguishable from a DNS error
+ * or a socket reset — and a caller could not tell "you may not fetch that" from
+ * "that host is down". Matched on the error TYPE, not its message, so the
+ * classification survives rewording and localization.
+ */
+function executionFailureCode(err: unknown): PluginHostToolErrorCode {
+  return err instanceof FetchTargetBlockedError ? "blocked" : "execution-failed"
 }
 
 /** Default cap on the raw body returned to the model (chars). */
@@ -262,9 +268,9 @@ function looksLikePdf(contentType: string, url: string): boolean {
 
 /**
  * Distill (via `prompt`, or a generic question when `alwaysDistill` is on) then
- * truncate extracted text to `cap`. Non-distilled text is framed as untrusted
- * so the main agent can't be prompt-injected by page content. Never throws —
- * distillation failures fall back to the (wrapped) extracted text.
+ * truncate extracted text to `cap`. All external text stays framed as
+ * untrusted, including distilled output. Never throws — distillation failures
+ * fall back to the extracted text.
  */
 async function shapeExtracted(
   rawText: string,
@@ -280,7 +286,6 @@ async function shapeExtracted(
   nextOffset?: number
 }> {
   let text = rawText.trim()
-  let distilled = false
   // Query-focused (or, with alwaysDistill, generic) distillation collapses the
   // page to a sub-model summary the main agent can trust.
   const question = args.prompt ?? (deps.alwaysDistill ? GENERIC_DISTILL_PROMPT : undefined)
@@ -289,7 +294,6 @@ async function shapeExtracted(
       const focused = (await deps.summarize(text, question, deps.signal))?.trim()
       if (focused) {
         text = focused
-        distilled = true
       }
     } catch {
       // Keep the extracted text.
@@ -297,10 +301,11 @@ async function shapeExtracted(
   }
   // Adaptive segmented reading — window `[offset, offset+cap)` out of the text.
   const win = windowText(text, args.offset, cap)
-  let out = win.slice
-  // Raw (non-distilled) page text is untrusted input — frame it. Distilled
-  // output already passed through the sub-model, so it isn't re-wrapped.
-  if (!distilled) out = wrapUntrustedContent(out)
+  // Distillation reduces content but does not make an external page trusted.
+  // The frame is applied ONCE to the whole payload (`untrustedNotice`), not per
+  // field: banner-per-field turned a one-line `title` into a multi-line string
+  // and made a JSON `body` unparseable for every consumer.
+  const out = win.slice
   return {
     text: out,
     truncated: win.truncated,
@@ -322,8 +327,36 @@ async function shapeExtracted(
  * in `deps.cache` when provided.
  */
 export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Promise<unknown> {
+  const result = await performWebFetch(args, deps)
+  // One frame for the whole payload, exactly as `shapeSearchResponse` does it.
+  // Applied here rather than inside each branch so `title`, `text` and `body`
+  // stay usable verbatim and no success path can forget the frame. A structured
+  // failure carries no external text, so it needs none.
+  if (
+    result &&
+    typeof result === "object" &&
+    typeof (result as WebFetchShape).status === "number"
+  ) {
+    return { ...(result as WebFetchShape), untrustedNotice: UNTRUSTED_CONTENT_NOTICE }
+  }
+  return result
+}
+
+/** The success shape `webFetch` frames — an HTTP outcome, not a tool failure. */
+type WebFetchShape = Record<string, unknown> & { status?: unknown }
+
+async function performWebFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Promise<unknown> {
   if (!args.url) {
-    return { ok: false as const, error: "url is required" }
+    return { ok: false as const, code: "invalid-arguments" as const, error: "url is required" }
+  }
+  const headers: Record<string, string> = { ...(args.headers ?? {}) }
+  if (deps.userAgent && !headers["User-Agent"]) headers["User-Agent"] = deps.userAgent
+  if (!hasNoLeakingPiiDeep({ url: args.url, headers, body: args.body })) {
+    return {
+      ok: false as const,
+      code: "blocked" as const,
+      error: "web_fetch blocked: outbound request contains sensitive data",
+    }
   }
   const method = args.method ?? "GET"
   const format: FetchFormat = args.format ?? "auto"
@@ -346,9 +379,6 @@ export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Pro
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch
-  const headers: Record<string, string> = { ...(args.headers ?? {}) }
-  if (deps.userAgent && !headers["User-Agent"]) headers["User-Agent"] = deps.userAgent
-
   const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : DEFAULT_MAX
   const extractCap = args.maxBytes && args.maxBytes > 0 ? cap : DEFAULT_EXTRACT_MAX
   const mayExtract = format !== "raw"
@@ -536,7 +566,11 @@ export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Pro
     if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
     return result
   } catch (err) {
-    return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    return {
+      ok: false as const,
+      code: executionFailureCode(err),
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 }
 
@@ -546,37 +580,23 @@ export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Pro
  * (when auto-filter is on), then sort most-credible-first. Pure; no-op when
  * verification is disabled.
  */
-function applySourceVerification(
-  results: SearchResult[],
-  sv: SourceVerificationSettings | undefined
-): SearchResult[] {
-  if (!sv?.enabled || results.length === 0) return results
-  const blocked = (sv.blockedDomains ?? []).map((d) => d.toLowerCase().trim()).filter(Boolean)
-  let out = results
-  if (blocked.length > 0) {
-    out = out.filter((r) => {
-      const domain = verifySource(r.url).domain.toLowerCase()
-      return !blocked.some((b) => domain === b || domain.endsWith(`.${b}`))
-    })
-  }
-  if (sv.autoFilterLowCredibility) {
-    out = out.filter((r) => verifySource(r.url).credibilityScore >= sv.minimumCredibilityScore)
-  }
-  return sortByCredibility(out, "desc")
-}
-
 /** Map a raw `SearchResponse` into the compact, token-bounded tool result. */
 function shapeSearchResponse(
   query: string,
   response: SearchResponse,
   sv: SourceVerificationSettings | undefined
 ): unknown {
-  const verified = applySourceVerification(response.results, sv)
+  const verified = applySourceVerificationPolicy(response.results, sv)
   const withBadges = Boolean(sv?.enabled && sv.showVerificationBadges)
   return {
     ok: true as const,
     query,
     provider: response.provider,
+    // One frame for the whole payload instead of one per field. Wrapping every
+    // title AND every snippet repeated this ~137-char banner up to 2N+1 times
+    // per search (~700 tokens of boilerplate on ten results) and turned each
+    // one-line `title` into a multi-line string every consumer had to unwrap.
+    untrustedNotice: UNTRUSTED_CONTENT_NOTICE,
     answer: response.answer ?? null,
     // Structured results only — the previous `formatted` markdown block
     // duplicated every snippet a second time. Each snippet is capped so a
@@ -600,52 +620,34 @@ function shapeSearchResponse(
 export async function webSearch(args: WebSearchArgs, deps: WebSearchDeps = {}): Promise<unknown> {
   const rawQuery = typeof args.query === "string" ? args.query.trim() : ""
   if (!rawQuery) {
-    return { ok: false as const, error: "query is required" }
+    return { ok: false as const, code: "invalid-arguments" as const, error: "query is required" }
   }
-  // Strip filler ("please tell me about …") so the provider sees a focused
-  // query — better hits and a smaller, stabler cache key.
-  const query = deps.optimizeQuery === false ? rawQuery : optimizeSearchQuery(rawQuery) || rawQuery
-
-  const providerSettings = deps.providerSettings ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
-  const configured = Object.values(providerSettings).filter(
-    (p) => p.enabled && isProviderConfigured(p.providerId, p)
-  )
-  if (configured.length === 0) {
-    return {
-      ok: false as const,
-      error:
-        "No web search provider is configured. Enable one and add its API key in Settings → Search.",
-    }
-  }
-
   const maxResults =
     typeof args.maxResults === "number"
       ? args.maxResults
       : typeof deps.searchMaxResults === "number"
         ? deps.searchMaxResults
         : undefined
-  const searchOptions: SearchOptions = {
-    ...(deps.searchOptions ?? {}),
-    ...(maxResults != null ? { maxResults } : {}),
+  if (!deps.searchExecutor) {
+    return {
+      ok: false as const,
+      code: "no-search-provider" as const,
+      error:
+        "No web search provider is configured. Enable one and add its API key in Settings → Search.",
+    }
   }
-
-  // Cache hit — reuse the existing search-result cache (shared with the search UI).
-  if (deps.searchCache) {
-    const hit = deps.searchCache.get(query, args.provider, searchOptions)
-    if (hit) return shapeSearchResponse(query, hit, deps.sourceVerification)
-  }
-
   try {
-    const response = await search(query, {
-      providerSettings,
+    const response = await deps.searchExecutor(rawQuery, {
+      ...(deps.searchOptions ?? {}),
       ...(args.provider ? { provider: args.provider } : {}),
-      ...searchOptions,
-      fallbackEnabled: deps.searchFallbackEnabled ?? true,
-      maxRetries: deps.searchMaxRetries,
+      ...(maxResults != null ? { maxResults } : {}),
     })
-    if (deps.searchCache) deps.searchCache.set(query, response, args.provider, searchOptions)
-    return shapeSearchResponse(query, response, deps.sourceVerification)
+    return shapeSearchResponse(response.query || rawQuery, response, deps.sourceVerification)
   } catch (err) {
-    return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+    return {
+      ok: false as const,
+      code: executionFailureCode(err),
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 }

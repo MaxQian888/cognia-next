@@ -17,11 +17,20 @@ const BING_WEB_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/search"
 const BING_NEWS_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/news/search"
 const BING_IMAGE_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/images/search"
 
-export interface BingSearchOptions extends SearchOptions {
-  safeSearch?: "Off" | "Moderate" | "Strict"
+export interface BingSearchOptions extends Omit<SearchOptions, "safeSearch"> {
+  /** Accepts both the unified levels and Bing's legacy native spellings. */
+  safeSearch?: SearchOptions["safeSearch"] | "Off" | "Moderate" | "Strict"
   textDecorations?: boolean
   textFormat?: "Raw" | "HTML"
   responseFilter?: ("Webpages" | "Images" | "Videos" | "News" | "RelatedSearches")[]
+}
+
+function mapSafeSearch(safeSearch: BingSearchOptions["safeSearch"]): "Off" | "Moderate" | "Strict" {
+  if (!safeSearch) return "Moderate"
+  if (safeSearch === "off") return "Off"
+  if (safeSearch === "moderate") return "Moderate"
+  if (safeSearch === "strict") return "Strict"
+  return safeSearch
 }
 
 interface BingWebPage {
@@ -97,7 +106,7 @@ export async function searchWithBing(
     country,
     language,
     recency,
-    safeSearch = "Moderate",
+    safeSearch,
     textDecorations = false,
     textFormat = "Raw",
     responseFilter,
@@ -112,7 +121,7 @@ export async function searchWithBing(
   const params = new URLSearchParams({
     q: query,
     count: maxResults.toString(),
-    safeSearch,
+    safeSearch: mapSafeSearch(safeSearch),
     textDecorations: textDecorations.toString(),
     textFormat,
   })
@@ -189,7 +198,7 @@ export async function searchNewsWithBing(
   apiKey: string,
   options: Omit<BingSearchOptions, "responseFilter"> = {}
 ): Promise<SearchResponse> {
-  const { maxResults = 10, country, language, recency, safeSearch = "Moderate" } = options
+  const { maxResults = 10, country, language, recency, safeSearch } = options
 
   if (!apiKey) {
     throw new Error("Bing API key is required")
@@ -200,7 +209,7 @@ export async function searchNewsWithBing(
   const params = new URLSearchParams({
     q: query,
     count: maxResults.toString(),
-    safeSearch,
+    safeSearch: mapSafeSearch(safeSearch),
   })
 
   if (country) params.append("cc", country)
@@ -254,7 +263,7 @@ export async function searchImagesWithBing(
   apiKey: string,
   options: Omit<BingSearchOptions, "responseFilter"> = {}
 ): Promise<SearchResponse> {
-  const { maxResults = 10, country, language, safeSearch = "Moderate" } = options
+  const { maxResults = 10, country, language, safeSearch } = options
 
   if (!apiKey) {
     throw new Error("Bing API key is required")
@@ -265,7 +274,7 @@ export async function searchImagesWithBing(
   const params = new URLSearchParams({
     q: query,
     count: maxResults.toString(),
-    safeSearch,
+    safeSearch: mapSafeSearch(safeSearch),
   })
 
   if (country) params.append("cc", country)

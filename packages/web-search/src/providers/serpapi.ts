@@ -17,13 +17,19 @@ const SERPAPI_URL = "https://serpapi.com/search.json"
 
 export type SerpAPIEngine = "google" | "bing" | "yahoo" | "yandex" | "baidu" | "duckduckgo"
 
-export interface SerpAPIOptions extends SearchOptions {
+export interface SerpAPIOptions extends Omit<SearchOptions, "safeSearch"> {
   engine?: SerpAPIEngine
   location?: string
   googleDomain?: string
-  safeSearch?: "active" | "off"
+  /** Accepts the unified levels and SerpAPI's legacy native spelling. */
+  safeSearch?: SearchOptions["safeSearch"] | "active"
   tbm?: "nws" | "isch" | "vid" | "bks" | "shop"
   start?: number
+}
+
+function mapSafeSearch(safeSearch: SerpAPIOptions["safeSearch"]): "active" | "off" {
+  if (safeSearch === "off") return "off"
+  return "active"
 }
 
 interface SerpAPIOrganicResult {
@@ -114,7 +120,7 @@ export async function searchWithSerpAPI(
     recency,
     location,
     googleDomain = "google.com",
-    safeSearch = "active",
+    safeSearch,
     tbm,
     start = 0,
   } = options
@@ -131,7 +137,7 @@ export async function searchWithSerpAPI(
     api_key: apiKey,
     num: maxResults.toString(),
     start: start.toString(),
-    safe: safeSearch,
+    safe: mapSafeSearch(safeSearch),
   })
 
   if (country) params.append("gl", country)

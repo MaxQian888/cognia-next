@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSettingsStore } from "@/stores/settings"
-import { search } from "@/lib/search/search-service"
+import { searchWithAppSettings } from "@/lib/search/configured-search"
 import {
   type SearchProviderType,
   SEARCH_PROVIDERS,
@@ -36,9 +36,8 @@ export function SearchProviderCompare() {
   const [resultB, setResultB] = useState<SearchResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const providerSettings = useSettingsStore(
-    (s) => s.settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
-  )
+  const settings = useSettingsStore((s) => s.settings)
+  const providerSettings = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
 
   const configuredProviders = Object.entries(providerSettings)
     .filter(([id]) =>
@@ -61,8 +60,24 @@ export function SearchProviderCompare() {
 
     try {
       const [a, b] = await Promise.all([
-        search(query, { provider: providerA, providerSettings, fallbackEnabled: false }),
-        search(query, { provider: providerB, providerSettings, fallbackEnabled: false }),
+        searchWithAppSettings(query, {
+          settings: settings ?? undefined,
+          useCache: false,
+          options: {
+            provider: providerA,
+            preferredProviders: [providerA],
+            fallbackEnabled: false,
+          },
+        }),
+        searchWithAppSettings(query, {
+          settings: settings ?? undefined,
+          useCache: false,
+          options: {
+            provider: providerB,
+            preferredProviders: [providerB],
+            fallbackEnabled: false,
+          },
+        }),
       ])
       setResultA(a)
       setResultB(b)

@@ -23,6 +23,7 @@ import {
 import { useSingleExport } from "@/hooks/data/use-single-export"
 import { Button } from "@/components/ui/button"
 import { DownloadIcon } from "lucide-react"
+import type { ComposerTurnMetadata } from "@/components/chat/composer"
 
 const ChatPane = lazy(() =>
   import("@/components/chat/chat-view").then((module) => ({
@@ -135,13 +136,21 @@ export function ResourceWorkbenchChatPanel({
   )
 
   const send = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) =>
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      _templateRun?: unknown,
+      turnMetadata?: ComposerTurnMetadata
+    ) =>
       withArtifactTarget(async () => {
         const resourceContext = await resolveResourceContext()
         return claude.send(content, undefined, {
           sessionId,
           resourceContext,
           attachmentManifest: manifest,
+          ...(turnMetadata?.webSearchContext
+            ? { webSearchContext: turnMetadata.webSearchContext }
+            : {}),
         })
       }),
     [claude, resolveResourceContext, sessionId, withArtifactTarget]

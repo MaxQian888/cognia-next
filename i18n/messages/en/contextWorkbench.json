@@ -287,6 +287,7 @@
     "labels": {
       "agentKnowledge": "Agent knowledge",
       "anthropic": "Web",
+      "cogniaWeb": "Cognia Web",
       "document": "Document",
       "file": "File",
       "footnote": "Note",

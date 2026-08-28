@@ -126,11 +126,10 @@ describe("ChatPaneGroup", () => {
     await (paneA.onSend as (c: unknown) => Promise<void>)("hi-a")
     await (paneB.onSend as (c: unknown) => Promise<void>)("hi-b")
     await (paneB.onStop as () => Promise<void>)()
-    // Third argument: the attachment manifest. Fourth: the template run this
-    // turn was written from. Both forwarded verbatim from the composer, and
-    // both undefined here because these panes send bare text.
-    expect(send).toHaveBeenCalledWith("hi-a", "a", undefined, undefined)
-    expect(send).toHaveBeenCalledWith("hi-b", "b", undefined, undefined)
+    // Attachment manifest, template provenance, and pre-dispatch metadata are
+    // all forwarded verbatim; all are undefined for these bare text turns.
+    expect(send).toHaveBeenCalledWith("hi-a", "a", undefined, undefined, undefined)
+    expect(send).toHaveBeenCalledWith("hi-b", "b", undefined, undefined, undefined)
     expect(stop).toHaveBeenCalledWith("b")
   })
 
@@ -140,7 +139,7 @@ describe("ChatPaneGroup", () => {
     const pane = paneRenders.find((p) => p.sessionId === "a")!
     const manifest = [{ filename: "a.pdf", mediaType: "application/pdf", kind: "document" }]
     await (pane.onSend as (c: unknown, m: unknown) => Promise<void>)("hi", manifest)
-    expect(send).toHaveBeenCalledWith("hi", "a", manifest, undefined)
+    expect(send).toHaveBeenCalledWith("hi", "a", manifest, undefined, undefined)
   })
 
   // The values are what make a turn re-runnable: the sent text has them
@@ -160,7 +159,26 @@ describe("ChatPaneGroup", () => {
       undefined,
       run
     )
-    expect(send).toHaveBeenCalledWith("review auth", "a", undefined, run)
+    expect(send).toHaveBeenCalledWith("review auth", "a", undefined, run, undefined)
+  })
+
+  it("forwards web-search sources before the pane dispatches", async () => {
+    const send = jest.fn()
+    render(<ChatPaneGroup {...makeProps({ send })} />)
+    const pane = paneRenders.find((p) => p.sessionId === "a")!
+    const metadata = {
+      webSearchContext: {
+        provider: "tavily",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+      },
+    }
+    await (pane.onSend as (...args: unknown[]) => Promise<void>)(
+      "question",
+      undefined,
+      null,
+      metadata
+    )
+    expect(send).toHaveBeenCalledWith("question", "a", undefined, null, metadata)
   })
 
   it("wires regenerate + editResend per session", async () => {

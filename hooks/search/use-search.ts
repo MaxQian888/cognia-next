@@ -1,12 +1,11 @@
 "use client"
 
-// Convenient client-side hook around the multi-provider search service.
-// Wraps `search()` + the LRU cache so callers (chat composer, slash
-// commands, dev tools) get a unified, stateful surface.
+// React state wrapper around the canonical configured-search executor. Cache
+// controls are exposed for UI actions, but policy and execution stay in the
+// shared binding rather than being reimplemented by this hook.
 
 import { useCallback, useState } from "react"
-import { useSettingsStore } from "@/stores/settings"
-import { search } from "@/lib/search/search-service"
+import { searchWithAppSettings } from "@/lib/search/configured-search"
 import { getSearchCache } from "@cognia/web-search/search-cache"
 import type {
   SearchOptions,
@@ -45,41 +44,16 @@ export function useSearch(options: UseSearchOptions = {}): UseSearchReturn {
 
   const doSearch = useCallback(
     async (query: string, opts: SearchOptions = {}): Promise<SearchResponse> => {
-      const settings = useSettingsStore.getState().settings
-      const providerSettings = settings?.searchProviders
-      const cache = getSearchCache()
-      const provider = overrideProvider ?? settings?.defaultSearchProvider
-
-      const cacheable = !disableCache && (settings?.searchCacheEnabled ?? true)
-      if (cacheable) {
-        const cached = cache.get(query, provider, opts)
-        if (cached) {
-          setLastResponse(cached)
-          return cached
-        }
-      }
-
       setIsSearching(true)
       setLastError(null)
       try {
-        const resp = await search(query, {
-          ...opts,
-          provider,
-          providerSettings,
-          fallbackEnabled: settings?.searchFallbackEnabled ?? true,
-          maxRetries: settings?.searchMaxRetries,
-          maxResults: opts.maxResults ?? settings?.searchMaxResults ?? 5,
-          searchType: opts.searchType ?? settings?.defaultSearchType,
-          searchDepth: opts.searchDepth ?? settings?.defaultSearchDepth,
-          recency: opts.recency ?? settings?.defaultSearchRecency,
-          country: opts.country ?? settings?.defaultSearchCountry,
-          language: opts.language ?? settings?.defaultSearchLanguage,
-          includeDomains: opts.includeDomains ?? settings?.defaultIncludeDomains,
-          excludeDomains: opts.excludeDomains ?? settings?.defaultExcludeDomains,
-          includeAnswer: opts.includeAnswer ?? settings?.defaultIncludeAnswer,
-          includeRawContent: opts.includeRawContent ?? settings?.defaultIncludeRawContent,
+        const resp = await searchWithAppSettings(query, {
+          options: {
+            ...opts,
+            ...(overrideProvider ? { provider: overrideProvider } : {}),
+          },
+          useCache: !disableCache,
         })
-        if (cacheable) cache.set(query, resp, provider, opts)
         setLastResponse(resp)
         return resp
       } catch (e) {

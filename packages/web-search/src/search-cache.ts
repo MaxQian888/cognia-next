@@ -14,8 +14,15 @@ export interface SearchCacheOptions {
 
 export interface CacheEntry {
   response: SearchResponse
+  /** Provider that produced the cached response, independent of the hashed request key. */
+  provider: SearchProviderType
   timestamp: number
   ttl: number
+}
+
+/** Search policy fields that affect cache identity but are not provider request options. */
+export interface SearchCacheKeyOptions extends SearchOptions {
+  preferredProviders?: SearchProviderType[]
 }
 
 export interface CacheStats {
@@ -32,7 +39,7 @@ export interface CacheStats {
 export function generateSearchCacheKey(
   query: string,
   provider?: SearchProviderType,
-  options?: SearchOptions
+  options?: SearchCacheKeyOptions
 ): string {
   const includeRawContent =
     options?.includeRawContent === true ? "text" : options?.includeRawContent
@@ -48,8 +55,10 @@ export function generateSearchCacheKey(
     includeRawContent ? String(includeRawContent) : "",
     options?.language || "en",
     options?.country || "",
-    options?.includeDomains?.sort().join(",") || "",
-    options?.excludeDomains?.sort().join(",") || "",
+    options?.includeDomains ? [...options.includeDomains].sort().join(",") : "",
+    options?.excludeDomains ? [...options.excludeDomains].sort().join(",") : "",
+    options?.safeSearch || "moderate",
+    options?.preferredProviders?.join(",") || "",
   ]
 
   const keyString = keyParts.join("|")
@@ -84,7 +93,7 @@ export class SearchCache {
   get(
     query: string,
     provider?: SearchProviderType,
-    options?: SearchOptions
+    options?: SearchCacheKeyOptions
   ): SearchResponse | null {
     const key = generateSearchCacheKey(query, provider, options)
     const entry = this.cache.get(key)
@@ -114,7 +123,7 @@ export class SearchCache {
     query: string,
     response: SearchResponse,
     provider?: SearchProviderType,
-    options?: SearchOptions
+    options?: SearchCacheKeyOptions
   ): void {
     const key = generateSearchCacheKey(query, provider, options)
 
@@ -130,6 +139,7 @@ export class SearchCache {
 
     this.cache.set(key, {
       response,
+      provider: response.provider,
       timestamp: Date.now(),
       ttl,
     })
@@ -159,7 +169,20 @@ export class SearchCache {
     return count
   }
 
-  has(query: string, provider?: SearchProviderType, options?: SearchOptions): boolean {
+  /** Remove every entry produced by a provider without relying on opaque hashed keys. */
+  invalidateProvider(provider: SearchProviderType): number {
+    let count = 0
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry.provider === provider) {
+        this.cache.delete(key)
+        count++
+      }
+    }
+    log.debug(`Invalidated ${count} cache entries for provider: ${provider}`)
+    return count
+  }
+
+  has(query: string, provider?: SearchProviderType, options?: SearchCacheKeyOptions): boolean {
     const key = generateSearchCacheKey(query, provider, options)
     const entry = this.cache.get(key)
 

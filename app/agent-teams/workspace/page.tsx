@@ -77,6 +77,7 @@ import type { AgentFileActivity } from "@/lib/agent-team/file-activity"
 import { resolveLinkPath } from "@/lib/terminal/terminal-links"
 import { deferProjectEditorOpen, openInProjectEditor } from "@/lib/files/project-editor-bridge"
 import type { ProjectFileReference } from "@/lib/files/project-file-reference"
+import type { ComposerTurnMetadata } from "@/components/chat/composer"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -216,7 +217,12 @@ function AgentTeamWorkspaceInner() {
   )
 
   const dispatchPair = useCallback(
-    async (params: { targetId: string; prompt: string; rawText: string }): Promise<void> => {
+    async (params: {
+      targetId: string
+      prompt: string
+      rawText: string
+      turnMetadata?: ComposerTurnMetadata
+    }): Promise<void> => {
       if (!teamId) return
       const target = findTargetById(mentionables, params.targetId)
       if (!target) {
@@ -254,6 +260,7 @@ function AgentTeamWorkspaceInner() {
             rawText: params.rawText,
             signal: ac.signal,
             history,
+            webSearchContext: params.turnMetadata?.webSearchContext,
           },
           {
             writer: { upsertMessage },
@@ -288,7 +295,7 @@ function AgentTeamWorkspaceInner() {
   )
 
   const handleSendMention = useCallback(
-    async (rawText: string): Promise<void> => {
+    async (rawText: string, turnMetadata?: ComposerTurnMetadata): Promise<void> => {
       if (!teamId) return
       const candidates = targetsToCandidates(mentionables)
       const parsed = parseLeadingMention(rawText, candidates)
@@ -312,7 +319,7 @@ function AgentTeamWorkspaceInner() {
         return
       }
 
-      await dispatchPair({ targetId: parsed.matchedId, prompt, rawText })
+      await dispatchPair({ targetId: parsed.matchedId, prompt, rawText, turnMetadata })
     },
     [teamId, mentionables, tComposer, dispatchPair]
   )

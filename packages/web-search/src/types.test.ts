@@ -9,6 +9,8 @@ import {
   createDefaultSearchUsageStats,
   type SearchProviderType,
   type SearchProviderSettings,
+  type CustomSearchSource,
+  type LegacyCustomSearchSource,
 } from "./types"
 
 describe("SEARCH_PROVIDERS", () => {
@@ -204,5 +206,14 @@ describe("createDefaultSearchUsageStats", () => {
     for (const id of Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]) {
       expect(stats[id]).toEqual(createDefaultSearchUsageEntry())
     }
+  })
+})
+
+describe("research source types", () => {
+  it("keeps a separate legacy read shape while new custom sources require a domain", () => {
+    const source: CustomSearchSource = { id: "docs", name: "Docs", domain: "docs.example.com" }
+    const legacy: LegacyCustomSearchSource = { id: "old", name: "old.example.com" }
+    expect(source.domain).toBe("docs.example.com")
+    expect(legacy.domain).toBeUndefined()
   })
 })

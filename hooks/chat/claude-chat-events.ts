@@ -8,6 +8,7 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
+  mergeWebSearchSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
@@ -167,7 +168,12 @@ export function sliceMessages(sessionId: string): UIMessage[] {
 export function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
   maybeDrainSteer(
     sessionId,
-    (payload) => void sendRef.current?.(payload, undefined, { sessionId, steerDrain: true })
+    (payload, webSearchContext) =>
+      void sendRef.current?.(payload, undefined, {
+        sessionId,
+        steerDrain: true,
+        webSearchContext,
+      })
   )
 }
 
@@ -900,6 +906,13 @@ export async function handleEvent(
       // onto the last assistant message's SourcesPart.
       if (turnComplete) {
         const last = useChatStore.getState().lastSendBySession[sessionId]
+        const webSearchCtx = last?.options.webSearchContext
+        if (webSearchCtx) {
+          const withWebSearch = mergeWebSearchSourcesIntoLastAssistant(nextMessages, webSearchCtx)
+          if (withWebSearch !== nextMessages) {
+            nextMessages = withWebSearch
+          }
+        }
         const twinCtx = last?.options.twinContext
         if (twinCtx) {
           const withTwin = mergeTwinSourcesIntoLastAssistant(nextMessages, twinCtx)

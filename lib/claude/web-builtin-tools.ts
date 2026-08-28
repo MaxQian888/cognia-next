@@ -111,7 +111,7 @@ export function isWebBuiltinTool(name: string): boolean {
   return name === WEB_SEARCH_TOOL_NAME || name === WEB_FETCH_TOOL_NAME
 }
 
-export type WebToolRunDeps = WebFetchDeps & WebSearchDeps
+export type WebToolRunDeps = WebFetchDeps & WebSearchDeps & { enabled?: boolean }
 
 /**
  * Execute a promoted web tool host-side. Called from `plugin-tool-ipc`'s
@@ -122,6 +122,13 @@ export async function runWebBuiltinTool(
   args: Record<string, unknown>,
   deps: WebToolRunDeps
 ): Promise<unknown> {
+  if (deps.enabled === false) {
+    return {
+      ok: false as const,
+      code: "web-disabled" as const,
+      error: "Web tools are disabled in Settings.",
+    }
+  }
   // Governance: the promoted web built-ins run host-side and so bypass the
   // plugin permission-guard/rate-limiter that clamps `ctx.network`. Re-apply an
   // outbound token bucket here (reusing the shared limiter) so a runaway agent
@@ -132,7 +139,11 @@ export async function runWebBuiltinTool(
     getPluginRateLimiter().check(WEB_BUILTIN_PLUGIN_ID, op)
   } catch (err) {
     if (err instanceof RateLimitError) {
-      return { ok: false as const, error: `Rate limit exceeded for ${name}; try again shortly.` }
+      return {
+        ok: false as const,
+        code: "rate-limited" as const,
+        error: `Rate limit exceeded for ${name}; try again shortly.`,
+      }
     }
     throw err
   }
@@ -151,15 +162,15 @@ export async function runWebBuiltinTool(
   }
   if (name === WEB_SEARCH_TOOL_NAME) {
     return webSearch(args as unknown as WebSearchArgs, {
-      providerSettings: deps.providerSettings,
+      searchExecutor: deps.searchExecutor,
       searchMaxResults: deps.searchMaxResults,
-      searchFallbackEnabled: deps.searchFallbackEnabled,
-      searchMaxRetries: deps.searchMaxRetries,
       searchOptions: deps.searchOptions,
-      searchCache: deps.searchCache,
       sourceVerification: deps.sourceVerification,
-      optimizeQuery: deps.optimizeQuery,
     })
   }
-  return { ok: false as const, error: `unknown web tool: ${name}` }
+  return {
+    ok: false as const,
+    code: "invalid-arguments" as const,
+    error: `unknown web tool: ${name}`,
+  }
 }

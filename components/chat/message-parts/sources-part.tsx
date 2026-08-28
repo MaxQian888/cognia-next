@@ -50,6 +50,7 @@ interface SourcesPartProps {
 // i18n key suffix (next-intl translation key — `chat.sourcesPart.originLabel.*`).
 const ORIGIN_LABEL_KEY: Record<SourcesPartItem["origin"], string> = {
   anthropic: "anthropic",
+  "cognia-web": "cogniaWeb",
   "twin-rag": "twinRag",
   "twin-style": "twinStyle",
   "agent-knowledge-base": "agentKnowledgeBase",

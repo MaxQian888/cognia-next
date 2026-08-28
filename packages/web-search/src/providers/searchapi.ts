@@ -28,13 +28,19 @@ export type SearchAPIEngine =
   | "yandex"
   | "duckduckgo"
 
-export interface SearchAPIOptions extends SearchOptions {
+export interface SearchAPIOptions extends Omit<SearchOptions, "safeSearch"> {
   engine?: SearchAPIEngine
   location?: string
   googleDomain?: string
-  safeSearch?: boolean
+  /** Accepts the unified levels and the legacy boolean adapter option. */
+  safeSearch?: SearchOptions["safeSearch"] | boolean
   timeRange?: "qdr:h" | "qdr:d" | "qdr:w" | "qdr:m" | "qdr:y"
   page?: number
+}
+
+function isSafeSearchActive(safeSearch: SearchAPIOptions["safeSearch"]): boolean {
+  if (safeSearch === undefined) return true
+  return safeSearch !== false && safeSearch !== "off"
 }
 
 interface SearchAPIOrganicResult {
@@ -126,7 +132,7 @@ export async function searchWithSearchAPI(
     recency,
     location,
     googleDomain,
-    safeSearch = true,
+    safeSearch,
     page = 1,
   } = options
 
@@ -148,7 +154,7 @@ export async function searchWithSearchAPI(
   if (language) params.append("hl", language)
   if (location) params.append("location", location)
   if (googleDomain) params.append("google_domain", googleDomain)
-  if (safeSearch) params.append("safe", "active")
+  if (isSafeSearchActive(safeSearch)) params.append("safe", "active")
 
   const timeRange = mapRecencyToTimeRange(recency)
   if (timeRange) params.append("tbs", timeRange)

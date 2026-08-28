@@ -7,6 +7,7 @@ import {
   makeUserMessage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
+  mergeWebSearchSourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   resetStreamingToolInputs,
@@ -1319,6 +1320,45 @@ describe("contentPreview", () => {
 
   it("respects a custom max length", () => {
     expect(contentPreview("hello world", 5)).toBe("hello…")
+  })
+})
+
+describe("mergeWebSearchSourcesIntoLastAssistant", () => {
+  const baseMessages: UIMessage[] = [
+    { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "hello" } as never] },
+  ]
+
+  it("persists provider-search results as clickable Cognia web sources", () => {
+    const next = mergeWebSearchSourcesIntoLastAssistant(baseMessages, {
+      provider: "tavily",
+      results: [
+        {
+          title: "Cognia docs",
+          url: "https://example.com/docs",
+          content: "A useful result",
+          score: 0.8,
+        },
+      ],
+    })
+
+    const part = next[1].parts.find((item) => (item as { type?: string }).type === "sources") as
+      SourcesPart | undefined
+    expect(part?.sources).toEqual([
+      expect.objectContaining({
+        title: "Cognia docs",
+        url: "https://example.com/docs",
+        snippet: "A useful result",
+        origin: "cognia-web",
+        score: 0.8,
+      }),
+    ])
+  })
+
+  it("is a no-op when there are no results", () => {
+    expect(
+      mergeWebSearchSourcesIntoLastAssistant(baseMessages, { provider: "tavily", results: [] })
+    ).toBe(baseMessages)
   })
 })
 

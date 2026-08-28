@@ -69,6 +69,8 @@ const REGISTRY: Record<string, CardComponent> = {
   Grep: GrepCard,
   WebFetch: WebFetchCard,
   WebSearch: WebSearchCard,
+  web_fetch: WebFetchCard,
+  web_search: WebSearchCard,
   NotebookEdit: NotebookEditCard,
   // Sidecar coreFiles suite (ai-sdk path registers these flat-named; the
   // Anthropic escape hatch namespaces them — normalizeToolName folds both
@@ -119,8 +121,9 @@ const RICH_CONTENT_AWARE = new Set(["Read", "read"])
  * same card as the ai-sdk path's flat `grep`.
  */
 export function normalizeToolName(toolName: string): string {
-  const CORE_PREFIX = "mcp__cognia-tools__"
-  return toolName.startsWith(CORE_PREFIX) ? toolName.slice(CORE_PREFIX.length) : toolName
+  const prefixes = ["mcp__cognia-tools__", "mcp__cognia-plugin-tools__"]
+  const prefix = prefixes.find((candidate) => toolName.startsWith(candidate))
+  return prefix ? toolName.slice(prefix.length) : toolName
 }
 
 /**

@@ -11,7 +11,12 @@ import {
 } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, MessageCircleMore } from "lucide-react"
-import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
+import {
+  Composer,
+  type ComposerHandle,
+  type ComposerTurnMetadata,
+  type ComposerWorkflowMention,
+} from "./composer"
 import { usePlatform } from "@/hooks/use-platform"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
@@ -177,7 +182,8 @@ interface ChatPaneProps {
   onSend: (
     content: SendContent,
     manifest?: readonly AttachmentManifestEntry[],
-    templateRun?: ChatTemplateRun | null
+    templateRun?: ChatTemplateRun | null,
+    turnMetadata?: ComposerTurnMetadata
   ) => Promise<void>
   onStop: () => Promise<void>
   /** Interrupt the running turn and immediately replay the queued steer. */
@@ -208,7 +214,9 @@ interface ChatPaneProps {
    */
   onHeroSend?: (
     content: SendContent,
-    manifest?: readonly AttachmentManifestEntry[]
+    manifest?: readonly AttachmentManifestEntry[],
+    templateRun?: ChatTemplateRun | null,
+    turnMetadata?: ComposerTurnMetadata
   ) => void | Promise<void>
   /** Recent sessions for the welcome page "Continue" group. */
   recentSessions?: readonly RecentSessionEntry[]
@@ -424,9 +432,10 @@ export function ChatPane({
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      turnMetadata?: ComposerTurnMetadata
     ) => {
-      await onSend(content, manifest, templateRun)
+      await onSend(content, manifest, templateRun, turnMetadata)
     },
     [onSend]
   )

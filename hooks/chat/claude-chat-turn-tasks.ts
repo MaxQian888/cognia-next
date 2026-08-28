@@ -238,6 +238,7 @@ export type SendFn = (
     bypassDelegation?: boolean
     sessionId?: string
     steerDrain?: boolean
+    webSearchContext?: SendOptions["webSearchContext"]
   }
 ) => Promise<void>
 

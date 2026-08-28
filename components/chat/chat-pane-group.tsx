@@ -13,7 +13,7 @@ import { useCallback, type ReactNode, type Ref } from "react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { ChatPane } from "./chat-view"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
-import type { ComposerHandle } from "./composer"
+import type { ComposerHandle, ComposerTurnMetadata } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
@@ -34,7 +34,8 @@ export interface ChatPaneGroupProps {
     content: SendContent,
     sessionId: string,
     manifest?: readonly AttachmentManifestEntry[],
-    templateRun?: ChatTemplateRun | null
+    templateRun?: ChatTemplateRun | null,
+    turnMetadata?: ComposerTurnMetadata
   ) => Promise<void> | void
   stop: (sessionId: string) => Promise<void> | void
   /** Interrupt the running turn and immediately replay the queued steer. */
@@ -60,7 +61,9 @@ export interface ChatPaneGroupProps {
   /** First turn from the welcome hero composer — creates the session, then sends. */
   onHeroSend?: (
     content: SendContent,
-    manifest?: readonly AttachmentManifestEntry[]
+    manifest?: readonly AttachmentManifestEntry[],
+    templateRun?: ChatTemplateRun | null,
+    turnMetadata?: ComposerTurnMetadata
   ) => void | Promise<void>
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
@@ -178,8 +181,10 @@ export function ChatPaneGroup({
       <ChatPane
         sessionId={sessionId ?? undefined}
         activeSession={session}
-        onSend={(content, manifest, templateRun) =>
-          Promise.resolve(sessionId ? send(content, sessionId, manifest, templateRun) : undefined)
+        onSend={(content, manifest, templateRun, turnMetadata) =>
+          Promise.resolve(
+            sessionId ? send(content, sessionId, manifest, templateRun, turnMetadata) : undefined
+          )
         }
         onStop={() => Promise.resolve(sessionId ? stop(sessionId) : undefined)}
         onSteerNow={() => Promise.resolve(sessionId ? steerNow(sessionId) : undefined)}

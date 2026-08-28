@@ -14,8 +14,10 @@ import { DEFAULT_TTS_SETTINGS, normalizeTTSProvider } from "@cognia/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
+  SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
 } from "@cognia/web-search/types"
+import { normalizeCustomSearchSource, SEARCH_SOURCES } from "@cognia/web-search/search-constants"
 import { DEFAULT_APPEARANCE_SLICE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_RUN_STATUS_BAR } from "@/lib/chat/run-bar-defaults"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
@@ -289,9 +291,26 @@ export async function getSettings(): Promise<AppSettings> {
     ...(row.routingConfig ?? {}),
     strategy: row.routingConfig?.strategy ?? autoRouting.strategy,
   }
+  const customSearchSources = (row.customSearchSources ?? []).map(
+    (source) => normalizeCustomSearchSource(source) ?? source
+  )
+  // A research source is either a real search provider (the "Preferred
+  // providers" pills, which are `SEARCH_PROVIDERS` keys — NOT the small
+  // provider subset in `SEARCH_SOURCES`), a built-in domain source, or a
+  // custom domain source. Omitting the provider ids here silently discarded
+  // every provider preference on the next read.
+  const validSearchSourceIds = new Set<string>([
+    ...Object.keys(SEARCH_PROVIDERS),
+    ...SEARCH_SOURCES.map((source) => source.id),
+    ...customSearchSources.map((source) => source.id),
+  ])
   return {
     ...DEFAULTS,
     ...row,
+    customSearchSources: customSearchSources as AppSettings["customSearchSources"],
+    defaultSearchSources: (row.defaultSearchSources ?? []).filter((id) =>
+      validSearchSourceIds.has(id)
+    ),
     ttsProvider: normalizeTTSProvider(row.ttsProvider),
     // Nested objects need their own forward-compat merge — a v1 row that
     // shipped without `builtinTools.shellAdvanced` would otherwise drop the
@@ -303,7 +322,7 @@ export async function getSettings(): Promise<AppSettings> {
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
-    webTools: { enabled: row.webTools?.enabled ?? true },
+    webTools: { ...(row.webTools ?? {}), enabled: row.webTools?.enabled ?? true },
     cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
     updates: { ...DEFAULT_UPDATE_SETTINGS, ...(row.updates ?? {}) },
     liveVoice: {

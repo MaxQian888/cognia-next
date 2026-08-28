@@ -254,6 +254,7 @@ export interface SourcesPartItem {
   snippet?: string
   /**
    * - `anthropic` — Anthropic Citations API (web search, page_location, …)
+   * - `cognia-web` — Cognia provider search performed before the model turn
    * - `twin-rag`  — chunk pulled from the user's Digital Twin vector store
    * - `twin-style`— style few-shot sample selected for this turn
    * - `memory`    — long-term memory recalled for this turn (autonomous memory)
@@ -262,6 +263,7 @@ export interface SourcesPartItem {
    */
   origin:
     | "anthropic"
+    | "cognia-web"
     | "twin-rag"
     | "twin-style"
     | "agent-knowledge-base"

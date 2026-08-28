@@ -94,6 +94,17 @@ describe("searchWithSerpAPI", () => {
     expect(url).toContain("tbs=qdr%3Ad")
   })
 
+  it.each([
+    ["off", "off"],
+    ["moderate", "active"],
+    ["strict", "active"],
+  ] as const)("maps common safe search level %s to SerpAPI %s", async (safeSearch, expected) => {
+    fetchMock.mockResolvedValueOnce(fakeResp({ json: {} }))
+    await searchWithSerpAPI("q", "k", { safeSearch })
+    const url = fetchMock.mock.calls[0][0] as string
+    expect(url).toContain(`safe=${expected}`)
+  })
+
   it("does not append google_domain when engine is not google", async () => {
     fetchMock.mockResolvedValueOnce(fakeResp({ json: {} }))
     await searchWithSerpAPI("q", "k", { engine: "bing" })

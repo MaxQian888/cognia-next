@@ -11,6 +11,7 @@
  */
 
 import type { SearchResult, SearchResponse } from "./types"
+import { normalizeSearchDomain } from "./search-constants"
 
 export type CredibilityLevel = "high" | "medium" | "low" | "unknown"
 
@@ -569,6 +570,45 @@ export function sortByCredibility(
   resultsWithScores.sort((a, b) => (order === "desc" ? b.score - a.score : a.score - b.score))
 
   return resultsWithScores.map((item) => item.result)
+}
+
+export interface SourceVerificationPolicy {
+  enabled: boolean
+  blockedDomains?: string[]
+  minimumCredibilityScore?: number
+  autoFilterLowCredibility?: boolean
+}
+
+/**
+ * Apply the host-configurable source policy through one framework-agnostic
+ * seam. UI settings use a 0-1 minimum score; legacy callers using 0-100 are
+ * accepted as-is.
+ */
+export function applySourceVerificationPolicy(
+  results: SearchResult[],
+  policy: SourceVerificationPolicy | undefined
+): SearchResult[] {
+  if (!policy?.enabled || results.length === 0) return results
+
+  const blockedDomains = (policy.blockedDomains ?? [])
+    .map(normalizeSearchDomain)
+    .filter((domain): domain is string => domain !== null)
+
+  let filtered = results.filter((result) => {
+    if (blockedDomains.length === 0) return true
+    const domain = extractDomain(result.url)
+    return !blockedDomains.some((blocked) => domain === blocked || domain.endsWith(`.${blocked}`))
+  })
+
+  if (policy.autoFilterLowCredibility) {
+    const configuredMinimum = policy.minimumCredibilityScore ?? 0
+    const minimumScore = configuredMinimum <= 1 ? configuredMinimum * 100 : configuredMinimum
+    filtered = filtered.filter(
+      (result) => verifySource(result.url).credibilityScore >= minimumScore
+    )
+  }
+
+  return sortByCredibility(filtered, "desc")
 }
 
 export function calculateSourceDiversity(results: SearchResult[]): number {

@@ -19,6 +19,7 @@ type SessionSourceLabel =
   | "document"
   | "tool"
   | "anthropic"
+  | "cogniaWeb"
   | "twinRag"
   | "twinStyle"
   | "agentKnowledge"
@@ -39,6 +40,7 @@ interface SessionSource {
 const HTTP_URL_RE = /^https?:\/\//i
 
 function sourceLabel(origin: SourcesPartItem["origin"]): SessionSourceLabel {
+  if (origin === "cognia-web") return "cogniaWeb"
   if (origin === "twin-rag") return "twinRag"
   if (origin === "twin-style") return "twinStyle"
   if (origin === "agent-knowledge-base") return "agentKnowledge"
@@ -52,7 +54,9 @@ function sourceKind(source: SourcesPartItem): SessionSourceKind {
   if (
     source.url &&
     HTTP_URL_RE.test(source.url) &&
-    (source.origin === "anthropic" || source.origin === "footnote")
+    (source.origin === "anthropic" ||
+      source.origin === "cognia-web" ||
+      source.origin === "footnote")
   ) {
     return "web"
   }

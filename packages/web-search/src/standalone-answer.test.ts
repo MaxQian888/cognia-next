@@ -85,6 +85,29 @@ describe("buildAnswerPrompt", () => {
     ])
     expect(prompt).toContain("[1] T")
   })
+
+  it("sanitizes the query and frames sanitized source text as untrusted", () => {
+    const sanitizeText = jest.fn((text: string) => text.replaceAll("secret@example.com", "[email]"))
+    const wrapUntrustedContent = jest.fn((text: string) => `[UNTRUSTED]\n${text}`)
+    const prompt = buildAnswerPrompt(
+      "contact secret@example.com",
+      [
+        {
+          title: "secret@example.com",
+          url: "https://example.com/?owner=secret@example.com",
+          content: "Email secret@example.com",
+          score: 1,
+        },
+      ],
+      { sanitizeText, wrapUntrustedContent }
+    )
+
+    expect(prompt).toContain("Question: contact [email]")
+    expect(prompt).toContain("[UNTRUSTED]")
+    expect(prompt).not.toContain("secret@example.com")
+    expect(sanitizeText).toHaveBeenCalledTimes(2)
+    expect(wrapUntrustedContent).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("runStandaloneSearchAnswer", () => {
@@ -137,6 +160,37 @@ describe("runStandaloneSearchAnswer", () => {
       "hi",
       expect.objectContaining({ maxResults: 5, includeAnswer: true })
     )
+  })
+
+  it("routes every model prompt through the host PII and untrusted-content gates", async () => {
+    const searchImpl = jest.fn().mockResolvedValue({
+      ...searchResponse,
+      results: [
+        {
+          title: "Private secret@example.com",
+          url: "https://example.com/private",
+          content: "Contact secret@example.com",
+          score: 1,
+        },
+      ],
+    })
+    const generateTextImpl = jest.fn().mockResolvedValue({ text: "answer" })
+    const sanitizeText = jest.fn((text: string) => text.replaceAll("secret@example.com", "[email]"))
+    const wrapUntrustedContent = jest.fn((text: string) => `[UNTRUSTED]\n${text}`)
+
+    await runStandaloneSearchAnswer(
+      {
+        query: "find secret@example.com",
+        searchImpl: searchImpl as never,
+        generateTextImpl: generateTextImpl as never,
+      },
+      { ...deps, sanitizeText, wrapUntrustedContent }
+    )
+
+    const call = generateTextImpl.mock.calls[0][0] as { prompt: string }
+    expect(call.prompt).toContain("Question: find [email]")
+    expect(call.prompt).toContain("[UNTRUSTED]")
+    expect(call.prompt).not.toContain("secret@example.com")
   })
 
   it("falls back to the provider-native answer when the model returns empty text", async () => {

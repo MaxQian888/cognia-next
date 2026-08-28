@@ -12,6 +12,18 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/components/chat/message-parts/sources-part", () => ({
+  SourcesPart: ({ part }: { part: { sources: Array<{ title: string; url?: string }> } }) => (
+    <div data-testid="mock-sources-part">
+      {part.sources.map((source) => (
+        <a key={source.title} href={source.url}>
+          {source.title}
+        </a>
+      ))}
+    </div>
+  ),
+}))
+
 // Mock TeamComposer + TeamMentionChips so we don't pull in the heavy real
 // composer; we still verify wiring (props received, callbacks invoked).
 jest.mock("./team-composer", () => {
@@ -34,6 +46,25 @@ jest.mock("./team-composer", () => {
               onClick={() => (props.onSend as (raw: string) => Promise<void>)("@codex hi")}
             >
               send
+            </button>
+            <button
+              data-testid="mock-send-web"
+              type="button"
+              onClick={() =>
+                (
+                  props.onSend as (
+                    raw: string,
+                    metadata: { webSearchContext: { provider: string; results: unknown[] } }
+                  ) => Promise<void>
+                )("@codex web", {
+                  webSearchContext: {
+                    provider: "tavily",
+                    results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+                  },
+                })
+              }
+            >
+              send web
             </button>
           </div>
         )
@@ -145,6 +176,32 @@ const targets: MentionTarget[] = [
 ]
 
 describe("AgentTeamChat unread divider", () => {
+  it("renders persisted pre-search results as reusable clickable sources", () => {
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[
+          makeMessage("web", {
+            metadata: {
+              webSearchContext: {
+                provider: "tavily",
+                results: [
+                  { title: "Search source", url: "https://a.test", content: "a", score: 1 },
+                ],
+              },
+            },
+          }),
+        ]}
+      />
+    )
+
+    expect(screen.getByTestId("mock-sources-part")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Search source" })).toHaveAttribute(
+      "href",
+      "https://a.test"
+    )
+  })
+
   it("uses the matching agent portrait for virtual-agent messages", () => {
     render(
       <AgentTeamChat
@@ -261,6 +318,18 @@ describe("AgentTeamChat", () => {
     render(<AgentTeamChat teamId="t1" messages={[]} mentionables={targets} onSend={onSend} />)
     fireEvent.click(screen.getByTestId("mock-send"))
     expect(onSend).toHaveBeenCalledWith("@codex hi")
+  })
+
+  it("forwards pre-search metadata through the team chat surface", () => {
+    const onSend = jest.fn()
+    render(<AgentTeamChat teamId="t1" messages={[]} mentionables={targets} onSend={onSend} />)
+    fireEvent.click(screen.getByTestId("mock-send-web"))
+    expect(onSend).toHaveBeenCalledWith("@codex web", {
+      webSearchContext: {
+        provider: "tavily",
+        results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+      },
+    })
   })
 
   it("flags the composer as streaming when isSending is true", () => {

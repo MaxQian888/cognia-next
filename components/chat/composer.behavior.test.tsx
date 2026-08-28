@@ -17,7 +17,10 @@ jest.mock("@/lib/slash-commands/custom", () => ({
 }))
 jest.mock("@/lib/search/search-service", () => ({
   search: jest.fn(),
-  formatSearchResultsForLLM: jest.fn(),
+  formatSearchResultsForLLM: jest.fn(() => "Search result body"),
+}))
+jest.mock("@/lib/search/configured-search", () => ({
+  searchWithAppSettings: jest.fn(),
 }))
 jest.mock("@/lib/shell/exec", () => ({
   executeShell: jest.fn(),
@@ -46,12 +49,13 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import { useChatStore } from "@/stores/chat"
+import { selectComposerWebSearchOn, useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { setDraft } from "@/lib/db/chat-drafts"
 import { recordInput } from "@/lib/db/chat-input-history"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { searchWithAppSettings } from "@/lib/search/configured-search"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -207,5 +211,117 @@ describe("composerBehavior — persistDrafts", () => {
     setBehavior({})
     const { ta } = renderComposer(mkSession({ id: "ses_draft_on" }))
     await waitFor(() => expect(ta.value).toBe("saved draft text"))
+  })
+})
+
+describe("composer web pre-search", () => {
+  it("uses the configured executor, frames results as untrusted, and stages clickable sources", async () => {
+    const session = mkSession({ id: "ses_web" })
+    // `preSearch` is the whole verdict, not just the master switch: it also
+    // needs web tools on and a configured provider.
+    useSettingsStore.setState({
+      settings: {
+        searchEnabled: true,
+        webTools: { enabled: true },
+        defaultSearchProvider: "tavily",
+        searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "tvly" } },
+      } as never,
+    })
+    jest.mocked(searchWithAppSettings).mockResolvedValue({
+      query: "latest Cognia",
+      provider: "tavily",
+      results: [
+        {
+          title: "Cognia docs",
+          url: "https://example.com/docs",
+          content: "A useful result",
+          score: 0.8,
+        },
+      ],
+      responseTime: 10,
+    })
+    useChatStore.getState().setWebSearchOnForNextSend(true, session.id)
+    const onSend = jest.fn(async () => undefined)
+    const { ta } = renderComposer(session, onSend)
+
+    fireEvent.change(ta, { target: { value: "latest Cognia" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+
+    await waitFor(() => expect(searchWithAppSettings).toHaveBeenCalledWith("latest Cognia"))
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith(
+        expect.stringContaining("[Untrusted web content below"),
+        [],
+        null,
+        {
+          webSearchContext: {
+            provider: "tavily",
+            results: [
+              {
+                title: "Cognia docs",
+                url: "https://example.com/docs",
+                content: "A useful result",
+                score: 0.8,
+              },
+            ],
+          },
+        }
+      )
+    )
+  })
+
+  it("does not run a previously armed pre-search after web tools are turned off", async () => {
+    // The master switch is still on and a provider is still configured — only
+    // the `webTools` kill switch flipped. Re-deriving just `searchEnabled` let
+    // an armed toggle reach the network after the user said no.
+    const session = mkSession({ id: "ses_web_killswitch" })
+    useSettingsStore.setState({
+      settings: {
+        searchEnabled: true,
+        webTools: { enabled: false },
+        defaultSearchProvider: "tavily",
+        searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "tvly" } },
+      } as never,
+    })
+    useChatStore.getState().setWebSearchOnForNextSend(true, session.id)
+    const onSend = jest.fn(async () => undefined)
+    const { ta } = renderComposer(session, onSend)
+
+    fireEvent.change(ta, { target: { value: "latest Cognia" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    expect(searchWithAppSettings).not.toHaveBeenCalled()
+  })
+
+  it("does not run a previously armed pre-search with no configured provider", async () => {
+    const session = mkSession({ id: "ses_web_noprovider" })
+    useSettingsStore.setState({
+      settings: { searchEnabled: true, webTools: { enabled: true } } as never,
+    })
+    useChatStore.getState().setWebSearchOnForNextSend(true, session.id)
+    const onSend = jest.fn(async () => undefined)
+    const { ta } = renderComposer(session, onSend)
+
+    fireEvent.change(ta, { target: { value: "latest Cognia" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    expect(searchWithAppSettings).not.toHaveBeenCalled()
+  })
+
+  it("does not run a previously armed pre-search after the setting is disabled", async () => {
+    const session = mkSession({ id: "ses_web_disabled" })
+    useSettingsStore.setState({ settings: { searchEnabled: false } as never })
+    useChatStore.getState().setWebSearchOnForNextSend(true, session.id)
+    const onSend = jest.fn(async () => undefined)
+    const { ta } = renderComposer(session, onSend)
+
+    fireEvent.change(ta, { target: { value: "latest Cognia" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    expect(searchWithAppSettings).not.toHaveBeenCalled()
+    expect(selectComposerWebSearchOn(useChatStore.getState(), session.id)).toBe(false)
   })
 })
