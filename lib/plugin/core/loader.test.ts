@@ -233,6 +233,7 @@ describe("PluginLoader", () => {
         path: entry.path,
         source: "builtin",
         status: "installed",
+        config: {},
       }
 
       const first = await loader.load(plugin)
@@ -258,6 +259,7 @@ describe("PluginLoader", () => {
         path: entry.path,
         source: "builtin",
         status: "installed",
+        config: {},
       })
 
       // Node hosts cannot parse the chunk's root-relative URL, so the fetcher

@@ -73,7 +73,7 @@ export function detectConsoleEnvironment(): ConsoleEnvironment {
     return { browser: true, tty: false, noColor: false, forceColor: false }
   }
   const proc = typeof process !== "undefined" ? process : undefined
-  const env = proc?.env ?? {}
+  const env: Readonly<Record<string, string | undefined>> = proc?.env ?? {}
   const force = env.FORCE_COLOR ?? env.CLICOLOR_FORCE
   return {
     browser: false,

@@ -61,6 +61,7 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     // reachable from a unit test.
     localSuggestEnabled: true,
     aiComplete: null,
+    agentComplete: null,
     handleSubmit: jest.fn(),
     handleHistoryPush: jest.fn(),
     listDir: undefined,

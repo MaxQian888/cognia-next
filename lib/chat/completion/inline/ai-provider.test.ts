@@ -190,7 +190,7 @@ describe("createAgentCompletionProvider", () => {
     // can still pass them; the factory must win.
     const p = createAgentCompletionProvider({
       complete,
-      ...({ manual: false, source: "ai" } as Record<string, never>),
+      ...({ manual: false, source: "ai" } as unknown as Record<string, never>),
     })
     expect(p.manual).toBe(true)
   })

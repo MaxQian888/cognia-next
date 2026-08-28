@@ -1,3 +1,4 @@
+import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import type { ExternalAgentEvent } from "@/types/agent/external-agent"
 
 const calls: Array<{ command: string; payload: unknown }> = []
@@ -86,15 +87,18 @@ describe("host support", () => {
     restoreDeps = __setRemoteHostConfigDepsForTests({
       hasLocalAuthority: () => false,
       isRemoteHostActive: () => true,
-      activeHostFeatureManifest: () => ({
-        version: 1,
-        features: {
-          "external-agent.host-configs": {
-            version: 1,
-            operations: ["external_agent_config_list"],
+      // Only the fields the gate reads; the rest of the manifest is
+      // irrelevant here and would be noise.
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 1,
+          features: {
+            "external-agent.host-configs": {
+              version: 1,
+              operations: ["external_agent_config_list"],
+            },
           },
-        },
-      }),
+        }) as unknown as HostFeatureManifest,
     })
 
     await expect(

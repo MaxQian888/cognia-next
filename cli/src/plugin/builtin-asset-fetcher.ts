@@ -36,7 +36,12 @@ export const BUILTIN_ASSET_URL_PREFIX = "/_cognia/builtin-plugins/"
 const ASSET_ROOT_CANDIDATES = ["", "public"] as const
 
 export interface BuiltinAssetFetcherOptions {
-  env?: NodeJS.ProcessEnv
+  /**
+   * Not `NodeJS.ProcessEnv`: the app augments that with a required
+   * `NODE_ENV`, which every caller here would have to supply for the one
+   * variable this actually reads. `process.env` still satisfies it.
+   */
+  env?: Readonly<Record<string, string | undefined>>
   execPath?: string
   exists?: (candidate: string) => boolean
   readFile?: (file: string) => Buffer
