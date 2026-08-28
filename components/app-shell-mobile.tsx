@@ -50,6 +50,11 @@ import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { TeamMembersPanel } from "@/components/context-workbench/panels/team-members-panel"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
+import { ExternalAgentElicitationDialog } from "@/components/agent/external-agent/elicitation-dialog"
+import {
+  useExternalElicitationStore,
+  useSessionPendingElicitation,
+} from "@/stores/agent/external-elicitation-store"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
@@ -122,6 +127,7 @@ export function AppShellMobile() {
   const errorMessage = useChatStore((s) => s.errorMessage)
   const chatStatus = useChatStore((s) => s.status)
   const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
+  const pendingElicitation = useSessionPendingElicitation(activeSessionId)
 
   const loadSettings = useSettingsStore((s) => s.load)
   const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
@@ -739,6 +745,27 @@ export function AppShellMobile() {
         onRespond={(decision) =>
           pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
         }
+      />
+
+      {/* The question half of the same gate. A permission request already
+          reaches this shell for free (it rides the chat store's approvals),
+          but an elicitation carries a schema and has its own store, so it
+          needs its own mount or an external agent's question would be
+          answerable on desktop and invisible here. */}
+      <ExternalAgentElicitationDialog
+        request={pendingElicitation?.request ?? null}
+        onRespond={(response) => {
+          if (!pendingElicitation) return
+          useExternalElicitationStore
+            .getState()
+            .remove(pendingElicitation.chatSessionId, pendingElicitation.request.id)
+          // Same delivery as the desktop pane: the bridge knows whether this
+          // agent is in-process or on a paired host.
+          void import("@/lib/ai/agent/external/chat-decision-bridge").then(
+            ({ deliverExternalElicitation }) =>
+              deliverExternalElicitation(pendingElicitation, response)
+          )
+        }}
       />
 
       <MobileCommandPalette

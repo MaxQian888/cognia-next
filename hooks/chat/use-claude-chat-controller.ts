@@ -1713,9 +1713,21 @@ export function useClaudeChat() {
       // composer reflects the send immediately; the assistant reply is
       // appended from the manager result when it lands.
       if (manualExternal || delegation) {
-        const extAgentId = manualExternal
-          ? useAgentRuntimeStore.getState().externalAgentId
-          : delegation!.targetAgentId
+        // A configuration the paired HOST owns, when the composer points at one
+        // instead of at a locally configured agent. Only the manual lane can
+        // select one — a delegation rule names a local agent by id, and there
+        // is no rule syntax for "whatever the host is called this week".
+        const hostSelection = manualExternal
+          ? useAgentRuntimeStore.getState().externalHostConfig
+          : null
+        // The lane id. For a host run this is the configuration id, which is
+        // also the agent id the host mounts it under, so everything keyed by
+        // "which agent is this turn on" keeps working without a second field.
+        const extAgentId = hostSelection
+          ? hostSelection.configId
+          : manualExternal
+            ? useAgentRuntimeStore.getState().externalAgentId
+            : delegation!.targetAgentId
         if (!extAgentId) {
           // The optimistic user message is rolled back before the refusal:
           // nothing was sent, so it must not stay in the transcript.
@@ -1754,7 +1766,44 @@ export function useClaudeChat() {
         // the built-in (trusted, in-process) path when `chatFailurePolicy` is
         // "fallback"; under "strict" it surfaces the error like a manual run.
         const chatFailurePolicy = useExternalAgentStore.getState().chatFailurePolicy
+        /**
+         * Take down every decision surface this session's external agent owns.
+         *
+         * One helper for two call sites that must NOT be collapsed into one:
+         * the `finally` below runs after the whole turn, but the failure path
+         * has to clear the surface BEFORE the sidecar fallback re-issues the
+         * turn — `PaneApprovalGate` renders the first pending entry, so a dead
+         * external card left in the queue would hide the fallback turn's own
+         * approval behind a dialog nothing can answer, hanging that turn too.
+         * Idempotent, so running it twice costs nothing.
+         */
+        const releaseExternalDecisionSurfaces = async (): Promise<void> => {
+          const { releaseExternalApprovals, elicitationCancelResponse } =
+            await import("@/lib/ai/agent/external/chat-decision-bridge")
+          for (const requestId of releaseExternalApprovals(sessionId)) {
+            store.getState().clearApproval(requestId, sessionId)
+          }
+          const { useExternalElicitationStore: elicitations } =
+            await import("@/stores/agent/external-elicitation-store")
+          const stranded = elicitations.getState().clearSession(sessionId)
+          if (stranded.length === 0) return
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          const manager = getExternalAgentManager()
+          // Best effort: the adapter is usually already gone, which is why the
+          // question was stranded in the first place. Telling it the user
+          // walked away costs nothing and lets an agent that IS still
+          // listening stop waiting.
+          for (const entry of stranded) {
+            void manager
+              .respondToElicitation(entry.agentId, elicitationCancelResponse(entry))
+              .catch(() => undefined)
+          }
+        }
         const handleExternalFailure = async (message: string, error?: Error): Promise<void> => {
+          // Before the fallback re-issues this turn on the sidecar: the
+          // external agent is gone, so its card is dead and would sit in front
+          // of the fallback turn's own approval.
+          await releaseExternalDecisionSurfaces()
           // ADR-0127: the external rail streams through the per-session
           // coalescer, so a failure must drop any pending frame / debounced
           // write (a late rAF commit would resurrect the partial over the
@@ -1826,8 +1875,21 @@ export function useClaudeChat() {
           await applyInstantTitle(sessionId, displayContent)
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
+          const { executeOnRemoteHostAgent, remoteApprovalDecisionId } = hostSelection
+            ? await import("@/lib/ai/agent/external/remote-execute")
+            : { executeOnRemoteHostAgent: null, remoteApprovalDecisionId: null }
+          // The run id a host turn is addressed by. Captured here so the
+          // decision ids the event handler mints below refer to the same run
+          // the executor is about to start.
+          const remoteRunId = hostSelection
+            ? `rer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+            : null
           const { applyExternalAgentEventToParts } =
             await import("@/lib/ai/agent/external/event-to-parts")
+          const { registerExternalApproval, registerExternalElicitation } =
+            await import("@/lib/ai/agent/external/chat-decision-bridge")
+          const { useExternalElicitationStore } =
+            await import("@/stores/agent/external-elicitation-store")
 
           // Pre-allocate the assistant message so partial deltas land in it
           // without flickering the chat list. Parts start empty and grow as
@@ -1871,41 +1933,114 @@ export function useClaudeChat() {
           }
 
           chatTurnPerformance.markDispatched(sessionId)
-          const result = await executeOnExternalAgent(externalSendText, {
-            agentId: extAgentId,
-            workingDirectory: sendOptions.cwd,
-            // The composer's thinking level, which before this reached only the
-            // built-in runtime — on an external agent the control was silently
-            // inert. Both fields carry the same resolved precedence chain (IM
-            // override > session > bot > app default), and the adapter folds
-            // the value onto whatever ladder its model publishes.
-            //
-            // `requestedEffort` rather than `effort`: the latter has already
-            // been through the `modelSupportsEffort` gate against the SESSION's
-            // model, which this rail does not run — the external agent brings
-            // its own. Reading the gated field made the control inert again
-            // whenever the session happened to sit on a model that rejects the
-            // Anthropic `effort` parameter (Haiku, Sonnet 4.5), even though the
-            // agent about to run it honours the level fine.
-            ...(sendOptions.requestedEffort || sendOptions.effort
-              ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
-              : {}),
-            context: {
-              custom: {
-                additionalDirectories: sendOptions.additionalDirectories ?? [],
-              },
-            },
-            onEvent: (event) => {
-              const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
-              if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
-              const nextParts = applyExternalAgentEventToParts(assistantParts, event)
-              if (nextParts !== assistantParts) {
-                assistantParts = nextParts as UIMessage["parts"]
-                chatTurnPerformance.markFirstResponse(sessionId)
-                writeAssistant()
-              }
-            },
-          })
+          /**
+           * One event handler for both lanes.
+           *
+           * `applyExternalAgentEventToParts` deliberately does not render a
+           * permission request — its contract is that the caller routes it
+           * "through dedicated UI channels (e.g. the existing pendingApprovals
+           * store)". Nothing here did, so an external agent that asked for
+           * permission on the chat surface got no dialog and no answer, and the
+           * turn stalled until the adapter timed out. Pi hits this on its
+           * ordinary path: its native edit/write/bash calls are intercepted
+           * precisely so they can be asked about (ADR-0119).
+           *
+           * A host run mints a `remoteDecisionId` alongside, which is the only
+           * thing that differs: the card, the store and the dialog are the same
+           * ones the local lane uses.
+           */
+          const handleExternalEvent = (
+            event: import("@/types/agent/external-agent").ExternalAgentEvent
+          ) => {
+            const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
+            if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
+            if (event.type === "permission_request") {
+              const responseRequestId = event.request?.requestId || event.request?.id
+              const approval = registerExternalApproval({
+                agentId: extAgentId,
+                chatSessionId: sessionId,
+                event,
+                ...(remoteRunId && remoteApprovalDecisionId && responseRequestId
+                  ? { remoteDecisionId: remoteApprovalDecisionId(remoteRunId, responseRequestId) }
+                  : {}),
+              })
+              if (approval) store.getState().pushApproval(approval)
+              return
+            }
+            // The other half of the same gap: a Pi `confirm` / `select` /
+            // `input` / `editor` arrives as an elicitation, and it blocks the
+            // agent exactly like a permission request does. It rides its own
+            // store rather than `pendingApprovals` because it carries a
+            // schema, not a tool call.
+            if (event.type === "elicitation_request") {
+              const pending = registerExternalElicitation({
+                agentId: extAgentId,
+                chatSessionId: sessionId,
+                event,
+                ...(remoteRunId && remoteApprovalDecisionId && event.request?.id
+                  ? { remoteDecisionId: remoteApprovalDecisionId(remoteRunId, event.request.id) }
+                  : {}),
+              })
+              if (pending) useExternalElicitationStore.getState().push(pending)
+              return
+            }
+            // The agent withdrew or already resolved the question — take the
+            // dialog down rather than leaving one nothing is waiting on.
+            if (event.type === "elicitation_complete") {
+              useExternalElicitationStore.getState().remove(sessionId, event.elicitationId)
+              return
+            }
+            const nextParts = applyExternalAgentEventToParts(assistantParts, event)
+            if (nextParts !== assistantParts) {
+              assistantParts = nextParts as UIMessage["parts"]
+              chatTurnPerformance.markFirstResponse(sessionId)
+              writeAssistant()
+            }
+          }
+
+          // Two executors, one contract. `executeOnRemoteHostAgent` presents
+          // the same `(prompt, { onEvent }) => ExternalAgentResult | null`
+          // shape over the companion plane, so everything downstream of this
+          // call — the coalescer, the parts, the failure and fallback paths —
+          // is shared rather than duplicated per lane.
+          const result =
+            hostSelection && executeOnRemoteHostAgent && remoteRunId
+              ? await executeOnRemoteHostAgent(externalSendText, {
+                  stamp: {
+                    configId: hostSelection.configId,
+                    revision: hostSelection.revision,
+                    lifecycleGeneration: hostSelection.lifecycleGeneration,
+                  },
+                  chatSessionId: sessionId,
+                  newRunId: () => remoteRunId,
+                  onEvent: handleExternalEvent,
+                })
+              : await executeOnExternalAgent(externalSendText, {
+                  agentId: extAgentId,
+                  workingDirectory: sendOptions.cwd,
+                  // The composer's thinking level, which before this reached only the
+                  // built-in runtime — on an external agent the control was silently
+                  // inert. Both fields carry the same resolved precedence chain (IM
+                  // override > session > bot > app default), and the adapter folds
+                  // the value onto whatever ladder its model publishes.
+                  //
+                  // `requestedEffort` rather than `effort`: the latter has already
+                  // been through the `modelSupportsEffort` gate against the SESSION's
+                  // model, which this rail does not run — the external agent brings
+                  // its own. Reading the gated field made the control inert again
+                  // whenever the session happened to sit on a model that rejects the
+                  // Anthropic `effort` parameter (Haiku, Sonnet 4.5), even though the
+                  // agent about to run it honours the level fine.
+                  ...(sendOptions.requestedEffort || sendOptions.effort
+                    ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
+                    : {}),
+                  context: {
+                    custom: {
+                      additionalDirectories: sendOptions.additionalDirectories ?? [],
+                    },
+                  },
+                  onEvent: handleExternalEvent,
+                })
 
           sealCoalescer()
 
@@ -1996,6 +2131,13 @@ export function useClaudeChat() {
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
+        } finally {
+          // However this turn ended, the adapter's waiters are gone. An entry
+          // left behind would be an unanswerable dialog pinned over the pane —
+          // the approval dialog has no close button, because on the SDK path
+          // closing it would orphan a live promise. Released here rather than
+          // on each exit path so a throw between them cannot skip it.
+          await releaseExternalDecisionSurfaces()
         }
         return
       }
@@ -2476,6 +2618,81 @@ export function useClaudeChat() {
           resolveApproval(approval.sessionId, approval.requestId, {
             decision: decision === "deny" ? "deny" : "allow",
           })
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      }
+      // External agent approvals. Same in-renderer contract as the two
+      // branches above: there is no sidecar-side waiter, so these ids must
+      // never reach `approveTool`. The answer goes to the adapter that asked,
+      // addressed by the agent + session recorded when the request arrived —
+      // not by the pane the user happens to be looking at now.
+      //
+      // `allow_always` also stops here rather than falling through: the code
+      // below writes `toolRules` / `alwaysAllowTools`, both of which are read
+      // by the SIDECAR. An external agent never talks to it, so the grant
+      // would be recorded and then ignored forever, and the agent would keep
+      // asking. The remembered choice travels in the agent's own protocol
+      // instead (see `toPermissionResponse`).
+      {
+        const {
+          isExternalAgentApprovalRequestId,
+          resolveExternalApproval,
+          getExternalApprovalTarget,
+        } = await import("@/lib/ai/agent/external/chat-decision-bridge")
+        if (isExternalAgentApprovalRequestId(approval.requestId)) {
+          try {
+            // Where the agent actually is decides how the answer travels. A
+            // host-run agent has no adapter in this shell to hand a response
+            // to, so it goes back as an RPC; everything else about the entry —
+            // the card, the decision, the bookkeeping below — is the same.
+            const remoteDecisionId = getExternalApprovalTarget(approval.requestId)?.remoteDecisionId
+            const respond = remoteDecisionId
+              ? async () => {
+                  const { resolveRemotePermission } =
+                    await import("@/lib/ai/agent/external/remote-run-client")
+                  const outcome = await resolveRemotePermission(remoteDecisionId, decision)
+                  // `wrong-device` cannot happen for the client that started
+                  // the run, and `unknown` means the host already decided (the
+                  // 120s auto-deny, or the run settled). Either way there is
+                  // nothing left to wait for, so the card comes down.
+                  if (!outcome.resolved && outcome.reason === "wrong-device") {
+                    throw new Error("This device is not the one that was asked.")
+                  }
+                }
+              : async (
+                  agentId: string,
+                  agentSessionId: string,
+                  response: import("@/types/agent/external-agent").AcpPermissionResponse
+                ) => {
+                  const { getExternalAgentManager } =
+                    await import("@/lib/ai/agent/external/manager")
+                  await getExternalAgentManager().respondToPermission(
+                    agentId,
+                    agentSessionId,
+                    response
+                  )
+                }
+            const answered = await resolveExternalApproval(approval.requestId, decision, respond)
+            // An unknown id means the turn already released it (the adapter is
+            // gone). Clear the card rather than leaving a dialog the user
+            // cannot dismiss.
+            if (answered) await recordChatToolApprovalDecision(approval, decision)
+          } catch (error) {
+            // Leave the approval mounted so the operator can retry; the agent
+            // is still waiting.
+            store.getState().setSessionDiagnostic(
+              approval.sessionId,
+              toDiagnostic(error, {
+                source: "external-agent",
+                meta: {
+                  sessionId: approval.sessionId,
+                  extra: { requestId: approval.requestId },
+                },
+              })
+            )
+            return
+          }
           store.getState().clearApproval(approval.requestId, approval.sessionId)
           return
         }

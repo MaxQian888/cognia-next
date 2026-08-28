@@ -13,10 +13,15 @@ import { useCallback, type ReactNode, type Ref } from "react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { ChatPane } from "./chat-view"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
+import { ExternalAgentElicitationDialog } from "@/components/agent/external-agent/elicitation-dialog"
 import type { ComposerHandle, ComposerTurnMetadata } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
+import {
+  useExternalElicitationStore,
+  useSessionPendingElicitation,
+} from "@/stores/agent/external-elicitation-store"
 import type {
   ApprovalDecision,
   Character,
@@ -113,6 +118,39 @@ function PaneApprovalGate({
       }}
     />
   )
+}
+
+/**
+ * Inline, session-scoped question gate for one pane.
+ *
+ * The sibling of `PaneApprovalGate`, and a separate dialog for the same reason
+ * the settings page keeps them apart: an approval grants a capability and
+ * answers allow / deny / always, while an elicitation collects a VALUE and has
+ * no "always" to offer.
+ *
+ * The response goes straight to the manager rather than up through a prop:
+ * unlike an approval it has no settings, ruleset or receipt side effects to
+ * coordinate, so threading it through every shell that renders this group
+ * would buy nothing.
+ */
+function PaneElicitationGate({ sessionId }: { sessionId: string }) {
+  const pending = useSessionPendingElicitation(sessionId)
+  const respond = useCallback(
+    (response: import("@/types/agent/external-agent").AcpElicitationResponse) => {
+      if (!pending) return
+      // Cleared first: the dialog calls back exactly once per request, and
+      // leaving it mounted while the answer is in flight would let a second
+      // click answer the same question twice.
+      useExternalElicitationStore.getState().remove(sessionId, pending.request.id)
+      // Where the agent is decides how the answer travels; the dialog does not
+      // need to know, so the branch lives in the bridge.
+      void import("@/lib/ai/agent/external/chat-decision-bridge").then(
+        ({ deliverExternalElicitation }) => deliverExternalElicitation(pending, response)
+      )
+    },
+    [pending, sessionId]
+  )
+  return <ExternalAgentElicitationDialog request={pending?.request ?? null} onRespond={respond} />
 }
 
 export function ChatPaneGroup({
@@ -235,13 +273,17 @@ export function ChatPaneGroup({
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
             {renderPane(activeSessionId, true)}
             {activeSessionId && (
-              <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
+              <>
+                <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
+                <PaneElicitationGate sessionId={activeSessionId} />
+              </>
             )}
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
             {renderPane(effectiveSplitId, false, undefined, () => setSplitSessionId(null))}
             <PaneApprovalGate sessionId={effectiveSplitId} onRespond={respondToApproval} />
+            <PaneElicitationGate sessionId={effectiveSplitId} />
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
@@ -252,7 +294,10 @@ export function ChatPaneGroup({
             splitTargetId ? () => setSplitSessionId(splitTargetId) : undefined
           )}
           {activeSessionId && (
-            <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
+            <>
+              <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
+              <PaneElicitationGate sessionId={activeSessionId} />
+            </>
           )}
         </div>
       )}

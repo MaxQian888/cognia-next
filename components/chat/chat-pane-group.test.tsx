@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 // ── Mocks ────────────────────────────────────────────────────────────────
@@ -19,6 +19,22 @@ jest.mock("./tool-approval-dialog", () => ({
     approvalRenders.push(props)
     return <div data-testid="approval" />
   },
+}))
+
+const elicitationRenders: Array<{ request: unknown; onRespond: (r: unknown) => void }> = []
+jest.mock("@/components/agent/external-agent/elicitation-dialog", () => ({
+  ExternalAgentElicitationDialog: (props: {
+    request: unknown
+    onRespond: (r: unknown) => void
+  }) => {
+    elicitationRenders.push(props)
+    return props.request ? <div data-testid="elicitation" /> : null
+  },
+}))
+
+const respondToElicitation = jest.fn(async () => undefined)
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: () => ({ respondToElicitation }),
 }))
 
 // Resizable primitives → passthrough divs so the split layout renders in jsdom.
@@ -45,6 +61,7 @@ jest.mock("@/stores/chat", () => ({
 }))
 
 import { ChatPaneGroup } from "./chat-pane-group"
+import { useExternalElicitationStore } from "@/stores/agent/external-elicitation-store"
 
 const sessions = [
   { id: "a", title: "Alpha" },
@@ -71,6 +88,9 @@ function makeProps(over: Partial<Parameters<typeof ChatPaneGroup>[0]> = {}) {
 beforeEach(() => {
   paneRenders.length = 0
   approvalRenders.length = 0
+  elicitationRenders.length = 0
+  respondToElicitation.mockClear()
+  useExternalElicitationStore.setState({ bySession: {} })
   for (const k of Object.keys(pendingBySession)) delete pendingBySession[k]
   chatState.activeSessionId = "a"
   chatState.openSessionIds = ["a", "b"]
@@ -199,6 +219,45 @@ describe("ChatPaneGroup", () => {
     expect(
       approvalRenders.some((r) => (r.approval as { requestId: string })?.requestId === "r1")
     ).toBe(true)
+  })
+
+  it("renders an elicitation gate scoped to the focused session", () => {
+    useExternalElicitationStore.getState().push({
+      chatSessionId: "a",
+      agentId: "agent-a",
+      request: { id: "q1", mode: "form", message: "Proceed?", raw: {} },
+    })
+    render(<ChatPaneGroup {...makeProps()} />)
+    expect(elicitationRenders.some((r) => (r.request as { id: string })?.id === "q1")).toBe(true)
+  })
+
+  // A question raised in the background pane must not open a dialog over the
+  // focused one — the user would answer a question they never saw asked.
+  it("does not show another session's question in this pane", () => {
+    useExternalElicitationStore.getState().push({
+      chatSessionId: "b",
+      agentId: "agent-a",
+      request: { id: "q-other", mode: "form", message: "Proceed?", raw: {} },
+    })
+    render(<ChatPaneGroup {...makeProps()} />)
+    expect(screen.queryByTestId("elicitation")).toBeNull()
+  })
+
+  it("answers the agent that asked and takes the dialog down", async () => {
+    useExternalElicitationStore.getState().push({
+      chatSessionId: "a",
+      agentId: "agent-z",
+      request: { id: "q1", mode: "form", message: "Proceed?", raw: {} },
+    })
+    render(<ChatPaneGroup {...makeProps()} />)
+    const rendered = elicitationRenders.find((r) => (r.request as { id: string })?.id === "q1")!
+    const answer = { requestId: "q1", action: "accept" as const, content: { ok: true } }
+    await act(async () => rendered.onRespond(answer))
+
+    expect(respondToElicitation).toHaveBeenCalledWith("agent-z", answer)
+    // Cleared before the answer is in flight, so a second click cannot answer
+    // the same question twice.
+    expect(useExternalElicitationStore.getState().bySession.a).toBeUndefined()
   })
 
   it("keeps a compact exit action when split view is open", () => {

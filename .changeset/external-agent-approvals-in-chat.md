@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix external agents hanging in chat when they block on the user. On the Composer surface neither a permission request nor a question from an external agent was ever surfaced: the event stream deliberately leaves both for a dedicated UI channel, and nothing routed them there, so no dialog appeared, no answer was sent, and the turn stalled until the adapter timed out — the only working decision UI lived on the External Agents settings page. Pi hit this on its ordinary path, because its native `edit`/`write`/`bash` calls are intercepted precisely so they can be asked about, and its `confirm`/`select`/`input`/`editor` calls arrive as questions. Permission requests now open the same approval dialog as built-in tools, questions open the same form the settings page uses, and each answer is routed back to the agent that asked. "Always allow" is recorded in the agent's own protocol rather than in the sidecar rules an external agent never reads; an unanswered question is cancelled rather than declined when the turn ends; and a stale decision is cleared so it can no longer hide a later one.
