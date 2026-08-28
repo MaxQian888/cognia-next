@@ -35,6 +35,13 @@ export const HOST_FEATURE_IDS = [
   "session.thread-handoff",
   "connectors.inbox-relay",
   "workflow.execution",
+  // Host-owned external-agent configurations. Its presence is what tells a
+  // browser that this host can BE the authority for an external agent — that
+  // it holds the head/revision store, not just a process it was handed a
+  // config blob for. A client that cannot see this feature must not offer
+  // remote external agents at all; falling back to sending a whole config per
+  // turn is exactly the arrangement the store exists to replace.
+  "external-agent.host-configs",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -231,6 +238,35 @@ export function buildLocalHostFeatureManifest({
     features["session.state-sync"] = {
       version: 1,
       operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+    }
+    // Advertised on both hosts that can actually spawn a process. The
+    // operations are named individually rather than implied by the feature id
+    // so a host that ships the store but not yet the reconcile command is
+    // describable — `supportsHostFeatureOperation` is per-operation for
+    // exactly this reason.
+    features["external-agent.host-configs"] = {
+      version: 1,
+      operations: [
+        "external_agent_config_list",
+        "external_agent_config_get",
+        "external_agent_config_create",
+        "external_agent_config_update",
+        "external_agent_config_delete",
+        "external_agent_config_reconcile",
+        // Admission is part of the same feature rather than its own: a host
+        // that stores configurations but cannot admit a run against one is not
+        // usefully different from a host that has neither, and splitting them
+        // would let a client believe it had found a runnable target.
+        "external_agent_admit_run",
+        "external_agent_release_run",
+        // The run plane itself. Named here so a client can gate on it: a host
+        // that shipped the store before the run commands would otherwise
+        // answer a turn with a raw "unknown command" instead of the structured
+        // "this host is too old" every sibling operation gets.
+        "external_agent_run_turn",
+        "external_agent_cancel_run",
+        "external_agent_resolve_decision",
+      ],
     }
     // Lease-backed attach. Its presence is what tells a client that
     // `session_attach` understands `mode`, binds the attachment to a real

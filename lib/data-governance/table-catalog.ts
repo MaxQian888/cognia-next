@@ -138,6 +138,8 @@ export const CORE_TABLE_NAMES = [
   "executionRunEvents",
   "executionRunInterrupts",
   "executionRuns",
+  "externalAgentConfigHeads",
+  "externalAgentConfigRevisions",
   "externalIdentities",
   "feishuPrincipalBindRequests",
   "feishuPrincipals",
@@ -631,6 +633,12 @@ const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 /** Stores whose rows hold encrypted user content rather than ids and metadata. */
 const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "collabIssues",
+  // Host-owned external-agent configurations. Not `secret` — the credential
+  // VALUES live in the keyring and only opaque refs are stored here — but a
+  // revision still carries the command line, argv, environment variable names
+  // and endpoint URLs of a process this host will spawn.
+  "externalAgentConfigHeads",
+  "externalAgentConfigRevisions",
   "collabWorkspaces",
   "collabPlans",
   "collabRuns",

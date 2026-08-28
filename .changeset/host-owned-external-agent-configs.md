@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Add host-owned external-agent configurations, so a paired host can be the authority for an agent it runs rather than being handed a configuration blob per turn. Configurations are stored as a head plus an append-only revision log: a revision is immutable and can be leased by a running turn, updates compare-and-swap the head so two editors cannot silently overwrite each other, a delete tombstones rather than drops (an id is never reused), and a separate readiness generation moves only when the agent's ability to run changes — so renaming an agent no longer invalidates an in-flight run, while revoking its credential does. Configurations that cannot run are stored disabled with the reason instead of being refused, and an imported one drops the keyring references and consent records that belonged to the machine it came from. Six authenticated commands expose the store to paired clients, advertised through the host feature manifest so a client that cannot see the feature does not offer it, and the execution spec gains a version-3 binding that names where an external turn runs and against which configuration revision.

@@ -3428,6 +3428,25 @@ export interface AppSettings {
       starters?: boolean
       /** Follow-up suggestion chips after an assistant reply. Default ON. */
       followUps?: boolean
+      /**
+       * Fall back to one headless AGENT TURN when no renderer-visible API key
+       * resolves. Default OFF, and deliberately so.
+       *
+       * Both suggestion features above default ON, but they are built on
+       * `buildRendererLlmClient`, which needs an API key the user pasted into
+       * settings. On a Claude subscription — the app's primary auth mode, whose
+       * bearer never leaves the keyring / sidecar (ADR-0025) — that resolves to
+       * `null` and both features have always been silently inert. The agent
+       * turn works there, and for every external agent besides.
+       *
+       * It is opt-in because switching it on is a real cost change, not a
+       * repair: follow-ups fire automatically after EVERY assistant reply, so
+       * defaulting this ON would roughly double the turn count for every
+       * subscription user who never knew the feature existed. Users with a
+       * pasted key are unaffected either way — the cheap direct client is tried
+       * first and this never runs.
+       */
+      agentFallback?: boolean
     }
     /** Per-feature provider/model override for all three assistance calls. */
     model?: UtilityModelConfig

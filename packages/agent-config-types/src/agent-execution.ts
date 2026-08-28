@@ -261,6 +261,48 @@ export interface ResolvedAgentExecutionSpec extends AgentSdkResolvedExecutionSpe
 // ---- SendOptions projection -------------------------------------------------
 
 /**
+ * Where an external-agent turn actually runs (spec v3).
+ *
+ * The two arms are not two transports for one thing; they are two different
+ * authorities, and collapsing them is what makes a browser Composer unable to
+ * run an external agent at all:
+ *
+ *   - `local-external` — the renderer that owns the configuration also owns
+ *     the process. `agentId` addresses the in-memory manager, and nothing has
+ *     to be proven because nothing crossed a trust boundary.
+ *   - `remote-external` — a paired host owns the process, and the caller owns
+ *     nothing but a reference. So the reference has to be checkable: the host
+ *     admits the run only if `revision` is still its head AND
+ *     `lifecycleGeneration` still matches. The first proves the configuration
+ *     text has not changed under the turn; the second proves it is still
+ *     runnable (not disabled, credentials not revoked). Either alone lets
+ *     through a case the other catches.
+ *
+ * Absent means the turn is not an external one at all — it runs on the
+ * built-in sidecar, which is the pre-v3 behaviour and the safe default.
+ */
+export type AgentExternalBinding =
+  | { kind: "local-external"; agentId: string }
+  | {
+      kind: "remote-external"
+      /** The paired runtime target that will run it. */
+      targetId: string
+      /** Host-owned configuration id. Never chosen by the caller. */
+      configId: string
+      /** The immutable revision the caller read. */
+      revision: string
+      /** The readiness generation the caller read. */
+      lifecycleGeneration: number
+    }
+
+/** Type guard: does this binding cross a host boundary? */
+export function isRemoteExternalBinding(
+  binding: AgentExternalBinding | undefined
+): binding is Extract<AgentExternalBinding, { kind: "remote-external" }> {
+  return binding?.kind === "remote-external"
+}
+
+/**
  * The serialized projection of a {@link ResolvedAgentExecutionSpec} that rides
  * `SendOptions.execution` renderer → Rust (via the `extra` flatten) → sidecar.
  * The sidecar treats it as frozen: dispatch reads `runtimeAdapter` and never
@@ -268,7 +310,7 @@ export interface ResolvedAgentExecutionSpec extends AgentSdkResolvedExecutionSpe
  * credentials) are NOT here — they ride `SendOptions.env`.
  */
 export interface AgentExecutionSendSpec {
-  specVersion: 1 | 2
+  specVersion: 1 | 2 | 3
   executionFingerprint: string
   runtimeAdapter: AgentRuntimeAdapterId
   executionKind: "agent" | "completion"
@@ -299,6 +341,10 @@ export interface AgentExecutionSendSpec {
    * behaviour and the safe default.
    */
   composition?: AgentCompositionProjection
+  /**
+   * v3+. Where an external-agent turn runs. Absent on a built-in sidecar turn.
+   */
+  externalBinding?: AgentExternalBinding
 }
 
 /**
@@ -1170,16 +1216,63 @@ export function validateResolvedAgentExecutionSpec(
     : { ok: true, value: v as unknown as ResolvedAgentExecutionSpec }
 }
 
+/**
+ * Validate the v3 external binding.
+ *
+ * A remote binding is a claim about another machine's state, so every field is
+ * load-bearing and none may be defaulted: a missing `lifecycleGeneration` that
+ * silently became `0` would compare unequal to every real generation and turn
+ * a checkable admission into a permanent refusal, while a missing `revision`
+ * treated as "any" would remove the check entirely. Refusing the spec is the
+ * only safe reading of an incomplete one.
+ */
+function validateExternalBinding(binding: unknown, specVersion: unknown, errors: string[]): void {
+  if (binding === undefined) return
+  if (specVersion !== 3) {
+    errors.push("externalBinding requires specVersion 3")
+    return
+  }
+  if (!isRecord(binding)) {
+    errors.push("externalBinding must be an object")
+    return
+  }
+  if (binding.kind === "local-external") {
+    if (typeof binding.agentId !== "string" || binding.agentId.length === 0) {
+      errors.push("externalBinding.agentId must be a non-empty string")
+    }
+    return
+  }
+  if (binding.kind === "remote-external") {
+    for (const field of ["targetId", "configId", "revision"] as const) {
+      if (typeof binding[field] !== "string" || (binding[field] as string).length === 0) {
+        errors.push(`externalBinding.${field} must be a non-empty string`)
+      }
+    }
+    if (
+      typeof binding.lifecycleGeneration !== "number" ||
+      !Number.isInteger(binding.lifecycleGeneration) ||
+      binding.lifecycleGeneration < 1
+    ) {
+      errors.push("externalBinding.lifecycleGeneration must be a positive integer")
+    }
+    return
+  }
+  errors.push("externalBinding.kind must be local-external|remote-external")
+}
+
 export function validateAgentExecutionSendSpec(
   v: unknown
 ): ValidationResult<AgentExecutionSendSpec> {
   const errors: string[] = []
   if (!isRecord(v)) return { ok: false, errors: ["execution spec must be an object"] }
 
-  if (v.specVersion !== 1 && v.specVersion !== 2) errors.push("specVersion must be 1 or 2")
+  if (v.specVersion !== 1 && v.specVersion !== 2 && v.specVersion !== 3) {
+    errors.push("specVersion must be 1, 2 or 3")
+  }
   if (typeof v.executionFingerprint !== "string" || v.executionFingerprint.length === 0) {
     errors.push("executionFingerprint must be a non-empty string")
   }
+  validateExternalBinding(v.externalBinding, v.specVersion, errors)
   if (!RUNTIME_ADAPTERS.includes(v.runtimeAdapter as string)) {
     errors.push(`runtimeAdapter must be one of ${RUNTIME_ADAPTERS.join("|")}`)
   }

@@ -7,6 +7,7 @@ import {
   isKnownCanonicalAgentEventKind,
   upgradeResolvedAgentExecutionSpec,
   validateAgentExecutionPolicy,
+  isRemoteExternalBinding,
   validateAgentExecutionSendSpec,
   validateResolvedAgentExecutionSpec,
 } from "./agent-execution"
@@ -553,5 +554,106 @@ describe("upgradeResolvedAgentExecutionSpec", () => {
 
   it("RESOLVED_SPEC_VERSION is what new specs are emitted as", () => {
     expect(RESOLVED_SPEC_VERSION).toBe(2)
+  })
+})
+
+describe("v3 external binding", () => {
+  const v3 = (externalBinding: unknown) => ({
+    ...validSendSpec,
+    specVersion: 3,
+    externalBinding,
+  })
+
+  it("accepts a spec with no binding — that is a built-in sidecar turn", () => {
+    expect(validateAgentExecutionSendSpec({ ...validSendSpec, specVersion: 3 }).ok).toBe(true)
+  })
+
+  it("accepts a local binding", () => {
+    expect(validateAgentExecutionSendSpec(v3({ kind: "local-external", agentId: "a" })).ok).toBe(
+      true
+    )
+  })
+
+  it("accepts a complete remote binding", () => {
+    expect(
+      validateAgentExecutionSendSpec(
+        v3({
+          kind: "remote-external",
+          targetId: "host-1",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+        })
+      ).ok
+    ).toBe(true)
+  })
+
+  // A remote binding is a claim about another machine's state; an incomplete
+  // one cannot be repaired by a default. A missing generation defaulted to 0
+  // would never match a real one (permanent refusal); a missing revision read
+  // as "any" would delete the check.
+  it.each([
+    ["targetId", { configId: "eac_1", revision: "eacr_1", lifecycleGeneration: 1 }],
+    ["configId", { targetId: "h", revision: "eacr_1", lifecycleGeneration: 1 }],
+    ["revision", { targetId: "h", configId: "eac_1", lifecycleGeneration: 1 }],
+    ["lifecycleGeneration", { targetId: "h", configId: "eac_1", revision: "eacr_1" }],
+  ])("refuses a remote binding missing %s", (_field, partial) => {
+    const result = validateAgentExecutionSendSpec(v3({ kind: "remote-external", ...partial }))
+    expect(result.ok).toBe(false)
+  })
+
+  it.each([0, -1, 1.5, "2"])("refuses lifecycleGeneration %p", (generation) => {
+    expect(
+      validateAgentExecutionSendSpec(
+        v3({
+          kind: "remote-external",
+          targetId: "h",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: generation,
+        })
+      ).ok
+    ).toBe(false)
+  })
+
+  it("refuses an unknown binding kind", () => {
+    expect(validateAgentExecutionSendSpec(v3({ kind: "somewhere-else" })).ok).toBe(false)
+  })
+
+  // An older host reading a v3 field off a v1/v2 spec would act on a binding
+  // its peer never agreed to send.
+  it("refuses a binding on a pre-v3 spec", () => {
+    const result = validateAgentExecutionSendSpec({
+      ...validSendSpec,
+      specVersion: 2,
+      externalBinding: { kind: "local-external", agentId: "a" },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join()).toMatch(/requires specVersion 3/)
+  })
+
+  it("still accepts v1 and v2 specs unchanged", () => {
+    expect(validateAgentExecutionSendSpec({ ...validSendSpec, specVersion: 1 }).ok).toBe(true)
+    expect(validateAgentExecutionSendSpec(validSendSpec).ok).toBe(true)
+  })
+
+  it("refuses specVersion 4", () => {
+    expect(validateAgentExecutionSendSpec({ ...validSendSpec, specVersion: 4 }).ok).toBe(false)
+  })
+})
+
+describe("isRemoteExternalBinding", () => {
+  it("separates the two arms and tolerates absence", () => {
+    expect(isRemoteExternalBinding(undefined)).toBe(false)
+    expect(isRemoteExternalBinding({ kind: "local-external", agentId: "a" })).toBe(false)
+    expect(
+      isRemoteExternalBinding({
+        kind: "remote-external",
+        targetId: "h",
+        configId: "c",
+        revision: "r",
+        lifecycleGeneration: 1,
+      })
+    ).toBe(true)
   })
 })

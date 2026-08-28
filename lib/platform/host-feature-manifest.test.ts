@@ -416,3 +416,82 @@ describe("host feature manifest", () => {
     )
   })
 })
+
+describe("external-agent.host-configs", () => {
+  // The feature is what tells a browser this host can BE the authority for an
+  // external agent. A client that cannot see it must not offer remote external
+  // agents at all, so an unadvertised feature is a silently disabled surface.
+  it.each(["tauri", "headless"] as const)("is advertised on %s, which can spawn", (platform) => {
+    const feature = buildLocalHostFeatureManifest({ platform }).features[
+      "external-agent.host-configs"
+    ]
+    expect(feature?.version).toBe(1)
+    expect(feature?.operations).toEqual([
+      "external_agent_config_list",
+      "external_agent_config_get",
+      "external_agent_config_create",
+      "external_agent_config_update",
+      "external_agent_config_delete",
+      "external_agent_config_reconcile",
+      "external_agent_admit_run",
+      "external_agent_release_run",
+      "external_agent_run_turn",
+      "external_agent_cancel_run",
+      "external_agent_resolve_decision",
+    ])
+  })
+
+  // Admission and the run plane ride the same feature id. A host advertising
+  // the store without them would look runnable to a client and refuse every
+  // turn at send time — with an "unknown command" rather than a reason.
+  it("advertises admission alongside the store", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+    for (const operation of [
+      "external_agent_admit_run",
+      "external_agent_release_run",
+      "external_agent_run_turn",
+      "external_agent_cancel_run",
+      "external_agent_resolve_decision",
+    ]) {
+      expect(supportsHostFeatureOperation(manifest, "external-agent.host-configs", operation)).toBe(
+        true
+      )
+    }
+  })
+
+  // A thin client hosts no process, so it can hold no configuration authority.
+  it.each(["web", "mobile"] as const)("is absent on %s, which cannot spawn", (platform) => {
+    expect(
+      buildLocalHostFeatureManifest({ platform }).features["external-agent.host-configs"]
+    ).toBeUndefined()
+  })
+
+  // Per-operation rather than per-feature: a host that ships the store but not
+  // yet the reconcile command has to be describable.
+  it("answers per operation, not per feature", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
+    expect(
+      supportsHostFeatureOperation(
+        manifest,
+        "external-agent.host-configs",
+        "external_agent_config_create"
+      )
+    ).toBe(true)
+    expect(
+      supportsHostFeatureOperation(
+        manifest,
+        "external-agent.host-configs",
+        "external_agent_config_not_a_command"
+      )
+    ).toBe(false)
+  })
+
+  it("survives the wire — parse keeps the feature a client gates on", () => {
+    const parsed = parseHostFeatureManifest(
+      JSON.parse(JSON.stringify(buildLocalHostFeatureManifest({ platform: "headless" })))
+    )
+    expect(parsed?.features["external-agent.host-configs"]?.operations).toContain(
+      "external_agent_config_list"
+    )
+  })
+})
