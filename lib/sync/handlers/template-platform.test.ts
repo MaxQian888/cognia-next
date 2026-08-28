@@ -3,6 +3,7 @@ import {
   syncTemplateInstances,
   syncTemplatePackages,
 } from "./template-platform"
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
@@ -25,6 +26,7 @@ describe("template platform mobile sync", () => {
     expect((transport as { call: jest.Mock }).call).toHaveBeenCalledWith("sync_pull", {
       table,
       since: 3,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
     })
   })
 })

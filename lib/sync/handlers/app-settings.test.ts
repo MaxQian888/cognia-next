@@ -8,6 +8,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type { SyncDelta } from "../types"
 
 import { syncAppSettings, CROSS_PLATFORM_SETTING_KEYS } from "./app-settings"
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 
 function makeTransport(delta: SyncDelta<{ id: string }>): Transport {
   return {
@@ -24,7 +25,11 @@ describe("syncAppSettings", () => {
   it("calls sync_pull with table=settings", async () => {
     const tx = makeTransport({ rows: [], deleted_ids: [], next_since: 4 })
     const out = await syncAppSettings(tx, { since: 0 })
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "settings", since: 0 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "settings",
+      since: 0,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
   })
 

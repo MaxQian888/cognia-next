@@ -7,6 +7,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { getDb } from "@/lib/db/schema"
 
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import { syncWorkflowRuns } from "./workflow-runs"
 
 function makeTransport(
@@ -29,7 +30,11 @@ describe("syncWorkflowRuns", () => {
     const tx = makeTransport([], [], 7)
     const out = await syncWorkflowRuns(tx, { since: 99 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "workflowRuns", since: 99 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "workflowRuns",
+      since: 99,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(7)

@@ -6,6 +6,7 @@ import "fake-indexeddb/auto"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { Goal } from "@/types/goal"
 
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import { syncGoals } from "./goals"
 
 function makeTransport(rows: Goal[], deleted_ids: string[] = [], next_since = 1): Transport {
@@ -20,7 +21,11 @@ describe("syncGoals", () => {
     const tx = makeTransport([], [], 7)
     const out = await syncGoals(tx, { since: 99 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "goals", since: 99 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "goals",
+      since: 99,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(7)

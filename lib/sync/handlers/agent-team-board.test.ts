@@ -8,6 +8,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import { getDb } from "@/lib/db/schema"
 
 import { syncAgentTeamBoard } from "./agent-team-board"
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 
 function makeTransport(
   rows: AgentTeamBoardRow[],
@@ -43,7 +44,11 @@ describe("syncAgentTeamBoard", () => {
     const tx = makeTransport([], [], 7)
     const out = await syncAgentTeamBoard(tx, { since: 99 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "agentTeamBoard", since: 99 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "agentTeamBoard",
+      since: 99,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(7)

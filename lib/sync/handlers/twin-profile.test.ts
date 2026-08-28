@@ -5,6 +5,7 @@ import "fake-indexeddb/auto"
 
 import type { Transport } from "@/lib/tauri/transport-types"
 
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import { syncTwinProfile } from "./twin-profile"
 
 function makeTransport(): Transport {
@@ -23,7 +24,11 @@ describe("syncTwinProfile", () => {
     const tx = makeTransport()
     const out = await syncTwinProfile(tx, { since: 2 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "twinProfile", since: 2 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "twinProfile",
+      since: 2,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
   })
 })

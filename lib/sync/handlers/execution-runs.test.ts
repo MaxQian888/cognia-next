@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { ExecutionRun } from "@/types/execution/run"
 
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import { syncExecutionRuns } from "./execution-runs"
 
 function makeTransport(rows: ExecutionRun[], nextSince = 1): Transport {
@@ -37,6 +38,7 @@ describe("syncExecutionRuns", () => {
     expect(transport.call).toHaveBeenCalledWith("sync_pull", {
       table: "executionRuns",
       since: 3,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
     })
     expect(outcome).toEqual({
       ok: true,

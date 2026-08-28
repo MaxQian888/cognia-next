@@ -7,6 +7,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 
+import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import { syncMcpServers } from "./mcp-servers"
 
 function makeTransport(): Transport {
@@ -31,7 +32,11 @@ describe("syncMcpServers", () => {
     const tx = makeTransport()
     const out = await syncMcpServers(tx, { since: 0 })
 
-    expect(tx.call).toHaveBeenCalledWith("sync_pull", { table: "mcpServers", since: 0 })
+    expect(tx.call).toHaveBeenCalledWith("sync_pull", {
+      table: "mcpServers",
+      since: 0,
+      content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+    })
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.result.nextSince).toBe(12)
