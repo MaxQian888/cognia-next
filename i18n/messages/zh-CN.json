@@ -5198,6 +5198,8 @@
       "ghostAcceptHint": "Tab",
       "ghostCycleHint": "Alt+] / Alt+[ 切换",
       "ghostDismiss": "忽略建议",
+      "ghostManualHint": "Alt+\\ 让 Agent 补全",
+      "ghostManualPending": "Agent 正在思考…",
       "ghostPosition": "第 {index} / {total} 条",
       "ghostSourceAgent": "来自 Agent",
       "ghostSourceAi": "模型建议",
@@ -10600,6 +10602,22 @@
     },
     "executionPlan": "执行计划",
     "externalAgents": "外部代理",
+    "hostConfigs": {
+      "count": "{count, plural, =0 {暂无配置} other {# 个配置}}",
+      "deleteLabel": "删除 {name}",
+      "description": "存放在已配对宿主上的外部智能体。配置与运行都在宿主端，因此它能告诉你每一个是否已就绪。",
+      "emptyDescription": "可在宿主端新建，或从本地复制一个过去。凭据始终在宿主端配置，绝不会从这里发送。",
+      "emptyTitle": "该宿主上尚未配置智能体",
+      "loading": "正在加载宿主配置…",
+      "recheck": "重新检查就绪状态",
+      "revision": "修订 {seq}",
+      "title": "宿主端智能体",
+      "toggleLabel": "启用 {name}",
+      "unavailableManifestMissing": "正在等待已配对的宿主上报其支持的能力。",
+      "unavailableNoHost": "先配对一个宿主，才能配置真正可运行的外部智能体。",
+      "unavailableTitle": "没有宿主配置",
+      "unavailableUnsupported": "已配对的宿主不支持宿主端外部智能体。升级后即可在这里管理。"
+    },
     "lifecycle": {
       "noReason": "Cognia 停用了这个 Agent，但没有记录原因。请检查它的设置。",
       "statusLabel": {
@@ -28363,6 +28381,10 @@
       }
     },
     "composerAssistance": {
+      "agentFallback": {
+        "hint": "没有保存 API key 时，改用一次 Agent 回合来跑这些辅助功能，订阅制下也能用。默认关闭——追问建议每次回复后都会触发，开启即每次多花一个回合。",
+        "label": "无 API key 时改用 Agent 回合"
+      },
       "assistanceModel": {
         "description": "这些辅助功能调用哪个模型。默认走聊天供应商上的便宜模型——如果那个供应商没存 API key，在这里另选一个。",
         "heading": "辅助模型",
@@ -28381,7 +28403,7 @@
       },
       "ghostText": {
         "debounceLabel": "防抖(毫秒)",
-        "hint": "打字时显示灰色 AI 续写，按 Tab 接受。默认关闭。",
+        "hint": "打字时显示灰色 AI 续写，按 Tab 接受，按 Alt+\\ 让 Agent 生成一条。默认关闭。",
         "label": "行内自动补全"
       },
       "ghostTextLocal": {

@@ -5198,6 +5198,8 @@
       "ghostAcceptHint": "Tab",
       "ghostCycleHint": "Alt+] / Alt+[ to cycle",
       "ghostDismiss": "Dismiss suggestion",
+      "ghostManualHint": "Alt+\\ ask the agent",
+      "ghostManualPending": "Asking the agent…",
       "ghostPosition": "{index} of {total}",
       "ghostSourceAgent": "From the agent",
       "ghostSourceAi": "Suggested",
@@ -10600,6 +10602,22 @@
     },
     "executionPlan": "Execution Plan",
     "externalAgents": "External Agents",
+    "hostConfigs": {
+      "count": "{count, plural, =0 {No configurations} other {# configurations}}",
+      "deleteLabel": "Delete {name}",
+      "description": "External agents stored on the paired host. The host both keeps these configurations and runs them, so it can tell you whether each one is ready.",
+      "emptyDescription": "Add one from the host itself, or copy a local agent across. Credentials are always provisioned on the host — they are never sent from here.",
+      "emptyTitle": "No agents configured on this host",
+      "loading": "Loading host configurations…",
+      "recheck": "Re-check readiness",
+      "revision": "Revision {seq}",
+      "title": "Host-owned agents",
+      "toggleLabel": "Enable {name}",
+      "unavailableManifestMissing": "Waiting for the paired host to report what it supports.",
+      "unavailableNoHost": "Pair a host to configure external agents that can actually run.",
+      "unavailableTitle": "No host configurations",
+      "unavailableUnsupported": "The paired host does not support host-owned external agents. Update it to manage them from here."
+    },
     "lifecycle": {
       "noReason": "Cognia stopped this agent and did not record why. Re-check its settings.",
       "statusLabel": {
@@ -28363,6 +28381,10 @@
       }
     },
     "composerAssistance": {
+      "agentFallback": {
+        "hint": "When no API key is saved for these helpers, run one agent turn instead so they work on a subscription. Off by default — follow-ups fire after every reply, so this costs a turn each time.",
+        "label": "Use an agent turn when no API key is set"
+      },
       "assistanceModel": {
         "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
         "heading": "Assistance model",
@@ -28381,7 +28403,7 @@
       },
       "ghostText": {
         "debounceLabel": "Debounce (ms)",
-        "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
+        "hint": "Show a dim AI continuation as you type; press Tab to accept, Alt+\\ to ask the agent for one. Off by default.",
         "label": "Inline autocomplete"
       },
       "ghostTextLocal": {
