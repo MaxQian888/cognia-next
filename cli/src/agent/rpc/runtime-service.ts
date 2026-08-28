@@ -42,7 +42,9 @@ import { createProviderSessionLease, type ProviderSessionLease } from "../runtim
 import { resolveWorkerExecutionProfile } from "../runtime/resolve-worker-execution"
 import { runUnifiedTurn, type UnifiedTurnParams } from "../runtime/unified-runtime"
 import { subscribePluginToolDispatch } from "../../plugin/plugin-tool-dispatch"
-import { makeCliPluginToolHandle } from "../subagent-dispatch"
+import { makeConfiguredCliPluginToolHandle } from "../configured-plugin-tool-handle"
+import { bindCliSessionHostRuntime } from "../cli-host-runtime"
+import { clearSessionHostRuntime } from "@/lib/plugin/runtime/host-runtime"
 import type { AgentRpcService, AgentRpcServiceContext } from "./server"
 import { AgentRpcHostError } from "./server"
 import { AssetStoreError, createAssetStore, type AssetStore } from "./asset-store"
@@ -464,6 +466,11 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       ...(agentDefinition ? { agentDefinition } : {}),
     }
     sessions.set(sessionId, session)
+    // Bind the session's provider/search config so plugin `ctx.ai.*` and
+    // `ctx.agent.invokeTool` calls resolve to THIS session. Several sessions
+    // share this process with different credentials, so an unbound one must
+    // fail closed rather than borrow another's account.
+    bindCliSessionHostRuntime(session.config, session.id)
     void bindSandboxRuntime(session)
     return session
   }
@@ -1666,6 +1673,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       })
     }
     sessions.set(id, session)
+    bindCliSessionHostRuntime(session.config, session.id)
     // `createSessionOnce` registers the session itself instead of going through
     // `materialize`, so without this a freshly created session never bound its
     // ceiling at all — only one recovered from disk on a later call did.
@@ -1887,7 +1895,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     session: HostedSession,
     recovery?: DurableRpcSuspendedTurn
   ): (request: PluginToolExecRequest) => Promise<PluginToolExecResponse> {
-    const fallback = makeCliPluginToolHandle()
+    const fallback = makeConfiguredCliPluginToolHandle(session.config)
     return async (request) => {
       if (request.name !== ASK_USER_TOOL_NAME) return fallback(request)
       session.status = "waiting"
@@ -1986,6 +1994,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     await session.activeRun?.catch(() => undefined)
     await session.lease.close()
     await sandboxSessionRuntime.releaseSession(session.id).catch(() => undefined)
+    clearSessionHostRuntime(session.id)
     session.status = "closed"
     sessions.delete(session.id)
   }

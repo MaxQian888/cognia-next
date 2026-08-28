@@ -20,9 +20,11 @@ import fs from "node:fs"
 
 import {
   cliConfigFileSchema,
+  CLI_SEARCH_PROVIDER_IDS,
   credentialsFileSchema,
   DEFAULT_RESOLVED_CONFIG,
   type CliConfigFile,
+  type CliSearchConfig,
   type CredentialsFile,
   type EditorConfig,
   type ExternalBackendConfig,
@@ -123,6 +125,35 @@ function mergeProviders(
   return out
 }
 
+/** Merge search policy field-by-field and provider entries field-by-field. */
+function mergeSearch(
+  base: CliSearchConfig | undefined,
+  over: CliSearchConfig | undefined
+): CliSearchConfig | undefined {
+  if (!over) return base
+  const providers = { ...(base?.providers ?? {}) }
+  for (const [id, entry] of Object.entries(over.providers ?? {})) {
+    providers[id as keyof typeof providers] = {
+      ...(providers[id as keyof typeof providers] ?? {}),
+      ...stripUndefined(entry),
+    }
+  }
+  return {
+    ...(base ?? {}),
+    ...stripUndefined(over),
+    ...(Object.keys(providers).length > 0 ? { providers } : {}),
+  }
+}
+
+/** Credentials are intentionally applied after project config so secrets win. */
+function mergeSearchCredentials(
+  base: CliSearchConfig | undefined,
+  creds: CredentialsFile | null
+): CliSearchConfig | undefined {
+  if (!creds?.searchProviders) return base
+  return mergeSearch(base, { providers: creds.searchProviders })
+}
+
 /** Merge per-backend records field-by-field; `over` wins per field, never wipes.
  * Same contract as {@link mergeProviders}, but a separate namespace — an
  * external agent backend is not a chat provider. */
@@ -185,6 +216,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       : acc.statusBar,
     mascot: layer.mascot ? { ...acc.mascot, ...stripUndefined(layer.mascot) } : acc.mascot,
     twin: layer.twin ? { ...acc.twin, ...stripUndefined(layer.twin) } : acc.twin,
+    collab: layer.collab ? { ...layer.collab } : acc.collab,
     outputStyle: layer.outputStyle ?? acc.outputStyle,
     thinkingLevel: layer.thinkingLevel ?? acc.thinkingLevel,
     agentMode: layer.agentMode ?? acc.agentMode,
@@ -262,10 +294,25 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   const layer: CliConfigFile = {}
   if (Object.keys(providers).length) layer.providers = providers
 
+  const searchProviders: NonNullable<CliSearchConfig["providers"]> = {}
+  for (const providerId of CLI_SEARCH_PROVIDER_IDS) {
+    const envId = providerId.toUpperCase().replaceAll("-", "_")
+    const apiKey = env[`COGNIA_SEARCH_${envId}_API_KEY`]?.trim()
+    if (apiKey) searchProviders[providerId] = { apiKey }
+  }
+  const googleCx = env.COGNIA_SEARCH_GOOGLE_CX?.trim()
+  if (googleCx) {
+    searchProviders.google = { ...(searchProviders.google ?? {}), cx: googleCx }
+  }
+  if (Object.keys(searchProviders).length > 0) layer.search = { providers: searchProviders }
+
   const provider = env.COGNIA_PROVIDER?.trim()
   if (provider) layer.provider = provider
   const model = env.COGNIA_MODEL?.trim()
   if (model) layer.model = model
+  const collabUrl = env.COGNIA_COLLAB_URL?.trim()
+  const collabOrgId = env.COGNIA_COLLAB_ORG_ID?.trim()
+  if (collabUrl && collabOrgId) layer.collab = { url: collabUrl, orgId: collabOrgId }
 
   // Extra skill dirs (path-list, split on the OS path delimiter) + the
   // external-skill-reuse toggle. `COGNIA_EXTERNAL_SKILLS=0|false|no|off` opts
@@ -344,6 +391,15 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
   acc = applyLayer(acc, projectFile ?? undefined)
   acc = applyLayer(acc, envLayer(env))
   acc = applyLayer(acc, flags)
+
+  // Search credentials have their own documented order: env > credentials >
+  // project > user. Re-resolve this one nested section explicitly rather than
+  // inheriting the model-provider overlay order above.
+  const environmentLayer = envLayer(input.env)
+  acc.search = mergeSearch(userFile?.search, projectFile?.search)
+  acc.search = mergeSearchCredentials(acc.search, creds)
+  acc.search = mergeSearch(acc.search, environmentLayer.search)
+  acc.search = mergeSearch(acc.search, flags?.search)
 
   // Bind the active model to the ACTIVE provider's slot so `resolveActiveModel`'s
   // per-provider precedence drives it (per-provider memory is authoritative; a

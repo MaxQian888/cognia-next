@@ -5,8 +5,11 @@ import path from "node:path"
 
 import {
   setCredential,
+  setSearchCredential,
   deleteCredential,
+  deleteSearchCredential,
   listCredentialProviders,
+  listSearchCredentialProviders,
   CREDENTIALS_MODE,
   type CredentialsFs,
 } from "./credentials"
@@ -54,6 +57,17 @@ describe("setCredential", () => {
     expect(parsed.providers.anthropic.apiKey).toBe("sk-a")
   })
 
+  it("preserves search-provider credentials when changing a model provider", () => {
+    const m = memFs({
+      [credentialsPath(HOME)]: JSON.stringify({
+        searchProviders: { tavily: { apiKey: "tvly" } },
+      }),
+    })
+    setCredential(HOME, "anthropic", "sk-a", m.fsx)
+    const parsed = JSON.parse(m.files.get(credentialsPath(HOME))!)
+    expect(parsed.searchProviders.tavily.apiKey).toBe("tvly")
+  })
+
   it("replaces an existing key for the same provider", () => {
     const m = memFs({
       [credentialsPath(HOME)]: JSON.stringify({ providers: { anthropic: { apiKey: "old" } } }),
@@ -81,6 +95,24 @@ describe("setCredential", () => {
   it("throws on corrupt existing credentials.json", () => {
     const m = memFs({ [credentialsPath(HOME)]: "{bad" })
     expect(() => setCredential(HOME, "anthropic", "sk", m.fsx)).toThrow(/invalid JSON/)
+  })
+})
+
+describe("search credentials", () => {
+  it("sets, lists and deletes search-provider credentials without touching model providers", () => {
+    const m = memFs({
+      [credentialsPath(HOME)]: JSON.stringify({ providers: { anthropic: { apiKey: "sk-a" } } }),
+    })
+    setSearchCredential(HOME, "google", "search-key", m.fsx, { cx: "engine" })
+    let parsed = JSON.parse(m.files.get(credentialsPath(HOME))!)
+    expect(parsed.providers.anthropic.apiKey).toBe("sk-a")
+    expect(parsed.searchProviders.google).toEqual({ apiKey: "search-key", cx: "engine" })
+    expect(listSearchCredentialProviders(HOME, m.fsx)).toEqual(["google"])
+
+    deleteSearchCredential(HOME, "google", m.fsx)
+    parsed = JSON.parse(m.files.get(credentialsPath(HOME))!)
+    expect(parsed.providers.anthropic.apiKey).toBe("sk-a")
+    expect(parsed.searchProviders.google).toBeUndefined()
   })
 })
 

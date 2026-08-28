@@ -53,6 +53,57 @@ describe("toBuildContext — session + appSettings shaping", () => {
     expect(ctx.appSettings?.builtinTools).toEqual(ctx.appSettings?.builtinTools)
   })
 
+  it("projects resolved CLI search config into the shared AppSettings executor", () => {
+    const ctx = toBuildContext({
+      sessionId: "s-search",
+      now: NOW,
+      config: cfg({
+        search: {
+          defaultProvider: "google",
+          maxResults: 9,
+          fallbackEnabled: false,
+          maxRetries: 1,
+          searchType: "news",
+          searchDepth: "advanced",
+          recency: "week",
+          language: "zh-CN",
+          includeDomains: ["example.com"],
+          includeAnswer: true,
+          includeRawContent: true,
+          safeSearch: "strict",
+          providers: {
+            google: { apiKey: "search-key", cx: "engine", enabled: true, priority: 2 },
+          },
+        },
+      }),
+    })
+
+    expect(ctx.appSettings).toMatchObject({
+      defaultSearchProvider: "google",
+      searchMaxResults: 9,
+      searchFallbackEnabled: false,
+      searchMaxRetries: 1,
+      defaultSearchType: "news",
+      defaultSearchDepth: "advanced",
+      defaultSearchRecency: "week",
+      defaultSearchLanguage: "zh-CN",
+      defaultIncludeDomains: ["example.com"],
+      defaultIncludeAnswer: true,
+      defaultIncludeRawContent: true,
+      searchSafeSearchEnabled: true,
+      searchSafeSearchLevel: "strict",
+      searchProviders: {
+        google: {
+          providerId: "google",
+          apiKey: "search-key",
+          cx: "engine",
+          enabled: true,
+          priority: 2,
+        },
+      },
+    })
+  })
+
   it("falls back to the default base prompt when none is configured", () => {
     const ctx = toBuildContext({
       sessionId: "s1",

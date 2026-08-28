@@ -18,6 +18,7 @@ import {
   resolveNotices,
   resolveRenderConfig,
   renderConfigSchema,
+  searchConfigSchema,
 } from "./schema"
 
 describe("renderConfigSchema + resolveRenderConfig", () => {
@@ -419,5 +420,28 @@ describe("cliLoggingSchema + resolveCliLoggingConfig", () => {
     expect(cliLogLevelRank("info")).toBeLessThan(cliLogLevelRank("warn"))
     expect(cliLogLevelRank("warn")).toBeLessThan(cliLogLevelRank("error"))
     expect(cliLogLevelRank("notice")).toBe(cliLogLevelRank("info"))
+  })
+})
+
+describe("searchConfigSchema", () => {
+  it("accepts the ten supported search providers and defaults", () => {
+    expect(
+      searchConfigSchema.safeParse({
+        defaultProvider: "brave",
+        maxResults: 8,
+        fallbackEnabled: true,
+        safeSearch: "strict",
+        providers: {
+          brave: { enabled: true, priority: 1 },
+          google: { enabled: true, priority: 2, cx: "engine-id" },
+        },
+      }).success
+    ).toBe(true)
+  })
+
+  it("rejects unknown providers and invalid bounds", () => {
+    expect(searchConfigSchema.safeParse({ providers: { duckduckgo: {} } }).success).toBe(false)
+    expect(searchConfigSchema.safeParse({ maxResults: 0 }).success).toBe(false)
+    expect(searchConfigSchema.safeParse({ safeSearch: "maximum" }).success).toBe(false)
   })
 })

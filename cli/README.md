@@ -41,7 +41,7 @@ cognia-agent config set model claude-opus-4-8
 
 ## Configuration
 
-Layered, low → high precedence:
+Layered, low → high precedence for model providers:
 
 1. defaults
 2. `~/.cognia/config.json`
@@ -53,6 +53,29 @@ Layered, low → high precedence:
 Provider routing mirrors the sidecar dispatch router: `anthropic` uses the
 native claude-agent-sdk path (auth via `ANTHROPIC_API_KEY`); any other provider
 uses the ai-sdk path (auth via the resolved provider credentials).
+
+Web search is configured under `search` and projected into the same shared
+search executor used by the desktop app:
+
+```json
+{
+  "webTools": true,
+  "search": {
+    "defaultProvider": "tavily",
+    "maxResults": 8,
+    "fallbackEnabled": true,
+    "safeSearch": "moderate",
+    "providers": { "tavily": { "enabled": true, "priority": 1 } }
+  }
+}
+```
+
+Search secrets live in `credentials.json` under
+`searchProviders.<provider>.apiKey` (Google may also carry `cx`). Their
+precedence is env → credentials → project config → user config. Environment
+keys are `COGNIA_SEARCH_<PROVIDER>_API_KEY` with `-` changed to `_`, for example
+`COGNIA_SEARCH_GOOGLE_AI_API_KEY`; Google CX uses
+`COGNIA_SEARCH_GOOGLE_CX`.
 
 ## Development
 

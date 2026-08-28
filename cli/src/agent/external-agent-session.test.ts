@@ -1,6 +1,10 @@
 /**
  * @jest-environment node
  */
+jest.mock("./configured-plugin-tool-handle", () => ({
+  makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
+}))
+
 import type {
   AcpConfigOption,
   AcpPermissionRequest,
@@ -163,6 +167,43 @@ describe("external-agent permission adaptation", () => {
 })
 
 describe("createExternalAgentSession", () => {
+  it("binds the external tool host to this session's resolved search config", async () => {
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "./configured-plugin-tool-handle"
+    ) as { makeConfiguredCliPluginToolHandle: jest.Mock }
+    makeConfiguredCliPluginToolHandle.mockClear()
+    const config = {
+      ...DEFAULT_RESOLVED_CONFIG,
+      cwd: "/work",
+      agentBackend: "claude-code" as const,
+      search: {
+        defaultProvider: "brave" as const,
+        providers: { brave: { apiKey: "search-key" } },
+      },
+    }
+    const startToolHost = jest.fn(async () => ({
+      endpoint: "http://127.0.0.1:1234",
+      token: "token",
+      isClosed: () => false,
+      connections: () => 0,
+      cancelInFlight: jest.fn(),
+      close: jest.fn(async () => undefined),
+    }))
+    const session = createExternalAgentSession({
+      config,
+      manager: fakeManager().manager,
+      transcriptFs: memoryTranscript().fs,
+      startToolHost: startToolHost as never,
+      buildToolHostServers: () => [],
+    })
+
+    await session.send("search", { gate: async () => ({ decision: "allow" }) })
+
+    expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
+    expect(startToolHost).toHaveBeenCalledTimes(1)
+    await session.close()
+  })
+
   it("maps CLI credential-file providers onto each external CLI's native env contract", () => {
     const config = {
       ...DEFAULT_RESOLVED_CONFIG,

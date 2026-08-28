@@ -2,6 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os"
 import path from "node:path"
 
+jest.mock("../configured-plugin-tool-handle", () => ({
+  makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
+}))
+
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
@@ -77,6 +81,65 @@ describe("createAgentRuntimeService", () => {
 
   afterEach(() => {
     rmSync(home, { recursive: true, force: true })
+  })
+
+  it("binds the RPC fallback tool handler to the hosted session's current search config", async () => {
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "../configured-plugin-tool-handle"
+    ) as { makeConfiguredCliPluginToolHandle: jest.Mock }
+    makeConfiguredCliPluginToolHandle.mockClear()
+    const config = {
+      ...DEFAULT_RESOLVED_CONFIG,
+      cwd: home,
+      model: "test-model",
+      search: {
+        defaultProvider: "brave" as const,
+        providers: { brave: { apiKey: "search-key" } },
+      },
+    }
+    const subscribePluginTools = jest.fn(
+      async (_handler: (request: PluginToolExecRequest) => Promise<PluginToolExecResponse>) => () =>
+        undefined
+    )
+    const runTurn = jest.fn(async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => {
+      const unsubscribe = await params.subscribePluginTools?.()
+      unsubscribe?.()
+      return {
+        result: {
+          schemaVersion: 1,
+          type: "result",
+          status: "completed",
+          sessionId: params.sessionId ?? "session-1",
+          runId: "run-1",
+          turnId: "turn-1",
+          attemptId: "attempt-1",
+          text: "done",
+          backend: "builtin",
+          model: "test-model",
+          capabilities: [],
+          session: { persisted: true },
+        },
+        envelopes: [],
+      }
+    })
+    const service = createAgentRuntimeService({
+      config,
+      home,
+      runTurn,
+      subscribePluginTools,
+      mintSessionId: () => "session-1",
+    })
+    await service.handle("session/create", {}, context as never)
+
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "search", commandId: "run-search" },
+      context as never
+    )
+
+    expect(subscribePluginTools).toHaveBeenCalledTimes(1)
+    expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
+    await service.close()
   })
 
   it("creates, runs, streams, reads, branches, and closes canonical sessions", async () => {

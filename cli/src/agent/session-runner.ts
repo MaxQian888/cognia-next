@@ -52,7 +52,9 @@ import {
 } from "./tool-suppression"
 import { type AgentSummary } from "./discover-agents"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
-import { clearCliSubagentContext, makeCliPluginToolHandle } from "./subagent-dispatch"
+import { clearCliSubagentContext } from "./subagent-dispatch"
+import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
+import { bindCliSessionHostRuntime } from "./cli-host-runtime"
 import { type LoadableSkill } from "./skill-load-tool"
 import {
   createCliContextAssembler,
@@ -246,7 +248,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
   const subscribePluginTools =
     params.subscribePluginTools ??
-    (() => subscribePluginToolDispatch({ handle: makeCliPluginToolHandle() }))
+    (() =>
+      subscribePluginToolDispatch({
+        handle: makeConfiguredCliPluginToolHandle(params.config),
+      }))
   const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
 
   const assembler: CliContextAssembler = createCliContextAssembler({
@@ -277,6 +282,12 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
 
   let boot: SidecarBootstrap | null = null
   let pluginUnsub: UnlistenFn | null = null
+  // Bind this session's provider/search config so `ctx.ai.*` and
+  // `ctx.agent.invokeTool` resolve to THIS session's credentials. Bound at
+  // construction rather than on first use: a plugin activating during
+  // bootstrap can already reach the model, and two concurrent sessions must
+  // never share one binding.
+  const releaseHostRuntime = bindCliSessionHostRuntime(params.config, sessionId)
   let closed = false
   let skillsAnnounced = false
   let databaseErrorShown = false
@@ -308,6 +319,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     if (params.outputSchema) {
       session.sendOptions.claudeAgentSdk = {
         ...session.sendOptions.claudeAgentSdk,
+        version: session.sendOptions.claudeAgentSdk?.version ?? 1,
         outputFormat: { type: "json_schema", schema: params.outputSchema },
       }
     }
@@ -485,6 +497,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Drop any lingering dispatch context (defensive — `send` clears it per
       // turn, but a close mid-turn must not leave a stale entry behind).
       clearCliSubagentContext(sessionId)
+      releaseHostRuntime()
       if (pluginUnsub) {
         try {
           await pluginUnsub()

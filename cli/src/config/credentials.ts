@@ -10,7 +10,12 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { credentialsFileSchema, type CredentialsFile } from "./schema"
+import {
+  CLI_SEARCH_PROVIDER_IDS,
+  credentialsFileSchema,
+  type CliSearchProviderId,
+  type CredentialsFile,
+} from "./schema"
 import { credentialsPath } from "./load"
 
 export interface CredentialsFs {
@@ -81,6 +86,7 @@ export function setCredential(
   const current = readCredentials(home, fsx)
   const existing = current.providers?.[providerId] ?? {}
   const next: CredentialsFile = {
+    ...current,
     providers: { ...(current.providers ?? {}), [providerId]: { ...existing, [kind]: secret } },
   }
   const target = credentialsPath(home)
@@ -101,7 +107,7 @@ export function deleteCredential(
   delete providers[providerId]
   const target = credentialsPath(home)
   fsx.mkdirp(fsx.dirname(target))
-  fsx.write(target, JSON.stringify({ providers }, null, 2) + "\n", CREDENTIALS_MODE)
+  fsx.write(target, JSON.stringify({ ...current, providers }, null, 2) + "\n", CREDENTIALS_MODE)
 }
 
 /** List provider ids that currently have a stored credential. */
@@ -111,4 +117,63 @@ export function listCredentialProviders(
 ): string[] {
   const current = readCredentials(home, fsx)
   return Object.keys(current.providers ?? {}).sort()
+}
+
+/** Store a search-provider API key (and optional Google CX) in credentials.json. */
+export function setSearchCredential(
+  home: string,
+  providerId: CliSearchProviderId,
+  apiKey: string,
+  fsx: CredentialsFs = realCredentialsFs,
+  options: { cx?: string } = {}
+): string {
+  if (!(CLI_SEARCH_PROVIDER_IDS as readonly string[]).includes(providerId)) {
+    throw new Error(`unsupported search provider: ${providerId}`)
+  }
+  if (!apiKey.trim()) throw new Error("apiKey must not be empty")
+  const current = readCredentials(home, fsx)
+  const existing = current.searchProviders?.[providerId] ?? {}
+  const next: CredentialsFile = {
+    ...current,
+    searchProviders: {
+      ...(current.searchProviders ?? {}),
+      [providerId]: {
+        ...existing,
+        apiKey,
+        ...(options.cx?.trim() ? { cx: options.cx.trim() } : {}),
+      },
+    },
+  }
+  const target = credentialsPath(home)
+  fsx.mkdirp(fsx.dirname(target))
+  fsx.write(target, JSON.stringify(next, null, 2) + "\n", CREDENTIALS_MODE)
+  return target
+}
+
+/** Remove one search-provider credential without touching model credentials. */
+export function deleteSearchCredential(
+  home: string,
+  providerId: CliSearchProviderId,
+  fsx: CredentialsFs = realCredentialsFs
+): void {
+  const current = readCredentials(home, fsx)
+  if (!current.searchProviders?.[providerId]) return
+  const searchProviders = { ...current.searchProviders }
+  delete searchProviders[providerId]
+  const target = credentialsPath(home)
+  fsx.mkdirp(fsx.dirname(target))
+  fsx.write(
+    target,
+    JSON.stringify({ ...current, searchProviders }, null, 2) + "\n",
+    CREDENTIALS_MODE
+  )
+}
+
+/** List search-provider ids that currently have stored credentials. */
+export function listSearchCredentialProviders(
+  home: string,
+  fsx: CredentialsFs = realCredentialsFs
+): string[] {
+  const current = readCredentials(home, fsx)
+  return Object.keys(current.searchProviders ?? {}).sort()
 }

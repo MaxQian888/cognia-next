@@ -209,6 +209,61 @@ describe("credentials overlay", () => {
     })
     expect(cfg.providers.anthropic).toEqual({ authToken: "oauth-tok" })
   })
+
+  it("resolves search settings with env > credentials > project > user precedence", () => {
+    const cfg = run(
+      {
+        [userConfigPath(HOME)]: JSON.stringify({
+          search: {
+            defaultProvider: "tavily",
+            maxResults: 3,
+            providers: { tavily: { apiKey: "user", enabled: true, priority: 9 } },
+          },
+        }),
+        [projectConfigPath(CWD)]: JSON.stringify({
+          search: {
+            maxResults: 7,
+            providers: { tavily: { apiKey: "project", priority: 2 } },
+          },
+        }),
+        [credentialsPath(HOME)]: JSON.stringify({
+          searchProviders: { tavily: { apiKey: "credential" } },
+        }),
+      },
+      { env: { COGNIA_SEARCH_TAVILY_API_KEY: "environment" } }
+    )
+
+    expect(cfg.search).toMatchObject({ defaultProvider: "tavily", maxResults: 7 })
+    expect(cfg.search?.providers?.tavily).toEqual({
+      apiKey: "environment",
+      enabled: true,
+      priority: 2,
+    })
+  })
+
+  it("maps every search-provider env id and Google CX", () => {
+    const cfg = run(
+      {},
+      {
+        env: {
+          COGNIA_SEARCH_GOOGLE_API_KEY: "google-key",
+          COGNIA_SEARCH_GOOGLE_CX: "cx-id",
+          COGNIA_SEARCH_SEARCHAPI_API_KEY: "searchapi-key",
+          COGNIA_SEARCH_BRAVE_API_KEY: "brave-key",
+        },
+      }
+    )
+    expect(cfg.search?.providers).toMatchObject({
+      google: { apiKey: "google-key", cx: "cx-id" },
+      searchapi: { apiKey: "searchapi-key" },
+      brave: { apiKey: "brave-key" },
+    })
+  })
+
+  it("ignores an env id the shared search engine cannot execute", () => {
+    const cfg = run({}, { env: { COGNIA_SEARCH_GOOGLE_AI_API_KEY: "google-ai-key" } })
+    expect(cfg.search?.providers?.["google-ai" as never]).toBeUndefined()
+  })
 })
 
 describe("subscription token from env", () => {

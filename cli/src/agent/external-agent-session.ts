@@ -72,6 +72,8 @@ import { registerTurnSubagentContext } from "./turn-dispatch"
 import { readToolApprovals } from "./tool-approvals"
 import { startToolHostBroker, type ToolHostBroker } from "./tool-host/broker"
 import { createHostToolExecutor } from "./tool-host/host-tools"
+import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
+import { bindCliSessionHostRuntime } from "./cli-host-runtime"
 import { buildToolHostMcpServers, isCogniaProjectedTool } from "./tool-host/spawn"
 import {
   clearToolHostStatus,
@@ -492,6 +494,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const requestedModel = resolveBackendModel(params.config, params.connection?.presetId)
   const sessionId = params.sessionId ?? mintSessionId(now())
   const agentId = params.connection?.agentId ?? `cli-external-${sessionId}`
+  // Bind this session's provider/search config so plugin `ctx.ai.*` and
+  // `ctx.agent.invokeTool` calls made during its turns resolve to THIS
+  // session's credentials rather than failing closed.
+  const releaseHostRuntime = bindCliSessionHostRuntime(params.config, sessionId)
   // The controller registered this agent, so it also removes it; a session that
   // registered its own is responsible for its own teardown.
   const ownsAgent = params.connection === undefined
@@ -646,7 +652,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     }
     if (broker && !broker.isClosed()) return buildToolHostServers(broker)
     brokerAttempt += 1
-    const execHostTool = createHostToolExecutor({ sessionId })
+    const execHostTool = createHostToolExecutor({
+      sessionId,
+      handle: makeConfiguredCliPluginToolHandle(params.config),
+    })
     try {
       broker = await startToolHost({
         session,
@@ -1118,6 +1127,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // bridge executing against a session that is already gone.
       clearCliSubagentContext(sessionId)
       clearToolHostStatus(sessionId)
+      releaseHostRuntime()
       await stopToolHost()
       if (!initialized) return
       if (externalSessionId) {

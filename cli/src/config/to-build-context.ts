@@ -156,6 +156,52 @@ function buildCustomProviders(config: ResolvedConfig): AppSettings["customProvid
   return customs.length ? (customs as unknown as AppSettings["customProviders"]) : undefined
 }
 
+/** Project desktop-independent CLI search config onto the shared app contract. */
+export function buildSearchAppSettings(config: ResolvedConfig): Partial<AppSettings> {
+  const search = config.search
+  if (!search) return {}
+  const searchProviders = Object.fromEntries(
+    Object.entries(search.providers ?? {}).map(([id, provider], index) => [
+      id,
+      {
+        providerId: id,
+        apiKey: provider.apiKey ?? "",
+        enabled: provider.enabled ?? Boolean(provider.apiKey),
+        priority: provider.priority ?? index + 1,
+        ...(provider.cx ? { cx: provider.cx } : {}),
+      },
+    ])
+  ) as AppSettings["searchProviders"]
+
+  return {
+    ...(search.defaultProvider ? { defaultSearchProvider: search.defaultProvider } : {}),
+    ...(search.maxResults != null ? { searchMaxResults: search.maxResults } : {}),
+    ...(search.fallbackEnabled != null ? { searchFallbackEnabled: search.fallbackEnabled } : {}),
+    ...(search.maxRetries != null ? { searchMaxRetries: search.maxRetries } : {}),
+    ...(search.searchType ? { defaultSearchType: search.searchType } : {}),
+    ...(search.searchDepth ? { defaultSearchDepth: search.searchDepth } : {}),
+    ...(search.recency ? { defaultSearchRecency: search.recency } : {}),
+    ...(search.country ? { defaultSearchCountry: search.country } : {}),
+    ...(search.language ? { defaultSearchLanguage: search.language } : {}),
+    ...(search.includeDomains ? { defaultIncludeDomains: search.includeDomains } : {}),
+    ...(search.excludeDomains ? { defaultExcludeDomains: search.excludeDomains } : {}),
+    ...(search.includeAnswer != null ? { defaultIncludeAnswer: search.includeAnswer } : {}),
+    ...(search.includeRawContent != null
+      ? { defaultIncludeRawContent: search.includeRawContent }
+      : {}),
+    ...(search.safeSearch
+      ? {
+          searchSafeSearchEnabled: search.safeSearch !== "off",
+          searchSafeSearchLevel: search.safeSearch,
+        }
+      : {}),
+    ...(search.cacheEnabled != null ? { searchCacheEnabled: search.cacheEnabled } : {}),
+    ...(search.cacheTTL != null ? { searchCacheTTL: search.cacheTTL } : {}),
+    ...(search.cacheMaxEntries != null ? { searchCacheMaxEntries: search.cacheMaxEntries } : {}),
+    ...(Object.keys(searchProviders ?? {}).length > 0 ? { searchProviders } : {}),
+  }
+}
+
 /**
  * Native-Anthropic auth env. The claude-agent-sdk reads these from the spawned
  * process env; the ai-sdk path ignores them (it uses providerCredentials), so
@@ -246,6 +292,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
     webTools: { enabled: config.webTools !== false },
+    ...buildSearchAppSettings(config),
     selfInvokeTools: {
       skill: config.skillTool === true,
       slashCommand: config.slashCommandTool === true,

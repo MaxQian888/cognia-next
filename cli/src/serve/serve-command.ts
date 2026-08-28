@@ -41,10 +41,13 @@ import { CompanionTransport, type CompanionConfig } from "@/lib/tauri/transport-
 import type { ParsedArgs } from "../cli/args"
 import { numberFlag, stringFlag } from "../cli/args"
 import type { OutputSink } from "../cli/output"
+import { fsReader, resolveHome, userConfigPath } from "../config/load"
+import { cliConfigFileSchema, collabCliSchema, type CollabCliConfig } from "../config/schema"
 import { VERSION } from "../version"
 import { ensureHeadlessAccount, HEADLESS_LOCAL_ACCOUNT_ID } from "./account"
 import { createNodeBackupFilesystem } from "./backup-filesystem"
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
+import { startHeadlessCollabReader } from "./collab-reader"
 import { startDurability } from "./durability"
 import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
 
@@ -58,6 +61,18 @@ export interface ServeDeps {
   /** Test hook: runs after the runtimes started, before blocking. */
   onStarted?: () => Promise<void> | void
   proc?: Pick<NodeJS.Process, "on" | "off" | "memoryUsage">
+}
+
+export function resolveServeCollabConfig(
+  env: NodeJS.ProcessEnv,
+  cliHome: string
+): CollabCliConfig | undefined {
+  const url = env.COGNIA_COLLAB_URL?.trim()
+  const orgId = env.COGNIA_COLLAB_ORG_ID?.trim()
+  if (url || orgId) return collabCliSchema.parse({ url, orgId })
+  const raw = fsReader(userConfigPath(cliHome))
+  if (!raw) return undefined
+  return cliConfigFileSchema.parse(JSON.parse(raw)).collab
 }
 
 function deriveBridgeUrl(serverUrl: string): string {
@@ -113,6 +128,23 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // ── 2. Account ─────────────────────────────────────────────────────────────
   await ensureHeadlessAccount(accountId)
   out.write(`serve: account ${accountId} unlocked\n`)
+
+  // Optional read-only collaboration plane. Credentials are loaded from the
+  // CLI's existing 0600 Logto session; no bearer token is accepted in env.
+  const cliHome = resolveHome(env, os.homedir())
+  const collabConfig = resolveServeCollabConfig(env, cliHome)
+  const collabReader = collabConfig
+    ? await startHeadlessCollabReader({ accountId, cliHome, config: collabConfig }).catch(
+        (cause) => {
+          out.error(`serve: collaboration reader failed: ${String(cause)}\n`)
+          return null
+        }
+      )
+    : null
+  if (collabReader?.status === "active") out.write("serve: collaboration reader active\n")
+  if (collabReader?.status === "not-signed-in") {
+    out.write("serve: collaboration configured; run `cognia-agent logto login` to activate\n")
+  }
 
   // ── 3. Durability ──────────────────────────────────────────────────────────
   const durability = await startDurability({
@@ -216,6 +248,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
 
   out.write("serve: shutting down…\n")
   await runtimes.stop()
+  collabReader?.stop()
   uninstallWorkerRuntime()
   workerPool.close()
   bridge.close()

@@ -398,6 +398,15 @@ export const twinCliSchema = z
 
 export type TwinCliConfig = z.infer<typeof twinCliSchema>
 
+/** Non-secret collaboration endpoint selection for CLI/headless reads. */
+export const collabCliSchema = z
+  .object({
+    url: z.string().url(),
+    orgId: z.string().regex(/^org_[A-Za-z0-9_-]+$/),
+  })
+  .strict()
+export type CollabCliConfig = z.infer<typeof collabCliSchema>
+
 /**
  * Transcript rendering preferences — how tool/file output is shown in the
  * transcript and the full-output pager. Every field is optional; absent values
@@ -583,6 +592,79 @@ export const providerConfigSchema = z
 export type ProviderConfig = z.infer<typeof providerConfigSchema>
 
 /**
+ * Search providers supported by the shared `@cognia/web-search` package.
+ *
+ * Must stay a subset of that package's `SEARCH_PROVIDERS` keys: an id this
+ * schema accepts but the engine does not know is validated, projected into
+ * `searchProviders`, then dropped by `getEnabledProviders`, leaving the user
+ * with "No search providers are enabled" and a config the CLI called valid.
+ */
+export const CLI_SEARCH_PROVIDER_IDS = [
+  "tavily",
+  "perplexity",
+  "exa",
+  "searchapi",
+  "serper",
+  "serpapi",
+  "bing",
+  "google",
+  "brave",
+] as const
+
+export type CliSearchProviderId = (typeof CLI_SEARCH_PROVIDER_IDS)[number]
+
+const searchProviderConfigSchema = z
+  .object({
+    /** Secret; prefer `credentials.json.searchProviders` or env. */
+    apiKey: z.string().min(1).optional(),
+    /** Google Programmable Search Engine id. */
+    cx: z.string().min(1).optional(),
+    enabled: z.boolean().optional(),
+    priority: z.number().int().positive().optional(),
+  })
+  .strict()
+
+const searchProvidersSchema = z
+  .record(z.string(), searchProviderConfigSchema)
+  .superRefine((providers, ctx) => {
+    for (const providerId of Object.keys(providers)) {
+      if (!(CLI_SEARCH_PROVIDER_IDS as readonly string[]).includes(providerId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `unsupported search provider: ${providerId}`,
+          path: [providerId],
+        })
+      }
+    }
+  })
+
+/** Non-secret search policy stored under `config.json.search`. */
+export const searchConfigSchema = z
+  .object({
+    defaultProvider: z.enum(CLI_SEARCH_PROVIDER_IDS).optional(),
+    maxResults: z.number().int().min(1).max(50).optional(),
+    fallbackEnabled: z.boolean().optional(),
+    maxRetries: z.number().int().min(0).max(10).optional(),
+    searchType: z.enum(["general", "news", "academic", "images", "videos"]).optional(),
+    searchDepth: z.enum(["basic", "advanced", "deep"]).optional(),
+    recency: z.enum(["day", "week", "month", "year", "any"]).optional(),
+    country: z.string().min(1).optional(),
+    language: z.string().min(1).optional(),
+    includeDomains: z.array(z.string().min(1)).optional(),
+    excludeDomains: z.array(z.string().min(1)).optional(),
+    includeAnswer: z.boolean().optional(),
+    includeRawContent: z.boolean().optional(),
+    safeSearch: z.enum(["off", "moderate", "strict"]).optional(),
+    cacheEnabled: z.boolean().optional(),
+    cacheTTL: z.number().int().positive().optional(),
+    cacheMaxEntries: z.number().int().positive().optional(),
+    providers: searchProvidersSchema.optional(),
+  })
+  .strict()
+
+export type CliSearchConfig = z.infer<typeof searchConfigSchema>
+
+/**
  * What we remember for one external agent backend. Only the model so far: the
  * id we explicitly asked that agent to run with. Absent means "the agent picks"
  * — for Codex that is `~/.codex/config.toml`, which is the correct default.
@@ -718,6 +800,8 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    /** Provider-backed web search settings for the desktop-independent CLI. */
+    search: searchConfigSchema.optional(),
     /**
      * Opt-in automatic tier routing (default off). When on, a one-shot/headless
      * `run` scores the prompt's difficulty and routes it to the cheapest capable
@@ -743,6 +827,8 @@ export const cliConfigFileSchema = z
     mascot: mascotSchema.optional(),
     /** Digital-twin retrieval over the desktop CLI bridge. Absent ⇒ off. */
     twin: twinCliSchema.optional(),
+    /** Collaboration plane used by the headless brain for read-only mirroring. */
+    collab: collabCliSchema.optional(),
     /** Output style ("response mode"). Appends a style instruction to the system
      * prompt. Absent / `default` ⇒ no change. */
     outputStyle: z.enum(OUTPUT_STYLES).optional(),
@@ -947,6 +1033,32 @@ export const credentialsFileSchema = z
           })
       )
       .optional(),
+    /** Search API credentials, kept separate from model-provider credentials. */
+    searchProviders: z
+      .record(
+        z.string(),
+        z
+          .object({
+            apiKey: z.string().min(1).optional(),
+            cx: z.string().min(1).optional(),
+          })
+          .strict()
+          .refine((v) => Boolean(v.apiKey || v.cx), {
+            message: "search provider credential needs an apiKey or cx",
+          })
+      )
+      .superRefine((providers, ctx) => {
+        for (const providerId of Object.keys(providers)) {
+          if (!(CLI_SEARCH_PROVIDER_IDS as readonly string[]).includes(providerId)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `unsupported search provider: ${providerId}`,
+              path: [providerId],
+            })
+          }
+        }
+      })
+      .optional(),
   })
   .strict()
 
@@ -984,6 +1096,8 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  /** Fully layered search policy and provider credentials. */
+  search?: CliSearchConfig
   /** Opt-in automatic tier routing for one-shot/headless runs. Default off. */
   autoRoute?: boolean
   /** Let the agent call the Skill tool to load a skill's instructions. Default off. */
@@ -1076,6 +1190,8 @@ export interface ResolvedConfig {
    * unreachable the turn proceeds without twin context (one notice per
    * session). Absent ⇒ off. */
   twin?: TwinCliConfig
+  /** Collaboration plane used by the headless brain for read-only mirroring. */
+  collab?: CollabCliConfig
   /** Idle (read) timeout for a streaming turn, in ms. Absent ⇒ 60000; `0`
    * disables. Guards against a provider stream that stalls mid-turn. */
   streamIdleTimeoutMs?: number

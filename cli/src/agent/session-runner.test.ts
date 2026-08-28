@@ -1,6 +1,10 @@
 /**
  * @jest-environment node
  */
+jest.mock("./configured-plugin-tool-handle", () => ({
+  makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
+}))
+
 import {
   createAgentSession,
   withCliAutoApprovedTools,
@@ -136,6 +140,36 @@ describe("withCliDisabledMcpTools", () => {
 })
 
 describe("createAgentSession", () => {
+  it("binds the default plugin-tool executor to this session's resolved search config", async () => {
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "./configured-plugin-tool-handle"
+    ) as { makeConfiguredCliPluginToolHandle: jest.Mock }
+    makeConfiguredCliPluginToolHandle.mockClear()
+    const config = cfg({
+      search: {
+        defaultProvider: "brave",
+        providers: { brave: { apiKey: "search-key" } },
+      },
+    })
+    const session = createAgentSession({
+      config,
+      sessionId: "s_search_config",
+      home: HOME,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture: jest.fn(async () => result("ok")),
+      transcriptFs: memFs().fsx,
+    })
+
+    await session.send("search", { gate: createPermissionGate({ yes: true }) })
+
+    expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
+    await session.close()
+  })
+
   it("prefers canonical envelopes and never double-applies the legacy callback", async () => {
     const capture = jest.fn(async (_sessionId, _content, _options, cap) => {
       cap?.onEvent?.({ type: "text-delta", delta: "hello" })

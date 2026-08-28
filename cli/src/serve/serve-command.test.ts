@@ -17,7 +17,7 @@ import { __resetCliDbForTesting } from "../db/bootstrap"
 import type { WebSocketLike } from "./bridge-client"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
-import { projectWorkerPlacement, serveCommand } from "./serve-command"
+import { projectWorkerPlacement, resolveServeCollabConfig, serveCommand } from "./serve-command"
 
 type Listener = (event: { data?: unknown }) => void
 
@@ -43,6 +43,27 @@ describe("projectWorkerPlacement", () => {
       placementReady: false,
       placementReason: "workspace_missing",
     })
+  })
+})
+
+describe("resolveServeCollabConfig", () => {
+  it("accepts endpoint selection but no token from the environment", () => {
+    expect(
+      resolveServeCollabConfig(
+        {
+          COGNIA_COLLAB_URL: "https://collab.test",
+          COGNIA_COLLAB_ORG_ID: "org_acme",
+          COGNIA_COLLAB_TOKEN: "must-be-ignored",
+        },
+        "/missing"
+      )
+    ).toEqual({ url: "https://collab.test", orgId: "org_acme" })
+  })
+
+  it("refuses a half-configured endpoint", () => {
+    expect(() =>
+      resolveServeCollabConfig({ COGNIA_COLLAB_URL: "https://collab.test" }, "/missing")
+    ).toThrow()
   })
 })
 
