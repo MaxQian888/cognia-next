@@ -46,7 +46,11 @@ describe("plugin-sdk package exports", () => {
     "./api/slash-command",
     "./api/skill-recorder",
     "./api/subagent",
+    "./api/testing",
     "./api/tool-renderer",
+    "./api/resources",
+    "./api/workflow-editor",
+    "./api/workflow-run",
     "./api/workflow-template",
   ])("publishes a built ESM/CJS/types surface for %s", (subpath) => {
     const entry = exportsMap[subpath]

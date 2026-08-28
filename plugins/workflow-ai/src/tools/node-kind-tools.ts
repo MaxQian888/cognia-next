@@ -11,16 +11,15 @@
  * Both are read-only, never require approval.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError } from "../store-bridge"
 import {
   NODE_CATALOG,
   getPluginCatalogSnapshot,
   nodeCatalogEntry,
   type NodeCatalogEntry,
-} from "@/lib/workflow/nodes/catalog"
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
-
+} from "@cognia/plugin-sdk/api/workflow-template"
+import type { WorkflowNodeKind } from "@cognia/plugin-sdk"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 interface ListedEntry {

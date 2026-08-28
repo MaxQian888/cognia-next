@@ -19,13 +19,12 @@
  * the user clicks Apply on the rendered card.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
-import { useProposalStore, type ProposalPayload } from "@/lib/workflow/editor/proposal-store"
-import { summarizeOps, type ProposalOp } from "@/lib/workflow/editor/proposal-types"
-import { coerceProposalOp } from "@/lib/workflow/editor/proposal-schema"
-import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
-
+import { useProposalStore, type ProposalPayload } from "@cognia/plugin-sdk/api/workflow-editor"
+import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
+import { coerceProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
+import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {

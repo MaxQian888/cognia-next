@@ -115,7 +115,13 @@
       "@cognia/plugin-sdk/api/skill-recorder": ["./packages/plugin-sdk/src/api/skill-recorder.ts"],
       "@cognia/plugin-sdk/api/slash-command": ["./packages/plugin-sdk/src/api/slash-command.ts"],
       "@cognia/plugin-sdk/api/subagent": ["./packages/plugin-sdk/src/api/subagent.ts"],
+      "@cognia/plugin-sdk/api/testing": ["./packages/plugin-sdk/src/api/testing.ts"],
       "@cognia/plugin-sdk/api/tool-renderer": ["./packages/plugin-sdk/src/api/tool-renderer.ts"],
+      "@cognia/plugin-sdk/api/resources": ["./packages/plugin-sdk/src/api/resources.ts"],
+      "@cognia/plugin-sdk/api/workflow-editor": [
+        "./packages/plugin-sdk/src/api/workflow-editor.ts"
+      ],
+      "@cognia/plugin-sdk/api/workflow-run": ["./packages/plugin-sdk/src/api/workflow-run.ts"],
       "@cognia/plugin-sdk/api/workflow-template": [
         "./packages/plugin-sdk/src/api/workflow-template.ts"
       ],

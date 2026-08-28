@@ -13,17 +13,19 @@
 
 const runWorkflowMock = jest.fn()
 
-jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
+// Doubled at the SDK subpath the tools import, not the host orchestrator.
+jest.mock("@cognia/plugin-sdk/api/workflow-run", () => ({
   runWorkflow: (...args: unknown[]) => runWorkflowMock(...args),
 }))
 
 import {
-  __resetRegistryForTesting,
+  createEditorStore,
+  listEditorStores,
   registerEditorStore,
-} from "@/lib/workflow/editor/store-registry"
-import { createEditorStore } from "@/lib/workflow/editor/store"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+  unregisterEditorStore,
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
+import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import { buildRunTools, __resetActiveRunsForTesting } from "./run-tools"
 
 function workflow(id: string): VisualWorkflow {
@@ -54,7 +56,7 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
-  __resetRegistryForTesting()
+  for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
   __resetActiveRunsForTesting()
   runWorkflowMock.mockReset()
   const store = createEditorStore(workflow("wf_a"))

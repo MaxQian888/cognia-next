@@ -18,19 +18,18 @@
  * never mutates the editor store directly.
  */
 
-import type { PluginTool } from "@/types/plugin"
-import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
+import type { PluginTool } from "@cognia/plugin-sdk"
+import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
 import {
   getCopilotTemplate,
   listCopilotTemplates,
   materializeCopilotTemplate,
   type CopilotSlotValues,
-} from "@/lib/workflow/copilot-templates"
-import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
-import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
-import { summarizeOps, type ProposalOp } from "@/lib/workflow/editor/proposal-types"
-
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import { useProposalStore } from "@cognia/plugin-sdk/api/workflow-editor"
+import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
+import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {

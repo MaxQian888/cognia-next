@@ -12,10 +12,9 @@
  * mapping logic stays trivially unit-testable.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
-import { explainLastRun, explainValidation } from "@/lib/workflow/runtime/error-explainer"
-
+import { explainLastRun, explainValidation } from "@cognia/plugin-sdk/api/workflow-editor"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {

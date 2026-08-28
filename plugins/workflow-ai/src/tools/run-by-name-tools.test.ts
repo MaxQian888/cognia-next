@@ -1,23 +1,21 @@
-import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { getDb } from "@/lib/db/schema"
-import { createWorkflow } from "@/lib/db/workflows"
+import {
+  createDbTestFixture,
+  listCallbackBindings,
+  seedPlatformBoundSession,
+  seedRunningInboundJob,
+} from "@cognia/plugin-sdk/api/testing"
+import { createWorkflow } from "@cognia/plugin-sdk/api/workflow-run"
 import { buildRunByNameTools } from "./run-by-name-tools"
 
 async function seedSession(opts: { sessionId: string; bindToIM?: boolean }): Promise<void> {
-  const now = Date.now()
-  await getDb().sessions.put({
-    id: opts.sessionId,
-    title: "Test",
-    createdAt: now,
-    updatedAt: now,
-    characterId: undefined as never,
+  await seedPlatformBoundSession({
+    sessionId: opts.sessionId,
     ...(opts.bindToIM
       ? {
-          platformBinding: {
+          binding: {
             adapterId: "wecom:a",
             conversationKey: "wecom:wecom:a:room",
             platform: "wecom",
-            conversationRef: { platform: "wecom", adapterId: "wecom:a" },
           },
         }
       : {}),
@@ -143,7 +141,7 @@ describe("wf_run_workflow_by_name", () => {
     expect(approve.value.startsWith("wfapp:")).toBe(true)
     expect(cancel.value.startsWith("wfcan:")).toBe(true)
 
-    const bindings = await getDb().connectorCallbackBindings.toArray()
+    const bindings = await listCallbackBindings()
     const approveBinding = bindings.find((b) => b.kind === "wf_approve")
     const cancelBinding = bindings.find((b) => b.kind === "wf_cancel")
     expect(approveBinding).toBeDefined()
@@ -170,38 +168,18 @@ describe("wf_run_workflow_by_name", () => {
   it("scopes the approval to the current turn's sender when a job is running", async () => {
     await seedSession({ sessionId: "s1", bindToIM: true })
     await createWorkflow({ name: "Scoped Flow" })
-    const { enqueueConnectorInboundJob, claimConnectorInboundJob } =
-      await import("@/lib/db/connector-inbound-jobs")
-    const job = await enqueueConnectorInboundJob(
-      {
-        platform: "wecom",
-        adapterId: "wecom:a",
-        selfId: "bot",
-        messageId: "m_turn",
-        conversationRef: { platform: "wecom", adapterId: "wecom:a" },
-        conversationKey: "wecom:wecom:a:room",
-        sender: {
-          id: "wecom:u_requester",
-          platform: "wecom",
-          adapterId: "wecom:a",
-          remoteUserId: "u_requester",
-        },
-        channel: { id: "wecom:wecom:a:room", kind: "group" },
-        segments: [{ type: "text", text: "run it" }],
-        plainText: "run it",
-        mentions: { selfMentioned: false, users: [] },
-        timestamp: Date.now(),
-        raw: {},
-      },
-      "queue"
-    )
-    await claimConnectorInboundJob(job.id, { leaseOwner: "test", leaseMs: 60_000 })
+    await seedRunningInboundJob({
+      adapterId: "wecom:a",
+      conversationKey: "wecom:wecom:a:room",
+      platform: "wecom",
+      sender: { id: "wecom:u_requester", remoteUserId: "u_requester" },
+    })
 
     const result = (await runByNameTool.execute({ name: "Scoped Flow" }, ctx("s1"))) as {
       ok: boolean
     }
     expect(result.ok).toBe(true)
-    const bindings = await getDb().connectorCallbackBindings.toArray()
+    const bindings = await listCallbackBindings()
     const approveBinding = bindings.find((b) => b.kind === "wf_approve")
     expect(approveBinding?.actorScope).toEqual({
       mode: "initiator",
@@ -263,7 +241,7 @@ describe("wf_subscribe_workflow_fanout", () => {
     expect(result.workflowId).toBe(wf.id)
     expect(result.surfaceId.startsWith("wffanout:")).toBe(true)
 
-    const bindings = await getDb().connectorCallbackBindings.toArray()
+    const bindings = await listCallbackBindings()
     const approve = bindings.find((b) => b.kind === "wf_fanout_approve")
     const cancel = bindings.find((b) => b.kind === "wf_fanout_cancel")
     expect(approve).toBeDefined()

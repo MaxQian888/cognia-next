@@ -1,8 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
+import {
+  addPluginCatalogEntry,
+  getPluginCatalogSnapshot,
+  removePluginCatalogEntry,
+} from "@cognia/plugin-sdk/api/workflow-template"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildNodeKindTools } from "./node-kind-tools"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
@@ -14,7 +18,10 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
-  __resetPluginCatalogForTesting()
+  // Remove the entries that are actually registered rather than wiping the
+  // catalog: `removePluginCatalogEntry` is what a plugin calls on disable, and
+  // the host's reset is not on the author surface.
+  for (const entry of getPluginCatalogSnapshot()) removePluginCatalogEntry(entry.kind)
 })
 
 describe("wf_list_node_kinds", () => {

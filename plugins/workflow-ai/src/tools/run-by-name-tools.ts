@@ -28,86 +28,23 @@
  * successful resolution.
  */
 
-import type { PluginTool } from "@/types/plugin"
-import { getDb } from "@/lib/db/schema"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import {
+  approvalActorScope,
+  buildApprovalSurface,
+  findWorkflowById,
   findWorkflowByName,
   listWorkflowSummaries,
+  recordCallbackBinding,
+  resolveWorkflowTriggerOrigin,
+  type A2UISegmentContent,
   type WorkflowSummary,
-} from "@/lib/workflow/library/lookup"
-import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
-import { buildApprovalSurface } from "@/lib/connectors/a2ui-bridge/workflow-to-a2ui"
-import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+} from "@cognia/plugin-sdk/api/workflow-run"
 import { formatToolError } from "../store-bridge"
-import type { A2UISegmentContent } from "@/types/connectors/segment"
-
 const PLUGIN_ID = "cognia-workflow-ai"
 
 function newBindingId(): string {
   return "wfb_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10)
-}
-
-/**
- * Read the chat session's IM platform binding so we know which adapter +
- * conversation to fan progress out to. Returns null when the session has
- * no IM binding (e.g., a desktop-only chat) — the caller surfaces a
- * structured error and the tool result tells the model to ask the user
- * to run the workflow from the editor instead.
- */
-async function resolveTriggeredFrom(
-  sessionId: string | undefined
-): Promise<WorkflowTriggeredFrom | null> {
-  if (!sessionId) return null
-  const session = await getDb().sessions.get(sessionId)
-  if (!session) return null
-  const binding = session.platformBinding
-  if (!binding) return null
-  return {
-    source: "im",
-    adapterId: binding.adapterId,
-    conversationKey: binding.conversationKey,
-    sessionId,
-    ...(await resolveTurnInitiator(binding.conversationKey)),
-  }
-}
-
-/**
- * Identify the human whose message is driving the CURRENT turn: this tool
- * executes mid-turn, so the conversation's `running` inbound job carries the
- * verified sender (plus the resolved principal/account stamp when the
- * registry is on). The initiator feeds both the workflow run's initiator
- * field and the approval binding's actorScope — the callback authorization
- * guard only lets this user (or a configured operator) tap Approve.
- */
-async function resolveTurnInitiator(
-  conversationKey: string
-): Promise<Pick<WorkflowTriggeredFrom, "initiator">> {
-  const jobs = await getDb()
-    .connectorInboundJobs.where("conversationKey")
-    .equals(conversationKey)
-    .filter((row) => row.status === "running")
-    .toArray()
-  const current = jobs.sort((a, b) => b.receivedAt - a.receivedAt)[0]
-  if (!current) return {}
-  const sender = current.event.sender
-  return {
-    initiator: {
-      platformIdentityId: sender.id,
-      remoteUserId: sender.remoteUserId,
-      displayName: sender.displayName,
-      ...(current.principalId && current.accountId
-        ? { principalId: current.principalId, accountId: current.accountId }
-        : {}),
-    },
-  }
-}
-
-/** Actor scope for approval bindings: the turn initiator, else operators. */
-function approvalActorScope(
-  triggeredFrom: WorkflowTriggeredFrom
-): import("@/types/connectors/interaction").CallbackActorScope {
-  const initiatorId = triggeredFrom.initiator?.remoteUserId
-  return initiatorId ? { mode: "initiator", allowedUserIds: [initiatorId] } : { mode: "operators" }
 }
 
 function summariesToBullets(candidates: WorkflowSummary[]): string {
@@ -182,7 +119,7 @@ export function buildRunByNameTools(): PluginTool[] {
             return { ok: false, error: { code: "invalid-name", message: "name is required" } }
           }
 
-          const triggeredFrom = await resolveTriggeredFrom(context.sessionId)
+          const triggeredFrom = await resolveWorkflowTriggerOrigin(context.sessionId)
           if (!triggeredFrom) {
             return {
               ok: false,
@@ -306,7 +243,7 @@ export function buildRunByNameTools(): PluginTool[] {
           if (name.length === 0) {
             return { ok: false, error: { code: "invalid-name", message: "name is required" } }
           }
-          const triggeredFrom = await resolveTriggeredFrom(context.sessionId)
+          const triggeredFrom = await resolveWorkflowTriggerOrigin(context.sessionId)
           if (!triggeredFrom) {
             return {
               ok: false,
@@ -454,9 +391,7 @@ function buildFanoutApprovalSurface(input: {
 }
 
 async function readWorkflowSummary(workflowId: string): Promise<string | undefined> {
-  const row = await getDb().workflows.get(workflowId)
-  if (!row) return undefined
-  const desc = row.description?.trim()
+  const desc = (await findWorkflowById(workflowId))?.description?.trim()
   return desc && desc.length > 0 ? desc : undefined
 }
 

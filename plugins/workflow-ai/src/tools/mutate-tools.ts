@@ -19,11 +19,11 @@
  * touched nodes so the user can see what the assistant did.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
-import type { ProposalOp } from "@/lib/workflow/editor/proposal-types"
-import { coerceProposalOp, KNOWN_PROPOSAL_OP_TYPES } from "@/lib/workflow/editor/proposal-schema"
+import type { WorkflowNodeKind } from "@cognia/plugin-sdk"
+import type { ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
+import { coerceProposalOp, KNOWN_PROPOSAL_OP_TYPES } from "@cognia/plugin-sdk/api/workflow-editor"
 import { nanoid } from "nanoid"
 
 const PLUGIN_ID = "cognia-workflow-ai"

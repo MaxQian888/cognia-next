@@ -12,7 +12,7 @@
  * error and the agent can ask the user to open a workflow first.
  */
 
-import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginTool } from "@cognia/plugin-sdk"
 // ADR-0026 §5 §D — i18n is declared in `manifest.i18n` below and auto-
 // wired by the plugin manager on enable. The old imperative
 // `registerPluginI18n` / `unregisterPluginI18n` calls are gone.

@@ -195,6 +195,12 @@
       "require": "./dist/ocr-provider.cjs",
       "default": "./dist/ocr-provider.js"
     },
+    "./api/resources": {
+      "types": "./dist/resources.d.ts",
+      "import": "./dist/resources.js",
+      "require": "./dist/resources.cjs",
+      "default": "./dist/resources.js"
+    },
     "./api/sandbox": {
       "types": "./dist/sandbox.d.ts",
       "import": "./dist/sandbox.js",
@@ -243,11 +249,29 @@
       "require": "./dist/subagent.cjs",
       "default": "./dist/subagent.js"
     },
+    "./api/testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "require": "./dist/testing.cjs",
+      "default": "./dist/testing.js"
+    },
     "./api/tool-renderer": {
       "types": "./dist/tool-renderer.d.ts",
       "import": "./dist/tool-renderer.js",
       "require": "./dist/tool-renderer.cjs",
       "default": "./dist/tool-renderer.js"
+    },
+    "./api/workflow-editor": {
+      "types": "./dist/workflow-editor.d.ts",
+      "import": "./dist/workflow-editor.js",
+      "require": "./dist/workflow-editor.cjs",
+      "default": "./dist/workflow-editor.js"
+    },
+    "./api/workflow-run": {
+      "types": "./dist/workflow-run.d.ts",
+      "import": "./dist/workflow-run.js",
+      "require": "./dist/workflow-run.cjs",
+      "default": "./dist/workflow-run.js"
     },
     "./api/workflow-template": {
       "types": "./dist/workflow-template.d.ts",

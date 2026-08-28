@@ -1,6 +1,11 @@
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow } from "@/lib/db/workflows"
-import { findWorkflowByName, listWorkflowSummaries, resolveWorkflowByNameOrId } from "./lookup"
+import {
+  findWorkflowById,
+  findWorkflowByName,
+  listWorkflowSummaries,
+  resolveWorkflowByNameOrId,
+} from "./lookup"
 
 const dbFixture = createDbTestFixture()
 
@@ -108,5 +113,18 @@ describe("listWorkflowSummaries", () => {
     for (let i = 0; i < 5; i++) await createWorkflow({ name: `WF ${i}` })
     const summaries = await listWorkflowSummaries(2)
     expect(summaries).toHaveLength(2)
+  })
+})
+
+describe("findWorkflowById", () => {
+  it("returns the index-level summary, not the whole row", async () => {
+    const created = await createWorkflow({ name: "Nightly Sync", description: "runs at 2am" })
+    const summary = await findWorkflowById(created.id)
+    expect(summary).toEqual({ id: created.id, name: "Nightly Sync", description: "runs at 2am" })
+    expect(summary).not.toHaveProperty("definition")
+  })
+
+  it("is undefined for an id that does not exist", async () => {
+    await expect(findWorkflowById("wf_missing")).resolves.toBeUndefined()
   })
 })

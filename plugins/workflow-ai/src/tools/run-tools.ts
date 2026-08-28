@@ -19,9 +19,9 @@
  * instead of starting the run.
  */
 
-import type { PluginTool } from "@/types/plugin"
-import { runWorkflow as runOrchestrator } from "@/lib/workflow/runtime/orchestrator"
-import type { TriggerEvent } from "@/types/workflow/visual"
+import type { PluginTool } from "@cognia/plugin-sdk"
+import { runWorkflow as runOrchestrator } from "@cognia/plugin-sdk/api/workflow-run"
+import type { TriggerEvent } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"

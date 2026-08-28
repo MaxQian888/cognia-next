@@ -15,7 +15,7 @@
  * Approval: never. Reads are safe and idempotent.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"

@@ -10,13 +10,13 @@
  * (auto-layout updates node positions but the user can Ctrl+Z).
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import {
   autoLayout,
   applyAutoLayoutPositions,
   ELK_DIRECTIONS,
   type AutoLayoutDirection,
-} from "@/lib/workflow/editor/auto-layout"
+} from "@cognia/plugin-sdk/api/workflow-editor"
 import { formatToolError, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"

@@ -2,16 +2,14 @@
  * @jest-environment jsdom
  */
 import {
-  __resetRegistryForTesting,
+  createEditorStore,
+  listEditorStores,
   registerEditorStore,
-} from "@/lib/workflow/editor/store-registry"
-import { createEditorStore } from "@/lib/workflow/editor/store"
-import {
-  __resetProposalStoreForTesting,
+  unregisterEditorStore,
   useProposalStore,
-} from "@/lib/workflow/editor/proposal-store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import type { VisualWorkflow } from "@cognia/plugin-sdk"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildProposeTools, validateProposalOps } from "./propose-tools"
 
 function workflow(id: string): VisualWorkflow {
@@ -42,8 +40,9 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
-  __resetRegistryForTesting()
-  __resetProposalStoreForTesting()
+  for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
+  for (const id of Object.keys(useProposalStore.getState().entries))
+    useProposalStore.getState().clearProposalsFor(id)
 })
 
 describe("validateProposalOps", () => {

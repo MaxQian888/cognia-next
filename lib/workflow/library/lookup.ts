@@ -104,3 +104,16 @@ export async function listWorkflowSummaries(limit = 50): Promise<WorkflowSummary
   const rows = await listWorkflows()
   return rows.slice(0, limit).map(toSummary)
 }
+
+/**
+ * A single workflow's index-level summary, by id.
+ *
+ * Callers that already hold an id and only need the human-facing description —
+ * a tool narrating "what did I just run?" — were reaching into
+ * `getDb().workflows.get(...)` for it, which hands over the whole row
+ * (definition graph, secrets refs, run history pointers) to read one string.
+ */
+export async function findWorkflowById(workflowId: string): Promise<WorkflowSummary | undefined> {
+  const row = (await listWorkflows()).find((r) => r.id === workflowId)
+  return row ? toSummary(row) : undefined
+}

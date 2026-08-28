@@ -15,13 +15,12 @@
  * plugin is disabled) — this file is only the plugin registration wrapper.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import {
   WORKFLOW_RUNNER_TOOL_NAME,
   WORKFLOW_RUNNER_TOOL_DEFINITION,
-} from "@/lib/workflow/publish/runner-tool"
-import { executeRunWorkflowTyped } from "@/lib/workflow/publish/run-workflow-typed-tool"
-
+} from "@cognia/plugin-sdk/api/workflow-run"
+import { executeRunWorkflowTyped } from "@cognia/plugin-sdk/api/workflow-run"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 export function buildRunTypedTools(): PluginTool[] {

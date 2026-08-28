@@ -1,6 +1,5 @@
-import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { createWorkflow } from "@/lib/db/workflows"
-import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+import { createDbTestFixture } from "@cognia/plugin-sdk/api/testing"
+import { createWorkflow, publishWorkflow } from "@cognia/plugin-sdk/api/workflow-run"
 import { buildRunTypedTools } from "./run-typed-tools"
 
 const tool = buildRunTypedTools().find((t) => t.name === "wf_run_workflow_typed")!

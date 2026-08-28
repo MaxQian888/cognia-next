@@ -2,19 +2,17 @@
  * @jest-environment jsdom
  */
 import {
-  __resetRegistryForTesting,
+  createEditorStore,
+  getCopilotTemplate,
+  listCopilotTemplates,
+  listEditorStores,
   registerEditorStore,
-} from "@/lib/workflow/editor/store-registry"
-import { createEditorStore } from "@/lib/workflow/editor/store"
-import {
-  __resetProposalStoreForTesting,
+  unregisterEditorStore,
   useProposalStore,
-} from "@/lib/workflow/editor/proposal-store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import type { VisualWorkflow } from "@cognia/plugin-sdk"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildTemplateTools, templateToProposalOps } from "./template-tools"
-import { getCopilotTemplate, listCopilotTemplates } from "@/lib/workflow/copilot-templates"
-
 /**
  * The template these mechanics tests drive. Any registered template works —
  * they assert `templateToProposalOps` behaviour, not template content — but it
@@ -76,8 +74,9 @@ function setupStore(): void {
 }
 
 beforeEach(() => {
-  __resetRegistryForTesting()
-  __resetProposalStoreForTesting()
+  for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
+  for (const id of Object.keys(useProposalStore.getState().entries))
+    useProposalStore.getState().clearProposalsFor(id)
 })
 
 describe("templateToProposalOps", () => {

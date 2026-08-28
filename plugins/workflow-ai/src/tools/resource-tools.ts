@@ -11,15 +11,14 @@
  * Approval: never. Reads only.
  */
 
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError } from "../store-bridge"
-import { listCharacters } from "@/lib/db/characters"
-import { listTwins } from "@/lib/db/twins"
-import { listSkills } from "@/lib/db/skills"
-import { listAdapterInstances } from "@/lib/db/adapter-instances"
-import { listMcpServers } from "@/lib/db/mcp-servers"
-import { listPlugins } from "@/lib/db/plugins"
-
+import { listCharacters } from "@cognia/plugin-sdk/api/resources"
+import { listTwins } from "@cognia/plugin-sdk/api/resources"
+import { listSkills } from "@cognia/plugin-sdk/api/resources"
+import { listAdapterInstances } from "@cognia/plugin-sdk/api/resources"
+import { listMcpServers } from "@cognia/plugin-sdk/api/resources"
+import { listPlugins } from "@cognia/plugin-sdk/api/resources"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const EMPTY_PARAMS = {

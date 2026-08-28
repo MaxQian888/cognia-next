@@ -2,8 +2,7 @@ import { buildWorkflowAiTools } from "./index"
 import {
   WORKFLOW_RUNNER_TOOL_NAME,
   WORKFLOW_RUNNER_TOOL_DEFINITION,
-} from "@/lib/workflow/publish/runner-tool"
-
+} from "@cognia/plugin-sdk/api/workflow-run"
 describe("buildWorkflowAiTools", () => {
   const tools = buildWorkflowAiTools()
   const names = tools.map((t) => t.name)

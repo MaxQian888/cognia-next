@@ -2,32 +2,26 @@
  * @jest-environment jsdom
  */
 
-jest.mock("@/lib/db/characters", () => ({
-  listCharacters: jest.fn(),
-}))
-jest.mock("@/lib/db/twins", () => ({
-  listTwins: jest.fn(),
-}))
-jest.mock("@/lib/db/skills", () => ({
-  listSkills: jest.fn(),
-}))
-jest.mock("@/lib/db/adapter-instances", () => ({
-  listAdapterInstances: jest.fn(),
-}))
-jest.mock("@/lib/db/mcp-servers", () => ({
-  listMcpServers: jest.fn(),
-}))
-jest.mock("@/lib/db/plugins", () => ({
-  listPlugins: jest.fn(),
+// One double for the SDK subpath the tools import, not six for the host
+// tables behind it.
+jest.mock("@cognia/plugin-sdk/api/resources", () => ({
+  listCharacters: jest.fn(async () => []),
+  listTwins: jest.fn(async () => []),
+  listSkills: jest.fn(async () => []),
+  listAdapterInstances: jest.fn(async () => []),
+  listMcpServers: jest.fn(async () => []),
+  listPlugins: jest.fn(async () => []),
 }))
 
-import { listCharacters } from "@/lib/db/characters"
-import { listTwins } from "@/lib/db/twins"
-import { listSkills } from "@/lib/db/skills"
-import { listAdapterInstances } from "@/lib/db/adapter-instances"
-import { listMcpServers } from "@/lib/db/mcp-servers"
-import { listPlugins } from "@/lib/db/plugins"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
+import {
+  listAdapterInstances,
+  listCharacters,
+  listMcpServers,
+  listPlugins,
+  listSkills,
+  listTwins,
+} from "@cognia/plugin-sdk/api/resources"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildResourceTools } from "./resource-tools"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }

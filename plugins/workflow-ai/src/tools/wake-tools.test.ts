@@ -1,5 +1,6 @@
 const emitWorkflowWaitEvent = jest.fn(async (event: Record<string, unknown>) => event)
-jest.mock("@/lib/db/workflow-waitpoints", () => ({
+// Doubled at the SDK subpath the tools import, not the host table.
+jest.mock("@cognia/plugin-sdk/api/workflow-run", () => ({
   createWorkflowWaitEvent: (input: Record<string, unknown>) => ({ id: "event_1", ...input }),
   emitWorkflowWaitEvent: (event: Record<string, unknown>) => emitWorkflowWaitEvent(event),
 }))

@@ -1,11 +1,11 @@
 import { EditorNotOpenError, formatToolError, resolveStore } from "./store-bridge"
 import {
-  __resetRegistryForTesting,
+  createEditorStore,
+  listEditorStores,
   registerEditorStore,
-} from "@/lib/workflow/editor/store-registry"
-import { createEditorStore } from "@/lib/workflow/editor/store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
-
+  unregisterEditorStore,
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import type { VisualWorkflow } from "@cognia/plugin-sdk"
 function workflow(id: string): VisualWorkflow {
   return {
     id,
@@ -25,8 +25,11 @@ function workflow(id: string): VisualWorkflow {
   }
 }
 
+// Unregister what is actually registered rather than wiping the registry: the
+// host's reset is not on the author surface, and `unregisterEditorStore` is
+// what an editor calls when it closes.
 beforeEach(() => {
-  __resetRegistryForTesting()
+  for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
 })
 
 describe("resolveStore", () => {

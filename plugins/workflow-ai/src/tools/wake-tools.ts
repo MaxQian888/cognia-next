@@ -12,8 +12,8 @@
  * available for 24 hours and can resolve a later matching waitpoint once.
  */
 
-import type { PluginTool } from "@/types/plugin"
-import { createWorkflowWaitEvent, emitWorkflowWaitEvent } from "@/lib/db/workflow-waitpoints"
+import type { PluginTool } from "@cognia/plugin-sdk"
+import { createWorkflowWaitEvent, emitWorkflowWaitEvent } from "@cognia/plugin-sdk/api/workflow-run"
 import { formatToolError } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"

@@ -16,9 +16,8 @@
  * undoable actions so manual edits and AI edits share one history stack.
  */
 
-import { getEditorStore, listEditorStores } from "@/lib/workflow/editor/store-registry"
-import type { EditorStore } from "@/lib/workflow/editor/store"
-
+import { getEditorStore, listEditorStores } from "@cognia/plugin-sdk/api/workflow-editor"
+import type { EditorStore } from "@cognia/plugin-sdk/api/workflow-editor"
 export type StoreResolutionFailure =
   { kind: "not-open"; requestedId?: string } | { kind: "ambiguous"; openIds: string[] }
 

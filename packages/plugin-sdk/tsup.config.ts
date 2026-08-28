@@ -38,7 +38,11 @@ const runtimeEntries = {
   "skill-recorder": "src/api/skill-recorder.ts",
   "slash-command": "src/api/slash-command.ts",
   subagent: "src/api/subagent.ts",
+  testing: "src/api/testing.ts",
   "tool-renderer": "src/api/tool-renderer.ts",
+  resources: "src/api/resources.ts",
+  "workflow-editor": "src/api/workflow-editor.ts",
+  "workflow-run": "src/api/workflow-run.ts",
   "workflow-template": "src/api/workflow-template.ts",
 }
 

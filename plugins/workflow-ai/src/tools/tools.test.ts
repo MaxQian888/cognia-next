@@ -2,16 +2,17 @@
  * @jest-environment jsdom
  */
 import {
-  __resetRegistryForTesting,
+  createEditorStore,
+  listEditorStores,
   registerEditorStore,
-} from "@/lib/workflow/editor/store-registry"
-import { createEditorStore } from "@/lib/workflow/editor/store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
+  unregisterEditorStore,
+} from "@cognia/plugin-sdk/api/workflow-editor"
+import type { VisualWorkflow } from "@cognia/plugin-sdk"
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildReadTools } from "./read-tools"
 import { buildMutateTools } from "./mutate-tools"
 import { buildLayoutTools } from "./layout-tools"
-import * as autoLayoutModule from "@/lib/workflow/editor/auto-layout"
+import * as autoLayoutModule from "@cognia/plugin-sdk/api/workflow-editor"
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -41,7 +42,7 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
-  __resetRegistryForTesting()
+  for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
 })
 
 describe("read tools", () => {
