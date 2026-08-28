@@ -880,6 +880,10 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 "workflow://step-execute",
                 "workflow://step-pending",
                 "thread-handoff://offer",
+                // The brain runs host-owned external agents for clients that
+                // cannot spawn one; this is the only way that turn reaches the
+                // client that asked for it.
+                "external-agent://session-event",
             ];
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();

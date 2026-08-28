@@ -36,6 +36,15 @@ import { selectionFromLegacyModeId } from "@/lib/agent/composition/legacy-mode-m
 
 export type AgentRuntime = "claude-sdk" | "external"
 
+/** What the composer remembers about a host-owned agent it has selected. */
+export interface ExternalHostConfigSelection {
+  configId: string
+  revision: string
+  lifecycleGeneration: number
+  /** Label only. Never sent — the host runs what its own store holds. */
+  name: string
+}
+
 interface AgentRuntimeState {
   runtime: AgentRuntime
   /**
@@ -49,6 +58,21 @@ interface AgentRuntimeState {
   defaultComposition: AgentCompositionSelectionV1
   sessionCompositions: Record<string, AgentCompositionSelectionV1>
   externalAgentId: string | null
+  /**
+   * A configuration owned by the paired HOST, when the external lane points at
+   * one instead of at a locally configured agent.
+   *
+   * Kept beside `externalAgentId` rather than folded into it because the two
+   * are addressed differently and only one can be right: a local id names an
+   * agent in this browser's store, while a host selection has to carry the
+   * revision and readiness generation the run will be admitted against. They
+   * are mutually exclusive by construction — setting either clears the other —
+   * so nothing downstream has to decide which one wins.
+   *
+   * The `name` is a cached label for the chip; it is never sent anywhere. The
+   * host resolves what actually runs from the stamp.
+   */
+  externalHostConfig: ExternalHostConfigSelection | null
 
   setRuntime: (runtime: AgentRuntime) => void
   setModeId: (modeId: string) => void
@@ -56,6 +80,7 @@ interface AgentRuntimeState {
   setSessionComposition: (sessionId: string, selection: AgentCompositionSelectionV1) => void
   clearSessionComposition: (sessionId: string) => void
   setExternalAgentId: (id: string | null) => void
+  setExternalHostConfig: (selection: ExternalHostConfigSelection | null) => void
 }
 
 /**
@@ -102,6 +127,7 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
       defaultComposition: { presetId: STANDARD_PRESET_ID },
       sessionCompositions: {},
       externalAgentId: null,
+      externalHostConfig: null,
 
       setRuntime: (runtime) => set({ runtime }),
       setModeId: (modeId) => set({ modeId, defaultComposition: selectionFromModeId(modeId) }),
@@ -132,7 +158,20 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
           delete next[sessionId]
           return { sessionCompositions: next }
         }),
-      setExternalAgentId: (externalAgentId) => set({ externalAgentId }),
+      // Each setter clears the other lane when it selects something. Leaving
+      // both set would make "which agent is this turn on" answerable two ways
+      // and the send path would have to guess. Clearing one leaves the other
+      // alone: `setExternalAgentId(null)` means "no local agent", not "no agent
+      // anywhere", and a partial with an explicit `undefined` would overwrite
+      // the other key rather than skip it.
+      setExternalAgentId: (externalAgentId) =>
+        set(externalAgentId ? { externalAgentId, externalHostConfig: null } : { externalAgentId }),
+      setExternalHostConfig: (externalHostConfig) =>
+        set(
+          externalHostConfig
+            ? { externalHostConfig, externalAgentId: null }
+            : { externalHostConfig }
+        ),
     }),
     {
       name: "cognia-next.agent-runtime",

@@ -75,6 +75,11 @@ const COMMAND_KINDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4)
   "external_agent_update",
+  // Host-owned external-agent configurations.
+  "external_agent_config_create",
+  "external_agent_config_delete",
+  "external_agent_config_reconcile",
+  "external_agent_config_update",
   // NOTE: `host_state_submit` (HostStateProtocol) is intentionally absent —
   // see the header comment and `E2E_GENERIC_DRAIN_EXCLUSIONS` in
   // lib/db/mobile-outbound-types.test.ts.

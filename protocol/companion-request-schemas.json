@@ -3136,8 +3136,206 @@
     "ensure_system_lsp_host": {
       "type": "object"
     },
+    "external_agent_admit_run": {
+      "type": "object",
+      "required": [
+        "runId",
+        "stamp"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "object",
+          "required": [
+            "configId",
+            "revision",
+            "lifecycleGeneration"
+          ],
+          "properties": {
+            "configId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "lifecycleGeneration": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_cancel_run": {
+      "type": "object",
+      "required": [
+        "runId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "callerDeviceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_config_create": {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "type": "object"
+        },
+        "fromImport": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_config_delete": {
+      "type": "object",
+      "required": [
+        "configId"
+      ],
+      "properties": {
+        "configId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_config_get": {
+      "type": "object",
+      "required": [
+        "configId"
+      ],
+      "properties": {
+        "configId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_config_list": {
+      "type": "object"
+    },
+    "external_agent_config_reconcile": {
+      "type": "object"
+    },
+    "external_agent_config_update": {
+      "type": "object",
+      "required": [
+        "configId",
+        "expectedRevision",
+        "patch"
+      ],
+      "properties": {
+        "configId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": "string"
+        },
+        "patch": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_list": {
       "type": "object"
+    },
+    "external_agent_release_run": {
+      "type": "object",
+      "required": [
+        "runId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_resolve_decision": {
+      "type": "object",
+      "required": [
+        "decisionId"
+      ],
+      "properties": {
+        "decisionId": {
+          "type": "string"
+        },
+        "callerDeviceId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "allow_always",
+            "deny"
+          ]
+        },
+        "elicitation": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_run_turn": {
+      "type": "object",
+      "required": [
+        "runId",
+        "chatSessionId",
+        "stamp",
+        "prompt"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "chatSessionId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "externalSessionId": {
+          "type": "string"
+        },
+        "callerDeviceId": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "object",
+          "required": [
+            "configId",
+            "revision",
+            "lifecycleGeneration"
+          ],
+          "properties": {
+            "configId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "lifecycleGeneration": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "external_agent_update": {
       "type": "object",

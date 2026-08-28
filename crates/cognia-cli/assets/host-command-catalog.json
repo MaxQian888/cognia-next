@@ -10591,6 +10591,748 @@
       "outputTyped": true
     },
     {
+      "name": "external_agent_admit_run",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_admit_run (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "stamp"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "admitted"
+        ],
+        "properties": {
+          "admitted": {
+            "type": "boolean"
+          },
+          "run": {
+            "type": "object",
+            "required": [
+              "runId",
+              "config"
+            ],
+            "properties": {
+              "runId": {
+                "type": "string"
+              },
+              "config": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          },
+          "record": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration",
+              "seq",
+              "enabled",
+              "lifecycleStatus",
+              "createdAt",
+              "updatedAt",
+              "config"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lifecycleStatus": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "needs-credentials",
+                  "needs-consent",
+                  "needs-runtime",
+                  "blocked"
+                ]
+              },
+              "tombstonedAt": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": true,
+                "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+              }
+            },
+            "additionalProperties": false
+          },
+          "refusal": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "config",
+                  "readiness"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "current": {
+                "type": "null"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_cancel_run",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "external_agent_cancel_run (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "callerDeviceId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "cancelled"
+        ],
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_create",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_config_create (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object"
+          },
+          "fromImport": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration",
+              "seq",
+              "enabled",
+              "lifecycleStatus",
+              "createdAt",
+              "updatedAt",
+              "config"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lifecycleStatus": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "needs-credentials",
+                  "needs-consent",
+                  "needs-runtime",
+                  "blocked"
+                ]
+              },
+              "tombstonedAt": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": true,
+                "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_delete",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_config_delete (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration",
+              "seq",
+              "enabled",
+              "lifecycleStatus",
+              "createdAt",
+              "updatedAt",
+              "config"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lifecycleStatus": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "needs-credentials",
+                  "needs-consent",
+                  "needs-runtime",
+                  "blocked"
+                ]
+              },
+              "tombstonedAt": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": true,
+                "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_get",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "external_agent_config_get (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "configId",
+                  "revision",
+                  "lifecycleGeneration",
+                  "seq",
+                  "enabled",
+                  "lifecycleStatus",
+                  "createdAt",
+                  "updatedAt",
+                  "config"
+                ],
+                "properties": {
+                  "configId": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "string"
+                  },
+                  "lifecycleGeneration": {
+                    "type": "integer"
+                  },
+                  "seq": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "lifecycleStatus": {
+                    "type": "string",
+                    "enum": [
+                      "ready",
+                      "needs-credentials",
+                      "needs-consent",
+                      "needs-runtime",
+                      "blocked"
+                    ]
+                  },
+                  "tombstonedAt": {
+                    "type": "number"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_list",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "external_agent_config_list (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "configs"
+        ],
+        "properties": {
+          "configs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "configId",
+                "revision",
+                "lifecycleGeneration",
+                "seq",
+                "enabled",
+                "lifecycleStatus",
+                "createdAt",
+                "updatedAt",
+                "config"
+              ],
+              "properties": {
+                "configId": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "string"
+                },
+                "lifecycleGeneration": {
+                  "type": "integer"
+                },
+                "seq": {
+                  "type": "integer"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "lifecycleStatus": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "needs-credentials",
+                    "needs-consent",
+                    "needs-runtime",
+                    "blocked"
+                  ]
+                },
+                "tombstonedAt": {
+                  "type": "number"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_reconcile",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_config_reconcile (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "outcomes"
+        ],
+        "properties": {
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "configId",
+                "from",
+                "to",
+                "changed"
+              ],
+              "properties": {
+                "configId": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "changed": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_update",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_config_update (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId",
+          "expectedRevision",
+          "patch"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration",
+              "seq",
+              "enabled",
+              "lifecycleStatus",
+              "createdAt",
+              "updatedAt",
+              "config"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lifecycleStatus": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "needs-credentials",
+                  "needs-consent",
+                  "needs-runtime",
+                  "blocked"
+                ]
+              },
+              "tombstonedAt": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": true,
+                "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "external_agent_list",
       "category": "agents",
       "resource": "external-agents",
@@ -10622,6 +11364,216 @@
         },
         "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_release_run",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "external_agent_release_run (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "released"
+        ],
+        "properties": {
+          "released": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_resolve_decision",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "external_agent_resolve_decision (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "decisionId"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string"
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "allow_always",
+              "deny"
+            ]
+          },
+          "elicitation": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "resolved"
+        ],
+        "properties": {
+          "resolved": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "wrong-device"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_run_turn",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "external_agent_run_turn (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "chatSessionId",
+          "stamp",
+          "prompt"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "chatSessionId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "externalSessionId": {
+            "type": "string"
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "started"
+        ],
+        "properties": {
+          "started": {
+            "type": "boolean"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "refusal": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "config",
+                  "readiness"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "current": {
+                "type": "null"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -41677,5 +42629,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "a942067f9dc6bd35fe9ba76dc0f87c63c73b8c4f952719ea66d94d8dece7a3b9"
+  "catalogHash": "5385b8d52f6c3ee06e5085b863b47949909944a38ac11d774cea24a7a320fb1f"
 }

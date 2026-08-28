@@ -489,6 +489,22 @@ const KNOWN_COMMANDS: &[&str] = &[
     // through the mobile outbound queue. Both via desktop_writes_bridge.
     "external_agent_list",
     "external_agent_update",
+    // Host-owned external-agent configurations: an append-only head/revision
+    // store in Dexie, distinct from the desktop's own localStorage configs
+    // above. A paired browser runs against THESE, which is why the brain has
+    // to own them — it holds the process, so it must hold the record of what
+    // it is allowed to spawn.
+    "external_agent_admit_run",
+    "external_agent_cancel_run",
+    "external_agent_config_create",
+    "external_agent_config_delete",
+    "external_agent_config_get",
+    "external_agent_config_list",
+    "external_agent_config_reconcile",
+    "external_agent_config_update",
+    "external_agent_release_run",
+    "external_agent_resolve_decision",
+    "external_agent_run_turn",
     // ADR-0059 R11 — headless external-agent execution plane. Service-scope
     // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
     // a public device principal can never reach these.
@@ -1191,6 +1207,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "background_monitor_list",
     // ADR-0056 Wave 4 — read-only external-agent list projection.
     "external_agent_list",
+    // Host-owned external-agent configuration reads.
+    "external_agent_config_get",
+    "external_agent_config_list",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
     "get_external_agent_status",
     // ADR-0059 R12 — read-only projection of the webhook ingress registry.
@@ -1818,6 +1837,13 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "perf_trace_open",
     "perf_trace_read_chunk",
     "perf_system_details",
+    // Host-driven external agent runs. The run records the device that started
+    // it, and a permission or elicitation answer is accepted only from that
+    // device — otherwise any paired device could deny another's turn, or
+    // approve a tool call it was never shown.
+    "external_agent_run_turn",
+    "external_agent_cancel_run",
+    "external_agent_resolve_decision",
 ];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in

@@ -124,6 +124,17 @@ pub(super) const COMMANDS: &[&str] = &[
     "backup_import",
     "external_agent_list",
     "external_agent_update",
+    "external_agent_admit_run",
+    "external_agent_cancel_run",
+    "external_agent_config_create",
+    "external_agent_config_delete",
+    "external_agent_config_get",
+    "external_agent_config_list",
+    "external_agent_config_reconcile",
+    "external_agent_config_update",
+    "external_agent_release_run",
+    "external_agent_resolve_decision",
+    "external_agent_run_turn",
     "browser_companion_capability",
     "browser_context_submit",
     "browser_context_list",
@@ -777,6 +788,30 @@ pub(super) async fn dispatch(
         // `lib/companion/desktop-write-source.ts`.
         | "external_agent_list"
         | "external_agent_update"
+        // Host-owned external-agent configurations. Same generic bridge:
+        // the head/revision store lives in the renderer's Dexie, so the
+        // authority is there and this only carries the call.
+        | "external_agent_config_create"
+        | "external_agent_config_delete"
+        | "external_agent_config_get"
+        | "external_agent_config_list"
+        | "external_agent_config_reconcile"
+        | "external_agent_config_update"
+        // Run admission. The stamp a caller presents is checked against the
+        // head here, so the answer to "may this run start" is decided by the
+        // host that owns the configuration rather than by the browser that
+        // asked. Not in MOBILE_OUTBOUND_COMMANDS on purpose: an admission
+        // replayed from an offline queue would be answering a question about a
+        // moment that has passed.
+        | "external_agent_admit_run"
+        | "external_agent_release_run"
+        // The turn itself. It streams over `external-agent://session-event`
+        // rather than through this call's response, so the RPC answers as soon
+        // as the run is accepted — a client holding an RPC open for a whole
+        // turn would lose it to any reconnect.
+        | "external_agent_run_turn"
+        | "external_agent_cancel_run"
+        | "external_agent_resolve_decision"
         // Browser Companion — a captured page becomes a new session on the
         // renderer, so it rides the same generic bridge. Deliberately NOT in
         // CONTROL_COMMANDS: that gate maps to `GrantKind::Control`, and a

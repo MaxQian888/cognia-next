@@ -142,11 +142,46 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
 
 const mockSetRuntime = jest.fn()
 const mockSetExternalAgentId = jest.fn()
+const mockSetExternalHostConfig = jest.fn()
+interface HostSelection {
+  configId: string
+  revision: string
+  lifecycleGeneration: number
+  name: string
+}
 const runtimeState = {
   runtime: "claude-sdk" as "claude-sdk" | "external",
   setRuntime: mockSetRuntime,
   externalAgentId: null as string | null,
   setExternalAgentId: mockSetExternalAgentId,
+  externalHostConfig: null as HostSelection | null,
+  setExternalHostConfig: mockSetExternalHostConfig,
+}
+
+// Configurations the paired host owns. The hook itself is covered by its own
+// suite; here it only has to supply rows and the "no host" verdict.
+const hostConfigsState = {
+  configs: [] as Array<Record<string, unknown>>,
+  unavailable: null as string | null,
+}
+jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
+  useHostExternalAgentConfigs: () => hostConfigsState,
+}))
+
+function hostConfig(
+  configId: string,
+  name: string,
+  over: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    configId,
+    revision: `${configId}-rev`,
+    lifecycleGeneration: 1,
+    enabled: true,
+    lifecycleStatus: "ready",
+    config: { name, protocol: "pi-rpc" },
+    ...over,
+  }
 }
 
 jest.mock("@/stores/agent", () => ({
@@ -181,6 +216,10 @@ function agent(id: string, name: string, enabled = true) {
 beforeEach(() => {
   runtimeState.runtime = "claude-sdk"
   runtimeState.externalAgentId = null
+  runtimeState.externalHostConfig = null
+  hostConfigsState.configs = []
+  hostConfigsState.unavailable = null
+  mockSetExternalHostConfig.mockClear()
   externalAgentState.enabled = true
   externalAgentState.agents = {}
   externalAgentState.connectionStatus = {}
@@ -444,5 +483,114 @@ describe("AgentRuntimeSelector — props", () => {
     render(<AgentRuntimeSelector />)
     const trigger = screen.getByTestId("agent-runtime-trigger")
     expect(trigger.className).not.toContain("max-w-[9rem]")
+  })
+})
+
+describe("AgentRuntimeSelector — host-owned agents", () => {
+  it("lists a ready configuration the host owns", () => {
+    hostConfigsState.configs = [hostConfig("eac_1", "Pi on the box")]
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("radio-item-host:eac_1")).toBeInTheDocument()
+    expect(screen.getByText("Pi on the box")).toBeInTheDocument()
+  })
+
+  // The settings panel is where an unready configuration is actionable. Here
+  // it would only be a row that refuses every turn it is picked for.
+  it("hides a disabled or unready configuration", () => {
+    hostConfigsState.configs = [
+      hostConfig("eac_off", "Disabled", { enabled: false }),
+      hostConfig("eac_bad", "Unready", { lifecycleStatus: "needs-credentials" }),
+    ]
+    render(<AgentRuntimeSelector />)
+    expect(screen.queryByTestId("radio-item-host:eac_off")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("radio-item-host:eac_bad")).not.toBeInTheDocument()
+  })
+
+  it("contributes no rows when no host owns configurations", () => {
+    hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
+    hostConfigsState.unavailable = "no-host"
+    render(<AgentRuntimeSelector />)
+    expect(screen.queryByTestId("radio-item-host:eac_1")).not.toBeInTheDocument()
+  })
+
+  // The stamp is captured at selection time: it is what the host admits the
+  // run against, so a configuration edited after this click is refused.
+  it("records the whole stamp, not just the id", () => {
+    hostConfigsState.configs = [
+      hostConfig("eac_1", "Pi", { revision: "eacr_7", lifecycleGeneration: 4 }),
+    ]
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("radio-item-host:eac_1"))
+    expect(mockSetExternalHostConfig).toHaveBeenCalledWith({
+      configId: "eac_1",
+      revision: "eacr_7",
+      lifecycleGeneration: 4,
+      name: "Pi",
+    })
+    expect(mockSetRuntime).toHaveBeenCalledWith("external")
+  })
+
+  it("names the host agent on the chip", () => {
+    hostConfigsState.configs = [hostConfig("eac_1", "Pi on the box")]
+    runtimeState.runtime = "external"
+    runtimeState.externalHostConfig = {
+      configId: "eac_1",
+      revision: "eac_1-rev",
+      lifecycleGeneration: 1,
+      name: "Pi on the box",
+    }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("agent-runtime-trigger")).toHaveTextContent("Pi on the box")
+  })
+
+  it("marks the host row as the checked value", () => {
+    hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
+    runtimeState.runtime = "external"
+    runtimeState.externalHostConfig = {
+      configId: "eac_1",
+      revision: "eac_1-rev",
+      lifecycleGeneration: 1,
+      name: "Pi",
+    }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("radio-group")).toHaveAttribute("data-value", "host:eac_1")
+  })
+
+  // Without the host lane suppressing it, the local-agent fallback effect would
+  // bounce every host selection straight back to the built-in runtime.
+  it("does not fall back to the built-in runtime while a host agent is selected", () => {
+    hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
+    runtimeState.runtime = "external"
+    runtimeState.externalHostConfig = {
+      configId: "eac_1",
+      revision: "eac_1-rev",
+      lifecycleGeneration: 1,
+      name: "Pi",
+    }
+    render(<AgentRuntimeSelector />)
+    expect(mockSetRuntime).not.toHaveBeenCalledWith("claude-sdk")
+  })
+
+  // The host swapped, or the configuration was deleted over there. Naming a
+  // different agent for the user is a worse surprise than the default.
+  it("drops a selection whose configuration the host no longer has", () => {
+    hostConfigsState.configs = [hostConfig("eac_other", "Other")]
+    runtimeState.runtime = "external"
+    runtimeState.externalHostConfig = {
+      configId: "eac_gone",
+      revision: "r",
+      lifecycleGeneration: 1,
+      name: "Gone",
+    }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("radio-group")).not.toHaveAttribute("data-value", "host:eac_gone")
+  })
+
+  it("keeps local and host agents in separate groups", () => {
+    externalAgentState.agents = { a1: agent("a1", "Local one") }
+    hostConfigsState.configs = [hostConfig("eac_1", "Host one")]
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("radio-item-external:a1")).toBeInTheDocument()
+    expect(screen.getByTestId("radio-item-host:eac_1")).toBeInTheDocument()
   })
 })

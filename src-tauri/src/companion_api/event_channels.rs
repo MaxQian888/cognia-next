@@ -617,6 +617,19 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         tauri_forwarded: true,
         note: "external agent exit; ids and exit code",
     },
+    // A run the HOST is driving on a remote client's behalf. Unlike the six
+    // above — which describe a process to whoever is watching — this one IS
+    // the turn: without it a browser that asked the host to run an agent sees
+    // nothing at all. `default_on: false` like its siblings, because a client
+    // that is not running a remote agent has no use for another client's turn.
+    EventChannelSpec {
+        pattern: "external-agent://session-event",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "host-driven external agent turn; carries agent output, permission and \
+               elicitation requests for the run's own client",
+    },
     // Provider gateway — brain-only: these carry prompt and routing detail.
     EventChannelSpec {
         pattern: "gateway://request-log",

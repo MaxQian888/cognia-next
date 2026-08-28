@@ -77,6 +77,13 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
   "external_agent_update",
+  // Host-owned external-agent configurations (head + revision store in
+  // Dexie). Distinct from `external_agent_update`, which edits the desktop's
+  // own localStorage configs; these are the ones a paired browser runs against.
+  "external_agent_config_create",
+  "external_agent_config_delete",
+  "external_agent_config_reconcile",
+  "external_agent_config_update",
   // HostStateProtocol — the same durable queue now carries attached-client
   // session intents from Web, Mobile, Desktop, and TUI adapters.
   "host_state_submit",

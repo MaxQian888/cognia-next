@@ -566,6 +566,31 @@ export async function dispatchCommand(
       return externalAgentList()
     case "external_agent_update":
       return externalAgentUpdate(payload)
+    // Host-owned external-agent configurations (head + immutable revisions).
+    // Distinct plane from the two above, which edit the desktop's own
+    // localStorage configs.
+    case "external_agent_config_list":
+      return externalAgentConfigList()
+    case "external_agent_config_get":
+      return externalAgentConfigGet(payload)
+    case "external_agent_config_create":
+      return externalAgentConfigCreate(payload)
+    case "external_agent_config_update":
+      return externalAgentConfigUpdate(payload)
+    case "external_agent_config_delete":
+      return externalAgentConfigDelete(payload)
+    case "external_agent_config_reconcile":
+      return externalAgentConfigReconcile()
+    case "external_agent_admit_run":
+      return externalAgentAdmitRun(payload)
+    case "external_agent_release_run":
+      return externalAgentReleaseRun(payload)
+    case "external_agent_run_turn":
+      return externalAgentRunTurn(payload)
+    case "external_agent_cancel_run":
+      return externalAgentCancelRun(payload)
+    case "external_agent_resolve_decision":
+      return externalAgentResolveDecision(payload)
     // Settings — per-conversation overrides (pin/archive/title).
     case "conversation_overrides_update":
       return conversationOverridesUpdate(payload)
@@ -2683,3 +2708,321 @@ async function backupImport(payload: Record<string, unknown>): Promise<{ summary
 }
 
 void getSettings // keep import alive for tests that mock the module
+
+// ============================================================================
+// Host-owned external-agent configurations
+// ============================================================================
+
+/**
+ * The wire shape of one configuration.
+ *
+ * `config` carries `credentialRefs` — opaque keyring key ids, never secrets —
+ * because the browser has to show which slots are filled in order to tell
+ * "needs a key" from "ready". The values behind them never leave the host:
+ * `resolveCredentials` runs immediately before a spawn, on this side.
+ */
+interface ExternalAgentConfigWire {
+  configId: string
+  revision: string
+  lifecycleGeneration: number
+  seq: number
+  enabled: boolean
+  lifecycleStatus: string
+  tombstonedAt?: number
+  createdAt: number
+  updatedAt: number
+  config: Record<string, unknown>
+}
+
+function toConfigWire(record: {
+  configId: string
+  revision: string
+  lifecycleGeneration: number
+  seq: number
+  enabled: boolean
+  lifecycleStatus: string
+  tombstonedAt?: number
+  createdAt: number
+  updatedAt: number
+  config: unknown
+}): ExternalAgentConfigWire {
+  return {
+    configId: record.configId,
+    revision: record.revision,
+    lifecycleGeneration: record.lifecycleGeneration,
+    seq: record.seq,
+    enabled: record.enabled,
+    lifecycleStatus: record.lifecycleStatus,
+    tombstonedAt: record.tombstonedAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    config: record.config as Record<string, unknown>,
+  }
+}
+
+/** Resolve the service's host dependencies once per call. */
+async function hostConfigDeps() {
+  const { defaultReadinessAssessor } = await import("@/lib/ai/agent/external/host-config-service")
+  return { assessReadiness: await defaultReadinessAssessor() }
+}
+
+async function externalAgentConfigList(): Promise<{ configs: ExternalAgentConfigWire[] }> {
+  const { listHostExternalAgentConfigs } =
+    await import("@/lib/ai/agent/external/host-config-service")
+  return { configs: (await listHostExternalAgentConfigs()).map(toConfigWire) }
+}
+
+async function externalAgentConfigGet(
+  payload: Record<string, unknown>
+): Promise<{ config: ExternalAgentConfigWire | null }> {
+  const configId = payload.configId as string | undefined
+  if (!configId) throw new Error("external_agent_config_get.configId is required")
+  const { getHostExternalAgentConfig } = await import("@/lib/ai/agent/external/host-config-service")
+  const record = await getHostExternalAgentConfig(configId)
+  return { config: record ? toConfigWire(record) : null }
+}
+
+/**
+ * Create a configuration on this host.
+ *
+ * `fromImport` is the browser's "copy to host": the service then drops the
+ * keyring refs and consent records that were granted on the browser's machine
+ * and stores the row disabled, because it has no credentials here yet. The id
+ * is always minted host-side — one supplied by a caller could collide with a
+ * tombstone and inherit its leases.
+ */
+async function externalAgentConfigCreate(
+  payload: Record<string, unknown>
+): Promise<{ config: ExternalAgentConfigWire }> {
+  const config = payload.config as Record<string, unknown> | undefined
+  if (!config || typeof config !== "object") {
+    throw new Error("external_agent_config_create.config is required")
+  }
+  const { createHostExternalAgentConfig } =
+    await import("@/lib/ai/agent/external/host-config-service")
+  const record = await createHostExternalAgentConfig(
+    {
+      config: config as never,
+      fromImport: payload.fromImport === true,
+    },
+    await hostConfigDeps()
+  )
+  return { config: toConfigWire(record) }
+}
+
+/**
+ * Edit a configuration, compare-and-swap on the revision the caller last read.
+ *
+ * A conflict is surfaced, not resolved: two browsers editing the same agent is
+ * a case where guessing a merge would silently discard one of them.
+ */
+async function externalAgentConfigUpdate(
+  payload: Record<string, unknown>
+): Promise<{ config: ExternalAgentConfigWire }> {
+  const configId = payload.configId as string | undefined
+  const expectedRevision = payload.expectedRevision as string | undefined
+  const patch = payload.patch as Record<string, unknown> | undefined
+  if (!configId) throw new Error("external_agent_config_update.configId is required")
+  if (!expectedRevision) {
+    throw new Error("external_agent_config_update.expectedRevision is required")
+  }
+  if (!patch || typeof patch !== "object") {
+    throw new Error("external_agent_config_update.patch is required")
+  }
+  const { updateHostExternalAgentConfig } =
+    await import("@/lib/ai/agent/external/host-config-service")
+  const record = await updateHostExternalAgentConfig(
+    { configId, expectedRevision, patch: patch as never },
+    await hostConfigDeps()
+  )
+  return { config: toConfigWire(record) }
+}
+
+async function externalAgentConfigDelete(
+  payload: Record<string, unknown>
+): Promise<{ config: ExternalAgentConfigWire }> {
+  const configId = payload.configId as string | undefined
+  if (!configId) throw new Error("external_agent_config_delete.configId is required")
+  const { deleteHostExternalAgentConfig } =
+    await import("@/lib/ai/agent/external/host-config-service")
+  // No `hostConfigDeps()`: a tombstone assesses nothing, and resolving the
+  // readiness assessor here would boot the keyring, the manager and the
+  // adapter registry for a write that only needs the clock.
+  return { config: toConfigWire(await deleteHostExternalAgentConfig(configId)) }
+}
+
+/**
+ * Re-assess every configuration against this host as it is now.
+ *
+ * Readiness is a statement about the host, and the host moves underneath a
+ * stored verdict — a key is revoked, a runtime is uninstalled. Exposed as a
+ * command so a browser that has just provisioned a credential can ask for the
+ * re-check instead of waiting for the next host restart.
+ */
+async function externalAgentConfigReconcile(): Promise<{
+  outcomes: Array<{ configId: string; from: string; to: string; changed: boolean }>
+}> {
+  const { reconcileHostExternalAgentConfigs } =
+    await import("@/lib/ai/agent/external/host-config-service")
+  return { outcomes: await reconcileHostExternalAgentConfigs(await hostConfigDeps()) }
+}
+
+/**
+ * May this run start against the configuration it named?
+ *
+ * The caller sends a stamp, never a configuration. What gets launched is read
+ * from the host's own leased revision, so a browser cannot widen what it is
+ * allowed to run by editing the blob it sends — the worst it can do is name a
+ * stamp that no longer resolves, and be refused.
+ *
+ * A refusal is returned as data rather than thrown. Every reason is a
+ * different thing for the caller to do (re-read and retry, provision a
+ * credential, pick another agent), and an exception would flatten all of them
+ * into one failed RPC.
+ *
+ * The admitted configuration itself is NOT returned. It never leaves this
+ * host: it is the command line, argv, environment variable names and endpoint
+ * URLs of a process this host will spawn — the content
+ * `externalAgentConfigRevisions` is classified confidential for — and the
+ * caller has no use for it, because the caller is not the thing that spawns.
+ * The envelope (`record`) is what a client needs to show state and to build
+ * its next stamp.
+ */
+async function externalAgentAdmitRun(payload: Record<string, unknown>): Promise<{
+  admitted: boolean
+  run?: { runId: string }
+  record?: ExternalAgentConfigWire
+  refusal?: Record<string, unknown>
+}> {
+  const runId = payload.runId as string | undefined
+  const stamp = payload.stamp as
+    { configId?: string; revision?: string; lifecycleGeneration?: number } | undefined
+  if (!runId) throw new Error("external_agent_admit_run.runId is required")
+  if (!stamp?.configId || !stamp.revision || typeof stamp.lifecycleGeneration !== "number") {
+    throw new Error(
+      "external_agent_admit_run.stamp requires configId, revision and lifecycleGeneration"
+    )
+  }
+  const { admitExternalAgentRun } = await import("@/lib/ai/agent/external/run-admission")
+  const result = await admitExternalAgentRun(runId, {
+    configId: stamp.configId,
+    revision: stamp.revision,
+    lifecycleGeneration: stamp.lifecycleGeneration,
+  })
+  if (!result.ok) {
+    const refusal = result.refusal
+    return {
+      admitted: false,
+      refusal: { ...refusal, current: undefined },
+      record: refusal.current ? toConfigWire(refusal.current) : undefined,
+    }
+  }
+  return {
+    admitted: true,
+    run: { runId: result.run.runId },
+    record: toConfigWire(result.run.record),
+  }
+}
+
+/**
+ * Drop the revision this run pinned.
+ *
+ * Idempotent, and deliberately not an error for a run that was never admitted:
+ * a caller whose turn died between the ACK and the spawn cannot tell which half
+ * happened, and making it guess would leave revisions pinned forever whenever
+ * it guessed wrong.
+ */
+async function externalAgentReleaseRun(
+  payload: Record<string, unknown>
+): Promise<{ released: boolean }> {
+  const runId = payload.runId as string | undefined
+  if (!runId) throw new Error("external_agent_release_run.runId is required")
+  const { releaseExternalAgentRun } = await import("@/lib/ai/agent/external/run-admission")
+  await releaseExternalAgentRun(runId)
+  return { released: true }
+}
+
+/**
+ * Run one turn of a host-owned external agent on the caller's behalf.
+ *
+ * Answers as soon as the run is **accepted**, not when it finishes. The turn
+ * streams over `external-agent://session-event`, which rides the companion
+ * event bus and therefore already has a sequence and a replay cursor; a client
+ * that had to hold this RPC open for the whole turn would lose the turn to any
+ * reconnect, and gain nothing for it.
+ *
+ * `callerDeviceId` is injected server-side (`CALLER_DEVICE_ID_COMMANDS`) and
+ * is what binds the run's later permission and elicitation answers to the
+ * device that was actually shown the question.
+ */
+async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
+  started: boolean
+  runId?: string
+  agentId?: string
+  refusal?: Record<string, unknown>
+}> {
+  const runId = payload.runId as string | undefined
+  const chatSessionId = payload.chatSessionId as string | undefined
+  const prompt = payload.prompt as string | undefined
+  const stamp = payload.stamp as
+    { configId?: string; revision?: string; lifecycleGeneration?: number } | undefined
+  if (!runId) throw new Error("external_agent_run_turn.runId is required")
+  if (!chatSessionId) throw new Error("external_agent_run_turn.chatSessionId is required")
+  if (typeof prompt !== "string") throw new Error("external_agent_run_turn.prompt is required")
+  if (!stamp?.configId || !stamp.revision || typeof stamp.lifecycleGeneration !== "number") {
+    throw new Error(
+      "external_agent_run_turn.stamp requires configId, revision and lifecycleGeneration"
+    )
+  }
+  const { startRemoteExternalRun } = await import("@/lib/ai/agent/external/remote-run-service")
+  const result = await startRemoteExternalRun({
+    runId,
+    chatSessionId,
+    prompt,
+    externalSessionId: payload.externalSessionId as string | undefined,
+    callerDeviceId: payload.callerDeviceId as string | undefined,
+    stamp: {
+      configId: stamp.configId,
+      revision: stamp.revision,
+      lifecycleGeneration: stamp.lifecycleGeneration,
+    },
+  })
+  if (!result.started) {
+    return { started: false, refusal: { ...result.refusal, current: undefined } }
+  }
+  return { started: true, runId: result.runId, agentId: result.agentId }
+}
+
+async function externalAgentCancelRun(
+  payload: Record<string, unknown>
+): Promise<{ cancelled: boolean }> {
+  const runId = payload.runId as string | undefined
+  if (!runId) throw new Error("external_agent_cancel_run.runId is required")
+  const { cancelRemoteExternalRun } = await import("@/lib/ai/agent/external/remote-run-service")
+  return {
+    cancelled: await cancelRemoteExternalRun(runId, payload.callerDeviceId as string | undefined),
+  }
+}
+
+/**
+ * Answer a permission or elicitation the running agent is blocked on.
+ *
+ * A refusal is data, not a throw: `unknown` (already answered, expired, or the
+ * run has settled) and `wrong-device` need different handling on the client —
+ * the first means stop waiting, the second means this client was never the one
+ * being asked.
+ */
+async function externalAgentResolveDecision(
+  payload: Record<string, unknown>
+): Promise<{ resolved: boolean; reason?: string }> {
+  const decisionId = payload.decisionId as string | undefined
+  if (!decisionId) throw new Error("external_agent_resolve_decision.decisionId is required")
+  const { resolveRemoteDecision } = await import("@/lib/ai/agent/external/remote-run-service")
+  const outcome = await resolveRemoteDecision({
+    decisionId,
+    callerDeviceId: payload.callerDeviceId as string | undefined,
+    decision: payload.decision as never,
+    elicitation: payload.elicitation as never,
+  })
+  return outcome.resolved ? { resolved: true } : { resolved: false, reason: outcome.reason }
+}

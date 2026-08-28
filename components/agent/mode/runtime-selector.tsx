@@ -43,6 +43,8 @@ import { ConnectionStatusBadge } from "@/components/agent/external-agent/connect
 import { ExternalAgentManager } from "@/components/agent/external-agent/manager"
 import { cn } from "@/lib/utils"
 import { useAgentRuntimeStore } from "@/stores/agent"
+import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
+import { ServerCogIcon } from "lucide-react"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { hydrateAgentConfig } from "@/stores/agent/external-agent-store/selectors"
 import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
@@ -62,6 +64,8 @@ interface Props {
 
 /** Radio value prefix for an external agent row (`claude-sdk` is the peer). */
 const EXTERNAL_VALUE_PREFIX = "external:"
+/** Radio value prefix for a configuration the paired host owns. */
+const HOST_VALUE_PREFIX = "host:"
 
 interface RuntimeAgentRow {
   agent: ExternalAgentConfig
@@ -90,11 +94,23 @@ interface RuntimeAgentRow {
 export function AgentRuntimeSelector({ className, disabled }: Props) {
   const t = useTranslations("agentRuntime")
   const tExternal = useTranslations("externalAgent")
+  const tHostConfigs = useTranslations("externalAgent.hostConfigs")
   const [manageOpen, setManageOpen] = useState(false)
 
   const runtime = useAgentRuntimeStore((s) => s.runtime)
   const setRuntime = useAgentRuntimeStore((s) => s.setRuntime)
   const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
+  const externalHostConfig = useAgentRuntimeStore((s) => s.externalHostConfig)
+  const setExternalHostConfig = useAgentRuntimeStore((s) => s.setExternalHostConfig)
+
+  // Configurations the paired host owns. Loaded here rather than passed in
+  // because the picker is where the choice is made, and the hook already
+  // answers "no host" / "host too old" without this component branching on a
+  // platform. A host that cannot serve them simply contributes no rows.
+  const { configs: hostConfigs, unavailable: hostUnavailable } = useHostExternalAgentConfigs()
+  const hostRows = hostUnavailable
+    ? []
+    : hostConfigs.filter((record) => record.enabled && record.lifecycleStatus === "ready")
 
   const externalEnabled = useExternalAgentStore((s) => s.enabled)
   const setExternalEnabled = useExternalAgentStore((s) => s.setEnabled)
@@ -147,19 +163,39 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
   // entirely (deleted, or its store entry gone) has no assessment to consult
   // and stays a settled block.
   const fallbackSettled = !selectedRow || !selectedRow.blockTransient
+  // A host selection is runnable on its own terms, so it must suppress the
+  // fallback: the local rows say nothing about it, and without this the chip
+  // would bounce every host selection straight back to the built-in runtime.
+  const holdsHostSelection = runtime === "external" && !!externalHostConfig
   useEffect(() => {
+    if (holdsHostSelection) return
     if (runtime === "external" && !selectedRunnable && fallbackSettled) setRuntime("claude-sdk")
-  }, [runtime, selectedRunnable, fallbackSettled, setRuntime])
+  }, [runtime, selectedRunnable, fallbackSettled, holdsHostSelection, setRuntime])
 
-  const value = selectedRunnable
-    ? `${EXTERNAL_VALUE_PREFIX}${externalAgentId}`
-    : runtime === "external"
-      ? EXTERNAL_VALUE_PREFIX
-      : "claude-sdk"
+  // A host selection whose configuration is gone (deleted on the host, or the
+  // host swapped underneath the tab) is dropped rather than replaced: naming a
+  // different agent for the user is a worse surprise than landing on the
+  // default, which is the same rule the local lane follows above.
+  const hostSelection =
+    runtime === "external" && externalHostConfig
+      ? (hostRows.find((row) => row.configId === externalHostConfig.configId) ?? null)
+      : null
+
+  const value = hostSelection
+    ? `${HOST_VALUE_PREFIX}${hostSelection.configId}`
+    : selectedRunnable
+      ? `${EXTERNAL_VALUE_PREFIX}${externalAgentId}`
+      : runtime === "external"
+        ? EXTERNAL_VALUE_PREFIX
+        : "claude-sdk"
 
   const Icon = runtime === "external" ? PlugZapIcon : BotIcon
   const label =
-    runtime === "external" ? (selectedRow?.agent.name ?? t("externalUnconfigured")) : t("claudeSdk")
+    runtime === "external"
+      ? ((hostSelection
+          ? ((hostSelection.config as { name?: string }).name ?? externalHostConfig?.name)
+          : selectedRow?.agent.name) ?? t("externalUnconfigured"))
+      : t("claudeSdk")
   // The label is earned by being a choice. On the built-in runtime the chip
   // spelled "Claude SDK" under every single turn — the one value it can never
   // be wrong about — while the composer's status line ran out of room and its
@@ -171,6 +207,23 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
   const handleValueChange = (next: string) => {
     if (next === "claude-sdk") {
       setRuntime("claude-sdk")
+      return
+    }
+    if (next.startsWith(HOST_VALUE_PREFIX)) {
+      const configId = next.slice(HOST_VALUE_PREFIX.length)
+      const record = hostRows.find((row) => row.configId === configId)
+      if (!record) return
+      // The stamp is captured at selection time. It is what the host admits
+      // the run against, so a configuration edited between this click and the
+      // send is refused rather than run — which is the whole point of carrying
+      // a revision instead of a bare id.
+      setExternalHostConfig({
+        configId: record.configId,
+        revision: record.revision,
+        lifecycleGeneration: record.lifecycleGeneration,
+        name: (record.config as { name?: string }).name ?? record.configId,
+      })
+      setRuntime("external")
       return
     }
     const agentId = next.startsWith(EXTERNAL_VALUE_PREFIX)
@@ -263,6 +316,43 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
                   </div>
                 </DropdownMenuRadioItem>
               ))}
+            </>
+          ) : null}
+
+          {/* Agents the paired host owns. A separate group, not merged with the
+              local rows: a local agent runs where this shell can spawn a
+              process, and on a browser that is nowhere — so presenting the two
+              as interchangeable would be the misleading part. Only ready,
+              enabled configurations appear; the rest are actionable on the
+              settings page, not here. */}
+          {hostRows.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-muted-foreground text-[10px] font-normal">
+                {tHostConfigs("title")}
+              </DropdownMenuLabel>
+              {hostRows.map((record) => {
+                const config = record.config as { name?: string; protocol?: string }
+                return (
+                  <DropdownMenuRadioItem
+                    key={record.configId}
+                    value={`${HOST_VALUE_PREFIX}${record.configId}`}
+                    data-testid={`runtime-host-${record.configId}`}
+                  >
+                    <ServerCogIcon className="mr-2 size-4 shrink-0" />
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm">{config.name ?? record.configId}</span>
+                      {config.protocol ? (
+                        <span className="mt-0.5 flex items-center gap-1">
+                          <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                            {config.protocol.toUpperCase()}
+                          </Badge>
+                        </span>
+                      ) : null}
+                    </div>
+                  </DropdownMenuRadioItem>
+                )
+              })}
             </>
           ) : null}
         </DropdownMenuRadioGroup>

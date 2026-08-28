@@ -161,3 +161,44 @@ describe("useAgentRuntimeStore", () => {
     )
   })
 })
+
+describe("the two external lanes are mutually exclusive", () => {
+  beforeEach(() => {
+    useAgentRuntimeStore.setState({ externalAgentId: null, externalHostConfig: null })
+  })
+
+  const selection = {
+    configId: "eac_1",
+    revision: "eacr_1",
+    lifecycleGeneration: 1,
+    name: "Pi",
+  }
+
+  it("selecting a host config drops a local agent", () => {
+    useAgentRuntimeStore.getState().setExternalAgentId("local-1")
+    useAgentRuntimeStore.getState().setExternalHostConfig(selection)
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBeNull()
+    expect(useAgentRuntimeStore.getState().externalHostConfig).toEqual(selection)
+  })
+
+  it("selecting a local agent drops a host config", () => {
+    useAgentRuntimeStore.getState().setExternalHostConfig(selection)
+    useAgentRuntimeStore.getState().setExternalAgentId("local-1")
+    expect(useAgentRuntimeStore.getState().externalHostConfig).toBeNull()
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBe("local-1")
+  })
+
+  // Clearing one lane must not clear the other: "no local agent" is not the
+  // same statement as "no agent anywhere".
+  it("clearing one lane leaves the other alone", () => {
+    useAgentRuntimeStore.getState().setExternalHostConfig(selection)
+    useAgentRuntimeStore.getState().setExternalAgentId(null)
+    expect(useAgentRuntimeStore.getState().externalHostConfig).toEqual(selection)
+  })
+
+  it("clearing the host config leaves a local agent alone", () => {
+    useAgentRuntimeStore.getState().setExternalAgentId("local-1")
+    useAgentRuntimeStore.getState().setExternalHostConfig(null)
+    expect(useAgentRuntimeStore.getState().externalAgentId).toBe("local-1")
+  })
+})
