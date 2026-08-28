@@ -28,8 +28,8 @@ use crate::model::{
     RunStatus,
 };
 use crate::store::{
-    IssuePatch, IssueQuery, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch, PlanQuery,
-    PlanStepProgress, RunPatch, RunQuery, Store, StoreError, Workspace, WorkspaceMember,
+    IssuePatch, IssueQuery, MutationGuard, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch,
+    PlanQuery, PlanStepProgress, RunPatch, RunQuery, Store, StoreError, Workspace, WorkspaceMember,
 };
 
 /// How long a minted grant lives.
@@ -97,8 +97,20 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn health() -> &'static str {
-    "ok"
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthResponse {
+    status: &'static str,
+    collab_protocol_version: u32,
+    features: [&'static str; 3],
+}
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        collab_protocol_version: 1,
+        features: ["issue-writes", "plan-writes", "run-writes"],
+    })
 }
 
 // ── Error shape ──────────────────────────────────────────────────────────────
@@ -134,6 +146,23 @@ enum Failure {
 
 impl IntoResponse for Failure {
     fn into_response(self) -> Response {
+        match self {
+            Self::Store(StoreError::Conflict(authoritative))
+            | Self::Auth(AuthError::Store(StoreError::Conflict(authoritative))) => (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "revision conflict",
+                    "authoritative": authoritative,
+                })),
+            )
+                .into_response(),
+            other => other.into_non_conflict_response(),
+        }
+    }
+}
+
+impl Failure {
+    fn into_non_conflict_response(self) -> Response {
         let (status, message) = match self {
             Self::Auth(AuthError::MissingCredentials) => (
                 StatusCode::UNAUTHORIZED,
@@ -147,6 +176,7 @@ impl IntoResponse for Failure {
             }
             Self::Auth(AuthError::Store(error)) | Self::Store(error) => match error {
                 StoreError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
+                StoreError::Conflict(_) => unreachable!("conflicts are handled before this match"),
                 other => {
                     tracing::error!(error = %other, "collaboration store failure");
                     (
@@ -217,6 +247,7 @@ impl ActorBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateIssueBody {
+    pub operation_id: String,
     pub workspace_id: String,
     pub issue_project_id: String,
     pub title: String,
@@ -235,6 +266,8 @@ pub struct CreateIssueBody {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchIssueBody {
+    pub operation_id: String,
+    pub base_revision: i64,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,9 +293,29 @@ where
     Deserialize::deserialize(deserializer).map(Some)
 }
 
+fn validated_operation_id(operation_id: String) -> Result<String, Failure> {
+    if operation_id.trim().is_empty() {
+        return Err(Failure::BadRequest("operationId must not be blank".into()));
+    }
+    Ok(operation_id)
+}
+
+fn mutation_guard(operation_id: String, base_revision: i64) -> Result<MutationGuard, Failure> {
+    if base_revision < 1 {
+        return Err(Failure::BadRequest(
+            "baseRevision must be a positive integer".into(),
+        ));
+    }
+    Ok(MutationGuard {
+        operation_id: validated_operation_id(operation_id)?,
+        base_revision,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppendEventBody {
+    pub operation_id: String,
     pub kind: String,
     #[serde(default)]
     pub payload: serde_json::Value,
@@ -291,6 +344,7 @@ pub struct CreatePlanStepBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlanBody {
+    pub operation_id: String,
     pub workspace_id: String,
     pub title: String,
     #[serde(default)]
@@ -317,6 +371,8 @@ pub struct PlanStepProgressBody {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchPlanBody {
+    pub operation_id: String,
+    pub base_revision: i64,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default, deserialize_with = "double_option")]
@@ -355,6 +411,7 @@ impl ArtifactBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRunBody {
+    pub operation_id: String,
     pub workspace_id: String,
     /// Both optional and neither required — an ad-hoc dispatch attaches to
     /// nothing. `title` is what makes it readable, so it is not optional.
@@ -373,6 +430,8 @@ pub struct CreateRunBody {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchRunBody {
+    pub operation_id: String,
+    pub base_revision: i64,
     #[serde(default)]
     pub status: Option<RunStatus>,
     #[serde(default, deserialize_with = "double_option")]
@@ -607,6 +666,7 @@ async fn create_issue(
     headers: HeaderMap,
     Json(body): Json<CreateIssueBody>,
 ) -> Result<(StatusCode, Json<Issue>), Failure> {
+    let operation_id = validated_operation_id(body.operation_id)?;
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
     let caller = authorize_workspace(
         state.store.as_ref(),
@@ -641,6 +701,7 @@ async fn create_issue(
             assignee,
             created_by,
             now,
+            operation_id,
         })
         .await?;
     Ok((StatusCode::CREATED, Json(issue)))
@@ -652,6 +713,7 @@ async fn patch_issue(
     headers: HeaderMap,
     Json(body): Json<PatchIssueBody>,
 ) -> Result<Json<Issue>, Failure> {
+    let mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
     // Read the issue first so the capability check runs against the workspace
     // the issue actually lives in, not one the caller names.
     let (claims, existing) = peek_issue(&state, &org_id, &issue_id, &headers).await?;
@@ -682,6 +744,7 @@ async fn patch_issue(
                 board_order: body.board_order,
                 assignee,
             },
+            mutation_guard,
             (state.now)(),
         )
         .await?;
@@ -710,6 +773,7 @@ async fn append_event(
     headers: HeaderMap,
     Json(body): Json<AppendEventBody>,
 ) -> Result<(StatusCode, Json<IssueEvent>), Failure> {
+    let operation_id = validated_operation_id(body.operation_id)?;
     let (claims, existing) = peek_issue(&state, &org_id, &issue_id, &headers).await?;
     let caller = authorize_workspace(
         state.store.as_ref(),
@@ -727,8 +791,9 @@ async fn append_event(
         // Same rule as authorship: the actor is who authenticated.
         actor: CollabActor::new(ActorKind::Human, caller.user_id, None)?,
         payload: body.payload,
+        operation_id,
     };
-    state.store.append_event(&org_id, event.clone()).await?;
+    let event = state.store.append_event(&org_id, event).await?;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -813,6 +878,7 @@ async fn create_plan(
     headers: HeaderMap,
     Json(body): Json<CreatePlanBody>,
 ) -> Result<(StatusCode, Json<Plan>), Failure> {
+    let operation_id = validated_operation_id(body.operation_id)?;
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
     let caller = authorize_workspace(
         state.store.as_ref(),
@@ -859,6 +925,7 @@ async fn create_plan(
             // Authorship is who authenticated, never a field on the request.
             created_by: CollabActor::new(ActorKind::Human, caller.user_id, None)?,
             now: (state.now)(),
+            operation_id,
         })
         .await?;
     Ok((StatusCode::CREATED, Json(plan)))
@@ -870,6 +937,7 @@ async fn patch_plan(
     headers: HeaderMap,
     Json(body): Json<PatchPlanBody>,
 ) -> Result<Json<Plan>, Failure> {
+    let mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
     // Read first, so the capability check runs against the workspace the plan
     // actually lives in rather than one the caller names.
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
@@ -906,6 +974,7 @@ async fn patch_plan(
                     })
                     .collect(),
             },
+            mutation_guard,
             (state.now)(),
         )
         .await?;
@@ -943,6 +1012,7 @@ async fn create_run(
     headers: HeaderMap,
     Json(body): Json<CreateRunBody>,
 ) -> Result<(StatusCode, Json<Run>), Failure> {
+    let operation_id = validated_operation_id(body.operation_id)?;
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
     let caller = authorize_workspace(
         state.store.as_ref(),
@@ -975,6 +1045,7 @@ async fn create_run(
             started_by: CollabActor::new(ActorKind::Human, caller.user_id, None)?,
             artifacts,
             now: (state.now)(),
+            operation_id,
         })
         .await?;
     Ok((StatusCode::CREATED, Json(run)))
@@ -986,6 +1057,7 @@ async fn patch_run(
     headers: HeaderMap,
     Json(body): Json<PatchRunBody>,
 ) -> Result<Json<Run>, Failure> {
+    let mutation_guard = mutation_guard(body.operation_id, body.base_revision)?;
     let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
     let existing = state
         .store
@@ -1021,6 +1093,7 @@ async fn patch_run(
                 error: body.error,
                 artifacts,
             },
+            mutation_guard,
             (state.now)(),
         )
         .await?;
@@ -1161,7 +1234,12 @@ mod tests {
         (status, json)
     }
 
-    fn post(path: &str, token: &str, body: serde_json::Value) -> Request<Body> {
+    fn post(path: &str, token: &str, mut body: serde_json::Value) -> Request<Body> {
+        if let Some(object) = body.as_object_mut() {
+            object.entry("operationId").or_insert_with(|| {
+                serde_json::Value::String(format!("test-op-{}", Uuid::new_v4().simple()))
+            });
+        }
         Request::builder()
             .method("POST")
             .uri(path)
@@ -1580,7 +1658,12 @@ mod tests {
                 .header("authorization", token_for(&ada()))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "status": "in_progress" }).to_string(),
+                    serde_json::json!({
+                        "operationId": "patch-in-progress",
+                        "baseRevision": 1,
+                        "status": "in_progress"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -1596,7 +1679,12 @@ mod tests {
                 .header("authorization", token_for(&bob()))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "title": "stolen" }).to_string(),
+                    serde_json::json!({
+                        "operationId": "patch-stolen",
+                        "baseRevision": 2,
+                        "title": "stolen"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -1622,6 +1710,8 @@ mod tests {
         let (_, assigned) = call(
             app(store.clone()),
             assign(serde_json::json!({
+                "operationId": "assign",
+                "baseRevision": 1,
                 "assignee": { "kind": "human", "id": ada().as_str(), "label": "Ada" }
             })),
         )
@@ -1631,14 +1721,68 @@ mod tests {
         // An unrelated patch leaves the assignee alone…
         let (_, renamed) = call(
             app(store.clone()),
-            assign(serde_json::json!({ "title": "Renamed" })),
+            assign(serde_json::json!({
+                "operationId": "rename",
+                "baseRevision": 2,
+                "title": "Renamed"
+            })),
         )
         .await;
         assert_eq!(renamed["assignee"]["id"], ada().as_str());
 
         // …an explicit null clears it.
-        let (_, cleared) = call(app(store), assign(serde_json::json!({ "assignee": null }))).await;
+        let (_, cleared) = call(
+            app(store),
+            assign(serde_json::json!({
+                "operationId": "unassign",
+                "baseRevision": 3,
+                "assignee": null
+            })),
+        )
+        .await;
         assert!(cleared.get("assignee").is_none(), "{cleared}");
+    }
+
+    #[tokio::test]
+    async fn patch_replay_is_successful_and_a_stale_new_operation_returns_authority() {
+        let store = seeded();
+        let id = create_issue_as_ada(&store).await;
+        let path = format!("/v1/orgs/{ORG}/issues/{id}");
+        let token = token_for(&ada());
+
+        let first_body = serde_json::json!({
+            "operationId": "rename-once",
+            "baseRevision": 1,
+            "title": "Renamed"
+        });
+        let (status, first) = call(
+            app(store.clone()),
+            patch_request(&path, &token, first_body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        assert_eq!(first["revision"], 2);
+
+        let (status, replay) =
+            call(app(store.clone()), patch_request(&path, &token, first_body)).await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(replay, first);
+
+        let (status, conflict) = call(
+            app(store),
+            patch_request(
+                &path,
+                &token,
+                serde_json::json!({
+                    "operationId": "rename-from-stale-copy",
+                    "baseRevision": 1,
+                    "title": "Overwrite"
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+        assert_eq!(conflict["authoritative"], first);
     }
 
     #[tokio::test]
@@ -1856,7 +2000,15 @@ mod tests {
 
     // ── Plans and Runs (Batch 7c) ────────────────────────────────────────────
 
-    fn patch_request(path: &str, token: &str, body: serde_json::Value) -> Request<Body> {
+    fn patch_request(path: &str, token: &str, mut body: serde_json::Value) -> Request<Body> {
+        if let Some(object) = body.as_object_mut() {
+            object.entry("operationId").or_insert_with(|| {
+                serde_json::Value::String(format!("test-op-{}", Uuid::new_v4().simple()))
+            });
+            object
+                .entry("baseRevision")
+                .or_insert(serde_json::Value::from(1));
+        }
         Request::builder()
             .method("PATCH")
             .uri(path)

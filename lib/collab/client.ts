@@ -1,9 +1,10 @@
 /**
  * HTTP client for the collaboration plane (`crates/cognia-collab-server`).
  *
- * ADR-0149 §6 makes the server authoritative and the client a read-only cache,
- * so this module only ever reads. Writes land in a later cut; adding them now
- * would mean inventing a conflict story for rows the client does not own.
+ * ADR-0149 §6 makes the server authoritative. Reads refresh local mirrors;
+ * writes carry a stable operation id and an explicit base revision so retries
+ * are idempotent and concurrent edits surface as conflicts instead of being
+ * silently merged.
  *
  * # Two credentials, not one
  *
@@ -41,6 +42,9 @@ export interface CollabIssue {
   createdBy: CollabIssueActor
   createdAt: number
   updatedAt: number
+  revision?: number
+  createdOperationId?: string
+  lastOperationId?: string
 }
 
 export interface CollabIssueEvent {
@@ -90,6 +94,12 @@ export interface CollabWorkspaceMember {
   orgMember: boolean
 }
 
+export interface CollabHealth {
+  status: string
+  collabProtocolVersion?: number
+  features?: string[]
+}
+
 /**
  * One plan as the plane knows it — ADR-0149 §6.
  *
@@ -112,6 +122,9 @@ export interface CollabPlan {
   updatedAt: number
   endedAt?: number
   steps?: CollabPlanStep[]
+  revision?: number
+  createdOperationId?: string
+  lastOperationId?: string
 }
 
 export interface CollabPlanStep {
@@ -147,6 +160,54 @@ export interface CollabRun {
   error?: string
   /** Always http(s) — the server refuses anything else. */
   artifacts?: IssueRunArtifact[]
+  revision?: number
+  createdOperationId?: string
+  lastOperationId?: string
+}
+
+export interface CreateCollabIssueInput {
+  operationId: string
+  workspaceId: string
+  issueProjectId: string
+  title: string
+  body?: string
+  status?: IssueStatus
+  priority?: IssuePriority
+  boardOrder?: number
+  assignee?: CollabIssueActor
+}
+
+export type PatchCollabIssueInput = {
+  operationId: string
+  baseRevision: number
+} & Partial<Pick<CollabIssue, "title" | "body" | "status" | "priority" | "boardOrder" | "assignee">>
+
+export interface AppendCollabIssueEventInput {
+  operationId: string
+  kind: string
+  payload?: unknown
+}
+
+export type CreateCollabPlanInput = Record<string, unknown> & {
+  operationId: string
+  workspaceId: string
+  title: string
+}
+
+export type PatchCollabPlanInput = Record<string, unknown> & {
+  operationId: string
+  baseRevision: number
+}
+
+export type CreateCollabRunInput = Record<string, unknown> & {
+  operationId: string
+  workspaceId: string
+  title: string
+}
+
+export type PatchCollabRunInput = Record<string, unknown> & {
+  operationId: string
+  baseRevision: number
 }
 
 interface MintedGrant {
@@ -174,6 +235,16 @@ export class CollabError extends Error {
   }
 }
 
+export class CollabConflictError<T = unknown> extends CollabError {
+  constructor(
+    message: string,
+    readonly authoritative: T
+  ) {
+    super(409, message)
+    this.name = "CollabConflictError"
+  }
+}
+
 export interface CollabClientOptions {
   baseUrl: string
   /** The Logto access token for this person. Called per exchange, so a refreshed token is picked up. */
@@ -181,6 +252,11 @@ export interface CollabClientOptions {
   fetchImpl: CollabFetch
   /** Injectable so the grant cache can be tested without waiting. */
   now?: () => number
+}
+
+export interface CollabIdentity {
+  userId: string
+  orgId: string
 }
 
 /**
@@ -210,6 +286,24 @@ export class CollabClient {
   forgetGrant(orgId?: string): void {
     if (orgId === undefined) this.grants.clear()
     else this.grants.delete(orgId)
+  }
+
+  /** Resolve the server-owned person id without exposing the bearer grant. */
+  async identity(orgId: string): Promise<CollabIdentity> {
+    await this.grantFor(orgId)
+    const minted = this.grants.get(orgId)
+    if (!minted) throw new CollabError(401, "collaboration identity is unavailable")
+    return { userId: minted.userId, orgId: minted.orgId }
+  }
+
+  /** Feature probe. A legacy plain-text `ok` response means read-only protocol 0. */
+  async health(): Promise<CollabHealth> {
+    const response = await this.fetchImpl(`${this.baseUrl}/health`)
+    if (!response.ok)
+      throw new CollabError(response.status, `collaboration plane returned ${response.status}`)
+    const text = await response.text()
+    if (text.trim() === "ok") return { status: "ok", collabProtocolVersion: 0, features: [] }
+    return JSON.parse(text) as CollabHealth
   }
 
   async listIssues(
@@ -293,6 +387,63 @@ export class CollabClient {
     )
   }
 
+  createIssue(orgId: string, input: CreateCollabIssueInput): Promise<CollabIssue> {
+    return this.json(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/issues`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  patchIssue(orgId: string, issueId: string, input: PatchCollabIssueInput): Promise<CollabIssue> {
+    return this.json(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/issues/${encodeURIComponent(issueId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  appendIssueEvent(
+    orgId: string,
+    issueId: string,
+    input: AppendCollabIssueEventInput
+  ): Promise<CollabIssueEvent> {
+    return this.json(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/issues/${encodeURIComponent(issueId)}/events`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  createPlan(orgId: string, input: CreateCollabPlanInput): Promise<CollabPlan> {
+    return this.json(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/plans`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  patchPlan(orgId: string, planId: string, input: PatchCollabPlanInput): Promise<CollabPlan> {
+    return this.json(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/plans/${encodeURIComponent(planId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  createRun(orgId: string, input: CreateCollabRunInput): Promise<CollabRun> {
+    return this.json(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/runs`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  patchRun(orgId: string, runId: string, input: PatchCollabRunInput): Promise<CollabRun> {
+    return this.json(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/runs/${encodeURIComponent(runId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
   /**
    * Exchange the access token for a grant, reusing a cached one until it is
    * close to expiry.
@@ -323,10 +474,15 @@ export class CollabClient {
     return minted.grant
   }
 
-  private async json<T>(orgId: string, path: string): Promise<T> {
+  private async json<T>(orgId: string, path: string, init: RequestInit = {}): Promise<T> {
     const attempt = async (grant: string) =>
       this.fetchImpl(`${this.baseUrl}${path}`, {
-        headers: { authorization: `Bearer ${grant}` },
+        ...init,
+        headers: {
+          ...(init.body ? { "content-type": "application/json" } : {}),
+          ...(init.headers as Record<string, string> | undefined),
+          authorization: `Bearer ${grant}`,
+        },
       })
 
     let response = await attempt(await this.grantFor(orgId))
@@ -360,17 +516,25 @@ function searchSuffix(query: Record<string, string | boolean | undefined>): stri
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new CollabError(response.status, await readError(response))
+    const body = await readErrorBody(response)
+    const message =
+      typeof body?.error === "string" && body.error
+        ? body.error
+        : `collaboration plane returned ${response.status}`
+    if (response.status === 409 && body && "authoritative" in body) {
+      throw new CollabConflictError(message, body.authoritative)
+    }
+    throw new CollabError(response.status, message)
   }
   return (await response.json()) as T
 }
 
-async function readError(response: Response): Promise<string> {
+async function readErrorBody(response: Response): Promise<Record<string, unknown> | null> {
   try {
-    const body = (await response.json()) as { error?: unknown }
-    if (typeof body.error === "string" && body.error) return body.error
+    const body = (await response.json()) as unknown
+    return typeof body === "object" && body !== null ? (body as Record<string, unknown>) : null
   } catch {
     // A non-JSON body (a proxy's HTML error page) is not worth a second failure.
+    return null
   }
-  return `collaboration plane returned ${response.status}`
 }

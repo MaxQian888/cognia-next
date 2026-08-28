@@ -98,6 +98,8 @@
     "pause": "暂停",
     "progress": "{total} 步中已完成 {completed} 步",
     "resume": "继续",
+    "share": "分享到协作空间",
+    "shared": "计划已分享到协作工作空间。",
     "statusBlocked": "受阻",
     "statusCompleted": "已完成",
     "statusFailed": "失败",

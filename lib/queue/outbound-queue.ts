@@ -27,6 +27,7 @@ import {
   deleteRow,
   listByStatus,
   markHostStateResult,
+  markCollabConflict,
   markSent,
   recordFailure,
   releaseClaim,
@@ -199,6 +200,10 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         await markSent(row.id)
       }
     } catch (err) {
+      if (row.protocol === "collab-v1" && isCollabConflict(err)) {
+        await markCollabConflict(row.id, err.message, err.authoritative)
+        return
+      }
       if (row.protocol === "host-state") {
         const rejectionCode = terminalHostStateErrorCode(err)
         if (rejectionCode) {
@@ -255,6 +260,16 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       return draining
     },
   }
+}
+
+function isCollabConflict(
+  error: unknown
+): error is { status: 409; message: string; authoritative: unknown } {
+  return (
+    error instanceof Error &&
+    (error as { status?: unknown }).status === 409 &&
+    "authoritative" in error
+  )
 }
 
 async function reconcileTerminalHostState(

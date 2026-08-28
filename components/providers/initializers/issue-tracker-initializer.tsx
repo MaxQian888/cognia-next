@@ -22,6 +22,7 @@ import { loggers } from "@cognia/logging"
 
 import { installIssueNotificationCommands, type IssueNotifyTranslate } from "@/lib/issues/notify"
 import { useAccountStore } from "@/stores/account/account-store"
+import { installCollabRefreshScheduler } from "@/lib/collab/refresh-scheduler"
 
 // The boot body lives in `lib/issues/boot.ts` so the headless brain can run the
 // same code without pulling React and `next/*` into its bundle
@@ -57,6 +58,11 @@ export function IssueTrackerInitializer() {
       // catalogue, which is recoverable, while a thrown effect is not.
       log.warn("issue-tracker: boot failed", { error: String(error) })
     })
+  }, [unlockedAccountId])
+
+  useEffect(() => {
+    if (!unlockedAccountId) return
+    return installCollabRefreshScheduler(unlockedAccountId)
   }, [unlockedAccountId])
 
   // The `issue.open` notification action needs the App Router, which only

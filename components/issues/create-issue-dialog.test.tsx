@@ -7,10 +7,18 @@ jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 const mockCreateIssue = jest.fn()
 const mockCreateIssueProject = jest.fn()
 const mockListTakenProjectKeys = jest.fn()
+const mockGetCollabWorkspace = jest.fn()
+const mockEnqueueCollabMutation = jest.fn()
 jest.mock("@/lib/db/issues", () => ({ createIssue: (...a: unknown[]) => mockCreateIssue(...a) }))
 jest.mock("@/lib/db/issue-projects", () => ({
   createIssueProject: (...a: unknown[]) => mockCreateIssueProject(...a),
   listTakenProjectKeys: (...a: unknown[]) => mockListTakenProjectKeys(...a),
+}))
+jest.mock("@/lib/db/collab-workspace-mirror", () => ({
+  getCollabWorkspace: (...a: unknown[]) => mockGetCollabWorkspace(...a),
+}))
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueCollabMutation: (...a: unknown[]) => mockEnqueueCollabMutation(...a),
 }))
 // Own suite; here it only needs to hand an actor back.
 let pickerOnChange: ((actor: unknown) => void) | null = null
@@ -22,7 +30,7 @@ jest.mock("./assignee-picker", () => ({
 }))
 
 import userEvent from "@testing-library/user-event"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { CreateIssueDialog } from "./create-issue-dialog"
 
 const PROJECT = {
@@ -53,6 +61,8 @@ beforeEach(() => {
   mockListTakenProjectKeys.mockResolvedValue(new Set<string>())
   mockCreateIssue.mockResolvedValue({ id: "iss_1" })
   mockCreateIssueProject.mockResolvedValue({ id: "p-new" })
+  mockGetCollabWorkspace.mockResolvedValue(undefined)
+  mockEnqueueCollabMutation.mockResolvedValue({ id: "op_1" })
 })
 
 describe("CreateIssueDialog", () => {
@@ -88,7 +98,7 @@ describe("CreateIssueDialog", () => {
     const user = userEvent.setup()
     renderDialog()
     await user.type(await screen.findByTestId("create-issue-title"), "Do it")
-    pickerOnChange!({ kind: "agent", id: "c1", label: "Ada" })
+    act(() => pickerOnChange!({ kind: "agent", id: "c1", label: "Ada" }))
     await user.click(screen.getByTestId("create-issue-submit"))
     await waitFor(() =>
       expect(mockCreateIssue).toHaveBeenCalledWith(
@@ -171,6 +181,34 @@ describe("CreateIssueDialog", () => {
     await user.type(await screen.findByTestId("create-issue-title"), "Ship it")
     await user.click(screen.getByTestId("create-issue-submit"))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("iss_1"))
+  })
+
+  it("defaults to local but can queue creation in a shared workspace", async () => {
+    const user = userEvent.setup()
+    mockGetCollabWorkspace.mockResolvedValue({ id: "w1", orgId: "org_1" })
+    renderDialog()
+    const destination = await screen.findByTestId("create-issue-destination")
+    expect(destination).toHaveTextContent("create.destinationLocal")
+    await user.click(destination)
+    await user.click(await screen.findByText("create.destinationShared"))
+    await user.type(screen.getByTestId("create-issue-title"), "Shared work")
+    await user.click(screen.getByTestId("create-issue-submit"))
+
+    await waitFor(() =>
+      expect(mockEnqueueCollabMutation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "collab_issue_create",
+          orgId: "org_1",
+          entityType: "issue",
+          payload: expect.objectContaining({
+            workspaceId: "w1",
+            issueProjectId: "p1",
+            title: "Shared work",
+          }),
+        })
+      )
+    )
+    expect(mockCreateIssue).not.toHaveBeenCalled()
   })
 
   /*

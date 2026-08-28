@@ -80,6 +80,15 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   // HostStateProtocol — the same durable queue now carries attached-client
   // session intents from Web, Mobile, Desktop, and TUI adapters.
   "host_state_submit",
+  // ADR-0149 collaboration-plane writes. These are drained by the collab
+  // dispatcher, not Companion RPC, but intentionally share this durable queue.
+  "collab_issue_create",
+  "collab_issue_patch",
+  "collab_issue_append_event",
+  "collab_plan_create",
+  "collab_plan_patch",
+  "collab_run_create",
+  "collab_run_patch",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]
@@ -134,7 +143,7 @@ export interface MobileOutboundJobRow {
    */
   claimedAt?: number
   /** Absent on v25-v167 rows, which are interpreted as legacy RPC jobs. */
-  protocol?: "legacy-rpc" | "host-state"
+  protocol?: "legacy-rpc" | "host-state" | "collab-v1"
   channel?: string
   hostGeneration?: number
   clientId?: string
@@ -143,4 +152,6 @@ export interface MobileOutboundJobRow {
   baseRevision?: number
   rejectionCode?: string
   currentRevision?: number
+  /** Server-authoritative resource retained for a manual 409 rebase/discard UI. */
+  conflictAuthoritative?: unknown
 }

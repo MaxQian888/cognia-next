@@ -58,6 +58,9 @@ export function toMirrorRow(issue: CollabIssue, fetchedAt: number): CollabIssueM
     createdBy: issue.createdBy,
     createdAt: issue.createdAt,
     updatedAt: issue.updatedAt,
+    ...(issue.revision !== undefined ? { revision: issue.revision } : {}),
+    ...(issue.createdOperationId ? { createdOperationId: issue.createdOperationId } : {}),
+    ...(issue.lastOperationId ? { lastOperationId: issue.lastOperationId } : {}),
     fetchedAt,
   }
 }

@@ -87,6 +87,8 @@ import { ManageLabelsDialog } from "./rail/manage-labels-dialog"
 import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
+import { CollabConflictsPanel } from "./collab-conflicts-panel"
+import { CollabRefreshStaleBadge } from "./collab-refresh-stale-badge"
 
 /** Stable empty reference, so the no-workspace path cannot churn memos. */
 const EMPTY_ITEMS: UnifiedIssueItem[] = []
@@ -495,6 +497,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           summary={t("summary", { count: sorted.length })}
           status={
             <div className="flex items-center gap-1.5">
+              <CollabRefreshStaleBadge />
               {runHint.running > 0 ? (
                 <Badge variant="outline" className="font-normal" data-testid="issue-agents-working">
                   {t("board.agentsWorking", { count: runHint.running })}
@@ -656,6 +659,8 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         onOpenChange={setManageLabelsOpen}
         labels={writableLabels}
       />
+
+      <CollabConflictsPanel />
 
       <DeleteIssueDialog
         open={deleteTargets.length > 0}

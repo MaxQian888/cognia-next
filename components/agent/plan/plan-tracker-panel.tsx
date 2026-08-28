@@ -16,8 +16,14 @@
  */
 
 import { useTranslations } from "next-intl"
+import { Share2Icon } from "lucide-react"
+import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { useClientLiveQuery } from "@/hooks/data"
+import { publishPlanToCollab } from "@/lib/collab/publish"
+import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
 import { cn } from "@/lib/utils"
 import { resolvePlanHtmlStyle, type PlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { useSettingsStore } from "@/stores/settings"
@@ -57,6 +63,11 @@ export interface PlanTrackerPanelProps {
 
 export function PlanTrackerPanel({ plan, styleVariant }: PlanTrackerPanelProps) {
   const t = useTranslations("plan")
+  const workspace = useClientLiveQuery(
+    () => (plan.projectId ? getCollabWorkspace(plan.projectId) : Promise.resolve(undefined)),
+    [plan.projectId],
+    undefined
+  )
   const persisted = useSettingsStore((s) => s.settings?.planSettings?.interactiveHtmlStyle)
   const variant = resolvePlanHtmlStyle(styleVariant ?? persisted)
   const styles = STYLE_CLASSES[variant]
@@ -67,7 +78,30 @@ export function PlanTrackerPanel({ plan, styleVariant }: PlanTrackerPanelProps) 
     <Card className="space-y-3 p-3" data-testid="plan-tracker-panel">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold break-words">{plan.title}</span>
-        <Badge variant="secondary">{t(`status.${plan.status}`)}</Badge>
+        <span className="flex items-center gap-1.5">
+          {workspace ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="plan-share-collab"
+              onClick={() => {
+                void publishPlanToCollab(plan, {
+                  orgId: workspace.orgId,
+                  workspaceId: workspace.id,
+                })
+                  .then(() => toast.success(t("tracker.shared")))
+                  .catch((cause) =>
+                    toast.error(cause instanceof Error ? cause.message : String(cause))
+                  )
+              }}
+            >
+              <Share2Icon className="size-3.5" />
+              {t("tracker.share")}
+            </Button>
+          ) : null}
+          <Badge variant="secondary">{t(`status.${plan.status}`)}</Badge>
+        </span>
       </div>
 
       <div className="space-y-1">

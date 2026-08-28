@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "cognia-collab-server"
 path = "src/main.rs"
 
+[[bin]]
+name = "cognia-collab-bootstrap"
+path = "src/bin/bootstrap.rs"
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

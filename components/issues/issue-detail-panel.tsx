@@ -20,6 +20,7 @@ import {
   FileCodeIcon,
   MessageSquarePlusIcon,
   PlayIcon,
+  Share2Icon,
   SquareIcon,
   TagIcon,
   Trash2Icon,
@@ -32,11 +33,13 @@ import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { collectFileReferences } from "@/lib/issues/editor-links"
+import { publishRunToCollab } from "@/lib/collab/publish"
 import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
+import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
 import { addIssueComment, setIssueAssignee } from "@/lib/db/issues"
 import { actorKey } from "@/lib/issues/board-model"
 import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
@@ -111,6 +114,7 @@ export function IssueDetailPanel({
   // Only local rows have an activity trail in our own table.
   const parsed = parseUnifiedIssueId(item.unifiedId)
   const localId = parsed?.kind === "local" ? parsed.sourceId : null
+  const writesCollabComments = parsed?.kind === "collab" && Boolean(onAction)
   const events = useClientLiveQuery(
     () =>
       localId
@@ -127,6 +131,12 @@ export function IssueDetailPanel({
     [] as IssueRun[]
   )
   const activeRun = (runs ?? []).find((run) => isActiveIssueRunStatus(run.status))
+  const localWorkspaceId = projects.find((project) => project.id === item.issueProjectId)?.projectId
+  const collabWorkspace = useClientLiveQuery(
+    () => (localWorkspaceId ? getCollabWorkspace(localWorkspaceId) : Promise.resolve(undefined)),
+    [localWorkspaceId],
+    undefined
+  )
 
   async function handleAssign(actor: IssueActor | null) {
     if (!localId) return
@@ -187,9 +197,12 @@ export function IssueDetailPanel({
   )
 
   async function handleComment(body: string) {
-    if (!localId) return
     try {
-      await addIssueComment(localId, body, { kind: "human" })
+      if (localId) {
+        await addIssueComment(localId, body, { kind: "human" })
+      } else if (writesCollabComments) {
+        await onAction?.({ kind: "comment", body })
+      }
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause))
     }
@@ -520,6 +533,30 @@ export function IssueDetailPanel({
                         <span className="text-muted-foreground">
                           {t(`run.adapter.${run.adapterId}.name`)}
                         </span>
+                        {collabWorkspace ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="ml-auto h-6 px-1.5 text-[10px]"
+                            data-testid={`issue-run-share-${run.id}`}
+                            onClick={() => {
+                              void publishRunToCollab(run, `${item.identifier}: ${item.title}`, {
+                                orgId: collabWorkspace.orgId,
+                                workspaceId: collabWorkspace.id,
+                              })
+                                .then(() => toast.success(t("run.shared")))
+                                .catch((cause) =>
+                                  toast.error(
+                                    cause instanceof Error ? cause.message : String(cause)
+                                  )
+                                )
+                            }}
+                          >
+                            <Share2Icon className="size-3" />
+                            {t("run.share")}
+                          </Button>
+                        ) : null}
                       </span>
                       {run.summary ? <p className="line-clamp-3">{run.summary}</p> : null}
                       {run.error ? <p className="text-destructive">{run.error}</p> : null}
@@ -569,7 +606,7 @@ export function IssueDetailPanel({
           </>
         ) : null}
 
-        {localId ? (
+        {localId || writesCollabComments ? (
           <>
             <Separator />
             <section className="flex flex-col gap-2">
@@ -600,7 +637,7 @@ export function IssueDetailPanel({
                 The trail has always rendered comments; until now there was no
                 way to write one, because `addIssueComment` had no caller.
               */}
-              {localId && item.capabilities.canComment ? (
+              {item.capabilities.canComment ? (
                 <IssueCommentComposer onSubmit={handleComment} />
               ) : null}
             </section>

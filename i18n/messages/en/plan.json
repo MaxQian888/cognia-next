@@ -98,6 +98,8 @@
     "pause": "Pause",
     "progress": "{completed} of {total} steps",
     "resume": "Resume",
+    "share": "Share",
+    "shared": "Plan shared with the collaborative workspace.",
     "statusBlocked": "Blocked",
     "statusCompleted": "Completed",
     "statusFailed": "Failed",

@@ -6,14 +6,18 @@ import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import {
   CLAIM_ABANDONED_AFTER_MS,
   claimNext,
+  discardCollabConflict,
   enqueue,
+  enqueueCollabMutation,
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
   listByStatus,
   markHostStateResult,
+  markCollabConflict,
   recordFailure,
   releaseClaim,
   releaseStaleClaims,
+  rebaseCollabConflict,
   retryDeadletter,
 } from "./mobile-outbound-queue"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
@@ -104,6 +108,64 @@ describe("mobile outbound queue target isolation", () => {
     await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toMatchObject({
       status: "pending",
       attempts: 0,
+    })
+  })
+
+  it("keeps collab conflicts for explicit discard or rebase", async () => {
+    const row = await enqueueCollabMutation({
+      ...scope,
+      command: "collab_issue_patch",
+      orgId: "org_1",
+      entityType: "issue",
+      entityId: "iss_1",
+      payload: { issueId: "iss_1", baseRevision: 1, title: "Local title" },
+      operationId: "op-stale",
+    })
+    await markCollabConflict(row.id, "revision conflict", {
+      id: "iss_1",
+      title: "Server title",
+      revision: 4,
+    })
+
+    const replacement = await rebaseCollabConflict(row.id)
+    expect(replacement).toMatchObject({
+      protocol: "collab-v1",
+      status: "pending",
+      targetId: scope.targetId,
+      payload: expect.objectContaining({
+        issueId: "iss_1",
+        title: "Local title",
+        baseRevision: 4,
+      }),
+    })
+    expect(replacement.id).not.toBe(row.id)
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toBeUndefined()
+
+    await markCollabConflict(replacement.id, "revision conflict", { revision: 5 })
+    await discardCollabConflict(replacement.id)
+    await expect(getDb().mobileOutboundQueue.get(replacement.id)).resolves.toBeUndefined()
+  })
+
+  it("tells the user a conflicted create cannot be rebased, rather than calling it corrupt", async () => {
+    // A create carries no entity id and has no base revision to move forward,
+    // so it fell through to the payload-shape check and reported the row as
+    // malformed — a data-corruption message for an ordinary, actionable state.
+    const row = await enqueueCollabMutation({
+      ...scope,
+      command: "collab_plan_create",
+      orgId: "org_1",
+      entityType: "plan",
+      entityId: "plan_1",
+      payload: { workspaceId: "ws_1", title: "Local plan" },
+      operationId: "op-create",
+    })
+    await markCollabConflict(row.id, "revision conflict", { id: "plan_1", revision: 2 })
+
+    await expect(rebaseCollabConflict(row.id)).rejects.toThrow(/cannot be rebased/i)
+    await expect(rebaseCollabConflict(row.id)).rejects.not.toThrow(/malformed/i)
+    // Refused, not consumed — the row is still there to discard.
+    await expect(getDb().mobileOutboundQueue.get(row.id)).resolves.toMatchObject({
+      status: "conflicted",
     })
   })
 

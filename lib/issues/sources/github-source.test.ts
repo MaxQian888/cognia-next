@@ -70,6 +70,9 @@ describe("toUnifiedGithubIssue", () => {
       canAssign: false,
       canRun: false,
       canComment: true,
+      canDelete: false,
+      canManageLabels: false,
+      canMoveProject: false,
     })
   })
 

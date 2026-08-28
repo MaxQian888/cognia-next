@@ -34,12 +34,22 @@ jest.mock("./github-writeback-dialog", () => ({
 
 let liveValue: unknown = []
 let runsValue: unknown[] = []
+let collabWorkspaceValue: { id: string; orgId: string } | undefined
 jest.mock("@/hooks/data", () => ({
   // Two live queries share the hook: the activity trail and the run history.
   useClientLiveQuery: (fn: () => unknown) =>
-    fn.toString().includes("listIssueRuns") ? runsValue : liveValue,
+    fn.toString().includes("listIssueRuns")
+      ? runsValue
+      : fn.toString().includes("getCollabWorkspace")
+        ? collabWorkspaceValue
+        : liveValue,
 }))
 jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
+jest.mock("@/lib/db/collab-workspace-mirror", () => ({ getCollabWorkspace: jest.fn() }))
+const mockPublishRun = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/collab/publish", () => ({
+  publishRunToCollab: (...args: unknown[]) => mockPublishRun(...args),
+}))
 
 // Pro IDE binding + transport — the "open in Pro IDE" affordance reads the
 // bound root after mount and drives code-server directly.
@@ -131,6 +141,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   liveValue = []
   runsValue = []
+  collabWorkspaceValue = undefined
+  mockPublishRun.mockClear()
   pickerProps = null
   mockSetIssueAssignee.mockResolvedValue(undefined)
   mockCancelIssueRun.mockResolvedValue(undefined)
@@ -234,6 +246,44 @@ describe("IssueDetailPanel", () => {
     mockCancelIssueRun.mockRejectedValueOnce(new Error("cannot"))
     fireEvent.click(screen.getByTestId("issue-run-cancel"))
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("cannot"))
+  })
+
+  it("publishes a run only after an explicit click in a shared workspace", async () => {
+    const user = userEvent.setup()
+    const project: IssueProject = {
+      id: "container-1",
+      projectId: "workspace-1",
+      key: "MERC",
+      name: "Mercury",
+      status: "in_progress",
+      priority: "medium",
+      resources: [],
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const run = {
+      id: "run-1",
+      issueId: "i1",
+      projectId: "workspace-1",
+      adapterId: "agent-task",
+      kind: "agent-task",
+      targetId: "task-1",
+      status: "succeeded",
+      by: { kind: "human" },
+      startedAt: 1,
+      updatedAt: 2,
+      artifacts: [],
+    } as IssueRun
+    runsValue = [run]
+    collabWorkspaceValue = { id: "workspace-1", orgId: "org-1" }
+    const value = item({ issueProjectId: "container-1" })
+    render(<IssueDetailPanel item={value} projects={[project]} />)
+    expect(mockPublishRun).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId("issue-run-share-run-1"))
+    expect(mockPublishRun).toHaveBeenCalledWith(run, "MERC-1: Ship the board", {
+      orgId: "org-1",
+      workspaceId: "workspace-1",
+    })
   })
 
   it("warns that a federated row is read-only, and does not for a local one", () => {
@@ -616,6 +666,25 @@ describe("editing", () => {
     it("gives them no comment composer — a mirror comment goes through write-back", () => {
       render(<IssueDetailPanel item={item({ kind: "agent-task" })} onAction={jest.fn()} />)
       expect(screen.queryByTestId("issue-comment-composer")).not.toBeInTheDocument()
+    })
+
+    it("routes collaboration comments through the writable source adapter", async () => {
+      const user = userEvent.setup()
+      const onAction = jest.fn()
+      render(
+        <IssueDetailPanel
+          item={item({
+            kind: "collab",
+            unifiedId: "collab:issue-1",
+            capabilities: { ...READ_ONLY_ISSUE_CAPABILITIES, canComment: true },
+          })}
+          onAction={onAction}
+        />
+      )
+      await user.type(screen.getByTestId("issue-comment-input"), "shared update")
+      await user.click(screen.getByTestId("issue-comment-submit"))
+      expect(onAction).toHaveBeenCalledWith({ kind: "comment", body: "shared update" })
+      expect(mockAddIssueComment).not.toHaveBeenCalled()
     })
 
     it("never offers delete", () => {

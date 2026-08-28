@@ -112,6 +112,9 @@ jest.mock("./create-issue-dialog", () => ({
   CreateIssueDialog: (props: Record<string, unknown>) =>
     props.open ? <div data-testid="create-dialog-stub" /> : null,
 }))
+jest.mock("./collab-refresh-stale-badge", () => ({
+  CollabRefreshStaleBadge: () => <div data-testid="collab-refresh-stale-stub" />,
+}))
 jest.mock("@/hooks/issues/use-assignee-options", () => ({
   useAssigneeOptions: () => [],
 }))

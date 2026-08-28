@@ -564,3 +564,18 @@ because of that race is the worse answer.
    surface — which is why the legacy secret keeps working and pre-tenancy
    shares are left alone rather than backfilled with a guess.
 
+## Implementation update — collaboration writes (2026-08-28)
+
+The first-cut plane is no longer read-only. Issue, Plan, Run, and issue-event
+writes use stable `operationId` values. Resources carry `revision`,
+`createdOperationId`, and `lastOperationId`; PATCH requires `baseRevision` and
+returns HTTP 409 with the authoritative resource instead of overwriting a
+concurrent edit. The client keeps pending changes in the durable outbound queue
+and overlays them on server-owned mirrors; it never optimistically rewrites the
+mirror. A legacy server advertising protocol 0 remains read-only.
+
+The client refreshes on boot, focus, online recovery, visibility, and successful
+local writes, with a 60-second visible interval, single-flight per account/org,
+and exponential backoff capped at 15 minutes. Plans and Runs cross the plane
+only through explicit publish actions and field allowlists; execution handles,
+prompts, credentials, tool input, and absolute paths remain local.

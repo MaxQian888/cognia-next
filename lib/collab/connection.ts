@@ -26,6 +26,7 @@
 import { normalizeServiceUrl } from "@/lib/diagnostic-service/client"
 
 const CONNECTION_KEY_PREFIX = "cognia.collab.connection"
+const CONNECTION_CHANGED_EVENT = "cognia:collab-connection-changed"
 
 export interface CollabConnection {
   /** Normalized service origin, path prefix preserved. */
@@ -83,6 +84,9 @@ export function saveCollabConnection(
 ): CollabConnection {
   const normalized: CollabConnection = { baseUrl: normalizeServiceUrl(connection.baseUrl) }
   store(deps)?.setItem(connectionKey(localAccountId), JSON.stringify(normalized))
+  if (!deps.local && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT))
+  }
   return normalized
 }
 
@@ -99,4 +103,13 @@ export function forgetCollabConnection(
   deps: CollabConnectionDeps = {}
 ): void {
   store(deps)?.removeItem(connectionKey(localAccountId))
+  if (!deps.local && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT))
+  }
+}
+
+export function subscribeCollabConnection(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => {}
+  window.addEventListener(CONNECTION_CHANGED_EVENT, listener)
+  return () => window.removeEventListener(CONNECTION_CHANGED_EVENT, listener)
 }

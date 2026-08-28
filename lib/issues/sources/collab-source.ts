@@ -19,7 +19,8 @@
  * form of the server id instead.
  */
 
-import { listCollabIssues } from "@/lib/db/collab-issue-mirror"
+import { getCollabIssue, listCollabIssues } from "@/lib/db/collab-issue-mirror"
+import { enqueueCollabMutation } from "@/lib/db/mobile-outbound-queue"
 import type { CollabIssueMirrorRow } from "@/lib/db/collab-issue-mirror-types"
 import { statusCategoryOf } from "@/types/issues"
 import type { IssueSourceAdapter, IssueSourceQuery, UnifiedIssueItem } from "@/types/issues/unified"
@@ -39,6 +40,7 @@ export function collabIssueIdentifier(id: string): string {
 
 /** Project a mirrored row into the board's normalized shape. */
 export function toUnifiedCollabIssue(row: CollabIssueMirrorRow): UnifiedIssueItem {
+  const writable = Number.isSafeInteger(row.revision)
   return {
     unifiedId: makeUnifiedIssueId("collab", row.id),
     kind: "collab",
@@ -70,7 +72,21 @@ export function toUnifiedCollabIssue(row: CollabIssueMirrorRow): UnifiedIssueIte
       // the source filter, and two chips reading Team would be unreadable.
       sourceLabel: "Shared",
     },
-    capabilities: READ_ONLY_ISSUE_CAPABILITIES,
+    capabilities: writable
+      ? {
+          canEdit: true,
+          canMove: true,
+          canAssign: true,
+          canRun: false,
+          canComment: true,
+          canDelete: false,
+          canManageLabels: false,
+          // The server's issue patch body carries no `issueProjectId`, so a
+          // move would be accepted and silently discarded. Claiming the
+          // capability is worse than withholding it.
+          canMoveProject: false,
+        }
+      : READ_ONLY_ISSUE_CAPABILITIES,
   }
 }
 
@@ -86,6 +102,58 @@ export const collabIssueSource: IssueSourceAdapter = {
       ...(query.issueProjectId ? { issueProjectId: query.issueProjectId } : {}),
     })
     return rows.map(toUnifiedCollabIssue)
+  },
+  async mutate(sourceId, action) {
+    const row = await getCollabIssue(sourceId)
+    if (!row || !Number.isSafeInteger(row.revision)) {
+      throw new Error("collaboration server does not support writable issue revisions")
+    }
+    if (action.kind === "comment") {
+      await enqueueCollabMutation({
+        command: "collab_issue_append_event",
+        orgId: row.orgId,
+        entityType: "issue",
+        entityId: row.id,
+        payload: {
+          issueId: row.id,
+          kind: "commented",
+          payload: { body: action.body },
+        },
+      })
+      return
+    }
+    // `project` is refused rather than sent: the server's `PatchIssueBody`
+    // has no `issueProjectId` field and ignores unknown keys, so the move
+    // would return 200, bump the revision, and change nothing.
+    if (
+      action.kind === "delete" ||
+      action.kind === "addLabel" ||
+      action.kind === "removeLabel" ||
+      action.kind === "project"
+    ) {
+      throw new Error(`collaboration issue does not support ${action.kind}`)
+    }
+    const patch =
+      action.kind === "status"
+        ? { status: action.to }
+        : action.kind === "title"
+          ? { title: action.to }
+          : action.kind === "description"
+            ? { body: action.to }
+            : action.kind === "priority"
+              ? { priority: action.to }
+              : { assignee: action.to }
+    await enqueueCollabMutation({
+      command: "collab_issue_patch",
+      orgId: row.orgId,
+      entityType: "issue",
+      entityId: row.id,
+      payload: {
+        issueId: row.id,
+        baseRevision: row.revision,
+        ...patch,
+      },
+    })
   },
 }
 

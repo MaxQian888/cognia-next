@@ -154,7 +154,23 @@
     "cancel": "Cancel",
     "noProject": "Create a project first — issues need somewhere to live.",
     "newProject": "New project…",
-    "pickExistingProject": "← Pick an existing project"
+    "pickExistingProject": "← Pick an existing project",
+    "destinationLabel": "Save to",
+    "destinationLocal": "This device (default)",
+    "destinationShared": "Shared workspace",
+    "sharedUnavailable": "This shared workspace is not ready for new issues."
+  },
+  "conflicts": {
+    "title": "{count, plural, one {Shared edit needs review} other {# shared edits need review}}",
+    "description": "The server changed after this edit was queued. Compare both versions, then discard the edit or resubmit it against the latest revision.",
+    "serverValue": "Current server value",
+    "pendingPatch": "Your pending patch",
+    "discard": "Discard",
+    "resubmit": "Resubmit on latest",
+    "failed": "Could not resolve conflict: {reason}"
+  },
+  "freshness": {
+    "stale": "Shared data is stale"
   },
   "projects": {
     "title": "Projects",
@@ -315,6 +331,8 @@
     "trigger": "Run",
     "cancel": "Cancel run",
     "cancelled": "Run cancelled",
+    "share": "Share",
+    "shared": "Run shared with the collaborative workspace.",
     "title": "Run {identifier}",
     "description": "Choose the execution engine. This is the confirmation — the engine starts as soon as you press Run.",
     "loading": "Checking which engines can run this issue…",

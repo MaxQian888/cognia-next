@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useSyncExternalStore } from "react"
 import Dexie from "dexie"
 
 import { usePlatform } from "@/hooks/use-platform"
@@ -22,6 +22,7 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { installHostStateSyncForTarget } from "@/lib/sync/host-state-service"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
+import { loadCollabConnection, subscribeCollabConnection } from "@/lib/collab/connection"
 import {
   getRuntimeSnapshot,
   runtimeHostSnapshotFromManifest,
@@ -33,6 +34,10 @@ const POST_TRIGGER_RUN_SYNC_DELAY_MS = 2500
 
 const liveDispatcher: OutboundDispatcher = {
   async call(command, payload, options) {
+    if (command.startsWith("collab_")) {
+      const { dispatchCollabOutbound } = await import("@/lib/collab/outbound-dispatcher")
+      return dispatchCollabOutbound(command as never, payload)
+    }
     const result = await transport.call(command, payload, options)
     if (command === "workflow_trigger_manual") {
       setTimeout(() => {
@@ -96,6 +101,18 @@ export function CompanionOutboundRunnerProvider({
     (platform === "mobile" && mobilePaired) ||
     (platform === "web" && hasWebTarget)
   const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : unlockedAccountId
+  const collabBaseUrl = useSyncExternalStore(
+    subscribeCollabConnection,
+    () => (accountId ? (loadCollabConnection(accountId)?.baseUrl ?? "") : ""),
+    () => ""
+  )
+  const collabScope = useMemo<RuntimeTargetScope | null>(
+    () =>
+      accountId && collabBaseUrl
+        ? { accountId, targetId: "collab-plane", routingGeneration: 0 }
+        : null,
+    [accountId, collabBaseUrl]
+  )
   const targetId = runtimeTarget?.id ?? (platform === "tauri" ? "local-host" : null)
   const scope = useMemo(() => {
     if (scopeOverride) return scopeOverride
@@ -145,6 +162,26 @@ export function CompanionOutboundRunnerProvider({
       void runner.stop()
     }
   }, [dispatcher, enabled, scope])
+
+  useEffect(() => {
+    if (!collabScope) return
+    const runner = createOutboundRunner({
+      dispatcher,
+      enforceMobile: false,
+      scope: collabScope,
+    })
+    const kick = () => {
+      void runner.kick().catch((error) => {
+        console.warn("collab-outbound-runner: kick failed", error)
+      })
+    }
+    const unsubscribe = subscribeToPendingJobs(collabScope, kick)
+    kick()
+    return () => {
+      unsubscribe()
+      void runner.stop()
+    }
+  }, [collabScope, dispatcher])
 
   useEffect(() => {
     if (platform !== "tauri" || !scope) return

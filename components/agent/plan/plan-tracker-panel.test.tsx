@@ -3,10 +3,22 @@
  */
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { PlanTrackerPanel } from "./plan-tracker-panel"
 import { useSettingsStore } from "@/stores/settings"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
+
+let collabWorkspace: { id: string; orgId: string } | undefined
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: () => collabWorkspace,
+}))
+jest.mock("@/lib/db/collab-workspace-mirror", () => ({ getCollabWorkspace: jest.fn() }))
+const mockPublishPlan = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/collab/publish", () => ({
+  publishPlanToCollab: (...args: unknown[]) => mockPublishPlan(...args),
+}))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -49,6 +61,11 @@ function plan(over: Partial<AgentPlan> = {}): AgentPlan {
 }
 
 describe("PlanTrackerPanel", () => {
+  beforeEach(() => {
+    collabWorkspace = undefined
+    mockPublishPlan.mockClear()
+  })
+
   it("renders title, status, steps and per-step status labels", () => {
     render(<PlanTrackerPanel plan={plan()} />)
     expect(screen.getByTestId("plan-tracker-panel")).toBeInTheDocument()
@@ -57,6 +74,23 @@ describe("PlanTrackerPanel", () => {
     expect(screen.getByText("status.executing")).toBeInTheDocument()
     expect(screen.getByText("tracker.statusCompleted")).toBeInTheDocument()
     expect(screen.getByText("tracker.statusInProgress")).toBeInTheDocument()
+  })
+
+  it("publishes only after an explicit click when the workspace is shared", async () => {
+    collabWorkspace = { id: "workspace-1", orgId: "org-1" }
+    const value = plan({ projectId: "workspace-1" })
+    render(<PlanTrackerPanel plan={value} />)
+    expect(mockPublishPlan).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByTestId("plan-share-collab"))
+    expect(mockPublishPlan).toHaveBeenCalledWith(value, {
+      orgId: "org-1",
+      workspaceId: "workspace-1",
+    })
+  })
+
+  it("does not offer publication for a local-only workspace", () => {
+    render(<PlanTrackerPanel plan={plan({ projectId: "local-only" })} />)
+    expect(screen.queryByTestId("plan-share-collab")).not.toBeInTheDocument()
   })
 
   it("computes the progress bar width from completed/total", () => {

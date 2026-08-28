@@ -31,6 +31,7 @@ import { canMoveIssue, type IssueMoveDenial } from "./state-machine"
 import type { IssueActor, IssuePriority, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
+import { getIssueSourceRegistry } from "./sources/registry"
 
 /**
  * One edit, expressed the same way whether it lands on one issue or twelve.
@@ -65,10 +66,8 @@ export interface IssueBulkOutcome {
   reason?: IssueMoveDenial
 }
 
-/** Which capability bit an action needs. Delete is local-only, not a bit. */
-function requiredCapability(
-  action: IssueBulkAction
-): keyof UnifiedIssueItem["capabilities"] | null {
+/** Which capability bit an action needs. */
+function requiredCapability(action: IssueBulkAction): keyof UnifiedIssueItem["capabilities"] {
   switch (action.kind) {
     case "status":
       return "canMove"
@@ -77,12 +76,14 @@ function requiredCapability(
     case "priority":
     case "title":
     case "description":
+      return "canEdit"
     case "addLabel":
     case "removeLabel":
+      return "canManageLabels"
     case "project":
-      return "canEdit"
+      return "canMoveProject"
     case "delete":
-      return null
+      return "canDelete"
   }
 }
 
@@ -96,11 +97,8 @@ export function canApplyBulkAction(
   action: IssueBulkAction,
   runActive: boolean
 ): { ok: true } | { ok: false; reason: IssueMoveDenial } {
-  // Only local rows have a writable row behind them at all.
-  if (item.kind !== "local") return { ok: false, reason: "federated-read-only" }
-
   const capability = requiredCapability(action)
-  if (capability && !item.capabilities[capability]) {
+  if (!item.capabilities[capability]) {
     return { ok: false, reason: "federated-read-only" }
   }
 
@@ -187,13 +185,19 @@ export async function applyIssueBulkAction(
       continue
     }
     const parsed = parseUnifiedIssueId(item.unifiedId)
-    if (parsed?.kind !== "local") {
+    if (!parsed) {
       skipped += 1
       reason ??= "federated-read-only"
       continue
     }
     try {
-      await applyOne(parsed.sourceId, action, by)
+      if (parsed.kind === "local") {
+        await applyOne(parsed.sourceId, action, by)
+      } else {
+        const source = getIssueSourceRegistry().getSource(parsed.kind)
+        if (!source?.mutate) throw new Error("issue source is read-only")
+        await source.mutate(parsed.sourceId, action, by)
+      }
       applied += 1
     } catch {
       // One bad row must not abandon the rest of the selection.

@@ -6,11 +6,13 @@
 #   tls            + Caddy ACME front door       → F2 tier-3 smoke
 #   observability  + Prometheus                  → D9
 #   logto          + Logto IdP (core+pg+redis)   → ADR-0059 multi-user OIDC auth
+#   collab         + collaboration plane + Postgres → ADR-0149 shared workspaces
 #
 #   docker compose up -d --wait                          # signaling + share
 #   docker compose --profile server up -d --wait          # + cognia-server
 #   docker compose --profile server --profile tls up -d   # + Caddy
 #   docker compose --profile logto up -d --wait           # + Logto IdP
+#   docker compose --profile collab up -d --wait           # + collaboration plane
 #
 # Copy .env.example → .env and fill SHARE_UPLOAD_SECRET (+ COGNIA_MASTER_KEY
 # and provider keys for the server profile; LOGTO_DB_PASSWORD for the logto
@@ -57,6 +59,77 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+
+  collab-postgres:
+    profiles: [collab, collab-bootstrap]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: cognia_collab
+      POSTGRES_PASSWORD: ${COLLAB_DB_PASSWORD:-cognia-local-only}
+      POSTGRES_DB: cognia_collab
+    volumes:
+      - collab_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognia_collab -d cognia_collab"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  collab-server:
+    profiles: [collab]
+    image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
+    build:
+      context: ../../
+      dockerfile: Dockerfile.collab-server
+    depends_on:
+      collab-postgres:
+        condition: service_healthy
+    environment:
+      COLLAB_DATABASE_URL: postgres://cognia_collab:${COLLAB_DB_PASSWORD:-cognia-local-only}@collab-postgres:5432/cognia_collab
+      COLLAB_GRANT_KEY: ${COLLAB_GRANT_KEY:-}
+      COLLAB_OIDC_ISSUER: ${COLLAB_OIDC_ISSUER:-}
+      COLLAB_OIDC_AUDIENCE: ${COLLAB_OIDC_AUDIENCE:-}
+      COLLAB_OIDC_TENANT_CLAIM: ${COLLAB_OIDC_TENANT_CLAIM:-organization_id}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  collab-bootstrap:
+    profiles: [collab-bootstrap]
+    image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
+    build:
+      context: ../../
+      dockerfile: Dockerfile.collab-server
+    entrypoint: ["cognia-collab-bootstrap"]
+    depends_on:
+      collab-postgres:
+        condition: service_healthy
+    environment:
+      # The seed needs a role that bypasses row-level security (every table is
+      # FORCE RLS, so owning them is not enough, and `users` cannot be inserted
+      # under a tenant the person does not belong to yet). Defaults to this
+      # container's POSTGRES_USER, which the postgres image creates as a
+      # superuser; a managed database needs a separate admin URL here.
+      COLLAB_BOOTSTRAP_DATABASE_URL: ${COLLAB_BOOTSTRAP_DATABASE_URL:-postgres://cognia_collab:${COLLAB_DB_PASSWORD:-cognia-local-only}@collab-postgres:5432/cognia_collab}
+      COLLAB_BOOTSTRAP_ORG_ID: ${COLLAB_BOOTSTRAP_ORG_ID:-}
+      COLLAB_BOOTSTRAP_ORG_NAME: ${COLLAB_BOOTSTRAP_ORG_NAME:-}
+      COLLAB_BOOTSTRAP_LOGTO_ORG_ID: ${COLLAB_BOOTSTRAP_LOGTO_ORG_ID:-}
+      COLLAB_BOOTSTRAP_USER_ID: ${COLLAB_BOOTSTRAP_USER_ID:-}
+      COLLAB_BOOTSTRAP_USER_NAME: ${COLLAB_BOOTSTRAP_USER_NAME:-}
+      COLLAB_BOOTSTRAP_USER_EMAIL: ${COLLAB_BOOTSTRAP_USER_EMAIL:-}
+      COLLAB_BOOTSTRAP_IDENTITY_ID: ${COLLAB_BOOTSTRAP_IDENTITY_ID:-}
+      COLLAB_BOOTSTRAP_IDENTITY_SUBJECT: ${COLLAB_BOOTSTRAP_IDENTITY_SUBJECT:-}
+      COLLAB_BOOTSTRAP_WORKSPACE_ID: ${COLLAB_BOOTSTRAP_WORKSPACE_ID:-}
+      COLLAB_BOOTSTRAP_WORKSPACE_NAME: ${COLLAB_BOOTSTRAP_WORKSPACE_NAME:-}
+    restart: "no"
 
   cognia-server:
     profiles: [server]
@@ -107,6 +180,10 @@ services:
       COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
       COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
       COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
+      # Brain collaboration is read-only. Its bearer credential comes from the
+      # mounted 0600 CLI Logto session, never from Compose environment.
+      COGNIA_COLLAB_URL: ${COGNIA_COLLAB_URL:-}
+      COGNIA_COLLAB_ORG_ID: ${COGNIA_COLLAB_ORG_ID:-}
     volumes:
       - cognia_data:/data
     ports:
@@ -236,3 +313,4 @@ volumes:
   prom_data:
   logto_pg:
   logto_redis:
+  collab_pg:

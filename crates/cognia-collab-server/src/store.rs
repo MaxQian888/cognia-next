@@ -43,6 +43,8 @@ pub enum StoreError {
     Corrupt(String),
     #[error("database error: {0}")]
     Database(String),
+    #[error("revision conflict")]
+    Conflict(serde_json::Value),
 }
 
 impl From<ActorError> for StoreError {
@@ -99,6 +101,24 @@ pub struct WorkspaceMembershipRow {
     pub role: WorkspaceRole,
 }
 
+/// Complete, operator-supplied seed for one initial tenant and workspace.
+/// Stable ids make repeated invocations idempotent.
+#[derive(Debug, Clone)]
+pub struct OperatorBootstrap {
+    pub org_id: String,
+    pub org_name: String,
+    pub logto_organization_id: String,
+    pub user_id: String,
+    pub user_name: String,
+    pub user_email: Option<String>,
+    pub identity_id: String,
+    pub identity_provider: String,
+    pub identity_subject: String,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub now: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewIssue {
     pub id: String,
@@ -113,6 +133,7 @@ pub struct NewIssue {
     pub assignee: Option<CollabActor>,
     pub created_by: CollabActor,
     pub now: i64,
+    pub operation_id: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -124,6 +145,12 @@ pub struct IssuePatch {
     pub board_order: Option<f64>,
     /// `Some(None)` unassigns; `None` leaves the assignee alone.
     pub assignee: Option<Option<CollabActor>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MutationGuard {
+    pub operation_id: String,
+    pub base_revision: i64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,6 +187,7 @@ pub struct NewPlan {
     pub steps: Vec<NewPlanStep>,
     pub created_by: CollabActor,
     pub now: i64,
+    pub operation_id: String,
 }
 
 /// One step's reported progress.
@@ -207,6 +235,7 @@ pub struct NewRun {
     pub started_by: CollabActor,
     pub artifacts: Vec<RunArtifact>,
     pub now: i64,
+    pub operation_id: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -377,10 +406,12 @@ pub trait Store: Send + Sync {
         org_id: &str,
         id: &str,
         patch: IssuePatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Issue, StoreError>;
 
-    async fn append_event(&self, org_id: &str, event: IssueEvent) -> Result<(), StoreError>;
+    async fn append_event(&self, org_id: &str, event: IssueEvent)
+        -> Result<IssueEvent, StoreError>;
 
     async fn list_events(
         &self,
@@ -406,6 +437,7 @@ pub trait Store: Send + Sync {
         org_id: &str,
         id: &str,
         patch: PlanPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Plan, StoreError>;
 
@@ -421,6 +453,7 @@ pub trait Store: Send + Sync {
         org_id: &str,
         id: &str,
         patch: RunPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Run, StoreError>;
 }
@@ -690,6 +723,17 @@ impl Store for InMemoryStore {
     }
 
     async fn create_issue(&self, input: NewIssue) -> Result<Issue, StoreError> {
+        let mut tables = self.tables.write();
+        if let Some(existing) = tables
+            .issues
+            .values()
+            .find(|issue| {
+                issue.org_id == input.org_id && issue.created_operation_id == input.operation_id
+            })
+            .cloned()
+        {
+            return Ok(existing);
+        }
         let issue = Issue {
             id: input.id,
             org_id: input.org_id,
@@ -704,11 +748,11 @@ impl Store for InMemoryStore {
             created_by: input.created_by,
             created_at: input.now,
             updated_at: input.now,
+            revision: 1,
+            created_operation_id: input.operation_id.clone(),
+            last_operation_id: input.operation_id,
         };
-        self.tables
-            .write()
-            .issues
-            .insert(issue.id.clone(), issue.clone());
+        tables.issues.insert(issue.id.clone(), issue.clone());
         Ok(issue)
     }
 
@@ -717,6 +761,7 @@ impl Store for InMemoryStore {
         org_id: &str,
         id: &str,
         patch: IssuePatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Issue, StoreError> {
         let mut tables = self.tables.write();
@@ -725,6 +770,15 @@ impl Store for InMemoryStore {
             .get_mut(id)
             .filter(|issue| issue.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
+        if issue.last_operation_id == guard.operation_id {
+            return Ok(issue.clone());
+        }
+        if issue.revision != guard.base_revision {
+            return Err(StoreError::Conflict(
+                serde_json::to_value(issue.clone())
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
         if let Some(title) = patch.title {
             issue.title = title;
         }
@@ -744,12 +798,26 @@ impl Store for InMemoryStore {
             issue.assignee = assignee;
         }
         issue.updated_at = now;
+        issue.revision += 1;
+        issue.last_operation_id = guard.operation_id;
         Ok(issue.clone())
     }
 
-    async fn append_event(&self, org_id: &str, event: IssueEvent) -> Result<(), StoreError> {
-        self.tables.write().events.push((org_id.to_owned(), event));
-        Ok(())
+    async fn append_event(
+        &self,
+        org_id: &str,
+        event: IssueEvent,
+    ) -> Result<IssueEvent, StoreError> {
+        let mut tables = self.tables.write();
+        if let Some((_, existing)) = tables
+            .events
+            .iter()
+            .find(|(org, existing)| org == org_id && existing.operation_id == event.operation_id)
+        {
+            return Ok(existing.clone());
+        }
+        tables.events.push((org_id.to_owned(), event.clone()));
+        Ok(event)
     }
 
     async fn list_events(
@@ -813,6 +881,17 @@ impl Store for InMemoryStore {
     }
 
     async fn create_plan(&self, input: NewPlan) -> Result<Plan, StoreError> {
+        let mut tables = self.tables.write();
+        if let Some(existing) = tables
+            .plans
+            .values()
+            .find(|plan| {
+                plan.org_id == input.org_id && plan.created_operation_id == input.operation_id
+            })
+            .cloned()
+        {
+            return Ok(existing);
+        }
         let steps: Vec<PlanStep> = input
             .steps
             .into_iter()
@@ -843,13 +922,13 @@ impl Store for InMemoryStore {
             created_by: input.created_by,
             created_at: input.now,
             updated_at: input.now,
+            revision: 1,
+            created_operation_id: input.operation_id.clone(),
+            last_operation_id: input.operation_id,
             ended_at: ended_at_for(is_terminal_plan(input.status), None, input.now),
             steps: Some(steps),
         };
-        self.tables
-            .write()
-            .plans
-            .insert(plan.id.clone(), plan.clone());
+        tables.plans.insert(plan.id.clone(), plan.clone());
         Ok(plan)
     }
 
@@ -858,6 +937,7 @@ impl Store for InMemoryStore {
         org_id: &str,
         id: &str,
         patch: PlanPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Plan, StoreError> {
         let mut tables = self.tables.write();
@@ -866,6 +946,15 @@ impl Store for InMemoryStore {
             .get_mut(id)
             .filter(|plan| plan.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
+        if plan.last_operation_id == guard.operation_id {
+            return Ok(plan.clone());
+        }
+        if plan.revision != guard.base_revision {
+            return Err(StoreError::Conflict(
+                serde_json::to_value(plan.clone())
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
         if let Some(title) = patch.title {
             plan.title = title;
         }
@@ -890,6 +979,8 @@ impl Store for InMemoryStore {
         plan.completed_steps = completed;
         plan.ended_at = ended_at_for(is_terminal_plan(plan.status), plan.ended_at, now);
         plan.updated_at = now;
+        plan.revision += 1;
+        plan.last_operation_id = guard.operation_id;
         Ok(plan.clone())
     }
 
@@ -945,6 +1036,17 @@ impl Store for InMemoryStore {
     }
 
     async fn create_run(&self, input: NewRun) -> Result<Run, StoreError> {
+        let mut tables = self.tables.write();
+        if let Some(existing) = tables
+            .runs
+            .values()
+            .find(|run| {
+                run.org_id == input.org_id && run.created_operation_id == input.operation_id
+            })
+            .cloned()
+        {
+            return Ok(existing);
+        }
         let run = Run {
             id: input.id,
             org_id: input.org_id,
@@ -957,12 +1059,15 @@ impl Store for InMemoryStore {
             started_by: input.started_by,
             started_at: input.now,
             updated_at: input.now,
+            revision: 1,
+            created_operation_id: input.operation_id.clone(),
+            last_operation_id: input.operation_id,
             ended_at: ended_at_for(!input.status.is_active(), None, input.now),
             summary: None,
             error: None,
             artifacts: input.artifacts,
         };
-        self.tables.write().runs.insert(run.id.clone(), run.clone());
+        tables.runs.insert(run.id.clone(), run.clone());
         Ok(run)
     }
 
@@ -971,6 +1076,7 @@ impl Store for InMemoryStore {
         org_id: &str,
         id: &str,
         patch: RunPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Run, StoreError> {
         let mut tables = self.tables.write();
@@ -979,6 +1085,15 @@ impl Store for InMemoryStore {
             .get_mut(id)
             .filter(|run| run.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
+        if run.last_operation_id == guard.operation_id {
+            return Ok(run.clone());
+        }
+        if run.revision != guard.base_revision {
+            return Err(StoreError::Conflict(
+                serde_json::to_value(run.clone())
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
         if let Some(status) = patch.status {
             run.status = status;
         }
@@ -993,6 +1108,8 @@ impl Store for InMemoryStore {
         }
         run.ended_at = ended_at_for(!run.status.is_active(), run.ended_at, now);
         run.updated_at = now;
+        run.revision += 1;
+        run.last_operation_id = guard.operation_id;
         Ok(run.clone())
     }
 }
@@ -1001,7 +1118,7 @@ impl Store for InMemoryStore {
 
 const ISSUE_COLUMNS: &str = "id, org_id, workspace_id, issue_project_id, title, body, status, \
      priority, board_order, assignee_kind, assignee_id, created_by_kind, created_by_id, \
-     created_at, updated_at";
+     created_at, updated_at, revision, created_operation_id, last_operation_id";
 
 pub struct PgStore {
     pool: Pool,
@@ -1053,6 +1170,121 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0003_plans_runs.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0004_write_concurrency.sql"))
+            .await?;
+        Ok(())
+    }
+
+    /// Idempotently seed the first operator-owned tenant.
+    ///
+    /// This deliberately requires a database role allowed to bypass RLS, and
+    /// that is NOT the same requirement the server has: every table carries
+    /// `FORCE ROW LEVEL SECURITY`, so owning them is not enough. The seed is
+    /// also chicken-and-egg — `users` is visible only to a tenant the person
+    /// already belongs to, and the membership that would grant that visibility
+    /// is one of the rows being inserted — so simply setting `app.tenant_id`
+    /// cannot work either. Point the bootstrap at a superuser / `BYPASSRLS`
+    /// connection (`COLLAB_BOOTSTRAP_DATABASE_URL`); the request pool keeps the
+    /// least-privilege role. The public API cannot call this; the standalone
+    /// bootstrap binary is the only caller.
+    pub async fn bootstrap_operator(&self, input: &OperatorBootstrap) -> anyhow::Result<()> {
+        let mut client = self.pool.get().await?;
+        // Checked up front so a least-privilege role fails with the fix rather
+        // than with Postgres' "query would be affected by row-level security
+        // policy for table \"orgs\"" on the first INSERT.
+        let can_bypass: bool = client
+            .query_one(
+                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user",
+                &[],
+            )
+            .await?
+            .get(0);
+        if !can_bypass {
+            anyhow::bail!(
+                "collaboration bootstrap needs a database role that bypasses row-level security \
+                 (SUPERUSER or BYPASSRLS); the current role cannot. Point \
+                 COLLAB_BOOTSTRAP_DATABASE_URL at an admin connection, or run \
+                 `ALTER ROLE <role> BYPASSRLS`."
+            )
+        }
+        let transaction = client.transaction().await?;
+        transaction
+            .batch_execute("SET LOCAL row_security = off")
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO orgs (id, display_name, logto_organization_id, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $4) \
+                 ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, \
+                   logto_organization_id = EXCLUDED.logto_organization_id, updated_at = EXCLUDED.updated_at",
+                &[&input.org_id, &input.org_name, &input.logto_organization_id, &input.now],
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO users (id, display_name, email, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $4) \
+                 ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, \
+                   email = EXCLUDED.email, updated_at = EXCLUDED.updated_at",
+                &[
+                    &input.user_id,
+                    &input.user_name,
+                    &input.user_email,
+                    &input.now,
+                ],
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO external_identities \
+                   (id, user_id, provider, subject, tenant, label, linked_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 ON CONFLICT (provider, tenant, subject) DO UPDATE SET \
+                   user_id = EXCLUDED.user_id, label = EXCLUDED.label, linked_at = EXCLUDED.linked_at",
+                &[
+                    &input.identity_id,
+                    &input.user_id,
+                    &input.identity_provider,
+                    &input.identity_subject,
+                    &Some(input.logto_organization_id.clone()),
+                    &Some(input.user_name.clone()),
+                    &input.now,
+                ],
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO org_memberships (org_id, user_id, role, created_at, updated_at) \
+                 VALUES ($1, $2, 'owner', $3, $3) \
+                 ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'owner', updated_at = EXCLUDED.updated_at",
+                &[&input.org_id, &input.user_id, &input.now],
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO workspaces (id, org_id, name, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $4) \
+                 ON CONFLICT (org_id, id) DO UPDATE SET name = EXCLUDED.name, updated_at = EXCLUDED.updated_at",
+                &[&input.workspace_id, &input.org_id, &input.workspace_name, &input.now],
+            )
+            .await?;
+        transaction
+            .execute(
+                "INSERT INTO workspace_memberships \
+                   (workspace_id, user_id, org_id, role, created_at, updated_at) \
+                 VALUES ($1, $2, $3, 'maintainer', $4, $4) \
+                 ON CONFLICT (workspace_id, user_id) DO UPDATE SET \
+                   org_id = EXCLUDED.org_id, role = 'maintainer', updated_at = EXCLUDED.updated_at",
+                &[
+                    &input.workspace_id,
+                    &input.user_id,
+                    &input.org_id,
+                    &input.now,
+                ],
+            )
+            .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -1123,17 +1355,22 @@ fn issue_from_row(row: &tokio_postgres::Row) -> Result<Issue, StoreError> {
         )?,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        revision: row.get("revision"),
+        created_operation_id: row.get("created_operation_id"),
+        last_operation_id: row.get("last_operation_id"),
     })
 }
 
 const PLAN_COLUMNS: &str = "id, org_id, workspace_id, title, description, status, total_steps, \
-     completed_steps, created_by_kind, created_by_id, created_at, updated_at, ended_at";
+     completed_steps, created_by_kind, created_by_id, created_at, updated_at, ended_at, revision, \
+     created_operation_id, last_operation_id";
 
 const PLAN_STEP_COLUMNS: &str = "id, org_id, plan_id, step_order, title, description, kind, \
      status, result, error, started_at, completed_at";
 
 const RUN_COLUMNS: &str = "id, org_id, workspace_id, issue_id, plan_id, title, kind, status, \
-     started_by_kind, started_by_id, started_at, updated_at, ended_at, summary, error";
+     started_by_kind, started_by_id, started_at, updated_at, ended_at, summary, error, revision, \
+     created_operation_id, last_operation_id";
 
 fn plan_from_row(
     row: &tokio_postgres::Row,
@@ -1157,6 +1394,9 @@ fn plan_from_row(
         )?,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        revision: row.get("revision"),
+        created_operation_id: row.get("created_operation_id"),
+        last_operation_id: row.get("last_operation_id"),
         ended_at: row.get("ended_at"),
         steps,
     })
@@ -1203,6 +1443,9 @@ fn run_from_row(row: &tokio_postgres::Row, artifacts: Vec<RunArtifact>) -> Resul
         )?,
         started_at: row.get("started_at"),
         updated_at: row.get("updated_at"),
+        revision: row.get("revision"),
+        created_operation_id: row.get("created_operation_id"),
+        last_operation_id: row.get("last_operation_id"),
         ended_at: row.get("ended_at"),
         summary: row.get("summary"),
         error: row.get("error"),
@@ -1552,7 +1795,9 @@ impl Store for PgStore {
             .query_one(
                 &format!(
                     "INSERT INTO issues ({ISSUE_COLUMNS}) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, $16, $16) \
+                     ON CONFLICT (org_id, created_operation_id) DO UPDATE \
+                       SET created_operation_id = EXCLUDED.created_operation_id \
                      RETURNING {ISSUE_COLUMNS}"
                 ),
                 &[
@@ -1571,6 +1816,7 @@ impl Store for PgStore {
                     &input.created_by.id,
                     &input.now,
                     &input.now,
+                    &input.operation_id,
                 ],
             )
             .await
@@ -1588,10 +1834,31 @@ impl Store for PgStore {
         org_id: &str,
         id: &str,
         patch: IssuePatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Issue, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
+        let existing = transaction
+            .query_opt(
+                &format!(
+                    "SELECT {ISSUE_COLUMNS} FROM issues WHERE org_id = $1 AND id = $2 FOR UPDATE"
+                ),
+                &[&org_id, &id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::NotFound)?;
+        let existing = issue_from_row(&existing)?;
+        if existing.last_operation_id == guard.operation_id {
+            return Ok(existing);
+        }
+        if existing.revision != guard.base_revision {
+            return Err(StoreError::Conflict(
+                serde_json::to_value(existing)
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
         // COALESCE keeps this one statement instead of read-modify-write, which
         // would need the read and the write in the same transaction anyway and
         // would still lose a concurrent edit between them.
@@ -1617,7 +1884,9 @@ impl Store for PgStore {
                                               ELSE COALESCE($10, assignee_kind) END, \
                        assignee_id     = CASE WHEN $9::bool THEN NULL \
                                               ELSE COALESCE($11, assignee_id) END, \
-                       updated_at      = $12 \
+                       updated_at      = $12, \
+                       revision        = revision + 1, \
+                       last_operation_id = $13 \
                      WHERE org_id = $1 AND id = $2 \
                      RETURNING {ISSUE_COLUMNS}"
                 ),
@@ -1634,6 +1903,7 @@ impl Store for PgStore {
                     &assignee_kind,
                     &assignee_id,
                     &now,
+                    &guard.operation_id,
                 ],
             )
             .await
@@ -1647,14 +1917,21 @@ impl Store for PgStore {
         Ok(issue)
     }
 
-    async fn append_event(&self, org_id: &str, event: IssueEvent) -> Result<(), StoreError> {
+    async fn append_event(
+        &self,
+        org_id: &str,
+        event: IssueEvent,
+    ) -> Result<IssueEvent, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        transaction
-            .execute(
+        let row = transaction
+            .query_one(
                 "INSERT INTO issue_events \
-                   (id, org_id, issue_id, kind, ts, actor_kind, actor_id, payload) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                   (id, org_id, issue_id, kind, ts, actor_kind, actor_id, payload, operation_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+                 ON CONFLICT (org_id, operation_id) DO UPDATE \
+                   SET operation_id = EXCLUDED.operation_id \
+                 RETURNING id, issue_id, kind, ts, actor_kind, actor_id, payload, operation_id",
                 &[
                     &event.id,
                     &org_id,
@@ -1664,15 +1941,29 @@ impl Store for PgStore {
                     &event.actor.kind.as_str(),
                     &event.actor.id,
                     &event.payload,
+                    &event.operation_id,
                 ],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let result = IssueEvent {
+            id: row.get("id"),
+            issue_id: row.get("issue_id"),
+            kind: row.get("kind"),
+            ts: row.get("ts"),
+            actor: CollabActor::from_columns(
+                &row.get::<_, String>("actor_kind"),
+                &row.get::<_, String>("actor_id"),
+                None,
+            )?,
+            payload: row.get("payload"),
+            operation_id: row.get("operation_id"),
+        };
         transaction
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(result)
     }
 
     async fn list_events(
@@ -1684,7 +1975,7 @@ impl Store for PgStore {
         let transaction = self.scoped(&mut client, org_id).await?;
         let rows = transaction
             .query(
-                "SELECT id, issue_id, kind, ts, actor_kind, actor_id, payload \
+                "SELECT id, issue_id, kind, ts, actor_kind, actor_id, payload, operation_id \
                  FROM issue_events WHERE org_id = $1 AND issue_id = $2 ORDER BY ts ASC",
                 &[&org_id, &issue_id],
             )
@@ -1703,6 +1994,7 @@ impl Store for PgStore {
                         None,
                     )?,
                     payload: row.get("payload"),
+                    operation_id: row.get("operation_id"),
                 })
             })
             .collect()
@@ -1776,7 +2068,9 @@ impl Store for PgStore {
             .query_one(
                 &format!(
                     "INSERT INTO plans ({PLAN_COLUMNS}) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $14) \
+                     ON CONFLICT (org_id, created_operation_id) DO UPDATE \
+                       SET created_operation_id = EXCLUDED.created_operation_id \
                      RETURNING {PLAN_COLUMNS}"
                 ),
                 &[
@@ -1793,10 +2087,22 @@ impl Store for PgStore {
                     &input.now,
                     &input.now,
                     &ended_at,
+                    &input.operation_id,
                 ],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let replay = row.get::<_, String>("id") != input.id;
+        if replay {
+            let replay_id: String = row.get("id");
+            let replay_steps = read_plan_steps(&transaction, &input.org_id, &replay_id).await?;
+            let plan = plan_from_row(&row, Some(replay_steps))?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+            return Ok(plan);
+        }
         for step in &steps {
             insert_plan_step(&transaction, &input.org_id, step).await?;
         }
@@ -1820,6 +2126,7 @@ impl Store for PgStore {
         org_id: &str,
         id: &str,
         patch: PlanPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Plan, StoreError> {
         let mut client = self.client().await?;
@@ -1836,6 +2143,17 @@ impl Store for PgStore {
             .ok_or(StoreError::NotFound)?;
         let mut steps = read_plan_steps(&transaction, org_id, id).await?;
         let mut plan = plan_from_row(&existing, None)?;
+        if plan.last_operation_id == guard.operation_id {
+            plan.steps = Some(steps);
+            return Ok(plan);
+        }
+        if plan.revision != guard.base_revision {
+            plan.steps = Some(steps);
+            return Err(StoreError::Conflict(
+                serde_json::to_value(plan)
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
 
         if let Some(title) = patch.title {
             plan.title = title;
@@ -1875,11 +2193,14 @@ impl Store for PgStore {
         plan.completed_steps = completed;
         plan.ended_at = ended_at_for(is_terminal_plan(plan.status), plan.ended_at, now);
         plan.updated_at = now;
+        plan.revision += 1;
+        plan.last_operation_id = guard.operation_id;
 
         transaction
             .execute(
                 "UPDATE plans SET title = $3, description = $4, status = $5, \
-                   total_steps = $6, completed_steps = $7, updated_at = $8, ended_at = $9 \
+                   total_steps = $6, completed_steps = $7, updated_at = $8, ended_at = $9, \
+                   revision = $10, last_operation_id = $11 \
                  WHERE org_id = $1 AND id = $2",
                 &[
                     &org_id,
@@ -1891,6 +2212,8 @@ impl Store for PgStore {
                     &plan.completed_steps,
                     &plan.updated_at,
                     &plan.ended_at,
+                    &plan.revision,
+                    &plan.last_operation_id,
                 ],
             )
             .await
@@ -1964,7 +2287,9 @@ impl Store for PgStore {
             .query_one(
                 &format!(
                     "INSERT INTO runs ({RUN_COLUMNS}) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, $16, $16) \
+                     ON CONFLICT (org_id, created_operation_id) DO UPDATE \
+                       SET created_operation_id = EXCLUDED.created_operation_id \
                      RETURNING {RUN_COLUMNS}"
                 ),
                 &[
@@ -1983,10 +2308,22 @@ impl Store for PgStore {
                     &ended_at,
                     &None::<String>,
                     &None::<String>,
+                    &input.operation_id,
                 ],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let replay = row.get::<_, String>("id") != input.id;
+        if replay {
+            let replay_id: String = row.get("id");
+            let artifacts = read_run_artifacts(&transaction, &input.org_id, &replay_id).await?;
+            let run = run_from_row(&row, artifacts)?;
+            transaction
+                .commit()
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+            return Ok(run);
+        }
         replace_run_artifacts(&transaction, &input.org_id, &input.id, &input.artifacts).await?;
         let run = run_from_row(&row, input.artifacts)?;
         transaction
@@ -2001,6 +2338,7 @@ impl Store for PgStore {
         org_id: &str,
         id: &str,
         patch: RunPatch,
+        guard: MutationGuard,
         now: i64,
     ) -> Result<Run, StoreError> {
         let mut client = self.client().await?;
@@ -2016,6 +2354,17 @@ impl Store for PgStore {
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
         let mut run = run_from_row(&existing, Vec::new())?;
+        if run.last_operation_id == guard.operation_id {
+            run.artifacts = read_run_artifacts(&transaction, org_id, id).await?;
+            return Ok(run);
+        }
+        if run.revision != guard.base_revision {
+            run.artifacts = read_run_artifacts(&transaction, org_id, id).await?;
+            return Err(StoreError::Conflict(
+                serde_json::to_value(run)
+                    .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+            ));
+        }
 
         if let Some(status) = patch.status {
             run.status = status;
@@ -2028,11 +2377,13 @@ impl Store for PgStore {
         }
         run.ended_at = ended_at_for(!run.status.is_active(), run.ended_at, now);
         run.updated_at = now;
+        run.revision += 1;
+        run.last_operation_id = guard.operation_id;
 
         transaction
             .execute(
                 "UPDATE runs SET status = $3, summary = $4, error = $5, \
-                   updated_at = $6, ended_at = $7 \
+                   updated_at = $6, ended_at = $7, revision = $8, last_operation_id = $9 \
                  WHERE org_id = $1 AND id = $2",
                 &[
                     &org_id,
@@ -2042,6 +2393,8 @@ impl Store for PgStore {
                     &run.error,
                     &run.updated_at,
                     &run.ended_at,
+                    &run.revision,
+                    &run.last_operation_id,
                 ],
             )
             .await
@@ -2071,6 +2424,13 @@ mod tests {
         UserId::parse("usr_aaaaaaaaaaaaaaaaaaaaaaaa").unwrap()
     }
 
+    fn guard(operation_id: &str, base_revision: i64) -> MutationGuard {
+        MutationGuard {
+            operation_id: operation_id.into(),
+            base_revision,
+        }
+    }
+
     fn new_issue(id: &str, org: &str) -> NewIssue {
         NewIssue {
             id: id.into(),
@@ -2085,6 +2445,7 @@ mod tests {
             assignee: None,
             created_by: CollabActor::human(&ada(), None),
             now: 100,
+            operation_id: format!("create-{org}-{id}"),
         }
     }
 
@@ -2125,7 +2486,9 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            store.patch_issue("org_b", "iss_a", patch, 200).await,
+            store
+                .patch_issue("org_b", "iss_a", patch, guard("wrong-org", 1), 200)
+                .await,
             Err(StoreError::NotFound)
         ));
         assert_eq!(
@@ -2155,6 +2518,7 @@ mod tests {
                     assignee: Some(Some(CollabActor::human(&ada(), Some("Ada".into())))),
                     ..Default::default()
                 },
+                guard("assign", 1),
                 200,
             )
             .await
@@ -2170,6 +2534,7 @@ mod tests {
                     title: Some("Renamed".into()),
                     ..Default::default()
                 },
+                guard("rename", 2),
                 300,
             )
             .await
@@ -2185,6 +2550,7 @@ mod tests {
                     assignee: Some(None),
                     ..Default::default()
                 },
+                guard("clear", 3),
                 400,
             )
             .await
@@ -2231,6 +2597,7 @@ mod tests {
                         ts,
                         actor: CollabActor::human(&ada(), None),
                         payload: serde_json::json!({}),
+                        operation_id: format!("event-{org}-{id}"),
                     },
                 )
                 .await
@@ -2293,6 +2660,7 @@ mod tests {
                 .collect(),
             created_by: CollabActor::human(&ada(), None),
             now: 100,
+            operation_id: format!("create-{org}-{id}"),
         }
     }
 
@@ -2309,6 +2677,7 @@ mod tests {
             started_by: CollabActor::human(&ada(), None),
             artifacts: vec![],
             now: 100,
+            operation_id: format!("create-{org}-{id}"),
         }
     }
 
@@ -2350,11 +2719,23 @@ mod tests {
         assert!(store.get_run("org_b", "run_1").await.unwrap().is_none());
         // And the patches, which would otherwise be a write across the boundary.
         assert!(store
-            .patch_plan("org_b", "plan_1", PlanPatch::default(), 200)
+            .patch_plan(
+                "org_b",
+                "plan_1",
+                PlanPatch::default(),
+                guard("wrong-plan-org", 1),
+                200,
+            )
             .await
             .is_err());
         assert!(store
-            .patch_run("org_b", "run_1", RunPatch::default(), 200)
+            .patch_run(
+                "org_b",
+                "run_1",
+                RunPatch::default(),
+                guard("wrong-run-org", 1),
+                200,
+            )
             .await
             .is_err());
     }
@@ -2404,6 +2785,7 @@ mod tests {
                     ],
                     ..Default::default()
                 },
+                guard("progress", 1),
                 200,
             )
             .await
@@ -2437,6 +2819,7 @@ mod tests {
                     steps: vec![progress("plan_1-step-0", PlanStepStatus::InProgress)],
                     ..Default::default()
                 },
+                guard("start", 1),
                 150,
             )
             .await
@@ -2454,6 +2837,7 @@ mod tests {
                     }],
                     ..Default::default()
                 },
+                guard("fail", 2),
                 200,
             )
             .await
@@ -2467,6 +2851,7 @@ mod tests {
                     steps: vec![progress("plan_1-step-0", PlanStepStatus::InProgress)],
                     ..Default::default()
                 },
+                guard("retry", 3),
                 300,
             )
             .await
@@ -2499,6 +2884,7 @@ mod tests {
                         steps: vec![progress("some-other-plans-step", PlanStepStatus::Completed)],
                         ..Default::default()
                     },
+                    guard("unknown-step", 1),
                     200,
                 )
                 .await,
@@ -2522,6 +2908,7 @@ mod tests {
                     status: Some(PlanStatus::Completed),
                     ..Default::default()
                 },
+                guard("complete", 1),
                 200,
             )
             .await
@@ -2538,6 +2925,7 @@ mod tests {
                     status: Some(PlanStatus::Failed),
                     ..Default::default()
                 },
+                guard("fail-terminal", 2),
                 300,
             )
             .await
@@ -2552,6 +2940,7 @@ mod tests {
                     status: Some(PlanStatus::Executing),
                     ..Default::default()
                 },
+                guard("reopen", 3),
                 400,
             )
             .await
@@ -2679,6 +3068,7 @@ mod tests {
                     ]),
                     ..Default::default()
                 },
+                guard("settle", 1),
                 200,
             )
             .await
@@ -2696,10 +3086,171 @@ mod tests {
                     error: Some(Some("flaked".into())),
                     ..Default::default()
                 },
+                guard("annotate", 2),
                 300,
             )
             .await
             .unwrap();
         assert_eq!(untouched.artifacts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_operations_are_idempotent_for_every_shared_resource() {
+        let store = InMemoryStore::new();
+
+        let issue = store
+            .create_issue(new_issue("iss_1", "org_a"))
+            .await
+            .unwrap();
+        let issue_replay = store
+            .create_issue(NewIssue {
+                id: "iss_2".into(),
+                ..new_issue("iss_1", "org_a")
+            })
+            .await
+            .unwrap();
+        assert_eq!(issue_replay.id, issue.id);
+
+        let plan = store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+        let plan_replay = store
+            .create_plan(NewPlan {
+                id: "plan_2".into(),
+                ..new_plan("plan_1", "org_a")
+            })
+            .await
+            .unwrap();
+        assert_eq!(plan_replay.id, plan.id);
+
+        let run = store.create_run(new_run("run_1", "org_a")).await.unwrap();
+        let run_replay = store
+            .create_run(NewRun {
+                id: "run_2".into(),
+                ..new_run("run_1", "org_a")
+            })
+            .await
+            .unwrap();
+        assert_eq!(run_replay.id, run.id);
+    }
+
+    #[tokio::test]
+    async fn patch_replays_succeed_and_stale_new_operations_conflict() {
+        let store = InMemoryStore::new();
+        store
+            .create_issue(new_issue("iss_1", "org_a"))
+            .await
+            .unwrap();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+        store.create_run(new_run("run_1", "org_a")).await.unwrap();
+
+        let issue = store
+            .patch_issue(
+                "org_a",
+                "iss_1",
+                IssuePatch {
+                    title: Some("Updated".into()),
+                    ..Default::default()
+                },
+                guard("issue-patch", 1),
+                200,
+            )
+            .await
+            .unwrap();
+        let issue_replay = store
+            .patch_issue(
+                "org_a",
+                "iss_1",
+                IssuePatch::default(),
+                guard("issue-patch", 1),
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(issue_replay, issue);
+        assert!(matches!(
+            store
+                .patch_issue(
+                    "org_a",
+                    "iss_1",
+                    IssuePatch::default(),
+                    guard("stale-issue-patch", 1),
+                    300,
+                )
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+
+        let plan = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch::default(),
+                guard("plan-patch", 1),
+                200,
+            )
+            .await
+            .unwrap();
+        let plan_replay = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch::default(),
+                guard("plan-patch", 1),
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(plan_replay, plan);
+        assert!(matches!(
+            store
+                .patch_plan(
+                    "org_a",
+                    "plan_1",
+                    PlanPatch::default(),
+                    guard("stale-plan-patch", 1),
+                    300,
+                )
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
+
+        let run = store
+            .patch_run(
+                "org_a",
+                "run_1",
+                RunPatch::default(),
+                guard("run-patch", 1),
+                200,
+            )
+            .await
+            .unwrap();
+        let run_replay = store
+            .patch_run(
+                "org_a",
+                "run_1",
+                RunPatch::default(),
+                guard("run-patch", 1),
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(run_replay, run);
+        assert!(matches!(
+            store
+                .patch_run(
+                    "org_a",
+                    "run_1",
+                    RunPatch::default(),
+                    guard("stale-run-patch", 1),
+                    300,
+                )
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
     }
 }

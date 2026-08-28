@@ -184,6 +184,9 @@ pub struct Issue {
     pub created_by: CollabActor,
     pub created_at: i64,
     pub updated_at: i64,
+    pub revision: i64,
+    pub created_operation_id: String,
+    pub last_operation_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,6 +199,7 @@ pub struct IssueEvent {
     pub actor: CollabActor,
     #[serde(default)]
     pub payload: serde_json::Value,
+    pub operation_id: String,
 }
 
 // ── Plans and Runs (Batch 7c) ────────────────────────────────────────────────
@@ -384,6 +388,9 @@ pub struct Plan {
     pub created_by: CollabActor,
     pub created_at: i64,
     pub updated_at: i64,
+    pub revision: i64,
+    pub created_operation_id: String,
+    pub last_operation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<i64>,
     /// Present on a single-plan read, absent from a listing. A board renders
@@ -447,6 +454,9 @@ pub struct Run {
     pub started_by: CollabActor,
     pub started_at: i64,
     pub updated_at: i64,
+    pub revision: i64,
+    pub created_operation_id: String,
+    pub last_operation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -571,6 +581,9 @@ mod tests {
             created_by: CollabActor::human(&user(), None),
             created_at: 1,
             updated_at: 1,
+            revision: 1,
+            created_operation_id: "op-create".into(),
+            last_operation_id: "op-create".into(),
         };
         let json = serde_json::to_string(&issue).unwrap();
         assert!(!json.contains("assignee"), "{json}");
@@ -776,6 +789,9 @@ mod tests {
             created_by: CollabActor::human(&user(), None),
             created_at: 1,
             updated_at: 2,
+            revision: 1,
+            created_operation_id: "op-create".into(),
+            last_operation_id: "op-create".into(),
             ended_at: None,
             steps: None,
         };
@@ -806,6 +822,9 @@ mod tests {
             started_by: CollabActor::human(&user(), Some("Ada".into())),
             started_at: 5,
             updated_at: 5,
+            revision: 1,
+            created_operation_id: "op-create".into(),
+            last_operation_id: "op-create".into(),
             ended_at: None,
             summary: None,
             error: None,

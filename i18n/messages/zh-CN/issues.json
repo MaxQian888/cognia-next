@@ -154,7 +154,23 @@
     "cancel": "取消",
     "noProject": "请先创建一个项目 —— 议题需要有归属。",
     "newProject": "新建项目…",
-    "pickExistingProject": "← 选择已有项目"
+    "pickExistingProject": "← 选择已有项目",
+    "destinationLabel": "保存到",
+    "destinationLocal": "此设备（默认）",
+    "destinationShared": "共享工作区",
+    "sharedUnavailable": "该共享工作区暂时无法新建议题。"
+  },
+  "conflicts": {
+    "title": "{count, plural, other {# 项共享编辑需要处理}}",
+    "description": "该编辑排队后，服务器版本已发生变化。请比较两份内容，然后丢弃编辑，或基于最新版本重新提交。",
+    "serverValue": "服务器当前值",
+    "pendingPatch": "待提交修改",
+    "discard": "丢弃",
+    "resubmit": "基于最新版重交",
+    "failed": "无法处理冲突：{reason}"
+  },
+  "freshness": {
+    "stale": "共享数据已过期"
   },
   "projects": {
     "title": "项目",
@@ -315,6 +331,8 @@
     "trigger": "运行",
     "cancel": "取消运行",
     "cancelled": "运行已取消",
+    "share": "分享到协作空间",
+    "shared": "运行已分享到协作工作空间。",
     "title": "运行 {identifier}",
     "description": "选择执行引擎。这一步就是确认 —— 按下「运行」后引擎立即启动。",
     "loading": "正在检查哪些引擎可以运行这个议题…",

@@ -7,6 +7,7 @@ name: Images
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
 #   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
+#   ghcr.io/<owner>/cognia-collab         Dockerfile.collab-server
 #   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
 #   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
 #   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
@@ -39,6 +40,7 @@ on:
       - "Dockerfile.cognia-server"
       - "Dockerfile.deploy-agent"
       - "Dockerfile.ops-controller"
+      - "Dockerfile.collab-server"
       - ".dockerignore"
       - "deploy/runner/**"
       - "services/signaling-server/Dockerfile"
@@ -117,6 +119,9 @@ jobs:
           - name: cognia-diagnostics
             context: services/diagnostic-server
             file: services/diagnostic-server/Dockerfile
+          - name: cognia-collab
+            context: .
+            file: Dockerfile.collab-server
           - name: cognia-deploy-agent
             context: .
             file: Dockerfile.deploy-agent

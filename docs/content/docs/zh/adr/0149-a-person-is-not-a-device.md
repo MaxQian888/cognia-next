@@ -458,3 +458,15 @@ workspace 恰好只认识一个人——那不是名册，也让 guest 成了别
    在 Batch 7 给协作面配上配置面之前处于待用状态——这也是为什么旧密钥继续可用、
    而租户化之前的分享被原样保留而不是用猜测回填。
 
+## 实施更新——协作写回（2026-08-28）
+
+第一阶段协作面已不再只读。Issue、Plan、Run 与 issue event 写入都使用稳定的
+`operationId`。资源携带 `revision`、`createdOperationId` 与 `lastOperationId`；
+PATCH 必须提交 `baseRevision`，并在并发冲突时返回 HTTP 409 与服务器权威资源，
+不会自动覆盖。客户端把待提交修改保存在持久化 outbound queue 中，并以 overlay
+方式展示；不会乐观改写由服务器拥有的 mirror。声明协议 0 的旧服务端继续保持只读。
+
+客户端在启动、窗口聚焦、恢复联网、页面重新可见以及本地写成功后立即刷新；页面可见时
+每 60 秒刷新一次，同一 account/org 只允许一个 in-flight 请求，失败退避最长 15 分钟。
+Plan 与 Run 只通过用户明确触发的发布动作和字段 allowlist 进入协作面；执行句柄、prompt、
+credential、tool input 与绝对路径始终留在本机。

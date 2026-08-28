@@ -33,6 +33,9 @@ export interface CollabIssueMirrorRow {
   createdBy: CollabIssueActor
   createdAt: number
   updatedAt: number
+  revision?: number
+  createdOperationId?: string
+  lastOperationId?: string
   /** When this row was last pulled, so a stale board can say so. */
   fetchedAt: number
 }

@@ -36,6 +36,8 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { createIssue } from "@/lib/db/issues"
 import { createIssueProject, listTakenProjectKeys } from "@/lib/db/issue-projects"
+import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
+import { enqueueCollabMutation } from "@/lib/db/mobile-outbound-queue"
 import type { IssueActor, IssueProject, IssueStatus } from "@/types/issues"
 import { AssigneePicker } from "./assignee-picker"
 import {
@@ -88,6 +90,8 @@ export function CreateIssueDialog({
   const [takenKeys, setTakenKeys] = useState<ReadonlySet<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sharedOrgId, setSharedOrgId] = useState<string | null>(null)
+  const [destination, setDestination] = useState<"local" | "shared">("local")
 
   // Only the async load lives in an effect. The two things this used to reset
   // synchronously are better expressed without one: the default container is
@@ -98,6 +102,11 @@ export function CreateIssueDialog({
     if (!open || !needsProject) return
     void listTakenProjectKeys().then(setTakenKeys)
   }, [open, needsProject])
+
+  useEffect(() => {
+    if (!open) return
+    void getCollabWorkspace(projectId).then((workspace) => setSharedOrgId(workspace?.orgId ?? null))
+  }, [open, projectId])
 
   /** Falls back to the first container until the user picks another. */
   const selectedProjectId = issueProjectId || (projects[0]?.id ?? "")
@@ -121,6 +130,30 @@ export function CreateIssueDialog({
     setBusy(true)
     setError(null)
     try {
+      if (destination === "shared") {
+        if (!sharedOrgId || !selectedProjectId) throw new Error(t("create.sharedUnavailable"))
+        await enqueueCollabMutation({
+          command: "collab_issue_create",
+          orgId: sharedOrgId,
+          entityType: "issue",
+          entityId: `new:${projectId}:${selectedProjectId}`,
+          payload: {
+            workspaceId: projectId,
+            issueProjectId: selectedProjectId,
+            title,
+            ...(description.trim() ? { body: description.trim() } : {}),
+            ...(assignee?.id ? { assignee } : {}),
+            status,
+          },
+          label: title,
+        })
+        setTitle("")
+        setDescription("")
+        setAssignee(null)
+        setDestination("local")
+        onOpenChange(false)
+        return
+      }
       const containerId = needsProject
         ? (
             await createIssueProject({
@@ -163,6 +196,23 @@ export function CreateIssueDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
+          {sharedOrgId && projects.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="issue-destination">{t("create.destinationLabel")}</Label>
+              <Select
+                value={destination}
+                onValueChange={(value) => setDestination(value as "local" | "shared")}
+              >
+                <SelectTrigger id="issue-destination" data-testid="create-issue-destination">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">{t("create.destinationLocal")}</SelectItem>
+                  <SelectItem value="shared">{t("create.destinationShared")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
           {needsProject ? (
             <>
               {projects.length > 0 ? (
@@ -191,6 +241,7 @@ export function CreateIssueDialog({
                 value={selectedProjectId}
                 onValueChange={(next) => {
                   if (next === NEW_PROJECT_VALUE) {
+                    setDestination("local")
                     setCreatingProject(true)
                     return
                   }

@@ -1,6 +1,11 @@
 /** @jest-environment jsdom */
 
-import { forgetCollabConnection, loadCollabConnection, saveCollabConnection } from "./connection"
+import {
+  forgetCollabConnection,
+  loadCollabConnection,
+  saveCollabConnection,
+  subscribeCollabConnection,
+} from "./connection"
 
 function memoryStore() {
   const values = new Map<string, string>()
@@ -15,6 +20,8 @@ function memoryStore() {
 }
 
 describe("collab connection", () => {
+  afterEach(() => localStorage.clear())
+
   it("round-trips a normalized base url", () => {
     const { local } = memoryStore()
     saveCollabConnection("acct_a", { baseUrl: "https://collab.example.com/" }, { local })
@@ -50,5 +57,16 @@ describe("collab connection", () => {
     forgetCollabConnection("acct_a", { local })
     expect(loadCollabConnection("acct_a", { local })).toBeNull()
     expect(loadCollabConnection("acct_b", { local })?.baseUrl).toBe("https://b.example")
+  })
+
+  it("notifies a mounted runner when the configured URL changes", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeCollabConnection(listener)
+    saveCollabConnection("acct_a", { baseUrl: "https://a.example" })
+    forgetCollabConnection("acct_a")
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    saveCollabConnection("acct_a", { baseUrl: "https://b.example" })
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 })

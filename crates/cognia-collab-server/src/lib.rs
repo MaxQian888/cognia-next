@@ -59,4 +59,4 @@ pub mod model;
 pub mod store;
 
 pub use api::{router, AppState};
-pub use store::{InMemoryStore, PgStore, Store};
+pub use store::{InMemoryStore, OperatorBootstrap, PgStore, Store};

@@ -5,6 +5,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
   isHostStateAction,
   sessionStateChannel,
@@ -44,6 +45,21 @@ export interface EnqueueInput {
   clientSeq?: number
   actionId?: string
   baseRevision?: number
+}
+
+export type CollabOutboundCommand = Extract<MobileOutboundCommand, `collab_${string}`>
+
+export interface EnqueueCollabMutationInput {
+  command: CollabOutboundCommand
+  orgId: string
+  entityType: "issue" | "plan" | "run"
+  entityId: string
+  payload: Record<string, unknown>
+  label?: string
+  operationId?: string
+  nowMs?: number
+  accountId?: string
+  targetId?: string
 }
 
 export const MAX_PENDING_HOST_STATE_ACTIONS = 1000
@@ -159,6 +175,58 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
   }
   await getDb().mobileOutboundQueue.put(row)
   return row
+}
+
+/**
+ * Enqueue one collaboration mutation with a stable operation id and per-entity FIFO sequence.
+ * The operation id is minted exactly once here and copied into the request body and queue
+ * idempotency key; retries never regenerate either value.
+ */
+export async function enqueueCollabMutation(
+  input: EnqueueCollabMutationInput
+): Promise<MobileOutboundJobRow> {
+  const accountId = input.accountId ?? getActiveAccountId()
+  const targetId = input.targetId ?? "collab-plane"
+  if (!accountId) {
+    throw new Error("Collaboration queue requires an active account.")
+  }
+  const now = input.nowMs ?? Date.now()
+  const operationId = input.operationId ?? randomHostStateId()
+  const channel = `collab:${input.orgId}:${input.entityType}:${input.entityId}`
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const rows = await db.mobileOutboundQueue
+      .where("status")
+      .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
+      .filter(
+        (row) =>
+          row.protocol === "collab-v1" &&
+          row.accountId === accountId &&
+          row.targetId === targetId &&
+          row.channel === channel
+      )
+      .toArray()
+    const clientSeq = rows.reduce((highest, row) => Math.max(highest, row.clientSeq ?? 0), 0) + 1
+    const row: MobileOutboundJobRow = {
+      id: operationId,
+      accountId,
+      targetId,
+      command: input.command,
+      payload: { ...input.payload, orgId: input.orgId, operationId },
+      status: "pending",
+      attempts: 0,
+      createdAt: now,
+      nextAttemptAt: now,
+      idempotencyKey: operationId,
+      label: input.label,
+      protocol: "collab-v1",
+      channel,
+      clientSeq,
+      actionId: operationId,
+    }
+    await db.mobileOutboundQueue.add(row)
+    return row
+  })
 }
 
 /** Persist a HostState intent before any optimistic UI is rendered. */
@@ -435,6 +503,76 @@ export async function markHostStateResult(
     rejectionCode: result.rejection?.code,
     currentRevision: result.rejection?.currentRevision,
   })
+}
+
+export async function markCollabConflict(
+  id: string,
+  error: string,
+  authoritative: unknown
+): Promise<void> {
+  const currentRevision =
+    typeof authoritative === "object" &&
+    authoritative !== null &&
+    typeof (authoritative as { revision?: unknown }).revision === "number"
+      ? (authoritative as { revision: number }).revision
+      : undefined
+  await getDb().mobileOutboundQueue.update(id, {
+    status: "conflicted",
+    lastError: error,
+    conflictAuthoritative: authoritative,
+    currentRevision,
+    claimedAt: undefined,
+  })
+}
+
+export async function discardCollabConflict(id: string): Promise<void> {
+  const row = await getDb().mobileOutboundQueue.get(id)
+  if (row?.protocol !== "collab-v1" || row.status !== "conflicted") return
+  await getDb().mobileOutboundQueue.delete(id)
+}
+
+export async function rebaseCollabConflict(id: string): Promise<MobileOutboundJobRow> {
+  const row = await getDb().mobileOutboundQueue.get(id)
+  if (row?.protocol !== "collab-v1" || row.status !== "conflicted") {
+    throw new Error("Collaboration conflict no longer exists.")
+  }
+  // A create has no base revision to move forward and carries no entity id, so
+  // it can only be discarded or retried as a new create. Say that, rather than
+  // falling through to the payload-shape check and calling the row corrupt.
+  if (row.command.endsWith("_create")) {
+    throw new Error("A create cannot be rebased — discard it, or retry it as a new create.")
+  }
+  if (!Number.isSafeInteger(row.currentRevision) || (row.currentRevision ?? 0) < 1) {
+    throw new Error("Collaboration conflict has no authoritative revision.")
+  }
+  const payload = { ...row.payload, baseRevision: row.currentRevision }
+  delete payload.operationId
+  const entityType = row.command.includes("_issue_")
+    ? "issue"
+    : row.command.includes("_plan_")
+      ? "plan"
+      : "run"
+  const entityId =
+    entityType === "issue"
+      ? payload.issueId
+      : entityType === "plan"
+        ? payload.planId
+        : payload.runId
+  if (typeof payload.orgId !== "string" || typeof entityId !== "string") {
+    throw new Error("Collaboration conflict payload is malformed.")
+  }
+  const replacement = await enqueueCollabMutation({
+    accountId: row.accountId,
+    targetId: row.targetId,
+    command: row.command as CollabOutboundCommand,
+    orgId: payload.orgId,
+    entityType,
+    entityId,
+    payload,
+    label: row.label,
+  })
+  await getDb().mobileOutboundQueue.delete(id)
+  return replacement
 }
 
 export async function recordFailure(opts: {

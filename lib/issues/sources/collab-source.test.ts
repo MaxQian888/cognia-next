@@ -81,6 +81,24 @@ describe("toUnifiedCollabIssue", () => {
       canAssign: false,
       canRun: false,
       canComment: false,
+      canDelete: false,
+      canManageLabels: false,
+      canMoveProject: false,
+    })
+  })
+
+  it("enables only server-supported writes when a revision is present", () => {
+    expect(toUnifiedCollabIssue(row({ revision: 3 })).capabilities).toEqual({
+      canEdit: true,
+      canMove: true,
+      canAssign: true,
+      canRun: false,
+      canComment: true,
+      canDelete: false,
+      canManageLabels: false,
+      // The server's issue patch body carries no `issueProjectId`, so a move
+      // would be accepted and silently dropped.
+      canMoveProject: false,
     })
   })
 
@@ -122,6 +140,41 @@ describe("collabIssueSource.list", () => {
 
   it("returns nothing when the mirror is empty, without throwing", async () => {
     expect(await collabIssueSource.list({ projectId: "proj-1" })).toEqual([])
+  })
+})
+
+describe("collabIssueSource.mutate", () => {
+  it("refuses a project move instead of enqueuing a patch the server drops", async () => {
+    await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_move", revision: 2 })])
+
+    await expect(
+      collabIssueSource.mutate?.(
+        "iss_move",
+        { kind: "project", issueProjectId: "cont-9" },
+        { kind: "human", id: ADA }
+      )
+    ).rejects.toThrow(/does not support project/)
+  })
+
+  it("enqueues an editable field against the mirrored base revision", async () => {
+    await replaceCollabIssues({ orgId: ORG }, [row({ id: "iss_edit", revision: 4 })])
+
+    await collabIssueSource.mutate?.(
+      "iss_edit",
+      { kind: "title", to: "Renamed" },
+      { kind: "human", id: ADA }
+    )
+
+    const { getDb } = await import("@/lib/db/schema")
+    const queued = await getDb().mobileOutboundQueue.toArray()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.command).toBe("collab_issue_patch")
+    expect(queued[0]?.payload).toMatchObject({
+      issueId: "iss_edit",
+      baseRevision: 4,
+      title: "Renamed",
+    })
+    expect(queued[0]?.payload).not.toHaveProperty("issueProjectId")
   })
 })
 

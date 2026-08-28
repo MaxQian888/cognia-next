@@ -1,4 +1,4 @@
-import { CollabClient, CollabError } from "./client"
+import { CollabClient, CollabConflictError, CollabError } from "./client"
 
 const ORG = "org_acme00000000000000000"
 const ADA = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
@@ -83,6 +83,17 @@ describe("CollabClient", () => {
     await client.listEvents(ORG, "iss_1")
 
     expect(exchanges()).toBe(1)
+  })
+
+  it("resolves the server-owned user id without exposing the grant", async () => {
+    const { fetchImpl } = harness()
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+      now: () => 0,
+    })
+    await expect(client.identity(ORG)).resolves.toEqual({ userId: ADA, orgId: ORG })
   })
 
   it("re-exchanges before the grant actually expires", async () => {
@@ -240,5 +251,57 @@ describe("CollabClient", () => {
 
     await client.listIssues(ORG)
     expect(calls[0].url).toBe(`https://collab.test/v1/orgs/${ORG}/grants`)
+  })
+
+  it("sends a stable operation id and base revision on writes", async () => {
+    const { calls, fetchImpl } = harness({ issues: [{ id: "iss_1" }] })
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+      now: () => 0,
+    })
+
+    await client.patchIssue(ORG, "iss_1", {
+      operationId: "op-1",
+      baseRevision: 4,
+      title: "Changed",
+    })
+
+    const call = calls[calls.length - 1]
+    expect(call.init?.method).toBe("PATCH")
+    expect(JSON.parse(String(call.init?.body))).toEqual({
+      operationId: "op-1",
+      baseRevision: 4,
+      title: "Changed",
+    })
+    expect(call.init?.headers).toMatchObject({
+      authorization: "Bearer grant-1",
+      "content-type": "application/json",
+    })
+  })
+
+  it("carries the authoritative resource on a revision conflict", async () => {
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse(
+              { error: "revision conflict", authoritative: { id: "iss_1", revision: 5 } },
+              409
+            ),
+      now: () => 0,
+    })
+
+    const error = await client
+      .patchIssue(ORG, "iss_1", { operationId: "op-1", baseRevision: 4 })
+      .catch((caught) => caught)
+    expect(error).toBeInstanceOf(CollabConflictError)
+    expect(error).toMatchObject({
+      status: 409,
+      authoritative: { id: "iss_1", revision: 5 },
+    })
   })
 })

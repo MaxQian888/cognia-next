@@ -44,6 +44,9 @@ export interface UnifiedIssueCapabilities {
   canAssign: boolean
   canRun: boolean
   canComment: boolean
+  canDelete: boolean
+  canManageLabels: boolean
+  canMoveProject: boolean
 }
 
 /** Local rows: everything. */
@@ -53,6 +56,9 @@ export const FULL_ISSUE_CAPABILITIES: Readonly<UnifiedIssueCapabilities> = Objec
   canAssign: true,
   canRun: true,
   canComment: true,
+  canDelete: true,
+  canManageLabels: true,
+  canMoveProject: true,
 })
 
 /** Federated rows with no write path at all. */
@@ -62,7 +68,22 @@ export const READ_ONLY_ISSUE_CAPABILITIES: Readonly<UnifiedIssueCapabilities> = 
   canAssign: false,
   canRun: false,
   canComment: false,
+  canDelete: false,
+  canManageLabels: false,
+  canMoveProject: false,
 })
+
+export type IssueSourceMutation =
+  | { kind: "status"; to: IssueStatus }
+  | { kind: "title"; to: string }
+  | { kind: "description"; to: string }
+  | { kind: "priority"; to: IssuePriority }
+  | { kind: "assignee"; to: IssueActor | null }
+  | { kind: "addLabel"; labelId: string }
+  | { kind: "removeLabel"; labelId: string }
+  | { kind: "project"; issueProjectId: string }
+  | { kind: "comment"; body: string }
+  | { kind: "delete" }
 
 /** Where a row came from, and how to reach its native surface. */
 export interface UnifiedIssueOrigin {
@@ -132,6 +153,7 @@ export interface IssueSourceAdapter {
   /** Display label for the source badge and the filter menu. */
   readonly label: string
   list(query: IssueSourceQuery): Promise<UnifiedIssueItem[]>
+  mutate?(sourceId: string, action: IssueSourceMutation, by: IssueActor): Promise<void>
 }
 
 /** Build a stable `unifiedId`. Centralized so sources can't drift. */
