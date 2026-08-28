@@ -36,6 +36,31 @@ describe("A2UIIcon", () => {
     expect(container.querySelector("svg")).toBeInTheDocument()
   })
 
+  it("should preserve an icon name that is already PascalCase", () => {
+    const component: A2UIIconComponent = {
+      id: "icon-pascal-case",
+      component: "Icon",
+      name: "FileText",
+    }
+
+    const { container } = render(<A2UIIcon {...createProps(component)} />)
+    expect(container.querySelector("svg")).toHaveClass("lucide-file-text")
+  })
+
+  it.each([
+    ["file_text", "lucide-file-text"],
+    ["CHECK", "lucide-check"],
+  ])("should keep normalizing the legacy %s spelling", (name, expectedClass) => {
+    const component: A2UIIconComponent = {
+      id: `icon-${name}`,
+      component: "Icon",
+      name,
+    }
+
+    const { container } = render(<A2UIIcon {...createProps(component)} />)
+    expect(container.querySelector("svg")).toHaveClass(expectedClass)
+  })
+
   it("should render fallback icon for unknown name", () => {
     const component: A2UIIconComponent = {
       id: "icon-2",

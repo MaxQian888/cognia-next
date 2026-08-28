@@ -27,7 +27,7 @@ export const A2UIIcon = memo(function A2UIIcon({
   }
 
   const pascalName = formatIconName(iconName)
-  const IconComponent = getLucideIcon(pascalName)
+  const IconComponent = getLucideIcon(iconName) ?? getLucideIcon(pascalName)
 
   if (!IconComponent) {
     // Fallback to a default icon
