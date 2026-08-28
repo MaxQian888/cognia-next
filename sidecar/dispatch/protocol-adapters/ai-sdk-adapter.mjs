@@ -279,6 +279,15 @@ async function buildRawModel({
 }) {
   switch (protocol) {
     case "openai": {
+      // The resolver intentionally keeps DeepSeek in the openai wire-protocol
+      // family, but the official adapter understands DeepSeek's native
+      // reasoning_content stream and prompt-cache usage fields. Preserve an
+      // explicit Responses override for compatible relays: the DeepSeek
+      // provider itself only exposes Chat Completions.
+      if (providerId === "deepseek" && apiFlavor !== "responses") {
+        const { createDeepSeek } = await import("@ai-sdk/deepseek")
+        return createDeepSeek({ apiKey, baseURL, headers }).chat(model)
+      }
       const { createOpenAI } = await import("@ai-sdk/openai")
       // `headers` carries the Codex ChatGPT-login extras (ChatGPT-Account-Id,
       // OpenAI-Beta, originator, OAI-Product-Sku); undefined for everyone else.

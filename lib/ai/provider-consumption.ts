@@ -18,6 +18,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createCohere } from "@ai-sdk/cohere"
+import { createDeepSeek } from "@ai-sdk/deepseek"
 import { createGoogle } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createOpenAI } from "@ai-sdk/openai"
@@ -495,7 +496,16 @@ export function resolveFeatureProvider(
 // =============================================================================
 
 export function createFeatureProviderClient(config: FeatureClientConfig) {
-  const { providerId, protocol, apiKey, baseURL, bedrock, fetch: fetchImpl, headers } = config
+  const {
+    providerId,
+    protocol,
+    apiFlavor,
+    apiKey,
+    baseURL,
+    bedrock,
+    fetch: fetchImpl,
+    headers,
+  } = config
   const settings: {
     apiKey?: string
     baseURL?: string
@@ -509,6 +519,14 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
   // so non-standalone callers are unaffected.
   if (fetchImpl) settings.fetch = fetchImpl
   if (headers) settings.headers = headers
+
+  // DeepSeek has a first-party AI SDK adapter that understands its native
+  // reasoning_content stream and cache-usage metadata. Keep an explicit
+  // Responses override on the OpenAI adapter because DeepSeek's provider only
+  // exposes Chat Completions; this preserves configured relay behavior.
+  if (providerId === "deepseek" && protocol === "openai" && apiFlavor !== "responses") {
+    return createDeepSeek(settings)
+  }
 
   switch (providerId) {
     case "qwen":

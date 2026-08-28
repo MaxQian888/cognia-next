@@ -177,8 +177,7 @@ test("buildModel(openai) routes a Codex RELAY preset to the Responses API via pr
   assert.equal(m.provider, "openai.responses")
 })
 
-test("buildModel(openai) leaves a non-codex gateway on Chat Completions", async () => {
-  // The providerId arm must not drag other openai-protocol gateways onto /responses.
+test("buildModel(openai) uses the native DeepSeek adapter for the built-in provider", async () => {
   const m = await buildModel({
     protocol: "openai",
     model: "deepseek-chat",
@@ -186,7 +185,30 @@ test("buildModel(openai) leaves a non-codex gateway on Chat Completions", async 
     baseURL: "https://api.deepseek.com/v1",
     providerId: "deepseek",
   })
-  assert.equal(m.provider, "openai.chat")
+  assert.equal(m.provider, "deepseek.chat")
+})
+
+test("buildModel(openai) preserves an explicit DeepSeek Responses endpoint", async () => {
+  const m = await buildModel({
+    protocol: "openai",
+    model: "deepseek-chat",
+    apiKey: "sk",
+    baseURL: "https://deepseek-relay.example/v1",
+    apiFlavor: "responses",
+    providerId: "deepseek",
+  })
+  assert.equal(m.provider, "openai.responses")
+})
+
+test("buildModel preserves an explicit DeepSeek protocol override", async () => {
+  const m = await buildModel({
+    protocol: "anthropic",
+    model: "deepseek-v4-flash",
+    apiKey: "sk",
+    baseURL: "https://anthropic-relay.example",
+    providerId: "deepseek",
+  })
+  assert.equal(m.provider, "anthropic.messages")
 })
 
 test("buildReasoningProviderOptions(openai): the Codex backend + relay are native surfaces", () => {

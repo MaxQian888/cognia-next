@@ -1,6 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
+import { createDeepSeek } from "@ai-sdk/deepseek"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createAlibaba } from "@ai-sdk/alibaba"
 import { createXai } from "@ai-sdk/xai"
@@ -57,6 +58,10 @@ jest.mock("@ai-sdk/azure", () => ({
 
 jest.mock("@ai-sdk/amazon-bedrock", () => ({
   createAmazonBedrock: makeEndpointFamilyFactory("amazon-bedrock"),
+}))
+
+jest.mock("@ai-sdk/deepseek", () => ({
+  createDeepSeek: makeEndpointFamilyFactory("deepseek"),
 }))
 
 jest.mock("@ai-sdk/alibaba", () => ({
@@ -682,6 +687,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     ;(createOpenAI as jest.Mock).mockClear()
     ;(createAzure as jest.Mock).mockClear()
     ;(createAmazonBedrock as jest.Mock).mockClear()
+    ;(createDeepSeek as jest.Mock).mockClear()
     ;(createAlibaba as jest.Mock).mockClear()
     ;(createXai as jest.Mock).mockClear()
     ;(createTogetherAI as jest.Mock).mockClear()
@@ -728,6 +734,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   })
 
   it.each([
+    ["deepseek", createDeepSeek],
     ["xai", createXai],
     ["togetherai", createTogetherAI],
     ["fireworks", createFireworks],
@@ -746,6 +753,36 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       baseURL: `https://${providerId}.example/v1`,
     })
     expect(createOpenAI).not.toHaveBeenCalled()
+  })
+
+  it("keeps an explicit DeepSeek Responses endpoint on the OpenAI adapter", () => {
+    createFeatureProviderClient({
+      ...base,
+      providerId: "deepseek",
+      protocol: "openai",
+      apiFlavor: "responses",
+      apiKey: "deepseek-key",
+      baseURL: "https://deepseek-relay.example/v1",
+    })
+
+    expect(createOpenAI).toHaveBeenCalledWith({
+      apiKey: "deepseek-key",
+      baseURL: "https://deepseek-relay.example/v1",
+    })
+    expect(createDeepSeek).not.toHaveBeenCalled()
+  })
+
+  it("keeps an explicit DeepSeek protocol override off the native adapter", () => {
+    const client = createFeatureProviderClient({
+      ...base,
+      providerId: "deepseek",
+      protocol: "anthropic",
+      apiKey: "deepseek-relay-key",
+      baseURL: "https://anthropic-relay.example",
+    }) as (modelId: string) => { __provider?: string }
+
+    expect(client("deepseek-v4-flash").__provider).toBe("anthropic")
+    expect(createDeepSeek).not.toHaveBeenCalled()
   })
 
   it("builds Bedrock clients for API-key and explicit-IAM modes", () => {
@@ -843,6 +880,22 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     }) as { __provider?: string; id?: string }
     expect(model.__provider).toBe("openai.chat")
     expect(model.id).toBe("openrouter/auto")
+  })
+
+  it("routes the built-in DeepSeek provider through its native AI SDK adapter", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "deepseek",
+      protocol: "openai",
+      apiKey: "sk-deepseek",
+      baseURL: "https://api.deepseek.com/v1",
+      model: "deepseek-v4-flash",
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { __provider?: string; id?: string }
+
+    expect(model.__provider).toBe("deepseek.chat")
+    expect(model.id).toBe("deepseek-v4-flash")
   })
 
   it("honors apiFlavor when building an OpenAI-compatible feature model", () => {

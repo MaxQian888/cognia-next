@@ -44,6 +44,42 @@ overrides:
   valibot: "^1.4.2"
   vite-tsconfig-paths: "^6.1.1"
 
+  # Single-copy floors for the AI SDK family. Six workspace packages declare these
+  # as peers with a bare `*` (`packages/{provider-core,provider-embedding,rag,
+  # memory,web-search,agent-config-types}`). A `*` is resolved ONCE and then frozen
+  # in the lockfile, so when the root pin later moved forward those packages stayed
+  # on whatever was newest the day their entry was written — leaving two copies of
+  # every one of these in the store.
+  #
+  # That is not merely wasteful: `tsc` loads both, and two copies of `ai` collide
+  # on its global `AI_SDK_TELEMETRY_INTEGRATIONS` declaration (TS2403), which broke
+  # the packed-SDK type-check in `scripts/plugin/test-sdk-package.mjs`.
+  #
+  # These override the whole graph — including third-party consumers — onto the
+  # `catalog:` block below, which the root package.json also references, so there
+  # is exactly one place to bump. (`$name` does the same job but pnpm 11
+  # deprecates it in favour of catalogs.)
+  ai: "catalog:"
+  "@ai-sdk/provider": "catalog:"
+  "@ai-sdk/openai": "catalog:"
+  "@ai-sdk/anthropic": "catalog:"
+  "@ai-sdk/google": "catalog:"
+  "@ai-sdk/mistral": "catalog:"
+  "@ai-sdk/cohere": "catalog:"
+  "@ai-sdk/amazon-bedrock": "catalog:"
+
+# One version per AI SDK package, for the catalog references above and in the
+# root package.json. This block is the single source of truth for the family.
+catalog:
+  ai: "7.0.59"
+  "@ai-sdk/provider": "4.0.7"
+  "@ai-sdk/openai": "4.0.37"
+  "@ai-sdk/anthropic": "4.0.37"
+  "@ai-sdk/google": "4.0.40"
+  "@ai-sdk/mistral": "4.0.28"
+  "@ai-sdk/cohere": "4.0.26"
+  "@ai-sdk/amazon-bedrock": "5.0.51"
+
 # pnpm 11 blocks lifecycle scripts by default (ERR_PNPM_IGNORED_BUILDS).
 # Explicitly approve packages whose postinstall/install/preinstall scripts are
 # required for correct operation (native addons, platform binaries). Deny
