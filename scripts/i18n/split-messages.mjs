@@ -20,7 +20,9 @@
  * independent) — it throws before declaring success if any data was lost.
  *
  * This is intended to run exactly once. After it, `pnpm i18n:build` keeps the
- * big artifacts in sync from the split sources.
+ * big artifacts in sync from the split sources. The `i18n:split` package.json
+ * alias was removed on 2026-08-28 — the migration had already run and nothing
+ * called it — so run this file directly if it ever has to be replayed.
  *
  * Usage:  node scripts/i18n/split-messages.mjs
  */
