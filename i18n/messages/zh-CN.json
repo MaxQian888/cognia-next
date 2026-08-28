@@ -6629,6 +6629,7 @@
       "originLabel": {
         "agentKnowledgeBase": "Agent 知识库",
         "anthropic": "网络",
+        "cogniaWeb": "Cognia 联网",
         "footnote": "脚注",
         "memory": "记忆",
         "projectKnowledge": "项目",
@@ -6734,6 +6735,7 @@
         "title": "截图"
       },
       "webFetch": {
+        "empty": "无返回内容。",
         "failed": "抓取失败。",
         "showLess": "收起",
         "showMore": "展开全部（{chars} 字符）",
@@ -7288,6 +7290,7 @@
       "labels": {
         "agentKnowledge": "智能体知识库",
         "anthropic": "网页",
+        "cogniaWeb": "Cognia 联网",
         "document": "文档",
         "file": "文件",
         "footnote": "注释",
@@ -8286,6 +8289,7 @@
       "cogniaAgentChecking": "正在检查 Cognia 代理…",
       "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
       "contentMatch": "匹配到消息内容",
+      "continueOnDevice": "在其他设备上继续",
       "delete": "删除",
       "deleteConfirmAction": "删除会话",
       "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
@@ -8293,6 +8297,8 @@
       "deleteConfirmTitle": "删除「{title}」？",
       "deselect": "取消选择",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
+      "handoffReadonly": "设备接力后只读",
+      "handoffStatus": "设备接力状态",
       "moveToFolder": "移动到文件夹",
       "openInCodexApp": "在 Codex App 中打开",
       "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
@@ -12813,6 +12819,15 @@
       "selected": "已选中 {count} 项",
       "skipped": "已更新 {count} 个议题，跳过 {skipped} 个"
     },
+    "conflicts": {
+      "description": "该编辑排队后，服务器版本已发生变化。请比较两份内容，然后丢弃编辑，或基于最新版本重新提交。",
+      "discard": "丢弃",
+      "failed": "无法处理冲突：{reason}",
+      "pendingPatch": "待提交修改",
+      "resubmit": "基于最新版重交",
+      "serverValue": "服务器当前值",
+      "title": "{count, plural, other {# 项共享编辑需要处理}}"
+    },
     "context": {
       "delete": "删除",
       "open": "打开议题"
@@ -12820,10 +12835,14 @@
     "create": {
       "cancel": "取消",
       "descriptionLabel": "描述",
+      "destinationLabel": "保存到",
+      "destinationLocal": "此设备（默认）",
+      "destinationShared": "共享工作区",
       "newProject": "新建项目…",
       "noProject": "请先创建一个项目 —— 议题需要有归属。",
       "pickExistingProject": "← 选择已有项目",
       "projectLabel": "项目",
+      "sharedUnavailable": "该共享工作区暂时无法新建议题。",
       "submit": "创建议题",
       "title": "新建议题",
       "titleLabel": "标题",
@@ -12860,6 +12879,9 @@
       "status": "状态",
       "title": "标题",
       "updated": "更新于"
+    },
+    "freshness": {
+      "stale": "共享数据已过期"
     },
     "labels": {
       "add": "添加标签",
@@ -13044,6 +13066,8 @@
       "reviewRule": "运行结束后议题进入「待审阅」—— 绝不会直接置为「完成」。",
       "section": "运行",
       "sectionHint": "把这个议题派发给指派的 Agent 或小队。运行期间由运行时持有「进行中」；结束后议题回到「待审阅」交还给你。",
+      "share": "分享到协作空间",
+      "shared": "运行已分享到协作工作空间。",
       "stackOn": "叠加在",
       "stackOnHint": "把这个 issue 的 PR 基于另一个 issue 的分支，而不是基分支，这样每次评审只看到它自己的改动。只列出已完成的运行真正推送过的分支。",
       "stackOnNone": "不叠加——使用基分支",
@@ -19879,6 +19903,8 @@
       "pause": "暂停",
       "progress": "{total} 步中已完成 {completed} 步",
       "resume": "继续",
+      "share": "分享到协作空间",
+      "shared": "计划已分享到协作工作空间。",
       "statusBlocked": "受阻",
       "statusCompleted": "已完成",
       "statusFailed": "失败",
@@ -25141,7 +25167,7 @@
     "add": "添加",
     "addBackupKey": "添加密钥",
     "addCustomSource": "添加",
-    "addCustomSourceDesc": "为自定义搜索来源命名",
+    "addCustomSourceDesc": "为来源命名并填写网站域名，用于限制研究结果。",
     "addCustomSourceTitle": "添加自定义来源",
     "apiKey": "API 密钥",
     "backupKeys": "备用密钥",
@@ -25152,6 +25178,12 @@
     "defaultProvider": "默认 Provider",
     "description": "配置联网搜索 provider 与对话集成。",
     "disableAll": "全部禁用",
+    "domainSources": {
+      "arxiv": "arXiv",
+      "github": "GitHub",
+      "stackoverflow": "Stack Overflow",
+      "wikipedia": "Wikipedia"
+    },
     "enableAll": "全部启用",
     "enableSearch": "启用联网搜索",
     "enabled": "已启用",
@@ -25174,6 +25206,7 @@
     "hideKeys": "隐藏密钥",
     "higherPriority": "提高优先级",
     "invalidKeyFormat": "密钥格式无效",
+    "invalidSourceDomain": "请输入有效的公网域名或 HTTP(S) URL。",
     "keyPoolSize": "轮换池中有 {count} 个密钥",
     "lowerPriority": "降低优先级",
     "maxResults": "最大结果数",
@@ -25202,8 +25235,10 @@
     "providers": "搜索 Providers",
     "providersDescription": "为各 Provider 配置 API 密钥",
     "removeKey": "移除密钥",
+    "researchDomains": "限定域名",
+    "researchProviders": "优先 Provider",
     "researchSources": "研究来源",
-    "researchSourcesDesc": "深度研究模式默认使用的来源",
+    "researchSourcesDesc": "优先 Provider 会先被尝试；选择的域名始终作为深度研究结果的硬过滤条件。",
     "reset": "重置",
     "rotateKeys": "轮换 API 密钥",
     "rotateKeysDesc": "在多个密钥间分摊请求；被限流或拒绝的密钥会被自动跳过。",
@@ -25211,7 +25246,12 @@
     "selectProvider": "选择 Provider",
     "selected": "已选择",
     "showKeys": "显示密钥",
+    "sourceDomain": "域名或 URL",
+    "sourceDomainHint": "保存时会移除路径并规范化为域名。",
+    "sourceDomainPlaceholder": "docs.example.com",
+    "sourceName": "来源名称",
     "sourceNamePlaceholder": "来源名称",
+    "sourceNeedsDomain": "需要补充域名",
     "strategyLeastUsed": "最少使用",
     "strategyRandom": "随机",
     "strategyRoundRobin": "轮询",
@@ -38688,6 +38728,58 @@
     "label": "切换主题",
     "switchToDark": "切换到深色模式",
     "switchToLight": "切换到浅色模式"
+  },
+  "threadHandoff": {
+    "inbound": {
+      "accept": "在此设备继续",
+      "blocker": {
+        "attachment-unresolvable": "附件不可用：{ref}",
+        "capability-missing": "缺少所需能力：{ref}",
+        "credential-missing": "缺少所需凭证：{ref}",
+        "host-operation-missing": "原生运行时操作不可用：{ref}",
+        "model-unavailable": "模型不可用：{ref}",
+        "protocol-incompatible": "协议版本过旧：{ref}",
+        "provider-unavailable": "服务商不可用：{ref}",
+        "transcript-digest-mismatch": "会话记录完整性校验失败：{ref}",
+        "workspace-unavailable": "工作区不可用：{ref}"
+      },
+      "blockersLabel": "预检结果",
+      "decline": "保留在源设备",
+      "degradedHint": "可以继续，但无法恢复原生运行时句柄。",
+      "description": "「{title}」已准备移动到此设备。完成接收和提交前，源设备会话保持只读。",
+      "failed": "接力未能继续。会话仍保持只读，可安全恢复。",
+      "fidelityLoss": "此设备将以 {fidelity} 保真度通过已传输的会话记录继续。",
+      "permissionReset": "历史工具授权不会转移；此设备在工具需要权限时会重新询问。",
+      "recoveryDescription": "「{title}」已在此设备接收，但最终所有权证明被中断。继续恢复不会产生两个可写副本。",
+      "recoveryTitle": "完成中断的接力",
+      "resume": "继续恢复",
+      "title": "在此设备继续该会话？",
+      "working": "正在校验所有权…"
+    },
+    "source": {
+      "available": "可用于 standalone 接力",
+      "committedReadonly": "所有权已成功转移；此源副本永久只读。",
+      "continue": "冻结并在该设备继续",
+      "description": "选择已配对的 standalone 设备。会话记录离开宿主前，源端会先冻结。",
+      "failed": "无法启动或恢复接力。",
+      "frozenReadonly": "目标端校验并接收会话记录期间，源端保持冻结。恢复过程中允许暂时零份可写。",
+      "lossDisclosure": "目标端会检查服务商、模型、凭证、工作区、协议和附件。若无法恢复原生运行时，会在接收前说明将降级为会话记录续接。",
+      "noDevices": "没有可用的配对设备。请先配对 standalone 手机，并等待其上报 thread-handoff-v1。",
+      "retry": "重试投递",
+      "retryQueued": "接力投递已重新入队。",
+      "started": "源端已冻结，接力请求已入队。",
+      "starting": "正在冻结源端…",
+      "statusDescription": "当前所有权状态：{state}",
+      "statusTitle": "设备接力状态",
+      "stranded": "投递已耗尽重试。请重试，或从目标端完成协调恢复；源端不会自行解冻。",
+      "title": "在其他设备上继续",
+      "unavailable": {
+        "not-mobile": "该配对客户端仅是控制面，不能成为 standalone 所有者。",
+        "paused": "配对已暂停。",
+        "revoked": "配对已撤销。",
+        "standalone-required": "请打开 standalone BYOK 模式并重新连接，以便设备上报 thread-handoff-v1。"
+      }
+    }
   },
   "toolCatalog": {
     "description": "搜索全部可用工具与 MCP server,构建允许或拒绝清单以收窄智能体可用范围。在每角色、每会话设置之上生效;拒绝始终优先。",

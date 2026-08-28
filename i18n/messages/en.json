@@ -6629,6 +6629,7 @@
       "originLabel": {
         "agentKnowledgeBase": "Agent KB",
         "anthropic": "Web",
+        "cogniaWeb": "Cognia Web",
         "footnote": "Note",
         "memory": "Memory",
         "projectKnowledge": "Project",
@@ -6734,6 +6735,7 @@
         "title": "Screenshot"
       },
       "webFetch": {
+        "empty": "No content returned.",
         "failed": "Fetch failed.",
         "showLess": "Show less",
         "showMore": "Show all ({chars} characters)",
@@ -7288,6 +7290,7 @@
       "labels": {
         "agentKnowledge": "Agent knowledge",
         "anthropic": "Web",
+        "cogniaWeb": "Cognia Web",
         "document": "Document",
         "file": "File",
         "footnote": "Note",
@@ -8286,6 +8289,7 @@
       "cogniaAgentChecking": "Checking for the Cognia agent…",
       "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
       "contentMatch": "Matched inside messages",
+      "continueOnDevice": "Continue on another device",
       "delete": "Delete",
       "deleteConfirmAction": "Delete conversation",
       "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
@@ -8293,6 +8297,8 @@
       "deleteConfirmTitle": "Delete “{title}”?",
       "deselect": "Deselect",
       "dragHandle": "Drag to reorder or move to a folder",
+      "handoffReadonly": "Read-only after device handoff",
+      "handoffStatus": "Device handoff status",
       "moveToFolder": "Move to folder",
       "openInCodexApp": "Open in Codex app",
       "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
@@ -12813,6 +12819,15 @@
       "selected": "{count, plural, one {# selected} other {# selected}}",
       "skipped": "{count, plural, one {# issue updated} other {# issues updated}}, {skipped} skipped"
     },
+    "conflicts": {
+      "description": "The server changed after this edit was queued. Compare both versions, then discard the edit or resubmit it against the latest revision.",
+      "discard": "Discard",
+      "failed": "Could not resolve conflict: {reason}",
+      "pendingPatch": "Your pending patch",
+      "resubmit": "Resubmit on latest",
+      "serverValue": "Current server value",
+      "title": "{count, plural, one {Shared edit needs review} other {# shared edits need review}}"
+    },
     "context": {
       "delete": "Delete",
       "open": "Open issue"
@@ -12820,10 +12835,14 @@
     "create": {
       "cancel": "Cancel",
       "descriptionLabel": "Description",
+      "destinationLabel": "Save to",
+      "destinationLocal": "This device (default)",
+      "destinationShared": "Shared workspace",
       "newProject": "New project…",
       "noProject": "Create a project first — issues need somewhere to live.",
       "pickExistingProject": "← Pick an existing project",
       "projectLabel": "Project",
+      "sharedUnavailable": "This shared workspace is not ready for new issues.",
       "submit": "Create issue",
       "title": "New issue",
       "titleLabel": "Title",
@@ -12860,6 +12879,9 @@
       "status": "Status",
       "title": "Title",
       "updated": "Updated"
+    },
+    "freshness": {
+      "stale": "Shared data is stale"
     },
     "labels": {
       "add": "Add label",
@@ -13044,6 +13066,8 @@
       "reviewRule": "When the run ends the issue moves to In review — never straight to Done.",
       "section": "Runs",
       "sectionHint": "Dispatch this issue to its assigned agent or squad. A run owns In progress; when it finishes the issue comes back to you at In review.",
+      "share": "Share",
+      "shared": "Run shared with the collaborative workspace.",
       "stackOn": "Stack on",
       "stackOnHint": "Base this issue's pull request on another issue's branch instead of the base branch, so each review shows only its own change. Only branches a finished run already pushed are offered.",
       "stackOnNone": "Nothing — base branch",
@@ -19879,6 +19903,8 @@
       "pause": "Pause",
       "progress": "{completed} of {total} steps",
       "resume": "Resume",
+      "share": "Share",
+      "shared": "Plan shared with the collaborative workspace.",
       "statusBlocked": "Blocked",
       "statusCompleted": "Completed",
       "statusFailed": "Failed",
@@ -25141,7 +25167,7 @@
     "add": "Add",
     "addBackupKey": "Add key",
     "addCustomSource": "Add",
-    "addCustomSourceDesc": "Enter a name for the custom search source",
+    "addCustomSourceDesc": "Name the source and enter the website domain to restrict research results.",
     "addCustomSourceTitle": "Add custom source",
     "apiKey": "API key",
     "backupKeys": "Backup keys",
@@ -25152,6 +25178,12 @@
     "defaultProvider": "Default provider",
     "description": "Configure web search providers and chat integration.",
     "disableAll": "Disable all",
+    "domainSources": {
+      "arxiv": "arXiv",
+      "github": "GitHub",
+      "stackoverflow": "Stack Overflow",
+      "wikipedia": "Wikipedia"
+    },
     "enableAll": "Enable all",
     "enableSearch": "Enable web search",
     "enabled": "enabled",
@@ -25174,6 +25206,7 @@
     "hideKeys": "Hide keys",
     "higherPriority": "Higher priority",
     "invalidKeyFormat": "Invalid key format",
+    "invalidSourceDomain": "Enter a valid public domain or HTTP(S) URL.",
     "keyPoolSize": "{count} keys in rotation",
     "lowerPriority": "Lower priority",
     "maxResults": "Max results",
@@ -25202,8 +25235,10 @@
     "providers": "Search providers",
     "providersDescription": "Configure API keys for each provider",
     "removeKey": "Remove key",
+    "researchDomains": "Required domains",
+    "researchProviders": "Preferred providers",
     "researchSources": "Research sources",
-    "researchSourcesDesc": "Default sources for deep research",
+    "researchSourcesDesc": "Preferred providers are tried first; selected domains always restrict deep research results.",
     "reset": "Reset",
     "rotateKeys": "Rotate API keys",
     "rotateKeysDesc": "Spread requests across a pool of keys; a rate-limited or rejected key is skipped automatically.",
@@ -25211,7 +25246,12 @@
     "selectProvider": "Select provider",
     "selected": "selected",
     "showKeys": "Show keys",
+    "sourceDomain": "Domain or URL",
+    "sourceDomainHint": "Paths are removed and the normalized domain is saved.",
+    "sourceDomainPlaceholder": "docs.example.com",
+    "sourceName": "Source name",
     "sourceNamePlaceholder": "Source name",
+    "sourceNeedsDomain": "Domain required",
     "strategyLeastUsed": "Least used",
     "strategyRandom": "Random",
     "strategyRoundRobin": "Round-robin",
@@ -38688,6 +38728,58 @@
     "label": "Toggle theme",
     "switchToDark": "Switch to dark mode",
     "switchToLight": "Switch to light mode"
+  },
+  "threadHandoff": {
+    "inbound": {
+      "accept": "Continue on this device",
+      "blocker": {
+        "attachment-unresolvable": "Attachment is unavailable: {ref}",
+        "capability-missing": "Required capability is unavailable: {ref}",
+        "credential-missing": "Required credential is unavailable: {ref}",
+        "host-operation-missing": "Native runtime operation is unavailable: {ref}",
+        "model-unavailable": "Model is unavailable: {ref}",
+        "protocol-incompatible": "Protocol version is too old: {ref}",
+        "provider-unavailable": "Provider is unavailable: {ref}",
+        "transcript-digest-mismatch": "Transcript integrity check failed: {ref}",
+        "workspace-unavailable": "Workspace is unavailable: {ref}"
+      },
+      "blockersLabel": "Preflight results",
+      "decline": "Keep it on the source device",
+      "degradedHint": "You can continue, but the original native runtime handle will not be restored.",
+      "description": "“{title}” is ready to move here. The source stays read-only until this device has accepted and committed the handoff.",
+      "failed": "The handoff could not advance. It remains read-only and can be recovered safely.",
+      "fidelityLoss": "This device will continue with {fidelity} fidelity using the transferred transcript.",
+      "permissionReset": "Past tool approvals do not transfer. This device will ask again when a tool needs permission.",
+      "recoveryDescription": "“{title}” was accepted here but the final ownership proof was interrupted. Resume to finish without creating two writable copies.",
+      "recoveryTitle": "Finish interrupted handoff",
+      "resume": "Resume handoff",
+      "title": "Continue this conversation here?",
+      "working": "Verifying ownership…"
+    },
+    "source": {
+      "available": "Available for standalone handoff",
+      "committedReadonly": "Ownership moved successfully. This source copy is permanently read-only.",
+      "continue": "Freeze and continue there",
+      "description": "Choose a paired standalone device. This source freezes before the transcript leaves the host.",
+      "failed": "The handoff could not be started or resumed.",
+      "frozenReadonly": "The source is frozen while the target verifies and accepts the transcript. Zero writable copies are allowed during recovery.",
+      "lossDisclosure": "The target checks provider, model, credential, Workspace, protocol, and attachments. If a native runtime cannot be restored, it will disclose transcript-seeded continuation before accepting.",
+      "noDevices": "No paired devices are available. Pair a standalone mobile device and let it report thread-handoff-v1 first.",
+      "retry": "Retry delivery",
+      "retryQueued": "Handoff delivery queued again.",
+      "started": "The source is frozen and the handoff offer is queued.",
+      "starting": "Freezing source…",
+      "statusDescription": "Current ownership state: {state}",
+      "statusTitle": "Device handoff status",
+      "stranded": "Delivery exhausted its retries. Retry it or complete coordinated recovery from the target; this source will not unfreeze itself.",
+      "title": "Continue on another device",
+      "unavailable": {
+        "not-mobile": "This paired client is a control surface, not a standalone owner.",
+        "paused": "Pairing is paused.",
+        "revoked": "Pairing was revoked.",
+        "standalone-required": "Open standalone BYOK mode and reconnect so the device can report thread-handoff-v1."
+      }
+    }
   },
   "toolCatalog": {
     "description": "Search every available tool and MCP server, then build an allow- or deny-list that narrows what agents can use. Applies on top of per-character and per-session settings; deny always wins.",
