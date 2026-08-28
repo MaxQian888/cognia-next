@@ -19,6 +19,7 @@ import type {
 } from "@cognia/agent-config-types/agent-execution"
 
 import * as ipc from "@/lib/claude/ipc"
+import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
 import { isCapabilityProtocolFailure } from "./capability-health"
 import type { AgentSessionControlPort } from "./agent-session-control-port"
 
@@ -172,7 +173,8 @@ export interface AgentExecutionTransport {
       message: string | undefined,
       updatedInput: Record<string, unknown> | undefined,
       interrupt: boolean | undefined,
-      commandId: string
+      commandId: string,
+      remoteExecutionContext: RemoteExecutionContext | undefined
     ) => Promise<void>
   }
   closeSession: (sessionId: string, commandId: string) => Promise<void>
@@ -233,7 +235,16 @@ export function createAgentExecutionHandle(
       steerSession: deps?.ipc?.steerSession ?? ipc.steerSession,
       resolvePermission:
         deps?.ipc?.resolvePermission ??
-        (async (sid, requestId, decision, message, updatedInput, interrupt, commandId) => {
+        (async (
+          sid,
+          requestId,
+          decision,
+          message,
+          updatedInput,
+          interrupt,
+          commandId,
+          remoteExecutionContext
+        ) => {
           const { transport } = await import("@/lib/tauri")
           await transport.call("agent_resolve_permission", {
             sessionId: sid,
@@ -243,6 +254,7 @@ export function createAgentExecutionHandle(
             updatedInput,
             interrupt,
             commandId,
+            ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
           })
         }),
     },
@@ -312,17 +324,24 @@ export function createAgentExecutionHandle(
     async resolvePermission(requestId, decision, options) {
       requireCapability(spec, "permissions.interrupt-resume", "resolvePermission")
       const commandId = nextCommandId()
-      await runCapabilityCommand("permissions.interrupt-resume", () =>
-        io.ipc.resolvePermission(
-          sessionId,
-          requestId,
-          decision,
-          options?.message,
-          options?.updatedInput,
-          options?.interrupt,
-          commandId
+      try {
+        await runCapabilityCommand("permissions.interrupt-resume", () =>
+          io.ipc.resolvePermission(
+            sessionId,
+            requestId,
+            decision,
+            options?.message,
+            options?.updatedInput,
+            options?.interrupt,
+            commandId,
+            ipc.peekRemoteApprovalContext(sessionId, requestId)
+          )
         )
-      )
+      } finally {
+        // Evicted only once the ask has been answered — a read must not strip
+        // the context out from under the other approval path.
+        ipc.forgetRemoteApprovalContext(sessionId, requestId)
+      }
     },
     async setModel(model) {
       requireCapability(spec, "set-model", "setModel")

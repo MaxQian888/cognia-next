@@ -1,4 +1,5 @@
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import * as claudeIpc from "@/lib/claude/ipc"
 
 import {
   AgentCapabilityError,
@@ -80,7 +81,8 @@ describe("createAgentExecutionHandle", () => {
       "ok",
       undefined,
       undefined,
-      expect.stringMatching(/^cmd-\d+-/)
+      expect.stringMatching(/^cmd-\d+-/),
+      undefined
     )
     expect(deps.ipc.setSessionMode).toHaveBeenCalledWith("s1", "plan", {
       commandId: expect.stringMatching(/^cmd-\d+-/),
@@ -232,6 +234,27 @@ describe("default (uninjected) transport wiring", () => {
       expect(name.startsWith("claude_")).toBe(false)
     }
   })
+
+  it("binds the canonical permission response to the server-issued execution context", async () => {
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "turn-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    claudeIpc.rememberRemoteApprovalContext("s1", "req-context", context)
+    const handle = createAgentExecutionHandle("s1", spec())
+
+    await handle.resolvePermission("req-context", "allow")
+
+    expect(call).toHaveBeenCalledWith(
+      "agent_resolve_permission",
+      expect.objectContaining({ remoteExecutionContext: context })
+    )
+  })
 })
 
 describe("deny interrupt", () => {
@@ -249,7 +272,8 @@ describe("deny interrupt", () => {
       "no",
       undefined,
       true,
-      expect.stringMatching(/^cmd-\d+-/)
+      expect.stringMatching(/^cmd-\d+-/),
+      undefined
     )
 
     await handle.resolvePermission("req-2", "deny")
@@ -260,7 +284,8 @@ describe("deny interrupt", () => {
       undefined,
       undefined,
       undefined,
-      expect.stringMatching(/^cmd-\d+-/)
+      expect.stringMatching(/^cmd-\d+-/),
+      undefined
     )
   })
 })

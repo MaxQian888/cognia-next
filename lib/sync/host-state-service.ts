@@ -266,13 +266,23 @@ export function createAgentRpcHostStateDispatcher(
             action.actionId
           )
         } else {
-          const { transport } = await import("@/lib/tauri")
-          await transport.call("agent_resolve_permission", {
+          const [{ transport }, { peekRemoteApprovalContext, forgetRemoteApprovalContext }] =
+            await Promise.all([import("@/lib/tauri"), import("@/lib/claude/ipc")])
+          const remoteExecutionContext = peekRemoteApprovalContext(
             sessionId,
-            requestId: action.action.requestId,
-            decision: action.action.decision,
-            commandId: action.actionId,
-          })
+            action.action.requestId
+          )
+          try {
+            await transport.call("agent_resolve_permission", {
+              sessionId,
+              requestId: action.action.requestId,
+              decision: action.action.decision,
+              commandId: action.actionId,
+              ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
+            })
+          } finally {
+            forgetRemoteApprovalContext(sessionId, action.action.requestId)
+          }
         }
         break
       case "elicitation.respond":

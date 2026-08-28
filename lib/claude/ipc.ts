@@ -49,6 +49,39 @@ function remoteApprovalKey(sessionId: string, requestId: string): string {
 }
 
 /**
+ * Read the server-issued execution context attached to one permission ask.
+ *
+ * Deliberately NON-consuming. Single-use is the Host's contract, not the
+ * cache's: `remote_execution::validate_and_consume` moves the key from
+ * `pending` to `consumed` and answers `REMOTE_RESPONSE_STALE` on a replay.
+ * Mirroring that here bought nothing and broke the request that read second —
+ * the canonical and legacy approval paths both look this up, and the loser
+ * sent no context to an arm where `remote_execution_context` is required,
+ * so its approval was rejected as malformed and the turn stalled at the
+ * prompt. Eviction is explicit, via {@link forgetRemoteApprovalContext}.
+ */
+export function peekRemoteApprovalContext(
+  sessionId: string,
+  requestId: string
+): RemoteExecutionContext | undefined {
+  return remoteApprovalContexts.get(remoteApprovalKey(sessionId, requestId))
+}
+
+/** Drop a cached context once its ask has been resolved. */
+export function forgetRemoteApprovalContext(sessionId: string, requestId: string): void {
+  remoteApprovalContexts.delete(remoteApprovalKey(sessionId, requestId))
+}
+
+/** Cache the context projected with a permission request event. */
+export function rememberRemoteApprovalContext(
+  sessionId: string,
+  requestId: string,
+  context: RemoteExecutionContext
+): void {
+  remoteApprovalContexts.set(remoteApprovalKey(sessionId, requestId), context)
+}
+
+/**
  * Narrow a sidecar frame to a permission ask. Local rather than exported from
  * the contract package because it guards a projection, not a protocol branch:
  * a frame that fails it is simply not audited.
@@ -926,8 +959,9 @@ export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Prom
       typeof routed.requestId === "string" &&
       isRemoteExecutionContext(routed.remoteExecutionContext)
     ) {
-      remoteApprovalContexts.set(
-        remoteApprovalKey(routed.sessionId, routed.requestId),
+      rememberRemoteApprovalContext(
+        routed.sessionId,
+        routed.requestId,
         routed.remoteExecutionContext
       )
     }
