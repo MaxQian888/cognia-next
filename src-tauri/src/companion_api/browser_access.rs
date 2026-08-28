@@ -33,6 +33,7 @@
 //! Config file: `<data_dir>/cognia/browser-access.json`
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,37 @@ pub const DEFAULT_BROWSER_PORT: u16 = 27891;
 /// and `pnpm start` serve the web client on. Never applied implicitly: an
 /// origin only takes effect once it is in the saved config.
 pub const SUGGESTED_ORIGINS: [&str; 2] = ["http://localhost:3000", "http://127.0.0.1:3000"];
+
+/// Whether this Host is currently accepting browser submissions.
+///
+/// A process-global for the same reason the advertised port is one: the axum
+/// router holds a [`crate::companion_api::SharedState`], which has no data
+/// directory and therefore cannot re-read the config file — but the RPC
+/// dispatch is where a submission has to be refused.
+///
+/// It exists because `enabled` used to be read exactly once, at startup, when
+/// it decided whether to bind the listener. Switching browser access off left
+/// the already-bound listener accepting submissions until the server restarted,
+/// which is not the switch ADR-0154 describes. Mirroring it here is what makes
+/// turning it off take effect on the next request.
+///
+/// Starts `false`: this Host has not been told browser access is on, and the
+/// default for browser access is off.
+static SUBMISSIONS_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Mirror the saved switch. Called on server start, on save, and on stop.
+pub fn set_submissions_enabled(enabled: bool) {
+    SUBMISSIONS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether a browser submission may be accepted right now.
+///
+/// Reads only. The listener stays bound until the server restarts, and the
+/// panel's reads keep answering on it — a browser that already started tasks
+/// must still be able to see them and open them in Cognia.
+pub fn submissions_enabled() -> bool {
+    SUBMISSIONS_ENABLED.load(Ordering::Relaxed)
+}
 
 /// On-disk shape. Absent file == the default, which is "off".
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -462,6 +494,38 @@ mod tests {
             loaded.allowed_origins,
             vec!["http://127.0.0.1:3000", "https://web.example"]
         );
+    }
+
+    #[test]
+    fn submissions_start_refused_and_follow_the_listener_predicate() {
+        // Fail closed: nothing has told this process that browser access is on.
+        // The default for browser access is off, and a global that started
+        // `true` would accept submissions on a Host that never enabled it.
+        assert!(!submissions_enabled());
+
+        // `listener_enabled()`, not the raw `enabled` flag — a config whose
+        // origin list is empty binds no listener, and a switch that reads "on"
+        // over an empty allowlist must not accept submissions either.
+        let no_origins = BrowserAccessConfig {
+            enabled: true,
+            allowed_origins: vec![],
+            port: DEFAULT_BROWSER_PORT,
+        };
+        set_submissions_enabled(no_origins.listener_enabled());
+        assert!(!submissions_enabled());
+
+        let usable = BrowserAccessConfig {
+            enabled: true,
+            allowed_origins: vec!["http://localhost:3000".to_string()],
+            port: DEFAULT_BROWSER_PORT,
+        };
+        set_submissions_enabled(usable.listener_enabled());
+        assert!(submissions_enabled());
+
+        // Turning it off takes effect here, not at the next restart. That is
+        // the whole reason this mirror exists.
+        set_submissions_enabled(false);
+        assert!(!submissions_enabled());
     }
 
     #[test]

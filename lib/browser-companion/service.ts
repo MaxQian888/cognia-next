@@ -75,8 +75,15 @@ export interface BrowserCompanionDeps {
   now: () => number
   /** The workspaces a submission may be aimed at, default first. */
   listWorkspaces: () => Promise<{ id: string; label: string; isDefault: boolean }[]>
-  /** The Host's resolved appearance for the side panel. */
-  appearance: () => BrowserCompanionCapabilityV1["appearance"]
+  /**
+   * The Host's resolved appearance for the side panel.
+   *
+   * Async because the only source that answers on every host is the database.
+   * A synchronous reader can only see in-memory state, and the one this used to
+   * read is hydrated by a React provider — which the headless brain does not
+   * have, so it answered the stock preset there forever.
+   */
+  appearance: () => Promise<BrowserCompanionCapabilityV1["appearance"]>
   /** `startNewSession`, narrowed to what this module needs. */
   createSession: (input: { title: string; projectId: string }) => Promise<{ id: string }>
   /** Enqueue one message on a session and start its turn. */
@@ -87,8 +94,12 @@ export interface BrowserCompanionDeps {
   readSubmission: (submissionId: string) => Promise<BrowserSubmissionRow | undefined>
   /** This device's submissions, newest first. */
   listSubmissions: (deviceId: string, limit: number) => Promise<BrowserSubmissionRow[]>
-  /** The live status of the session a submission created. */
-  sessionStatus: (sessionId: string) => Promise<BrowserSubmissionStatus>
+  /**
+   * The live status of the session a submission created, or `null` when that
+   * session has no run at all — which is what an enqueue that never happened
+   * looks like from here.
+   */
+  sessionStatus: (sessionId: string) => Promise<BrowserSubmissionStatus | null>
 }
 
 /** `cognia://session/<id>` — the link that opens the task on the desktop. */
@@ -104,7 +115,7 @@ export async function browserCompanionCapability(
     limits: BROWSER_CONTEXT_LIMITS,
     supportedCaptureModes: [...BROWSER_CAPTURE_MODES],
     workspaces: await deps.listWorkspaces(),
-    appearance: deps.appearance(),
+    appearance: await deps.appearance(),
   }
 }
 
@@ -131,7 +142,8 @@ export async function submitBrowserContext(
         "this submission id belongs to another device"
       )
     }
-    if (existing.status === "submitting") {
+    let status = existing.status
+    if (REDRIVABLE_STATUSES.includes(existing.status)) {
       const { prompt, derivedTitle } = buildBrowserContextPrompt(
         request.context,
         request.instruction,
@@ -149,18 +161,16 @@ export async function submitBrowserContext(
           "this submission id was already accepted for a different capture"
         )
       }
-      await deps.enqueueMessage({
-        sessionId: existing.sessionId,
+      status = await enqueueAndSettle(deps, existing, {
         messageId: `browser-${request.submissionId}`,
         text: prompt,
       })
-      await deps.recordSubmission({ ...existing, status: "queued", updatedAt: deps.now() })
     }
     return {
       submissionId: existing.submissionId,
       sessionId: existing.sessionId,
       acceptedAt: existing.submittedAt,
-      status: existing.status === "submitting" ? "queued" : existing.status,
+      status,
       deepLink: browserSubmissionDeepLink(existing.sessionId),
     }
   }
@@ -188,9 +198,9 @@ export async function submitBrowserContext(
   })
 
   const now = deps.now()
-  // Persist the recoverable intent first, then mark it queued only after
-  // HostState accepts the stable message id. A retry can redrive a submission
-  // left in `submitting` without creating another session or transcript item.
+  // Persist the recoverable intent first, then settle the status only after
+  // HostState has answered. A retry can redrive any row still in
+  // `REDRIVABLE_STATUSES` without creating another session or transcript item.
   const submission: BrowserSubmissionRow = {
     submissionId: request.submissionId,
     deviceId,
@@ -207,23 +217,82 @@ export async function submitBrowserContext(
   }
   await deps.recordSubmission(submission)
 
-  await deps.enqueueMessage({
-    sessionId: session.id,
+  const status = await enqueueAndSettle(deps, submission, {
     // Derived from the submission id rather than random: a retry that gets
     // past the ledger must still resolve to the same message, or the same
     // capture arrives twice in one transcript.
     messageId: `browser-${request.submissionId}`,
     text: prompt,
   })
-  await deps.recordSubmission({ ...submission, status: "queued", updatedAt: deps.now() })
 
   return {
     submissionId: request.submissionId,
     sessionId: session.id,
     acceptedAt: now,
-    status: "queued",
+    status,
     deepLink: browserSubmissionDeepLink(session.id),
   }
+}
+
+/**
+ * Row states a redrive may act on.
+ *
+ * All three mean the same thing: the enqueue is known not to have landed, so
+ * re-running it cannot duplicate anything. `submitting` is a submission
+ * interrupted between writing the row and enqueueing; the other two are
+ * recorded refusals, and a panel offering "try again" on them lands right here
+ * with the same submission id. A row past this set has a message in a
+ * transcript and must not be driven twice.
+ */
+const REDRIVABLE_STATUSES: readonly BrowserSubmissionStatus[] = [
+  "submitting",
+  "host_unavailable",
+  "failed",
+]
+
+/**
+ * Enqueue the message, then write down what actually happened.
+ *
+ * Three outcomes, and only one of them is an exception:
+ *
+ * - **Accepted** → the row moves to `queued` and any `errorCode` from an
+ *   earlier attempt is dropped, because it no longer describes anything.
+ * - **No runtime** → `host_unavailable`, RETURNED rather than thrown. The
+ *   contract calls it "a real state, not an error", and it is one: the session
+ *   exists, the capture is recorded, and the row stays inside
+ *   {@link REDRIVABLE_STATUSES} so a retry finishes the job instead of opening
+ *   a second session. Reporting it as a failure would tell the user to
+ *   resubmit something that is one runtime away from running.
+ * - **Refused** → `failed` with the refusal's code, and the error is rethrown.
+ *   The Host said no to this specific message; the panel needs to see that,
+ *   and the row needs to remember why. This is the only writer of `errorCode`.
+ */
+async function enqueueAndSettle(
+  deps: BrowserCompanionDeps,
+  row: BrowserSubmissionRow,
+  message: { messageId: string; text: string }
+): Promise<BrowserSubmissionStatus> {
+  try {
+    await deps.enqueueMessage({ sessionId: row.sessionId, ...message })
+  } catch (error) {
+    const code = error instanceof BrowserCompanionError ? error.code : "enqueue_failed"
+    const status: BrowserSubmissionStatus =
+      code === "runtime_target_unavailable" ? "host_unavailable" : "failed"
+    await deps.recordSubmission({
+      ...row,
+      status,
+      errorCode: code,
+      updatedAt: deps.now(),
+    })
+    if (status === "host_unavailable") return status
+    throw error
+  }
+  // Spread first so `errorCode` is genuinely removed rather than set to
+  // undefined — a row put back with `errorCode: undefined` still carries the
+  // key, and `getBrowserContextSubmission` spreads it back onto the response.
+  const { errorCode: _cleared, ...settled } = row
+  await deps.recordSubmission({ ...settled, status: "queued", updatedAt: deps.now() })
+  return "queued"
 }
 
 export async function listBrowserContextSubmissions(
@@ -277,18 +346,20 @@ export async function getBrowserContextSubmission(
 }
 
 /**
- * The session's live state wins over the recorded one.
+ * The session's live state wins over the recorded one — when there is one.
  *
  * The row records what was true when it was written; the run has moved on
- * since. Falling back to the row when the session cannot be read keeps a
- * temporarily unreachable runtime from rewriting history as `failed`.
+ * since. Two cases fall back to the row instead: the session cannot be read
+ * (a temporarily unreachable runtime must not rewrite history as `failed`),
+ * and the session has no run (`null`), which is exactly the shape of a
+ * submission whose enqueue was refused or had no runtime to accept it.
  */
 async function currentStatus(
   deps: BrowserCompanionDeps,
   row: BrowserSubmissionRow
 ): Promise<BrowserSubmissionStatus> {
   try {
-    return await deps.sessionStatus(row.sessionId)
+    return (await deps.sessionStatus(row.sessionId)) ?? row.status
   } catch {
     return row.status
   }

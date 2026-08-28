@@ -113,6 +113,20 @@
       }
     }
   },
+  "reasonNoRuntime": {
+    "message": "正在等待 Cognia 的运行时 —— 等它起来后再试一次。"
+  },
+  "reasonRefused": {
+    "message": "Cognia 拒绝了这条消息。可以再试一次，或打开任务查看原因。"
+  },
+  "reasonOther": {
+    "message": "Cognia 返回：$CODE$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
   "retry": {
     "message": "重试"
   },

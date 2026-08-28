@@ -12,6 +12,7 @@
 import type {
   BrowserCompanionCapabilityV1,
   BrowserContextSubmissionSummaryV1,
+  BrowserSubmissionStatus,
 } from "@cognia/companion-client"
 
 import type { PairFailure, PairingRecord } from "./client"
@@ -117,4 +118,40 @@ export function pollIntervalFor(recent: { status: string }[]): number {
       row.status === "needs_input"
   )
   return active ? POLL_ACTIVE_MS : POLL_IDLE_MS
+}
+
+/**
+ * Statuses whose row is worth asking `browser_context_get` about.
+ *
+ * The recent list is deliberately thin and carries no `errorCode`; the single
+ * read is the only call that answers *why*. Asking for every row would be a
+ * request per row per poll for a field that is empty on all of them.
+ */
+export const STATUSES_WITH_A_REASON: readonly BrowserSubmissionStatus[] = [
+  "failed",
+  "host_unavailable",
+]
+
+/**
+ * The message key for a Host refusal code.
+ *
+ * A code is a machine token — `runtime_target_unavailable` is not a sentence,
+ * and putting it on screen as one is how an enum ends up being read as an error
+ * message. Known codes get a localized explanation; anything else is shown as
+ * the code it is, clearly framed as something Cognia said rather than as
+ * prose the extension wrote.
+ */
+export function failureReasonMessage(
+  code: string,
+  message: (key: string, substitutions?: string[]) => string
+): string {
+  switch (code) {
+    case "runtime_target_unavailable":
+      return message("reasonNoRuntime")
+    case "enqueue_refused":
+    case "enqueue_failed":
+      return message("reasonRefused")
+    default:
+      return message("reasonOther", [code])
+  }
 }

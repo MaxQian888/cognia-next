@@ -2,11 +2,21 @@ import type { BrowserContextSubmissionSummaryV1 } from "@cognia/companion-client
 import { Button, Card, CardContent } from "@cognia/plugin-ui"
 
 import type { BrowserApi } from "@ext/src/lib/browser-api"
+import { failureReasonMessage } from "@ext/src/lib/panel-state"
 import { StatusPill } from "./status-pill"
 
 export interface RecentListProps {
   api: BrowserApi
   items: BrowserContextSubmissionSummaryV1[]
+  /**
+   * Refusal codes, by submission id, for the rows that have one.
+   *
+   * Fetched separately because the list does not carry them: the summary is
+   * deliberately thin and `browser_context_get` is the only call that answers
+   * `errorCode`. A row with no entry here simply shows its status, which is the
+   * ordinary case.
+   */
+  failureCodes?: Record<string, string>
 }
 
 /**
@@ -21,7 +31,7 @@ export interface RecentListProps {
  * panel deliberately cannot answer a prompt (ADR-0154 §1), and offering
  * something that looks like it could would be worse than offering nothing.
  */
-export function RecentList({ api, items }: RecentListProps) {
+export function RecentList({ api, items, failureCodes = {} }: RecentListProps) {
   if (items.length === 0) {
     return (
       <p className="px-1 text-xs text-muted-foreground" data-testid="recent-empty">
@@ -39,6 +49,14 @@ export function RecentList({ api, items }: RecentListProps) {
                 <p className="line-clamp-2 min-w-0 shrink text-xs font-medium">{item.title}</p>
                 <StatusPill api={api} status={item.status} />
               </div>
+              {failureCodes[item.submissionId] ? (
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid={`recent-reason-${item.submissionId}`}
+                >
+                  {failureReasonMessage(failureCodes[item.submissionId], api.message)}
+                </p>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate font-mono text-[11px] text-muted-foreground">
                   {item.sourceHost}

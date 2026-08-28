@@ -446,6 +446,10 @@ impl CompanionServerState {
             }
         }
         let browser_config = browser_access::load(self.data_dir());
+        // Mirror the switch where the RPC dispatch can read it. The router's
+        // state has no data directory, so this is the only way a submission can
+        // be refused without a restart.
+        browser_access::set_submissions_enabled(browser_config.listener_enabled());
         let origin_policy = web_origin::WebOriginPolicy::from_env_and_config(&browser_config);
         let handle = server::spawn_server(port, bind_loopback_only, tls, state.clone()).await?;
         let bound_port = handle.bound_port;
@@ -495,6 +499,7 @@ impl CompanionServerState {
         }
         inner.bound_port = None;
         inner.browser_port = None;
+        browser_access::set_submissions_enabled(false);
         inner.bind_mode = None;
         // Mirror the bind state in the process-global so /healthz responses
         // reflect "server stopped" rather than a stale port.

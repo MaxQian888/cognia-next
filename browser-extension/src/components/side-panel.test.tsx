@@ -43,6 +43,10 @@ interface Harness {
   submitAttempts: unknown[]
   submitted: unknown[]
   recent: BrowserContextSubmissionSummaryV1[]
+  /** `browser_context_get` answers, by submission id. */
+  details: Map<string, { errorCode?: string }>
+  detailReads: string[]
+  invalidations: string[]
   capabilityError?: unknown
   submitError?: unknown
 }
@@ -53,6 +57,9 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     submitAttempts: [],
     submitted: [],
     recent: [],
+    details: new Map(),
+    detailReads: [],
+    invalidations: [],
     ...overrides,
     // After the spread, not before: `overrides` carries its own `store`, and
     // letting it win here would leave the harness reading one Map while the
@@ -105,7 +112,22 @@ function clientFactory(state: Harness) {
       }
     },
     list: async () => ({ items: state.recent }),
-    invalidate: () => undefined,
+    get: async (submissionId: string) => {
+      state.detailReads.push(submissionId)
+      const detail = state.details.get(submissionId)
+      if (!detail) throw new Error("submission_not_found")
+      return {
+        submissionId,
+        sessionId: "session-1",
+        status: "failed" as const,
+        updatedAt: 1,
+        deepLink: "cognia://session/session-1",
+        ...detail,
+      }
+    },
+    invalidate: () => {
+      state.invalidations.push("invalidated")
+    },
   })
 }
 
@@ -320,6 +342,100 @@ describe("SidePanel capture and settings", () => {
       (state.submitAttempts[0] as { submissionId: string }).submissionId,
       (state.submitAttempts[0] as { submissionId: string }).submissionId,
     ])
+  })
+
+  it("keeps the retry id after the panel is closed and reopened", async () => {
+    // The ref this used to live in dies with the panel, so the one case it
+    // existed for — the panel closing mid-submit — was the one it could not
+    // cover, and reopening minted a second id for the same capture.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      submitError: new Error("response lost"),
+    })
+    const first = renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(1))
+    const original = (state.submitAttempts[0] as { submissionId: string }).submissionId
+    expect(state.store.get(STORAGE_KEYS.pendingSubmission)).toMatchObject({
+      submissionId: original,
+    })
+
+    first.unmount()
+    state.submitError = undefined
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitAttempts).toHaveLength(2))
+
+    expect((state.submitAttempts[1] as { submissionId: string }).submissionId).toBe(original)
+    // And a landed submission stops being pending, or the next unrelated
+    // capture would inherit this one's id.
+    await waitFor(() => expect(state.store.has(STORAGE_KEYS.pendingSubmission)).toBe(false))
+  })
+
+  it("explains a failed submission with the reason the Host recorded", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [
+        {
+          submissionId: "sub-1",
+          sessionId: "session-1",
+          title: "A guide",
+          sourceHost: "example.com",
+          captureMode: "selection",
+          status: "host_unavailable",
+          submittedAt: 1,
+          updatedAt: 2,
+          deepLink: "cognia://session/session-1",
+        },
+      ],
+      details: new Map([["sub-1", { errorCode: "runtime_target_unavailable" }]]),
+    })
+    renderPanel(state)
+    // The summary carries no `errorCode`; the single read is what answers it.
+    await screen.findByTestId("recent-reason-sub-1")
+    expect(screen.getByTestId("recent-reason-sub-1")).toHaveTextContent("reasonNoRuntime")
+    expect(state.detailReads).toEqual(["sub-1"])
+  })
+
+  it("does not ask for a reason a running submission cannot have", async () => {
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      recent: [
+        {
+          submissionId: "sub-1",
+          sessionId: "session-1",
+          title: "A guide",
+          sourceHost: "example.com",
+          captureMode: "selection",
+          status: "running",
+          submittedAt: 1,
+          updatedAt: 2,
+          deepLink: "cognia://session/session-1",
+        },
+      ],
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    expect(state.detailReads).toEqual([])
+  })
+
+  it("drops the cached token when the device turns out to be revoked", async () => {
+    // The token is dead and its refresh will be refused too. Leaving it in the
+    // session cache makes the next reconnect replay it once and report an
+    // authentication failure rather than "reconnect".
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      capabilityError: Object.assign(new Error("gone"), { code: "device_unavailable" }),
+    })
+    renderPanel(state)
+    await screen.findByTestId("panel-revoked")
+    expect(state.invalidations).toEqual(["invalidated"])
   })
 
   it("shows a recoverable error when extension storage cannot be read", async () => {

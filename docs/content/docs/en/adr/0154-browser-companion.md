@@ -189,6 +189,19 @@ people watch rather than glance at, the socket channel in §11 is the fix.
 
 ## Rollout
 
-Internal only. Browser Access is off by default, the extension is distributed
-through an unlisted store listing, and the Host keeps a kill switch that stops
-enrollment and submission while leaving existing sessions reachable.
+Internal only. Browser Access is off by default, and the extension is
+distributed through an unlisted store listing.
+
+The kill switch is the Browser Access toggle itself, and it acts on three
+things at different moments. Turning it off refuses new enrollments and new
+submissions on the very next request — `companion_browser_access_set` mirrors
+the saved switch into the process-global that
+`rpc/data_sync.rs` consults, so neither waits for a restart. The plaintext
+listener stays bound until the server does restart, which is deliberate rather
+than a gap: the reads a paired panel makes keep answering on it, so a browser
+that already started tasks can still see their status and open them in Cognia.
+That is what "leaving existing sessions reachable" means here.
+
+A submission refused this way answers `browser_submissions_disabled` rather
+than a transport failure, because the remedy is a control in this Host's
+settings and nothing the caller holds can change the outcome.

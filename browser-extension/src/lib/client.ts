@@ -16,6 +16,7 @@ import {
   expectCompanionJson,
   signerFromCryptoKey,
   type BrowserCompanionCapabilityV1,
+  type BrowserContextSubmissionStatusV1,
   type BrowserContextSubmissionSummaryPageV1,
   type BrowserContextSubmitRequestV1,
   type BrowserContextSubmitResponseV1,
@@ -142,6 +143,15 @@ export interface HostClient {
   capability(): Promise<BrowserCompanionCapabilityV1>
   submit(request: BrowserContextSubmitRequestV1): Promise<BrowserContextSubmitResponseV1>
   list(limit?: number): Promise<BrowserContextSubmissionSummaryPageV1>
+  /**
+   * One submission, by id.
+   *
+   * The list is deliberately thin and carries no `errorCode`; this is the only
+   * call that answers *why* a submission failed. The Host answers a submission
+   * belonging to another device exactly as it answers a missing one, so a
+   * rejection here says nothing about whether the id exists.
+   */
+  get(submissionId: string): Promise<BrowserContextSubmissionStatusV1>
   invalidate(): void
 }
 
@@ -194,6 +204,8 @@ export function createHostClient({
       ),
     list: (limit) =>
       call<BrowserContextSubmissionSummaryPageV1>("browser_context_list", limit ? { limit } : {}),
+    get: (submissionId) =>
+      call<BrowserContextSubmissionStatusV1>("browser_context_get", { submissionId }),
     invalidate: () => session.invalidate(),
   }
 }

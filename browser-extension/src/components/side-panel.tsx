@@ -35,6 +35,7 @@ import {
   type PairingRecord,
 } from "@ext/src/lib/client"
 import {
+  STATUSES_WITH_A_REASON,
   captureModeFor,
   isCompatible,
   panelStateForError,
@@ -81,8 +82,13 @@ export function SidePanel({
   // not appear is a smaller failure than a system dialog nobody was warned
   // about.
   const [hasPermission, setHasPermission] = useState(false)
+  const [failureCodes, setFailureCodes] = useState<Record<string, string>>({})
   const clientRef = useRef<HostClient | null>(null)
   const pendingSubmissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
+  // Ids already asked about, so an answered row is not re-fetched every poll —
+  // held in a ref rather than derived from `failureCodes` so this effect does
+  // not depend on the state it writes.
+  const askedForReasonRef = useRef<Set<string>>(new Set())
 
   // Paint before anything else. The stored appearance is the Host's last
   // answer, so a panel reopened offline still looks like the app rather than
@@ -98,6 +104,22 @@ export function SidePanel({
 
   useEffect(() => {
     void api.hasLoopbackPermission().then(setHasPermission)
+  }, [api])
+
+  // Recover a submission whose response never arrived.
+  //
+  // This used to live only in the ref, which dies with the panel — so the one
+  // case it existed for (the panel closing mid-submit) was exactly the case it
+  // could not cover, and reopening minted a fresh id for the same capture. The
+  // id is not content: it is a UUID and a fingerprint of the choices, so it is
+  // safe in `chrome.storage.local` alongside the pairing record.
+  useEffect(() => {
+    void api
+      .read<{ fingerprint: string; submissionId: string }>(STORAGE_KEYS.pendingSubmission)
+      .then((stored) => {
+        if (stored?.fingerprint && stored.submissionId) pendingSubmissionRef.current = stored
+      })
+      .catch(() => undefined)
   }, [api])
 
   /**
@@ -155,7 +177,14 @@ export function SidePanel({
         workspaceId: chosen?.id ?? null,
       }
     } catch (error) {
-      return { state: panelStateForError(error, pairing) }
+      const state = panelStateForError(error, pairing)
+      // A revoked device's cached access token is dead and its refresh will be
+      // refused too. Dropping the client without invalidating leaves that token
+      // in the session cache, so a reconnect on the same panel replays it once
+      // before finding out — one wasted round trip that reports as an
+      // authentication failure rather than as "reconnect".
+      if (state.kind === "revoked") client.invalidate()
+      return { state }
     }
   }, [api, makeClient])
 
@@ -262,6 +291,44 @@ export function SidePanel({
   const recent = state.kind === "ready" ? state.recent : EMPTY
   const pollMs = useMemo(() => pollIntervalFor(recent), [recent])
 
+  // Ask why, once per failed submission.
+  //
+  // The list is thin by design and carries no `errorCode`; `browser_context_get`
+  // is the only call that answers it. A refusal to read one is not worth
+  // surfacing on its own — the row already says the submission failed, and this
+  // is the sentence underneath it.
+  useEffect(() => {
+    const unexplained = recent.filter(
+      (item) =>
+        STATUSES_WITH_A_REASON.includes(item.status) &&
+        !askedForReasonRef.current.has(item.submissionId)
+    )
+    if (unexplained.length === 0) return
+    let cancelled = false
+    for (const item of unexplained) askedForReasonRef.current.add(item.submissionId)
+    void Promise.all(
+      unexplained.map(async (item) => {
+        try {
+          const detail = await clientRef.current?.get(item.submissionId)
+          return [item.submissionId, detail?.errorCode ?? ""] as const
+        } catch {
+          // Asked and could not be told. The id stays in the asked set: a row
+          // whose detail read fails once will fail the same way every poll.
+          return [item.submissionId, ""] as const
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return
+      const answered = entries.filter(([, code]) => code.length > 0)
+      if (answered.length > 0) {
+        setFailureCodes((current) => ({ ...current, ...Object.fromEntries(answered) }))
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [recent])
+
   // Poll only while the panel is visible. A hidden side panel is one the user
   // is not reading, and a request every three seconds for a list nobody is
   // looking at is a cost with no reader.
@@ -356,12 +423,14 @@ export function SidePanel({
         ? pendingSubmissionRef.current.submissionId
         : crypto.randomUUID()
     pendingSubmissionRef.current = { fingerprint, submissionId }
+    await api.write(STORAGE_KEYS.pendingSubmission, { fingerprint, submissionId })
     try {
       await clientRef.current?.submit({
         submissionId,
         ...draft,
       })
       pendingSubmissionRef.current = null
+      await api.remove([STORAGE_KEYS.pendingSubmission])
       void api.write(STORAGE_KEYS.lastWorkspaceId, workspaceId)
       setInstruction("")
       setState((current) => (current.kind === "ready" ? { ...current, captured: null } : current))
@@ -570,7 +639,7 @@ export function SidePanel({
         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {api.message("recentTitle")}
         </h2>
-        <RecentList api={api} items={state.recent} />
+        <RecentList api={api} items={state.recent} failureCodes={failureCodes} />
       </section>
 
       <section className="space-y-1 border-t border-border pt-3">

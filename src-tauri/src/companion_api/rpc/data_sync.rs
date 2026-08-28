@@ -821,6 +821,25 @@ pub(super) async fn dispatch(
         | "browser_context_submit"
         | "browser_context_list"
         | "browser_context_get" => {
+            // The kill switch, checked per request rather than only at boot.
+            //
+            // `BrowserAccessConfig.enabled` used to be read exactly once, when
+            // it decided whether to bind the listener. Switching it off left an
+            // already-bound listener accepting submissions until the server
+            // restarted — while the ADR promised a switch that stops them.
+            // `companion_browser_access_set` now mirrors the saved value into
+            // the process-global this reads, so it takes effect immediately.
+            //
+            // Only the write. The reads keep answering on purpose: a browser
+            // that already started tasks must still be able to see them and
+            // open them in Cognia, which is exactly what "leaving existing
+            // sessions reachable" means. They are also polled every few
+            // seconds, and this is a file read.
+            if name == "browser_context_submit"
+                && !crate::companion_api::browser_access::submissions_enabled()
+            {
+                return Err(RpcError::browser_submissions_disabled());
+            }
             // ADR-0060: some TS dispatch arms must know the authenticated
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.

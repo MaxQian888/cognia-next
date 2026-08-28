@@ -1099,6 +1099,12 @@ pub fn companion_browser_access_set(
             port: port.unwrap_or(browser_access::DEFAULT_BROWSER_PORT),
         },
     )?;
+    // Binding the listener still needs a restart, but refusing new submissions
+    // must not: an already-bound listener that keeps accepting them after the
+    // switch is off is the gap ADR-0154's kill switch was written to describe.
+    // The saved config, not the argument — `sanitized()` can turn `enabled` off
+    // when nothing survives the origin list.
+    browser_access::set_submissions_enabled(saved.listener_enabled());
     Ok(browser_access_summary(&state, saved))
 }
 
@@ -1189,6 +1195,16 @@ pub async fn companion_create_browser_enrollment(
                 .to_string(),
         );
     };
+    // The port outlives the switch: turning Browser Access off leaves the
+    // listener bound until the server restarts, so a bound port alone does not
+    // mean this Host is still accepting browsers. Minting a code here would
+    // hand out a credential the submit path is already refusing.
+    if !browser_access::load(state.data_dir()).enabled {
+        return Err(
+            "browser access is switched off; turn it back on in Settings before pairing a browser"
+                .to_string(),
+        );
+    }
     let now = unix_time_secs();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;

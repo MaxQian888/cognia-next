@@ -1,8 +1,10 @@
 import {
   POLL_ACTIVE_MS,
   POLL_IDLE_MS,
+  STATUSES_WITH_A_REASON,
   SUPPORTED_SCHEMA_VERSION,
   captureModeFor,
+  failureReasonMessage,
   isCompatible,
   panelStateForError,
   pollIntervalFor,
@@ -97,5 +99,28 @@ describe("pollIntervalFor", () => {
 
   it("polls fast when even one entry is still moving", () => {
     expect(pollIntervalFor([{ status: "completed" }, { status: "running" }])).toBe(POLL_ACTIVE_MS)
+  })
+})
+
+describe("failureReasonMessage", () => {
+  const message = (key: string, subs?: string[]) => (subs ? `${key}:${subs.join(",")}` : key)
+
+  it("explains the codes a browser can actually meet", () => {
+    expect(failureReasonMessage("runtime_target_unavailable", message)).toBe("reasonNoRuntime")
+    expect(failureReasonMessage("enqueue_refused", message)).toBe("reasonRefused")
+    expect(failureReasonMessage("enqueue_failed", message)).toBe("reasonRefused")
+  })
+
+  it("frames an unknown code as something Cognia said, not as prose", () => {
+    // A code is a machine token. Rendering `some_new_code` bare would read as
+    // an error message the extension wrote, which is how an enum ends up on
+    // screen pretending to be a sentence.
+    expect(failureReasonMessage("some_new_code", message)).toBe("reasonOther:some_new_code")
+  })
+
+  it("asks for a reason only where one can exist", () => {
+    // Every other status either has not failed or failed inside the run, where
+    // the row carries no `errorCode` to fetch.
+    expect([...STATUSES_WITH_A_REASON].sort()).toEqual(["failed", "host_unavailable"])
   })
 })

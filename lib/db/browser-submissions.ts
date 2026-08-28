@@ -14,8 +14,6 @@
  *
  * Mechanical module — no network, no gating.
  */
-import type { BrowserSubmissionStatus } from "@/types/browser-companion"
-
 import type { BrowserSubmissionRow } from "./browser-submissions-types"
 import { getDb } from "./schema"
 
@@ -76,33 +74,24 @@ export async function putBrowserSubmission(row: BrowserSubmissionRow): Promise<v
   })
 }
 
-/**
- * Move a submission's status on.
- *
- * A no-op when the row is gone, because the row is a convenience and the run
- * it describes is not: a trimmed-away submission must not resurrect itself as
- * a partial row when its session later completes.
- */
-export async function updateBrowserSubmissionStatus(
-  submissionId: string,
-  status: BrowserSubmissionStatus,
-  now: number,
-  errorCode?: string
-): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.browserSubmissions, async () => {
-    const existing = await db.browserSubmissions.get(submissionId)
-    if (!existing) return
-    await db.browserSubmissions.put({
-      ...existing,
-      status,
-      updatedAt: now,
-      ...(errorCode ? { errorCode } : {}),
-    })
-  })
-}
-
 /** Forget one device's history — the extension's "clear local data". */
 export async function clearBrowserSubmissions(deviceId: string): Promise<number> {
   return getDb().browserSubmissions.where("deviceId").equals(deviceId).delete()
+}
+
+/**
+ * What this Host has recorded, in aggregate.
+ *
+ * Device ids rather than a count alone, because clearing is device-scoped and
+ * must stay that way: `clearBrowserSubmissions` is the only writer that deletes
+ * from this table, and a "clear everything" that reached past it would be a
+ * second, unscoped delete path sitting next to the one the security model
+ * describes. The caller iterates the ids instead.
+ */
+export async function summarizeBrowserSubmissions(): Promise<{
+  deviceIds: string[]
+  total: number
+}> {
+  const rows = await getDb().browserSubmissions.toArray()
+  return { deviceIds: [...new Set(rows.map((row) => row.deviceId))], total: rows.length }
 }

@@ -1,5 +1,13 @@
 /** @jest-environment jsdom */
-import { BROWSER_COMPANION_COMMANDS, isBrowserCompanionCommand } from "./host-dispatch"
+import { saveSettings } from "@/lib/db/settings"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { useSettingsStore } from "@/stores/settings"
+
+import {
+  BROWSER_COMPANION_COMMANDS,
+  createBrowserCompanionDeps,
+  isBrowserCompanionCommand,
+} from "./host-dispatch"
 
 describe("browser companion command surface", () => {
   it("names exactly the four commands the manifest registers", () => {
@@ -66,5 +74,41 @@ describe("the Rust and TypeScript command lists agree", () => {
     // creating a second session.
     expect(byName.get("browser_context_submit")?.idempotency).toBe("required")
     expect(byName.get("browser_context_list")?.idempotency).toBe("structural")
+  })
+})
+
+/**
+ * The production dependency object, exercised for real.
+ *
+ * Every other test in this subsystem hands `service.ts` a stub, which is
+ * exactly why the appearance reader could be broken for as long as it was: an
+ * injected-deps default is only ever verified by a test that refuses the
+ * injection. `createBrowserCompanionDeps` is what runs on a real Host, so it is
+ * what this describes.
+ */
+describe("createBrowserCompanionDeps", () => {
+  const dbFixture = createDbTestFixture()
+  beforeAll(dbFixture.initialize)
+  beforeEach(dbFixture.restore)
+  afterAll(dbFixture.dispose)
+
+  it("reads the Host's theme without a hydrated settings store", async () => {
+    // The headless brain has no React tree, so nothing ever calls
+    // `settings-hydrator.tsx` — and this store stays null for the life of the
+    // process. Reading it there answered the stock dark preset for every user,
+    // silently, because "null" is also what the first milliseconds after boot
+    // look like on the desktop.
+    expect(useSettingsStore.getState().settings).toBeNull()
+    await saveSettings({ theme: "light" })
+
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("HostState must not be resolved to answer a capability call")
+    })
+    const appearance = await deps.appearance()
+
+    expect(appearance.mode).toBe("light")
+    expect(Object.keys(appearance.cssVars).length).toBeGreaterThan(0)
+    // Still null: the reader went to the database, it did not hydrate anything.
+    expect(useSettingsStore.getState().settings).toBeNull()
   })
 })

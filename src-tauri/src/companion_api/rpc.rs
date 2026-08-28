@@ -167,6 +167,25 @@ impl RpcError {
         )
     }
 
+    /// Browser Companion kill switch (ADR-0154). Browser Access is switched
+    /// off, so this Host is not accepting new work from a browser — but the
+    /// listener it is still answering on stays up until the server restarts,
+    /// and the reads a paired panel makes keep working. That asymmetry is the
+    /// point: turning the switch off must stop submissions immediately without
+    /// making the tasks a browser already started unreachable from it.
+    ///
+    /// Not retryable: repeating it verbatim cannot help, and the remedy is a
+    /// control in the Host's settings rather than anything the caller holds.
+    fn browser_submissions_disabled() -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::FORBIDDEN,
+            Json(Self::new(
+                "browser_submissions_disabled",
+                "browser access is switched off on this Host; no new submissions are being accepted",
+            )),
+        )
+    }
+
     fn service_unavailable(detail: String) -> (StatusCode, Json<Self>) {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1076,8 +1095,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_session_get",
     "browser_capability",
     "browser_runtime_status",
-    // Browser Companion (ADR-XXXX) — the extension's whole surface. Four
-    // commands, one of which writes; see `rpc/browser_companion.rs`.
+    // Browser Companion (ADR-0154) — the extension's whole surface. Four
+    // commands, one of which writes. The dispatch arm lives in
+    // `rpc/data_sync.rs`; the decisions live in TypeScript
+    // (`lib/browser-companion/service.ts`), because the submit path creates a
+    // session and enqueues a turn.
     "browser_companion_capability",
     "browser_context_submit",
     "browser_context_list",

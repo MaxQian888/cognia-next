@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { CopyIcon, MonitorSmartphoneIcon, PuzzleIcon } from "lucide-react"
+import { CopyIcon, HistoryIcon, MonitorSmartphoneIcon, PuzzleIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { encodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { clearBrowserSubmissions, summarizeBrowserSubmissions } from "@/lib/db/browser-submissions"
 import { isTauri, transport } from "@/lib/tauri"
 
 /** Mirrors Rust `companion_api::commands::BrowserEnrollmentIssue`. */
@@ -32,6 +33,10 @@ export interface BrowserCompanionCardProps {
   copy?: (text: string) => Promise<void>
   /** Test seam — injectable clock. */
   now?: () => number
+  /** Test seam — defaults to the real Dexie reader. */
+  loadHistory?: () => Promise<{ deviceIds: string[]; total: number }>
+  /** Test seam — defaults to the real device-scoped delete. */
+  clearHistory?: (deviceId: string) => Promise<number>
 }
 
 const defaultLoadListener = () =>
@@ -63,6 +68,8 @@ export function BrowserCompanionCard({
   createEnrollment = defaultCreateEnrollment,
   copy = defaultCopy,
   now = () => Date.now(),
+  loadHistory = summarizeBrowserSubmissions,
+  clearHistory = clearBrowserSubmissions,
 }: BrowserCompanionCardProps = {}) {
   const t = useTranslations("mobile.companion.browserCompanion")
   const [listening, setListening] = useState<boolean | null>(null)
@@ -70,6 +77,9 @@ export function BrowserCompanionCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [history, setHistory] = useState<{ deviceIds: string[]; total: number } | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [cleared, setCleared] = useState(false)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -85,6 +95,50 @@ export function BrowserCompanionCard({
       cancelled = true
     }
   }, [loadListener])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void loadHistory()
+      .then((summary) => {
+        if (!cancelled) setHistory(summary)
+      })
+      .catch(() => {
+        // A history the card cannot read is one it must not claim is empty.
+        if (!cancelled) setHistory(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [loadHistory])
+
+  /**
+   * Forget every recorded submission, one device at a time.
+   *
+   * Looped rather than a single unscoped delete because device scoping is the
+   * table's security property, not an optimisation: `clearBrowserSubmissions`
+   * is the only writer that deletes from it, and a bulk path beside it would be
+   * a second one that no longer has to name whose rows it is removing.
+   */
+  const clearAll = useCallback(async () => {
+    if (!history || history.total === 0) return
+    setClearing(true)
+    setCleared(false)
+    try {
+      setError(null)
+      for (const deviceId of history.deviceIds) await clearHistory(deviceId)
+      setHistory(await loadHistory())
+      setCleared(true)
+    } catch {
+      // A Dexie failure message is not a sentence anybody can act on, and
+      // unlike the enrollment refusal above there is no Host-authored
+      // explanation to pass through — the remedy is "try again", not a
+      // different switch.
+      setError(t("historyClearFailed"))
+    } finally {
+      setClearing(false)
+    }
+  }, [clearHistory, history, loadHistory, t])
 
   const generate = useCallback(async () => {
     setBusy(true)
@@ -199,6 +253,37 @@ export function BrowserCompanionCard({
           <p className="text-xs text-destructive" data-testid="browser-companion-error">
             {error}
           </p>
+        ) : null}
+
+        {/* Rendered whenever the history is readable, including at zero. A
+            control that appeared only once something had been recorded would
+            make "nothing has been sent from a browser" and "this Host does not
+            keep a record" look identical. */}
+        {history ? (
+          <div className="space-y-1 border-t pt-3" data-testid="browser-companion-history">
+            <p className="flex items-center gap-1.5 text-xs font-medium">
+              <HistoryIcon className="size-3.5" aria-hidden="true" />
+              {t("historyTitle")}
+            </p>
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="browser-companion-history-count"
+            >
+              {t("historyCount", { count: history.total })}
+            </p>
+            <p className="text-xs text-muted-foreground">{t("historyHint")}</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              disabled={clearing || history.total === 0}
+              onClick={() => void clearAll()}
+              data-testid="browser-companion-clear-history"
+            >
+              {clearing ? t("historyClearing") : cleared ? t("historyCleared") : t("historyClear")}
+            </Button>
+          </div>
         ) : null}
 
         <div className="space-y-1 border-t pt-3">

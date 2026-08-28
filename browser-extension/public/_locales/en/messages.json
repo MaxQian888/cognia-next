@@ -113,6 +113,20 @@
       }
     }
   },
+  "reasonNoRuntime": {
+    "message": "Waiting for Cognia's runtime — try again once it is running."
+  },
+  "reasonRefused": {
+    "message": "Cognia refused this message. Try again, or open the task to see why."
+  },
+  "reasonOther": {
+    "message": "Cognia reported: $CODE$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
   "retry": {
     "message": "Try again"
   },

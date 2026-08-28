@@ -9,6 +9,12 @@
  *
  * Collapsing them here rather than in the reader keeps the mapping in one
  * place and testable without a database.
+ *
+ * A session with no run at all is deliberately NOT projected here. It used to
+ * answer `queued`, which quietly overwrote a row that had already recorded
+ * `failed` or `host_unavailable` — the run the reader looked for does not exist
+ * precisely because the enqueue never happened. The reader answers `null` for
+ * that case and the recorded row stands.
  */
 import type { BrowserSubmissionStatus } from "@/types/browser-companion"
 import type { ExecutionRunStatus } from "@/types/execution/run"
@@ -38,13 +44,3 @@ export function browserStatusForRun(status: ExecutionRunStatus): BrowserSubmissi
       return "failed"
   }
 }
-
-/**
- * The status of a submission whose session has no run yet.
- *
- * Not `failed`. A session that was created a moment ago and whose turn has not
- * reached the ledger is the ordinary state during the first second of every
- * submission, and calling it a failure would make every successful submission
- * flash red before it went green.
- */
-export const BROWSER_STATUS_WITHOUT_RUN: BrowserSubmissionStatus = "queued"

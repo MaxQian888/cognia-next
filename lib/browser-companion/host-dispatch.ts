@@ -9,6 +9,7 @@
  * injected-deps default is ever actually verified.
  */
 import { startNewSession } from "@/lib/chat/start-session"
+import type { BrowserCompanionCapabilityV1 } from "@/types/browser-companion"
 import {
   getBrowserSubmission,
   listBrowserSubmissions,
@@ -16,13 +17,13 @@ import {
 } from "@/lib/db/browser-submissions"
 import { listExecutionRuns } from "@/lib/db/execution-runs"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
+import { getSettings } from "@/lib/db/settings"
 import type { HostStateService } from "@/lib/sync/host-state-service"
-import { useSettingsStore } from "@/stores/settings"
 import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 
 import { buildBrowserCompanionAppearance } from "./appearance"
-import { BROWSER_STATUS_WITHOUT_RUN, browserStatusForRun } from "./run-status"
+import { browserStatusForRun } from "./run-status"
 import {
   BrowserCompanionError,
   browserCompanionCapability,
@@ -86,10 +87,14 @@ export function createBrowserCompanionDeps(
     recordSubmission: putBrowserSubmission,
     readSubmission: getBrowserSubmission,
     listSubmissions: listBrowserSubmissions,
+    // `null` means "this session has no run", which is not the same as "the run
+    // is queued". A submission whose enqueue was refused has a session and no
+    // run, and answering `queued` there overwrote the recorded failure with a
+    // reassuring lie on the very next poll.
     sessionStatus: async (sessionId) => {
       const runs = await listExecutionRuns({ sessionId, limit: 1 })
       const latest = runs[0]
-      return latest ? browserStatusForRun(latest.status) : BROWSER_STATUS_WITHOUT_RUN
+      return latest ? browserStatusForRun(latest.status) : null
     },
   }
 }
@@ -114,24 +119,31 @@ async function listHostWorkspaces(): Promise<{ id: string; label: string; isDefa
 }
 
 /**
- * The Host's appearance, or the stock one before settings have hydrated.
+ * The Host's appearance, read from the database rather than from a store.
  *
- * `settings` is legitimately null for the first moments after boot, and a
- * capability call can land there. Falling back to the default preset is right:
- * it is the same palette the stylesheet is painting at that instant, so the
- * panel matches what the user is looking at rather than a guess.
+ * This used to read `useSettingsStore`, which is hydrated by exactly one thing
+ * in the repo: `components/providers/settings-hydrator.tsx`. A headless brain
+ * has no React tree, so on that host — the one a browser reaches when Cognia is
+ * served as a web app or self-hosted — `settings` was null forever and the
+ * panel was painted with the stock dark preset. The failure was silent, because
+ * "null for the first moments after boot" is also what a host that never
+ * hydrates looks like.
+ *
+ * `getSettings()` merges the defaults under the persisted row, so it answers
+ * with a real `AppSettings` on every host, hydrated or not. Its sibling
+ * `listHostWorkspaces` already self-hydrates for the same reason.
  */
-function hostAppearance() {
-  const settings = useSettingsStore.getState().settings
+async function hostAppearance(): Promise<BrowserCompanionCapabilityV1["appearance"]> {
+  const settings = await getSettings()
   return buildBrowserCompanionAppearance({
-    colorTheme: settings?.colorTheme ?? "default",
-    resolvedTheme: settings?.theme === "light" ? "light" : "dark",
-    activeCustomThemeId: settings?.activeCustomThemeId ?? null,
-    customThemes: settings?.customThemes ?? [],
-    accentColor: settings?.accentColor,
-    a11y: settings?.a11y,
-    stylePackId: settings?.stylePack?.packId,
-    density: settings?.density?.global,
+    colorTheme: settings.colorTheme ?? "default",
+    resolvedTheme: settings.theme === "light" ? "light" : "dark",
+    activeCustomThemeId: settings.activeCustomThemeId ?? null,
+    customThemes: settings.customThemes ?? [],
+    accentColor: settings.accentColor,
+    a11y: settings.a11y,
+    stylePackId: settings.stylePack?.packId,
+    density: settings.density?.global,
   })
 }
 

@@ -1,6 +1,6 @@
 import type { ExecutionRunStatus } from "@/types/execution/run"
 
-import { BROWSER_STATUS_WITHOUT_RUN, browserStatusForRun } from "./run-status"
+import { browserStatusForRun } from "./run-status"
 
 describe("browserStatusForRun", () => {
   it("maps every runtime status without falling through", () => {
@@ -36,10 +36,5 @@ describe("browserStatusForRun", () => {
     expect(browserStatusForRun("completed")).toBe("completed")
     expect(browserStatusForRun("cancelled")).toBe("cancelled")
     expect(browserStatusForRun("failed")).toBe("failed")
-  })
-
-  it("treats a session with no run yet as queued, never failed", () => {
-    // The first second of every successful submission looks like this.
-    expect(BROWSER_STATUS_WITHOUT_RUN).toBe("queued")
   })
 })

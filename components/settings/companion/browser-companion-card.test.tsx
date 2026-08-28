@@ -32,6 +32,8 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof BrowserCompan
       createEnrollment={async () => ISSUE}
       copy={async () => undefined}
       now={() => NOW}
+      loadHistory={async () => ({ deviceIds: [], total: 0 })}
+      clearHistory={async () => 0}
       {...overrides}
     />
   )
@@ -151,5 +153,69 @@ describe("BrowserCompanionCard", () => {
     await screen.findByTestId("browser-companion-code")
     fireEvent.click(screen.getByRole("button", { name: /copy/i }))
     await screen.findByRole("button", { name: /copied/i })
+  })
+
+  it("shows the recorded history even when it is empty", async () => {
+    // "Nothing has been sent from a browser" and "this Host keeps no record"
+    // are different answers, and a control that appeared only once something
+    // existed would collapse them into one.
+    renderCard()
+    await screen.findByTestId("browser-companion-history")
+    expect(screen.getByTestId("browser-companion-history-count")).toHaveTextContent(
+      "mobile.companion.browserCompanion.historyCount:0"
+    )
+    expect(screen.getByTestId("browser-companion-clear-history")).toBeDisabled()
+  })
+
+  it("clears every device's rows and re-reads the total", async () => {
+    const cleared: string[] = []
+    let total = 3
+    renderCard({
+      loadHistory: async () => ({
+        deviceIds: total === 0 ? [] : ["browser-a", "browser-b"],
+        total,
+      }),
+      clearHistory: async (deviceId) => {
+        cleared.push(deviceId)
+        total = 0
+        return 1
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("browser-companion-history-count")).toHaveTextContent(
+        "mobile.companion.browserCompanion.historyCount:3"
+      )
+    )
+    fireEvent.click(screen.getByTestId("browser-companion-clear-history"))
+
+    // Every device, not just the first: the delete is device-scoped by design,
+    // so "clear everything" is a loop over the ids rather than a second,
+    // unscoped delete path.
+    await waitFor(() => expect(cleared).toEqual(["browser-a", "browser-b"]))
+    await waitFor(() =>
+      expect(screen.getByTestId("browser-companion-history-count")).toHaveTextContent(
+        "mobile.companion.browserCompanion.historyCount:0"
+      )
+    )
+  })
+
+  it("explains a failed clear in its own words, not Dexie's", async () => {
+    renderCard({
+      loadHistory: async () => ({ deviceIds: ["browser-a"], total: 2 }),
+      clearHistory: async () => Promise.reject(new Error("DatabaseClosedError: ...")),
+    })
+    await screen.findByTestId("browser-companion-clear-history")
+    fireEvent.click(screen.getByTestId("browser-companion-clear-history"))
+    await waitFor(() =>
+      expect(screen.getByTestId("browser-companion-error")).toHaveTextContent(
+        "mobile.companion.browserCompanion.historyClearFailed"
+      )
+    )
+  })
+
+  it("hides the control rather than claiming empty when the history cannot be read", async () => {
+    renderCard({ loadHistory: async () => Promise.reject(new Error("db closed")) })
+    await screen.findByTestId("browser-companion-card")
+    await waitFor(() => expect(screen.queryByTestId("browser-companion-history")).toBeNull())
   })
 })

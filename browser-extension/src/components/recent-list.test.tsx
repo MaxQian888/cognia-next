@@ -67,6 +67,18 @@ describe("RecentList", () => {
     expect(openUrl).toHaveBeenCalledWith("cognia://session/session-1")
   })
 
+  it("shows the recorded reason under a failed row, and nothing under the rest", () => {
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ status: "failed" }), item({ submissionId: "sub-2", title: "Second" })]}
+        failureCodes={{ "sub-1": "enqueue_refused" }}
+      />
+    )
+    expect(screen.getByTestId("recent-reason-sub-1")).toHaveTextContent("reasonRefused")
+    expect(screen.queryByTestId("recent-reason-sub-2")).toBeNull()
+  })
+
   it("keeps one row per submission", () => {
     render(
       <RecentList

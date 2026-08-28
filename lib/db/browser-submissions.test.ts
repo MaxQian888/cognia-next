@@ -6,7 +6,7 @@ import {
   getBrowserSubmission,
   listBrowserSubmissions,
   putBrowserSubmission,
-  updateBrowserSubmissionStatus,
+  summarizeBrowserSubmissions,
 } from "./browser-submissions"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -102,24 +102,13 @@ describe("browserSubmissions", () => {
     expect(await getBrowserSubmission("other")).toBeDefined()
   })
 
-  it("advances a status and records an error code only when there is one", async () => {
-    await putBrowserSubmission(row())
-    await updateBrowserSubmissionStatus("sub-1", "running", 2_000)
-    expect(await getBrowserSubmission("sub-1")).toMatchObject({
-      status: "running",
-      updatedAt: 2_000,
-    })
-    expect(await getBrowserSubmission("sub-1")).not.toHaveProperty("errorCode")
-    await updateBrowserSubmissionStatus("sub-1", "failed", 3_000, "runtime_unavailable")
-    expect(await getBrowserSubmission("sub-1")).toMatchObject({
-      status: "failed",
-      errorCode: "runtime_unavailable",
-    })
-  })
-
-  it("does not resurrect a trimmed-away submission as a partial row", async () => {
-    await expect(updateBrowserSubmissionStatus("gone", "completed", 9_000)).resolves.toBeUndefined()
-    expect(await getBrowserSubmission("gone")).toBeUndefined()
+  it("summarizes every device that has history, for the Host-side control", async () => {
+    await putBrowserSubmission(row({ submissionId: "a" }))
+    await putBrowserSubmission(row({ submissionId: "b" }))
+    await putBrowserSubmission(row({ submissionId: "c", deviceId: "browser-b" }))
+    const summary = await summarizeBrowserSubmissions()
+    expect(summary.total).toBe(3)
+    expect([...summary.deviceIds].sort()).toEqual(["browser-a", "browser-b"])
   })
 
   it("clears one device's history and leaves the others", async () => {

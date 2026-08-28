@@ -40,7 +40,7 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
       { id: "ws-default", label: "Default", isDefault: true },
       { id: "ws-other", label: "Other", isDefault: false },
     ],
-    appearance: () => APPEARANCE,
+    appearance: async () => APPEARANCE,
     createSession: async (input) => {
       createdSessions.push(input)
       sessionCounter += 1
@@ -159,7 +159,9 @@ describe("submitBrowserContext", () => {
     await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
       "HostState unavailable"
     )
-    expect(h.rows.get("sub-1")?.status).toBe("submitting")
+    // The refusal is written down rather than left looking mid-flight, and
+    // `failed` is still redrivable — which the next call proves.
+    expect(h.rows.get("sub-1")).toMatchObject({ status: "failed", errorCode: "enqueue_failed" })
 
     fail = false
     await expect(submitBrowserContext(h.deps, "browser-a", payload())).resolves.toMatchObject({
@@ -169,6 +171,37 @@ describe("submitBrowserContext", () => {
     expect(h.createdSessions).toHaveLength(1)
     expect(attempts).toEqual(["browser-sub-1", "browser-sub-1"])
     expect(h.rows.get("sub-1")?.status).toBe("queued")
+    // The code described the attempt that failed, not the row. A row put back
+    // with `errorCode: undefined` still carries the key and would be spread
+    // onto every later status response.
+    expect(h.rows.get("sub-1")).not.toHaveProperty("errorCode")
+  })
+
+  it("reports a missing runtime as host_unavailable rather than throwing", async () => {
+    // The contract calls this "a real state, not an error": the session exists
+    // and the capture is recorded, so the work is one runtime away from
+    // running. Throwing would tell the user to resubmit it.
+    let fail = true
+    const h = harness({
+      enqueueMessage: async () => {
+        if (fail) throw new BrowserCompanionError("runtime_target_unavailable", "no runtime")
+      },
+    })
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).resolves.toMatchObject({
+      status: "host_unavailable",
+      sessionId: "session-1",
+    })
+    expect(h.rows.get("sub-1")).toMatchObject({
+      status: "host_unavailable",
+      errorCode: "runtime_target_unavailable",
+    })
+
+    // And it stays redrivable, which is the whole reason it is not a failure.
+    fail = false
+    await expect(submitBrowserContext(h.deps, "browser-a", payload())).resolves.toMatchObject({
+      status: "queued",
+    })
+    expect(h.createdSessions).toHaveLength(1)
   })
 
   it("refuses to redrive an in-flight submission id with a different capture", async () => {
@@ -180,7 +213,7 @@ describe("submitBrowserContext", () => {
     await expect(submitBrowserContext(h.deps, "browser-a", payload())).rejects.toThrow(
       "HostState unavailable"
     )
-    expect(h.rows.get("sub-1")?.status).toBe("submitting")
+    expect(h.rows.get("sub-1")?.status).toBe("failed")
 
     // Same id, a different page. Letting it through would enqueue page B into
     // the session created (and titled) for page A, while the row kept
@@ -200,7 +233,7 @@ describe("submitBrowserContext", () => {
     })
     expect(h.rows.get("sub-1")).toMatchObject({
       sourceHost: "example.com",
-      status: "submitting",
+      status: "failed",
     })
     expect(h.createdSessions).toHaveLength(1)
   })
@@ -218,7 +251,7 @@ describe("submitBrowserContext", () => {
       "HostState unavailable"
     )
     const first = h.rows.get("sub-1")
-    expect(first).toMatchObject({ sourceHost: "example.com", status: "submitting" })
+    expect(first).toMatchObject({ sourceHost: "example.com", status: "failed" })
     expect(first?.urlFingerprint).toEqual(expect.any(String))
 
     const samePayload = payload()
@@ -373,6 +406,21 @@ describe("listBrowserContextSubmissions", () => {
     h.sessionStatusThrows = true
     const page = await listBrowserContextSubmissions(h.deps, "browser-a")
     expect(page.items[0].status).toBe("queued")
+  })
+
+  it("does not let a session with no run overwrite a recorded refusal", async () => {
+    // The failure mode this replaced: the reader answered `queued` for "no run
+    // found", which is exactly what a refused enqueue leaves behind — so every
+    // recorded failure was painted green again on the very next poll.
+    const h = harness({
+      enqueueMessage: async () => {
+        throw new BrowserCompanionError("runtime_target_unavailable", "no runtime")
+      },
+      sessionStatus: async () => null,
+    })
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items[0].status).toBe("host_unavailable")
   })
 })
 
