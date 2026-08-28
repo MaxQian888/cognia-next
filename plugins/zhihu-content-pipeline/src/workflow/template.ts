@@ -21,7 +21,7 @@ import type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateNode,
   PluginWorkflowTemplateEdge,
-} from "@/types/plugin/plugin-workflow-template"
+} from "@cognia/plugin-sdk"
 import { nodeKind } from "../ids"
 import { SAVE_TOPICS_KIND } from "../nodes/save-topics"
 

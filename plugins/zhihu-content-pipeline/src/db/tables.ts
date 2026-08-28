@@ -15,8 +15,7 @@
  * over this same handle.
  */
 
-import type { PluginDexieAPI } from "@/types/plugin"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 export type TopicStatus = "candidate" | "selected" | "done"
 export type DraftStatus = "draft" | "published"
 

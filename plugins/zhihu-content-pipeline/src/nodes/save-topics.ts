@@ -11,9 +11,9 @@
  */
 
 import { defineWorkflowNode } from "@cognia/plugin-sdk"
-import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
-import type { PluginDexieAPI } from "@/types/plugin"
-import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import type { PluginNodeDef } from "@cognia/plugin-sdk"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { StepExecutionContext, StepExecutionResult } from "@cognia/plugin-sdk"
 import { createPipelineDb, parseCandidatesStrict } from "../db/tables"
 
 /** Unprefixed kind — the host prefixes the pluginId. */

@@ -53,7 +53,7 @@ export default definePlugin({
 - `@cognia/plugin-sdk/api/<capability>`: the runtime half of one contribution — the
   registry a plugin calls from `activate(ctx)` when it computes its contributions instead
   of declaring them statically, plus that capability's host client. Published for
-  `agent-team-template`, `automation`, `balance-adapter`, `browser`, `character-pack`,
+  `agent-team-template`, `agent-turn`, `automation`, `balance-adapter`, `browser`, `character-pack`,
   `cli-tool`, `connector`, `context-panel`, `context-provider`, `editor`,
   `eval`, `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
   `integration`, `message-renderer`, `ocr-provider`, `sandbox`, `scheduled-task`,

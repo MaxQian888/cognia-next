@@ -1,8 +1,7 @@
 import { makePersistTools } from "./persist"
 import { TABLES } from "../db/tables"
 import { PLUGIN_ID } from "../ids"
-import type { PluginDexieAPI } from "@/types/plugin"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 function fakeDexie() {
   const tables: Record<string, Record<string, jest.Mock>> = {
     [TABLES.research]: { put: jest.fn(async () => undefined) },

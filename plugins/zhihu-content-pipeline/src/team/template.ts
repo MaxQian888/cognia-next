@@ -15,7 +15,7 @@
  */
 
 import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "@cognia/plugin-sdk"
 import { ROLE_PACK_ID, packSkillId } from "../ids"
 
 export const WRITING_CREW_TEMPLATE = defineAgentTeamTemplate({

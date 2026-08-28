@@ -1,7 +1,6 @@
 import { makeSaveTopicsNode, SAVE_TOPICS_KIND } from "./save-topics"
-import type { PluginDexieAPI } from "@/types/plugin"
-import type { StepExecutionContext } from "@/types/workflow/visual"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { StepExecutionContext } from "@cognia/plugin-sdk"
 function fakeDexie() {
   const topics = {
     bulkPut: jest.fn(async (_rows: unknown[]): Promise<void> => undefined),

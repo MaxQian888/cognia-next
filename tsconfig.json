@@ -79,6 +79,7 @@
       "@cognia/plugin-sdk/api/i18n": ["./packages/plugin-sdk/src/api/i18n.ts"],
       "@cognia/plugin-sdk/api/integration": ["./packages/plugin-sdk/src/api/integration.ts"],
       "@cognia/plugin-sdk/api/webview": ["./packages/plugin-sdk/src/api/webview.ts"],
+      "@cognia/plugin-sdk/api/agent-turn": ["./packages/plugin-sdk/src/api/agent-turn.ts"],
       "@cognia/plugin-sdk/api/agent-team-template": [
         "./packages/plugin-sdk/src/api/agent-team-template.ts"
       ],

@@ -44,3 +44,34 @@ export type {
   PluginWorkflowTemplateEdge,
   PluginWorkflowTemplateNode,
 } from "@/types/plugin/plugin-workflow-template"
+
+/**
+ * The node catalog a contributed node joins, and the validators that prove a
+ * contributed TEMPLATE is well formed.
+ *
+ * A template is a graph, and a graph with a dangling edge or an illegal cycle
+ * fails at run time in whatever surface happens to open it. Projecting the
+ * template and running the host's own integrity check is how a plugin proves
+ * its template is loadable BEFORE shipping it — and it must be the host's
+ * check, because the host is what will reject it.
+ *
+ * `addPluginCatalogEntry` / `removePluginCatalogEntry` are the catalog half:
+ * a template that references a plugin-contributed node kind only resolves once
+ * that kind is in the catalog, which is what `validateWorkflowTemplateRequires`
+ * above reports on.
+ */
+export {
+  addPluginCatalogEntry,
+  effectiveRequires,
+  getPluginCatalogSnapshot,
+  missingCapabilities,
+  nodeCatalogEntry,
+  NODE_CATALOG,
+  removePluginCatalogEntry,
+  subscribePluginCatalog,
+} from "@/lib/workflow/nodes/catalog"
+
+export type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+
+export { projectPluginWorkflowTemplate } from "@/lib/workflow/templates/project-plugin-workflow-template"
+export { validateGraphIntegrity } from "@/lib/workflow/definition/validate"

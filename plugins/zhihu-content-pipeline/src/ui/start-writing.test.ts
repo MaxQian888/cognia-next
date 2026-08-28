@@ -2,10 +2,6 @@ import { buildWritingSeed, startWritingForTopic } from "./start-writing"
 import { zhihuRoleCharacterId } from "../characters/pack"
 import type { TopicRow } from "../db/tables"
 
-jest.mock("@/lib/claude/adapter", () => ({
-  makeUserMessage: (text: string) => ({ id: "m1", role: "user", parts: [{ type: "text", text }] }),
-}))
-
 const topic: TopicRow = {
   id: "topic_1",
   title: "DeepSeek 永久降价意味着什么",
@@ -35,32 +31,34 @@ describe("buildWritingSeed", () => {
 })
 
 describe("startWritingForTopic", () => {
-  it("marks selected, opens a Writer-character session seeded with the topic, activates it", async () => {
-    const createSession = jest.fn(async (_p: { title?: string; characterId?: string }) => ({
-      id: "sess_1",
-    }))
-    const persistMessages = jest.fn(async (_sessionId: string, _messages: unknown[]) => undefined)
-    const setActiveSession = jest.fn()
+  it("marks selected, then opens a Writer-character session seeded with the topic", async () => {
+    const startSeededSession = jest.fn(async () => ({ sessionId: "sess_1" }))
     const markTopicStatus = jest.fn(async (_id: string, _status: string) => undefined)
 
-    const id = await startWritingForTopic(topic, {
-      createSession,
-      persistMessages,
-      setActiveSession,
-      markTopicStatus,
-    })
+    const id = await startWritingForTopic(topic, { startSeededSession, markTopicStatus })
 
     expect(id).toBe("sess_1")
     expect(markTopicStatus).toHaveBeenCalledWith("topic_1", "selected")
-    expect(createSession).toHaveBeenCalledWith({
+    expect(startSeededSession).toHaveBeenCalledWith({
       title: `知乎写作：${topic.title}`,
       characterId: zhihuRoleCharacterId("writer"),
+      seedUserMessage: buildWritingSeed(topic),
     })
-    expect(persistMessages).toHaveBeenCalledTimes(1)
-    const call = persistMessages.mock.calls[0]
-    expect(call[0]).toBe("sess_1")
-    const messages = call[1] as Array<{ role: string }>
-    expect(messages[0].role).toBe("user")
-    expect(setActiveSession).toHaveBeenCalledWith("sess_1")
+  })
+
+  it("marks the topic selected BEFORE opening the session", async () => {
+    // Order matters: a session that opens against a topic still marked
+    // `candidate` leaves the review list offering it again.
+    const order: string[] = []
+    await startWritingForTopic(topic, {
+      startSeededSession: jest.fn(async () => {
+        order.push("session")
+        return { sessionId: "sess_1" }
+      }),
+      markTopicStatus: jest.fn(async () => {
+        order.push("status")
+      }),
+    })
+    expect(order).toEqual(["status", "session"])
   })
 })

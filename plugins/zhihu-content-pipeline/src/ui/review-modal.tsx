@@ -12,11 +12,9 @@
  */
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { createSession } from "@/lib/db/sessions"
-import { persistMessages } from "@/lib/db/messages"
-import { useChatStore } from "@/stores/chat"
-import type { PluginModalProps } from "@/types/plugin/plugin-modal"
-import { Button } from "@/components/ui/button"
+import { startSeededSession } from "@cognia/plugin-sdk/api/agent-turn"
+import type { PluginModalProps } from "@cognia/plugin-sdk"
+import { Button } from "@cognia/plugin-ui"
 import { getPipelineDb } from "../db/runtime"
 import type { DraftRow, TopicRow } from "../db/tables"
 import { startWritingForTopic } from "./start-writing"
@@ -25,7 +23,6 @@ import { usePluginT } from "./use-plugin-t"
 export function ReviewModal({ onClose }: PluginModalProps) {
   const t = usePluginT()
   const db = getPipelineDb()
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
 
   const topics = useLiveQuery<TopicRow[] | undefined>(
     () => (db ? db.listTopics("candidate") : Promise.resolve([])),
@@ -39,9 +36,7 @@ export function ReviewModal({ onClose }: PluginModalProps) {
   async function onStart(topic: TopicRow) {
     if (!db) return
     await startWritingForTopic(topic, {
-      createSession,
-      persistMessages,
-      setActiveSession,
+      startSeededSession,
       markTopicStatus: (id, status) => db.setTopicStatus(id, status),
     })
     onClose()

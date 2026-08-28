@@ -16,6 +16,7 @@ const runtimeEntries = {
   "context-panel": "src/api/context-panel.ts",
   editor: "src/api/editor.ts",
   webview: "src/api/webview.ts",
+  "agent-turn": "src/api/agent-turn.ts",
   "agent-team-template": "src/api/agent-team-template.ts",
   automation: "src/api/automation.ts",
   "balance-adapter": "src/api/balance-adapter.ts",

@@ -26,7 +26,7 @@
  */
 
 import { defineCharacterPack } from "@cognia/plugin-sdk"
-import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
+import type { PluginCharacterDef } from "@cognia/plugin-sdk"
 import { PLUGIN_ID, packSkillId } from "../ids"
 
 /** Stable role keys — the `agent.turn` node maps these to pack character ids. */

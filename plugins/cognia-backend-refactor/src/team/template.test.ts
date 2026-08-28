@@ -1,14 +1,11 @@
 import { REVIEW_BOARD_TEMPLATE } from "./template"
-import { validateTemplateRequires } from "@/lib/plugin/registries/agent-team-template-registry"
-import { registerSkill, __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
-import {
-  registerSubagent,
-  __resetSubagentsForTesting,
-} from "@/lib/plugin/registries/subagent-registry"
+import { validateTemplateRequires } from "@cognia/plugin-sdk/api/agent-team-template"
+import { registerSkill, unregisterSkillsByPlugin } from "@cognia/plugin-sdk/api/skill"
+import { registerSubagent, unregisterSubagentsByPlugin } from "@cognia/plugin-sdk/api/subagent"
 import {
   registerCharacterPack,
-  __resetCharacterPacksForTesting,
-} from "@/lib/plugin/registries/character-pack-registry"
+  unregisterCharacterPacksByPlugin,
+} from "@cognia/plugin-sdk/api/character-pack"
 import { REFACTOR_ROLE_PACK } from "../characters/pack"
 import { REFACTOR_SKILLS } from "../skills/definitions"
 import { REFACTOR_SUBAGENTS } from "../subagents/definitions"
@@ -20,10 +17,15 @@ function registerOwnContributions() {
   registerCharacterPack(REFACTOR_ROLE_PACK.id, REFACTOR_ROLE_PACK, { pluginId: PLUGIN_ID })
 }
 
+/**
+ * Plugin-scoped teardown — the three calls the plugin manager makes on
+ * disable. A registry-wide reset would also drop contributions this plugin
+ * never made, and is not part of the author surface.
+ */
 function resetAll() {
-  __resetSkillsForTesting()
-  __resetSubagentsForTesting()
-  __resetCharacterPacksForTesting()
+  unregisterSkillsByPlugin(PLUGIN_ID)
+  unregisterSubagentsByPlugin(PLUGIN_ID)
+  unregisterCharacterPacksByPlugin(PLUGIN_ID)
 }
 
 beforeEach(resetAll)

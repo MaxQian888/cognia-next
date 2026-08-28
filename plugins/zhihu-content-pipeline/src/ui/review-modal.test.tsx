@@ -3,26 +3,22 @@
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { createSession } from "@/lib/db/sessions"
+import { startSeededSession } from "@cognia/plugin-sdk/api/agent-turn"
 import { ReviewModal } from "./review-modal"
 import { __setPipelineDbForTesting } from "../db/runtime"
 import type { DraftRow, TopicRow } from "../db/tables"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("next-intl", () => ({ useLocale: () => "zh-CN" }))
-jest.mock("@/lib/db/sessions", () => ({ createSession: jest.fn(async () => ({ id: "sess_1" })) }))
-jest.mock("@/lib/db/messages", () => ({ persistMessages: jest.fn(async () => undefined) }))
-jest.mock("@/lib/claude/adapter", () => ({
-  makeUserMessage: (text: string) => ({ id: "m", role: "user", parts: [{ type: "text", text }] }),
-}))
-const setActiveSession = jest.fn()
-jest.mock("@/stores/chat", () => ({
-  useChatStore: (sel: (s: { setActiveSession: () => void }) => unknown) =>
-    sel({ setActiveSession }),
+// One double for the SDK call the modal makes; the session/message/store
+// plumbing behind it belongs to `startSeededSession` and is pinned by that
+// module's own suite.
+jest.mock("@cognia/plugin-sdk/api/agent-turn", () => ({
+  startSeededSession: jest.fn(async () => ({ sessionId: "sess_1" })),
 }))
 
 const mockLive = useLiveQuery as jest.Mock
-const mockCreateSession = createSession as jest.Mock
+const mockStartSeededSession = startSeededSession as jest.Mock
 
 const topics: TopicRow[] = [
   {
@@ -67,9 +63,11 @@ describe("ReviewModal", () => {
     const onClose = jest.fn()
     render(<ReviewModal onClose={onClose} modalId="m" />)
     fireEvent.click(screen.getByRole("button", { name: "开始写作：选题甲" }))
-    await waitFor(() => expect(mockCreateSession).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockStartSeededSession).toHaveBeenCalledTimes(1))
     expect(fakeDb.setTopicStatus).toHaveBeenCalledWith("t1", "selected")
-    expect(setActiveSession).toHaveBeenCalledWith("sess_1")
+    expect(mockStartSeededSession).toHaveBeenCalledWith(
+      expect.objectContaining({ seedUserMessage: expect.stringContaining("选题甲") })
+    )
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -77,7 +75,7 @@ describe("ReviewModal", () => {
     __setPipelineDbForTesting(null)
     render(<ReviewModal onClose={jest.fn()} modalId="m" />)
     fireEvent.click(screen.getByRole("button", { name: "开始写作：选题甲" }))
-    await waitFor(() => expect(mockCreateSession).not.toHaveBeenCalled())
+    await waitFor(() => expect(mockStartSeededSession).not.toHaveBeenCalled())
   })
 
   it("shows the empty state when there are no candidates", () => {

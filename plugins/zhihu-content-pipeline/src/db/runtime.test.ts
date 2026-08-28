@@ -1,6 +1,5 @@
 import { setPipelineDbFromDexie, getPipelineDb, __setPipelineDbForTesting } from "./runtime"
-import type { PluginDexieAPI } from "@/types/plugin"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 const fakeDexie: PluginDexieAPI = {
   table: jest.fn() as unknown as PluginDexieAPI["table"],
   rawDb: jest.fn(),

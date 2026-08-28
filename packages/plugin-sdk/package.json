@@ -117,6 +117,12 @@
       "require": "./dist/templates.cjs",
       "default": "./dist/templates.js"
     },
+    "./api/agent-turn": {
+      "types": "./dist/agent-turn.d.ts",
+      "import": "./dist/agent-turn.js",
+      "require": "./dist/agent-turn.cjs",
+      "default": "./dist/agent-turn.js"
+    },
     "./api/agent-team-template": {
       "types": "./dist/agent-team-template.d.ts",
       "import": "./dist/agent-team-template.js",

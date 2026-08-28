@@ -19,11 +19,11 @@
  * node executors carry a runtime `execute` fn that the manifest can't hold.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
+} from "@cognia/plugin-sdk/api/character-pack"
 import { PLUGIN_ID } from "./ids"
 import { I18N_MESSAGES } from "./i18n"
 import { REFACTOR_ROLE_PACK } from "./characters/pack"
@@ -32,8 +32,7 @@ import { REFACTOR_SKILLS } from "./skills/definitions"
 import { REFACTOR_SUBAGENTS } from "./subagents/definitions"
 import { REVIEW_BOARD_TEMPLATE } from "./team/template"
 import { REFACTOR_PIPELINE_TEMPLATE } from "./workflow/template"
-import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
-
+import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
 /**
  * Disposer for the custom workflow node. The plugin manager also tears down
  * a plugin's node registrations on disable (`teardownPluginWorkflowRegistrations`),

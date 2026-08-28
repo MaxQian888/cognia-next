@@ -9,7 +9,7 @@
  * the plugin's code at runtime.
  */
 
-import type { PluginDexieAPI } from "@/types/plugin"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import { createPipelineDb, type PipelineDb } from "./tables"
 
 let pipelineDb: PipelineDb | null = null

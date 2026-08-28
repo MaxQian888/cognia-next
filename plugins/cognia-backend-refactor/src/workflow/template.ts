@@ -28,7 +28,7 @@ import type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateNode,
   PluginWorkflowTemplateEdge,
-} from "@/types/plugin/plugin-workflow-template"
+} from "@cognia/plugin-sdk"
 import { nodeKind } from "../ids"
 
 const AGENT_TURN = nodeKind("agent.turn")

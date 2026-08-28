@@ -8,7 +8,7 @@
  * (`lib/claude/build-options.ts:buildPluginToolsManifest`).
  */
 
-import type { PluginDexieAPI, PluginTool } from "@/types/plugin"
+import type { PluginDexieAPI, PluginTool } from "@cognia/plugin-sdk"
 import { PLUGIN_ID } from "../ids"
 import { createPipelineDb } from "../db/tables"
 

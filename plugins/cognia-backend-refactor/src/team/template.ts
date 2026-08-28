@@ -15,7 +15,7 @@
  */
 
 import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "@cognia/plugin-sdk"
 import { REFACTOR_PACK_ID } from "../characters/pack"
 import { packSkillId, subagentRuntimeId } from "../ids"
 

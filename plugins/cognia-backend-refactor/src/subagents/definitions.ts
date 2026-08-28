@@ -11,8 +11,7 @@
  */
 
 import { defineSubagent } from "@cognia/plugin-sdk"
-import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
-
+import type { PluginSubagentDef } from "@cognia/plugin-sdk"
 const GO_ANALYZER = defineSubagent({
   id: "go-analyzer",
   name: "Go Analyzer",

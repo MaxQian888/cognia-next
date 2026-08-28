@@ -18,7 +18,7 @@
  */
 
 import { defineCharacterPack } from "@cognia/plugin-sdk"
-import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
+import type { PluginCharacterDef } from "@cognia/plugin-sdk"
 import { ROLE_PACK_ID, packSkillId, PLUGIN_ID } from "../ids"
 
 /** Stable role keys. */

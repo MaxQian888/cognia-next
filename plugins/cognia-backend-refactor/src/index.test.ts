@@ -1,13 +1,14 @@
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
+} from "@cognia/plugin-sdk/api/character-pack"
 import definition from "./index"
 import { REFACTOR_ROLE_PACK } from "./characters/pack"
 import { AGENT_TURN_NODE } from "./nodes/agent-turn"
 import { PLUGIN_ID } from "./ids"
 
-jest.mock("@/lib/plugin/registries/character-pack-registry", () => ({
+// Doubled at the SDK subpath the plugin imports, not the host registry behind it.
+jest.mock("@cognia/plugin-sdk/api/character-pack", () => ({
   registerCharacterPack: jest.fn(),
   unregisterCharacterPacksByPlugin: jest.fn(),
 }))

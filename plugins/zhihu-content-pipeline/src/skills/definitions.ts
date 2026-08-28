@@ -20,7 +20,7 @@
  */
 
 import { defineSkill } from "@cognia/plugin-sdk"
-import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import type { PluginSkillDef } from "@cognia/plugin-sdk"
 import { packSkillId } from "../ids"
 
 /** Writer — the high-vote Zhihu answer writer (faithful to zhihu-answer-writer). */

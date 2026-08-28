@@ -7,8 +7,7 @@ import {
   type TopicRow,
   type DraftRow,
 } from "./tables"
-import type { PluginDexieAPI } from "@/types/plugin"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 describe("parseCandidates", () => {
   it("parses a raw JSON array", () => {
     const out = parseCandidates('[{"title":"A","score":90},{"title":"B"}]')

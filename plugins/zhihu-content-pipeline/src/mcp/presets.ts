@@ -16,7 +16,7 @@
  */
 
 import { defineMcpServerPreset } from "@cognia/plugin-sdk"
-import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+import type { PluginMcpServerPresetDef } from "@cognia/plugin-sdk"
 import { mcpPresetId } from "../ids"
 
 /** Exa — web search & fetch (research backbone). */

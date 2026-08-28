@@ -1,9 +1,9 @@
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
-import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
-import { unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+} from "@cognia/plugin-sdk/api/character-pack"
+import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
+import { unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import definition from "./index"
 import { getPipelineDb } from "./db/runtime"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
@@ -13,14 +13,17 @@ import { TOPIC_DISCOVERY_TEMPLATE } from "./workflow/template"
 import { WRITING_CREW_TEMPLATE } from "./team/template"
 import { PLUGIN_ID } from "./ids"
 
-jest.mock("@/lib/plugin/registries/character-pack-registry", () => ({
+// Doubled at the SDK subpaths the plugin imports, not the host registries.
+jest.mock("@cognia/plugin-sdk/api/character-pack", () => ({
   registerCharacterPack: jest.fn(),
   unregisterCharacterPacksByPlugin: jest.fn(),
 }))
-jest.mock("@/lib/plugin/registries/workflow-template-registry", () => ({
+jest.mock("@cognia/plugin-sdk/api/workflow-template", () => ({
   refreshAllWorkflowTemplateWarnings: jest.fn(),
 }))
-jest.mock("@/lib/slash-commands/registry", () => ({ unregisterCommandsByPlugin: jest.fn() }))
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
+  unregisterSlashCommandsByPlugin: jest.fn(),
+}))
 jest.mock("./commands", () => ({ handleZhihuCommand: jest.fn(() => "opened") }))
 
 const mockRegisterPack = registerCharacterPack as jest.Mock

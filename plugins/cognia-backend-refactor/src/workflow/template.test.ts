@@ -1,12 +1,12 @@
 import { REFACTOR_PIPELINE_TEMPLATE } from "./template"
-import { validateWorkflowTemplateRequires } from "@/lib/plugin/registries/workflow-template-registry"
+import { validateWorkflowTemplateRequires } from "@cognia/plugin-sdk/api/workflow-template"
 import {
   addPluginCatalogEntry,
   removePluginCatalogEntry,
   type NodeCatalogEntry,
-} from "@/lib/workflow/nodes/catalog"
-import { projectPluginWorkflowTemplate } from "@/lib/workflow/templates/project-plugin-workflow-template"
-import { validateGraphIntegrity } from "@/lib/workflow/definition/validate"
+} from "@cognia/plugin-sdk/api/workflow-template"
+import { projectPluginWorkflowTemplate } from "@cognia/plugin-sdk/api/workflow-template"
+import { validateGraphIntegrity } from "@cognia/plugin-sdk/api/workflow-template"
 import { nodeKind, PLUGIN_ID } from "../ids"
 
 const AGENT_TURN = nodeKind("agent.turn")

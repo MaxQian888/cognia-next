@@ -14,8 +14,6 @@
  * chat-runtime behavior to confirm under `pnpm tauri dev`.
  */
 
-import type { UIMessage } from "ai"
-import { makeUserMessage } from "@/lib/claude/adapter"
 import { zhihuRoleCharacterId } from "../characters/pack"
 import type { TopicRow, TopicStatus } from "../db/tables"
 
@@ -33,9 +31,16 @@ export function buildWritingSeed(topic: Pick<TopicRow, "title" | "url" | "reason
 }
 
 export interface StartWritingDeps {
-  createSession: (partial: { title?: string; characterId?: string }) => Promise<{ id: string }>
-  persistMessages: (sessionId: string, messages: UIMessage[]) => Promise<void>
-  setActiveSession: (id: string) => void
+  /**
+   * `startSeededSession` from `@cognia/plugin-sdk/api/agent-turn` — creates the
+   * session, persists the seed message and moves the UI in one call. Injected
+   * so the handoff stays unit-testable without the chat runtime.
+   */
+  startSeededSession: (input: {
+    title?: string
+    characterId?: string
+    seedUserMessage?: string
+  }) => Promise<{ sessionId: string }>
   markTopicStatus: (id: string, status: TopicStatus) => Promise<void>
 }
 
@@ -48,12 +53,10 @@ export async function startWritingForTopic(
   deps: StartWritingDeps
 ): Promise<string> {
   await deps.markTopicStatus(topic.id, "selected")
-  const session = await deps.createSession({
+  const { sessionId } = await deps.startSeededSession({
     title: `知乎写作：${topic.title}`,
     characterId: zhihuRoleCharacterId("writer"),
+    seedUserMessage: buildWritingSeed(topic),
   })
-  const seed = makeUserMessage(buildWritingSeed(topic))
-  await deps.persistMessages(session.id, [seed])
-  deps.setActiveSession(session.id)
-  return session.id
+  return sessionId
 }

@@ -8,7 +8,7 @@
  * aren't mounted by any host); the command is the trigger.
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
 import { ReviewModal } from "./ui/review-modal"
 import { I18N_MESSAGES } from "./i18n"
 import { PLUGIN_ID } from "./ids"

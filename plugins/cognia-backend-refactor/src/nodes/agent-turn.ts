@@ -16,9 +16,13 @@
  * `ctx.workflow.registerNode`. Desktop-only: it requires the Tauri sidecar.
  */
 
-import { defineWorkflowNode } from "@cognia/plugin-sdk"
-import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import { isTauri } from "@/lib/tauri"
+import {
+  defineWorkflowNode,
+  type StepExecutionContext,
+  type StepExecutionResult,
+} from "@cognia/plugin-sdk"
+import { runPluginAgentTurn } from "@cognia/plugin-sdk/api/agent-turn"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../characters/pack"
 
 /** Unprefixed kind — the host prefixes the pluginId. */
@@ -36,39 +40,6 @@ interface AgentTurnParams {
 
 function isKnownRole(role: string): role is RefactorRole {
   return (REFACTOR_ROLES as readonly string[]).includes(role)
-}
-
-/**
- * Resolve-or-create the chat session for `characterId`, pinned to `cwd` as its
- * working directory (which `resolveSendOptions` reads into `SendOptions.cwd`).
- * Reuses the character's most recent session for in-run continuity rather than
- * spawning one per turn.
- */
-async function ensureSession(
-  db: typeof import("@/lib/db/sessions"),
-  characterId: string,
-  cwd: string,
-  sessionId?: string
-): Promise<{ id: string }> {
-  if (sessionId) {
-    const existing = await db.getSession(sessionId)
-    if (existing) {
-      if (existing.workingDir !== cwd) await db.updateSession(existing.id, { workingDir: cwd })
-      return { id: existing.id }
-    }
-  }
-  const all = await db.listSessions()
-  const match = all.find((s) => s.characterId === characterId)
-  if (match) {
-    if (match.workingDir !== cwd) await db.updateSession(match.id, { workingDir: cwd })
-    return { id: match.id }
-  }
-  const created = await db.createSession({
-    title: `Backend Refactor — ${characterId}`,
-    characterId,
-    workingDir: cwd,
-  })
-  return { id: created.id }
 }
 
 export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepExecutionResult> {
@@ -90,45 +61,14 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 
   // Tool-enabled turns need the sidecar; fail loudly in the browser shell.
-  // Direct `isTauri()` is intentional here: node executors receive a
-  // StepExecutionContext, which carries no `ctx.capabilities` API
-  // (the node is declared `desktopOnly`).
-  if (!isTauri()) {
+  // The SDK's host-shell probe rather than `ctx.capabilities`: a node executor
+  // receives a StepExecutionContext, which carries no capabilities API (the
+  // node is declared `desktopOnly`).
+  if (!readHostCapabilities().tauri) {
     throw new Error(
       "agent.turn requires the desktop runtime: the tool-enabled Claude turn is driven through the Tauri sidecar."
     )
   }
-
-  const [{ resolveCharacterById }, sessionsDb, { getSettings }, { resolveSendOptions }, runner] =
-    await Promise.all([
-      import("@/lib/db/characters"),
-      import("@/lib/db/sessions"),
-      import("@/lib/db/settings"),
-      import("@/lib/claude/build-options"),
-      import("@/lib/claude/run-and-capture"),
-    ])
-
-  const character = await resolveCharacterById(characterId)
-  if (!character) {
-    throw new Error(
-      `agent.turn: character "${characterId}" not found — is the Backend Refactor plugin enabled?`
-    )
-  }
-
-  const session = await ensureSession(sessionsDb, characterId, cwd, params.sessionId?.trim())
-  const appSettings = await getSettings().catch(() => undefined)
-  const sendOptions = await resolveSendOptions({
-    session: (await sessionsDb.getSession(session.id)) ?? null,
-    character,
-    appSettings: appSettings ?? null,
-  })
-  // Headless runs have no UI to answer a permission prompt, so the turn would
-  // hang forever waiting on one. Scope the bypass to THIS call site rather than
-  // to the character definitions: a character's `permissionMode` is consulted
-  // for every interactive chat with that character too (see the pack header),
-  // which silently handed un-prompted Edit/Write/Bash to anyone who picked a
-  // refactor role from the character list.
-  sendOptions.permissionMode = "bypassPermissions"
 
   const timeoutSec =
     typeof params.timeoutSec === "number" && params.timeoutSec > 0
@@ -136,9 +76,20 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
       : AGENT_TURN_DEFAULT_TIMEOUT_SEC
   ctx.log?.("info", `agent.turn: running ${characterId} in ${cwd}`)
 
-  const result = await runner.runAndCaptureAssistantReply(session.id, prompt, sendOptions, {
-    signal: ctx.signal,
+  const result = await runPluginAgentTurn({
+    characterId,
+    prompt,
+    cwd,
+    ...(params.sessionId?.trim() ? { sessionId: params.sessionId.trim() } : {}),
     timeoutMs: timeoutSec * 1000,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    // Scoped to THIS call site rather than to the character definitions: a
+    // character's `permissionMode` is consulted for every interactive chat
+    // with that character too, which would silently hand un-prompted
+    // Edit/Write/Bash to anyone picking a refactor role from the character
+    // list. A headless run has no UI to answer a prompt, so it would otherwise
+    // hang forever waiting on one.
+    permissionMode: "bypassPermissions",
   })
 
   return {
@@ -147,7 +98,7 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
       messageId: result.messageId,
       characterId,
       role: params.role ?? null,
-      sessionId: session.id,
+      sessionId: result.sessionId,
     },
   }
 }

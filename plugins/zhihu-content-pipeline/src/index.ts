@@ -25,12 +25,12 @@
  * (both close over the `ctx.dexie` handle, which the manifest can't hold).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
-import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
+} from "@cognia/plugin-sdk/api/character-pack"
+import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
 import { I18N_MESSAGES } from "./i18n"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
