@@ -2,20 +2,18 @@
  * @jest-environment jsdom
  */
 
-import type { Transport } from "@/lib/tauri/transport-types"
-import { setTransport } from "@/lib/tauri"
+import type { Transport } from "@cognia/plugin-sdk/api/host-environment"
+import { setTransport } from "@cognia/plugin-sdk/api/host-environment"
 import {
-  __resetMicrovmBridgeForTesting,
   setMicrovmExec,
   type MicrovmExecPayload,
   type MicrovmResult,
-} from "@/lib/sandbox/microvm-bridge"
-import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
-import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+} from "@cognia/plugin-sdk/api/sandbox"
+import { sandboxSessionRuntime } from "@cognia/plugin-sdk/api/sandbox"
+import type { SandboxResourcePolicy } from "@cognia/plugin-sdk/api/sandbox"
 
 import definition, { SANDBOXED_TOOL_NAMES } from "./index"
-import type { PluginTool, PluginToolContext } from "@/types/plugin"
-
+import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 const OK: MicrovmResult = { exit_code: 0, stdout: "", stderr: "", duration: 1, timed_out: false }
 
 interface RecordedCall {
@@ -72,7 +70,10 @@ async function bindRuntime(options?: {
 
 beforeEach(async () => {
   await sandboxSessionRuntime.releaseSession("s1")
-  __resetMicrovmBridgeForTesting()
+  // `setMicrovmExec(null)` IS the reset: the bridge holds exactly one
+  // adapter, and clearing it is the same call a provider plugin makes on
+  // deactivate. The host's `__resetMicrovmBridgeForTesting` does nothing more.
+  setMicrovmExec(null)
   await bindRuntime()
 })
 

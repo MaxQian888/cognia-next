@@ -13,12 +13,11 @@ import { useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { ClipboardListIcon } from "lucide-react"
 
-import type { ToolResultRendererProps } from "@/lib/plugin/api/tool-result-renderers"
-import { McpCardShell, useParsedOutput } from "@/components/chat/message-parts/mcp-renderers/common"
-import { Button } from "@/components/ui/button"
-import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
-import { useCopy } from "@/hooks/ui/use-copy"
-
+import type { ToolResultRendererProps } from "@cognia/plugin-sdk/api/tool-renderer"
+import { McpCardShell, useParsedOutput } from "@cognia/plugin-sdk/api/tool-renderer"
+import { Button } from "@cognia/plugin-ui"
+import { CopyFeedbackIcon } from "@cognia/plugin-sdk/api/tool-renderer"
+import { useCopy } from "@cognia/plugin-sdk/api/tool-renderer"
 interface ClipboardEntry {
   text: string
   capturedAt: number

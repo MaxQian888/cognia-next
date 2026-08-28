@@ -18,7 +18,7 @@
  *     friendly install hint when the dynamic import fails.
  */
 
-import type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
+import type { E2BBackend, WorkspaceHandle } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BSandboxPool } from "./sandbox-pool"
 
 /** Narrow shape of `@e2b/sdk` we depend on. Real SDK exports `Sandbox`. */

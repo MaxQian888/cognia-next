@@ -1,6 +1,5 @@
-import type { PluginContext } from "@/types/plugin"
-
-jest.mock("@/lib/sandbox/microvm-bridge", () => ({ setMicrovmExec: jest.fn() }))
+import type { PluginContext } from "@cognia/plugin-sdk"
+jest.mock("@cognia/plugin-sdk/api/sandbox", () => ({ setMicrovmExec: jest.fn() }))
 
 const fakeBackend = { kind: "e2b-backend" }
 jest.mock("./workspace-backend", () => ({
@@ -10,7 +9,7 @@ jest.mock("./workspace-backend", () => ({
 const fakeExec = { kind: "microvm-exec", dispose: jest.fn(async () => undefined) }
 jest.mock("./microvm-exec", () => ({ buildMicrovmExec: jest.fn(() => fakeExec) }))
 
-import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+import { setMicrovmExec } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
 import e2bSandbox from "./index"

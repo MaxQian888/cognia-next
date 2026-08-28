@@ -99,11 +99,13 @@
         "./packages/plugin-sdk/src/api/message-renderer.ts"
       ],
       "@cognia/plugin-sdk/api/ocr-provider": ["./packages/plugin-sdk/src/api/ocr-provider.ts"],
+      "@cognia/plugin-sdk/api/sandbox": ["./packages/plugin-sdk/src/api/sandbox.ts"],
       "@cognia/plugin-sdk/api/scheduled-task": ["./packages/plugin-sdk/src/api/scheduled-task.ts"],
       "@cognia/plugin-sdk/api/shared-memory-adapter": [
         "./packages/plugin-sdk/src/api/shared-memory-adapter.ts"
       ],
       "@cognia/plugin-sdk/api/skill": ["./packages/plugin-sdk/src/api/skill.ts"],
+      "@cognia/plugin-sdk/api/skill-recorder": ["./packages/plugin-sdk/src/api/skill-recorder.ts"],
       "@cognia/plugin-sdk/api/slash-command": ["./packages/plugin-sdk/src/api/slash-command.ts"],
       "@cognia/plugin-sdk/api/subagent": ["./packages/plugin-sdk/src/api/subagent.ts"],
       "@cognia/plugin-sdk/api/tool-renderer": ["./packages/plugin-sdk/src/api/tool-renderer.ts"],

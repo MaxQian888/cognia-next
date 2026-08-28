@@ -4,8 +4,8 @@ import type {
   MicrovmExecAdapter,
   MicrovmExecPayload,
   MicrovmResult,
-} from "@/lib/sandbox/microvm-bridge"
-import { MicrovmAdapterError } from "@/lib/sandbox/microvm-bridge"
+} from "@cognia/plugin-sdk/api/sandbox"
+import { MicrovmAdapterError } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BSandboxPool, type E2BSandboxLease } from "./sandbox-pool"
 
 export interface MicrovmExecOptions {

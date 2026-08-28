@@ -14,12 +14,12 @@
  */
 
 import { ClipboardHistoryCard } from "./clipboard-history-card"
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-// `isTauri` retained as a fallback for hosts that don't expose
+// `readHostCapabilities()` is the fallback for hosts that don't expose
 // `ctx.capabilities` (older bootstrap, sidecar harnesses). Prefer
 // `ctx.capabilities.tauri` per ADR-0026 §5 §C.
-import { isTauri } from "@/lib/tauri"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 
 const BUFFER_KEY = "buffer"
 
@@ -36,9 +36,9 @@ interface PluginConfig {
 
 async function readClipboardText(ctx?: PluginContext): Promise<string | null> {
   // Prefer ADR-0026 §5 §C `ctx.capabilities.tauri` when the host wired
-  // it; fall back to the direct `isTauri()` import when running under an
+  // it; fall back to the direct `readHostCapabilities().tauri` import when running under an
   // older bootstrap (the import keeps working as a `@deprecated` path).
-  const tauriHost = ctx?.capabilities?.tauri ?? isTauri()
+  const tauriHost = ctx?.capabilities?.tauri ?? readHostCapabilities().tauri
   if (tauriHost) {
     try {
       const mod = await import("@tauri-apps/plugin-clipboard-manager")

@@ -2,23 +2,30 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext } from "@/types/plugin"
-
-jest.mock("@/lib/ui/screenshot", () => ({
+import type { PluginContext } from "@cognia/plugin-sdk"
+// Mocked at the SDK subpaths the plugin imports, not at the host modules
+// behind them: a plugin's test should be able to run against the published
+// surface alone, the same way a third-party plugin's would.
+jest.mock("@cognia/plugin-sdk/api/automation", () => ({
   captureScreenshot: jest.fn(),
 }))
 
-jest.mock("@/lib/slash-commands/registry", () => ({
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 
 const extractMock = jest.fn()
-jest.mock("@/lib/ocr", () => ({ extract: (...a: unknown[]) => extractMock(...a) }))
-jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({}) }))
+jest.mock("@cognia/plugin-sdk/api/ocr-provider", () => ({
+  extract: (...a: unknown[]) => extractMock(...a),
+  buildOcrDeps: () => ({}),
+}))
 
-import { captureScreenshot } from "@/lib/ui/screenshot"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import { captureScreenshot } from "@cognia/plugin-sdk/api/automation"
+import {
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
 import screenshotPlugin, { captureToToolResult } from "./index"
 
 const captureMock = captureScreenshot as jest.Mock

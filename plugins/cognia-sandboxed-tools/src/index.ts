@@ -24,13 +24,18 @@
  * verbatim — no silent fallback to unsandboxed execution.
  */
 
-import type { PluginContext, PluginDefinition, PluginTool, PluginToolContext } from "@/types/plugin"
-import type { MicrovmExecPayload } from "@/lib/sandbox/microvm-bridge"
+import type {
+  PluginContext,
+  PluginDefinition,
+  PluginTool,
+  PluginToolContext,
+} from "@cognia/plugin-sdk"
+import type { MicrovmExecPayload } from "@cognia/plugin-sdk/api/sandbox"
 import {
   HOST_FALLBACK_RUNTIME_REF,
   SandboxRuntimeError,
   sandboxSessionRuntime,
-} from "@/lib/sandbox/session-runtime"
+} from "@cognia/plugin-sdk/api/sandbox"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"

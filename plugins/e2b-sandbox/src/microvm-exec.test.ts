@@ -2,7 +2,7 @@ import type {
   MicrovmCeiling,
   MicrovmExecPayload,
   MicrovmRequest,
-} from "@/lib/sandbox/microvm-bridge"
+} from "@cognia/plugin-sdk/api/sandbox"
 import { buildMicrovmExec } from "./microvm-exec"
 import { E2BSandboxPool } from "./sandbox-pool"
 

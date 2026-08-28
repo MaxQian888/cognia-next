@@ -34,3 +34,17 @@ export { getActiveWorkspaceRoot } from "@/lib/plugin/api/workspace-root"
  * value rather than a manifest-declared guess.
  */
 export { APP_VERSION } from "@/lib/app-version"
+
+/**
+ * Test seam. `setTransport()` replaces the Tauri IPC transport a plugin's
+ * desktop paths call through, so a plugin test can exercise them under jsdom
+ * without a real host. Production code must never call it — the host installs
+ * the real transport at boot, and replacing it mid-session silently redirects
+ * every `invoke` in the process.
+ *
+ * Exposed because the alternative was worse: plugin tests were importing
+ * `@/lib/tauri` directly to get at it, which pins the test to a host-private
+ * path a third-party plugin could never use.
+ */
+export { setTransport } from "@/lib/tauri"
+export type { Transport } from "@/lib/tauri/transport-types"

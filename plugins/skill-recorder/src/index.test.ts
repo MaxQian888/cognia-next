@@ -2,37 +2,42 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
 
-jest.mock("@/lib/slash-commands/registry", () => ({
+// Every double targets the SDK subpath the plugin imports, so the test
+// exercises the same surface a third-party recorder plugin would have.
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 
 const isTauriMock = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
-
-const recordStatusMock = jest.fn()
-jest.mock("@/lib/skills/recording/recorder-client", () => ({
-  recordStatus: (...a: unknown[]) => recordStatusMock(...a),
+jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
+  readHostCapabilities: () => ({ tauri: isTauriMock() }),
 }))
 
+const recordStatusMock = jest.fn()
 const openRecorderMock = jest.fn()
 const statusSnapshotMock = jest.fn().mockReturnValue({
   recording: false,
   phase: "idle",
   stepCount: 0,
 })
-jest.mock("@/stores/skills/recorder-store", () => ({
+jest.mock("@cognia/plugin-sdk/api/skill-recorder", () => ({
+  ...jest.requireActual("@cognia/plugin-sdk/api/skill-recorder"),
+  recordStatus: (...a: unknown[]) => recordStatusMock(...a),
   openRecorder: (...a: unknown[]) => openRecorderMock(...a),
   recorderStatusSnapshot: () => statusSnapshotMock(),
 }))
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import {
-  __resetRecorderAvailabilityForTesting,
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
+import {
+  clearRecorderAvailability,
   getRecorderAvailability,
-} from "@/lib/skills/recording/recorder-availability"
+} from "@cognia/plugin-sdk/api/skill-recorder"
 import plugin from "./index"
 
 const registerMock = registerSlashCommand as jest.Mock
@@ -71,7 +76,9 @@ beforeEach(() => {
     phase: "idle",
     stepCount: 0,
   })
-  __resetRecorderAvailabilityForTesting()
+  // `clearRecorderAvailability()` IS the reset — the same call the plugin
+  // makes on deactivate.
+  clearRecorderAvailability()
 })
 
 describe("skill-recorder (built-in)", () => {

@@ -13,13 +13,10 @@
  */
 
 import { ScreenshotResultCard } from "./screenshot-result-card"
-import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
-
+import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { captureScreenshot } from "@/lib/ui/screenshot"
-import { extract } from "@/lib/ocr"
-import { buildOcrDeps } from "@/lib/ocr/deps"
-
+import { captureScreenshot } from "@cognia/plugin-sdk/api/automation"
+import { buildOcrDeps, extract } from "@cognia/plugin-sdk/api/ocr-provider"
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)

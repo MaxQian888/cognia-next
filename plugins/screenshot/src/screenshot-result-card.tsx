@@ -15,15 +15,10 @@
 import { useTranslations } from "next-intl"
 import { CameraIcon } from "lucide-react"
 
-import type { ToolResultRendererProps } from "@/lib/plugin/api/tool-result-renderers"
-import {
-  McpCardShell,
-  blockMediaSrc,
-  parseOutputJson,
-} from "@/components/chat/message-parts/mcp-renderers/common"
-import type { McpResultBlock } from "@/lib/claude/parts-extensions"
-import { ImageBlock } from "@/components/chat/renderers/image-block"
-
+import type { ToolResultRendererProps } from "@cognia/plugin-sdk/api/tool-renderer"
+import { McpCardShell, blockMediaSrc, parseOutputJson } from "@cognia/plugin-sdk/api/tool-renderer"
+import type { McpResultBlock } from "@cognia/plugin-sdk/api/tool-renderer"
+import { ImageBlock } from "@cognia/plugin-sdk/api/tool-renderer"
 interface ContentBlockLike {
   type?: string
   text?: string

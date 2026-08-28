@@ -59,3 +59,16 @@ export type {
   ElementHandle,
   GetAppStateOptions,
 } from "@/lib/automation/types"
+
+/**
+ * Screen capture through the WebView, not the native automation stack.
+ *
+ * `desktop.screenshot(...)` above is the OS-level capture: it needs the
+ * screen-recording permission and only exists on the desktop shell.
+ * `captureScreenshot()` goes through `navigator.mediaDevices.getDisplayMedia()`
+ * instead — the browser owns the consent prompt and the source picker, so it
+ * works in every shell, and it returns a PNG `File` ready to attach. Resolves
+ * `null` when the user cancels or the API is unavailable; that is a normal
+ * outcome, not an error.
+ */
+export { captureScreenshot } from "@/lib/ui/screenshot"

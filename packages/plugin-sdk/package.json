@@ -171,6 +171,12 @@
       "require": "./dist/ocr-provider.cjs",
       "default": "./dist/ocr-provider.js"
     },
+    "./api/sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "import": "./dist/sandbox.js",
+      "require": "./dist/sandbox.cjs",
+      "default": "./dist/sandbox.js"
+    },
     "./api/scheduled-task": {
       "types": "./dist/scheduled-task.d.ts",
       "import": "./dist/scheduled-task.js",
@@ -188,6 +194,12 @@
       "import": "./dist/skill.js",
       "require": "./dist/skill.cjs",
       "default": "./dist/skill.js"
+    },
+    "./api/skill-recorder": {
+      "types": "./dist/skill-recorder.d.ts",
+      "import": "./dist/skill-recorder.js",
+      "require": "./dist/skill-recorder.cjs",
+      "default": "./dist/skill-recorder.js"
     },
     "./api/slash-command": {
       "types": "./dist/slash-command.d.ts",

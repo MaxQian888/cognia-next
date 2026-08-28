@@ -5,7 +5,8 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
 const copyMock = jest.fn(async () => true)
-jest.mock("@/hooks/ui/use-copy", () => ({
+jest.mock("@cognia/plugin-sdk/api/tool-renderer", () => ({
+  ...jest.requireActual("@cognia/plugin-sdk/api/tool-renderer"),
   useCopy: () => ({ copied: false, copy: copyMock }),
 }))
 

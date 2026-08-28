@@ -4,7 +4,8 @@
 import { render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
-jest.mock("@/components/chat/renderers/image-block", () => ({
+jest.mock("@cognia/plugin-sdk/api/tool-renderer", () => ({
+  ...jest.requireActual("@cognia/plugin-sdk/api/tool-renderer"),
   ImageBlock: ({ src, alt }: { src: string; alt?: string }) => (
     <img data-testid="screenshot-image" src={src} alt={alt} />
   ),

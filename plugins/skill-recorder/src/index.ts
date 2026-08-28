@@ -22,13 +22,13 @@
  * browser and mobile `blocked`, so `activate` never runs there.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { isTauri } from "@/lib/tauri"
-import { recordStatus } from "@/lib/skills/recording/recorder-client"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import {
   clearRecorderAvailability,
+  recordStatus,
   setRecorderAvailability,
-} from "@/lib/skills/recording/recorder-availability"
+} from "@cognia/plugin-sdk/api/skill-recorder"
 import manifestJson from "../plugin.json"
 
 const definition: PluginDefinition = {
@@ -57,7 +57,7 @@ const definition: PluginDefinition = {
         },
       } as never,
       execute: async () => {
-        if (!isTauri()) {
+        if (!readHostCapabilities().tauri) {
           return { ok: false as const, error: "desktop-only" }
         }
         try {
@@ -65,7 +65,7 @@ const definition: PluginDefinition = {
           // authority on whether capture is actually running. Prefer the store
           // when it has a session, so "paused" and "reviewing" are not reported
           // as "not recording".
-          const { recorderStatusSnapshot } = await import("@/stores/skills/recorder-store")
+          const { recorderStatusSnapshot } = await import("@cognia/plugin-sdk/api/skill-recorder")
           const local = recorderStatusSnapshot()
           if (local.phase !== "idle") {
             return {
@@ -95,11 +95,11 @@ const definition: PluginDefinition = {
     return {
       onCommand: async (command: string) => {
         if (command !== "record-skill") return false
-        if (!isTauri()) {
+        if (!readHostCapabilities().tauri) {
           ctx.ui?.showToast?.("Skill recording is desktop-only.", "error")
           return true
         }
-        const { openRecorder } = await import("@/stores/skills/recorder-store")
+        const { openRecorder } = await import("@cognia/plugin-sdk/api/skill-recorder")
         openRecorder("plugin-command")
         return true
       },

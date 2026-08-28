@@ -2,13 +2,16 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
+// Mocked at the SDK subpaths the plugin imports, not at the host modules
+// behind them.
+jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
+  readHostCapabilities: () => ({ tauri: false }),
+}))
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
-
-jest.mock("@/lib/slash-commands/registry", () => ({
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 
 // Virtual double for the desktop clipboard read path.
@@ -21,7 +24,10 @@ jest.mock(
   { virtual: true }
 )
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import {
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
 import clipboardHistory from "./index"
 
 const registerMock = registerSlashCommand as jest.Mock

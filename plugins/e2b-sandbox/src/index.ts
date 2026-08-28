@@ -15,11 +15,11 @@
  * Part of M3 of the plugin-first Computer Use plan.
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
 import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
 import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 import manifestJson from "../plugin.json"
-import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+import { setMicrovmExec } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import type { E2BSandboxConnection } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
