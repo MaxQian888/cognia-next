@@ -139,6 +139,55 @@ describe("TaskScheduler", () => {
       await initTaskScheduler()
       expect(mockSchedulerDb.interruptStaleExecutions).toHaveBeenCalledTimes(1)
     })
+
+    it("unrefs its housekeeping intervals so a Node host can still exit", async () => {
+      // jsdom's setInterval returns a NUMBER, which cannot carry `unref` —
+      // hand back a Node-shaped object handle instead and record who unrefs
+      // it. Without the production `unref`, `cognia-agent run --plugin-tools`
+      // finished its turn and then hung forever on these two timers.
+      const unrefs: string[] = []
+      const spy = jest.spyOn(globalThis, "setInterval").mockImplementation(((
+        _handler: TimerHandler,
+        timeout?: number
+      ) => ({
+        unref: () => {
+          unrefs.push(String(timeout))
+        },
+      })) as unknown as typeof setInterval)
+
+      try {
+        await initTaskScheduler()
+      } finally {
+        spy.mockRestore()
+      }
+
+      // The missed-task poll (60s) and the execution auto-cleanup (24h).
+      expect(unrefs).toEqual(expect.arrayContaining(["60000", String(24 * 60 * 60 * 1000)]))
+    })
+
+    it("unrefs the execution-status BroadcastChannel for the same reason", async () => {
+      // Node's BroadcastChannel refs the loop by itself, so this one channel
+      // was enough to keep a finished one-shot run alive even after both
+      // housekeeping intervals were unref'd.
+      const unref = jest.fn()
+      const prior = (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+      class NodeShapedChannel {
+        onmessage: unknown = null
+        unref = unref
+        constructor(public name: string) {}
+        postMessage(): void {}
+        close(): void {}
+      }
+      ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = NodeShapedChannel
+
+      try {
+        await initTaskScheduler()
+      } finally {
+        ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = prior
+      }
+
+      expect(unref).toHaveBeenCalled()
+    })
   })
 
   describe("stopTaskScheduler", () => {

@@ -644,7 +644,7 @@ describe("buildMcpServerMap", () => {
       transport: "http",
       config: { url: "https://127.0.0.1/mcp" },
     })
-    expect(() => buildMcpServerMap([blocked])).toThrow("private")
+    expect(buildMcpServerMap([blocked])).toEqual({})
 
     const reviewed = {
       ...blocked,
@@ -653,6 +653,45 @@ describe("buildMcpServerMap", () => {
     expect(buildMcpServerMap([reviewed])["blocked-local"]).toMatchObject({
       url: "http://127.0.0.1/mcp",
       allowPrivateNetwork: true,
+    })
+  })
+
+  it("excludes only the refused server, never the whole turn's map", async () => {
+    // One saved `http://` URL used to throw out of the loop and abandon every
+    // other server with it — including stdio servers the guard never inspects.
+    const refused = await createReviewed({
+      name: "storybook",
+      transport: "http",
+      config: { url: "http://localhost:6006/mcp" },
+    })
+    const local = await createReviewed({
+      name: "alpha-stdio",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    const remote = await createReviewed({
+      name: "zeta-remote",
+      transport: "http",
+      config: { url: "https://mcp.example.com/mcp" },
+    })
+
+    const out = buildMcpServerMap([refused, local, remote])
+
+    expect(Object.keys(out).sort()).toEqual(["alpha-stdio", "zeta-remote"])
+    expect(out.storybook).toBeUndefined()
+  })
+
+  it("frees the refused server's namespace for a later server that reuses it", async () => {
+    const refused = await createReviewed({
+      name: "dup",
+      transport: "http",
+      config: { url: "http://localhost:6006/mcp" },
+    })
+    const reused = { ...refused, id: `${refused.id}-2`, config: { url: "https://ok.example/mcp" } }
+
+    expect(() => buildMcpServerMap([refused, reused])).not.toThrow()
+    expect(buildMcpServerMap([refused, reused]).dup).toMatchObject({
+      url: "https://ok.example/mcp",
     })
   })
 

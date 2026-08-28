@@ -85,6 +85,13 @@ export async function startLeaderElection(): Promise<void> {
         setLeader(false)
       }
     }
+    // Node's BroadcastChannel keeps the event loop alive on its own, so this
+    // cross-tab election channel alone was enough to stop `cognia-agent run
+    // --plugin-tools` from ever exiting once a plugin registered a scheduled
+    // task. `unref` drops only the loop reference — delivery is unaffected for
+    // as long as the process is running, which is the whole window in which
+    // another context could contest leadership. Browsers have no `unref`.
+    ;(state.channel as { unref?: () => void }).unref?.()
   } catch {
     log.warn("[TabLock] BroadcastChannel not available")
   }
@@ -171,6 +178,9 @@ function startHeartbeatElection(): void {
 
   // Then periodically
   state.heartbeatTimer = setInterval(tryClaimLeadership, HEARTBEAT_INTERVAL)
+  // Same reason as the channel above: a leadership heartbeat must not be the
+  // thing that keeps a one-shot Node run alive.
+  ;(state.heartbeatTimer as unknown as { unref?: () => void }).unref?.()
 
   // Listen for storage events from other tabs
   state.storageHandler = (event: StorageEvent) => {

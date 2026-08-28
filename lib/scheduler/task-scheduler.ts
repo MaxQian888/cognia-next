@@ -51,6 +51,21 @@ import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/sch
 import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { normalizeTaskTrigger } from "./trigger-normalizer"
+
+/**
+ * Drop a housekeeping interval's hold on the event loop.
+ *
+ * `unref` exists on Node timer handles only; browsers return a number, so this
+ * is a no-op there. Without it, a Node host that boots the scheduler — the CLI
+ * with `--plugin-tools`, the supervised brain — can never exit: the one-shot
+ * `cognia-agent run` finished its turn and then hung on these two timers
+ * forever. Long-lived hosts keep the loop alive through their own server
+ * socket or TUI input, so the intervals still fire there; the per-task alarms
+ * in `timing/node-driver.ts` are unref'd for exactly the same reason.
+ */
+function unrefTimer(handle: ReturnType<typeof setInterval> | null): void {
+  ;(handle as unknown as { unref?: () => void } | null)?.unref?.()
+}
 import { normalizeConversationalTaskPayload } from "./conversational-task-authoring"
 import { resolveCatchupDefaults } from "./catchup-policy"
 import {
@@ -459,6 +474,11 @@ class TaskSchedulerImpl {
       // Initialize BroadcastChannel for real-time execution status updates
       try {
         this.executionChannel = new BroadcastChannel(EXECUTION_CHANNEL_NAME)
+        // Node's BroadcastChannel refs the event loop on its own, so this
+        // status fan-out alone kept `cognia-agent run --plugin-tools` alive
+        // forever once a plugin registered a scheduled task. Same reasoning as
+        // `unrefTimer` above; browsers have no `unref`.
+        ;(this.executionChannel as { unref?: () => void }).unref?.()
       } catch {
         log.warn("BroadcastChannel not available for execution status updates")
       }
@@ -693,6 +713,7 @@ class TaskSchedulerImpl {
         log.error("Error checking missed tasks:", err)
       })
     }, 60000)
+    unrefTimer(this.checkInterval)
   }
 
   /**
@@ -714,6 +735,7 @@ class TaskSchedulerImpl {
         log.error("Error in auto-cleanup:", err)
       })
     }, CLEANUP_INTERVAL)
+    unrefTimer(this.cleanupInterval)
   }
 
   /**

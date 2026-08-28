@@ -319,6 +319,10 @@ import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 import { backfillSessionLineageV131 } from "./session-lineage-backfill"
 import type { ChatTemplateRow } from "./chat-templates"
+import type {
+  ExternalAgentConfigHeadRow,
+  ExternalAgentConfigRevisionRow,
+} from "@/types/agent/external-agent-config-store"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -4755,8 +4759,22 @@ export class CogniaDB extends Dexie {
       threadHandoffTickets:
         "&[ticketId+role], ticketId, role, state, expiresAt, source.sessionId, target.hostRef",
     })
+
+    // v201 — host-owned external-agent configurations (head + append-only
+    // revisions). See `lib/db/external-agent-configs.ts`. `*leaseRuns` is
+    // multi-entry so a finished run can release its pins without scanning
+    // every revision, and `[configId+seq]` gives the per-config history in
+    // order without sorting in memory.
+    this.version(201).stores({
+      externalAgentConfigHeads: "&configId, tombstonedAt, updatedAt",
+      externalAgentConfigRevisions: "&revisionId, configId, [configId+seq], createdAt, *leaseRuns",
+    })
   }
 
+  // v201 — host-owned external-agent configurations. See
+  // `lib/db/external-agent-configs.ts`.
+  externalAgentConfigHeads!: Table<ExternalAgentConfigHeadRow, string>
+  externalAgentConfigRevisions!: Table<ExternalAgentConfigRevisionRow, string>
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
   chatTemplates!: Table<ChatTemplateRow, string>
   // v194 — ADR-0149 identity projection. See `lib/db/identity.ts`.
@@ -5141,6 +5159,15 @@ function ensureYieldChannel(): BroadcastChannel | null {
       const msg = event.data as DbYieldMessage | undefined
       handleYieldMessage(msg, (reply) => _yieldChannel?.postMessage(reply))
     }
+    // Node's BroadcastChannel keeps the event loop alive on its own, so an
+    // open yield channel is enough to stop a CLI / brain process from ever
+    // exiting — `cognia-agent run` finished its turn and then hung forever.
+    // `unref` only drops the loop reference; delivery still works for as long
+    // as the process is running for another reason, which is exactly the
+    // window in which a cross-context upgrade can need the handshake. Absent
+    // in browsers (and in the jsdom stub), hence the guard. Dexie unrefs its
+    // own internal BroadcastChannel for the same reason.
+    ;(_yieldChannel as { unref?: () => void }).unref?.()
   } catch {
     _yieldChannel = null
   }

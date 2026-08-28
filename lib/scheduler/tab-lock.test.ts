@@ -66,6 +66,35 @@ describe("getTabId", () => {
   })
 })
 
+describe("Node event-loop hygiene", () => {
+  it("unrefs the election channel and heartbeat so a one-shot run can exit", async () => {
+    // Node's BroadcastChannel and its interval each keep the event loop alive
+    // by themselves; without these unrefs `cognia-agent run --plugin-tools`
+    // finished its turn and then hung forever. The shared mocks deliberately
+    // have no `unref` (the browser shape every other test here covers).
+    const channelUnref = jest.fn()
+    class UnrefableChannel extends MockBroadcastChannel {
+      unref = channelUnref
+    }
+    ;(globalThis as unknown as { BroadcastChannel?: unknown }).BroadcastChannel = UnrefableChannel
+
+    const timerUnref = jest.fn()
+    const spy = jest
+      .spyOn(globalThis, "setInterval")
+      .mockImplementation((() => ({ unref: timerUnref })) as unknown as typeof setInterval)
+
+    try {
+      // No Web Locks in this environment, so this takes the heartbeat path.
+      await startLeaderElection()
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(channelUnref).toHaveBeenCalledTimes(1)
+    expect(timerUnref).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("Web Locks election path", () => {
   it("claims leadership and broadcasts via BroadcastChannel", async () => {
     const requestMock = jest.fn().mockImplementation(async (_name, _opts, cb) => {

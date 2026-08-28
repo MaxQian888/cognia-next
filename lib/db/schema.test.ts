@@ -87,6 +87,34 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
+    const name = `cognia-external-agent-configs-v201-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(200).stores({ sessions: "id, updatedAt" })
+    await legacy.open()
+    await legacy.table("sessions").put({ id: "session-before-configs", updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(201)
+    expect(upgraded.externalAgentConfigHeads.schema.primKey.keyPath).toBe("configId")
+    expect(upgraded.externalAgentConfigRevisions.schema.primKey.keyPath).toBe("revisionId")
+    // `*leaseRuns` is multi-entry so a finished run releases its pins without
+    // scanning every revision; `[configId+seq]` gives ordered history.
+    const revisionIndexes = upgraded.externalAgentConfigRevisions.schema.indexes
+    expect(revisionIndexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["configId", "[configId+seq]", "createdAt", "leaseRuns"])
+    )
+    expect(revisionIndexes.find((index) => index.name === "leaseRuns")?.multi).toBe(true)
+    expect(await upgraded.sessions.get("session-before-configs")).toEqual({
+      id: "session-before-configs",
+      updatedAt: 1,
+    })
+    upgraded.close()
+  })
+
   fullSchemaIt("v200 adds compound source/target thread handoff tickets", async () => {
     const name = `cognia-thread-handoff-v200-${Date.now()}`
     const legacy = new Dexie(name)
@@ -5028,6 +5056,24 @@ describe("cross-context upgrade yield channel", () => {
     expect(FakeBroadcastChannel.instances).toHaveLength(0)
     getDb()
     expect(activeChannel().name).toBe("cognia-db-yield")
+  })
+
+  it("unrefs the channel on hosts that support it, so the process can still exit", () => {
+    // Node's BroadcastChannel keeps the event loop alive by itself: without
+    // this, `cognia-agent run` finishes its turn and then hangs forever. The
+    // shared fake deliberately has NO `unref` (that is the browser shape every
+    // other test in this block covers), so only this subclass sees the call.
+    const unref = jest.fn()
+    class UnrefableChannel extends FakeBroadcastChannel {
+      unref = unref
+    }
+    ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = UnrefableChannel
+
+    getDb()
+
+    expect(unref).toHaveBeenCalledTimes(1)
+    // Unref must not close the channel — the handshake still has to deliver.
+    expect(activeChannel().closed).toBe(false)
   })
 
   it("broadcasts a yield request when our upgrade is blocked", () => {

@@ -17,6 +17,7 @@ import {
   validateMcpDefinition,
 } from "@/lib/mcp/server-definition"
 import { validateMcpRemoteEgress } from "@/lib/mcp/policy"
+import { loggers } from "@cognia/logging"
 import {
   isToolRuleTightening,
   normalizeToolRuleList,
@@ -32,6 +33,8 @@ import {
 function newId() {
   return "mcp_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
+
+const mcpLog = loggers.mcp.child("server-map")
 
 export async function listMcpServers(): Promise<McpServer[]> {
   return getDb().mcpServers.orderBy("name").toArray()
@@ -373,7 +376,28 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
     namespaces.add(normalized)
     if (s.transport !== "stdio") {
       const config = s.config as Record<string, unknown>
-      validateMcpRemoteEgress(String(config.url ?? ""), config.allowPrivateNetwork === true)
+      try {
+        validateMcpRemoteEgress(String(config.url ?? ""), config.allowPrivateNetwork === true)
+      } catch (error) {
+        // Drop just this server. Throwing here used to abandon the whole map,
+        // so ONE endpoint the egress guard refuses — a saved `http://` URL, a
+        // typo — silently removed EVERY MCP server from the turn, including
+        // the stdio ones the guard never looks at. The caller's catch reported
+        // that as a single line about the first bad URL, which reads like one
+        // server being skipped rather than all of them being dropped.
+        //
+        // Skipping is strictly no less restrictive than throwing: the refused
+        // endpoint is still never projected into an SDK session. The refusal
+        // is logged per server so a disappearing tool namespace is traceable
+        // to the server and the reason.
+        mcpLog.warn("Excluded MCP server from this turn: remote egress refused", {
+          server: s.name,
+          transport: s.transport,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+        namespaces.delete(normalized)
+        continue
+      }
     }
     out[s.name] = { type: s.transport, ...s.config }
   }
