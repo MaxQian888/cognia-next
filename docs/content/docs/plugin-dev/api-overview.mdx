@@ -102,6 +102,70 @@ return {
 report is fine). Returning `true` keeps the legacy behavior — handled, host
 writes the response line — and `false` / `{ handled: false }` declines.
 
+## Capability subpaths
+
+`ctx.*` is the runtime a plugin is handed. Some contributions also have a
+*static* half — a registry to join, a domain vocabulary to implement against, a
+host client to drive — and those live on `@cognia/plugin-sdk/api/<capability>`:
+
+```ts
+import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"
+import { registerCharacterPack, unregisterCharacterPacksByPlugin } from "@cognia/plugin-sdk/api/character-pack"
+
+export async function activate(ctx: PluginContext) {
+  registerCharacterPack(MY_PACK.id, MY_PACK, { pluginId: ctx.pluginId })
+}
+
+export async function deactivate(ctx: PluginContext) {
+  unregisterCharacterPacksByPlugin(ctx.pluginId)
+}
+```
+
+Two rules make these safe to depend on:
+
+- **Registries are absent from the root barrel** (pinned by
+  `packages/plugin-sdk/src/index.test.ts`). Importing one is a decision you
+  write down, not something that arrives with `import { definePlugin }`. The
+  root carries types and pure helpers only.
+- **Every registry ships an `unregisterXxxByPlugin(pluginId)` twin.** That is
+  the supported teardown — on `deactivate`, and in your own tests. The host's
+  `__resetXxxForTesting` helpers are deliberately private: they clear
+  contributions your plugin never made.
+
+Published subpaths, by what they let a plugin do:
+
+| Subpath | For |
+| --- | --- |
+| `agent-turn` | Run a full character turn headlessly; start a seeded conversation |
+| `agent-team-template`, `subagent`, `skill`, `shared-memory-adapter`, `balance-adapter` | Contribute agent-team pieces dynamically |
+| `automation` | Desktop automation client, the computer-use policy, screen capture |
+| `browser` | The embedded browser engine, its per-domain consent gate, annotations |
+| `character-pack` | Character packs and the portable pack-file format |
+| `cli-tool` | The argv/cwd template engine behind a declarative CLI tool |
+| `connector`, `integration` | Platform connectors and marketplace integrations |
+| `context-panel`, `context-provider` | Context workbench panels and ambient context |
+| `eval` | The evaluation pipeline and its scoring version |
+| `external-agent-adapter`, `external-agent-preset` | Speak a new agent protocol; ship a preset |
+| `host-environment` | Which shell am I in, where is the user working, app version |
+| `i18n` | Register your own message bundles |
+| `message-renderer`, `tool-renderer` | Render a custom message part or tool-result card |
+| `ocr-provider` | Implement an OCR provider, or drive the host's extraction pipeline |
+| `resources` | Index-level lists of the user's characters, skills, MCP servers, … |
+| `sandbox` | Provide a microVM executor, or check whether a session is confined |
+| `scheduled-task` | Plugin tasks, and the user's own schedule |
+| `security-findings` | The shared finding vocabulary and the scan-run bridge |
+| `skill-recorder` | Publish desktop recording availability and drive the recorder |
+| `slash-command` | Contribute `/commands` |
+| `testing` | Test-only: a real-Dexie fixture and the seams a plugin cannot fake |
+| `webview`, `editor` | Webview panels and the active editor |
+| `workflow-editor`, `workflow-run`, `workflow-template` | Edit a live workflow, start one, ship a template |
+
+`@cognia/plugin-sdk/host` is not published, and neither is any `@cognia/*`
+workspace package other than `plugin-sdk` and `plugin-ui`. Anything you need
+from the host arrives through one of the subpaths above, where it is a contract
+rather than an accident — `pnpm plugin:author-imports` enforces that for every
+in-tree plugin.
+
 ## Governance pipeline
 
 Calls registered in the catalog are evaluated in this order:
