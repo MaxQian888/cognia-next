@@ -21,6 +21,7 @@
 //! child; credentials are never forwarded and come from the CLI's 0600 Logto
 //! session file.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -182,6 +183,102 @@ impl ReadyWatchdog {
     }
 }
 
+/// Level tags the brain can put in front of a line. `fatal` has no `log`
+/// counterpart and collapses to `Error`, matching the frontend's mapping.
+const BRAIN_LEVEL_TAGS: [(&str, log::Level); 6] = [
+    ("TRACE", log::Level::Trace),
+    ("DEBUG", log::Level::Debug),
+    ("INFO", log::Level::Info),
+    ("WARN", log::Level::Warn),
+    ("ERROR", log::Level::Error),
+    ("FATAL", log::Level::Error),
+];
+
+/// How far into a line a level tag may sit. Past that we would start eating
+/// message text that merely happens to bracket a level word.
+const BRAIN_TAG_SCAN_CHARS: usize = 48;
+
+/// Drop ANSI escape sequences, borrowing when there are none.
+///
+/// A supervised child emits no colour — `packages/logging` yields the clock,
+/// the icon and the colour the moment it sees a piped stdout — but
+/// `FORCE_COLOR` is the documented way to keep colour in `docker logs`, and a
+/// coloured line begins `\x1b[34m[INFO]\x1b[0m …`. The CSI introducer is
+/// itself a `[`, so the tag scan below would pair it with the `]` of the real
+/// tag, test `"34m[INFO"` against the level table, miss, and resume PAST the
+/// tag — flattening every child line to the supervisor's default level with
+/// the escapes still embedded.
+fn strip_ansi(line: &str) -> Cow<'_, str> {
+    if !line.contains('\x1b') {
+        return Cow::Borrowed(line);
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' {
+            out.push(ch);
+            continue;
+        }
+        // CSI (`\x1b[`) runs to a final byte in `@`..=`~`. Any other escape is
+        // two bytes, so dropping the introducer alone is enough.
+        if let Some('[') = chars.next() {
+            for c in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&c) {
+                    break;
+                }
+            }
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// The level a line claims, and the byte offset its message starts at.
+/// `None` when no bracketed group in the head names a level.
+fn scan_brain_level(line: &str) -> Option<(log::Level, usize)> {
+    let head_end = line
+        .char_indices()
+        .nth(BRAIN_TAG_SCAN_CHARS)
+        .map_or(line.len(), |(index, _)| index);
+    let mut cursor = 0usize;
+    while cursor < head_end {
+        let open = cursor + line[cursor..head_end].find('[')?;
+        let close = open + line[open..head_end].find(']')?;
+        if let Some((_, level)) = BRAIN_LEVEL_TAGS
+            .iter()
+            .find(|(name, _)| line[open + 1..close].eq_ignore_ascii_case(name))
+        {
+            return Some((*level, close + 1));
+        }
+        cursor = close + 1;
+    }
+    None
+}
+
+/// Split a child line into the level it claims and the message after it.
+///
+/// The brain runs `packages/logging`, which prints its own `[LEVEL]` tag —
+/// and, on a terminal, a clock and an icon in front of it. Stamping the
+/// supervisor's own `[INFO]` on top buried real child warnings and printed
+/// two level tags per line (`[INFO] [brain] [3:34:42 PM] i [INFO] ...`), so
+/// take the first bracketed group that names a level, drop everything up to
+/// and including it, and report at that level. Untagged lines — the CLI's own
+/// `serve: ...` writes — come back whole at `default_level`.
+///
+/// Colour is stripped first; see [`strip_ansi`] for why the scan cannot see it.
+fn classify_brain_line(line: &str, default_level: log::Level) -> (log::Level, Cow<'_, str>) {
+    let clean = strip_ansi(line);
+    let Some((level, start)) = scan_brain_level(&clean) else {
+        // Untagged lines come back byte-for-byte (minus colour): a `serve:`
+        // write is the message, not a prefix around one.
+        return (default_level, clean);
+    };
+    let message = match clean {
+        Cow::Borrowed(text) => Cow::Borrowed(text[start..].trim_start()),
+        Cow::Owned(text) => Cow::Owned(text[start..].trim_start().to_owned()),
+    };
+    (level, message)
+}
+
 impl BrainSupervisor {
     pub fn new(config: BrainConfig, state: SharedState) -> Arc<Self> {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -304,12 +401,14 @@ impl BrainSupervisor {
         self.running.store(true, Ordering::SeqCst);
         self.restart_count.fetch_add(1, Ordering::SeqCst);
 
-        // Pipe child output to the server log.
+        // Pipe child output to the server log, keeping the level the child
+        // claimed instead of flattening every line to INFO.
         if let Some(stdout) = child.stdout.take() {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
-                    log::info!("[brain] {line}");
+                    let (level, message) = classify_brain_line(&line, log::Level::Info);
+                    log::log!(level, "[brain] {message}");
                 }
             });
         }
@@ -317,7 +416,10 @@ impl BrainSupervisor {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
-                    log::warn!("[brain.stderr] {line}");
+                    // Anything on stderr is a warning at minimum even when the
+                    // child left it untagged; a tagged ERROR still lands as one.
+                    let (level, message) = classify_brain_line(&line, log::Level::Warn);
+                    log::log!(level.min(log::Level::Warn), "[brain.stderr] {message}");
                 }
             });
         }
@@ -583,6 +685,80 @@ mod tests {
             .await
             .expect("loop must stop on shutdown")
             .expect("join");
+    }
+
+    #[test]
+    fn a_bare_level_tag_sets_the_level_and_is_stripped() {
+        let (level, message) =
+            classify_brain_line("[WARN] [scheduler] queue is backed up", log::Level::Info);
+        assert_eq!(level, log::Level::Warn);
+        assert_eq!(message, "[scheduler] queue is backed up");
+    }
+
+    #[test]
+    fn a_clock_and_icon_in_front_of_the_tag_are_stripped_too() {
+        // What `packages/logging` prints when it thinks it owns a terminal.
+        let (level, message) = classify_brain_line(
+            "[3:34:42 PM] \u{2139}\u{fe0f} [INFO] [scheduler] Registered executor for task type: chat",
+            log::Level::Warn,
+        );
+        assert_eq!(level, log::Level::Info);
+        assert_eq!(
+            message,
+            "[scheduler] Registered executor for task type: chat"
+        );
+    }
+
+    #[test]
+    fn fatal_collapses_to_error() {
+        let (level, message) = classify_brain_line("[FATAL] vault unreachable", log::Level::Info);
+        assert_eq!(level, log::Level::Error);
+        assert_eq!(message, "vault unreachable");
+    }
+
+    #[test]
+    fn an_untagged_line_keeps_its_text_and_the_default_level() {
+        // The CLI's own `serve:` writes carry no tag and must survive whole.
+        let (level, message) = classify_brain_line(
+            "serve: headless runtime started: a2ui-dispatch",
+            log::Level::Info,
+        );
+        assert_eq!(level, log::Level::Info);
+        assert_eq!(message, "serve: headless runtime started: a2ui-dispatch");
+
+        let (level, message) = classify_brain_line("node:internal/errors stack", log::Level::Warn);
+        assert_eq!(level, log::Level::Warn);
+        assert_eq!(message, "node:internal/errors stack");
+    }
+
+    #[test]
+    fn a_level_word_deep_in_the_message_is_not_a_tag() {
+        let line =
+            "serve: retry budget exhausted while draining the outbound queue, [INFO] follows";
+        let (level, message) = classify_brain_line(line, log::Level::Info);
+        assert_eq!(level, log::Level::Info);
+        assert_eq!(message, line, "the message must not be truncated");
+    }
+
+    #[test]
+    fn colour_does_not_hide_the_level_tag() {
+        // `FORCE_COLOR` (the documented way to keep colour in `docker logs`)
+        // makes the child paint its own tag. The CSI introducer is a `[`, so
+        // an unstripped scan pairs it with the tag's `]` and walks past it.
+        let (level, message) =
+            classify_brain_line("\x1b[31m[ERROR]\x1b[0m [gateway] upstream refused", log::Level::Info);
+        assert_eq!(level, log::Level::Error);
+        assert_eq!(message, "[gateway] upstream refused");
+    }
+
+    #[test]
+    fn stderr_lines_never_drop_below_warn() {
+        // The supervisor floors stderr at WARN; an INFO tag must not demote it,
+        // and an ERROR tag must still come through as an error.
+        let (info, _) = classify_brain_line("[INFO] noise on stderr", log::Level::Warn);
+        assert_eq!(info.min(log::Level::Warn), log::Level::Warn);
+        let (error, _) = classify_brain_line("[ERROR] spawn failed", log::Level::Warn);
+        assert_eq!(error.min(log::Level::Warn), log::Level::Error);
     }
 
     #[test]
