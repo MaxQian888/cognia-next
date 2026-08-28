@@ -112,3 +112,29 @@ describe("decideNextAction", () => {
     expect(tokens).toBe(0)
   })
 })
+
+describe("normalizeDecision optional-key shape", () => {
+  // `exactOptionalPropertyTypes`: a present `rationale: undefined` is a
+  // DIFFERENT type from an absent key, and plugin authors compile against the
+  // packed SDK with that flag on. `toEqual` cannot see the difference, so these
+  // assert on key presence.
+  it("omits rationale rather than setting it to undefined", () => {
+    const d = normalizeDecision({ action: "search", queries: ["q"] }, withState(), true)
+    expect("rationale" in d).toBe(false)
+  })
+
+  it("omits it on the read -> search pivot as well", () => {
+    const d = normalizeDecision({ action: "read" }, withState({ candidates: [] }), true)
+    expect(d.action).toBe("search")
+    expect("rationale" in d).toBe(false)
+  })
+
+  it("still carries a rationale the model supplied", () => {
+    const d = normalizeDecision(
+      { action: "search", queries: ["q"], rationale: "because" },
+      withState(),
+      true
+    )
+    expect(d.rationale).toBe("because")
+  })
+})

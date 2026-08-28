@@ -1,62 +1,46 @@
 /**
- * Config + secret reading. The only host type used is `PluginContext`
- * (types-only import) — no behavioural coupling to the core app.
+ * Engine budgets, read from the plugin's own declarative configuration.
+ *
+ * `ctx.configuration` (not a raw `ctx.config` bag) because it seeds the
+ * manifest's schema defaults: a fresh install has never written a config row,
+ * and reading raw storage there returns `undefined` for every budget — which
+ * silently ran the loop on the engine's internal defaults instead of the ones
+ * the manifest advertises to the user.
+ *
+ * Search-provider credentials are deliberately absent. Search and page reads go
+ * through the host's promoted web tools, so the provider and its key live in
+ * Settings → Search, configured once for the whole app.
  */
-import type { PluginContext } from "@/types/plugin"
-import type { SearchProviderId } from "./providers/search"
+import type { PluginContext } from "@cognia/plugin-sdk"
+
 import type { DeepSearchConfig } from "./types"
 
 export const PLUGIN_ID = "cognia-deep-research"
 
-/** Keyring id for a provider's API key, e.g. `cognia-deep-research:exaKey`. */
-export function secretKey(provider: SearchProviderId): string {
-  return `${PLUGIN_ID}:${provider}Key`
-}
-
-function cfg(ctx: PluginContext): Record<string, unknown> {
-  return (ctx.config as Record<string, unknown> | undefined) ?? {}
-}
-
-export function readSearchProvider(ctx: PluginContext): SearchProviderId {
-  const value = cfg(ctx).searchProvider
-  return value === "tavily" ? "tavily" : "exa"
-}
+/** Numeric budgets accepted from configuration, in manifest order. */
+const NUMERIC_KEYS = [
+  "tokenBudget",
+  "maxSteps",
+  "maxBadAttempts",
+  "readTopK",
+  "searchResultsPerQuery",
+] as const satisfies ReadonlyArray<keyof DeepSearchConfig>
 
 /**
- * Resolve a provider API key: the secure keyring first, then a plain-config
- * fallback (handy in web/dev where the keyring degrades to localStorage).
+ * Engine overrides drawn from plugin configuration. Absent, non-numeric or
+ * non-positive values fall through to `DEFAULT_CONFIG` rather than poisoning a
+ * budget with `NaN` or `0` (a zero step ceiling ends the run before it starts).
  */
-export async function readApiKey(
-  ctx: PluginContext,
-  provider: SearchProviderId
-): Promise<string | null> {
-  try {
-    const fromSecret = await ctx.secrets?.get?.(secretKey(provider))
-    if (fromSecret && fromSecret.trim()) return fromSecret.trim()
-  } catch {
-    // keyring unavailable — fall back to config
-  }
-  const fromConfig = cfg(ctx)[`${provider}ApiKey`]
-  return typeof fromConfig === "string" && fromConfig.trim() ? fromConfig.trim() : null
-}
-
-/** Engine config overrides drawn from plugin config (absent keys use defaults). */
 export function readEngineConfig(ctx: PluginContext): Partial<DeepSearchConfig> {
-  const c = cfg(ctx)
+  const config = ctx.configuration.getAll()
   const out: Partial<DeepSearchConfig> = {}
-  const numbers: (keyof DeepSearchConfig)[] = [
-    "tokenBudget",
-    "maxSteps",
-    "maxBadAttempts",
-    "readTopK",
-    "searchResultsPerQuery",
-  ]
-  for (const key of numbers) {
-    const v = c[key]
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      ;(out[key] as number) = v
+  for (const key of NUMERIC_KEYS) {
+    const value = config[key]
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      ;(out[key] as number) = value
     }
   }
-  if (typeof c.locale === "string" && c.locale.trim()) out.locale = c.locale.trim()
+  const locale = config.locale
+  if (typeof locale === "string" && locale.trim()) out.locale = locale.trim()
   return out
 }

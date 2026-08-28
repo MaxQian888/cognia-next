@@ -1,11 +1,9 @@
 /**
  * Engine-local domain types for the DeepSearch/DeepResearch loop.
  *
- * These deliberately do NOT import `@/types/plugin` or any core module —
- * the engine is a pure, dependency-injected state machine so it can be unit
- * tested in isolation and the whole plugin stays detachable (zero coupling).
- * The plugin glue (`tool.ts` / `slash.ts` / `index.ts`) adapts the host
- * `PluginContext` onto the `EngineDeps` shape defined here.
+ * These deliberately do NOT import host modules. The engine is a pure,
+ * dependency-injected state machine; the runtime adapter supplies Cognia's
+ * shared search and page-reader implementations through `EngineDeps`.
  */
 import type { AiBridge } from "./lib/ai"
 
@@ -114,7 +112,7 @@ export interface DeepResearchResult {
 
 /**
  * Fetch raw search results for a query. Injected so the engine never touches
- * the network directly (the plugin glue wires Exa/Tavily via `fetch`).
+ * the network directly (the plugin glue uses the shared search executor).
  */
 export type SearchFn = (query: string, limit: number) => Promise<SearchHit[]>
 

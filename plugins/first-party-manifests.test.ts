@@ -137,7 +137,9 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // the merged manifest is what validates at enable — pinned by the plugin's
   // own index.test.ts.
   "context-inspector": ["field_missing:context-panel", "field_missing:webview"],
-  "deep-research": ["field_missing:tools", "field_missing:skills"],
+  // `tools` is declared in the manifest now (so `deep_research` is discoverable
+  // before activation); the skill is still registered imperatively in `activate`.
+  "deep-research": ["field_missing:skills"],
   "e2b-sandbox": ["field_missing:mcp-server-preset"],
   eval: ["field_missing:tools"],
   // Both example plugins now declare their contributions in plugin.json.

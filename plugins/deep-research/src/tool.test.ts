@@ -1,9 +1,10 @@
-import type { PluginContext, PluginToolContext } from "@/types/plugin"
+import type { PluginContext, PluginToolContext } from "@cognia/plugin-sdk"
 import type { AiBridge } from "./lib/ai"
 import type { EngineDeps, SearchHit } from "./types"
 
 jest.mock("./runtime", () => ({ buildEngineDeps: jest.fn() }))
 import { buildEngineDeps } from "./runtime"
+import { ResearchToolError } from "./errors"
 import { registerDeepResearchTool, resolveConfig, runResearchTool } from "./tool"
 
 const mockBuild = buildEngineDeps as jest.MockedFunction<typeof buildEngineDeps>
@@ -64,10 +65,27 @@ function reportDeps(): EngineDeps {
   return { ai, search: async () => [hit(`https://s${n++}.com`)], read: async () => "body" }
 }
 
+/** Deps whose very first search fails — the run cannot start. */
+function failingDeps(error: unknown): EngineDeps {
+  const ai: AiBridge = {
+    chat: async function* () {
+      throw error
+    },
+    embed: async () => [],
+  }
+  return {
+    ai,
+    search: async () => {
+      throw error
+    },
+    read: async () => "",
+  }
+}
+
 function ctx(config: Record<string, unknown> = {}): PluginContext {
   return {
     pluginId: "cognia-deep-research",
-    config,
+    configuration: { getAll: () => config },
     agent: { registerTool: jest.fn() },
   } as unknown as PluginContext
 }
@@ -91,15 +109,25 @@ describe("runResearchTool", () => {
     expect(out).toEqual({ ok: false, error: "query is required" })
   })
 
-  it("returns a friendly error when deps cannot be built", async () => {
-    mockBuild.mockResolvedValue({ ok: false, error: "MISSING_KEY", provider: "exa" })
+  it("classifies a fatal host-tool failure into an actionable message", async () => {
+    // The model reads this string, so "configure a search provider" beats a
+    // stack-shaped message it can only relay verbatim.
+    mockBuild.mockReturnValue(failingDeps(new ResearchToolError("NO_SEARCH_PROVIDER", "none")))
     const out = (await runResearchTool(ctx(), { query: "q" })) as { ok: boolean; error: string }
     expect(out.ok).toBe(false)
-    expect(out.error).toMatch(/exa/)
+    expect(out.error).toMatch(/Settings → Search/)
+  })
+
+  it("classifies the host's no-provider marker", async () => {
+    mockBuild.mockReturnValue(
+      failingDeps(Object.assign(new Error("nope"), { code: "NO_PROVIDER_AVAILABLE" }))
+    )
+    const out = (await runResearchTool(ctx(), { query: "q" })) as { ok: boolean; error: string }
+    expect(out.error).toMatch(/No AI model provider/)
   })
 
   it("runs the loop and returns a grounded result", async () => {
-    mockBuild.mockResolvedValue({ ok: true, deps: scriptedDeps() })
+    mockBuild.mockReturnValue(scriptedDeps())
     const out = (await runResearchTool(ctx(), { query: "what is x?", depth: "quick" })) as {
       ok: boolean
       answer: string
@@ -115,7 +143,7 @@ describe("runResearchTool", () => {
   })
 
   it("produces a multi-section report in report mode", async () => {
-    mockBuild.mockResolvedValue({ ok: true, deps: reportDeps() })
+    mockBuild.mockReturnValue(reportDeps())
     const out = (await runResearchTool(ctx(), { query: "topic", mode: "report" })) as {
       ok: boolean
       mode: string
@@ -130,23 +158,33 @@ describe("runResearchTool", () => {
     expect(out.sections).toBe(1)
   })
 
-  it("threads reportProgress + signal from the tool context into buildEngineDeps", async () => {
-    mockBuild.mockResolvedValue({ ok: true, deps: scriptedDeps() })
+  it("threads progress, cancellation and the calling session into buildEngineDeps", async () => {
+    // `sessionId` is what binds the run to the user's provider and usage
+    // account; the host has no ambient session to fall back on.
+    mockBuild.mockReturnValue(scriptedDeps())
     const toolCtx = {
       reportProgress: jest.fn(),
       signal: new AbortController().signal,
+      sessionId: "s-7",
     } as unknown as PluginToolContext
     await runResearchTool(ctx(), { query: "q" }, toolCtx)
-    expect(mockBuild).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ reportProgress: toolCtx.reportProgress, signal: toolCtx.signal })
-    )
+    expect(mockBuild).toHaveBeenCalledWith(expect.anything(), {
+      reportProgress: toolCtx.reportProgress,
+      signal: toolCtx.signal,
+      sessionId: "s-7",
+    })
+  })
+
+  it("passes no host-private dependencies — the context alone is enough", async () => {
+    mockBuild.mockReturnValue(scriptedDeps())
+    await runResearchTool(ctx(), { query: "q" }, {} as PluginToolContext)
+    expect(mockBuild).toHaveBeenCalledWith(expect.anything(), {})
   })
 })
 
 describe("registerDeepResearchTool", () => {
   it("registers a deep_research tool whose execute delegates to the loop", async () => {
-    mockBuild.mockResolvedValue({ ok: true, deps: scriptedDeps() })
+    mockBuild.mockReturnValue(scriptedDeps())
     const c = ctx()
     registerDeepResearchTool(c)
     const registerTool = (c.agent as unknown as { registerTool: jest.Mock }).registerTool

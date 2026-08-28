@@ -1,10 +1,10 @@
 /**
  * AI bridge — a thin, decoupled interface over the host's chat/embed model.
  *
- * The shapes intentionally match the host's `PluginAIProviderAPI`
- * (`ctx.ai.chat` / `ctx.ai.embed`) structurally, so the plugin glue can pass
- * `ctx.ai` straight in without importing `@/types/plugin` here. Keeping the
- * interface local means the engine + its tests depend on nothing external.
+ * The shapes intentionally match `ctx.ai.chat` / `ctx.ai.embed` structurally,
+ * so the runtime adapter can bind the host API straight in. Keeping the
+ * interface local is what lets the engine and its tests depend on nothing but
+ * a plain object — every engine test injects a fake bridge, no host in sight.
  */
 
 export interface AiMessage {
@@ -28,9 +28,17 @@ export interface AiChunk {
   }
 }
 
+/** Per-call routing shared by both methods; see {@link bindAiBridge}. */
+export interface AiCallContext {
+  /** Session the call belongs to — the host resolves credentials from it. */
+  sessionId?: string
+  /** Cancellation signal for the underlying provider request. */
+  signal?: AbortSignal
+}
+
 export interface AiBridge {
-  chat: (messages: AiMessage[], options?: AiOptions) => AsyncIterable<AiChunk>
-  embed: (texts: string[]) => Promise<number[][]>
+  chat: (messages: AiMessage[], options?: AiOptions & AiCallContext) => AsyncIterable<AiChunk>
+  embed: (texts: string[], options?: AiCallContext) => Promise<number[][]>
 }
 
 export interface CompletionResult {
@@ -85,4 +93,27 @@ export async function completeJson<T>(
 ): Promise<JsonCompletionResult<T>> {
   const { text, tokens } = await completeText(ai, messages, options)
   return { value: parse(text), text, tokens }
+}
+
+/**
+ * Bind the host's model API to the engine's bridge for one run.
+ *
+ * Every call carries the run's `sessionId`. That is not decoration: the host
+ * resolves WHICH provider, key and usage account answers from it, and on hosts
+ * that serve several sessions in one process (the CLI) a call without it has no
+ * credentials at all. Passing it here is what makes `/research` in one session
+ * bill that session.
+ */
+export function bindAiBridge(
+  ai: AiBridge,
+  context: { sessionId?: string; signal?: AbortSignal } = {}
+): AiBridge {
+  const routing = {
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.signal ? { signal: context.signal } : {}),
+  }
+  return {
+    chat: (messages, options) => ai.chat(messages, { ...options, ...routing }),
+    embed: (texts) => ai.embed(texts, routing),
+  }
 }

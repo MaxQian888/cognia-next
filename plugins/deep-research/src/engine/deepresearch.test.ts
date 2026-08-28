@@ -1,5 +1,5 @@
 import type { AiBridge } from "../lib/ai"
-import type { EngineDeps, SearchHit } from "../types"
+import { DEFAULT_CONFIG, type EngineDeps, type SearchHit } from "../types"
 import { dedupeCitations, mapLimit, normalizeOutline, runDeepResearch } from "./deepresearch"
 
 function orthonormal(i: number): number[] {
@@ -153,5 +153,43 @@ describe("runDeepResearch", () => {
     }
     const result = await runDeepResearch("topic", d)
     expect(result.report).toContain("## H1")
+  })
+
+  it("leaves DEFAULT_CONFIG's search width intact for sections", async () => {
+    // `runDeepSearch` merges `{ ...DEFAULT_CONFIG, ...override }`, so a
+    // present-but-undefined `searchResultsPerQuery` CLOBBERED the default and
+    // every section search asked for `undefined` results. `SearchFn` declares
+    // `limit` as a required number, so nothing in the type system caught it.
+    const outline = JSON.stringify({ title: "T", sections: [{ heading: "H", question: "q?" }] })
+    const d = deps(outline)
+    const widths: unknown[] = []
+    const base = d.search
+    d.search = async (query, limit) => {
+      widths.push(limit)
+      return base(query, limit)
+    }
+
+    await runDeepResearch("topic", d)
+
+    expect(widths.length).toBeGreaterThan(1)
+    expect(widths).not.toContain(undefined)
+    // 8 is the scout's own constant; 6 is the per-section default under test.
+    expect(widths).toContain(DEFAULT_CONFIG.searchResultsPerQuery)
+  })
+
+  it("still honours a caller-supplied search width", async () => {
+    const outline = JSON.stringify({ title: "T", sections: [{ heading: "H", question: "q?" }] })
+    const d = deps(outline)
+    const widths: unknown[] = []
+    const base = d.search
+    d.search = async (query, limit) => {
+      widths.push(limit)
+      return base(query, limit)
+    }
+
+    await runDeepResearch("topic", d, { searchResultsPerQuery: 2 })
+
+    expect(widths).toContain(2)
+    expect(widths).not.toContain(DEFAULT_CONFIG.searchResultsPerQuery)
   })
 })

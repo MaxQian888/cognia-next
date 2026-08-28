@@ -3,8 +3,7 @@
  * `deep_research` tool. Inline markdown, registered via the host skill
  * registry; auto-unregistered on disable.
  */
-import type { PluginContext } from "@/types/plugin"
-import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import { defineSkill, type PluginContext, type PluginSkillDef } from "@cognia/plugin-sdk"
 
 const PLAYBOOK = `# Deep Research
 
@@ -30,15 +29,15 @@ The tool runs an autonomous search → read → reason loop and returns a
 **citation-backed** answer. Present its answer with the sources it provides;
 never strip or invent citations.`
 
-export const DEEP_RESEARCH_SKILL: PluginSkillDef = {
+export const DEEP_RESEARCH_SKILL: PluginSkillDef = defineSkill({
   id: "deep-research",
   name: "Deep Research",
   description: "Playbook for the autonomous web deep-research tool.",
   source: { kind: "inline", markdown: PLAYBOOK },
   scope: "global",
   allowedTools: ["deep_research"],
-}
+})
 
 export function registerResearchSkill(ctx: PluginContext): void {
-  ctx.agent?.registerSkill?.(DEEP_RESEARCH_SKILL)
+  ctx.agent.registerSkill(DEEP_RESEARCH_SKILL)
 }

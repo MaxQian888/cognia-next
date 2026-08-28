@@ -42,12 +42,22 @@ export async function runDeepResearch(
   const { outline, tokens: outlineTokens } = await architect(topic, landscape, deps)
   tokens += outlineTokens
 
-  const sectionDeps: EngineDeps = { ...deps, reportProgress: undefined }
+  // Sections must not report their own progress — the outer loop owns the bar.
+  // OMIT the key; setting it to `undefined` is what `exactOptionalPropertyTypes`
+  // rejects, and it is not equivalent (see the config note below).
+  const { reportProgress: _sectionProgress, ...sectionDeps } = deps
   const sectionConfig: Partial<DeepSearchConfig> = {
     ...SECTION_CONFIG,
-    readTopK: configOverride.readTopK ?? SECTION_CONFIG.readTopK,
-    searchResultsPerQuery: configOverride.searchResultsPerQuery,
-    locale: configOverride.locale,
+    // Same rule, and here a present-but-undefined key was a live bug rather
+    // than a style nit: `runDeepSearch` merges `{ ...DEFAULT_CONFIG, ...override }`,
+    // so passing `searchResultsPerQuery: undefined` CLOBBERED the default and
+    // every section search asked for `undefined` results instead of 6.
+    // Spreading SECTION_CONFIG first already supplies its own `readTopK`.
+    ...(configOverride.readTopK !== undefined ? { readTopK: configOverride.readTopK } : {}),
+    ...(configOverride.searchResultsPerQuery !== undefined
+      ? { searchResultsPerQuery: configOverride.searchResultsPerQuery }
+      : {}),
+    ...(configOverride.locale !== undefined ? { locale: configOverride.locale } : {}),
   }
 
   let done = 0

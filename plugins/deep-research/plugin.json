@@ -1,10 +1,10 @@
 {
   "id": "cognia-deep-research",
   "name": "Deep Research",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Autonomous web deep-research: search → read → reason → cited answer. Adds the /research command and a deep_research agent tool.",
   "type": "frontend",
-  "capabilities": ["tools", "commands", "skills"],
+  "capabilities": ["tools", "commands", "skills", "configuration"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -17,12 +17,41 @@
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
     "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
   },
-  "permissions": ["network:fetch", "secrets:read"],
+  "permissions": ["agent:control", "ai:chat", "ai:embed", "settings:read"],
   "networkAccess": {
-    "allowedDomains": ["api.exa.ai", "api.tavily.com"],
-    "reasoning": "The research loop queries exactly one of the two configured web-search APIs; the user's provider key is sent only to the provider it belongs to. Fetching a result page goes through the host's own reader, not this allowlist."
+    "allowedDomains": ["*"],
+    "reasoning": "The research loop reads pages the web search returns, so the hosts are only known at runtime. Every request goes through the host's own web_fetch — this plugin holds no keys and opens no sockets of its own."
+  },
+  "permissionJustifications": {
+    "agent:control": "Calls the app's own web_search and web_fetch tools so research reuses your configured search providers, result cache and safety guards instead of shipping a second, weaker copy.",
+    "ai:chat": "Drives the research loop with your configured model: rewriting queries, judging sources, and drafting the final cited answer.",
+    "ai:embed": "Deduplicates near-identical search results and evidence so the loop spends its budget on genuinely new sources.",
+    "settings:read": "Reads this plugin's own research budgets (token budget, step ceiling, sources per read, answer locale)."
   },
   "activationEvents": ["startup"],
+  "tools": [
+    {
+      "name": "deep_research",
+      "description": "Run an autonomous web research loop (search → read → reason → cited answer) for a multi-hop or knowledge-intensive question. mode='search' returns a grounded cited answer; mode='report' returns a multi-section cited report. Use for questions that need current web evidence.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "The research question or report topic." },
+          "mode": {
+            "type": "string",
+            "enum": ["search", "report"],
+            "description": "'search' for a cited answer (default), 'report' for a multi-section report."
+          },
+          "depth": {
+            "type": "string",
+            "enum": ["quick", "standard", "deep"],
+            "description": "How exhaustively to research (default: standard)."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ],
   "commands": [
     {
       "id": "research",
@@ -33,25 +62,6 @@
   "configSchema": {
     "type": "object",
     "properties": {
-      "searchProvider": {
-        "type": "string",
-        "enum": ["exa", "tavily"],
-        "default": "exa",
-        "title": "Search provider",
-        "description": "Which web-search API the research loop uses."
-      },
-      "exaApiKey": {
-        "type": "string",
-        "secret": true,
-        "title": "Exa API key",
-        "description": "Stored securely. Used when the search provider is Exa."
-      },
-      "tavilyApiKey": {
-        "type": "string",
-        "secret": true,
-        "title": "Tavily API key",
-        "description": "Stored securely. Used when the search provider is Tavily."
-      },
       "tokenBudget": {
         "type": "number",
         "default": 120000,
@@ -64,11 +74,23 @@
         "title": "Max steps",
         "description": "Hard ceiling on search/read/reason iterations."
       },
+      "maxBadAttempts": {
+        "type": "number",
+        "default": 2,
+        "title": "Max failed answers",
+        "description": "How many rejected answer attempts before the loop settles for its best effort."
+      },
       "readTopK": {
         "type": "number",
         "default": 3,
         "title": "Sources per read",
         "description": "How many pages to read per read step."
+      },
+      "searchResultsPerQuery": {
+        "type": "number",
+        "default": 6,
+        "title": "Results per query",
+        "description": "How many search results to request for each query."
       },
       "locale": {
         "type": "string",
@@ -78,9 +100,10 @@
     }
   },
   "defaultConfig": {
-    "searchProvider": "exa",
     "tokenBudget": 120000,
     "maxSteps": 24,
-    "readTopK": 3
+    "maxBadAttempts": 2,
+    "readTopK": 3,
+    "searchResultsPerQuery": 6
   }
 }

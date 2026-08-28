@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Close two gaps in the promoted web tools and retire expired handoff tickets. A plugin calling `web_fetch` through `ctx.agent.invokeTool` is now held to its manifest's `networkAccess.allowedDomains`, the same clamp `ctx.network` gets, so `agent:control` no longer implies unrestricted egress; the web-tools plugin's `web_research` now honours the Settings web-tools switch instead of fetching after it is turned off. Expired cross-host handoff tickets are swept on a timer, so a handoff the other device never accepted can no longer leave a conversation permanently read-only. Also: `ctx.ai.getDefaultModel`/`getDefaultProvider` accept a `sessionId` and no longer throw on the CLI, `web_fetch` returns `title`, `text` and `body` verbatim with a single `untrustedNotice` instead of a banner glued onto each field, CLI searches keep their default safe-search level, a handoff from a session with no pinned model no longer demands an unrelated provider, and rebasing a conflicted collaboration create explains itself instead of reporting the row as corrupt.

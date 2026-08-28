@@ -5,6 +5,7 @@
  * fallback to keeping everything when `embed` is unavailable.
  */
 import type { EngineDeps, KnowledgeItem, SearchHit } from "../types"
+import { isFatalResearchError } from "../errors"
 import { normalizeUrl } from "../lib/url"
 import { cosineSimilarity } from "../lib/vector"
 import type { ResearchState } from "./workspace"
@@ -28,6 +29,10 @@ export async function runReadStep(
     try {
       content = await deps.read(hit.url, hit)
     } catch (err) {
+      // Same split as the search step: one unreadable page is skipped, but a
+      // reader that is switched off or rate-limited ends the run rather than
+      // letting the loop quietly answer from snippets alone.
+      if (isFatalResearchError(err)) throw err
       deps.logger?.warn(`read failed for ${hit.url}`, err)
       continue
     }

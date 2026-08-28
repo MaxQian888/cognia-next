@@ -1,75 +1,59 @@
-import type { PluginContext } from "@/types/plugin"
-import { PLUGIN_ID, readApiKey, readEngineConfig, readSearchProvider, secretKey } from "./config"
+import type { PluginContext } from "@cognia/plugin-sdk"
 
-function ctx(
-  over: { config?: Record<string, unknown>; secrets?: Partial<PluginContext["secrets"]> } = {}
-): PluginContext {
-  return {
-    pluginId: PLUGIN_ID,
-    config: over.config ?? {},
-    secrets: over.secrets,
-  } as unknown as PluginContext
+import { readEngineConfig } from "./config"
+
+function context(config: Record<string, unknown>): PluginContext {
+  return { configuration: { getAll: () => config } } as unknown as PluginContext
 }
 
-describe("secretKey", () => {
-  it("namespaces by plugin id", () => {
-    expect(secretKey("exa")).toBe("cognia-deep-research:exaKey")
-  })
-})
-
-describe("readSearchProvider", () => {
-  it("defaults to exa", () => {
-    expect(readSearchProvider(ctx())).toBe("exa")
-  })
-  it("returns tavily when configured", () => {
-    expect(readSearchProvider(ctx({ config: { searchProvider: "tavily" } }))).toBe("tavily")
-  })
-  it("ignores unknown providers", () => {
-    expect(readSearchProvider(ctx({ config: { searchProvider: "bing" } }))).toBe("exa")
-  })
-})
-
-describe("readApiKey", () => {
-  it("prefers the secure keyring", async () => {
-    const secrets = { get: jest.fn(async () => "secret-key") }
-    expect(await readApiKey(ctx({ secrets }), "exa")).toBe("secret-key")
-    expect(secrets.get).toHaveBeenCalledWith("cognia-deep-research:exaKey")
-  })
-  it("falls back to plain config when no secret is set", async () => {
-    const secrets = { get: jest.fn(async () => null) }
-    expect(await readApiKey(ctx({ secrets, config: { exaApiKey: "cfg-key" } }), "exa")).toBe(
-      "cfg-key"
-    )
-  })
-  it("falls back to config when the keyring throws", async () => {
-    const secrets = {
-      get: jest.fn(async () => {
-        throw new Error("no keyring")
-      }),
-    }
-    expect(await readApiKey(ctx({ secrets, config: { tavilyApiKey: "t" } }), "tavily")).toBe("t")
-  })
-  it("returns null when no key is available anywhere", async () => {
-    expect(await readApiKey(ctx(), "exa")).toBeNull()
-  })
-})
-
 describe("readEngineConfig", () => {
-  it("picks valid positive numbers and locale, ignoring junk", () => {
-    const out = readEngineConfig(
-      ctx({
-        config: {
-          tokenBudget: 50000,
-          maxSteps: 0,
+  it("reads every numeric budget plus the locale", () => {
+    expect(
+      readEngineConfig(
+        context({
+          tokenBudget: 42,
+          maxSteps: 7,
+          maxBadAttempts: 3,
           readTopK: 2,
-          searchResultsPerQuery: -1,
-          locale: "zh-CN",
-        },
-      })
-    )
-    expect(out).toEqual({ tokenBudget: 50000, readTopK: 2, locale: "zh-CN" })
+          searchResultsPerQuery: 9,
+          locale: " zh-CN ",
+        })
+      )
+    ).toEqual({
+      tokenBudget: 42,
+      maxSteps: 7,
+      maxBadAttempts: 3,
+      readTopK: 2,
+      searchResultsPerQuery: 9,
+      locale: "zh-CN",
+    })
   })
-  it("returns an empty object when nothing is configured", () => {
-    expect(readEngineConfig(ctx())).toEqual({})
+
+  it("returns nothing when configuration is empty, leaving engine defaults in force", () => {
+    expect(readEngineConfig(context({}))).toEqual({})
+  })
+
+  it("drops non-positive and non-finite budgets", () => {
+    // A zero step ceiling ends the run before it starts, and NaN poisons every
+    // comparison downstream — both are worse than the schema default.
+    expect(
+      readEngineConfig(
+        context({ maxSteps: 0, tokenBudget: -1, readTopK: Number.NaN, searchResultsPerQuery: "6" })
+      )
+    ).toEqual({})
+  })
+
+  it("ignores a blank locale", () => {
+    expect(readEngineConfig(context({ locale: "   " }))).toEqual({})
+  })
+
+  it("does not read search-provider credentials — those live in app settings", () => {
+    // The plugin no longer owns a provider or a key; search runs through the
+    // host's promoted web tools with the user's configured provider.
+    const out = readEngineConfig(
+      context({ searchProvider: "exa", exaApiKey: "secret", tavilyApiKey: "secret" })
+    )
+    expect(out).toEqual({})
+    expect(JSON.stringify(out)).not.toContain("secret")
   })
 })

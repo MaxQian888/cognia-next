@@ -5,6 +5,7 @@
  * the exact-URL-deduped set.
  */
 import type { EngineDeps, SearchHit } from "../types"
+import { isFatalResearchError } from "../errors"
 import { normalizeUrl } from "../lib/url"
 import { dedupeByEmbedding } from "../lib/vector"
 import type { ResearchState } from "./workspace"
@@ -45,6 +46,11 @@ async function gatherFreshHits(
     try {
       hits = await deps.search(query, state.config.searchResultsPerQuery)
     } catch (err) {
+      // A query that fails is noise; a search backend that CANNOT run is the
+      // end of the run. Swallowing the second kind produced the worst possible
+      // outcome — a confident answer synthesized from zero evidence, with no
+      // hint that search never happened.
+      if (isFatalResearchError(err)) throw err
       deps.logger?.warn(`search failed for "${query}"`, err)
       continue
     }

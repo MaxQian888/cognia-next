@@ -64,6 +64,10 @@ export function normalizeDecision(
   const urls = asStringArray(raw.urls).filter((u) => state.candidates.some((c) => c.url === u))
   const gaps = asStringArray(raw.gaps)
   const rationale = typeof raw.rationale === "string" ? raw.rationale : undefined
+  // `exactOptionalPropertyTypes`: an absent rationale must be an ABSENT key, not
+  // a present `undefined`. Plugin authors compile against the packed SDK with
+  // that flag on, so this file has to hold under it too.
+  const maybeRationale = rationale === undefined ? {} : { rationale }
 
   const valid: ResearchAction[] = ["search", "read", "reflect", "answer"]
   if (!valid.includes(action)) action = heuristicDecision(state, allowAnswer).action
@@ -79,7 +83,13 @@ export function normalizeDecision(
   if (action === "read" && urls.length === 0) {
     if (state.candidates.length === 0) {
       // Nothing to read — pivot to search.
-      return { action: "search", queries: [nextGap(state)], urls: [], gaps: [], rationale }
+      return {
+        action: "search",
+        queries: [nextGap(state)],
+        urls: [],
+        gaps: [],
+        ...maybeRationale,
+      }
     }
     urls.push(...state.candidates.slice(0, state.config.readTopK).map((c) => c.url))
   }
@@ -89,7 +99,7 @@ export function normalizeDecision(
     else urls.push(...state.candidates.slice(0, state.config.readTopK).map((c) => c.url))
   }
 
-  return { action, queries, urls, gaps, rationale }
+  return { action, queries, urls, gaps, ...maybeRationale }
 }
 
 /** Deterministic fallback when the model can't be parsed. */
