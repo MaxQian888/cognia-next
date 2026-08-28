@@ -1,11 +1,4 @@
 {
   "$comment": "Plugins that still import host-private modules instead of @cognia/plugin-sdk. This list may only shrink — see scripts/plugin/check-author-imports.mjs.",
-  "notYetMigrated": [
-    "cognia-backend-refactor",
-    "eval",
-    "impeccable",
-    "ocr",
-    "workflow-ai",
-    "zhihu-content-pipeline"
-  ]
+  "notYetMigrated": ["cognia-backend-refactor", "ocr", "workflow-ai", "zhihu-content-pipeline"]
 }

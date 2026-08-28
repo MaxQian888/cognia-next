@@ -55,7 +55,7 @@ export default definePlugin({
   of declaring them statically, plus that capability's host client. Published for
   `agent-team-template`, `automation`, `balance-adapter`, `browser`, `character-pack`,
   `cli-tool`, `connector`, `context-panel`, `context-provider`, `editor`,
-  `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
+  `eval`, `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
   `integration`, `message-renderer`, `ocr-provider`, `sandbox`, `scheduled-task`,
   `security-findings`, `shared-memory-adapter`, `skill`, `skill-recorder`,
   `slash-command`, `subagent`, `tool-renderer`, `webview`, and `workflow-template`.

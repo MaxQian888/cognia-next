@@ -14,17 +14,22 @@
  * (runs cost the user's own tokens, same trust tier as the ocr tool).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { getRunDetail, listDatasetSummaries, runEvalService } from "@/lib/ai/eval/service"
-import { runCalibration } from "@/lib/ai/eval/calibration/runner"
-import { loadOrCreateEvalArtifactKey } from "@/lib/ai/eval/artifact-crypto"
-import { createBrowserEvalOrchestrator } from "@/lib/ai/eval/browser-execution"
-import { EvalProjectService } from "@/lib/ai/eval/project-service"
-import { SCORING_VERSION } from "@/lib/ai/eval/report"
-import { deterministicScorers } from "@/lib/ai/eval/scorers"
-import type { TargetSpec } from "@/types/eval/run-config"
-import { APP_VERSION } from "@/lib/app-version"
-
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import {
+  createBrowserEvalOrchestrator,
+  deterministicScorers,
+  EvalProjectService,
+  getRunDetail,
+  listDatasetSummaries,
+  loadEvalAppSettings,
+  loadEvalRuntimeContext,
+  loadOrCreateEvalArtifactKey,
+  runCalibration,
+  runEvalService,
+  SCORING_VERSION,
+  type TargetSpec,
+} from "@cognia/plugin-sdk/api/eval"
+import { APP_VERSION } from "@cognia/plugin-sdk/api/host-environment"
 export interface RunDatasetArgs {
   datasetId: string
   targetKind?: "chat" | "team" | "workflow"
@@ -60,8 +65,7 @@ function buildTarget(args: RunDatasetArgs): TargetSpec {
 }
 
 async function loadAppSettings() {
-  const { useSettingsStore } = await import("@/stores/settings/settings-store")
-  return useSettingsStore.getState().settings
+  return loadEvalAppSettings()
 }
 
 export async function runEvalDatasetTool(args: RunDatasetArgs) {
@@ -129,15 +133,9 @@ export interface EvalProjectV2Args {
 }
 
 async function loadEvalRuntime() {
-  const [{ useSettingsStore }, { useAccountStore }] = await Promise.all([
-    import("@/stores/settings/settings-store"),
-    import("@/stores/account/account-store"),
-  ])
-  const settings = useSettingsStore.getState().settings
-  const accountId = useAccountStore.getState().unlockedAccountId
-  if (!settings || !accountId)
-    throw new Error("eval_project_v2: an unlocked account and settings are required")
-  return { settings, accountId }
+  const runtime = await loadEvalRuntimeContext()
+  if (!runtime) throw new Error("eval_project_v2: an unlocked account and settings are required")
+  return runtime
 }
 
 export async function runEvalProjectV2Tool(args: EvalProjectV2Args) {

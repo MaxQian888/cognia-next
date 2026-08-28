@@ -23,6 +23,7 @@ const runtimeEntries = {
   "character-pack": "src/api/character-pack.ts",
   "cli-tool": "src/api/cli-tool.ts",
   "context-provider": "src/api/context-provider.ts",
+  eval: "src/api/eval.ts",
   "external-agent-adapter": "src/api/external-agent-adapter.ts",
   "external-agent-preset": "src/api/external-agent-preset.ts",
   "host-environment": "src/api/host-environment.ts",

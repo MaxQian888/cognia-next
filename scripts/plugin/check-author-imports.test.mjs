@@ -6,6 +6,7 @@ import {
   checkPluginGovernance,
   findForbiddenAuthorImports,
   readGovernanceBaseline,
+  stripComments,
 } from "./check-author-imports.mjs"
 
 test("detects host-private author imports without flagging public SDK subpaths", () => {
@@ -90,5 +91,37 @@ test("counts jest module references, not just imports", () => {
       jest.doMock("@/lib/tauri", () => ({}))
     `),
     ["@/lib/slash-commands/registry", "@/stores/chat/chat-store", "@/lib/tauri"]
+  )
+})
+
+test("a host path mentioned in a comment is prose, not a dependency", () => {
+  // The generated author-type bundles cross-reference host modules from JSDoc
+  // (`{@link import("@/types/...")}`), and a commented-out import is not an
+  // import either. Only real module references count.
+  assert.deepEqual(
+    findForbiddenAuthorImports(`
+      /** See {@link import("@/types/eval/settings").EvalSettings}. */
+      // import { thing } from "@/lib/old-path"
+      import { definePlugin } from "@cognia/plugin-sdk"
+      const url = "https://example.com" // not a comment-stripped string
+    `),
+    []
+  )
+})
+
+test("stripComments leaves line offsets intact", () => {
+  const source = "const a = 1 // note\nconst b = 2\n"
+  const stripped = stripComments(source)
+  assert.equal(stripped.split("\n").length, source.split("\n").length)
+  assert.ok(stripped.startsWith("const a = 1 "))
+  assert.ok(!stripped.includes("note"))
+})
+
+test("a URL's // is not a comment", () => {
+  // Without the `[^:]` guard, `https://…` swallows the rest of the line and a
+  // real violation after it on the same line would vanish.
+  assert.deepEqual(
+    findForbiddenAuthorImports('const u = "https://x.dev"; import { a } from "@/lib/x"'),
+    ["@/lib/x"]
   )
 })

@@ -1,7 +1,6 @@
 /** cognia-eval builtin plugin — tool registration + handlers. */
 import evalPlugin, { runEvalDatasetTool, runCalibrationTool, runEvalProjectV2Tool } from "./index"
-import type { PluginContext } from "@/types/plugin"
-
+import type { PluginContext } from "@cognia/plugin-sdk"
 const mockVerifiedPreflight = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const mockProjectStart = jest.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const mockProjectPause = jest.fn(async (..._args: unknown[]) => {})
@@ -12,7 +11,10 @@ const mockProjectReport = jest.fn(async (..._args: unknown[]): Promise<unknown> 
 const mockProjectExtend = jest.fn(async (..._args: unknown[]) => {})
 const mockProjectRun = jest.fn(async (..._args: unknown[]) => {})
 
-jest.mock("@/lib/ai/eval/service", () => ({
+// One double for the whole SDK subpath the plugin imports, rather than six for
+// the host modules behind it: the plugin only ever sees this surface, so this
+// is the surface the test should replace.
+jest.mock("@cognia/plugin-sdk/api/eval", () => ({
   listDatasetSummaries: jest.fn(async () => [
     { id: "d1", name: "DS", capability: "chat", version: 1, caseCount: 2 },
   ]),
@@ -24,8 +26,6 @@ jest.mock("@/lib/ai/eval/service", () => ({
     gatePassed: true,
     deterministicOnly: true,
   })),
-}))
-jest.mock("@/lib/ai/eval/calibration/runner", () => ({
   runCalibration: jest.fn(async (input: { setId: string; judgeModel?: string }) => ({
     runId: "calrun_1",
     setId: input.setId,
@@ -39,14 +39,11 @@ jest.mock("@/lib/ai/eval/calibration/runner", () => ({
     verdicts: [],
     createdAt: 1,
   })),
-}))
-jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: { getState: () => ({ settings: { defaultProvider: "local" } }) },
-}))
-jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: { getState: () => ({ unlockedAccountId: "account" }) },
-}))
-jest.mock("@/lib/ai/eval/project-service", () => ({
+  loadEvalAppSettings: async () => ({ defaultProvider: "local" }),
+  loadEvalRuntimeContext: async () => ({
+    settings: { defaultProvider: "local" },
+    accountId: "account",
+  }),
   EvalProjectService: class {
     verifiedPreflight(...args: unknown[]) {
       return mockVerifiedPreflight(...args)
@@ -73,17 +70,13 @@ jest.mock("@/lib/ai/eval/project-service", () => ({
       return mockProjectExtend(...args)
     }
   },
-}))
-jest.mock("@/lib/ai/eval/browser-execution", () => ({
   createBrowserEvalOrchestrator: () => ({ run: (...args: unknown[]) => mockProjectRun(...args) }),
-}))
-jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
   loadOrCreateEvalArtifactKey: async () => new Uint8Array(32),
+  SCORING_VERSION: 1,
+  deterministicScorers: () => [],
 }))
 
-import { runEvalService } from "@/lib/ai/eval/service"
-import { runCalibration } from "@/lib/ai/eval/calibration/runner"
-
+import { runCalibration, runEvalService } from "@cognia/plugin-sdk/api/eval"
 interface RegisteredTool {
   name: string
   execute: (args: Record<string, unknown>) => Promise<unknown>

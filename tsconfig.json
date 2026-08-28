@@ -91,6 +91,7 @@
       "@cognia/plugin-sdk/api/context-provider": [
         "./packages/plugin-sdk/src/api/context-provider.ts"
       ],
+      "@cognia/plugin-sdk/api/eval": ["./packages/plugin-sdk/src/api/eval.ts"],
       "@cognia/plugin-sdk/api/external-agent-adapter": [
         "./packages/plugin-sdk/src/api/external-agent-adapter.ts"
       ],

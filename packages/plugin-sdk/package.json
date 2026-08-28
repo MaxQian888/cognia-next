@@ -159,6 +159,12 @@
       "require": "./dist/context-provider.cjs",
       "default": "./dist/context-provider.js"
     },
+    "./api/eval": {
+      "types": "./dist/eval.d.ts",
+      "import": "./dist/eval.js",
+      "require": "./dist/eval.cjs",
+      "default": "./dist/eval.js"
+    },
     "./api/external-agent-adapter": {
       "types": "./dist/external-agent-adapter.d.ts",
       "import": "./dist/external-agent-adapter.js",

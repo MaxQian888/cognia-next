@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { extname, join, relative, resolve } from "node:path"
+import { extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
@@ -35,8 +35,23 @@ function isHostOnlyCogniaPackage(specifier) {
   )
 }
 
+/**
+ * Blank out comments so a mention of a host path in prose is not a violation.
+ *
+ * The generated author-type bundles carry `{@link import("@/types/...")}` in
+ * their JSDoc — a cross-reference, not a dependency — and a commented-out
+ * import is not an import either. Replacing with spaces rather than deleting
+ * keeps offsets stable for anything that later wants them.
+ */
+export function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (line, lead) => lead + " ".repeat(line.length - lead.length))
+}
+
 export function findForbiddenAuthorImports(source) {
   const matches = []
+  source = stripComments(source)
   /**
    * `jest.mock(...)` and friends are module references too. A test that imports
    * a symbol from `@cognia/plugin-sdk` but mocks it through `@/lib/...` still
@@ -66,12 +81,30 @@ export function findForbiddenAuthorImports(source) {
   return matches
 }
 
-function sourceFiles(root) {
+/**
+ * `types/cognia-plugin-sdk.d.ts` is the marker for a VENDORED author-type
+ * bundle — the same artifact `cognia plugin new` writes into a scaffolded
+ * project, because none of the `@cognia/*` packages are published and the
+ * template forbids `skipLibCheck`. Its internal references to
+ * `@cognia/provider-types` resolve to sibling files in the same bundle (the
+ * plugin's own tsconfig `paths` point there), so they are not host imports and
+ * the plugin does not author them. Regenerating the bundle is the only way to
+ * change them, so gating them would fail a plugin for the SDK's shape.
+ */
+function isVendoredAuthorTypes(root, path) {
+  return (
+    path.startsWith(join(root, "types") + sep) &&
+    existsSync(join(root, "types", "cognia-plugin-sdk.d.ts"))
+  )
+}
+
+function sourceFiles(root, pluginRoot = root) {
   const files = []
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name === "dist") continue
     const path = join(root, entry.name)
-    if (entry.isDirectory()) files.push(...sourceFiles(path))
+    if (isVendoredAuthorTypes(pluginRoot, path)) continue
+    if (entry.isDirectory()) files.push(...sourceFiles(path, pluginRoot))
     else if (SOURCE_EXTENSIONS.has(extname(entry.name))) files.push(path)
   }
   return files

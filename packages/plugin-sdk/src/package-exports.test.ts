@@ -31,6 +31,7 @@ describe("plugin-sdk package exports", () => {
     "./api/character-pack",
     "./api/cli-tool",
     "./api/context-provider",
+    "./api/eval",
     "./api/external-agent-adapter",
     "./api/external-agent-preset",
     "./api/host-environment",
