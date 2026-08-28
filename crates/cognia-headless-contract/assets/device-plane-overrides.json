@@ -136,6 +136,45 @@
         "additionalProperties": false
       }
     },
+    "git_clone_guarded": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "remoteUrl",
+          "destination",
+          "workspaceId",
+          "adminLease"
+        ],
+        "properties": {
+          "remoteUrl": {
+            "type": "string",
+            "example": ""
+          },
+          "destination": {
+            "type": "string",
+            "example": ""
+          },
+          "guards": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "relativePath": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "git_commit": {
       "inputSchemaSource": "contract",
       "inputSchema": {

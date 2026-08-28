@@ -1,0 +1,52 @@
+{
+  "source": {
+    "available": "Available for standalone handoff",
+    "committedReadonly": "Ownership moved successfully. This source copy is permanently read-only.",
+    "continue": "Freeze and continue there",
+    "description": "Choose a paired standalone device. This source freezes before the transcript leaves the host.",
+    "failed": "The handoff could not be started or resumed.",
+    "frozenReadonly": "The source is frozen while the target verifies and accepts the transcript. Zero writable copies are allowed during recovery.",
+    "lossDisclosure": "The target checks provider, model, credential, Workspace, protocol, and attachments. If a native runtime cannot be restored, it will disclose transcript-seeded continuation before accepting.",
+    "noDevices": "No paired devices are available. Pair a standalone mobile device and let it report thread-handoff-v1 first.",
+    "retry": "Retry delivery",
+    "retryQueued": "Handoff delivery queued again.",
+    "started": "The source is frozen and the handoff offer is queued.",
+    "starting": "Freezing source…",
+    "statusDescription": "Current ownership state: {state}",
+    "statusTitle": "Device handoff status",
+    "stranded": "Delivery exhausted its retries. Retry it or complete coordinated recovery from the target; this source will not unfreeze itself.",
+    "title": "Continue on another device",
+    "unavailable": {
+      "not-mobile": "This paired client is a control surface, not a standalone owner.",
+      "paused": "Pairing is paused.",
+      "revoked": "Pairing was revoked.",
+      "standalone-required": "Open standalone BYOK mode and reconnect so the device can report thread-handoff-v1."
+    }
+  },
+  "inbound": {
+    "accept": "Continue on this device",
+    "blocker": {
+      "attachment-unresolvable": "Attachment is unavailable: {ref}",
+      "capability-missing": "Required capability is unavailable: {ref}",
+      "credential-missing": "Required credential is unavailable: {ref}",
+      "host-operation-missing": "Native runtime operation is unavailable: {ref}",
+      "model-unavailable": "Model is unavailable: {ref}",
+      "protocol-incompatible": "Protocol version is too old: {ref}",
+      "provider-unavailable": "Provider is unavailable: {ref}",
+      "transcript-digest-mismatch": "Transcript integrity check failed: {ref}",
+      "workspace-unavailable": "Workspace is unavailable: {ref}"
+    },
+    "blockersLabel": "Preflight results",
+    "decline": "Keep it on the source device",
+    "degradedHint": "You can continue, but the original native runtime handle will not be restored.",
+    "description": "“{title}” is ready to move here. The source stays read-only until this device has accepted and committed the handoff.",
+    "failed": "The handoff could not advance. It remains read-only and can be recovered safely.",
+    "fidelityLoss": "This device will continue with {fidelity} fidelity using the transferred transcript.",
+    "permissionReset": "Past tool approvals do not transfer. This device will ask again when a tool needs permission.",
+    "recoveryDescription": "“{title}” was accepted here but the final ownership proof was interrupted. Resume to finish without creating two writable copies.",
+    "recoveryTitle": "Finish interrupted handoff",
+    "resume": "Resume handoff",
+    "title": "Continue this conversation here?",
+    "working": "Verifying ownership…"
+  }
+}

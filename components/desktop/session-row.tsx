@@ -6,6 +6,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
 import { JumpFlash } from "@/components/chat/jump-flash"
+import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import {
   AlertDialog,
@@ -42,6 +43,7 @@ import type {
 } from "@cognia/agent-config-types"
 import {
   ArchiveIcon,
+  ArrowRightLeftIcon,
   ArchiveRestoreIcon,
   BotIcon,
   BoxesIcon,
@@ -54,6 +56,7 @@ import {
   HashIcon,
   ListChecksIcon,
   Loader2Icon,
+  LockKeyholeIcon,
   MessageSquareIcon,
   MessageSquareTextIcon,
   CpuIcon,
@@ -248,6 +251,7 @@ function SessionRowImpl({
   const now = useNow()
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [handoffDialogOpen, setHandoffDialogOpen] = useState(false)
   // Only queried while the confirm is open — this row renders once per session
   // in the sidebar, and an always-live count would be one index read per row on
   // every session write.
@@ -542,6 +546,12 @@ function SessionRowImpl({
                   aria-label={t("pinned")}
                 />
               ) : null}
+              {session.handoffLock ? (
+                <LockKeyholeIcon
+                  className="size-3 shrink-0 text-amber-600"
+                  aria-label={t("handoffReadonly")}
+                />
+              ) : null}
               {timestampAt != null ? (
                 <span
                   className="shrink-0 text-[10px] leading-4 text-muted-foreground/80 tabular-nums"
@@ -695,6 +705,10 @@ function SessionRowImpl({
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               ) : null}
+              <DropdownMenuItem onSelect={() => setHandoffDialogOpen(true)}>
+                <ArrowRightLeftIcon className="mr-2 size-4" />
+                {session.handoffLock ? t("handoffStatus") : t("continueOnDevice")}
+              </DropdownMenuItem>
               {isTauri() ? (
                 <>
                   <DropdownMenuItem onSelect={handleOpenInCodexApp} disabled={codexDispatching}>
@@ -760,6 +774,15 @@ function SessionRowImpl({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Mounted only while open, for the same reason the delete confirm's
+       * message count is: this row renders once per conversation, and the
+       * dialog body holds a live query over `pairedDevices`, the handoff
+       * tickets and the dispatch queue — always-mounted, that is one live
+       * subscription per sidebar row, re-running on every write to any of
+       * those tables. */}
+      {handoffDialogOpen ? (
+        <ThreadHandoffSourceDialog session={session} open onOpenChange={setHandoffDialogOpen} />
+      ) : null}
     </li>
   )
 }

@@ -12,9 +12,20 @@ import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/session-write-guard"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+}
+
+async function assertSessionsWritable(
+  db: ReturnType<typeof getDb>,
+  ids: readonly string[],
+  operation: SessionWriteOperation
+): Promise<void> {
+  for (const session of await db.sessions.bulkGet([...new Set(ids)])) {
+    assertSessionWritable(session, operation)
+  }
 }
 
 /**
@@ -235,11 +246,13 @@ export async function updateSession(
   if (Object.prototype.hasOwnProperty.call(patch, "workingSet")) {
     throw new Error("Working set changes must use mutateSessionWorkingSet")
   }
-  await withDbReopenRetry(() =>
-    getDb()
-      .sessions.update(id, { ...patch, updatedAt: Date.now() })
-      .then(() => undefined)
-  )
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    await db.transaction("rw", db.sessions, async () => {
+      assertSessionWritable(await db.sessions.get(id), "metadata")
+      await db.sessions.update(id, { ...patch, updatedAt: Date.now() })
+    })
+  })
 }
 
 /**
@@ -262,6 +275,7 @@ export async function bulkSetSessionsPinned(
   await withDbReopenRetry(async () => {
     const db = getDb()
     await db.transaction("rw", db.sessions, async () => {
+      await assertSessionsWritable(db, uniqueIds, "metadata")
       await db.sessions
         .where("id")
         .anyOf(uniqueIds)
@@ -287,6 +301,7 @@ export async function setSessionActiveBranchSelection(
     db.transaction("rw", db.sessions, async () => {
       const session = await db.sessions.get(sessionId)
       if (!session) return
+      assertSessionWritable(session, "metadata")
       if (session.activeBranchByGroup?.[branchGroupId] === messageId) return
       const nextRevision = (session.transcriptRevision ?? 0) + 1
       await db.sessions.update(sessionId, {
@@ -311,6 +326,7 @@ export async function setSessionActiveBranchSelection(
  * `undefined` through `update()` would leave the value intact.
  */
 export async function clearSessionSdkLink(id: string): Promise<void> {
+  assertSessionWritable(await getDb().sessions.get(id), "continue-run")
   await getDb()
     .sessions.where("id")
     .equals(id)
@@ -329,6 +345,7 @@ export async function clearSessionSdkLink(id: string): Promise<void> {
  * `update()` would leave it intact). See `lib/chat/branch-session.ts`.
  */
 export async function clearBranchSeed(id: string): Promise<void> {
+  assertSessionWritable(await getDb().sessions.get(id), "continue-run")
   await getDb()
     .sessions.where("id")
     .equals(id)
@@ -437,6 +454,7 @@ export async function archiveSession(id: string): Promise<void> {
   const db = getDb()
   const now = Date.now()
   await db.transaction("rw", db.sessions, async () => {
+    await assertSessionsWritable(db, [id], "metadata")
     await db.sessions.update(id, { archivedAt: now })
     await closeOwnedAttachedDescendants(db, [id], now)
   })
@@ -449,6 +467,7 @@ export async function archiveSession(id: string): Promise<void> {
  * leave it intact — see {@link clearSessionSdkLink}).
  */
 export async function unarchiveSession(id: string): Promise<void> {
+  assertSessionWritable(await getDb().sessions.get(id), "metadata")
   await getDb()
     .sessions.where("id")
     .equals(id)
@@ -463,6 +482,7 @@ export async function bulkArchiveSessions(ids: readonly string[]): Promise<void>
   const now = Date.now()
   const db = getDb()
   await db.transaction("rw", db.sessions, async () => {
+    await assertSessionsWritable(db, ids, "metadata")
     for (const id of ids) await db.sessions.update(id, { archivedAt: now })
     await closeOwnedAttachedDescendants(db, ids, now)
   })
@@ -478,6 +498,7 @@ export async function bulkArchiveSessions(ids: readonly string[]): Promise<void>
  */
 export async function bulkUnarchiveSessions(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return
+  await assertSessionsWritable(getDb(), ids, "metadata")
   await getDb()
     .sessions.where("id")
     .anyOf(ids as string[])
@@ -499,6 +520,7 @@ export async function assignSessionToFolder(
   folderId: string | null
 ): Promise<void> {
   const db = getDb()
+  assertSessionWritable(await db.sessions.get(sessionId), "metadata")
   if (folderId === null) {
     await db.sessions
       .where("id")
@@ -527,6 +549,7 @@ export async function setSessionOrder(ids: readonly string[], sectionKey: string
   if (ids.length === 0) return
   const db = getDb()
   await db.transaction("rw", db.sessions, async () => {
+    await assertSessionsWritable(db, ids, "metadata")
     for (let i = 0; i < ids.length; i++) {
       await db.sessions.update(ids[i], { manualOrder: i, manualOrderSection: sectionKey })
     }
@@ -551,6 +574,7 @@ export async function setSessionOrder(ids: readonly string[], sectionKey: string
 export async function forkSessionFromParent(parentId: string): Promise<ChatSession> {
   const parent = await getDb().sessions.get(parentId)
   if (!parent) throw new Error(`Session ${parentId} not found`)
+  assertSessionWritable(parent, "branch")
   if (!parent.sdkSessionId) {
     throw new Error("Cannot fork: the session hasn't started a SDK conversation yet")
   }
@@ -721,6 +745,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       const at = Date.now()
       deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) => (row ? [row.id] : []))
       if (deletedIds.length === 0) return
+      await assertSessionsWritable(db, deletedIds, "delete")
       const attachedDescendants = await listOwnedAttachedDescendantIds(db, deletedIds)
       deletedIds = [...new Set([...deletedIds, ...attachedDescendants])]
       const doomedIds = new Set(deletedIds)
@@ -813,6 +838,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
 }
 
 export async function touchSession(id: string): Promise<void> {
+  assertSessionWritable(await getDb().sessions.get(id), "continue-run")
   await getDb().sessions.update(id, { updatedAt: Date.now() })
 }
 
@@ -824,5 +850,6 @@ export async function touchSession(id: string): Promise<void> {
 export async function setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {
   const row = await getDb().sessions.get(id)
   if (!row || row.sdkSessionId === sdkSessionId) return
+  assertSessionWritable(row, "continue-run")
   await getDb().sessions.update(id, { sdkSessionId })
 }

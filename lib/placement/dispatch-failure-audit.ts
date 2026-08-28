@@ -49,6 +49,7 @@ const DOMAIN_LABEL: Record<HostDispatchDomain, string> = {
   "mobile-step": "Device step",
   "remote-step": "Worker step",
   "schedule-handoff": "Workflow handoff",
+  "thread-handoff": "Thread handoff",
 }
 
 function describe(job: HostDispatchJobRow, failure: HostDispatchFailure): NotificationInput {

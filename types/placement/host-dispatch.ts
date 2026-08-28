@@ -20,7 +20,7 @@
  *
  * One table with a discriminant rather than three tables: the runner, the
  * backoff, the dead-letter policy, and the recovery sweep are identical for all
- * three, and only the delivery call differs.
+ * domains, and only the delivery call differs.
  */
 export type HostDispatchDomain =
   /** A workflow step executing on a paired device (`action.mobile.*`). */
@@ -29,6 +29,8 @@ export type HostDispatchDomain =
   | "remote-step"
   /** A scheduled occurrence handed to the execution authority. */
   | "schedule-handoff"
+  /** ADR-0103 cross-host thread ownership transfer. */
+  | "thread-handoff"
 
 export type HostDispatchStatus =
   | "pending"

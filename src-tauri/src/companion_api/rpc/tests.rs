@@ -24,6 +24,89 @@ fn known_commands_are_unique() {
 }
 
 #[test]
+fn remote_completion_commands_have_exact_remote_authority() {
+    let expected = [
+        ("agent_resolve_permission", "agent.run"),
+        ("agent_vendor_roots", "host.observe"),
+        ("fleet_opencode_outbox_repair", "host.admin"),
+        ("fleet_opencode_outbox_status", "host.observe"),
+        ("git_clone_guarded", "git.write"),
+        ("read_project_mcp_config", "host.observe"),
+        ("task_workspace_restore_snapshot", "workspace.write"),
+    ];
+
+    for (name, capability) in expected {
+        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+            .unwrap_or_else(|| panic!("{name} must have a manifest descriptor"));
+        assert_eq!(
+            descriptor.target,
+            crate::companion_api::command_manifest::CommandTarget::Execution,
+            "{name} target"
+        );
+        assert_eq!(descriptor.capability, capability, "{name} capability");
+        assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+    }
+
+    assert!(super::chat::COMMANDS.contains(&"agent_resolve_permission"));
+    assert!(super::chat::COMMANDS.contains(&"agent_vendor_roots"));
+    assert!(super::diagnostics::COMMANDS.contains(&"fleet_opencode_outbox_repair"));
+    assert!(super::diagnostics::COMMANDS.contains(&"fleet_opencode_outbox_status"));
+    assert!(super::source_control::COMMANDS.contains(&"git_clone_guarded"));
+    assert!(super::chat::COMMANDS.contains(&"read_project_mcp_config"));
+    assert!(super::filesystem::COMMANDS.contains(&"task_workspace_restore_snapshot"));
+    assert!(STEP_UP_COMMANDS.contains(&"fleet_opencode_outbox_repair"));
+}
+
+#[test]
+fn remote_completion_commands_reject_additional_fields_at_runtime() {
+    for name in [
+        "agent_resolve_permission",
+        "agent_vendor_roots",
+        "fleet_opencode_outbox_repair",
+        "fleet_opencode_outbox_status",
+        "git_clone_guarded",
+        "read_project_mcp_config",
+        "task_workspace_restore_snapshot",
+    ] {
+        let (status, Json(error)) =
+            validate_completion_command_fields(name, &json!({ "definitelyUnexpected": true }))
+                .expect_err("completion commands must reject additional fields");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+        assert_eq!(error.code, "validation_failed", "{name}");
+        assert!(error.message.contains("definitelyUnexpected"), "{name}");
+    }
+}
+
+#[test]
+fn thread_handoff_commands_have_exact_remote_authority_and_reject_extra_fields() {
+    let expected = [
+        ("thread_handoff_offer", "workspace.write", false),
+        ("thread_handoff_preflight", "host.observe", false),
+        ("thread_handoff_accept", "host.admin", true),
+        ("thread_handoff_commit", "host.admin", true),
+        ("thread_handoff_abort", "workspace.write", false),
+        ("thread_handoff_status", "host.observe", false),
+    ];
+
+    for (name, capability, step_up) in expected {
+        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+            .unwrap_or_else(|| panic!("{name} must have a manifest descriptor"));
+        assert_eq!(descriptor.capability, capability, "{name} capability");
+        assert_eq!(STEP_UP_COMMANDS.contains(&name), step_up, "{name} step-up");
+        assert!(
+            super::data_sync::COMMANDS.contains(&name),
+            "{name} dispatch arm"
+        );
+
+        let (status, Json(error)) =
+            validate_completion_command_fields(name, &json!({ "definitelyUnexpected": true }))
+                .expect_err("handoff commands must reject additional fields");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+        assert_eq!(error.code, "validation_failed", "{name}");
+    }
+}
+
+#[test]
 fn bridge_transport_failures_keep_the_public_retryable_error_contract() {
     for detail in [
         "brain bridge disconnected",

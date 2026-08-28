@@ -32,6 +32,7 @@ export const HOST_FEATURE_IDS = [
   "session.state-sync",
   "session.remote-control",
   "session.attachment-upload",
+  "session.thread-handoff",
   "connectors.inbox-relay",
   "workflow.execution",
 ] as const
@@ -254,6 +255,17 @@ export function buildLocalHostFeatureManifest({
         "session_attachment_upload_chunk",
         "session_attachment_upload_commit",
         "session_attachment_upload_abort",
+      ],
+    }
+    features["session.thread-handoff"] = {
+      version: 1,
+      operations: [
+        "thread_handoff_offer",
+        "thread_handoff_preflight",
+        "thread_handoff_accept",
+        "thread_handoff_commit",
+        "thread_handoff_abort",
+        "thread_handoff_status",
       ],
     }
     features["twin.runtime"] = {

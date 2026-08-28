@@ -73,6 +73,7 @@ import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-di
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
 import { HostConsentPrompt } from "@/components/host-consent/host-consent-prompt"
+import { ThreadHandoffInboundPromptProvider } from "@/components/thread-handoff/thread-handoff-inbound-prompt"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import { WorkflowRunToaster } from "@/components/workflow/runs/workflow-run-toaster"
 import { OrchestrationDispatchProvider } from "@/components/providers/orchestration-dispatch-provider"
@@ -383,6 +384,7 @@ export default async function RootLayout({
                              * interactive approver it has. Renders null unless
                              * the host says this device may answer. */}
                             <HostConsentPrompt />
+                            <ThreadHandoffInboundPromptProvider />
                             {/* Single consumer for every HITL approval gate in
                              * `usePendingGatesStore` — ADR-0022 team gates
                              * (budget / deadlock / teammate-fix / replan /

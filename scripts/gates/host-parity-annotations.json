@@ -60,6 +60,10 @@
     "components/data": {
       "classification": "ui-assumption"
     },
+    "components/devices": {
+      "classification": "ui-assumption",
+      "note": "Device controls and ownership candidates must be selected from runtime capabilities; the current guards still key presentation and grant affordances directly off the shell."
+    },
     "components/desktop": {
       "classification": "physically-impossible",
       "note": "Native window/menu chrome. Some children may be ui-assumption; split when paying down.",
@@ -176,6 +180,10 @@
     },
     "hooks/data": {
       "classification": "ui-assumption"
+    },
+    "hooks/devices": {
+      "classification": "ui-assumption",
+      "note": "Device discovery and grant actions currently branch on Tauri even though Companion and remote-host transports expose capability-based equivalents."
     },
     "hooks/desktop": {
       "classification": "ui-assumption"
@@ -468,6 +476,10 @@
     },
     "packages/document": {
       "classification": "unmigrated"
+    },
+    "packages/agent-config-types": {
+      "classification": "physically-impossible",
+      "note": "The only guard token is documentation in the settings-sync contract explaining why machine-local wallpaper refs cannot cross hosts; no runtime branch exists in this package."
     },
     "packages/provider-core": {
       "classification": "unmigrated"

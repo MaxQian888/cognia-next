@@ -146,6 +146,7 @@ import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
 import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
 import type { CollabRunMirrorRow } from "./collab-run-mirror-types"
 import type { BrowserSubmissionRow } from "./browser-submissions-types"
+import type { ThreadHandoffTicket } from "@cognia/agent-config-types/thread-handoff"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
@@ -4746,6 +4747,14 @@ export class CogniaDB extends Dexie {
     this.version(199).stores({
       browserSubmissions: "&submissionId, deviceId, sessionId, submittedAt, [deviceId+submittedAt]",
     })
+
+    // ADR-0103 — cross-host thread handoff tickets. Source and target live in
+    // different databases, but the compound key preserves the honest two-row
+    // model when both roles are observed in one test or recovery import.
+    this.version(200).stores({
+      threadHandoffTickets:
+        "&[ticketId+role], ticketId, role, state, expiresAt, source.sessionId, target.hostRef",
+    })
   }
 
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
@@ -4769,6 +4778,9 @@ export class CogniaDB extends Dexie {
   // v199 — Browser Companion submission side-notes. See
   // `lib/db/browser-submissions.ts`.
   browserSubmissions!: Table<BrowserSubmissionRow, string>
+  // v200 — ADR-0103 two-role cross-host handoff journal. See
+  // `lib/db/thread-handoff-tickets.ts`.
+  threadHandoffTickets!: Table<ThreadHandoffTicket, [string, string]>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.

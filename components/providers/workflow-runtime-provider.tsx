@@ -28,6 +28,7 @@ import { loggers } from "@cognia/logging"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { installHostDispatchRuntime } from "@/lib/placement/host-dispatch-runtime"
 import { registerScheduleHandoffDelivery } from "@/lib/workflow/runtime/schedule-handoff-delivery"
+import { registerThreadHandoffDelivery } from "@/lib/thread-handoff/delivery"
 
 const log = loggers.scheduler
 
@@ -64,6 +65,8 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
     try {
       const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
       disposers.push(unregisterScheduleHandoff)
+      const unregisterThreadHandoff = registerThreadHandoffDelivery()
+      disposers.push(unregisterThreadHandoff)
       const hostDispatchRuntime = installHostDispatchRuntime({ accountId: getActiveAccountId() })
       disposers.push(() => hostDispatchRuntime.stop())
       log.info?.("workflow runtime: durable Host dispatch installed")

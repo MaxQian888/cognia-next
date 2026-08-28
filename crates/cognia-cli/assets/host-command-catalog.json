@@ -343,6 +343,11 @@
       "category": "development"
     },
     {
+      "id": "thread",
+      "title": "Thread",
+      "category": "sessions"
+    },
+    {
       "id": "transcript",
       "title": "Transcript",
       "category": "sessions"
@@ -962,6 +967,134 @@
       "outputTyped": true
     },
     {
+      "name": "agent_resolve_permission",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "agent_resolve_permission (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "request_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `requestId`."
+          },
+          "decision": {
+            "type": "string",
+            "example": ""
+          },
+          "message": {
+            "type": "string"
+          },
+          "updated_input": {
+            "description": "Also accepted as `updatedInput`."
+          },
+          "command_id": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "interrupt": {
+            "type": "boolean"
+          },
+          "remote_execution_context": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {},
+            "description": "Also accepted as `remoteExecutionContext`."
+          },
+          "sessionId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `sessionId`."
+          },
+          "requestId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `requestId`."
+          },
+          "updatedInput": {
+            "description": "Also accepted as `updatedInput`."
+          },
+          "commandId": {
+            "type": "string",
+            "description": "Also accepted as `commandId`."
+          },
+          "remoteExecutionContext": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {},
+            "description": "Also accepted as `remoteExecutionContext`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_id"
+                ]
+              },
+              {
+                "required": [
+                  "sessionId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "request_id"
+                ]
+              },
+              {
+                "required": [
+                  "requestId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "remote_execution_context"
+                ]
+              },
+              {
+                "required": [
+                  "remoteExecutionContext"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "agent_send",
       "category": "agents",
       "resource": "agent",
@@ -1313,6 +1446,71 @@
         "additionalProperties": true,
         "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "agent-tasks"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "agent_vendor_roots",
+      "category": "agents",
+      "resource": "agent",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "agent_vendor_roots (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "claudeConfigDir",
+          "codexHome",
+          "opencodeConfigDir",
+          "opencodeDataDir",
+          "opencodePlatformDataDir",
+          "piAgentDir",
+          "piSessionDir",
+          "geminiDir",
+          "continueDir"
+        ],
+        "properties": {
+          "claudeConfigDir": {
+            "type": "string"
+          },
+          "codexHome": {
+            "type": "string"
+          },
+          "opencodeConfigDir": {
+            "type": "string"
+          },
+          "opencodeDataDir": {
+            "type": "string"
+          },
+          "opencodePlatformDataDir": {
+            "type": "string"
+          },
+          "piAgentDir": {
+            "type": "string"
+          },
+          "piSessionDir": {
+            "type": "string"
+          },
+          "geminiDir": {
+            "type": "string"
+          },
+          "continueDir": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -11287,6 +11485,110 @@
       "outputTyped": true
     },
     {
+      "name": "fleet_opencode_outbox_repair",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "fleet_opencode_outbox_repair (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "health",
+          "path",
+          "error"
+        ],
+        "properties": {
+          "health": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "corrupt",
+              "unavailable"
+            ]
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fleet_opencode_outbox_status",
+      "category": "agents",
+      "resource": "fleet",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "fleet_opencode_outbox_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "health",
+          "path",
+          "error"
+        ],
+        "properties": {
+          "health": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "corrupt",
+              "unavailable"
+            ]
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fleet_opencode_send_message",
       "category": "agents",
       "resource": "fleet",
@@ -12544,6 +12846,97 @@
           }
         },
         "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "git_clone_guarded",
+      "category": "development",
+      "resource": "git",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "git_clone_guarded (git.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "remoteUrl",
+          "destination"
+        ],
+        "properties": {
+          "remoteUrl": {
+            "type": "string",
+            "example": ""
+          },
+          "destination": {
+            "type": "string",
+            "example": ""
+          },
+          "guards": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "rootId",
+              "relativePath"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authorized-root"
+              },
+              "rootId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relativePath": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "pluginId",
+              "segments"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "plugin-cache"
+              },
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "segments": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -25211,6 +25604,67 @@
       "outputTyped": true
     },
     {
+      "name": "plugin_workspace_repo_remove",
+      "category": "extensions",
+      "resource": "plugin",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "plugin_workspace_repo_remove (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "segments"
+        ],
+        "properties": {
+          "plugin_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": []
+          },
+          "pluginId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `pluginId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "plugin_id"
+                ]
+              },
+              {
+                "required": [
+                  "pluginId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "project_environment_execute",
       "category": "development",
       "resource": "project-environments",
@@ -25773,6 +26227,80 @@
           "agent": {
             "type": "string",
             "description": "Canonical agent slug."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+        "required": [
+          "path",
+          "exists",
+          "writable",
+          "format",
+          "raw",
+          "parsed"
+        ],
+        "properties": {
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "jsonc",
+              "toml"
+            ]
+          },
+          "raw": {
+            "type": "string"
+          },
+          "parsed": {
+            "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+          },
+          "parseError": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "agent-config"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "read_project_mcp_config",
+      "category": "development",
+      "resource": "agent-config",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "read_project_mcp_config (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "cwd"
+        ],
+        "properties": {
+          "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "An authorized Host workspace root or descendant."
           }
         },
         "additionalProperties": false
@@ -34045,6 +34573,275 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_restore_snapshot",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_restore_snapshot (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "taskId",
+          "parentRunId",
+          "agentId",
+          "agentKind",
+          "executionRoot",
+          "isolationKind",
+          "isolationRef",
+          "workspaceId",
+          "base",
+          "workspaceKey",
+          "executionRunId",
+          "traceId",
+          "turnId",
+          "attemptId",
+          "providerAttemptId",
+          "surface",
+          "trackingPolicy",
+          "baselineRevision",
+          "state",
+          "createdAt",
+          "settledAt"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "parentRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "agentKind": {
+            "type": "string"
+          },
+          "executionRoot": {
+            "type": "string"
+          },
+          "isolationKind": {
+            "type": "string",
+            "enum": [
+              "gitWorktree",
+              "shadow"
+            ]
+          },
+          "isolationRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "workingState"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "localHead"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "remoteDefault"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "gitRef"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "gitRef"
+                  },
+                  "gitRef": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "provider",
+                  "repo",
+                  "number"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "pullRequest"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "number": {
+                    "type": "integer"
+                  },
+                  "fetchRef": {
+                    "type": "string"
+                  },
+                  "headSha": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "workspaceKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executionRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "traceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attemptId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "providerAttemptId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "surface": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trackingPolicy": {
+            "type": "object",
+            "required": [
+              "generatedOutputRoots",
+              "autoDetect"
+            ],
+            "properties": {
+              "generatedOutputRoots": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "autoDetect": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "baselineRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "settling",
+              "ready",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "settledAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_settle",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -35429,6 +36226,3006 @@
           },
           "additionalProperties": false
         }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_abort",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "thread_handoff_abort (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "role"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target"
+            ]
+          },
+          "peerDisposition": {
+            "type": "string",
+            "enum": [
+              "not-accepted",
+              "deleted"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticketVersion",
+          "ticketId",
+          "state",
+          "role",
+          "source",
+          "target",
+          "transport",
+          "project",
+          "requirements",
+          "continuation",
+          "attachments",
+          "pendingApprovals",
+          "history",
+          "createdAt",
+          "updatedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "ticketVersion": {
+            "const": 1
+          },
+          "ticketId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "frozen",
+              "accepted",
+              "committed",
+              "aborted"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target"
+            ]
+          },
+          "source": {
+            "type": "object",
+            "required": [
+              "hostRef",
+              "kind",
+              "sessionId",
+              "title",
+              "messageCount"
+            ],
+            "properties": {
+              "hostRef": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "cloud",
+                  "mobile",
+                  "cli"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "messageCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "target": {
+            "type": "object",
+            "required": [
+              "hostRef",
+              "kind"
+            ],
+            "properties": {
+              "hostRef": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "cloud",
+                  "mobile",
+                  "cli"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "cli-bridge",
+              "companion",
+              "remote-host"
+            ]
+          },
+          "project": {
+            "type": "object",
+            "properties": {
+              "sourceProjectId": {
+                "type": "string"
+              },
+              "workspaceRef": {
+                "type": "string"
+              },
+              "sourceWorkingDir": {
+                "type": "string"
+              },
+              "roots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "rootId",
+                    "relPath"
+                  ],
+                  "properties": {
+                    "rootId": {
+                      "type": "string"
+                    },
+                    "relPath": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "requirements": {
+            "type": "object",
+            "required": [
+              "capabilities",
+              "hostOperations",
+              "providerRefs",
+              "models",
+              "credentialProfileRefs"
+            ],
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "hostOperations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "feature"
+                  ],
+                  "properties": {
+                    "feature": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "providerRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "credentialProfileRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "minProtocolVersion": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "continuation": {
+            "type": "object",
+            "required": [
+              "sourceRuntime",
+              "fidelity",
+              "sequenceDigest"
+            ],
+            "properties": {
+              "sourceRuntime": {
+                "type": "string"
+              },
+              "sdkSessionId": {
+                "type": "string"
+              },
+              "fidelity": {
+                "type": "string",
+                "enum": [
+                  "native-exact",
+                  "structured",
+                  "contextual",
+                  "summary-only",
+                  "unsupported"
+                ]
+              },
+              "sequenceDigest": {
+                "type": "string"
+              },
+              "seedTranscript": {
+                "type": "string"
+              },
+              "permissionMode": {
+                "type": "string"
+              },
+              "systemPrompt": {
+                "type": "string"
+              },
+              "characterId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "providerOverride": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "attachmentId",
+                "filename",
+                "mediaType",
+                "byteLength",
+                "digest",
+                "carriage"
+              ],
+              "properties": {
+                "attachmentId": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "mediaType": {
+                  "type": "string"
+                },
+                "byteLength": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "carriage": {
+                  "type": "string",
+                  "enum": [
+                    "inline",
+                    "chunked",
+                    "by-ref"
+                  ]
+                },
+                "ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "pendingApprovals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "toolName",
+                "state",
+                "requestedAt"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string"
+                },
+                "toolName": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "denied"
+                  ]
+                },
+                "requestedAt": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "preflight": {
+            "type": "object",
+            "required": [
+              "ok",
+              "blockers",
+              "achievableFidelity",
+              "checkedAt"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "blockers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "ref",
+                    "severity"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "capability-missing",
+                        "host-operation-missing",
+                        "provider-unavailable",
+                        "model-unavailable",
+                        "credential-missing",
+                        "workspace-unavailable",
+                        "protocol-incompatible",
+                        "attachment-unresolvable",
+                        "transcript-digest-mismatch"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "blocking",
+                        "degraded"
+                      ]
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "achievableFidelity": {
+                "type": "string",
+                "enum": [
+                  "native-exact",
+                  "structured",
+                  "contextual",
+                  "summary-only",
+                  "unsupported"
+                ]
+              },
+              "checkedAt": {
+                "type": "integer"
+              },
+              "targetManifestSchemaVersion": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "state",
+                "at"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "preparing",
+                    "frozen",
+                    "accepted",
+                    "committed",
+                    "aborted"
+                  ]
+                },
+                "at": {
+                  "type": "integer"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_accept",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.admin",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "thread_handoff_accept (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "envelope",
+          "adminLease"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "frozen",
+                  "accepted",
+                  "committed",
+                  "aborted"
+                ]
+              },
+              "role": {
+                "const": "target"
+              },
+              "source": {
+                "type": "object"
+              },
+              "target": {
+                "type": "object"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object"
+              },
+              "requirements": {
+                "type": "object"
+              },
+              "continuation": {
+                "type": "object"
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "preflight": {
+                "type": "object"
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "envelope": {
+            "type": "object"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "proof"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "frozen",
+                  "accepted",
+                  "committed",
+                  "aborted"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "target"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind",
+                  "sessionId",
+                  "title",
+                  "messageCount"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "messageCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "target": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object",
+                "properties": {
+                  "sourceProjectId": {
+                    "type": "string"
+                  },
+                  "workspaceRef": {
+                    "type": "string"
+                  },
+                  "sourceWorkingDir": {
+                    "type": "string"
+                  },
+                  "roots": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "rootId",
+                        "relPath"
+                      ],
+                      "properties": {
+                        "rootId": {
+                          "type": "string"
+                        },
+                        "relPath": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "requirements": {
+                "type": "object",
+                "required": [
+                  "capabilities",
+                  "hostOperations",
+                  "providerRefs",
+                  "models",
+                  "credentialProfileRefs"
+                ],
+                "properties": {
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hostOperations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "providerRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "credentialProfileRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "minProtocolVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "continuation": {
+                "type": "object",
+                "required": [
+                  "sourceRuntime",
+                  "fidelity",
+                  "sequenceDigest"
+                ],
+                "properties": {
+                  "sourceRuntime": {
+                    "type": "string"
+                  },
+                  "sdkSessionId": {
+                    "type": "string"
+                  },
+                  "fidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "sequenceDigest": {
+                    "type": "string"
+                  },
+                  "seedTranscript": {
+                    "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string"
+                  },
+                  "systemPrompt": {
+                    "type": "string"
+                  },
+                  "characterId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "providerOverride": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "attachmentId",
+                    "filename",
+                    "mediaType",
+                    "byteLength",
+                    "digest",
+                    "carriage"
+                  ],
+                  "properties": {
+                    "attachmentId": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "carriage": {
+                      "type": "string",
+                      "enum": [
+                        "inline",
+                        "chunked",
+                        "by-ref"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "toolName",
+                    "state",
+                    "requestedAt"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "toolName": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "denied"
+                      ]
+                    },
+                    "requestedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "preflight": {
+                "type": "object",
+                "required": [
+                  "ok",
+                  "blockers",
+                  "achievableFidelity",
+                  "checkedAt"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "blockers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "ref",
+                        "severity"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "capability-missing",
+                            "host-operation-missing",
+                            "provider-unavailable",
+                            "model-unavailable",
+                            "credential-missing",
+                            "workspace-unavailable",
+                            "protocol-incompatible",
+                            "attachment-unresolvable",
+                            "transcript-digest-mismatch"
+                          ]
+                        },
+                        "ref": {
+                          "type": "string"
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "blocking",
+                            "degraded"
+                          ]
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "achievableFidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "checkedAt": {
+                    "type": "integer"
+                  },
+                  "targetManifestSchemaVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "at"
+                  ],
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "preparing",
+                        "frozen",
+                        "accepted",
+                        "committed",
+                        "aborted"
+                      ]
+                    },
+                    "at": {
+                      "type": "integer"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "actor": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "proof": {
+            "type": "object",
+            "required": [
+              "ticketId",
+              "state",
+              "targetHostRef",
+              "targetSessionId",
+              "sequenceDigest"
+            ],
+            "properties": {
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "const": "accepted"
+              },
+              "targetHostRef": {
+                "type": "string"
+              },
+              "targetSessionId": {
+                "type": "string"
+              },
+              "sequenceDigest": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_commit",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.admin",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "thread_handoff_commit (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "role",
+          "adminLease"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target"
+            ]
+          },
+          "acceptedProof": {
+            "type": "object",
+            "required": [
+              "ticketId",
+              "state",
+              "targetHostRef",
+              "targetSessionId",
+              "sequenceDigest"
+            ],
+            "properties": {
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "const": "accepted"
+              },
+              "targetHostRef": {
+                "type": "string"
+              },
+              "targetSessionId": {
+                "type": "string"
+              },
+              "sequenceDigest": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "sourceCommitProof": {
+            "type": "object",
+            "required": [
+              "ticketId",
+              "state",
+              "sourceHostRef",
+              "sourceSessionId",
+              "sequenceDigest"
+            ],
+            "properties": {
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "const": "committed"
+              },
+              "sourceHostRef": {
+                "type": "string"
+              },
+              "sourceSessionId": {
+                "type": "string"
+              },
+              "sequenceDigest": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "acceptedProof"
+            ],
+            "properties": {
+              "role": {
+                "const": "source"
+              }
+            }
+          },
+          {
+            "required": [
+              "sourceCommitProof"
+            ],
+            "properties": {
+              "role": {
+                "const": "target"
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "proof"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "frozen",
+                  "accepted",
+                  "committed",
+                  "aborted"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "target"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind",
+                  "sessionId",
+                  "title",
+                  "messageCount"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "messageCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "target": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object",
+                "properties": {
+                  "sourceProjectId": {
+                    "type": "string"
+                  },
+                  "workspaceRef": {
+                    "type": "string"
+                  },
+                  "sourceWorkingDir": {
+                    "type": "string"
+                  },
+                  "roots": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "rootId",
+                        "relPath"
+                      ],
+                      "properties": {
+                        "rootId": {
+                          "type": "string"
+                        },
+                        "relPath": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "requirements": {
+                "type": "object",
+                "required": [
+                  "capabilities",
+                  "hostOperations",
+                  "providerRefs",
+                  "models",
+                  "credentialProfileRefs"
+                ],
+                "properties": {
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hostOperations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "providerRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "credentialProfileRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "minProtocolVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "continuation": {
+                "type": "object",
+                "required": [
+                  "sourceRuntime",
+                  "fidelity",
+                  "sequenceDigest"
+                ],
+                "properties": {
+                  "sourceRuntime": {
+                    "type": "string"
+                  },
+                  "sdkSessionId": {
+                    "type": "string"
+                  },
+                  "fidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "sequenceDigest": {
+                    "type": "string"
+                  },
+                  "seedTranscript": {
+                    "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string"
+                  },
+                  "systemPrompt": {
+                    "type": "string"
+                  },
+                  "characterId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "providerOverride": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "attachmentId",
+                    "filename",
+                    "mediaType",
+                    "byteLength",
+                    "digest",
+                    "carriage"
+                  ],
+                  "properties": {
+                    "attachmentId": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "carriage": {
+                      "type": "string",
+                      "enum": [
+                        "inline",
+                        "chunked",
+                        "by-ref"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "toolName",
+                    "state",
+                    "requestedAt"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "toolName": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "denied"
+                      ]
+                    },
+                    "requestedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "preflight": {
+                "type": "object",
+                "required": [
+                  "ok",
+                  "blockers",
+                  "achievableFidelity",
+                  "checkedAt"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "blockers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "ref",
+                        "severity"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "capability-missing",
+                            "host-operation-missing",
+                            "provider-unavailable",
+                            "model-unavailable",
+                            "credential-missing",
+                            "workspace-unavailable",
+                            "protocol-incompatible",
+                            "attachment-unresolvable",
+                            "transcript-digest-mismatch"
+                          ]
+                        },
+                        "ref": {
+                          "type": "string"
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "blocking",
+                            "degraded"
+                          ]
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "achievableFidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "checkedAt": {
+                    "type": "integer"
+                  },
+                  "targetManifestSchemaVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "at"
+                  ],
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "preparing",
+                        "frozen",
+                        "accepted",
+                        "committed",
+                        "aborted"
+                      ]
+                    },
+                    "at": {
+                      "type": "integer"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "actor": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "proof": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "ticketId",
+                  "state",
+                  "sourceHostRef",
+                  "sourceSessionId",
+                  "sequenceDigest"
+                ],
+                "properties": {
+                  "ticketId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "committed"
+                  },
+                  "sourceHostRef": {
+                    "type": "string"
+                  },
+                  "sourceSessionId": {
+                    "type": "string"
+                  },
+                  "sequenceDigest": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "state"
+                ],
+                "properties": {
+                  "state": {
+                    "const": "committed"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_offer",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "thread_handoff_offer (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticket"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "const": "preparing"
+              },
+              "role": {
+                "const": "source"
+              },
+              "source": {
+                "type": "object"
+              },
+              "target": {
+                "type": "object"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object"
+              },
+              "requirements": {
+                "type": "object"
+              },
+              "continuation": {
+                "type": "object"
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "preflight": {
+                "type": "object"
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticketVersion",
+          "ticketId",
+          "state",
+          "role",
+          "source",
+          "target",
+          "transport",
+          "project",
+          "requirements",
+          "continuation",
+          "attachments",
+          "pendingApprovals",
+          "history",
+          "createdAt",
+          "updatedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "ticketVersion": {
+            "const": 1
+          },
+          "ticketId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "frozen",
+              "accepted",
+              "committed",
+              "aborted"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target"
+            ]
+          },
+          "source": {
+            "type": "object",
+            "required": [
+              "hostRef",
+              "kind",
+              "sessionId",
+              "title",
+              "messageCount"
+            ],
+            "properties": {
+              "hostRef": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "cloud",
+                  "mobile",
+                  "cli"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "messageCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "target": {
+            "type": "object",
+            "required": [
+              "hostRef",
+              "kind"
+            ],
+            "properties": {
+              "hostRef": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "cloud",
+                  "mobile",
+                  "cli"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "cli-bridge",
+              "companion",
+              "remote-host"
+            ]
+          },
+          "project": {
+            "type": "object",
+            "properties": {
+              "sourceProjectId": {
+                "type": "string"
+              },
+              "workspaceRef": {
+                "type": "string"
+              },
+              "sourceWorkingDir": {
+                "type": "string"
+              },
+              "roots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "rootId",
+                    "relPath"
+                  ],
+                  "properties": {
+                    "rootId": {
+                      "type": "string"
+                    },
+                    "relPath": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "requirements": {
+            "type": "object",
+            "required": [
+              "capabilities",
+              "hostOperations",
+              "providerRefs",
+              "models",
+              "credentialProfileRefs"
+            ],
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "hostOperations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "feature"
+                  ],
+                  "properties": {
+                    "feature": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "providerRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "credentialProfileRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "minProtocolVersion": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "continuation": {
+            "type": "object",
+            "required": [
+              "sourceRuntime",
+              "fidelity",
+              "sequenceDigest"
+            ],
+            "properties": {
+              "sourceRuntime": {
+                "type": "string"
+              },
+              "sdkSessionId": {
+                "type": "string"
+              },
+              "fidelity": {
+                "type": "string",
+                "enum": [
+                  "native-exact",
+                  "structured",
+                  "contextual",
+                  "summary-only",
+                  "unsupported"
+                ]
+              },
+              "sequenceDigest": {
+                "type": "string"
+              },
+              "seedTranscript": {
+                "type": "string"
+              },
+              "permissionMode": {
+                "type": "string"
+              },
+              "systemPrompt": {
+                "type": "string"
+              },
+              "characterId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "providerOverride": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "attachmentId",
+                "filename",
+                "mediaType",
+                "byteLength",
+                "digest",
+                "carriage"
+              ],
+              "properties": {
+                "attachmentId": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "mediaType": {
+                  "type": "string"
+                },
+                "byteLength": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "carriage": {
+                  "type": "string",
+                  "enum": [
+                    "inline",
+                    "chunked",
+                    "by-ref"
+                  ]
+                },
+                "ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "pendingApprovals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "toolName",
+                "state",
+                "requestedAt"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string"
+                },
+                "toolName": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "denied"
+                  ]
+                },
+                "requestedAt": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "preflight": {
+            "type": "object",
+            "required": [
+              "ok",
+              "blockers",
+              "achievableFidelity",
+              "checkedAt"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "blockers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "ref",
+                    "severity"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "capability-missing",
+                        "host-operation-missing",
+                        "provider-unavailable",
+                        "model-unavailable",
+                        "credential-missing",
+                        "workspace-unavailable",
+                        "protocol-incompatible",
+                        "attachment-unresolvable",
+                        "transcript-digest-mismatch"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "blocking",
+                        "degraded"
+                      ]
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "achievableFidelity": {
+                "type": "string",
+                "enum": [
+                  "native-exact",
+                  "structured",
+                  "contextual",
+                  "summary-only",
+                  "unsupported"
+                ]
+              },
+              "checkedAt": {
+                "type": "integer"
+              },
+              "targetManifestSchemaVersion": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "state",
+                "at"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "preparing",
+                    "frozen",
+                    "accepted",
+                    "committed",
+                    "aborted"
+                  ]
+                },
+                "at": {
+                  "type": "integer"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "actor": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_preflight",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "thread_handoff_preflight (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticket"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "frozen",
+                  "accepted",
+                  "committed",
+                  "aborted"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "target"
+                ]
+              },
+              "source": {
+                "type": "object"
+              },
+              "target": {
+                "type": "object"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object"
+              },
+              "requirements": {
+                "type": "object"
+              },
+              "continuation": {
+                "type": "object"
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "preflight": {
+                "type": "object"
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ok",
+          "blockers",
+          "achievableFidelity",
+          "checkedAt"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "ref",
+                "severity"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "capability-missing",
+                    "host-operation-missing",
+                    "provider-unavailable",
+                    "model-unavailable",
+                    "credential-missing",
+                    "workspace-unavailable",
+                    "protocol-incompatible",
+                    "attachment-unresolvable",
+                    "transcript-digest-mismatch"
+                  ]
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocking",
+                    "degraded"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "achievableFidelity": {
+            "type": "string",
+            "enum": [
+              "native-exact",
+              "structured",
+              "contextual",
+              "summary-only",
+              "unsupported"
+            ]
+          },
+          "checkedAt": {
+            "type": "integer"
+          },
+          "targetManifestSchemaVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "thread_handoff_status",
+      "category": "sessions",
+      "resource": "thread",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "thread_handoff_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "role"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "source",
+              "target"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "ticketVersion",
+              "ticketId",
+              "state",
+              "role",
+              "source",
+              "target",
+              "transport",
+              "project",
+              "requirements",
+              "continuation",
+              "attachments",
+              "pendingApprovals",
+              "history",
+              "createdAt",
+              "updatedAt",
+              "expiresAt"
+            ],
+            "properties": {
+              "ticketVersion": {
+                "const": 1
+              },
+              "ticketId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "frozen",
+                  "accepted",
+                  "committed",
+                  "aborted"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "target"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind",
+                  "sessionId",
+                  "title",
+                  "messageCount"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "messageCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "target": {
+                "type": "object",
+                "required": [
+                  "hostRef",
+                  "kind"
+                ],
+                "properties": {
+                  "hostRef": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "desktop",
+                      "cloud",
+                      "mobile",
+                      "cli"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "cli-bridge",
+                  "companion",
+                  "remote-host"
+                ]
+              },
+              "project": {
+                "type": "object",
+                "properties": {
+                  "sourceProjectId": {
+                    "type": "string"
+                  },
+                  "workspaceRef": {
+                    "type": "string"
+                  },
+                  "sourceWorkingDir": {
+                    "type": "string"
+                  },
+                  "roots": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "rootId",
+                        "relPath"
+                      ],
+                      "properties": {
+                        "rootId": {
+                          "type": "string"
+                        },
+                        "relPath": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "requirements": {
+                "type": "object",
+                "required": [
+                  "capabilities",
+                  "hostOperations",
+                  "providerRefs",
+                  "models",
+                  "credentialProfileRefs"
+                ],
+                "properties": {
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "hostOperations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "feature"
+                      ],
+                      "properties": {
+                        "feature": {
+                          "type": "string"
+                        },
+                        "operation": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "providerRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "credentialProfileRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "minProtocolVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "continuation": {
+                "type": "object",
+                "required": [
+                  "sourceRuntime",
+                  "fidelity",
+                  "sequenceDigest"
+                ],
+                "properties": {
+                  "sourceRuntime": {
+                    "type": "string"
+                  },
+                  "sdkSessionId": {
+                    "type": "string"
+                  },
+                  "fidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "sequenceDigest": {
+                    "type": "string"
+                  },
+                  "seedTranscript": {
+                    "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string"
+                  },
+                  "systemPrompt": {
+                    "type": "string"
+                  },
+                  "characterId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "providerOverride": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "attachmentId",
+                    "filename",
+                    "mediaType",
+                    "byteLength",
+                    "digest",
+                    "carriage"
+                  ],
+                  "properties": {
+                    "attachmentId": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "carriage": {
+                      "type": "string",
+                      "enum": [
+                        "inline",
+                        "chunked",
+                        "by-ref"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "pendingApprovals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "toolName",
+                    "state",
+                    "requestedAt"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "toolName": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "denied"
+                      ]
+                    },
+                    "requestedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "preflight": {
+                "type": "object",
+                "required": [
+                  "ok",
+                  "blockers",
+                  "achievableFidelity",
+                  "checkedAt"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "blockers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "ref",
+                        "severity"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "capability-missing",
+                            "host-operation-missing",
+                            "provider-unavailable",
+                            "model-unavailable",
+                            "credential-missing",
+                            "workspace-unavailable",
+                            "protocol-incompatible",
+                            "attachment-unresolvable",
+                            "transcript-digest-mismatch"
+                          ]
+                        },
+                        "ref": {
+                          "type": "string"
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "blocking",
+                            "degraded"
+                          ]
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "achievableFidelity": {
+                    "type": "string",
+                    "enum": [
+                      "native-exact",
+                      "structured",
+                      "contextual",
+                      "summary-only",
+                      "unsupported"
+                    ]
+                  },
+                  "checkedAt": {
+                    "type": "integer"
+                  },
+                  "targetManifestSchemaVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "history": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "at"
+                  ],
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "preparing",
+                        "frozen",
+                        "accepted",
+                        "committed",
+                        "aborted"
+                      ]
+                    },
+                    "at": {
+                      "type": "integer"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "actor": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "createdAt": {
+                "type": "integer"
+              },
+              "updatedAt": {
+                "type": "integer"
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "outputTyped": true
     },
@@ -37880,5 +41677,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "f08e7707fe58e92c084af9a1c909961dc5b021adbff6c2adc1fbbbf31c1d30ee"
+  "catalogHash": "a942067f9dc6bd35fe9ba76dc0f87c63c73b8c4f952719ea66d94d8dece7a3b9"
 }

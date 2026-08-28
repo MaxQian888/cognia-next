@@ -64,6 +64,7 @@ export const CORE_CAPABILITY_IDS = [
   "connector-runtime",
   "mcp-runtime",
   "pro-ide",
+  "thread-handoff-v1",
 ] as const
 
 export type CoreCapabilityId = (typeof CORE_CAPABILITY_IDS)[number]
@@ -86,6 +87,7 @@ const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
   "connector-runtime",
   "mcp-runtime",
   "headless",
+  "thread-handoff-v1",
 ] as const)
 
 /** True when `value` is a well-formed capability id (core or `plugin:<id>`). */
@@ -116,6 +118,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "push-display",
     "browser",
     "pro-ide",
+    "thread-handoff-v1",
   ] as const),
   mobile: Object.freeze([
     "webview",
@@ -126,6 +129,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "share-sheet",
     "push-display",
     "biometric",
+    "thread-handoff-v1",
   ] as const),
   web: Object.freeze(["webview"] as const),
   headless: SERVER_BACKED,

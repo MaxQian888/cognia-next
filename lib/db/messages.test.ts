@@ -469,3 +469,21 @@ describe("last-message preview denormalization", () => {
     expect(await getDb().sessions.get("s-orphan")).toBeUndefined()
   })
 })
+
+describe("thread handoff write guard", () => {
+  it("does not persist transcript changes while the session is frozen", async () => {
+    await getDb().sessions.put({
+      id: "handoff-locked",
+      projectId: "proj-A",
+      title: "Frozen",
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      updatedAt: 1,
+      createdAt: 1,
+    } as never)
+
+    await expect(
+      persistMessages("handoff-locked", [msg("blocked", "user", "must not persist")])
+    ).rejects.toMatchObject({ code: "session_handoff_locked" })
+    expect(await getDb().messages.where("sessionId").equals("handoff-locked").count()).toBe(0)
+  })
+})

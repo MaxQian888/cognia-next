@@ -15,6 +15,8 @@
  */
 
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
+import { detectPlatform, type Platform } from "@/lib/platform/detect"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { loggers } from "@cognia/logging"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
@@ -27,6 +29,15 @@ export interface CapabilityReporterTransport {
   onConnectionStateChange(handler: (state: ConnectionState) => void): () => void
 }
 
+export function capabilitiesForCompanionReport(
+  capabilities: readonly string[],
+  platform: Platform,
+  standalone: boolean
+): string[] {
+  if (platform !== "mobile" || standalone) return [...capabilities]
+  return capabilities.filter((capability) => capability !== "thread-handoff-v1")
+}
+
 /**
  * Install the reporter. Reports immediately when already connected, then on
  * every reconnect. Returns a teardown function (boot-provider cleanup shape).
@@ -36,7 +47,12 @@ export function installCapabilityReporter(transport: CapabilityReporterTransport
   let disposed = false
 
   const report = async (): Promise<void> => {
-    const capabilities = [...detectLocalCapabilities()]
+    const platform = detectPlatform()
+    const capabilities = capabilitiesForCompanionReport(
+      detectLocalCapabilities(),
+      platform,
+      platform === "mobile" && isStandaloneChatMode()
+    )
     const payloadKey = capabilities.join(",")
     if (payloadKey === lastReported) return
     try {

@@ -21,6 +21,7 @@ import { getDb } from "@/lib/db/schema"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { renderTranscript } from "@/lib/chat/branch-session"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 export interface HandoffMessage {
   role: "user" | "assistant" | "system"
@@ -45,6 +46,14 @@ export interface ImportHandoffParams {
    * `listScopedSessions`).
    */
   projectId?: string
+  /**
+   * Lineage marker written on the row, and the marker a pre-existing row must
+   * already carry to count as an idempotent re-import rather than a native
+   * collision. Defaults to the CLI handoff this module was built for; the
+   * ADR-0103 cross-host receiver passes `"thread-handoff"` so its own retries
+   * overwrite in place instead of diverting to a fresh id.
+   */
+  handoffSource?: "cli" | "thread-handoff"
   /** Injected clock for deterministic tests. */
   now?: number
 }
@@ -86,15 +95,20 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
   const transcript = renderTranscript(uiMessages)
   const db = getDb()
 
-  // Collision guard: a prior handoff of the SAME session (tagged
-  // `handoffSource: "cli"`) is overwritten in place — the intended idempotent
+  // Collision guard: a prior handoff of the SAME session (tagged with THIS
+  // import's `handoffSource`) is overwritten in place — the intended idempotent
   // re-handoff. But an incoming id that instead belongs to a *native* desktop
   // session must never be clobbered (title reset, messages replaced), so divert
   // to a fresh id and leave the original row untouched.
+  const handoffSource = params.handoffSource ?? "cli"
   const existing = await db.sessions.get(params.sessionId)
-  const isPriorHandoff = existing?.handoffSource === "cli"
+  const isPriorHandoff = existing?.handoffSource === handoffSource
   const collidesWithNative = existing != null && !isPriorHandoff
   const sessionId = collidesWithNative ? newSessionId() : params.sessionId
+  // Guard AFTER the diversion: a native collision writes a brand-new row and
+  // never touches `existing`, so its handoff lock is none of this import's
+  // business. Only the overwrite-in-place path needs the row to be writable.
+  if (!collidesWithNative) assertSessionWritable(existing, "metadata")
 
   // Workspace scope: preserve a prior handoff's workspace; otherwise stamp the
   // active one so the row shows up in the scoped chat sidebar. Without this the
@@ -110,8 +124,8 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
     titleAuto: false,
     kind: "direct",
     // Lineage marker: distinguishes a re-handoff from a native-session collision
-    // (see the collision guard above) and lets the UI show "handed off from the CLI".
-    handoffSource: "cli",
+    // (see the collision guard above) and lets the UI show where it came from.
+    handoffSource,
     model: meta?.model,
     providerOverride: meta?.provider,
     workingDir: meta?.cwd,

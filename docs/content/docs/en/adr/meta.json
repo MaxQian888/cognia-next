@@ -104,6 +104,7 @@
     "0100-unified-template-platform",
     "0101-model-evaluation-lab",
     "0102-unified-observability-crash-diagnostics",
+    "0103-cross-host-session-handoff",
     "0104-provider-diagnostics-control-plane",
     "0106-end-to-end-skill-recorder",
     "0107-coding-agent-migration",
@@ -152,6 +153,7 @@
     "0151-stacks-as-first-class",
     "0152-connector-controls-name-their-host",
     "0153-the-host-obtains-the-confirmation",
-    "0154-browser-companion"
+    "0154-browser-companion",
+    "0155-plugins-reach-the-host-through-one-door"
   ]
 }

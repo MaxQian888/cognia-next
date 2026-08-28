@@ -457,7 +457,7 @@ const HOST_CATEGORIES = [
     title: "Sessions and messages",
     description: "Chat sessions, messages, conversations, characters, and transcripts.",
     skill: "cognia-host-sessions",
-    pattern: /^(session_|message_|conversation_|character_|transcript_)/,
+    pattern: /^(session_|message_|conversation_|character_|transcript_|thread_handoff_)/,
   },
   {
     id: "agents",
@@ -509,7 +509,7 @@ const HOST_CATEGORIES = [
     description: "Git, files, terminals, browsers, code-server, and language servers.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",
@@ -564,7 +564,7 @@ const HOST_RESOURCE_ALIASES = [
   [/^(?:register_push_token|revoke_push_token|remote_notification_publish)$/, "notifications"],
   [/^(?:ensure_dir|ensure_dir_confined|default_export_dir|read_text_file|write_text_file|write_text_file_confined)$/, "files"],
   [/^fs_/, "workspace-files"],
-  [/^(?:read_agent_config|write_agent_config)$/, "agent-config"],
+  [/^(?:read_agent_config|read_project_mcp_config|write_agent_config)$/, "agent-config"],
   [/^(?:ensure_system_lsp_host|lsp_host_)/, "language-servers"],
 ]
 

@@ -6,6 +6,7 @@ import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
 import { collectUnreferencedMessageMedia, messageMediaRefRows } from "./message-media-refs"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -138,6 +139,7 @@ export async function replaceSessionTranscript(
   // once per call from the session — messages inherit their session's project.
   // Falls back to the active project for a session row that predates the column.
   const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
   const projectId = session?.projectId ?? (await resolveScopeProjectId())
 
   // Captured outside the transaction so we can fan-out trigger.chat.message
@@ -392,6 +394,7 @@ export async function commitMessageDelta(
 ): Promise<void> {
   const db = getDb()
   const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
   const projectId = session?.projectId ?? (await resolveScopeProjectId())
   const normalized = await Promise.all(upserts.map(normalizeMessageMedia))
   const upsertIds = normalized.map((message) => message.id || newId())
@@ -522,20 +525,30 @@ export async function persistStreamingMessages(
   const db = getDb()
   const oldRefs = await db.messageMediaRefs.where("messageId").equals(last.id).toArray()
   const replacementRefs = messageMediaRefRows(last.id, sessionId, normalizedLast.parts)
-  const updated = await db.transaction("rw", db.messages, db.messageMediaRefs, async () => {
-    const count = await db.messages.update(last.id, {
-      role: last.role,
-      parts: normalizedLast.parts,
-      turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
-      senderId,
-      senderKind,
-      metadata: stripHoistedMeta(meta),
-    })
-    if (count === 0) return count
-    await db.messageMediaRefs.where("messageId").equals(last.id).delete()
-    if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
-    return count
-  })
+  const updated = await db.transaction(
+    "rw",
+    db.messages,
+    db.messageMediaRefs,
+    db.sessions,
+    async () => {
+      // Read inside the transaction that it guards: this runs on every stream
+      // flush, so a separate `get` was an extra round-trip per flush — and a
+      // pre-check outside the write is one a concurrent lock can slip past.
+      assertSessionWritable(await db.sessions.get(sessionId), "continue-run")
+      const count = await db.messages.update(last.id, {
+        role: last.role,
+        parts: normalizedLast.parts,
+        turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+        senderId,
+        senderKind,
+        metadata: stripHoistedMeta(meta),
+      })
+      if (count === 0) return count
+      await db.messageMediaRefs.where("messageId").equals(last.id).delete()
+      if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+      return count
+    }
+  )
 
   // An out-of-band delete can invalidate an otherwise compatible in-memory
   // snapshot. Recover through the full path instead of silently dropping the
@@ -626,6 +639,7 @@ async function dispatchChatMessageTriggers(
 
 export async function clearMessages(sessionId: string): Promise<void> {
   const db = getDb()
+  assertSessionWritable(await db.sessions.get(sessionId), "send-message")
   const refs = await db.messageMediaRefs.where("sessionId").equals(sessionId).toArray()
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
@@ -652,6 +666,7 @@ export async function deleteStoredMessage(messageId: string): Promise<void> {
   const db = getDb()
   const row = await db.messages.get(messageId)
   if (!row) return
+  assertSessionWritable(await db.sessions.get(row.sessionId), "send-message")
 
   const refs = await db.messageMediaRefs.where("messageId").equals(messageId).toArray()
   let revision: number | null = null
@@ -687,6 +702,7 @@ export async function updateMessageMetadata(
   const db = getDb()
   const row = await db.messages.get(messageId)
   if (!row || row.sessionId !== sessionId) return
+  assertSessionWritable(await db.sessions.get(sessionId), "metadata")
   const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.sessions, async () => {
@@ -714,6 +730,7 @@ export async function truncateAfter(
   const db = getDb()
   const anchor = await db.messages.get(anchorMessageId)
   if (!anchor || anchor.sessionId !== sessionId) return
+  assertSessionWritable(await db.sessions.get(sessionId), "send-message")
 
   const lowerBound = options.inclusive ? anchor.createdAt : anchor.createdAt + 1
   const orphanCandidates = new Set<string>()

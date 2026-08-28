@@ -879,6 +879,7 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 "workflow://approval-pending",
                 "workflow://step-execute",
                 "workflow://step-pending",
+                "thread-handoff://offer",
             ];
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();

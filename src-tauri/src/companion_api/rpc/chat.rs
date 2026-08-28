@@ -8,6 +8,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "agent_interrupt",
     "agent_compact",
     "agent_close_session",
+    "agent_resolve_permission",
     "claude_send",
     "claude_interrupt",
     "claude_compact",
@@ -26,6 +27,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "claude_has_oauth_bearer",
     "claude_restart_sidecar",
     "read_agent_config",
+    "agent_vendor_roots",
+    "read_project_mcp_config",
     "write_agent_config",
     "secret_store_get",
     "keyring_secret_get",
@@ -187,6 +190,41 @@ pub(super) async fn dispatch(
                 decision,
                 message,
                 updated_input,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        "agent_resolve_permission" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
+            let decision: String = required(&args, "decision")?;
+            let message: Option<String> = optional(&args, "message")?;
+            let updated_input: Option<Value> =
+                optional_aliased(&args, "updated_input", "updatedInput")?;
+            let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
+            let interrupt: Option<bool> = optional(&args, "interrupt")?;
+            let context: super::super::remote_execution::RemoteExecutionContext =
+                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            super::super::remote_execution::global()
+                .validate_and_consume(
+                    &context,
+                    device_id,
+                    &session_id,
+                    &request_id,
+                    unix_time_ms(),
+                )
+                .map_err(remote_context_error)?;
+            claude_commands::claude_approve_impl_with_id(
+                &host.sidecar_state(),
+                session_id,
+                request_id,
+                decision,
+                message,
+                updated_input,
+                command_id,
+                interrupt,
             )
             .await
             .map(|_| Value::Null)
@@ -385,6 +423,24 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
                 .and_then(|r| {
                     serde_json::to_value(r).map_err(|e| RpcError::internal(e.to_string()))
+                })
+        }
+
+        "agent_vendor_roots" => to_json(agent_commands::agent_vendor_roots()),
+
+        "read_project_mcp_config" => {
+            let cwd = authorize_workspace_root(host, required(&args, "cwd")?)?;
+            tokio::task::spawn_blocking(move || agent_commands::read_project_mcp_config(cwd))
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(RpcError::internal)
+                .and_then(|result| {
+                    let mut value = serde_json::to_value(result)
+                        .map_err(|error| RpcError::internal(error.to_string()))?;
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("path".to_string(), Value::String(".mcp.json".to_string()));
+                    }
+                    Ok(value)
                 })
         }
 

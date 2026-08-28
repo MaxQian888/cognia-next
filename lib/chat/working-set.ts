@@ -10,6 +10,7 @@ import type { ResourceRefV1 } from "@cognia/agent-config-types/governance"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 import { getDb, withDbReopenRetry } from "@/lib/db/schema"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 export const WORKING_SET_MAX_ENTRIES = 32
 export const WORKING_SET_MAX_SUMMARY_CHARS = 512
@@ -137,6 +138,7 @@ export async function mutateSessionWorkingSet(
     return db.transaction("rw", db.sessions, async () => {
       const session = await db.sessions.get(mutation.sessionId)
       if (!session) throw new Error(`Unknown chat session: ${mutation.sessionId}`)
+      assertSessionWritable(session, "metadata")
       const current = session.workingSet ?? emptyWorkingSet()
       if (current.revision !== mutation.expectedRevision) {
         throw new WorkingSetConflictError(mutation.expectedRevision, current.revision)

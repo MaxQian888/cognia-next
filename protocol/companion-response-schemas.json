@@ -3541,6 +3541,254 @@
       },
       "additionalProperties": false
     },
+    "ThreadHandoffAcceptedProof": {
+      "type": "object",
+      "required": ["ticketId", "state", "targetHostRef", "targetSessionId", "sequenceDigest"],
+      "properties": {
+        "ticketId": { "type": "string" },
+        "state": { "const": "accepted" },
+        "targetHostRef": { "type": "string" },
+        "targetSessionId": { "type": "string" },
+        "sequenceDigest": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ThreadHandoffSourceCommitProof": {
+      "type": "object",
+      "required": ["ticketId", "state", "sourceHostRef", "sourceSessionId", "sequenceDigest"],
+      "properties": {
+        "ticketId": { "type": "string" },
+        "state": { "const": "committed" },
+        "sourceHostRef": { "type": "string" },
+        "sourceSessionId": { "type": "string" },
+        "sequenceDigest": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ThreadHandoffPreflight": {
+      "type": "object",
+      "required": ["ok", "blockers", "achievableFidelity", "checkedAt"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "ref", "severity"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "capability-missing",
+                  "host-operation-missing",
+                  "provider-unavailable",
+                  "model-unavailable",
+                  "credential-missing",
+                  "workspace-unavailable",
+                  "protocol-incompatible",
+                  "attachment-unresolvable",
+                  "transcript-digest-mismatch"
+                ]
+              },
+              "ref": { "type": "string" },
+              "severity": { "type": "string", "enum": ["blocking", "degraded"] },
+              "detail": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "achievableFidelity": {
+          "type": "string",
+          "enum": ["native-exact", "structured", "contextual", "summary-only", "unsupported"]
+        },
+        "checkedAt": { "type": "integer" },
+        "targetManifestSchemaVersion": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "ThreadHandoffTicket": {
+      "type": "object",
+      "required": [
+        "ticketVersion",
+        "ticketId",
+        "state",
+        "role",
+        "source",
+        "target",
+        "transport",
+        "project",
+        "requirements",
+        "continuation",
+        "attachments",
+        "pendingApprovals",
+        "history",
+        "createdAt",
+        "updatedAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "ticketVersion": { "const": 1 },
+        "ticketId": { "type": "string" },
+        "state": {
+          "type": "string",
+          "enum": ["preparing", "frozen", "accepted", "committed", "aborted"]
+        },
+        "role": { "type": "string", "enum": ["source", "target"] },
+        "source": {
+          "type": "object",
+          "required": ["hostRef", "kind", "sessionId", "title", "messageCount"],
+          "properties": {
+            "hostRef": { "type": "string" },
+            "kind": { "type": "string", "enum": ["desktop", "cloud", "mobile", "cli"] },
+            "label": { "type": "string" },
+            "sessionId": { "type": "string" },
+            "title": { "type": "string" },
+            "messageCount": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "object",
+          "required": ["hostRef", "kind"],
+          "properties": {
+            "hostRef": { "type": "string" },
+            "kind": { "type": "string", "enum": ["desktop", "cloud", "mobile", "cli"] },
+            "label": { "type": "string" },
+            "sessionId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "transport": { "type": "string", "enum": ["cli-bridge", "companion", "remote-host"] },
+        "project": {
+          "type": "object",
+          "properties": {
+            "sourceProjectId": { "type": "string" },
+            "workspaceRef": { "type": "string" },
+            "sourceWorkingDir": { "type": "string" },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["rootId", "relPath"],
+                "properties": { "rootId": { "type": "string" }, "relPath": { "type": "string" } },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "requirements": {
+          "type": "object",
+          "required": [
+            "capabilities",
+            "hostOperations",
+            "providerRefs",
+            "models",
+            "credentialProfileRefs"
+          ],
+          "properties": {
+            "capabilities": { "type": "array", "items": { "type": "string" } },
+            "hostOperations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["feature"],
+                "properties": {
+                  "feature": { "type": "string" },
+                  "operation": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "providerRefs": { "type": "array", "items": { "type": "string" } },
+            "models": { "type": "array", "items": { "type": "string" } },
+            "credentialProfileRefs": { "type": "array", "items": { "type": "string" } },
+            "minProtocolVersion": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "continuation": {
+          "type": "object",
+          "required": ["sourceRuntime", "fidelity", "sequenceDigest"],
+          "properties": {
+            "sourceRuntime": { "type": "string" },
+            "sdkSessionId": { "type": "string" },
+            "fidelity": {
+              "type": "string",
+              "enum": ["native-exact", "structured", "contextual", "summary-only", "unsupported"]
+            },
+            "sequenceDigest": { "type": "string" },
+            "seedTranscript": { "type": "string" },
+            "permissionMode": { "type": "string" },
+            "systemPrompt": { "type": "string" },
+            "characterId": { "type": "string" },
+            "model": { "type": "string" },
+            "providerOverride": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "attachmentId",
+              "filename",
+              "mediaType",
+              "byteLength",
+              "digest",
+              "carriage"
+            ],
+            "properties": {
+              "attachmentId": { "type": "string" },
+              "filename": { "type": "string" },
+              "mediaType": { "type": "string" },
+              "byteLength": { "type": "integer", "minimum": 0 },
+              "digest": { "type": "string" },
+              "carriage": { "type": "string", "enum": ["inline", "chunked", "by-ref"] },
+              "ref": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "pendingApprovals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["requestId", "toolName", "state", "requestedAt"],
+            "properties": {
+              "requestId": { "type": "string" },
+              "toolName": { "type": "string" },
+              "state": { "type": "string", "enum": ["pending", "denied"] },
+              "requestedAt": { "type": "integer" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "preflight": { "$ref": "#/$defs/ThreadHandoffPreflight" },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["state", "at"],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": ["preparing", "frozen", "accepted", "committed", "aborted"]
+              },
+              "at": { "type": "integer" },
+              "note": { "type": "string" },
+              "actor": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" },
+        "expiresAt": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
     "LangfuseCredentialsStatus": {
       "type": "object",
       "required": [
@@ -3584,6 +3832,35 @@
     }
   },
   "commands": {
+    "agent_resolve_permission": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_vendor_roots": {
+      "type": "object",
+      "required": [
+        "claudeConfigDir",
+        "codexHome",
+        "opencodeConfigDir",
+        "opencodeDataDir",
+        "opencodePlatformDataDir",
+        "piAgentDir",
+        "piSessionDir",
+        "geminiDir",
+        "continueDir"
+      ],
+      "properties": {
+        "claudeConfigDir": { "type": "string" },
+        "codexHome": { "type": "string" },
+        "opencodeConfigDir": { "type": "string" },
+        "opencodeDataDir": { "type": "string" },
+        "opencodePlatformDataDir": { "type": "string" },
+        "piAgentDir": { "type": "string" },
+        "piSessionDir": { "type": "string" },
+        "geminiDir": { "type": "string" },
+        "continueDir": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "adapter_update_policy": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -4916,7 +5193,57 @@
     "provider_profiles_version": {
       "$ref": "#/$defs/ProfileVersion"
     },
+    "fleet_opencode_outbox_repair": {
+      "type": "object",
+      "required": ["health", "path", "error"],
+      "properties": {
+        "health": { "type": "string", "enum": ["healthy", "corrupt", "unavailable"] },
+        "path": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "fleet_opencode_outbox_status": {
+      "type": "object",
+      "required": ["health", "path", "error"],
+      "properties": {
+        "health": { "type": "string", "enum": ["healthy", "corrupt", "unavailable"] },
+        "path": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "git_clone_guarded": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "rootId", "relativePath"],
+          "properties": {
+            "kind": { "type": "string", "const": "authorized-root" },
+            "rootId": { "type": "string", "minLength": 1 },
+            "relativePath": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "pluginId", "segments"],
+          "properties": {
+            "kind": { "type": "string", "const": "plugin-cache" },
+            "pluginId": { "type": "string", "minLength": 1 },
+            "segments": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "plugin_workspace_repo_remove": {
+      "type": "boolean"
+    },
     "read_agent_config": {
+      "$ref": "#/$defs/AgentReadResult"
+    },
+    "read_project_mcp_config": {
       "$ref": "#/$defs/AgentReadResult"
     },
     "read_text_file": {
@@ -5253,6 +5580,149 @@
     },
     "task_workspace_undo": {
       "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
+    },
+    "task_workspace_restore_snapshot": {
+      "type": "object",
+      "required": [
+        "runId",
+        "taskId",
+        "parentRunId",
+        "agentId",
+        "agentKind",
+        "executionRoot",
+        "isolationKind",
+        "isolationRef",
+        "workspaceId",
+        "base",
+        "workspaceKey",
+        "executionRunId",
+        "traceId",
+        "turnId",
+        "attemptId",
+        "providerAttemptId",
+        "surface",
+        "trackingPolicy",
+        "baselineRevision",
+        "state",
+        "createdAt",
+        "settledAt"
+      ],
+      "properties": {
+        "runId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "parentRunId": { "type": ["string", "null"] },
+        "agentId": { "type": "string" },
+        "agentKind": { "type": "string" },
+        "executionRoot": { "type": "string" },
+        "isolationKind": { "type": "string", "enum": ["gitWorktree", "shadow"] },
+        "isolationRef": { "type": ["string", "null"] },
+        "workspaceId": { "type": ["string", "null"] },
+        "base": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "const": "workingState" } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "const": "localHead" } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "const": "remoteDefault" } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind", "gitRef"],
+              "properties": { "kind": { "const": "gitRef" }, "gitRef": { "type": "string" } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind", "provider", "repo", "number"],
+              "properties": {
+                "kind": { "const": "pullRequest" },
+                "provider": { "type": "string" },
+                "repo": { "type": "string" },
+                "number": { "type": "integer" },
+                "fetchRef": { "type": "string" },
+                "headSha": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "workspaceKey": { "type": ["string", "null"] },
+        "executionRunId": { "type": ["string", "null"] },
+        "traceId": { "type": ["string", "null"] },
+        "turnId": { "type": ["string", "null"] },
+        "attemptId": { "type": ["string", "null"] },
+        "providerAttemptId": { "type": ["string", "null"] },
+        "surface": { "type": ["string", "null"] },
+        "trackingPolicy": {
+          "type": "object",
+          "required": ["generatedOutputRoots", "autoDetect"],
+          "properties": {
+            "generatedOutputRoots": { "type": "array", "items": { "type": "string" } },
+            "autoDetect": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "baselineRevision": { "type": "integer", "minimum": 0 },
+        "state": {
+          "type": "string",
+          "enum": ["running", "settling", "ready", "failed", "cancelled"]
+        },
+        "createdAt": { "type": "integer" },
+        "settledAt": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_abort": {
+      "$ref": "#/$defs/ThreadHandoffTicket"
+    },
+    "thread_handoff_accept": {
+      "type": "object",
+      "required": ["ticket", "proof"],
+      "properties": {
+        "ticket": { "$ref": "#/$defs/ThreadHandoffTicket" },
+        "proof": { "$ref": "#/$defs/ThreadHandoffAcceptedProof" }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_commit": {
+      "type": "object",
+      "required": ["ticket", "proof"],
+      "properties": {
+        "ticket": { "$ref": "#/$defs/ThreadHandoffTicket" },
+        "proof": {
+          "oneOf": [
+            { "$ref": "#/$defs/ThreadHandoffSourceCommitProof" },
+            {
+              "type": "object",
+              "required": ["state"],
+              "properties": { "state": { "const": "committed" } },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_offer": {
+      "$ref": "#/$defs/ThreadHandoffTicket"
+    },
+    "thread_handoff_preflight": {
+      "$ref": "#/$defs/ThreadHandoffPreflight"
+    },
+    "thread_handoff_status": {
+      "oneOf": [{ "$ref": "#/$defs/ThreadHandoffTicket" }, { "type": "null" }]
     },
     "team_run_pause": {
       "$ref": "#/$defs/LegacyResult"

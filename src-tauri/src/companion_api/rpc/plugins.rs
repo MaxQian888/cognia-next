@@ -39,6 +39,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "plugin_api_invoke",
     "plugin_api_batch_invoke",
     "plugin_get_capabilities",
+    "plugin_workspace_repo_remove",
     "codeserver_supported",
     "codeserver_ensure",
     "codeserver_status",
@@ -813,6 +814,17 @@ pub(super) async fn dispatch(
         }
         "plugin_get_capabilities" => {
             to_json(crate::plugin_api::api_bridge::plugin_get_capabilities_for_host(false))
+        }
+        "plugin_workspace_repo_remove" => {
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let segments: Vec<String> = required(&args, "segments")?;
+            crate::plugin_api::api_bridge::plugin_workspace_repo_remove_for_state(
+                host.plugin_runtime(),
+                &plugin_id,
+                &segments,
+            )
+            .map_err(plugin_rpc_error)
+            .and_then(to_json)
         }
 
         "codeserver_supported" => to_json(crate::codeserver::download::resolve_platform().is_ok()),

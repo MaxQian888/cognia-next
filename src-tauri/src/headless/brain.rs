@@ -17,6 +17,9 @@
 //! `COGNIA_DATA_DIR`, `COGNIA_LOCAL_ACCOUNT_ID`, and `NODE_EXTRA_CA_CERTS`
 //! pointed at the companion `tls.pem` (the self-signed cert's SANs include
 //! `127.0.0.1` / `localhost` — verified in `companion_api/tls.rs`).
+//! Optional `COGNIA_COLLAB_URL` / `COGNIA_COLLAB_ORG_ID` are inherited by the
+//! child; credentials are never forwarded and come from the CLI's 0600 Logto
+//! session file.
 
 use std::path::PathBuf;
 use std::process::Stdio;

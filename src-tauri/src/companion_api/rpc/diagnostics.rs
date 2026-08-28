@@ -16,6 +16,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "logs_query",
     "logs_list_files",
     "fleet_get_snapshot",
+    "fleet_opencode_outbox_status",
+    "fleet_opencode_outbox_repair",
     "fleet_worker_enrollment_create",
     "fleet_worker_list",
     "fleet_worker_set",
@@ -107,6 +109,14 @@ pub(super) async fn dispatch(
             })?;
             to_json(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
         }
+        "fleet_opencode_outbox_status" => crate::fleet::fleet_opencode_outbox_status()
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json),
+        "fleet_opencode_outbox_repair" => crate::fleet::fleet_opencode_outbox_repair()
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json),
         "fleet_worker_enrollment_create" => {
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("worker enrollment requires an authenticated tenant")

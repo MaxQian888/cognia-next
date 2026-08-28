@@ -22,6 +22,7 @@ import type { UIMessage } from "@/types"
 import { getDb } from "./schema"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { invalidatePersistSnapshot } from "./messages"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 /**
  * Proxy that lazy-resolves Dexie tables. Plugin code that hooks
@@ -148,6 +149,7 @@ export const messageRepository = {
   },
 
   async create(sessionId: string, message: UIMessage): Promise<UIMessage> {
+    assertSessionWritable(await getDb().sessions.get(sessionId), "send-message")
     const row = pluginToStored(sessionId, message)
     await getDb().messages.put(row)
     markSessionDirty(sessionId)
@@ -160,6 +162,7 @@ export const messageRepository = {
     const dexie = getDb()
     const existing = await dexie.messages.get(messageId)
     if (!existing) return
+    assertSessionWritable(await dexie.sessions.get(existing.sessionId), "send-message")
 
     const meta: Record<string, unknown> = { ...(existing.metadata ?? {}) }
     if (updates.attachments !== undefined) meta.attachments = updates.attachments
@@ -190,6 +193,9 @@ export const messageRepository = {
 
   async delete(messageId: string): Promise<void> {
     const existing = await getDb().messages.get(messageId)
+    if (existing) {
+      assertSessionWritable(await getDb().sessions.get(existing.sessionId), "send-message")
+    }
     await getDb().messages.delete(messageId)
     if (existing) {
       invalidatePersistSnapshot(existing.sessionId)
@@ -201,6 +207,7 @@ export const messageRepository = {
   },
 
   async deleteBySessionId(sessionId: string): Promise<void> {
+    assertSessionWritable(await getDb().sessions.get(sessionId), "send-message")
     await getDb().messages.where("sessionId").equals(sessionId).delete()
   },
 }

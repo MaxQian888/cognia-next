@@ -160,10 +160,13 @@ import {
 } from "@/lib/sync/host-state-service"
 import { permittedHostStateIntentKinds } from "@cognia/agent-config-types/host-state"
 import type {
+  HostStateAction,
   HostStateSnapshotRequest,
   HostStateSubmitCaller,
   HostStateSubmitRequest,
 } from "@cognia/agent-config-types/host-state"
+import { sessionIndexChannel } from "@cognia/agent-config-types/host-state"
+import type { CanonicalSession } from "@cognia/agent-config-types/canonical-session"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 const REQUEST_EVENT = "companion://desktop-write-request"
@@ -309,6 +312,14 @@ export async function dispatchCommand(
   }
   if (isScheduledTaskRpc(command)) {
     return dispatchScheduledTaskRpc(command, payload)
+  }
+  const { isThreadHandoffCommand, dispatchThreadHandoffCommand } =
+    await import("@/lib/thread-handoff/host-dispatch")
+  if (isThreadHandoffCommand(command)) {
+    return dispatchThreadHandoffCommand(command, payload, {
+      importSession: (envelope, sessionId) =>
+        importThreadHandoffSession(payload, envelope, sessionId, bridge),
+    })
   }
   // Browser Companion. Its own module rather than four `case` arms because the
   // submit path creates a session and enqueues a turn — see
@@ -565,6 +576,52 @@ export async function dispatchCommand(
       return backupImport(payload)
     default:
       throw new Error(`unknown desktop-write command: ${command}`)
+  }
+}
+
+async function importThreadHandoffSession(
+  payload: Record<string, unknown>,
+  envelope: CanonicalSession,
+  sessionId: string,
+  bridge?: TauriBridge
+): Promise<void> {
+  const service = await resolveHostStateService(payload, bridge)
+  const active = getActiveRuntimeTargetContext()
+  const accountId = payload.callerAccountId
+  const hostId = payload.authoritativeHostId
+  const deviceId = payload.callerDeviceId
+  const ticket = payload.ticket as { ticketId?: unknown } | undefined
+  if (
+    !active ||
+    typeof accountId !== "string" ||
+    typeof hostId !== "string" ||
+    typeof deviceId !== "string" ||
+    typeof ticket?.ticketId !== "string"
+  ) {
+    throw new Error("thread_handoff_authority_binding_missing")
+  }
+  const status = await service.status()
+  const now = Date.now()
+  const action: HostStateAction = {
+    channel: sessionIndexChannel(active.targetId),
+    accountId,
+    runtimeTargetId: active.targetId,
+    hostId,
+    hostGeneration: status.hostGeneration,
+    sessionId,
+    clientId: deviceId,
+    clientSeq: 1,
+    actionId: `thread-handoff:${ticket.ticketId}:import`,
+    createdAt: now,
+    action: { kind: "session.import", envelope },
+  }
+  const response = await service.submit(
+    { accountId, runtimeTargetId: active.targetId, actions: [action] },
+    hostStateCaller(payload)
+  )
+  const receipt = response.results[0]
+  if (!receipt || (receipt.outcome !== "applied" && receipt.outcome !== "duplicate")) {
+    throw new Error(receipt?.rejection?.code ?? "thread_handoff_session_import_failed")
   }
 }
 

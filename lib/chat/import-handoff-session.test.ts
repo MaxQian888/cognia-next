@@ -95,6 +95,65 @@ describe("importHandoffSession", () => {
     expect(await listMessages(created.id)).toHaveLength(1)
   })
 
+  it("still diverts when the colliding native session is handoff-locked", async () => {
+    // The lock belongs to an unrelated ADR-0103 transfer. This import never
+    // writes to that row — it mints a new one — so the lock is none of its
+    // business, and checking writability before the diversion turned a
+    // handled collision into a hard failure.
+    await getDb().sessions.put({
+      id: "s_locked",
+      projectId: DEFAULT_PROJECT_ID,
+      title: "Native chat mid-handoff",
+      createdAt: 1,
+      updatedAt: 1,
+      handoffLock: {
+        ticketId: "ticket-9",
+        state: "frozen",
+        targetHostRef: "phone-1",
+        at: 2,
+      },
+    } as ChatSession)
+
+    const created = await importHandoffSession({
+      sessionId: "s_locked",
+      messages: [{ role: "user", content: "from cli" }],
+      now: 5,
+    })
+
+    expect(created.id).not.toBe("s_locked")
+    const native = await getSession("s_locked")
+    expect(native?.title).toBe("Native chat mid-handoff")
+    expect(native?.handoffLock?.ticketId).toBe("ticket-9")
+    expect(await listMessages("s_locked")).toHaveLength(0)
+    expect(await listMessages(created.id)).toHaveLength(1)
+  })
+
+  it("refuses an overwrite-in-place re-handoff while the row is handoff-locked", async () => {
+    // The other half of the guard: this path DOES write to the existing row.
+    await getDb().sessions.put({
+      id: "s_relock",
+      projectId: DEFAULT_PROJECT_ID,
+      title: "Prior handoff",
+      handoffSource: "cli",
+      createdAt: 1,
+      updatedAt: 1,
+      handoffLock: {
+        ticketId: "ticket-7",
+        state: "frozen",
+        targetHostRef: "phone-1",
+        at: 2,
+      },
+    } as ChatSession)
+
+    await expect(
+      importHandoffSession({
+        sessionId: "s_relock",
+        messages: [{ role: "user", content: "from cli" }],
+        now: 5,
+      })
+    ).rejects.toMatchObject({ code: "session_handoff_locked" })
+  })
+
   it("persists the transcript as visible messages and stores the row", async () => {
     await importHandoffSession({
       sessionId: "s_cli_2",

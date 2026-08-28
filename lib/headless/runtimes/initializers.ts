@@ -60,6 +60,7 @@ registerHeadlessRuntime({
       { reconcilePendingGoalVerifications },
       { registerScheduleHandoffDelivery },
       { installHostDispatchRuntime },
+      { registerThreadHandoffDelivery },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
       import("@/lib/db/workflows"),
@@ -70,9 +71,11 @@ registerHeadlessRuntime({
       import("@/lib/goal/verification"),
       import("@/lib/workflow/runtime/schedule-handoff-delivery"),
       import("@/lib/placement/host-dispatch-runtime"),
+      import("@/lib/thread-handoff/delivery"),
     ])
 
     const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
+    const unregisterThreadHandoff = registerThreadHandoffDelivery()
     const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.accountId })
     initTriggerSubscriptions()
     initPluginTriggerLifecycle()
@@ -110,6 +113,7 @@ registerHeadlessRuntime({
       await disposePluginTriggerLifecycle()
       await hostDispatchRuntime.stop()
       unregisterScheduleHandoff()
+      unregisterThreadHandoff()
     }
   },
 })

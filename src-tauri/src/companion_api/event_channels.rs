@@ -287,6 +287,13 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "desktop-issued remote step request; full params ride the socket",
     },
     EventChannelSpec {
+        pattern: "thread-handoff://offer",
+        audience: ChannelAudience::Any,
+        default_on: true,
+        tauri_forwarded: true,
+        note: "ADR-0103 ownership offer; addressed canonical transcript rides the authenticated socket",
+    },
+    EventChannelSpec {
         pattern: "sync://invalidate",
         audience: ChannelAudience::Any,
         default_on: true,

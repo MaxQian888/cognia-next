@@ -1173,3 +1173,31 @@ describe("deleteSession — branch survival", () => {
     expect((await getDb().sessions.get("branch"))?.parentSessionId).toBeUndefined()
   })
 })
+
+describe("thread handoff write guard", () => {
+  beforeEach(async () => {
+    await getDb().sessions.put({
+      id: "handoff-locked",
+      title: "Frozen",
+      kind: "direct",
+      projectId: "p1",
+      sdkSessionId: "sdk-1",
+      handoffLock: { ticketId: "ticket-1", state: "frozen", at: 1 },
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+  })
+
+  it("blocks metadata, branching, and deletion", async () => {
+    await expect(updateSession("handoff-locked", { title: "Changed" })).rejects.toMatchObject({
+      code: "session_handoff_locked",
+    })
+    await expect(forkSessionFromParent("handoff-locked")).rejects.toMatchObject({
+      code: "session_handoff_locked",
+    })
+    await expect(deleteSession("handoff-locked")).rejects.toMatchObject({
+      code: "session_handoff_locked",
+    })
+    expect((await getDb().sessions.get("handoff-locked"))?.title).toBe("Frozen")
+  })
+})

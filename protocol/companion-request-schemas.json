@@ -447,6 +447,51 @@
       },
       "additionalProperties": false
     },
+    "agent_resolve_permission": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "request_id",
+        "decision",
+        "remote_execution_context"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `sessionId`."
+        },
+        "request_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `requestId`."
+        },
+        "decision": {
+          "type": "string",
+          "example": ""
+        },
+        "message": {
+          "type": "string"
+        },
+        "updated_input": {
+          "description": "Also accepted as `updatedInput`."
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
+        },
+        "interrupt": {
+          "type": "boolean"
+        },
+        "remote_execution_context": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "Also accepted as `remoteExecutionContext`."
+        }
+      },
+      "additionalProperties": false
+    },
     "agent_send": {
       "type": "object",
       "required": [
@@ -618,6 +663,11 @@
           "minLength": 1
         }
       },
+      "additionalProperties": false
+    },
+    "agent_vendor_roots": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "app_settings_update": {
@@ -3262,6 +3312,16 @@
       },
       "additionalProperties": false
     },
+    "fleet_opencode_outbox_repair": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "fleet_opencode_outbox_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "fleet_opencode_send_message": {
       "type": "object",
       "required": [
@@ -3802,6 +3862,41 @@
         "destinationRelativePath": {
           "type": "string",
           "minLength": 1
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_clone_guarded": {
+      "type": "object",
+      "required": [
+        "remoteUrl",
+        "destination",
+        "workspaceId",
+        "adminLease"
+      ],
+      "properties": {
+        "remoteUrl": {
+          "type": "string",
+          "example": ""
+        },
+        "destination": {
+          "type": "string",
+          "example": ""
+        },
+        "guards": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relativePath": {
+          "type": "string"
         },
         "adminLease": {
           "type": "string",
@@ -8253,6 +8348,28 @@
       },
       "additionalProperties": false
     },
+    "plugin_workspace_repo_remove": {
+      "type": "object",
+      "required": [
+        "plugin_id",
+        "segments"
+      ],
+      "properties": {
+        "plugin_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `pluginId`."
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": []
+        }
+      },
+      "additionalProperties": false
+    },
     "project_environment_execute": {
       "type": "object",
       "required": [
@@ -8404,6 +8521,20 @@
         "agent": {
           "type": "string",
           "description": "Canonical agent slug."
+        }
+      },
+      "additionalProperties": false
+    },
+    "read_project_mcp_config": {
+      "type": "object",
+      "required": [
+        "cwd"
+      ],
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "description": "An authorized Host workspace root or descendant."
         }
       },
       "additionalProperties": false
@@ -9958,6 +10089,19 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_restore_snapshot": {
+      "type": "object",
+      "required": [
+        "runId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_settle": {
       "type": "object",
       "required": [
@@ -10362,6 +10506,483 @@
       "properties": {
         "projectId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_abort": {
+      "type": "object",
+      "required": [
+        "ticketId",
+        "role"
+      ],
+      "properties": {
+        "ticketId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "peerDisposition": {
+          "type": "string",
+          "enum": [
+            "not-accepted",
+            "deleted"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_accept": {
+      "type": "object",
+      "required": [
+        "ticket",
+        "envelope",
+        "adminLease"
+      ],
+      "properties": {
+        "ticket": {
+          "type": "object",
+          "required": [
+            "ticketVersion",
+            "ticketId",
+            "state",
+            "role",
+            "source",
+            "target",
+            "transport",
+            "project",
+            "requirements",
+            "continuation",
+            "attachments",
+            "pendingApprovals",
+            "history",
+            "createdAt",
+            "updatedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "ticketVersion": {
+              "const": 1
+            },
+            "ticketId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "frozen",
+                "accepted",
+                "committed",
+                "aborted"
+              ]
+            },
+            "role": {
+              "const": "target"
+            },
+            "source": {
+              "type": "object"
+            },
+            "target": {
+              "type": "object"
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "cli-bridge",
+                "companion",
+                "remote-host"
+              ]
+            },
+            "project": {
+              "type": "object"
+            },
+            "requirements": {
+              "type": "object"
+            },
+            "continuation": {
+              "type": "object"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "pendingApprovals": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "preflight": {
+              "type": "object"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "createdAt": {
+              "type": "integer"
+            },
+            "updatedAt": {
+              "type": "integer"
+            },
+            "expiresAt": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "envelope": {
+          "type": "object"
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_commit": {
+      "type": "object",
+      "required": [
+        "ticketId",
+        "role",
+        "adminLease"
+      ],
+      "properties": {
+        "ticketId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "acceptedProof": {
+          "type": "object",
+          "required": [
+            "ticketId",
+            "state",
+            "targetHostRef",
+            "targetSessionId",
+            "sequenceDigest"
+          ],
+          "properties": {
+            "ticketId": {
+              "type": "string"
+            },
+            "state": {
+              "const": "accepted"
+            },
+            "targetHostRef": {
+              "type": "string"
+            },
+            "targetSessionId": {
+              "type": "string"
+            },
+            "sequenceDigest": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "sourceCommitProof": {
+          "type": "object",
+          "required": [
+            "ticketId",
+            "state",
+            "sourceHostRef",
+            "sourceSessionId",
+            "sequenceDigest"
+          ],
+          "properties": {
+            "ticketId": {
+              "type": "string"
+            },
+            "state": {
+              "const": "committed"
+            },
+            "sourceHostRef": {
+              "type": "string"
+            },
+            "sourceSessionId": {
+              "type": "string"
+            },
+            "sequenceDigest": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "adminLease": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "acceptedProof"
+          ],
+          "properties": {
+            "role": {
+              "const": "source"
+            }
+          }
+        },
+        {
+          "required": [
+            "sourceCommitProof"
+          ],
+          "properties": {
+            "role": {
+              "const": "target"
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "thread_handoff_offer": {
+      "type": "object",
+      "required": [
+        "ticket"
+      ],
+      "properties": {
+        "ticket": {
+          "type": "object",
+          "required": [
+            "ticketVersion",
+            "ticketId",
+            "state",
+            "role",
+            "source",
+            "target",
+            "transport",
+            "project",
+            "requirements",
+            "continuation",
+            "attachments",
+            "pendingApprovals",
+            "history",
+            "createdAt",
+            "updatedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "ticketVersion": {
+              "const": 1
+            },
+            "ticketId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "state": {
+              "const": "preparing"
+            },
+            "role": {
+              "const": "source"
+            },
+            "source": {
+              "type": "object"
+            },
+            "target": {
+              "type": "object"
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "cli-bridge",
+                "companion",
+                "remote-host"
+              ]
+            },
+            "project": {
+              "type": "object"
+            },
+            "requirements": {
+              "type": "object"
+            },
+            "continuation": {
+              "type": "object"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "pendingApprovals": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "preflight": {
+              "type": "object"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "createdAt": {
+              "type": "integer"
+            },
+            "updatedAt": {
+              "type": "integer"
+            },
+            "expiresAt": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_preflight": {
+      "type": "object",
+      "required": [
+        "ticket"
+      ],
+      "properties": {
+        "ticket": {
+          "type": "object",
+          "required": [
+            "ticketVersion",
+            "ticketId",
+            "state",
+            "role",
+            "source",
+            "target",
+            "transport",
+            "project",
+            "requirements",
+            "continuation",
+            "attachments",
+            "pendingApprovals",
+            "history",
+            "createdAt",
+            "updatedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "ticketVersion": {
+              "const": 1
+            },
+            "ticketId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "preparing",
+                "frozen",
+                "accepted",
+                "committed",
+                "aborted"
+              ]
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "source",
+                "target"
+              ]
+            },
+            "source": {
+              "type": "object"
+            },
+            "target": {
+              "type": "object"
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "cli-bridge",
+                "companion",
+                "remote-host"
+              ]
+            },
+            "project": {
+              "type": "object"
+            },
+            "requirements": {
+              "type": "object"
+            },
+            "continuation": {
+              "type": "object"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "pendingApprovals": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "preflight": {
+              "type": "object"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "createdAt": {
+              "type": "integer"
+            },
+            "updatedAt": {
+              "type": "integer"
+            },
+            "expiresAt": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "thread_handoff_status": {
+      "type": "object",
+      "required": [
+        "ticketId",
+        "role"
+      ],
+      "properties": {
+        "ticketId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "source",
+            "target"
+          ]
         }
       },
       "additionalProperties": false

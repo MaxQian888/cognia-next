@@ -139,6 +139,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "perf_trace_open",
     "perf_trace_read_chunk",
     "perf_system_details",
+    "thread_handoff_offer",
+    "thread_handoff_preflight",
+    "thread_handoff_accept",
+    "thread_handoff_commit",
+    "thread_handoff_abort",
+    "thread_handoff_status",
 ];
 
 fn validate_content_protocol(
@@ -800,6 +806,26 @@ pub(super) async fn dispatch(
             };
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
+            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
+            bridge
+                .dispatch(
+                    transport.as_ref(),
+                    name,
+                    args,
+                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(|error| map_desktop_write_bridge_error(name, error))
+        }
+        "thread_handoff_offer"
+        | "thread_handoff_preflight"
+        | "thread_handoff_accept"
+        | "thread_handoff_commit"
+        | "thread_handoff_abort"
+        | "thread_handoff_status" => {
+            let args = super::host_state::bind_authority(args, state, account_id, device_id)?;
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge

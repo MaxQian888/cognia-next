@@ -29,6 +29,7 @@
 import type { UIMessage } from "ai"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { getSession } from "@/lib/db/sessions"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
@@ -280,6 +281,7 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
 
   const source = await getSession(sourceId)
   if (!source) throw new Error(`Cannot branch: session ${sourceId} not found`)
+  assertSessionWritable(source, "branch")
 
   const cutIdx = visibleMessages.findIndex((m) => m.id === messageId)
   if (cutIdx < 0) {

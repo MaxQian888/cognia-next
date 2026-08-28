@@ -357,6 +357,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "agent_interrupt",
     "agent_compact",
     "agent_close_session",
+    "agent_resolve_permission",
+    "agent_vendor_roots",
     "claude_send",
     "claude_interrupt",
     "claude_compact",
@@ -421,6 +423,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "mcp_oauth_refresh",
     "mcp_oauth_clear",
     "read_agent_config",
+    "read_project_mcp_config",
     "write_agent_config",
     // Generic encrypted secret-store facade for the headless brain. The
     // keyring names are deprecated compatibility aliases.
@@ -614,6 +617,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    "thread_handoff_offer",
+    "thread_handoff_preflight",
+    "thread_handoff_accept",
+    "thread_handoff_commit",
+    "thread_handoff_abort",
+    "thread_handoff_status",
     // Single-Agent task board control. Metadata mirrors over the agentTasks
     // sync tables; these live commands are validated by the desktop runtime.
     "agent_task_start",
@@ -729,6 +738,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "git_interactive_rebase",
     "git_init",
     "git_clone",
+    "git_clone_guarded",
     "git_identity",
     "git_set_identity",
     "git_ignore_add",
@@ -816,6 +826,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_resource_upload_abort",
     "task_workspace_apply",
     "task_workspace_undo",
+    "task_workspace_restore_snapshot",
     "task_workspace_resolve_conflict",
     "task_workspace_pin",
     "task_workspace_prune",
@@ -880,6 +891,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_permission_grant",
     "plugin_permission_list",
     "plugin_permission_revoke",
+    "plugin_workspace_repo_remove",
     "plugin_api_invoke",
     "plugin_api_batch_invoke",
     "plugin_get_capabilities",
@@ -1029,6 +1041,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     // All reach the process-global runtime directly (no AppHandle), so they also
     // work on a headless server.
     "fleet_get_snapshot",
+    "fleet_opencode_outbox_status",
+    "fleet_opencode_outbox_repair",
     "fleet_worker_enrollment_create",
     "fleet_worker_list",
     "fleet_worker_set",
@@ -1123,6 +1137,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "claude_sidecar_status",
     "claude_has_api_key",
     "claude_has_oauth_bearer",
+    "agent_vendor_roots",
     "skills_load_registry",
     "skills_scan_native",
     "skills_catalog_get",
@@ -1133,6 +1148,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "mcp_oauth_status",
     "mcp_oauth_load_entry",
     "read_agent_config",
+    "read_project_mcp_config",
     "keyring_secret_get",
     "secret_store_get",
     "ocr_list_native_backends",
@@ -1288,6 +1304,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "workflow_placement_probe",
     "workflow_approval_list",
     "workflow_human_input_list",
+    "thread_handoff_preflight",
+    "thread_handoff_status",
     // Twin reads.
     "twin_source_list",
     "twin_job_status",
@@ -1306,6 +1324,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "logs_list_files",
     // Fleet snapshot — same call always returns the current live snapshot.
     "fleet_get_snapshot",
+    "fleet_opencode_outbox_status",
     // ADR-0153 — approver-side read; must never be served from the 60 s
     // idempotency cache, or an answered request keeps re-appearing.
     "host_consent_pending",
@@ -1387,6 +1406,10 @@ const CONTROL_COMMANDS: &[&str] = &[
     "session_attachment_upload_chunk",
     "session_attachment_upload_commit",
     "session_attachment_upload_abort",
+    "thread_handoff_offer",
+    "thread_handoff_accept",
+    "thread_handoff_commit",
+    "thread_handoff_abort",
     "goal_pause",
     "goal_resume",
     "goal_stop",
@@ -1450,6 +1473,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "git_interactive_rebase",
     "git_init",
     "git_clone",
+    "git_clone_guarded",
     "git_set_identity",
     "git_ignore_add",
     "git_merge",
@@ -1609,6 +1633,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "fleet_question_respond",
     "fleet_question_reject",
     "fleet_opencode_send_message",
+    "fleet_opencode_outbox_repair",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
 ];
@@ -1632,6 +1657,9 @@ static CONTROL_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| CONTROL_COMMANDS.iter().copied().collect());
 
 const STEP_UP_COMMANDS: &[&str] = &[
+    "thread_handoff_accept",
+    "thread_handoff_commit",
+    "fleet_opencode_outbox_repair",
     "skills_bundle_upload_open",
     "skills_bundle_upload_write",
     "skills_bundle_upload_commit",
@@ -2312,6 +2340,75 @@ fn validate_app_settings_update(args: &Value) -> Result<(), (StatusCode, Json<Rp
     }
 }
 
+fn validate_completion_command_fields(
+    name: &str,
+    args: &Value,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let allowed: &[&str] = match name {
+        "agent_resolve_permission" => &[
+            "session_id",
+            "sessionId",
+            "request_id",
+            "requestId",
+            "decision",
+            "message",
+            "updated_input",
+            "updatedInput",
+            "command_id",
+            "commandId",
+            "interrupt",
+            "remote_execution_context",
+            "remoteExecutionContext",
+        ],
+        "agent_vendor_roots" | "fleet_opencode_outbox_status" => &[],
+        "fleet_opencode_outbox_repair" => &["adminLease", "admin_lease"],
+        "git_clone_guarded" => &[
+            "remoteUrl",
+            "destination",
+            "workspaceId",
+            "destinationRelativePath",
+            "workspaceRef",
+            "guards",
+        ],
+        "read_project_mcp_config" => &["cwd"],
+        "task_workspace_restore_snapshot" => &["runId"],
+        "thread_handoff_offer" | "thread_handoff_preflight" => &["ticket"],
+        "thread_handoff_accept" => &["ticket", "envelope", "adminLease", "admin_lease"],
+        "thread_handoff_commit" => &[
+            "ticketId",
+            "ticket_id",
+            "role",
+            "acceptedProof",
+            "accepted_proof",
+            "sourceCommitProof",
+            "source_commit_proof",
+            "adminLease",
+            "admin_lease",
+        ],
+        "thread_handoff_abort" => &[
+            "ticketId",
+            "ticket_id",
+            "role",
+            "peerDisposition",
+            "peer_disposition",
+        ],
+        "thread_handoff_status" => &["ticketId", "ticket_id", "role"],
+        _ => return Ok(()),
+    };
+    let object = args
+        .as_object()
+        .ok_or_else(|| RpcError::validation_failed(format!("{name} args must be an object")))?;
+    if let Some(field) = object
+        .keys()
+        .find(|field| !allowed.contains(&field.as_str()))
+    {
+        return Err(RpcError::validation_failed(format!(
+            "{name} does not accept field '{field}'"
+        )));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Axum handler
 // ---------------------------------------------------------------------------
@@ -2915,6 +3012,7 @@ pub(super) async fn dispatch(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    validate_completion_command_fields(name, &args)?;
     // Remote Session Control gate. Runs for both the HTTP `rpc_handler` and
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
     // elevated capability is enforced regardless of transport. Baseline chat

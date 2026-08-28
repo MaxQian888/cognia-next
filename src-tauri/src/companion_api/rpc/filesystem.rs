@@ -65,6 +65,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_resource_upload_abort",
     "task_workspace_apply",
     "task_workspace_undo",
+    "task_workspace_restore_snapshot",
     "task_workspace_pin",
     "task_workspace_resolve_conflict",
     "task_workspace_prune",
@@ -812,6 +813,13 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)
             .and_then(to_json)
+        }
+        "task_workspace_restore_snapshot" => {
+            let run_id: String = required(&args, "runId")?;
+            crate::task_workspace::task_workspace_restore_snapshot(run_id)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
         "task_workspace_pin" => {
             let task_id: String = required(&args, "taskId")?;

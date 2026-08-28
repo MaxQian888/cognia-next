@@ -1,7 +1,11 @@
 /**
  * @jest-environment jsdom
  */
-import { installCapabilityReporter, type CapabilityReporterTransport } from "./capability-reporter"
+import {
+  capabilitiesForCompanionReport,
+  installCapabilityReporter,
+  type CapabilityReporterTransport,
+} from "./capability-reporter"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
 
 function makeTransport(initial: ConnectionState) {
@@ -82,5 +86,14 @@ describe("installCapabilityReporter", () => {
     setState("connected")
     await flush()
     expect(call).not.toHaveBeenCalled()
+  })
+})
+
+describe("capabilitiesForCompanionReport", () => {
+  it("advertises thread handoff from a standalone phone only", () => {
+    const capabilities = ["webview", "thread-handoff-v1"]
+    expect(capabilitiesForCompanionReport(capabilities, "mobile", false)).toEqual(["webview"])
+    expect(capabilitiesForCompanionReport(capabilities, "mobile", true)).toEqual(capabilities)
+    expect(capabilitiesForCompanionReport(capabilities, "tauri", false)).toEqual(capabilities)
   })
 })

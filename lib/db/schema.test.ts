@@ -87,6 +87,31 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  fullSchemaIt("v200 adds compound source/target thread handoff tickets", async () => {
+    const name = `cognia-thread-handoff-v200-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(199).stores({ sessions: "id, updatedAt" })
+    await legacy.open()
+    await legacy.table("sessions").put({ id: "session-before-handoff", updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(200)
+    expect(upgraded.threadHandoffTickets.schema.primKey.keyPath).toEqual(["ticketId", "role"])
+    expect(upgraded.threadHandoffTickets.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["ticketId", "role", "state", "expiresAt"])
+    )
+    expect(await upgraded.sessions.get("session-before-handoff")).toEqual({
+      id: "session-before-handoff",
+      updatedAt: 1,
+    })
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   fullSchemaIt(
     "v156 adds durable workflow waitpoint and event tables",
     async () => {

@@ -5,6 +5,24 @@ struct RemoteGitTarget {
     workspace: crate::files::RemoteGitWorkspace,
     relative_path: String,
     resolved_path: std::path::PathBuf,
+    workspace_ref: Option<HostWorkspaceRef>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum HostWorkspaceRef {
+    AuthorizedRoot {
+        root_id: String,
+        relative_path: String,
+    },
+    PluginCache {
+        plugin_id: String,
+        segments: Vec<String>,
+    },
 }
 
 fn relative_path_from_args(
@@ -146,11 +164,122 @@ fn resolve_remote_target(
     let (workspace, resolved_path) = source
         .resolve(account_id, &workspace_id, &relative_path)
         .map_err(RpcError::forbidden)?;
+    let workspace_ref = HostWorkspaceRef::AuthorizedRoot {
+        root_id: workspace.workspace_id.clone(),
+        relative_path: relative_path.clone(),
+    };
     Ok(RemoteGitTarget {
         workspace,
         relative_path,
         resolved_path,
+        workspace_ref: Some(workspace_ref),
     })
+}
+
+/// Which argument key carries the workspace-relative path for `name`.
+///
+/// Shared by `prepare_workspace_ref_args` and `prepare_remote_args` so an
+/// `authorized-root` ref normalizes onto the exact key the workspace-id path
+/// will read back.
+fn relative_key_for(name: &str) -> &'static str {
+    match name {
+        "git_clone" | "git_clone_guarded" => "destinationRelativePath",
+        "git_worktree_commit" | "git_worktree_remove" => "worktreeRelativePath",
+        "git_worktree_add" => "destinationRelativePath",
+        _ => "relativePath",
+    }
+}
+
+/// Resolve an optional `workspaceRef` into concrete path arguments.
+///
+/// Returns the (possibly rewritten) args plus a target when this function
+/// resolved one itself. An `authorized-root` ref is normalized onto
+/// `workspaceId` + the command's relative-path key and handed back with no
+/// target, so the existing workspace-id path resolves it under the same
+/// account-scoped root check it always has — dropping it here instead would
+/// leave `git_clone_guarded` with a ref it accepts in validation and then
+/// silently ignores.
+fn prepare_workspace_ref_args(
+    host: &super::super::dispatch_host::DispatchHost,
+    name: &str,
+    mut args: Value,
+    scope: Option<&str>,
+) -> Result<(Value, Option<RemoteGitTarget>), (StatusCode, Json<RpcError>)> {
+    if scope == Some("service") {
+        return Ok((args, None));
+    }
+    let Some(workspace_ref) = optional::<HostWorkspaceRef>(&args, "workspaceRef")? else {
+        return Ok((args, None));
+    };
+    let (plugin_id, segments) = match &workspace_ref {
+        HostWorkspaceRef::AuthorizedRoot {
+            root_id,
+            relative_path,
+        } => {
+            let object = args
+                .as_object_mut()
+                .ok_or_else(|| RpcError::malformed("Git RPC arguments must be an object".into()))?;
+            object.remove("workspaceRef");
+            object.insert("workspaceId".into(), Value::String(root_id.clone()));
+            object.insert(
+                relative_key_for(name).into(),
+                Value::String(relative_path.clone()),
+            );
+            return Ok((args, None));
+        }
+        HostWorkspaceRef::PluginCache {
+            plugin_id,
+            segments,
+        } => (plugin_id, segments),
+    };
+    let resolved = crate::plugin_api::api_bridge::plugin_workspace_repo_dir_for_state(
+        host.plugin_runtime(),
+        plugin_id,
+        segments,
+    )
+    .map_err(|error| RpcError::forbidden(error.to_string()))?;
+    let resolved_path = std::path::PathBuf::from(&resolved);
+    let mut cache_root = resolved_path.clone();
+    for _ in segments {
+        cache_root.pop();
+    }
+    let object = args
+        .as_object_mut()
+        .ok_or_else(|| RpcError::malformed("Git RPC arguments must be an object".into()))?;
+    object.remove("workspaceRef");
+    match name {
+        "git_clone_guarded" => {
+            object.insert("destination".into(), Value::String(resolved));
+        }
+        "git_init" => {
+            object.insert("path".into(), Value::String(resolved));
+        }
+        "git_worktree_add" | "git_worktree_remove" | "git_worktree_commit" => {
+            return Err(RpcError::malformed(
+                "plugin cache refs do not support worktree operations".into(),
+            ));
+        }
+        _ => {
+            object.insert("repoPath".into(), Value::String(resolved));
+        }
+    }
+    let target = RemoteGitTarget {
+        workspace: crate::files::RemoteGitWorkspace {
+            workspace_id: format!("plugin-cache:{plugin_id}"),
+            display_name: plugin_id.clone(),
+            path: cache_root.to_string_lossy().into_owned(),
+        },
+        relative_path: segments.join("/"),
+        resolved_path,
+        workspace_ref: Some(workspace_ref),
+    };
+    if name != "git_clone_guarded"
+        && name != "git_init"
+        && crate::git::read::repository_boundaries(&target.resolved_path.to_string_lossy()).is_ok()
+    {
+        authorize_discovered_repository(&target)?;
+    }
+    Ok((args, Some(target)))
 }
 
 fn authorize_discovered_repository(
@@ -183,12 +312,7 @@ fn prepare_remote_args(
     let object = args
         .as_object_mut()
         .ok_or_else(|| RpcError::malformed("Git RPC arguments must be an object".into()))?;
-    let relative_key = match name {
-        "git_clone" => "destinationRelativePath",
-        "git_worktree_commit" | "git_worktree_remove" => "worktreeRelativePath",
-        "git_worktree_add" => "destinationRelativePath",
-        _ => "relativePath",
-    };
+    let relative_key = relative_key_for(name);
     let target = resolve_remote_target(
         source,
         &Value::Object(object.clone()),
@@ -197,7 +321,7 @@ fn prepare_remote_args(
     )?;
     let resolved = target.resolved_path.to_string_lossy().to_string();
     match name {
-        "git_clone" => {
+        "git_clone" | "git_clone_guarded" => {
             object.insert("destination".into(), Value::String(resolved));
         }
         "git_init" => {
@@ -264,7 +388,10 @@ fn relative_to_workspace(path: &str, target: &RemoteGitTarget) -> Option<String>
 }
 
 fn sanitize_remote_result(name: &str, value: Value, target: &RemoteGitTarget) -> Value {
-    if name == "git_clone" {
+    if matches!(name, "git_clone" | "git_clone_guarded") {
+        if let Some(workspace_ref) = &target.workspace_ref {
+            return serde_json::to_value(workspace_ref).unwrap_or(Value::Null);
+        }
         return json!({
             "workspaceId": target.workspace.workspace_id,
             "relativePath": target.relative_path,
@@ -398,6 +525,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "git_interactive_rebase",
     "git_init",
     "git_clone",
+    "git_clone_guarded",
     "git_identity",
     "git_set_identity",
     "git_ignore_add",
@@ -435,17 +563,20 @@ pub(super) async fn dispatch(
     let prepare_name = name.to_string();
     let prepare_account_id = account_id.map(str::to_string);
     let prepare_scope = scope.map(str::to_string);
-    let (args, remote_target) = tokio::task::spawn_blocking(move || {
-        prepare_remote_args(
-            &prepare_source,
-            &prepare_name,
-            args,
-            prepare_account_id.as_deref(),
-            prepare_scope.as_deref(),
-        )
-    })
-    .await
-    .map_err(|error| RpcError::internal(format!("prepare Git request: {error}")))??;
+    let (args, remote_target) = match prepare_workspace_ref_args(host, name, args, scope)? {
+        (args, Some(target)) => (args, Some(target)),
+        (args, None) => tokio::task::spawn_blocking(move || {
+            prepare_remote_args(
+                &prepare_source,
+                &prepare_name,
+                args,
+                prepare_account_id.as_deref(),
+                prepare_scope.as_deref(),
+            )
+        })
+        .await
+        .map_err(|error| RpcError::internal(format!("prepare Git request: {error}")))??,
+    };
     let result = match name {
         // ── Source control (ADR-0038) — native git porcelain ────────────────
         // camelCase arg keys mirror `lib/git/commands.ts` (the shared desktop
@@ -949,6 +1080,15 @@ pub(super) async fn dispatch(
                 .map(Value::String)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
+        "git_clone_guarded" => {
+            let remote_url: String = required(&args, "remoteUrl")?;
+            let destination: String = required(&args, "destination")?;
+            let guards: Option<crate::git::repo::CloneGuards> = optional(&args, "guards")?;
+            crate::git::commands::git_clone_guarded(remote_url, destination, guards)
+                .await
+                .map(Value::String)
+                .map_err(|error| RpcError::internal(error.to_string()))
+        }
         "git_identity" => {
             let repo_path: String = required(&args, "repoPath")?;
             let identity = if remote_target.is_some() {
@@ -1094,6 +1234,7 @@ pub(super) async fn dispatch(
                             relative_path: String::new(),
                             resolved_path: std::path::PathBuf::from(&workspace.path),
                             workspace: workspace.clone(),
+                            workspace_ref: None,
                         };
                         let mut state = crate::git::read::repo_state(&workspace.path);
                         if state.is_repo && authorize_discovered_repository(&target).is_err() {
@@ -1424,6 +1565,7 @@ mod tests {
             },
             relative_path: String::new(),
             resolved_path: root.path().to_path_buf(),
+            workspace_ref: None,
         };
         let result = sanitize_remote_result(
             "git_remotes",
