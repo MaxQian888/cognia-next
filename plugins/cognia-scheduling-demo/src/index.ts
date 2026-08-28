@@ -12,7 +12,7 @@
  *     module, so the function is provided at activation.)
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 
 const HANDLER_NAME = "demoHeartbeat"

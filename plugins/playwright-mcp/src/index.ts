@@ -13,7 +13,7 @@
  * Part of M3 of the plugin-first Computer Use plan.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineMcpServerPreset } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 

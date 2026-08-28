@@ -50,6 +50,21 @@ export default definePlugin({
   helpers, and the runtime `PluginTemplatesAPI` contract.
 - `@cognia/plugin-sdk/api/tool` and `/api/native-anthropic-tool`: explicit compatibility
   subpaths resolving to the safe author surface in the published package.
+- `@cognia/plugin-sdk/api/<capability>`: the runtime half of one contribution — the
+  registry a plugin calls from `activate(ctx)` when it computes its contributions instead
+  of declaring them statically, plus that capability's host client. Published for
+  `agent-team-template`, `automation`, `balance-adapter`, `character-pack`, `cli-tool`,
+  `connector`, `context-panel`, `context-provider`, `editor`, `external-agent-adapter`,
+  `external-agent-preset`, `integration`, `message-renderer`, `ocr-provider`,
+  `scheduled-task`, `shared-memory-adapter`, `skill`, `slash-command`, `subagent`,
+  `tool-renderer`, `webview`, and `workflow-template`.
+
+  Registries are deliberately absent from the root barrel (pinned by
+  `src/index.test.ts`). Importing one is a decision an author writes down, not something
+  that arrives with `import { definePlugin }`. Each registry ships an
+  `unregisterXxxByPlugin(pluginId)` twin — that is the supported teardown, both on
+  disable and in a plugin's own tests; the host's `__resetXxxForTesting` helpers stay
+  private because they clear contributions the plugin does not own.
 
 The npm tarball ships ESM, CJS, declarations, the language-neutral manifest catalog,
 `contract/plugin-points.json`, and `wit/cognia-plugin.wit`. The generated point snapshot contains

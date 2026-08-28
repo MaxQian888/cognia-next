@@ -47,3 +47,22 @@ export type {
 } from "@/types/plugin/plugin-character-pack"
 
 export type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+
+/**
+ * The portable `.cognia-pack.json` file format. A plugin that ships packs as
+ * data files — rather than inlining them in the manifest — parses and
+ * serializes them through the SAME reader the host uses, so a pack that loads
+ * in the plugin loads identically in the character library.
+ */
+export {
+  CHARACTER_PACK_FILE_SCHEMA_VERSION,
+  parseLocalPackFile,
+  serializeLocalPackFile,
+  SUPPORTED_SCHEMA_VERSIONS as SUPPORTED_CHARACTER_PACK_SCHEMA_VERSIONS,
+} from "@/lib/plugin/character-pack/schema"
+
+export type {
+  CharacterPackFileSchemaVersion,
+  LocalCharacterPackFile,
+  LocalCharacterPackSignature,
+} from "@/lib/plugin/character-pack/schema"

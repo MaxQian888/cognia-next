@@ -10,8 +10,8 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import type { PluginManifest } from "@/types/plugin"
+import { validatePluginManifest } from "@cognia/plugin-sdk"
+import type { PluginManifest } from "@cognia/plugin-sdk"
 
 const manifest = JSON.parse(
   readFileSync(join(__dirname, "plugin.json"), "utf8")

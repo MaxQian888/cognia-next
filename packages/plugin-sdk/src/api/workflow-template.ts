@@ -31,3 +31,16 @@ export {
 } from "@/lib/plugin/registries/workflow-template-registry"
 
 export type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
+
+/**
+ * Recompute the "requires" warnings for every registered template. A plugin
+ * that registers templates whose requirements depend on other plugins calls
+ * this after its own registration so the library reflects the new state
+ * without waiting for the next host-side refresh.
+ */
+export { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
+
+export type {
+  PluginWorkflowTemplateEdge,
+  PluginWorkflowTemplateNode,
+} from "@/types/plugin/plugin-workflow-template"

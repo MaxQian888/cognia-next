@@ -23,6 +23,23 @@ describe("plugin-sdk package exports", () => {
     "./api/context-panel",
     "./api/editor",
     "./api/webview",
+    "./api/agent-team-template",
+    "./api/automation",
+    "./api/balance-adapter",
+    "./api/character-pack",
+    "./api/cli-tool",
+    "./api/context-provider",
+    "./api/external-agent-adapter",
+    "./api/external-agent-preset",
+    "./api/message-renderer",
+    "./api/ocr-provider",
+    "./api/scheduled-task",
+    "./api/shared-memory-adapter",
+    "./api/skill",
+    "./api/slash-command",
+    "./api/subagent",
+    "./api/tool-renderer",
+    "./api/workflow-template",
   ])("publishes a built ESM/CJS/types surface for %s", (subpath) => {
     const entry = exportsMap[subpath]
     expect(typeof entry).toBe("object")

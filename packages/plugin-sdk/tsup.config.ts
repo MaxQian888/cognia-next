@@ -15,6 +15,23 @@ const runtimeEntries = {
   "context-panel": "src/api/context-panel.ts",
   editor: "src/api/editor.ts",
   webview: "src/api/webview.ts",
+  "agent-team-template": "src/api/agent-team-template.ts",
+  "automation": "src/api/automation.ts",
+  "balance-adapter": "src/api/balance-adapter.ts",
+  "character-pack": "src/api/character-pack.ts",
+  "cli-tool": "src/api/cli-tool.ts",
+  "context-provider": "src/api/context-provider.ts",
+  "external-agent-adapter": "src/api/external-agent-adapter.ts",
+  "external-agent-preset": "src/api/external-agent-preset.ts",
+  "message-renderer": "src/api/message-renderer.ts",
+  "ocr-provider": "src/api/ocr-provider.ts",
+  "scheduled-task": "src/api/scheduled-task.ts",
+  "shared-memory-adapter": "src/api/shared-memory-adapter.ts",
+  "skill": "src/api/skill.ts",
+  "slash-command": "src/api/slash-command.ts",
+  "subagent": "src/api/subagent.ts",
+  "tool-renderer": "src/api/tool-renderer.ts",
+  "workflow-template": "src/api/workflow-template.ts",
 }
 
 const shared = {

@@ -9,8 +9,7 @@
  * detection, injection-proof argv templating, audit).
  */
 
-import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
-
+import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 
 const definition: PluginDefinition = {

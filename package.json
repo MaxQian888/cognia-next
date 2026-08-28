@@ -186,6 +186,7 @@
     "plugin-node:check": "node scripts/build/prepare-plugin-node.mjs --check",
     "plugin-node:prepare": "node scripts/build/prepare-plugin-node.mjs",
     "plugin:author-imports": "node scripts/plugin/check-author-imports.mjs",
+    "plugin:author-imports:baseline": "node scripts/plugin/check-author-imports.mjs --write-baseline",
     "plugin:codegen": "node scripts/scaffold/plugin-codegen.mjs",
     "plugin:contract:check": "node scripts/plugin/generate-contract.mjs --check",
     "plugin:create": "node scripts/scaffold/create-plugin.mjs",

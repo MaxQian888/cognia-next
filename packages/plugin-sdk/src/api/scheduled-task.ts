@@ -45,3 +45,22 @@ export type {
   PluginTaskResult,
   PluginTaskTrigger,
 } from "@/types/plugin/plugin-scheduler"
+
+/**
+ * The scheduler domain vocabulary. A plugin that creates or inspects tasks
+ * types them against the host's own row shapes rather than a private copy.
+ */
+export type {
+  CreateScheduledTaskInput,
+  ScheduledTask,
+  ScheduledTaskStatus,
+  ScheduledTaskType,
+  SchedulerPermissionPolicy,
+  TaskExecution,
+  TaskExecutionStatus,
+  TaskExecutionTriggerSource,
+  TaskTrigger,
+  TaskTriggerType,
+} from "@/types/scheduler"
+
+export { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"

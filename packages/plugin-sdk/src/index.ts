@@ -183,3 +183,242 @@ export { defineLimitsSource } from "./define/define-limits-source"
 export { defineImRateSource } from "./define/define-im-rate-source"
 export { defineCompactionStrategy } from "./define/define-compaction-strategy"
 export { defineTrayItem } from "./define/define-tray-item"
+
+// =============================================================================
+// Domain vocabularies. A plugin implementing one of these capabilities types
+// against the host's own shapes — a private copy is a copy that drifts.
+//
+// Only TYPES and pure helpers live here. The registries that make a
+// contribution dynamic are deliberately absent from this barrel (see
+// `index.test.ts`): each one is published as `@cognia/plugin-sdk/api/<capability>`
+// so importing a registry is a decision an author writes down, not something
+// that arrives with `import { definePlugin }`.
+// =============================================================================
+
+/** Character packs — the pack/character shapes and the portable file format. */
+export type {
+  CharacterPackFileSchemaVersion,
+  LocalCharacterPackFile,
+  LocalCharacterPackSignature,
+  PluginCharacterDef,
+  PluginCharacterPackWarning,
+} from "./api/character-pack"
+export {
+  CHARACTER_PACK_FILE_SCHEMA_VERSION,
+  parseLocalPackFile,
+  serializeLocalPackFile,
+  SUPPORTED_CHARACTER_PACK_SCHEMA_VERSIONS,
+} from "./api/character-pack"
+
+export type { PluginSkillSource } from "./api/skill"
+
+export type {
+  PluginWorkflowTemplateEdge,
+  PluginWorkflowTemplateNode,
+} from "./api/workflow-template"
+
+export type {
+  SharedMemoryAdapterChangeSet,
+  SharedMemoryEntry,
+} from "./api/shared-memory-adapter"
+
+export type { BalanceQuery, BalanceSnapshot } from "./api/balance-adapter"
+
+export type {
+  ContextProvidersBridgeError,
+  ContextProvidersBridgeOptions,
+  ContextProvidersBridgeResult,
+  PluginContextProviderFactoryContext,
+} from "./api/context-provider"
+
+/**
+ * External agents. `BaseProtocolAdapter` is the abstract class an adapter
+ * extends — subclassing it is what gets a plugin adapter the host's usage
+ * folding and turn accounting instead of a private reimplementation.
+ */
+export { BaseProtocolAdapter, foldUsageUpdate, mergeTurnUsage } from "./api/external-agent-adapter"
+export {
+  getExternalAgentExecutionBlock,
+  getExternalAgentExecutionBlockReason,
+  isSupportedExternalAgentProtocol,
+  SUPPORTED_EXTERNAL_AGENT_PROTOCOLS,
+} from "./api/external-agent-adapter"
+export type {
+  AcpPermissionResponse,
+  ExternalAgentAdaptersBridgeError,
+  ExternalAgentAdaptersBridgeOptions,
+  ExternalAgentAdaptersBridgeResult,
+  ExternalAgentConfig,
+  ExternalAgentEvent,
+  ExternalAgentExecutionBlockAssessment,
+  ExternalAgentExecutionOptions,
+  ExternalAgentMessage,
+  ExternalAgentMessageDeltaEvent,
+  ExternalAgentProtocol,
+  ExternalAgentSession,
+  ExternalAgentTransport,
+  PluginProtocolAdapterMetadata,
+  ProtocolAdapter,
+  ProtocolAdapterFactory,
+  ProtocolAdapterRegistryChange,
+  SessionCreateOptions,
+  SessionListOptions,
+} from "./api/external-agent-adapter"
+export type {
+  ExternalAgentPresetConfig,
+  ExternalAgentPresetId,
+} from "./api/external-agent-preset"
+
+/** Slash commands — the definition shape; the registry is on the subpath. */
+export type {
+  RegisterSlashCommandResult,
+  SlashCommandContext,
+  SlashCommandDefinition,
+  SlashCommandHandler,
+  SlashCommandResult,
+} from "./api/slash-command"
+
+/** Result rendering — a tool-result card, and a custom message-part renderer. */
+export type { ToolResultRendererEntry, ToolResultRendererProps } from "./api/tool-renderer"
+export type { MessagePartRendererEntry, MessagePartRendererProps } from "./api/message-renderer"
+
+/** Context workbench — panel contributions and the resources they read. */
+export { CONTEXT_RESOURCE_READ_PERMISSIONS } from "./api/context-panel"
+export type {
+  CanonicalContextActivity,
+  CogniaContextPanelWebviewApi,
+  ContextActivity,
+  ContextCapability,
+  ContextPanelMode,
+  ContextPanelRegistry,
+  ContextPanelRenderProps,
+  ContextPanelRetention,
+  ContextResource,
+  ContextResourceKind,
+  ContextWorkbenchMode,
+  PluginContextPanelDef,
+  PluginContextPanelIcon,
+  PluginContextPanelRegistration,
+  PluginContextPanelRenderer,
+  PluginModuleContextPanelDef,
+  PluginWebviewContextPanelDef,
+} from "./api/context-panel"
+
+/** Artifacts — the row `ctx.artifacts` stores and renders. */
+export type { Artifact, ArtifactLanguage } from "./api/canvas"
+
+/** Visual workflows — the graph a contributed node or trigger runs inside. */
+export type {
+  PluginNodeDef,
+  PluginNodeExecuteFn,
+  PluginTriggerDef,
+  PluginTriggerHandle,
+  PluginTriggerLogger,
+  PluginTriggerStartContext,
+  StepExecutionContext,
+  StepExecutionResult,
+  TriggerEvent,
+  VisualWorkflow,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeData,
+  WorkflowNodeKind,
+  WorkflowTriggeredFrom,
+} from "./api/workflow"
+
+/** Scheduled tasks — the task/trigger/execution rows a plugin reads and writes. */
+export { DEFAULT_PERMISSION_POLICY } from "./api/scheduled-task"
+export type {
+  CreateScheduledTaskInput,
+  ScheduledTask,
+  ScheduledTaskStatus,
+  ScheduledTaskType,
+  SchedulerPermissionPolicy,
+  TaskExecution,
+  TaskExecutionStatus,
+  TaskExecutionTriggerSource,
+  TaskTrigger,
+  TaskTriggerType,
+} from "./api/scheduled-task"
+
+/**
+ * Declarative CLI tools — the argv/cwd template engine. Pure functions, so a
+ * plugin can preview or dry-run the exact command the executor would spawn.
+ * The executor itself (`executeCliTool`) stays on `./api/cli-tool`.
+ */
+export { buildArgv, CliTemplateError, parseOutput, resolveCwd } from "./api/cli-tool"
+export type {
+  CwdContext,
+  PluginCliArgvToken,
+  PluginCliBinaryRef,
+  PluginCliCwdPolicy,
+  PluginCliOutputParse,
+} from "./api/cli-tool"
+
+/**
+ * OCR. The extraction pipeline is a pure function over an injected dependency
+ * bundle, so it belongs here; the provider REGISTRY lives on
+ * `@cognia/plugin-sdk/api/ocr-provider`.
+ */
+export {
+  buildOcrDeps,
+  createNullOcrCache,
+  createNullOcrPageCache,
+  createOcrRuntimeStatusResolver,
+  DEFAULT_OCR_SETTINGS,
+  detectOcrOsTag,
+  extract,
+  OcrError,
+} from "./api/ocr-provider"
+export type {
+  BuildOcrDepsOptions,
+  CacheLookupKey,
+  CacheWriteInput,
+  ExtractDeps,
+  OcrBlock,
+  OcrBlockKind,
+  OcrCostEstimate,
+  OcrCredentials,
+  OcrInput,
+  OcrOsTag,
+  OcrOutputFormat,
+  OcrPage,
+  OcrPageCache,
+  OcrProvider,
+  OcrProviderCategory,
+  OcrProviderConfig,
+  OcrProviderContext,
+  OcrProviderShellSupport,
+  OcrRegistry,
+  OcrResult,
+  OcrResultCache,
+  OcrSource,
+  PageCacheKey,
+  UserOcrSettings,
+} from "./api/ocr-provider"
+
+/** Desktop automation — the locator/action vocabulary; the client is on the subpath. */
+export type {
+  ActionRequest,
+  AppLocator,
+  AutomationSurface,
+  CallContext,
+  ElementHandle,
+  GetAppStateOptions,
+  Locator,
+  UiaEventPayload,
+} from "./api/automation"
+
+/**
+ * Manifest validation — the SAME validator the plugin manager runs at install
+ * time. A plugin test asserting `validatePluginManifest(manifest).valid` is
+ * the cheapest way to catch a contribution that would be rejected on load.
+ */
+export { parseManifest, validatePluginConfig, validatePluginManifest } from "./manifest"
+export type {
+  ConfigValidationResult,
+  ManifestDiagnostic,
+  ManifestValidationOptions,
+  ValidationError,
+  ValidationResult,
+} from "./manifest"

@@ -2,7 +2,7 @@ import type {
   IntegrationActionHandlerContext,
   IntegrationProviderContext,
   IntegrationVerifiedDelivery,
-} from "@/types/plugin/plugin-integration"
+} from "@cognia/plugin-sdk"
 import githubPlugin, {
   GithubIntegrationError,
   checkGithubHealth,

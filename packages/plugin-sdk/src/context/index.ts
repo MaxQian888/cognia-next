@@ -303,7 +303,19 @@ export type {
   PluginExtensionAPI,
   PluginPermissionAPI,
   PluginContextAPI,
+  PluginFilesAPI,
+  PluginFileHandle,
+  PluginSkillsAPI,
+  PluginBuiltInSkillSummary,
 } from "@/types/plugin/plugin"
+
+/**
+ * The result shape `ctx.skills.invokeBuiltIn()` resolves to. It is part of
+ * that method's signature, so a plugin cannot type its own call site without
+ * it — re-exported here rather than left as an inline `import()` type only the
+ * host could name.
+ */
+export type { BuiltInSkillResult } from "@/lib/skills/built-in/types"
 
 // =============================================================================
 // Author-callable host tools (`ctx.agent.invokeTool`)

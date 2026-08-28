@@ -105,6 +105,108 @@
       "require": "./dist/templates.cjs",
       "default": "./dist/templates.js"
     },
+    "./api/agent-team-template": {
+      "types": "./dist/agent-team-template.d.ts",
+      "import": "./dist/agent-team-template.js",
+      "require": "./dist/agent-team-template.cjs",
+      "default": "./dist/agent-team-template.js"
+    },
+    "./api/automation": {
+      "types": "./dist/automation.d.ts",
+      "import": "./dist/automation.js",
+      "require": "./dist/automation.cjs",
+      "default": "./dist/automation.js"
+    },
+    "./api/balance-adapter": {
+      "types": "./dist/balance-adapter.d.ts",
+      "import": "./dist/balance-adapter.js",
+      "require": "./dist/balance-adapter.cjs",
+      "default": "./dist/balance-adapter.js"
+    },
+    "./api/character-pack": {
+      "types": "./dist/character-pack.d.ts",
+      "import": "./dist/character-pack.js",
+      "require": "./dist/character-pack.cjs",
+      "default": "./dist/character-pack.js"
+    },
+    "./api/cli-tool": {
+      "types": "./dist/cli-tool.d.ts",
+      "import": "./dist/cli-tool.js",
+      "require": "./dist/cli-tool.cjs",
+      "default": "./dist/cli-tool.js"
+    },
+    "./api/context-provider": {
+      "types": "./dist/context-provider.d.ts",
+      "import": "./dist/context-provider.js",
+      "require": "./dist/context-provider.cjs",
+      "default": "./dist/context-provider.js"
+    },
+    "./api/external-agent-adapter": {
+      "types": "./dist/external-agent-adapter.d.ts",
+      "import": "./dist/external-agent-adapter.js",
+      "require": "./dist/external-agent-adapter.cjs",
+      "default": "./dist/external-agent-adapter.js"
+    },
+    "./api/external-agent-preset": {
+      "types": "./dist/external-agent-preset.d.ts",
+      "import": "./dist/external-agent-preset.js",
+      "require": "./dist/external-agent-preset.cjs",
+      "default": "./dist/external-agent-preset.js"
+    },
+    "./api/message-renderer": {
+      "types": "./dist/message-renderer.d.ts",
+      "import": "./dist/message-renderer.js",
+      "require": "./dist/message-renderer.cjs",
+      "default": "./dist/message-renderer.js"
+    },
+    "./api/ocr-provider": {
+      "types": "./dist/ocr-provider.d.ts",
+      "import": "./dist/ocr-provider.js",
+      "require": "./dist/ocr-provider.cjs",
+      "default": "./dist/ocr-provider.js"
+    },
+    "./api/scheduled-task": {
+      "types": "./dist/scheduled-task.d.ts",
+      "import": "./dist/scheduled-task.js",
+      "require": "./dist/scheduled-task.cjs",
+      "default": "./dist/scheduled-task.js"
+    },
+    "./api/shared-memory-adapter": {
+      "types": "./dist/shared-memory-adapter.d.ts",
+      "import": "./dist/shared-memory-adapter.js",
+      "require": "./dist/shared-memory-adapter.cjs",
+      "default": "./dist/shared-memory-adapter.js"
+    },
+    "./api/skill": {
+      "types": "./dist/skill.d.ts",
+      "import": "./dist/skill.js",
+      "require": "./dist/skill.cjs",
+      "default": "./dist/skill.js"
+    },
+    "./api/slash-command": {
+      "types": "./dist/slash-command.d.ts",
+      "import": "./dist/slash-command.js",
+      "require": "./dist/slash-command.cjs",
+      "default": "./dist/slash-command.js"
+    },
+    "./api/subagent": {
+      "types": "./dist/subagent.d.ts",
+      "import": "./dist/subagent.js",
+      "require": "./dist/subagent.cjs",
+      "default": "./dist/subagent.js"
+    },
+    "./api/tool-renderer": {
+      "types": "./dist/tool-renderer.d.ts",
+      "import": "./dist/tool-renderer.js",
+      "require": "./dist/tool-renderer.cjs",
+      "default": "./dist/tool-renderer.js"
+    },
+    "./api/workflow-template": {
+      "types": "./dist/workflow-template.d.ts",
+      "import": "./dist/workflow-template.js",
+      "require": "./dist/workflow-template.cjs",
+      "default": "./dist/workflow-template.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

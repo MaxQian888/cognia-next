@@ -22,3 +22,20 @@ export type {
   PluginManifestTriggerDef,
   PluginManifestWorkflowsBlock,
 } from "@/types/plugin/plugin-workflow"
+
+/**
+ * The visual-workflow domain vocabulary a node/trigger implementation speaks:
+ * the graph it is embedded in, the node data it reads, and the execution
+ * context/result it exchanges with the runtime.
+ */
+export type {
+  StepExecutionContext,
+  StepExecutionResult,
+  TriggerEvent,
+  VisualWorkflow,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeData,
+  WorkflowNodeKind,
+  WorkflowTriggeredFrom,
+} from "@/types/workflow/visual"

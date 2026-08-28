@@ -23,6 +23,6 @@ it("builds standalone ESM, CJS, and declaration entrypoints", async () => {
     Object.keys(runtime.entry as Record<string, string>).filter((entry) =>
       entry.startsWith("context")
     )
-  ).toEqual(["context", "context-panel"])
+  ).toEqual(["context", "context-panel", "context-provider"])
   expect(runtime.entry).toEqual(expect.objectContaining({ webview: "src/api/webview.ts" }))
 })

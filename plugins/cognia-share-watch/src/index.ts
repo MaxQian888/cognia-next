@@ -7,8 +7,8 @@
  * `#k=` decryption key (zero-knowledge red-line, ADR-0037).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { PluginHooksAll, ShareLinkHookPayload } from "@/types/plugin/plugin-hooks"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import type { PluginHooksAll, ShareLinkHookPayload } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 
 interface ShareWatchEntry {

@@ -22,3 +22,16 @@ export type {
   PluginCliOutputParse,
   PluginCliToolDef,
 } from "@/types/plugin/plugin-cli-tool"
+
+/**
+ * The argv/cwd template engine behind a declarative CLI tool. A plugin that
+ * needs to preview or dry-run the command it would execute renders it through
+ * the SAME builder the executor uses, so what the user is shown is what runs.
+ */
+export {
+  buildArgv,
+  CliTemplateError,
+  parseOutput,
+  resolveCwd,
+} from "@/lib/plugin/cli-tools/template"
+export type { CwdContext } from "@/lib/plugin/cli-tools/template"

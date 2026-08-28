@@ -1,15 +1,10 @@
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
 
-jest.mock("@/lib/slash-commands/registry", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
-}))
-
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import { listSlashCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import stagehandMcp from "./index"
 
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
+/** Asserted against the real registry: this plugin must leave it untouched. */
+const PLUGIN_ID = "cognia-stagehand-mcp"
 
 function makeCtx() {
   const presets: Array<{ id: string }> = []
@@ -24,11 +19,6 @@ function makeCtx() {
   }
   return { ctx: ctx as PluginContext, presets }
 }
-
-beforeEach(() => {
-  registerMock.mockReset()
-  unregisterMock.mockReset()
-})
 
 describe("stagehand-mcp (built-in)", () => {
   it("activate registers the stagehand MCP preset imperatively", async () => {
@@ -73,7 +63,7 @@ describe("stagehand-mcp (built-in)", () => {
     // for it to undo. Manifest-declared commands are unregistered by
     // `PluginManager.unregisterPluginSlashCommands`.
     expect(stagehandMcp.deactivate).toBeUndefined()
-    expect(unregisterMock).not.toHaveBeenCalled()
+    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
   })
 
   it("declares its slash command instead of registering it imperatively", async () => {
@@ -82,7 +72,7 @@ describe("stagehand-mcp (built-in)", () => {
     // The manager owns registration for manifest-declared commands; a plugin
     // touching the registry itself skips namespacing, conflict detection,
     // aliases, the command-palette entry and teardown.
-    expect(registerMock).not.toHaveBeenCalled()
+    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
     expect(typeof hooks?.onCommand).toBe("function")
     const commands = (stagehandMcp.manifest as { commands?: Array<{ id: string }> }).commands
     expect(commands?.map((c) => c.id)).toEqual(["stagehand"])

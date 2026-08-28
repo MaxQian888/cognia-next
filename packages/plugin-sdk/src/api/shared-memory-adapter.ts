@@ -19,3 +19,8 @@ export {
 } from "@/lib/plugin/registries/shared-memory-adapter-registry"
 
 export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+
+export type { SharedMemoryAdapterChangeSet } from "@/types/plugin/plugin-shared-memory-adapter"
+
+/** The host's shared-memory row shape an adapter reads and writes. */
+export type { SharedMemoryEntry } from "@/types/agent/agent-team"

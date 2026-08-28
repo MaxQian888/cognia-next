@@ -10,8 +10,8 @@
  * raw objective — so this demo can never observe stripped PII.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { GoalHookPayload, PluginHooksAll } from "@/types/plugin/plugin-hooks"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import type { GoalHookPayload, PluginHooksAll } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 
 // In-memory log of observed goal events. Exported for tests; in a real plugin

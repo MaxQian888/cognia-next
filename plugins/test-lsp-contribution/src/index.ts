@@ -11,7 +11,7 @@
  * Used by the Phase B verification suite. Not intended for end users.
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginContext } from "@cognia/plugin-sdk"
 
 export function activate(ctx: PluginContext): void {
   ctx.logger.info(

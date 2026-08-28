@@ -23,12 +23,15 @@ export {
   dispatchSlashCommand,
   getSlashCommand,
   getSlashCommandsVersion,
-  listCommandsByPlugin,
   listSlashCommands,
   registerSlashCommand,
   subscribeSlashCommands,
-  unregisterCommandsByPlugin,
   unregisterSlashCommand,
+  // Renamed on the way out: the host has a SECOND `listCommandsByPlugin` (the
+  // plugin-command registry on `./command`), and two identically-named
+  // registry readers in one SDK is a trap an author only finds at runtime.
+  listCommandsByPlugin as listSlashCommandsByPlugin,
+  unregisterCommandsByPlugin as unregisterSlashCommandsByPlugin,
 } from "@/lib/slash-commands/registry"
 
 export type {

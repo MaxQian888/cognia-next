@@ -26,3 +26,6 @@ export type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 export type { PythonExecResult } from "@/lib/tauri/canvas"
 export type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
 export type { ArtifactLanguage, CanvasDocumentVersion, CanvasSuggestion } from "@/types/artifact"
+
+/** The artifact row itself — what `ctx.artifacts` stores and renders. */
+export type { Artifact } from "@/types/artifact"

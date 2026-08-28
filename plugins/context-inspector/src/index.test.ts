@@ -1,5 +1,5 @@
-import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import type { PluginManifest } from "@/types/plugin"
+import { validatePluginManifest } from "@cognia/plugin-sdk"
+import type { PluginManifest } from "@cognia/plugin-sdk"
 import definition from "./index"
 
 describe("context-inspector plugin definition", () => {

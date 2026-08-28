@@ -14,7 +14,7 @@
  * write method (`setBadge` / `reveal` / `setMode` / `setPinned`).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { buildInspectorHtml, INSPECTOR_PANEL_ID } from "./inspector-html"
 

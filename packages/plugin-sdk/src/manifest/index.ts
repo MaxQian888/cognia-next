@@ -165,3 +165,24 @@ export type {
 export type { VsCodeExtensionBlock } from "@/types/plugin/plugin-vscode"
 
 export type { PluginVerificationSnapshot } from "@/types/plugin/plugin-verification"
+
+/**
+ * Manifest validation — the SAME validator the plugin manager runs at install
+ * time. A plugin's own test asserting `validatePluginManifest(manifest).valid`
+ * is the cheapest way to catch a contribution that would be rejected on load,
+ * and running the host's validator (rather than a hand-rolled shape check) is
+ * what makes that assertion mean something.
+ */
+export {
+  parseManifest,
+  validatePluginConfig,
+  validatePluginManifest,
+} from "@/lib/plugin/core/validation"
+
+export type {
+  ConfigValidationResult,
+  ManifestDiagnostic,
+  ManifestValidationOptions,
+  ValidationError,
+  ValidationResult,
+} from "@/lib/plugin/core/validation"

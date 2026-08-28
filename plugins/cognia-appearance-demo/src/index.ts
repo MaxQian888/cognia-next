@@ -16,7 +16,7 @@
  * plugin doubles as the smallest possible "data-only contribution" example.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 
 const definition: PluginDefinition = {

@@ -1,7 +1,6 @@
 import definition, { getShareWatchLog, __resetShareWatchForTesting } from "./index"
 import manifest from "../plugin.json"
-import type { PluginHooksAll, ShareLinkHookPayload } from "@/types/plugin/plugin-hooks"
-
+import type { PluginHooksAll, ShareLinkHookPayload } from "@cognia/plugin-sdk"
 const link = (over: Partial<ShareLinkHookPayload> = {}): ShareLinkHookPayload => ({
   code: "AbC",
   kind: "chat-html",

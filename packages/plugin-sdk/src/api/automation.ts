@@ -37,3 +37,25 @@ export type {
   TypeOpts,
   WindowOp,
 } from "@/lib/automation/types"
+
+/**
+ * The guarded desktop-automation client. `ctx.automation` is the narrow,
+ * permission-checked surface most plugins want; `desktop` is the full client
+ * the host itself drives, exposed here for plugins whose whole reason to exist
+ * is computer use. Every call still passes a `CallContext` naming the calling
+ * surface, so the consent tier and audit trail stay attributable.
+ */
+export { desktop, listenUiaEvents, UIA_EVENT_NAME } from "@/lib/automation/client"
+
+export type {
+  CallContext,
+  Surface as AutomationSurface,
+  UiaEventPayload,
+} from "@/lib/automation/client"
+
+export type {
+  ActionRequest,
+  AppLocator,
+  ElementHandle,
+  GetAppStateOptions,
+} from "@/lib/automation/types"

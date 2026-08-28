@@ -1,7 +1,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { checkAuthorImports, findForbiddenAuthorImports } from "./check-author-imports.mjs"
+import {
+  checkAuthorImports,
+  checkPluginGovernance,
+  findForbiddenAuthorImports,
+  readGovernanceBaseline,
+} from "./check-author-imports.mjs"
 
 test("detects host-private author imports without flagging public SDK subpaths", () => {
   assert.deepEqual(
@@ -51,4 +56,24 @@ test("the reference in-tree plugin compiles against the SDK alone", () => {
 
 test("repository author templates pass the private-import gate", () => {
   assert.deepEqual(checkAuthorImports(), [])
+})
+
+test("in-tree plugins are governed by a baseline that may only shrink", () => {
+  const { violations, stale, unlisted } = checkPluginGovernance(process.cwd())
+
+  // A plugin that is NOT on the baseline must be clean.
+  assert.deepEqual(violations, [])
+  // A plugin that IS on the baseline but has been cleaned must be removed from
+  // it — otherwise the list overstates how much work is left, forever.
+  assert.deepEqual(stale, [])
+  // A baseline entry for a plugin that no longer exists is dead weight.
+  assert.deepEqual(unlisted, [])
+})
+
+test("the baseline is a shrinking record, never a growing one", () => {
+  const baseline = readGovernanceBaseline(process.cwd())
+  assert.ok(Array.isArray(baseline))
+  // Sorted + unique, so a rewrite produces a reviewable diff rather than a
+  // reordered blob.
+  assert.deepEqual(baseline, [...new Set(baseline)].sort())
 })

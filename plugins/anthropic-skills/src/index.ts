@@ -15,7 +15,7 @@
  * Part of the plugin-first Computer Use plan (M4).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineSkill } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 

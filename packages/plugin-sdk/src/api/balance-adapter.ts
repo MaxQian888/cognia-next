@@ -18,3 +18,6 @@ export {
 } from "@/lib/plugin/registries/balance-adapter-registry"
 
 export type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+
+/** The query a balance adapter answers, and the snapshot it returns. */
+export type { BalanceQuery, BalanceSnapshot } from "@/types/subscription/balance"

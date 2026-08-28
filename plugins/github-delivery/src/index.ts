@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import type {
   IntegrationAccountStatusProvider,
   IntegrationActionHandler,
@@ -7,8 +7,7 @@ import type {
   IntegrationResourceProvider,
   IntegrationVerifiedDelivery,
   PluginIntegrationDef,
-} from "@/types/plugin/plugin-integration"
-
+} from "@cognia/plugin-sdk"
 const API_ORIGIN = "https://api.github.com"
 const API_VERSION = "2022-11-28"
 const REQUIRED_APP_PERMISSIONS = [

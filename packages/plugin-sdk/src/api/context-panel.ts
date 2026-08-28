@@ -67,3 +67,11 @@ declare global {
     acquireCogniaContextPanelApi?: () => CogniaContextPanelWebviewApi
   }
 }
+
+/**
+ * The host's live context-panel registry. A plugin that contributes panels
+ * dynamically (rather than declaring them in the manifest) registers against
+ * this same instance, so the workbench sees one list.
+ */
+export { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+export type { ContextPanelRegistry } from "@/lib/context-workbench/panel-registry"

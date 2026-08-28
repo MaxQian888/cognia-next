@@ -1,7 +1,6 @@
 import definition, { getGoalInsights, __resetGoalInsightsForTesting } from "./index"
 import manifest from "../plugin.json"
-import type { GoalHookPayload, PluginHooksAll } from "@/types/plugin/plugin-hooks"
-
+import type { GoalHookPayload, PluginHooksAll } from "@cognia/plugin-sdk"
 const payload = (over: Partial<GoalHookPayload> = {}): GoalHookPayload => ({
   goalId: "g1",
   sessionId: "s1",

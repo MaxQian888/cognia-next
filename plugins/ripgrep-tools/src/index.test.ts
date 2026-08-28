@@ -11,9 +11,8 @@
  * helpers, with adversarial values.
  */
 
-import { buildArgv, resolveCwd, CliTemplateError } from "@/lib/plugin/cli-tools/template"
-import type { PluginCliArgvToken, PluginCliToolDef } from "@/types/plugin"
-
+import { buildArgv, resolveCwd, CliTemplateError } from "@cognia/plugin-sdk"
+import type { PluginCliArgvToken, PluginCliToolDef } from "@cognia/plugin-sdk"
 import definition from "./index"
 import manifest from "../plugin.json"
 
