@@ -43,7 +43,8 @@ Usage:
                     [--backend builtin|codex|claude-code|<preset>]
                     [--plugin-tools] [--dev-plugins] [--bypass]
   cognia-agent -p "<prompt>"                            headless one-shot (alias of run)
-  cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
+  cognia-agent run "<prompt>" [--model m] [--provider p] [--protocol openai|anthropic|…]
+                              [--cwd dir]
                               [--system s] [--allow a,b] [--yes] [--max-turns n]
                               [--output-format text|json|stream-json] [--json]
                               [--timeout ms] [--handoff]

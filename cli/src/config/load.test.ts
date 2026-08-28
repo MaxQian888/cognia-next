@@ -303,6 +303,57 @@ describe("env provider keys", () => {
     const cfg = run({}, { env: { COGNIA_API_KEY: "sk-default" } })
     expect(cfg.providers.anthropic.apiKey).toBe("sk-default")
   })
+
+  it("COGNIA_PROTOCOL sets the active provider's wire dialect", () => {
+    // The trio that redirects a turn at a custom endpoint: address, key, and
+    // the dialect it is spoken in. Overriding only the first two left an
+    // Anthropic-format deployment unreachable without editing config.json.
+    const cfg = run(
+      {},
+      {
+        env: {
+          COGNIA_PROVIDER: "openrouter",
+          COGNIA_BASE_URL: "https://gateway.example/provider",
+          COGNIA_PROTOCOL: "anthropic",
+        },
+      }
+    )
+    expect(cfg.providers.openrouter).toMatchObject({
+      baseURL: "https://gateway.example/provider",
+      protocol: "anthropic",
+    })
+  })
+
+  it("rejects an unknown COGNIA_PROTOCOL instead of dropping it", () => {
+    // A silently ignored dialect sends the turn in the wrong shape and shows
+    // up only as an empty reply — the exact failure this override prevents.
+    expect(() => run({}, { env: { COGNIA_PROTOCOL: "antropic" } })).toThrow(
+      /unknown protocol "antropic"/
+    )
+  })
+
+  it("--protocol overrides the config file and binds to the active provider", () => {
+    const cfg = run(
+      {
+        [userConfigPath(HOME)]: JSON.stringify({
+          provider: "openrouter",
+          providers: { openrouter: { protocol: "openai" } },
+        }),
+      },
+      { flags: { protocol: "anthropic" } }
+    )
+    expect(cfg.providers.openrouter.protocol).toBe("anthropic")
+  })
+
+  it("leaves the provider's stored protocol alone when nothing overrides it", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "openrouter",
+        providers: { openrouter: { protocol: "openai" } },
+      }),
+    })
+    expect(cfg.providers.openrouter.protocol).toBe("openai")
+  })
 })
 
 describe("skill discovery config", () => {

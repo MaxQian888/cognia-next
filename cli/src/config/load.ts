@@ -21,6 +21,7 @@ import fs from "node:fs"
 import {
   cliConfigFileSchema,
   CLI_SEARCH_PROVIDER_IDS,
+  RESOLVER_PROTOCOLS,
   credentialsFileSchema,
   DEFAULT_RESOLVED_CONFIG,
   type CliConfigFile,
@@ -30,6 +31,7 @@ import {
   type ExternalBackendConfig,
   type ProviderConfig,
   type ResolvedConfig,
+  type ResolverProtocol,
 } from "./schema"
 
 /** Reads a file's text, or returns `null` when it does not exist. */
@@ -344,21 +346,44 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   const editor = env.COGNIA_EDITOR?.trim()
   if (editor) layer.editor = editor
 
-  // COGNIA_API_KEY / COGNIA_BASE_URL apply to the active provider (resolved
-  // against an explicit COGNIA_PROVIDER or the default).
+  // COGNIA_API_KEY / COGNIA_BASE_URL / COGNIA_PROTOCOL apply to the active
+  // provider (resolved against an explicit COGNIA_PROVIDER or the default).
+  // The protocol belongs in this trio: an endpoint's address, credential, and
+  // wire dialect are one decision, and overriding two of the three left an
+  // Anthropic-format deployment unreachable without editing config.json.
   const activeProvider = provider ?? DEFAULT_RESOLVED_CONFIG.provider
   const genericKey = env.COGNIA_API_KEY?.trim()
   const genericBase = env.COGNIA_BASE_URL?.trim()
-  if (genericKey || genericBase) {
+  const genericProtocol = parseProtocol(env.COGNIA_PROTOCOL, "COGNIA_PROTOCOL")
+  if (genericKey || genericBase || genericProtocol) {
     const merged: Record<string, ProviderConfig> = { ...(layer.providers ?? {}) }
     merged[activeProvider] = {
       ...(merged[activeProvider] ?? {}),
       ...(genericKey ? { apiKey: genericKey } : {}),
       ...(genericBase ? { baseURL: genericBase } : {}),
+      ...(genericProtocol ? { protocol: genericProtocol } : {}),
     }
     layer.providers = merged
   }
   return layer
+}
+
+/**
+ * Parse a protocol override, rejecting anything outside the resolver's list.
+ *
+ * Throws rather than ignoring: a misspelled dialect that is silently dropped
+ * sends the turn at the wrong endpoint shape and surfaces only as an empty
+ * reply, which is precisely the failure this override exists to avoid.
+ */
+function parseProtocol(value: string | undefined, source: string): ResolverProtocol | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  if ((RESOLVER_PROTOCOLS as readonly string[]).includes(trimmed)) {
+    return trimmed as ResolverProtocol
+  }
+  throw new Error(
+    `${source}: unknown protocol "${trimmed}" — expected one of ${RESOLVER_PROTOCOLS.join(", ")}`
+  )
 }
 
 /**
@@ -419,6 +444,20 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
     acc.providers = {
       ...acc.providers,
       [acc.provider]: { ...acc.providers[acc.provider], model: acc.model },
+    }
+  }
+
+  // Same binding for the wire dialect: `--protocol` (and the top-level
+  // `protocol` key it overlays) is a generic override that has to land on the
+  // ACTIVE provider's slot, because that is where `to-build-context` reads it
+  // from — as `providerSettings[id].apiProtocol` for a built-in id, or as a
+  // `customProviders` entry for a self-hosted one. `COGNIA_PROTOCOL` already
+  // wrote itself there in `envLayer`, where the active provider is known.
+  const overrideProtocol = flags?.protocol ?? acc.protocol
+  if (overrideProtocol) {
+    acc.providers = {
+      ...acc.providers,
+      [acc.provider]: { ...acc.providers[acc.provider], protocol: overrideProtocol },
     }
   }
 

@@ -33,6 +33,9 @@ export const RESOLVER_PROTOCOLS = [
   "bedrock",
 ] as const
 
+/** One of {@link RESOLVER_PROTOCOLS}. */
+export type ResolverProtocol = (typeof RESOLVER_PROTOCOLS)[number]
+
 /** SDK permission modes, mirrored from `SendOptions["permissionMode"]`. */
 export const PERMISSION_MODES = [
   "default",
@@ -369,6 +372,13 @@ export type MascotConfig = z.infer<typeof mascotSchema>
  *     the TUI always had, only ranked properly.
  *   - `ai` — a model-generated continuation of the draft, resolved through the
  *     renderer LLM client. Opt-IN (absent ⇒ off), because it bills a model.
+ *   - `agent` — one real agent turn, run ONLY when the user presses the key
+ *     (alt+\\), never on a debounce. Opt-IN. It exists because `ai` above needs
+ *     an API key the CLI can read from settings, and a Claude subscription
+ *     keeps its bearer in the keyring instead — so for most users that tier
+ *     silently produces nothing. A headless turn runs where the credentials
+ *     are, which also makes it work for whatever provider or external agent the
+ *     session is bound to.
  */
 export const autosuggestSchema = z
   .object({
@@ -376,6 +386,11 @@ export const autosuggestSchema = z
     local: z.boolean().optional(),
     /** Model-generated continuation. Absent ⇒ off. */
     ai: z.boolean().optional(),
+    /**
+     * Agent-turn continuation, requested explicitly with alt+\\. Absent ⇒ off.
+     * Never runs on a keystroke — see the tier note above.
+     */
+    agent: z.boolean().optional(),
     /** Debounce before querying the model, ms. Absent ⇒ 500. Clamped [200, 2000]. */
     debounceMs: z.number().int().positive().optional(),
   })
@@ -773,6 +788,17 @@ export const cliConfigFileSchema = z
   .object({
     provider: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
+    /**
+     * Wire dialect for the ACTIVE provider, bound onto its slot the same way a
+     * top-level `model` is. This is the generic-override face of
+     * `providers.<id>.protocol`, reachable from `--protocol` and
+     * `COGNIA_PROTOCOL`, so pointing the CLI at a self-hosted or proxy endpoint
+     * does not require hand-editing config.json. Without it, an
+     * Anthropic-format endpoint could only be reached by picking a provider id
+     * that happens to already speak Anthropic — the base URL, key, and model
+     * were all overridable but the dialect they are spoken in was not.
+     */
+    protocol: z.enum(RESOLVER_PROTOCOLS).optional(),
     systemPrompt: z.string().optional(),
     permissionMode: z.enum(PERMISSION_MODES).optional(),
     allowedTools: z.array(z.string().min(1)).optional(),
@@ -1076,6 +1102,9 @@ export interface ResolvedConfig {
    * any other value resolves through the external-agent preset registry. */
   agentBackend?: string
   model?: string
+  /** Generic wire-dialect override, bound onto the active provider's slot
+   * during resolution. See the config-file schema field. */
+  protocol?: ResolverProtocol
   systemPrompt?: string
   permissionMode: (typeof PERMISSION_MODES)[number]
   allowedTools?: string[]

@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { toBuildContext } from "./to-build-context"
+import { resolveConfig } from "./load"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
@@ -352,6 +353,31 @@ describe("toBuildContext — provider credentials", () => {
     // A built-in id with an explicit protocol must NOT also be misclassified
     // as a genuinely custom provider.
     expect(ctx.appSettings?.customProviders).toBeUndefined()
+  })
+
+  it("carries a --protocol / COGNIA_PROTOCOL override all the way to apiProtocol", () => {
+    // Spans the whole chain rather than its two halves: the generic override
+    // has to survive resolveConfig's provider binding AND the providerSettings
+    // fold, because that field is what tells the sidecar which wire dialect to
+    // speak. Overriding an endpoint's address and key while leaving the dialect
+    // pinned to the provider id's default is how an Anthropic-format
+    // deployment ends up addressed as OpenAI.
+    const resolved = resolveConfig({
+      home: "/home/u",
+      cwd: "/work",
+      env: {
+        COGNIA_PROVIDER: "openrouter",
+        COGNIA_BASE_URL: "https://gateway.example/provider",
+        COGNIA_PROTOCOL: "anthropic",
+      },
+      readFile: () => null,
+    })
+    const ctx = toBuildContext({ sessionId: "s1", now: NOW, config: resolved })
+
+    expect(ctx.appSettings?.providerSettings?.openrouter).toMatchObject({
+      baseURL: "https://gateway.example/provider",
+      apiProtocol: "anthropic",
+    })
   })
 
   it("never folds a protocol override into the literal anthropic provider slot", () => {
