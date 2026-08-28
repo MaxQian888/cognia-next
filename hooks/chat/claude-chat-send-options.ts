@@ -17,6 +17,9 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
+import { decideSessionTierPin } from "@/lib/sandbox/pin-session-tier"
+import { getCharacter } from "@/lib/db/characters"
+import { updateSession } from "@/lib/db/sessions"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
@@ -98,6 +101,34 @@ export async function buildSendOptions(
     enabled: appSettings?.workspaceTrust?.enabled !== false,
     onWeb: !isTauri(),
   })
+
+  // Freeze the sandbox tier onto the session the first time it runs sandboxed.
+  // The ladder is re-read every send and nothing else writes the session's own
+  // tier, so without this a conversation follows `AppSettings.sandboxTier`
+  // forever and can lose isolation because of a setting changed elsewhere.
+  // Resolved through the SAME pure functions `resolveSendOptions` binds with
+  // (`lib/sandbox/binding.ts`), so this cannot become a second precedence
+  // ladder. Best-effort: a failed pin must never block a send.
+  if (session?.id) {
+    try {
+      const pinCharacter = session.characterId ? await getCharacter(session.characterId) : undefined
+      const pin = decideSessionTierPin({
+        sandboxEnabled:
+          session.sandboxEnabled ??
+          pinCharacter?.sandboxEnabled ??
+          appSettings?.sandboxDefaultEnabled ??
+          false,
+        inputs: {
+          session: { sandboxTier: session.sandboxTier },
+          character: { sandboxTier: pinCharacter?.sandboxTier },
+          appSettings: { sandboxTier: appSettings?.sandboxTier },
+        },
+      })
+      if (pin.pin) await updateSession(session.id, { sandboxTier: pin.tier })
+    } catch (err) {
+      console.warn("buildSendOptions: sandbox tier pin failed", err)
+    }
+  }
 
   // Twin runtime injection: when the user has populated the runtime config
   // (vector store + embedding API key) and the message is a plain string,

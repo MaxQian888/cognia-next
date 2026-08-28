@@ -85,6 +85,54 @@ export function resolveSandboxSessionBinding(inputs: SandboxBindingInputs): Sand
 }
 
 /**
+ * Isolation strength, ascending. `cua-desktop` outranks `microvm` because it
+ * moves shell, file AND GUI work off the host, where `microvm` still leaves the
+ * GUI axis local.
+ *
+ * Exists so a *change* of tier can be classified. Resolution alone cannot say
+ * whether a session just lost isolation, and "lost isolation" is the one
+ * transition that must never happen quietly.
+ */
+export const SANDBOX_ISOLATION_RANK: Record<SandboxShellTier, number> = {
+  os: 1,
+  microvm: 2,
+  "cua-desktop": 3,
+}
+
+/** How `next` compares to `prev` on the isolation axis. */
+export type SandboxIsolationChange = "same" | "stronger" | "weaker"
+
+export function compareSandboxIsolation(
+  prev: SandboxShellTier,
+  next: SandboxShellTier
+): SandboxIsolationChange {
+  const delta = SANDBOX_ISOLATION_RANK[next] - SANDBOX_ISOLATION_RANK[prev]
+  return delta === 0 ? "same" : delta > 0 ? "stronger" : "weaker"
+}
+
+/** Which rung of the ladder supplied the resolved shell tier. */
+export type SandboxTierSource = "session" | "character" | "appSettings" | "fallback"
+
+/**
+ * The provenance of {@link resolveSandboxSessionBinding}'s `shellTier`.
+ *
+ * Deliberately NOT a field on {@link SandboxSessionBinding}: that shape is
+ * handed to `sandboxSessionRuntime.bindSession` and compared across binds, so
+ * widening it would make provenance part of the binding's identity. Provenance
+ * is a question about the *inputs*, so it is answered from the inputs.
+ *
+ * The caller that matters is the pin: a tier resolved from anything other than
+ * `"session"` is one that will silently re-resolve when the layer beneath it
+ * changes.
+ */
+export function resolveSandboxTierSource(inputs: SandboxBindingInputs): SandboxTierSource {
+  if (inputs.session?.sandboxTier) return "session"
+  if (inputs.character?.sandboxTier) return "character"
+  if (inputs.appSettings?.sandboxTier) return "appSettings"
+  return "fallback"
+}
+
+/**
  * Check the two invariants. A violation is a refusal, never a downgrade: a
  * `cua-desktop` binding with no connection must not quietly become `"os"`,
  * because the user asked for isolation and would not be told they lost it.

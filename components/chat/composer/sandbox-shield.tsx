@@ -18,9 +18,11 @@ import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { getCharacter } from "@/lib/db/characters"
+import { updateSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SandboxShellTier } from "@/types/sandbox"
@@ -107,20 +109,54 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       />
     )
 
+  // A tier stored on the session is pinned: it no longer follows the character
+  // or the app default. `lib/sandbox/pin-session-tier.ts` writes it on the first
+  // sandboxed send so a default changed elsewhere cannot re-tier a conversation
+  // mid-flight. A pin with no way out would be worse than the drift it fixes,
+  // so releasing it lives right here, on the badge that reports it.
+  const pinned = state !== "off" && !!session?.sandboxTier
+  const sessionId = session?.id
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
           data-testid="sandbox-shield"
           data-state={state}
-          role="img"
+          data-pinned={pinned ? "true" : "false"}
           aria-label={ariaLabel}
-          className="inline-flex size-7 shrink-0 items-center justify-center"
+          title={tooltip}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
         >
           {icon}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={4} className="w-72 space-y-2 p-3">
+        <p className="text-sm font-medium">{ariaLabel}</p>
+        <p className="text-xs text-muted-foreground">{tooltip}</p>
+        {state !== "off" && (
+          <div className="space-y-2 border-t pt-2">
+            <p className="text-xs text-muted-foreground">
+              {pinned ? t("pinnedDetail") : t("inheritedDetail")}
+            </p>
+            {pinned && sessionId && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="w-full"
+                data-testid="sandbox-shield-unpin"
+                onClick={() => {
+                  void updateSession(sessionId, { sandboxTier: undefined })
+                }}
+              >
+                {t("unpin")}
+              </Button>
+            )}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

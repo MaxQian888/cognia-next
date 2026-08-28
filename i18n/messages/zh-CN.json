@@ -5392,18 +5392,21 @@
       },
       "removePastedChip": "移除粘贴的文本",
       "sandboxShield": {
+        "inheritedDetail": "本会话目前跟随角色或应用默认值。首次进入沙盒执行时，会固定为当时的层级。",
         "label": {
           "cua-desktop": "沙盒层级不可用 — 绑定桌面",
           "microvm": "沙盒已开启 — microVM 层",
           "off": "沙盒未开启",
           "os": "沙盒已开启 — OS 层"
         },
+        "pinnedDetail": "本会话已固定自己的沙盒层级，之后在别处改动默认值不会再改变它。",
         "tooltip": {
           "cua-desktop": "该层级已停用：绑定桌面目前仅能证明远程 GUI 隔离，shell 与文件操作并未进入沙盒。请改用 OS 或 microVM 层级。",
           "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
           "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
           "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
-        }
+        },
+        "unpin": "恢复跟随默认值"
       },
       "saveTemplate": {
         "cancel": "取消",

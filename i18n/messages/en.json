@@ -5392,18 +5392,21 @@
       },
       "removePastedChip": "Remove pasted text",
       "sandboxShield": {
+        "inheritedDetail": "This conversation follows the character or app default. It will be pinned to the tier it runs on the first time it uses the sandbox.",
         "label": {
           "cua-desktop": "Sandbox tier unavailable — bound desktop",
           "microvm": "Sandbox active — microVM tier",
           "off": "Sandbox off",
           "os": "Sandbox active — OS tier"
         },
+        "pinnedDetail": "This conversation keeps its own sandbox tier, so changing the default elsewhere will not re-tier it.",
         "tooltip": {
           "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
           "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
           "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
-        }
+        },
+        "unpin": "Follow the default again"
       },
       "saveTemplate": {
         "cancel": "Cancel",

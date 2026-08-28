@@ -1,6 +1,6 @@
 // ADR-0028 §UI surfaces — SandboxShield unit tests.
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import { resolveShieldState, SandboxShield } from "./sandbox-shield"
@@ -13,16 +13,19 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn(),
 }))
 
-// Provide a TooltipProvider so the shield's Tooltip can mount in jsdom.
-jest.mock("@/components/ui/tooltip", () => {
-  const Real = jest.requireActual("@/components/ui/tooltip")
-  return {
-    ...Real,
-    Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  }
-})
+// The shield is a Popover trigger (the repo's `status-bar-usage` pattern: a
+// `title` for the hover hint, no nested Radix triggers). Render the content
+// inline so the pin controls are assertable without driving a portal.
+jest.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+const updateSessionMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/sessions", () => ({
+  updateSession: (...args: unknown[]) => updateSessionMock(...args),
+}))
 
 import { useSettingsStore } from "@/stores/settings"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -68,6 +71,7 @@ const session: ChatSession = {
 beforeEach(() => {
   mockUseSettings.mockReset()
   mockUseLiveQuery.mockReset()
+  updateSessionMock.mockClear()
 })
 
 describe("resolveShieldState", () => {
@@ -206,5 +210,40 @@ describe("SandboxShield component", () => {
     withIntl(<SandboxShield session={session} />)
     const shield = screen.getByTestId("sandbox-shield")
     expect(shield).toHaveAttribute("data-state", "microvm")
+  })
+})
+
+describe("SandboxShield tier pin", () => {
+  beforeEach(() => {
+    mockUseSettings.mockReturnValue({})
+    mockUseLiveQuery.mockReturnValue(undefined)
+  })
+
+  it("reports a session-stored tier as pinned and offers to release it", () => {
+    // `lib/sandbox/pin-session-tier.ts` writes the tier onto the session so a
+    // default changed elsewhere cannot re-tier a live conversation. A pin with
+    // no way out would be worse than the drift, so the release lives here.
+    const pinnedSession = { ...session, sandboxEnabled: true, sandboxTier: "microvm" as const }
+    withIntl(<SandboxShield session={pinnedSession} />)
+
+    expect(screen.getByTestId("sandbox-shield")).toHaveAttribute("data-pinned", "true")
+    fireEvent.click(screen.getByTestId("sandbox-shield-unpin"))
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", { sandboxTier: undefined })
+  })
+
+  it("does not claim a pin for a tier that is merely inherited", () => {
+    mockUseLiveQuery.mockReturnValue({ sandboxEnabled: true, sandboxTier: "microvm" })
+    withIntl(<SandboxShield session={session} />)
+
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-state", "microvm")
+    expect(shield).toHaveAttribute("data-pinned", "false")
+    expect(screen.queryByTestId("sandbox-shield-unpin")).toBeNull()
+  })
+
+  it("offers no pin control at all when the sandbox is off", () => {
+    withIntl(<SandboxShield session={{ ...session, sandboxTier: "microvm" }} forceState="off" />)
+    expect(screen.getByTestId("sandbox-shield")).toHaveAttribute("data-pinned", "false")
+    expect(screen.queryByTestId("sandbox-shield-unpin")).toBeNull()
   })
 })

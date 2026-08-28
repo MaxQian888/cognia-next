@@ -1,9 +1,12 @@
 import {
   DEFAULT_SANDBOX_SESSION_BINDING,
+  SANDBOX_ISOLATION_RANK,
   bindingRoutesGuiToConnection,
   bindingRoutesWorkspaceToConnection,
+  compareSandboxIsolation,
   requiredOperationsForBinding,
   resolveSandboxSessionBinding,
+  resolveSandboxTierSource,
   validateSandboxSessionBinding,
 } from "./binding"
 
@@ -212,5 +215,44 @@ describe("requiredOperationsForBinding", () => {
         connectionId: "c",
       })
     ).toEqual(["gui", "workspaceExec"])
+  })
+})
+
+describe("compareSandboxIsolation", () => {
+  it("ranks cua-desktop above microvm above os", () => {
+    expect(SANDBOX_ISOLATION_RANK.os).toBeLessThan(SANDBOX_ISOLATION_RANK.microvm)
+    expect(SANDBOX_ISOLATION_RANK.microvm).toBeLessThan(SANDBOX_ISOLATION_RANK["cua-desktop"])
+  })
+
+  it("classifies every direction", () => {
+    expect(compareSandboxIsolation("microvm", "microvm")).toBe("same")
+    expect(compareSandboxIsolation("os", "microvm")).toBe("stronger")
+    // The transition the pin exists to prevent.
+    expect(compareSandboxIsolation("microvm", "os")).toBe("weaker")
+    expect(compareSandboxIsolation("cua-desktop", "microvm")).toBe("weaker")
+    expect(compareSandboxIsolation("microvm", "cua-desktop")).toBe("stronger")
+  })
+})
+
+describe("resolveSandboxTierSource", () => {
+  it("names the rung that supplied the tier", () => {
+    expect(resolveSandboxTierSource({ session: { sandboxTier: "microvm" } })).toBe("session")
+    expect(resolveSandboxTierSource({ character: { sandboxTier: "microvm" } })).toBe("character")
+    expect(resolveSandboxTierSource({ appSettings: { sandboxTier: "microvm" } })).toBe(
+      "appSettings"
+    )
+    expect(resolveSandboxTierSource({})).toBe("fallback")
+  })
+
+  it("follows the same precedence as the resolver it explains", () => {
+    // Provenance that disagreed with resolution would be worse than none: the
+    // pin writes the resolved tier and keys the decision on the source.
+    const inputs = {
+      session: { sandboxTier: undefined },
+      character: { sandboxTier: "microvm" as const },
+      appSettings: { sandboxTier: "os" as const },
+    }
+    expect(resolveSandboxSessionBinding(inputs).shellTier).toBe("microvm")
+    expect(resolveSandboxTierSource(inputs)).toBe("character")
   })
 })
