@@ -217,10 +217,7 @@ export type {
   PluginWorkflowTemplateNode,
 } from "./api/workflow-template"
 
-export type {
-  SharedMemoryAdapterChangeSet,
-  SharedMemoryEntry,
-} from "./api/shared-memory-adapter"
+export type { SharedMemoryAdapterChangeSet, SharedMemoryEntry } from "./api/shared-memory-adapter"
 
 export type { BalanceQuery, BalanceSnapshot } from "./api/balance-adapter"
 
@@ -264,10 +261,7 @@ export type {
   SessionCreateOptions,
   SessionListOptions,
 } from "./api/external-agent-adapter"
-export type {
-  ExternalAgentPresetConfig,
-  ExternalAgentPresetId,
-} from "./api/external-agent-preset"
+export type { ExternalAgentPresetConfig, ExternalAgentPresetId } from "./api/external-agent-preset"
 
 /** Slash commands — the definition shape; the registry is on the subpath. */
 export type {

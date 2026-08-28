@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { VISUALIZATION_ARTIFACT_KIND } from "./model"
 import { createVisualizationRenderer } from "./preview"

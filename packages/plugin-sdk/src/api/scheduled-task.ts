@@ -64,3 +64,19 @@ export type {
 } from "@/types/scheduler"
 
 export { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
+
+/**
+ * The USER's scheduled tasks — the `/scheduler` list — as opposed to the
+ * plugin-owned tasks `ctx.scheduler` manages. An agent tool that schedules
+ * work on the user's behalf lives here, and MUST consult
+ * `getSchedulerPermissionPolicy()` before creating anything: the policy is the
+ * user's standing answer to "may something other than me put work on my
+ * schedule?", and the store does not enforce it on write.
+ */
+export {
+  createUserScheduledTask,
+  deleteUserScheduledTask,
+  getSchedulerPermissionPolicy,
+  listUserScheduledTasks,
+  runUserScheduledTaskNow,
+} from "@/lib/plugin/api/scheduler-tasks"

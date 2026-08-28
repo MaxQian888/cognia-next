@@ -14,7 +14,7 @@
  * `needsConfirmation` result instead of silently creating.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
@@ -23,8 +23,14 @@ import type {
   TaskExecution,
   TaskExecutionTriggerSource,
   TaskTrigger,
-} from "@/types/scheduler"
-
+} from "@cognia/plugin-sdk"
+import {
+  createUserScheduledTask,
+  deleteUserScheduledTask,
+  getSchedulerPermissionPolicy,
+  listUserScheduledTasks,
+  runUserScheduledTaskNow,
+} from "@cognia/plugin-sdk/api/scheduled-task"
 /** Task types an agent is allowed to schedule (never raw "script" by default). */
 const AGENT_CREATABLE_TYPES: ScheduledTaskType[] = [
   "chat",
@@ -38,27 +44,30 @@ const AGENT_CREATABLE_TYPES: ScheduledTaskType[] = [
 ]
 
 export interface SchedulerToolDeps {
-  getPolicy: () => SchedulerPermissionPolicy
-  getTasks: () => ScheduledTask[]
+  getPolicy: () => Promise<SchedulerPermissionPolicy>
+  listTasks: () => Promise<ScheduledTask[]>
   createTask: (input: CreateScheduledTaskInput) => Promise<ScheduledTask | null>
   deleteTask: (taskId: string) => Promise<boolean>
   runTaskNow: (
     taskId: string,
     opts?: { triggerSource?: TaskExecutionTriggerSource }
   ) => Promise<TaskExecution | null>
-  loadTasks: () => Promise<void>
 }
 
-async function defaultDeps(): Promise<SchedulerToolDeps> {
-  const { useSchedulerStore } = await import("@/stores/scheduler/scheduler-store")
-  const s = () => useSchedulerStore.getState()
+/**
+ * The production wiring: the SDK's user-scheduled-task surface. This is the
+ * whole reason the plugin needs `@cognia/plugin-sdk/api/scheduled-task` rather
+ * than `ctx.scheduler` — the latter owns tasks a PLUGIN creates for itself,
+ * keyed by a handler name, and cannot see the user's schedule or the
+ * permission policy guarding it.
+ */
+function defaultDeps(): SchedulerToolDeps {
   return {
-    getPolicy: () => s().permissionPolicy,
-    getTasks: () => s().tasks,
-    createTask: (input) => s().createTask(input),
-    deleteTask: (taskId) => s().deleteTask(taskId),
-    runTaskNow: (taskId, opts) => s().runTaskNow(taskId, opts),
-    loadTasks: () => s().loadTasks(),
+    getPolicy: getSchedulerPermissionPolicy,
+    listTasks: listUserScheduledTasks,
+    createTask: createUserScheduledTask,
+    deleteTask: deleteUserScheduledTask,
+    runTaskNow: runUserScheduledTaskNow,
   }
 }
 
@@ -115,8 +124,7 @@ export async function runSchedulerToolAction(
 ): Promise<ManageScheduledTaskResult> {
   switch (args.action) {
     case "list": {
-      await deps.loadTasks().catch(() => undefined)
-      const tasks = deps.getTasks().map((t) => ({
+      const tasks = (await deps.listTasks()).map((t) => ({
         id: t.id,
         name: t.name,
         type: t.type,
@@ -140,7 +148,7 @@ export async function runSchedulerToolAction(
     }
 
     case "create": {
-      const policy = deps.getPolicy()
+      const policy = await deps.getPolicy()
       if (!policy.agentAutoCreate) {
         return {
           ok: false,
@@ -168,7 +176,7 @@ export async function runSchedulerToolAction(
           message: `Creating a "${taskType}" task requires explicit user confirmation. Present the proposed task to the user and ask them to confirm.`,
         }
       }
-      const existing = deps.getTasks().length
+      const existing = (await deps.listTasks()).length
       if (existing >= policy.maxTasksPerSource) {
         return {
           ok: false,
@@ -249,7 +257,7 @@ const definition: PluginDefinition = {
       } as never,
       execute: async (rawArgs: unknown) => {
         try {
-          const deps = await defaultDeps()
+          const deps = defaultDeps()
           return await runSchedulerToolAction(rawArgs as ManageScheduledTaskArgs, deps)
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) }

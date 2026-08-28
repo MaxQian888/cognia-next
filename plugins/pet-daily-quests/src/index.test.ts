@@ -7,9 +7,8 @@
 import definition from "./index"
 import { claimQuestReward, disposeQuestStore, getQuestState } from "./quest-store"
 import { advanceQuests, ensureDay, localDayKey } from "./quest-engine"
-import type { PluginContext } from "@/types/plugin"
-import type { PluginPetEvent } from "@/lib/plugin/api/pet-api"
-
+import type { PluginContext } from "@cognia/plugin-sdk"
+import type { PluginPetEvent } from "@cognia/plugin-sdk"
 type PetEventCb = (event: PluginPetEvent) => void
 
 function makeCtx() {

@@ -13,8 +13,8 @@
  *  - Day rollover is a lazy date-check inside the quest store — no scheduler.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import type { PluginHooksAll } from "@cognia/plugin-sdk"
 import type { QuestState } from "./quest-engine"
 import { configureQuestStore, disposeQuestStore, handleQuestEvent } from "./quest-store"
 import { I18N_MESSAGES } from "./i18n"

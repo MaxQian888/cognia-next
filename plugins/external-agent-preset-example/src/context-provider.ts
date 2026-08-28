@@ -6,11 +6,7 @@
  * appended to the system prompt of the plugin's agent runs.
  */
 
-import type {
-  PluginContextProvider,
-  PluginContextProviderFactoryContext,
-} from "@/types/plugin/plugin-context-provider"
-
+import type { PluginContextProvider, PluginContextProviderFactoryContext } from "@cognia/plugin-sdk"
 export function createEnvBannerProvider(
   ctx: PluginContextProviderFactoryContext
 ): PluginContextProvider {

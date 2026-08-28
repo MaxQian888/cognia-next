@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx"
-import type { ArtifactRenderer } from "@/types/plugin"
+import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { parseWorkbook, validateWorkbook, type WorkbookCell, type WorkbookDocument } from "./model"
 
 interface PreviewLabels {

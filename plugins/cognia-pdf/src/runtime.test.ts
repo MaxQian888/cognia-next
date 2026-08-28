@@ -1,6 +1,5 @@
-import type { Artifact } from "@/types/artifact"
-import type { PluginArtifactAPI } from "@/types/plugin"
-
+import type { Artifact } from "@cognia/plugin-sdk"
+import type { PluginArtifactAPI } from "@cognia/plugin-sdk"
 jest.mock("./pdf-engine", () => ({
   inspectPdf: jest.fn(),
   fillPdfFields: jest.fn(),

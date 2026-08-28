@@ -7,8 +7,7 @@
  */
 
 import { demoSharedMemoryAdapter, __resetDemoAdapterForTesting } from "./demo-adapter"
-import type { SharedMemoryEntry } from "@/types/agent/agent-team"
-
+import type { SharedMemoryEntry } from "@cognia/plugin-sdk"
 const TEAM = "team-1"
 const OTHER = "team-2"
 

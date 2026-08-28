@@ -1,4 +1,4 @@
-import type { ArtifactRenderer } from "@/types/plugin"
+import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { base64ToBytes, parsePdfArtifact, PDF_MIME } from "./model"
 
 interface PdfPreviewLabels {

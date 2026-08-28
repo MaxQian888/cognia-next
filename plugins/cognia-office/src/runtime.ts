@@ -1,5 +1,5 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI, PluginSkillsAPI } from "@/types/plugin"
+import type { PluginArtifactAPI, PluginFilesAPI, PluginSkillsAPI } from "@cognia/plugin-sdk"
 import {
   applyWorkbookOperations,
   createWorkbook,

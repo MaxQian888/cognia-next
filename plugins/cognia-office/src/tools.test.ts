@@ -1,6 +1,5 @@
 import type { OfficePluginContext } from "./runtime"
-import type { PluginToolContext } from "@/types/plugin"
-
+import type { PluginToolContext } from "@cognia/plugin-sdk"
 const mockRuntime = {
   create: jest.fn(async () => ({ ok: true, artifactId: "a1" })),
   importXlsx: jest.fn(async () => ({ ok: true, artifactId: "a1" })),

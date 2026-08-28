@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import type { Artifact } from "@/types/artifact"
+import type { Artifact } from "@cognia/plugin-sdk"
 import { createPdfArtifactDocument, PDF_ARTIFACT_KIND } from "./model"
 import { createPdfRenderer } from "./preview"
 

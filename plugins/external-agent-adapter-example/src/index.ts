@@ -18,14 +18,13 @@
  * loops read the manifest arrays, so no imperative activate() wiring is needed.
  */
 
-import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
+import type { ExternalAgentProtocol } from "@cognia/plugin-sdk"
 import type {
   PluginDefinition,
   PluginExternalAgentAdapterDef,
   PluginExternalAgentPresetDef,
   PluginManifest,
-} from "@/types/plugin"
-
+} from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
 const PLUGIN_ID = "cognia-external-agent-adapter-example"

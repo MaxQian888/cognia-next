@@ -12,39 +12,39 @@
 
 import definition, { manifest } from "./index"
 import {
+  getSubagent,
   registerSubagent,
   unregisterSubagentsByPlugin,
-  getSubagent,
-  __resetSubagentsForTesting,
-} from "@/lib/plugin/registries/subagent-registry"
+} from "@cognia/plugin-sdk/api/subagent"
 import {
+  getAgentTeamTemplate,
   registerAgentTeamTemplate,
   unregisterAgentTeamTemplatesByPlugin,
-  getAgentTeamTemplate,
-  __resetAgentTeamTemplatesForTesting,
-} from "@/lib/plugin/registries/agent-team-template-registry"
+} from "@cognia/plugin-sdk/api/agent-team-template"
 import {
+  getSharedMemoryAdapter,
   registerSharedMemoryAdapter,
   unregisterSharedMemoryAdaptersByPlugin,
-  getSharedMemoryAdapter,
-  __resetSharedMemoryAdaptersForTesting,
-} from "@/lib/plugin/registries/shared-memory-adapter-registry"
+} from "@cognia/plugin-sdk/api/shared-memory-adapter"
 import {
+  getBalanceAdapter,
   registerBalanceAdapter,
   unregisterBalanceAdaptersByPlugin,
-  getBalanceAdapter,
-  __resetBalanceAdaptersForTesting,
-} from "@/lib/plugin/registries/balance-adapter-registry"
+} from "@cognia/plugin-sdk/api/balance-adapter"
 import jsonManifest from "../plugin.json"
 
 const PLUGIN_ID = "cognia-agent-team-examples"
 
 describe("agent-team-examples plugin", () => {
+  // Plugin-scoped teardown — the same four calls the plugin manager makes on
+  // disable. The host's registry-wide resets are not on the author surface,
+  // and clearing the whole registry would also drop contributions this plugin
+  // never made.
   beforeEach(() => {
-    __resetSubagentsForTesting()
-    __resetAgentTeamTemplatesForTesting()
-    __resetSharedMemoryAdaptersForTesting()
-    __resetBalanceAdaptersForTesting()
+    unregisterSubagentsByPlugin(PLUGIN_ID)
+    unregisterAgentTeamTemplatesByPlugin(PLUGIN_ID)
+    unregisterSharedMemoryAdaptersByPlugin(PLUGIN_ID)
+    unregisterBalanceAdaptersByPlugin(PLUGIN_ID)
   })
 
   it("declares every contribution array in its manifest", () => {

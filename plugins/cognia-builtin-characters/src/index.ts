@@ -22,13 +22,12 @@
  * would orphan existing user customisations.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineCharacterPack } from "@cognia/plugin-sdk"
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
-
+} from "@cognia/plugin-sdk/api/character-pack"
 export const BUILTIN_PACK = defineCharacterPack({
   id: "builtin",
   name: "Cognia Built-ins",

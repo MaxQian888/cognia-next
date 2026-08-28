@@ -4,7 +4,7 @@
  * contextProviders entry flows through the context-providers bridge.
  */
 
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "@cognia/plugin-sdk"
 import definition, { TYPED_CONTRIBUTIONS } from "./index"
 // Read the JSON manifest, NOT the TS module overlay: this plugin is in
 // `INTENTIONALLY_UNBUNDLED`, so an installed copy only ever sees plugin.json.
@@ -14,23 +14,24 @@ import manifestJson from "../plugin.json"
 const manifest = manifestJson as unknown as PluginManifest
 import { createEnvBannerProvider } from "./context-provider"
 import {
-  registerPreset,
-  unregisterPresetsByPlugin,
-  getPresetConfig,
-  __resetDynamicPresetsForTesting,
-} from "@/lib/ai/agent/external/presets"
-import { registerContextProvidersForPlugin } from "@/lib/plugin/bridge/context-providers-bridge"
+  getExternalAgentPresetConfig as getPresetConfig,
+  registerExternalAgentPreset as registerPreset,
+  unregisterExternalAgentPresetsByPlugin as unregisterPresetsByPlugin,
+} from "@cognia/plugin-sdk/api/external-agent-preset"
 import {
   getContextProvider,
-  __resetContextProvidersForTesting,
-} from "@/lib/plugin/registries/context-provider-registry"
-
+  registerContextProvidersForPlugin,
+  unregisterContextProvidersByPlugin,
+} from "@cognia/plugin-sdk/api/context-provider"
 const PLUGIN_ID = "cognia-external-agent-preset-example"
 
 describe("external-agent-preset-example plugin", () => {
+  // Plugin-scoped teardown — the pair the plugin manager calls on disable.
+  // A registry-wide reset is not on the author surface and would also clear
+  // presets and providers this plugin never contributed.
   beforeEach(() => {
-    __resetDynamicPresetsForTesting()
-    __resetContextProvidersForTesting()
+    unregisterPresetsByPlugin(PLUGIN_ID)
+    unregisterContextProvidersByPlugin(PLUGIN_ID)
   })
 
   it("declares one external-agent preset + one context provider in its manifest", () => {

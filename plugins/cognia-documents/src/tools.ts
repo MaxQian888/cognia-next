@@ -1,4 +1,4 @@
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import type { DocumentOperation } from "./model"
 import { createDocumentsRuntime, type DocumentsPluginContext } from "./runtime"
 

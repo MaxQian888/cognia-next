@@ -1,6 +1,5 @@
 import { demoBalanceAdapter } from "./demo-balance-adapter"
-import type { BalanceQuery } from "@/types/subscription"
-
+import type { BalanceQuery } from "@cognia/plugin-sdk"
 const q: BalanceQuery = {
   accountId: "acc-1",
   providerKey: "example-credits",

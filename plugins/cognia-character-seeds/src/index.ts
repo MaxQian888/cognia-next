@@ -20,13 +20,12 @@
  * hot-reload coherent, mirroring `anthropic-skills`.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineCharacterPack } from "@cognia/plugin-sdk"
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,
-} from "@/lib/plugin/registries/character-pack-registry"
-
+} from "@cognia/plugin-sdk/api/character-pack"
 const WORKPLACE_SUITE = defineCharacterPack({
   id: "workplace-suite",
   name: "Workplace Suite",

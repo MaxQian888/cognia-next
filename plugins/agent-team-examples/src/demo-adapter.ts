@@ -9,12 +9,8 @@
  * this adapter when a team selects it.
  */
 
-import type {
-  PluginSharedMemoryAdapterDef,
-  SharedMemoryAdapterChangeSet,
-} from "@/types/plugin/plugin-shared-memory-adapter"
-import type { SharedMemoryEntry } from "@/types/agent/agent-team"
-
+import type { PluginSharedMemoryAdapterDef, SharedMemoryAdapterChangeSet } from "@cognia/plugin-sdk"
+import type { SharedMemoryEntry } from "@cognia/plugin-sdk"
 const ADAPTER_ID = "cognia-agent-team-examples:in-memory"
 
 // teamId → key → entry

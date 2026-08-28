@@ -1,5 +1,5 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI } from "@/types/plugin"
+import type { PluginArtifactAPI, PluginFilesAPI } from "@cognia/plugin-sdk"
 import {
   applyPresentationOperations,
   createPresentation,

@@ -8,19 +8,21 @@
  */
 
 import {
-  __resetCharacterPacksForTesting,
   getCharacterPack,
-} from "@/lib/plugin/registries/character-pack-registry"
+  unregisterCharacterPacksByPlugin,
+} from "@cognia/plugin-sdk/api/character-pack"
 import definition from "./index"
-import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-
+import type { PluginCharacterPackDef } from "@cognia/plugin-sdk"
 function manifestPacks(): PluginCharacterPackDef[] {
   const m = definition.manifest as unknown as { characterPacks?: PluginCharacterPackDef[] }
   return m.characterPacks ?? []
 }
 
+/** The id the manifest declares — teardown is scoped to it, as on disable. */
+const PLUGIN_ID = "cognia-character-seeds"
+
 afterEach(() => {
-  __resetCharacterPacksForTesting()
+  unregisterCharacterPacksByPlugin(PLUGIN_ID)
 })
 
 describe("cognia-character-seeds plugin", () => {

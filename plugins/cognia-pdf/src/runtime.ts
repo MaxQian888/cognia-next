@@ -1,6 +1,5 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI } from "@/types/plugin"
-
+import type { PluginArtifactAPI, PluginFilesAPI } from "@cognia/plugin-sdk"
 import { extractPdfPages, fillPdfFields, inspectPdf, type PdfFieldValue } from "./pdf-engine"
 import {
   base64ToBytes,

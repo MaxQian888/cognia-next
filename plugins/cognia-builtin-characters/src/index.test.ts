@@ -8,15 +8,18 @@
  */
 
 import {
-  __resetCharacterPacksForTesting,
   getCharacterPack,
   isOverlayCharacterId,
-} from "@/lib/plugin/registries/character-pack-registry"
-import { parseLocalPackFile, serializeLocalPackFile } from "@/lib/plugin/character-pack/schema"
+  unregisterCharacterPacksByPlugin,
+} from "@cognia/plugin-sdk/api/character-pack"
+import { parseLocalPackFile, serializeLocalPackFile } from "@cognia/plugin-sdk"
 import definition, { BUILTIN_LEGACY_ID_TO_LOCAL_ID, BUILTIN_PACK, BUILTIN_PLUGIN_ID } from "./index"
 
+// Plugin-scoped teardown: the same call the plugin manager makes on disable.
+// The host's registry-wide reset is not part of the author surface, and it
+// would also clear packs this plugin never registered.
 afterEach(() => {
-  __resetCharacterPacksForTesting()
+  unregisterCharacterPacksByPlugin(BUILTIN_PLUGIN_ID)
 })
 
 describe("cognia-builtin-characters plugin", () => {

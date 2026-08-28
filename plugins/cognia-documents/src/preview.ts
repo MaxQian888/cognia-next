@@ -1,4 +1,4 @@
-import type { ArtifactRenderer } from "@/types/plugin"
+import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { parseDocument, validateDocument, type DocumentBlock } from "./model"
 
 export function createDocumentRenderer(labels: {

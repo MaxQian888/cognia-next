@@ -15,7 +15,7 @@ import {
   type ProtocolAdapter,
   type ProtocolAdapterFactory,
   type SessionCreateOptions,
-} from "@/lib/ai/agent/external/protocol-adapter"
+} from "@cognia/plugin-sdk/api/external-agent-adapter"
 import type {
   AcpPermissionResponse,
   ExternalAgentConfig,
@@ -23,8 +23,7 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
-} from "@/types/agent/external-agent"
-
+} from "@cognia/plugin-sdk"
 /** The bare adapter id; the bridge registers it as `${pluginId}:demo-echo`. */
 export const DEMO_ADAPTER_ID = "demo-echo"
 

@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import type { Artifact } from "@/types/artifact"
+import type { Artifact } from "@cognia/plugin-sdk"
 import { applyWorkbookOperations, createWorkbook, WORKBOOK_ARTIFACT_KIND } from "./model"
 import { createWorkbookRenderer } from "./preview"
 

@@ -4,7 +4,7 @@ jest.mock("./docx", () => ({
   validateDocxRoundTrip: jest.fn(async () => ({ valid: true, text: "Hello" })),
 }))
 
-import type { Artifact } from "@/types/artifact"
+import type { Artifact } from "@cognia/plugin-sdk"
 import { DOCUMENT_ARTIFACT_KIND } from "./model"
 import { createDocumentsRuntime } from "./runtime"
 

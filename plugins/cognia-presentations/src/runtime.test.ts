@@ -4,7 +4,7 @@ jest.mock("./pptx", () => ({
   validatePptxRoundTrip: jest.fn(async () => ({ valid: true, slideCount: 1 })),
 }))
 
-import type { Artifact } from "@/types/artifact"
+import type { Artifact } from "@cognia/plugin-sdk"
 import { PRESENTATION_ARTIFACT_KIND } from "./model"
 import { createPresentationsRuntime } from "./runtime"
 

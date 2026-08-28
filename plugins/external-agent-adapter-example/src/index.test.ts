@@ -5,7 +5,7 @@
  * overlay, and the contributed adapter is createable + behaves (echo).
  */
 
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "@cognia/plugin-sdk"
 import definition, { TYPED_CONTRIBUTIONS } from "./index"
 // Read the JSON manifest, NOT the TS module overlay: this plugin is in
 // `INTENTIONALLY_UNBUNDLED`, so an installed copy only ever sees plugin.json.
@@ -15,39 +15,36 @@ import manifestJson from "../plugin.json"
 const manifest = manifestJson as unknown as PluginManifest
 import { createDemoEchoAdapter, DEMO_ADAPTER_ID } from "./demo-adapter"
 import {
+  protocolAdapterRegistry,
   registerExternalAgentAdaptersForPlugin,
   unregisterExternalAgentAdaptersForPlugin,
-} from "@/lib/plugin/bridge/external-agent-adapters-bridge"
+  unregisterPluginProtocolAdaptersByPlugin,
+} from "@cognia/plugin-sdk/api/external-agent-adapter"
 import {
-  protocolAdapterRegistry,
-  __resetPluginProtocolAdaptersForTesting,
-} from "@/lib/ai/agent/external/protocol-adapter"
-import {
-  registerPreset,
-  unregisterPresetsByPlugin,
-  getPresetConfig,
   createAgentFromPreset,
-  __resetDynamicPresetsForTesting,
-} from "@/lib/ai/agent/external/presets"
-import { getExternalAgentExecutionBlock } from "@/lib/ai/agent/external/config-normalizer"
+  getExternalAgentPresetConfig as getPresetConfig,
+  registerExternalAgentPreset as registerPreset,
+  unregisterExternalAgentPresetsByPlugin as unregisterPresetsByPlugin,
+} from "@cognia/plugin-sdk/api/external-agent-preset"
+import { getExternalAgentExecutionBlock } from "@cognia/plugin-sdk"
 import type {
   ExternalAgentConfig,
   ExternalAgentMessage,
   ExternalAgentMessageDeltaEvent,
-} from "@/types/agent/external-agent"
-
+} from "@cognia/plugin-sdk"
 const PLUGIN_ID = "cognia-external-agent-adapter-example"
 const PROTOCOL = `${PLUGIN_ID}:${DEMO_ADAPTER_ID}`
 
 describe("external-agent-adapter-example plugin", () => {
-  beforeEach(() => {
-    __resetPluginProtocolAdaptersForTesting()
-    __resetDynamicPresetsForTesting()
-  })
-  afterEach(() => {
-    __resetPluginProtocolAdaptersForTesting()
-    __resetDynamicPresetsForTesting()
-  })
+  // Plugin-scoped teardown — the pair the plugin manager calls on disable.
+  // The host's registry-wide resets are not on the author surface, and using
+  // them here would also clear adapters and presets this plugin never made.
+  const teardown = () => {
+    unregisterPluginProtocolAdaptersByPlugin(PLUGIN_ID)
+    unregisterPresetsByPlugin(PLUGIN_ID)
+  }
+  beforeEach(teardown)
+  afterEach(teardown)
 
   it("declares one adapter + one matching preset in its manifest", () => {
     expect(definition.manifest.id).toBe(PLUGIN_ID)

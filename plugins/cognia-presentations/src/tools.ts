@@ -1,4 +1,4 @@
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import type { PresentationOperation } from "./model"
 import { createPresentationsRuntime, type PresentationsPluginContext } from "./runtime"
 

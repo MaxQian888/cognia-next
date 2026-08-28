@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { PRESENTATION_ARTIFACT_KIND, PPTX_MIME } from "./model"
 import { importPptx } from "./pptx"

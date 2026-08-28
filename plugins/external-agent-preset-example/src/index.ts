@@ -14,8 +14,11 @@
  * loops read the manifest arrays, so no imperative activate() wiring is needed.
  */
 
-import type { PluginDefinition, PluginManifest, PluginExternalAgentPresetDef } from "@/types/plugin"
-
+import type {
+  PluginDefinition,
+  PluginManifest,
+  PluginExternalAgentPresetDef,
+} from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
 /** Re-exported from the JSON so callers/tests share one source of truth. */

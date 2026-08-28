@@ -1,4 +1,4 @@
-import type { ArtifactRenderer } from "@/types/plugin"
+import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { parseVisualization, validateVisualization, type VisualizationSpec } from "./model"
 
 export function createVisualizationRenderer(labels: {

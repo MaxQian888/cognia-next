@@ -3,14 +3,13 @@ import {
   type ManageScheduledTaskArgs,
   type SchedulerToolDeps,
 } from "./index"
-import { DEFAULT_PERMISSION_POLICY, type SchedulerPermissionPolicy } from "@/types/scheduler"
-
+import { DEFAULT_PERMISSION_POLICY, type SchedulerPermissionPolicy } from "@cognia/plugin-sdk"
 function makeDeps(overrides: Partial<SchedulerToolDeps> = {}): {
   deps: SchedulerToolDeps
   createTask: jest.Mock
   deleteTask: jest.Mock
   runTaskNow: jest.Mock
-  loadTasks: jest.Mock
+  listTasks: jest.Mock
   setPolicy: (p: Partial<SchedulerPermissionPolicy>) => void
   setTasks: (t: unknown[]) => void
 } {
@@ -19,14 +18,13 @@ function makeDeps(overrides: Partial<SchedulerToolDeps> = {}): {
   const createTask = jest.fn(async () => ({ id: "new_task", name: "n" }))
   const deleteTask = jest.fn(async () => true)
   const runTaskNow = jest.fn(async () => ({ id: "exec_1" }))
-  const loadTasks = jest.fn(async () => undefined)
+  const listTasks = jest.fn(async () => tasks as never)
   const deps: SchedulerToolDeps = {
-    getPolicy: () => policy,
-    getTasks: () => tasks as never,
+    getPolicy: async () => policy,
+    listTasks,
     createTask: createTask as never,
     deleteTask,
     runTaskNow: runTaskNow as never,
-    loadTasks,
     ...overrides,
   }
   return {
@@ -34,7 +32,7 @@ function makeDeps(overrides: Partial<SchedulerToolDeps> = {}): {
     createTask,
     deleteTask,
     runTaskNow,
-    loadTasks,
+    listTasks,
     setPolicy: (p) => {
       policy = { ...policy, ...p }
     },
@@ -53,7 +51,7 @@ describe("runSchedulerToolAction", () => {
     h.setTasks([{ id: "t1", name: "A", type: "plan", status: "active", trigger: { type: "cron" } }])
     const r = await run({ action: "list" }, h.deps)
     expect(r.ok).toBe(true)
-    expect(h.loadTasks).toHaveBeenCalled()
+    expect(h.listTasks).toHaveBeenCalled()
     if (r.ok) {
       expect(r.count).toBe(1)
       expect((r.tasks as Array<{ id: string }>)[0].id).toBe("t1")

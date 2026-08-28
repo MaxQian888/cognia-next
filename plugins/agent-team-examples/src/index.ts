@@ -12,7 +12,7 @@
  * `manifest.agentTeamTemplates`, so no imperative activate() wiring is needed.
  */
 
-import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import { defineSubagent, defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import { demoSharedMemoryAdapter } from "./demo-adapter"
 import { demoBalanceAdapter } from "./demo-balance-adapter"

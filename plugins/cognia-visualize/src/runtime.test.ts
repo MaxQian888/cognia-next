@@ -1,4 +1,4 @@
-import type { Artifact } from "@/types/artifact"
+import type { Artifact } from "@cognia/plugin-sdk"
 import { VISUALIZATION_ARTIFACT_KIND } from "./model"
 import { createVisualizeRuntime } from "./runtime"
 

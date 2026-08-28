@@ -1,4 +1,4 @@
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import type { WorkbookOperation } from "./model"
 import { createOfficeRuntime, type OfficePluginContext } from "./runtime"
 
