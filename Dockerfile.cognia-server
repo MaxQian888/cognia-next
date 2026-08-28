@@ -119,7 +119,7 @@ RUN target_triple=$(rustc -vV | sed -n 's/^host: //p') \
     && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt \
     && echo placeholder > sidecar/webclone/dist/keep.txt \
     && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt \
-    && echo placeholder > sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix
+    && echo placeholder > sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
@@ -167,7 +167,7 @@ RUN target_triple=$(rustc -vV | sed -n 's/^host: //p') \
     && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt \
     && echo placeholder > sidecar/webclone/dist/keep.txt \
     && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt \
-    && echo placeholder > sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix
+    && echo placeholder > sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
 RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
 RUN cargo check --release --locked -p cognia-cli --bin cognia
 
@@ -297,7 +297,7 @@ COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
 # ESM visitor types do not match its compatibility adapter. The sidecar bundle
 # therefore needs this pure-JS runtime closure beside claude-host.mjs.
 COPY --from=brain-builder /work/sidecar/webclone/node_modules /app/brain/sidecar/node_modules
-COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix /opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix
 COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
 COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
 # Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when
@@ -320,7 +320,7 @@ ENV NODE_ENV=production \
     COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
     COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
 ENV COGNIA_CODE_SERVER_BIN=/opt/cognia/code-server/4.128.0/bin/code-server \
-    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix
 VOLUME /data
 # 27890 tracks companion_api::server::DEFAULT_PORT — 7890/7891 are the Clash
 # mixed/SOCKS defaults and collide with a proxy on most dev hosts.

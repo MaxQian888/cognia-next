@@ -49,6 +49,9 @@ COPY --from=webclone-host /node_modules ./sidecar/webclone/node_modules
 COPY --from=tui-host /node_modules /opt/cognia-tui-deps/node_modules
 COPY tmp-cognia-e2e-npm /opt/cognia-e2e-bin/npm
 RUN chmod +x /opt/cognia-e2e-bin/npm
+# The managed-broker .vsix is a build artifact rather than a committed one, so
+# `COPY . .` above no longer carries it into the context.
+RUN pnpm sidecar:codeserver-agent:build
 RUN PATH=/opt/cognia-e2e-bin:$PATH NODE_OPTIONS=--max-old-space-size=8192 \
     node scripts/build/build-cli-binary.mjs --layout-only
 
@@ -89,7 +92,7 @@ RUN groupadd --system --gid 10001 cognia \
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=builder /work/target/release/cognia /usr/local/bin/cognia
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
-COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-managed-broker.vsix /opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix
 COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
 COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
 COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
@@ -100,7 +103,7 @@ ENV COGNIA_DATA_DIR=/data \
     COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
     COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
 ENV COGNIA_CODE_SERVER_BIN=/opt/cognia/code-server/4.128.0/bin/code-server \
-    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-managed-broker.vsix
 VOLUME /data
 EXPOSE 27890
 USER 10001:10001

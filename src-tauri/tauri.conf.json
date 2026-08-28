@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm build && pnpm tauri:frontend:check"
+    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check"
   },
   "app": {
     "macOSPrivateApi": true,

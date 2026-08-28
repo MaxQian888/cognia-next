@@ -156,6 +156,12 @@ sidecar/builtin-tools/code/grammars/*.wasm
 # lib/external-bridge/mcp-server/standalone-entry.ts by
 # scripts/build/build-mcp-sidecar.mjs (prebuild), not authored here.
 sidecar/cognia-mcp.mjs
+# Pro IDE managed-broker extension package (ADR-0088). Built by
+# `sidecar/codeserver-agent-ext/build.mjs` and shipped as a Tauri resource, so
+# `beforeDevCommand` / `beforeBuildCommand` regenerate it before the resource
+# walk. It was committed until the packaging became deterministic; a zip that
+# restamped every entry's mtime meant each rebuild was a 34 KB binary diff.
+sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
 # Root-only scratch screenshots. Anchored: unanchored, these matched at any
 # depth and silently swallowed web/public/og/workflows-{en,zh}.png, whose paths
 # web/lib/metadata.ts still advertises as og:image.
