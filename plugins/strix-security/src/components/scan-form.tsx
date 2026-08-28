@@ -2,10 +2,10 @@
 
 import { useState } from "react"
 import { Play, Square } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Button } from "@cognia/plugin-ui"
+import { Checkbox } from "@cognia/plugin-ui"
+import { Input } from "@cognia/plugin-ui"
+import { Label } from "@cognia/plugin-ui"
 import type { ScanOptions } from "../types"
 import { usePluginT } from "../use-plugin-t"
 

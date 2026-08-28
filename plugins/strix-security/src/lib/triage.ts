@@ -18,7 +18,7 @@ import {
   targetKey,
   type ScanReport,
   type SecurityFinding,
-} from "@cognia/security-findings"
+} from "@cognia/plugin-sdk/api/security-findings"
 import {
   SUPPRESSING_STATES,
   type FindingState,

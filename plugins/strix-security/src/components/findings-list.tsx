@@ -1,7 +1,7 @@
 "use client"
 
 import { Download, ShieldCheck } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Button } from "@cognia/plugin-ui"
 import type { FindingState, FindingStateRow, StrixFinding, SuppressionRule } from "../types"
 import { findingStateOf, isSuppressed } from "../lib/triage"
 import { usePluginT } from "../use-plugin-t"

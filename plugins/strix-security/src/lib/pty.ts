@@ -4,7 +4,7 @@
 // and dependency-injected (sleep/signal) so it's unit-testable with a mock
 // terminal.
 
-import type { PluginTerminalAPI } from "@/lib/plugin/api/terminal-api"
+import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
 import { stripAnsi } from "./ansi"
 import {
   buildCaptureCommand,

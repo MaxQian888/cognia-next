@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react"
 import { RadarIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Button } from "@cognia/plugin-ui"
+import { cn } from "@cognia/plugin-ui"
 import type { SreRuntime } from "../runtime"
 import type { SreIncident, SreIncidentStatus } from "../incident/model"
 import { usePluginT } from "../use-plugin-t"

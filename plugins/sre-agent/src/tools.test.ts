@@ -1,4 +1,4 @@
-import type { PluginToolContext } from "@/types/plugin"
+import type { PluginToolContext } from "@cognia/plugin-sdk"
 import { FIXTURE_END, FIXTURE_START, FIXTURE_TRACE_ID } from "./fixtures"
 import { clearSrePanelRuntime, recentSreToolActivity, setSrePanelRuntime } from "./panel-runtime"
 import { createSreRuntime } from "./runtime"

@@ -408,11 +408,19 @@ export type {
  * time. A plugin test asserting `validatePluginManifest(manifest).valid` is
  * the cheapest way to catch a contribution that would be rejected on load.
  */
-export { parseManifest, validatePluginConfig, validatePluginManifest } from "./manifest"
+export {
+  assertPluginManifestParity,
+  findPluginManifestParityIssues,
+  parseManifest,
+  PluginManifestParityError,
+  validatePluginConfig,
+  validatePluginManifest,
+} from "./manifest"
 export type {
   ConfigValidationResult,
   ManifestDiagnostic,
   ManifestValidationOptions,
+  PluginManifestParityIssue,
   ValidationError,
   ValidationResult,
 } from "./manifest"
@@ -426,3 +434,10 @@ export type {
  * is nothing to combine.
  */
 export { combineAbortSignals } from "@/lib/execution/admit"
+
+/**
+ * Hand the user a file. A plugin that exports a report, a transcript or a
+ * SARIF log needs the same object-URL dance every host export does — including
+ * the revoke, which is the part hand-rolled copies forget.
+ */
+export { downloadBlob } from "@/lib/connectors/audit-export"

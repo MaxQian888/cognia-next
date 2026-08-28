@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangleIcon, MaximizeIcon, PinIcon, PinOffIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Button } from "@cognia/plugin-ui"
+import { cn } from "@cognia/plugin-ui"
 import type { SreTimeRange } from "../evidence"
 import type { SreHistogramBucket, SreLogPattern } from "../providers/types"
 import type { SreRuntime } from "../runtime"

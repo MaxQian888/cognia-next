@@ -3,10 +3,9 @@
 // stashes the APIs here; the panel + runner read them via `getStrixRuntime()`.
 // Mirrors pet-daily-quests' `configureQuestStore` decoupling.
 
-import type { PluginContextPanelAPI } from "@/lib/plugin/api/context-panel-api"
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
-import type { PluginTerminalAPI } from "@/lib/plugin/api/terminal-api"
-
+import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
 export interface StrixRuntime {
   terminal: PluginTerminalAPI
   dexie: PluginDexieAPI

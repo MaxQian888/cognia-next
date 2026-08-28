@@ -1,4 +1,4 @@
-import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { I18N_MESSAGES } from "./i18n"
 import { PANEL_ACTIVITY, PANEL_ID, PLUGIN_ID } from "./ids"

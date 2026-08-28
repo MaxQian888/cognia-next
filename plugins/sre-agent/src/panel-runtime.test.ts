@@ -1,4 +1,4 @@
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import type { SreRuntime } from "./runtime"
 import {
   clearSrePanelRuntime,

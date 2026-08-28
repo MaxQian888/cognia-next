@@ -1,7 +1,7 @@
 "use client"
 
 import { CheckIcon, CircleIcon, CircleDotIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@cognia/plugin-ui"
 import {
   derivePhase,
   phaseIndex,

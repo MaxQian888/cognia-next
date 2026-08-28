@@ -23,7 +23,7 @@ jest.mock("../panel-runtime", () => ({
   },
 }))
 
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
+import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 import type { SreIncident } from "../incident/model"
 import { activityForIncident, IncidentPanel, unpinnedAgentEvidence } from "./incident-panel"
 import { createIncident } from "../incident/model"

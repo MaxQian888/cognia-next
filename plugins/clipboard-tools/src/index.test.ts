@@ -5,7 +5,10 @@
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import type { PluginNodeDef } from "@cognia/plugin-sdk"
 const isTauriMock = jest.fn(() => false)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+// Doubled at the SDK subpath the plugin imports, not the host module behind it.
+jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
+  readHostCapabilities: () => ({ tauri: isTauriMock() }),
+}))
 
 const readTextMock = jest.fn<Promise<string>, []>()
 jest.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: () => readTextMock() }), {

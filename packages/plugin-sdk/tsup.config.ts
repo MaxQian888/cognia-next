@@ -30,6 +30,7 @@ const runtimeEntries = {
   "ocr-provider": "src/api/ocr-provider.ts",
   sandbox: "src/api/sandbox.ts",
   "scheduled-task": "src/api/scheduled-task.ts",
+  "security-findings": "src/api/security-findings.ts",
   "shared-memory-adapter": "src/api/shared-memory-adapter.ts",
   skill: "src/api/skill.ts",
   "skill-recorder": "src/api/skill-recorder.ts",

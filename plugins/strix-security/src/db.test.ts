@@ -9,8 +9,7 @@ import {
   setFindingState,
   suppressionRuleId,
 } from "./db"
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
-
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 /**
  * Map-backed stand-in for one namespaced plugin table.
  *

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { cn } from "@/lib/utils"
+import { cn } from "@cognia/plugin-ui"
 import type { SreIngestSource, SreIngestStatus } from "../providers/types"
 import type { SreRuntime } from "../runtime"
 import { usePluginT } from "../use-plugin-t"

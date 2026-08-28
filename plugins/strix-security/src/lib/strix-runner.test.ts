@@ -1,4 +1,4 @@
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import type { StrixFinding, StrixRun } from "../types"
 import { counterId, createMockTerminal, immediateSleep, type CommandResolver } from "./mock-shell"
 import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./strix-runner"

@@ -9,7 +9,13 @@
  * and each one fails silently. Booting the real manager against the real
  * manifest is the only thing that proves the chain end to end.
  *
- * Harness mirrors `lib/plugin/core/builtin-contributions-flow.test.ts`.
+ * Harness mirrors `builtin-contributions-flow.test.ts` next door.
+ *
+ * Lives here, not under `plugins/sre-agent/`, because it is a test of the HOST:
+ * it boots the real `PluginManager` and drives the signature verifier, the
+ * permission guard and the panel registry. A plugin's own suite must be
+ * runnable against the published SDK surface alone — this one cannot be, and
+ * pretending otherwise is what kept those host-private imports alive.
  */
 
 import "fake-indexeddb/auto"
@@ -22,7 +28,7 @@ import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import type { ContextResource } from "@/types/context-workbench"
 import type { Plugin, PluginManifest } from "@/types/plugin"
-import { PANEL_ACTIVITY, PANEL_FULL_ID, PLUGIN_ID } from "./ids"
+import { PANEL_ACTIVITY, PANEL_FULL_ID, PLUGIN_ID } from "@/plugins/sre-agent/src/ids"
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/stores/plugin-runtime", () => ({ usePluginStore: { getState: jest.fn() } }))

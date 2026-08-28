@@ -15,8 +15,8 @@
  * so it can watch a run it did not start and must not pretend it can steer one.
  */
 
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
-import type { PluginContextPanelAPI } from "@/lib/plugin/api/context-panel-api"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
 import type { SreTimelineDraft, SreValidationResult } from "./evidence"
 import type { SreRuntime } from "./runtime"
 

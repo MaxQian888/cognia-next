@@ -2,7 +2,7 @@
 // CLI on PATH? Runs two framed commands in a throwaway shell and reports their
 // exit codes. Blocks the Start button until both are green.
 
-import type { PluginTerminalAPI } from "@/lib/plugin/api/terminal-api"
+import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
 import type { PreflightStatus } from "../types"
 import { captureCommand, openPty, quietShell, safeKill, type PtyPollDeps } from "./pty"
 

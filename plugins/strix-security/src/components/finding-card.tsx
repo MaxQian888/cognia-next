@@ -1,9 +1,9 @@
 "use client"
 
 import { Bell, BellOff } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Badge } from "@cognia/plugin-ui"
+import { Button } from "@cognia/plugin-ui"
+import { cn } from "@cognia/plugin-ui"
 import { FINDING_STATES, type FindingState, type Severity, type StrixFinding } from "../types"
 import { usePluginT } from "../use-plugin-t"
 

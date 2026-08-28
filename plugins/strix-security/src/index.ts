@@ -21,7 +21,7 @@
  * activates anywhere the gate would have mattered.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import manifest from "../plugin.json"
 import { I18N_MESSAGES } from "./i18n"
 import { StrixPanel } from "./StrixPanel"

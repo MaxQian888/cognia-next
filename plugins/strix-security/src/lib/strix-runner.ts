@@ -4,8 +4,8 @@
 // findings to Dexie. Fully dependency-injected (terminal/dexie/clock/id/sleep)
 // so it is unit-testable with a mock terminal + fake IndexedDB.
 
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
-import type { PluginTerminalAPI } from "@/lib/plugin/api/terminal-api"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
 import type { ScanOptions, StrixRun } from "../types"
 import { findingsTable, runsTable } from "../db"
 import { buildStrixCommand, buildStrixEnv } from "./strix-cli"

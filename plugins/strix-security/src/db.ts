@@ -2,8 +2,8 @@
 // Every table access goes through `ctx.dexie`, which namespaces to
 // `strix-security:<table>` — see lib/plugin/api/dexie-api.ts.
 
-import { findingKey, targetKey } from "@cognia/security-findings"
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
+import { findingKey, targetKey } from "@cognia/plugin-sdk/api/security-findings"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import type { Table } from "dexie"
 import type {
   FindingState,

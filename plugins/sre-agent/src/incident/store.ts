@@ -12,7 +12,7 @@
  */
 
 import type { Table } from "dexie"
-import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
+import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import { compareIncidents, type SreIncident } from "./model"
 
 export const INCIDENTS_TABLE = "incidents"

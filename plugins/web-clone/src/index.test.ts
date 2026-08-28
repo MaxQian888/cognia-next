@@ -3,13 +3,15 @@
  */
 
 import type { PluginContext } from "@cognia/plugin-sdk"
-jest.mock("@/lib/slash-commands/registry", () => ({
+// Doubled at the SDK subpaths the plugin imports, not the host modules behind
+// them. The git store double is gone entirely: the plugin reads the repo root
+// through `ctx.git.getRoot()` now, so the test supplies it on the context.
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
-jest.mock("@/stores/git/git-store", () => ({
-  useGitStore: { getState: () => ({ rootDir: "/repo" }) },
+jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
+  readHostCapabilities: () => ({ tauri: true }),
 }))
 
 import {

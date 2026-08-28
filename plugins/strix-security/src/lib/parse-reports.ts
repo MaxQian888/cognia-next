@@ -11,7 +11,7 @@ import {
   fingerprintFinding,
   normalizeSeverity,
   type FindingLocation,
-} from "@cognia/security-findings"
+} from "@cognia/plugin-sdk/api/security-findings"
 import type { CodeLocation, Severity, StrixFinding } from "../types"
 import { SEVERITY_ORDER } from "../types"
 

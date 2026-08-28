@@ -195,6 +195,12 @@
       "require": "./dist/scheduled-task.cjs",
       "default": "./dist/scheduled-task.js"
     },
+    "./api/security-findings": {
+      "types": "./dist/security-findings.d.ts",
+      "import": "./dist/security-findings.js",
+      "require": "./dist/security-findings.cjs",
+      "default": "./dist/security-findings.js"
+    },
     "./api/shared-memory-adapter": {
       "types": "./dist/shared-memory-adapter.d.ts",
       "import": "./dist/shared-memory-adapter.js",

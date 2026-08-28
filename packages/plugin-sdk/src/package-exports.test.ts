@@ -37,6 +37,7 @@ describe("plugin-sdk package exports", () => {
     "./api/message-renderer",
     "./api/ocr-provider",
     "./api/scheduled-task",
+    "./api/security-findings",
     "./api/sandbox",
     "./api/shared-memory-adapter",
     "./api/skill",

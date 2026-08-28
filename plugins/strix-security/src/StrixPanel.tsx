@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ShieldAlert } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
-import { toSarifLog } from "@cognia/security-findings"
-import { downloadBlob } from "@/lib/connectors/audit-export"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@cognia/plugin-ui"
+import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
+import { toSarifLog } from "@cognia/plugin-sdk/api/security-findings"
+import { downloadBlob } from "@cognia/plugin-sdk"
 import type {
   FindingState,
   FindingStateRow,
@@ -39,8 +39,8 @@ import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./lib/strix-runne
 import {
   securityScanExecutionRunId,
   syncSecurityScanExecutionRun,
-} from "@/lib/execution/security-scan-bridge"
-import { registerSecurityScanRunController } from "@/lib/execution/control-handlers"
+} from "@cognia/plugin-sdk/api/security-findings"
+import { registerSecurityScanRunController } from "@cognia/plugin-sdk/api/security-findings"
 import { PreflightBanner } from "./components/preflight-banner"
 import { ScanForm } from "./components/scan-form"
 import { ScanConsole } from "./components/scan-console"

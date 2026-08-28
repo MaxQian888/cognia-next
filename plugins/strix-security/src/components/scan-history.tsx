@@ -1,8 +1,8 @@
 "use client"
 
 import { Trash2 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@cognia/plugin-ui"
+import { Button } from "@cognia/plugin-ui"
 import type { RunStatus, StrixRun } from "../types"
 import { usePluginT } from "../use-plugin-t"
 

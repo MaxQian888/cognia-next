@@ -1,6 +1,6 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@cognia/plugin-ui"
 import type { SreFinding } from "../evidence"
 import { canConclude, type SreIncident } from "../incident/model"
 import { usePluginT } from "../use-plugin-t"

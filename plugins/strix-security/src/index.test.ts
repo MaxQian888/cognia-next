@@ -1,15 +1,18 @@
-jest.mock("@/lib/slash-commands/registry", () => ({
+// Doubled at the SDK subpath the plugin imports, not the host module behind it.
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 jest.mock("./StrixPanel", () => ({ StrixPanel: () => null }))
 jest.mock("./runtime", () => ({ setStrixRuntime: jest.fn(), clearStrixRuntime: jest.fn() }))
 
 import definition from "./index"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import {
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
 import { clearStrixRuntime, setStrixRuntime } from "./runtime"
-import type { PluginContext } from "@/types/plugin"
-
+import type { PluginContext } from "@cognia/plugin-sdk"
 const disposePanel = jest.fn()
 const register = jest.fn(() => disposePanel)
 const reveal = jest.fn(() => true)

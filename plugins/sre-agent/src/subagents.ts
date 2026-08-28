@@ -1,5 +1,5 @@
 import { defineSubagent } from "@cognia/plugin-sdk"
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
 type ManifestSubagent = NonNullable<PluginManifest["subagents"]>[number]

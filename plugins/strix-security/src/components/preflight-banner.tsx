@@ -1,8 +1,8 @@
 "use client"
 
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@cognia/plugin-ui"
+import { Button } from "@cognia/plugin-ui"
 import type { PreflightStatus } from "../types"
 import { usePluginT } from "../use-plugin-t"
 

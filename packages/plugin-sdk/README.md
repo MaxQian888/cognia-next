@@ -57,8 +57,8 @@ export default definePlugin({
   `cli-tool`, `connector`, `context-panel`, `context-provider`, `editor`,
   `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
   `integration`, `message-renderer`, `ocr-provider`, `sandbox`, `scheduled-task`,
-  `shared-memory-adapter`, `skill`, `skill-recorder`, `slash-command`, `subagent`,
-  `tool-renderer`, `webview`, and `workflow-template`.
+  `security-findings`, `shared-memory-adapter`, `skill`, `skill-recorder`,
+  `slash-command`, `subagent`, `tool-renderer`, `webview`, and `workflow-template`.
 
   Registries are deliberately absent from the root barrel (pinned by
   `src/index.test.ts`). Importing one is a decision an author writes down, not something

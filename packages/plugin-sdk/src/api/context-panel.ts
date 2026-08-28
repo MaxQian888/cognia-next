@@ -75,3 +75,11 @@ declare global {
  */
 export { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 export type { ContextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+
+/**
+ * Width-aware layout for a panel body. The workbench rail can be resized and
+ * a panel can be docked wide or narrow, so a panel that lays out from a
+ * breakpoint guess renders wrong in half its placements; this measures the
+ * element it is given.
+ */
+export { useElementWidth } from "@/hooks/use-element-width"

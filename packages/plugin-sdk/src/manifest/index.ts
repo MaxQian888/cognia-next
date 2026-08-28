@@ -186,3 +186,20 @@ export type {
   ValidationError,
   ValidationResult,
 } from "@/lib/plugin/core/validation"
+
+/**
+ * Parity between a packaged `plugin.json` and a TypeScript manifest overlay.
+ *
+ * A plugin that ships both has two manifests, and the module overlay WINS the
+ * merge — so a contribution declared only in TS exists nowhere an installed
+ * copy can reach, and one declared only in JSON is silently dropped. This is
+ * the check that catches the divergence, and it belongs in the plugin's own
+ * test rather than in a reviewer's head.
+ */
+export {
+  assertPluginManifestParity,
+  findPluginManifestParityIssues,
+  PluginManifestParityError,
+} from "@/lib/plugin/core/manifest-parity"
+
+export type { PluginManifestParityIssue } from "@/lib/plugin/core/manifest-parity"

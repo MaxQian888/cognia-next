@@ -1,8 +1,8 @@
 "use client"
 
 import { AlertTriangleIcon, CheckCircle2Icon, HelpCircleIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Button } from "@cognia/plugin-ui"
+import { cn } from "@cognia/plugin-ui"
 import type { SreValidationIssue } from "../evidence"
 import type { SreIncident } from "../incident/model"
 import { usePluginT } from "../use-plugin-t"

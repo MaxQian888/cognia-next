@@ -4,8 +4,7 @@
 // supplied resolver for an { output, exitCode }, and emits the corresponding
 // completion markers back through onData. Imported only by *.test.ts files.
 
-import type { PluginTerminalAPI, PluginTerminalCommandRecord } from "@/lib/plugin/api/terminal-api"
-
+import type { PluginTerminalAPI, PluginTerminalCommandRecord } from "@cognia/plugin-sdk"
 export interface ScriptedResponse {
   output?: string
   exitCode?: number

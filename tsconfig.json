@@ -103,6 +103,9 @@
       "@cognia/plugin-sdk/api/ocr-provider": ["./packages/plugin-sdk/src/api/ocr-provider.ts"],
       "@cognia/plugin-sdk/api/sandbox": ["./packages/plugin-sdk/src/api/sandbox.ts"],
       "@cognia/plugin-sdk/api/scheduled-task": ["./packages/plugin-sdk/src/api/scheduled-task.ts"],
+      "@cognia/plugin-sdk/api/security-findings": [
+        "./packages/plugin-sdk/src/api/security-findings.ts"
+      ],
       "@cognia/plugin-sdk/api/shared-memory-adapter": [
         "./packages/plugin-sdk/src/api/shared-memory-adapter.ts"
       ],

@@ -8,12 +8,11 @@
 // this plugin exists to show and what an exported SARIF log has no business
 // carrying into a CI log.
 
-import type { Severity } from "@cognia/security-findings"
-
+import type { Severity } from "@cognia/plugin-sdk/api/security-findings"
 export type { Severity }
 
 /** Ordered most-severe first — used for sorting + display. */
-export { SEVERITY_ORDER } from "@cognia/security-findings"
+export { SEVERITY_ORDER } from "@cognia/plugin-sdk/api/security-findings"
 
 /** Lifecycle status of a scan run. */
 export type RunStatus = "running" | "done" | "error" | "cancelled"

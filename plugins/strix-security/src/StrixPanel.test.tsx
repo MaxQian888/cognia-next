@@ -31,7 +31,7 @@ let mockRuntime: {
 } | null = null
 jest.mock("./runtime", () => ({ peekStrixRuntime: () => mockRuntime }))
 
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
+import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 import { StrixPanel } from "./StrixPanel"
 
 /** The workbench hands a panel the resource in front, not plugin/view ids. */

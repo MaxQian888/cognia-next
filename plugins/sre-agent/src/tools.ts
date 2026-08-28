@@ -1,4 +1,4 @@
-import type { PluginTool, PluginToolContext, PluginToolDef } from "@/types/plugin"
+import type { PluginTool, PluginToolContext, PluginToolDef } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import type { SreTimelineDraft, SreValidationResult } from "./evidence"
 import type { SrePluginContext } from "./runtime"
