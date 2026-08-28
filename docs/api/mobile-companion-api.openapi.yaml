@@ -6116,6 +6116,11 @@ paths:
                 targetId:
                   type: string
                   minLength: 1
+                targetParams:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  example: {}
                 instruction:
                   type: string
                   minLength: 1

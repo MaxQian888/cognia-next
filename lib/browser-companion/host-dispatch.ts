@@ -9,6 +9,10 @@
  * injected-deps default is ever actually verified.
  */
 import { startNewSession } from "@/lib/chat/start-session"
+import type { ChatTemplateBinding, ChatTemplateParamValue } from "@/lib/chat/template/binding"
+import { listParamTokens } from "@/lib/chat/template/param-segments"
+import { renderParamTokens } from "@/lib/chat/template/render-params"
+import { getChatTemplate, listChatTemplates, recordChatTemplateUse } from "@/lib/db/chat-templates"
 import type { BrowserCompanionCapabilityV1 } from "@/types/browser-companion"
 import {
   getBrowserSubmission,
@@ -93,18 +97,15 @@ export function createBrowserCompanionDeps(
       return { id: session.id }
     },
     enqueueMessage: (input) => enqueueOnHostAuthority(payload, resolveHostState, input),
-    listDeliveryTargets: (callerDeviceId) =>
-      listDeliveryTargets({ listSubmissions: listBrowserSubmissions }, callerDeviceId),
+    listDeliveryTargets: (callerDeviceId) => listDeliveryTargets(targetDeps(), callerDeviceId),
+    renderTemplate: renderHostTemplate,
     // Built from the same readers the capability call uses, so the digest and
     // the answer it describes cannot disagree — a revision derived from
     // anything else would be a second definition of "what the capability is".
     capabilityRevision: async (callerDeviceId) =>
       capabilityRevisionOf({
         workspaces: await listHostWorkspaces(),
-        deliveryTargets: await listDeliveryTargets(
-          { listSubmissions: listBrowserSubmissions },
-          callerDeviceId
-        ),
+        deliveryTargets: await listDeliveryTargets(targetDeps(), callerDeviceId),
         ...(await hostAppearance()),
       }),
     latestAnswer: latestAssistantAnswer,
@@ -346,4 +347,72 @@ async function abortOnHostAuthority(
   )
   const receipt = response.results[0]
   return receipt?.outcome === "applied" || receipt?.outcome === "duplicate"
+}
+
+/**
+ * The readers the target catalogue is built from.
+ *
+ * Named once so the capability call and the digest that describes it cannot end
+ * up reading different things — a revision derived from a different catalogue
+ * than the one that was sent is a revision that lies.
+ */
+function targetDeps() {
+  return { listSubmissions: listBrowserSubmissions, listTemplates: listChatTemplates }
+}
+
+/**
+ * Render a saved template's body with the values a submission supplied.
+ *
+ * On the Host because the body lives here and stays here: it is the user's own
+ * saved prompt, and the panel only ever needs to know which fields to show. The
+ * substitution is `renderParamTokens`, the same pass the composer uses, over
+ * the tokens `listParamTokens` finds — so a template that behaves one way when
+ * inserted in the app behaves the same way when a browser runs it.
+ *
+ * Only declared parameters are read. A value naming something the template does
+ * not declare is dropped rather than substituted, which is what keeps a client
+ * from introducing a token of its own.
+ *
+ * `recordChatTemplateUse` runs on the way out so a template used from a browser
+ * counts, and its values are remembered for the next use exactly as they would
+ * be from the composer.
+ */
+async function renderHostTemplate(
+  templateId: string,
+  values: Record<string, string>
+): Promise<{ text: string; missing: string[] } | null> {
+  const template = await getChatTemplate(templateId)
+  if (!template) return null
+
+  const params: Record<string, ChatTemplateParamValue> = {}
+  const missing: string[] = []
+  for (const declared of template.params) {
+    // `resource` is never offered to a browser, so a value for one can only
+    // come from a client that made it up.
+    if (declared.kind === "resource") continue
+    const supplied = values[declared.id]?.trim()
+    if (supplied) {
+      params[declared.id] = { kind: "text", value: supplied }
+      continue
+    }
+    const fallback =
+      template.lastParams?.[declared.id] ??
+      (declared.defaultValue ? { kind: "text" as const, value: declared.defaultValue } : undefined)
+    if (fallback) {
+      params[declared.id] = fallback
+      continue
+    }
+    if (declared.required) missing.push(declared.label || declared.id)
+  }
+  if (missing.length > 0) return { text: "", missing }
+
+  const binding: ChatTemplateBinding = {
+    templateId: template.id,
+    version: String(template.revision),
+    params,
+    insertedAt: Date.now(),
+  }
+  const rendered = renderParamTokens(template.body, listParamTokens(template.body), binding)
+  await recordChatTemplateUse(template.id, params).catch(() => undefined)
+  return { text: rendered.text, missing: [] }
 }

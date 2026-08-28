@@ -27,8 +27,9 @@
  * are the ones it started itself. A second browser paired to the same Host sees
  * its own, and neither sees a conversation started on the desktop.
  */
-import type { BrowserDeliveryTargetV1 } from "@/types/browser-companion"
+import type { BrowserDeliveryTargetV1, BrowserTargetParamV1 } from "@/types/browser-companion"
 
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 
 /** The target every Host offers, and the one a submission means when it names none. */
@@ -61,6 +62,47 @@ export const MAX_SESSION_TARGETS = 6
 export interface DeliveryTargetDeps {
   /** This device's submissions, newest first — the same reader the list uses. */
   listSubmissions: (deviceId: string, limit: number) => Promise<BrowserSubmissionRow[]>
+  /** The Host's saved chat templates. */
+  listTemplates: () => Promise<ChatTemplateRow[]>
+}
+
+/** `template:<id>` — the id form, in one place so the reader and writer agree. */
+export function templateTargetId(templateId: string): string {
+  return `template:${templateId}`
+}
+
+/**
+ * A template's parameters, or `null` when a browser cannot fill them.
+ *
+ * `resource` parameters are the boundary. One is filled through the `@` menu
+ * against the Host's own workspace, and a side panel has neither that picker
+ * nor any business enumerating the Host's files to build one. A template that
+ * declares one is not offered at all: a field that cannot be completed is a
+ * worse answer than an absent target.
+ */
+export function browserFillableParams(template: ChatTemplateRow): BrowserTargetParamV1[] | null {
+  const params: BrowserTargetParamV1[] = []
+  for (const param of template.params) {
+    if (param.kind === "resource") return null
+    const remembered = template.lastParams?.[param.id]
+    params.push({
+      id: param.id,
+      label: param.label,
+      required: param.required,
+      kind: param.kind,
+      ...(param.description ? { description: param.description } : {}),
+      ...(param.options ? { options: param.options } : {}),
+      ...(param.multiline ? { multiline: param.multiline } : {}),
+      // The last value wins over the declared default, matching what the
+      // composer offers: nine uses out of ten repeat most of the values.
+      ...(remembered?.kind === "text"
+        ? { defaultValue: remembered.value }
+        : param.defaultValue
+          ? { defaultValue: param.defaultValue }
+          : {}),
+    })
+  }
+  return params
 }
 
 /**
@@ -93,6 +135,21 @@ export async function listDeliveryTargets(
       // it is never offered under a workspace the append would not move it to.
       ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}),
       detail: row.sourceHost,
+    })
+  }
+  for (const template of await deps.listTemplates()) {
+    const params = browserFillableParams(template)
+    if (!params) continue
+    targets.push({
+      id: templateTargetId(template.id),
+      kind: "template",
+      label: template.name,
+      isDefault: false,
+      // No `workspaceId`: a template describes how to start a task, not where.
+      // It runs in whichever workspace the submission names, exactly as a new
+      // task does.
+      ...(template.description ? { detail: template.description } : {}),
+      ...(params.length > 0 ? { params } : {}),
     })
   }
   return targets
@@ -130,4 +187,11 @@ export function sessionIdOfTarget(target: BrowserDeliveryTargetV1): string | und
   if (target.kind !== "session") return undefined
   const sessionId = target.id.slice("session:".length)
   return sessionId.length > 0 ? sessionId : undefined
+}
+
+/** The template a resolved `template:` target runs, by the same rule. */
+export function templateIdOfTarget(target: BrowserDeliveryTargetV1): string | undefined {
+  if (target.kind !== "template") return undefined
+  const templateId = target.id.slice("template:".length)
+  return templateId.length > 0 ? templateId : undefined
 }

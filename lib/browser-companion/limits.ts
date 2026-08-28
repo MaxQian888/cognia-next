@@ -64,7 +64,15 @@ export function validateBrowserSubmission(
       limit: limits.requestBytes,
     })
   }
-  const { submissionId, workspaceId, targetId, instruction, suggestedTitle, context } = payload
+  const {
+    submissionId,
+    workspaceId,
+    targetId,
+    targetParams,
+    instruction,
+    suggestedTitle,
+    context,
+  } = payload
   if (!nonEmptyString(submissionId)) return reject({ code: "malformed", field: "submissionId" })
   if (!nonEmptyString(workspaceId)) return reject({ code: "malformed", field: "workspaceId" })
   if (!nonEmptyString(instruction)) return reject({ code: "malformed", field: "instruction" })
@@ -77,6 +85,13 @@ export function validateBrowserSubmission(
   // well-formed id through as if it had been checked.
   if (targetId !== undefined && !nonEmptyString(targetId)) {
     return reject({ code: "malformed", field: "targetId" })
+  }
+  // Shape only, again. Which ids are meaningful is the target declaration's
+  // answer, and the Host reads that back rather than trusting this map — an
+  // entry naming a parameter the target does not declare is dropped there, so
+  // it cannot introduce a substitution by arriving here.
+  if (targetParams !== undefined && !isStringRecord(targetParams)) {
+    return reject({ code: "malformed", field: "targetParams" })
   }
   const instructionBytes = utf8ByteLength(instruction)
   if (instructionBytes > limits.instructionBytes) {
@@ -95,6 +110,7 @@ export function validateBrowserSubmission(
     submissionId,
     workspaceId,
     ...(typeof targetId === "string" ? { targetId } : {}),
+    ...(isStringRecord(targetParams) ? { targetParams } : {}),
     instruction,
     ...(typeof suggestedTitle === "string" && suggestedTitle.trim()
       ? { suggestedTitle: suggestedTitle.trim() }
@@ -207,6 +223,11 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false
   }
+}
+
+/** A flat `Record<string, string>`, and nothing more decorated than one. */
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string")
 }
 
 function reject(rejection: BrowserSubmissionRejection): {

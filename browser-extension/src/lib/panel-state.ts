@@ -14,6 +14,7 @@ import type {
   BrowserContextSubmissionSummaryV1,
   BrowserDeliveryTargetV1,
   BrowserSubmissionStatus,
+  BrowserTargetParamV1,
 } from "@cognia/companion-client"
 
 import type { PairFailure, PairingRecord } from "./client"
@@ -293,4 +294,39 @@ export function stopFailureMessage(
   return code === "session_driven_elsewhere"
     ? message("stopDrivenElsewhere")
     : message("stopFailed")
+}
+
+/**
+ * The values a target's parameters start at.
+ *
+ * The Host already resolved "the declared default or the last value used", so
+ * this only spreads what it sent. Rebuilt whenever the target changes, because
+ * carrying one template's answers into another's field of the same name would
+ * silently reuse a value nobody re-read.
+ */
+export function initialTargetParams(
+  params: readonly BrowserTargetParamV1[] | undefined
+): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const param of params ?? []) {
+    if (param.defaultValue !== undefined) values[param.id] = param.defaultValue
+  }
+  return values
+}
+
+/**
+ * Whether a target has everything it needs to run.
+ *
+ * The Host checks this too and names what is missing. Checking here as well is
+ * not duplication for its own sake: a disabled button is a better answer than a
+ * refusal after the round trip, and the Host's check is what makes it safe
+ * rather than what makes it visible.
+ */
+export function targetParamsSatisfied(
+  target: BrowserDeliveryTargetV1 | undefined,
+  values: Record<string, string>
+): boolean {
+  return (target?.params ?? []).every(
+    (param) => !param.required || (values[param.id] ?? "").trim().length > 0
+  )
 }

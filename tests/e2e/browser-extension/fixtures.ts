@@ -16,6 +16,8 @@
  */
 import { chromium, type Page, type Worker } from "@playwright/test"
 
+import type { BrowserCompanionCapabilityV1 } from "@cognia/companion-client"
+
 import { test as base } from "../fixtures/test"
 import { extensionDirFor, unpackedExtensionId, type ExtensionProfile } from "./extension-profile"
 import { startMockHost, type MockHost } from "./mock-host"
@@ -40,6 +42,14 @@ export interface ExtensionFixtures {
   extensionId: string
   /** The MV3 service worker, for driving `chrome.*` outside a page. */
   serviceWorker: Worker
+  /**
+   * Template targets the Host offers.
+   *
+   * Empty unless a file declares some, because a dropdown only appears when
+   * there is more than one target and most specs are asserting on a panel that
+   * has no such control.
+   */
+  hostTemplates: NonNullable<BrowserCompanionCapabilityV1["deliveryTargets"]>
   /** A faithful stand-in for the Host's plaintext browser plane. */
   mockHost: MockHost
   /** The side panel, opened as a tab. */
@@ -53,6 +63,7 @@ export interface ExtensionFixtures {
  */
 export const test = base.extend<ExtensionFixtures>({
   extensionProfile: ["shipped", { option: true }],
+  hostTemplates: [[], { option: true }],
   hostSchemaVersion: [1, { option: true }],
 
   extensionId: async ({ extensionProfile }, provide) => {
@@ -88,8 +99,12 @@ export const test = base.extend<ExtensionFixtures>({
     await provide(worker)
   },
 
-  mockHost: async ({ extensionOrigin, hostSchemaVersion }, provide) => {
-    const host = await startMockHost({ extensionOrigin, schemaVersion: hostSchemaVersion })
+  mockHost: async ({ extensionOrigin, hostSchemaVersion, hostTemplates }, provide) => {
+    const host = await startMockHost({
+      extensionOrigin,
+      schemaVersion: hostSchemaVersion,
+      templates: hostTemplates,
+    })
     try {
       await provide(host)
     } finally {

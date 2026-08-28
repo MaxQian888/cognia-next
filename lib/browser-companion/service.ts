@@ -56,7 +56,12 @@ import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
 import { sha256Hex } from "@/lib/share/hash"
 
 import { buildBrowserContextPrompt, sourceHostOf } from "./build-prompt"
-import { NEW_CHAT_TARGET_ID, resolveDeliveryTarget, sessionIdOfTarget } from "./targets"
+import {
+  NEW_CHAT_TARGET_ID,
+  resolveDeliveryTarget,
+  sessionIdOfTarget,
+  templateIdOfTarget,
+} from "./targets"
 import { validateBrowserSubmission, type BrowserSubmissionRejection } from "./limits"
 
 /** A refusal the side panel can act on, rather than an English sentence. */
@@ -84,6 +89,19 @@ export interface BrowserCompanionDeps {
   listWorkspaces: () => Promise<{ id: string; label: string; isDefault: boolean }[]>
   /** What this device may aim a submission at, default first. */
   listDeliveryTargets: (deviceId: string) => Promise<BrowserDeliveryTargetV1[]>
+  /**
+   * Render a template's body with the values a submission supplied, and record
+   * the use.
+   *
+   * Rendering happens on the Host because the template body lives here and must
+   * not be handed to a browser: it is the user's own saved prompt, and the
+   * panel only ever needs to know which fields to show. Returns `null` when the
+   * template has since been deleted.
+   */
+  renderTemplate: (
+    templateId: string,
+    values: Record<string, string>
+  ) => Promise<{ text: string; missing: string[] } | null>
   /**
    * The Host's resolved appearance for the side panel.
    *
@@ -189,10 +207,16 @@ export async function submitBrowserContext(
   if (!validation.ok) throw rejectionError(validation.rejection)
   const request = validation.request
 
-  // Replay before anything else. The RPC layer already replays the receipt for
-  // a repeated Idempotency-Key, so reaching here twice means the ledger was
-  // cleared or the key was reused across restarts — either way, a second
-  // session for one user action is the failure this exists to prevent.
+  // Resolved before either branch, because a redrive has to reproduce the
+  // prompt the first attempt built — and for a template that means rendering it
+  // again from a declaration that may since have changed or gone.
+  const target = await resolveSubmissionTarget(deps, deviceId, request)
+  const instruction = await resolveSubmissionInstruction(deps, target, request)
+
+  // Replay before anything is created. The RPC layer already replays the
+  // receipt for a repeated Idempotency-Key, so reaching here twice means the
+  // ledger was cleared or the key was reused across restarts — either way, a
+  // second session for one user action is the failure this exists to prevent.
   const urlFingerprint = await sha256Hex(request.context.url)
   const existing = await deps.readSubmission(request.submissionId)
   if (existing) {
@@ -206,7 +230,7 @@ export async function submitBrowserContext(
     if (REDRIVABLE_STATUSES.includes(existing.status)) {
       const { prompt, derivedTitle } = buildBrowserContextPrompt(
         request.context,
-        request.instruction,
+        instruction,
         request.suggestedTitle
       )
       // The submission id is the caller's, so "the row is still mid-flight"
@@ -247,17 +271,6 @@ export async function submitBrowserContext(
     )
   }
 
-  // Same rule, one level up. The target is looked up in a catalogue this
-  // process just built, never parsed out of the request: a lookup can only
-  // return something the Host offered, while a parse would let a browser name
-  // any session on this machine by writing its id down.
-  const target = resolveDeliveryTarget(await deps.listDeliveryTargets(deviceId), request.targetId)
-  if (!target) {
-    throw new BrowserCompanionError(
-      "unknown_target",
-      "the chosen delivery target is not available on this Host, or not in this workspace"
-    )
-  }
   if (target.workspaceId && target.workspaceId !== request.workspaceId) {
     // The panel filters targets by workspace, so the pair can only disagree
     // when the panel is showing a stale catalogue. Honouring it would append to
@@ -271,7 +284,7 @@ export async function submitBrowserContext(
 
   const { prompt, derivedTitle } = buildBrowserContextPrompt(
     request.context,
-    request.instruction,
+    instruction,
     request.suggestedTitle
   )
   // An append reuses the conversation the target names; only a new task creates
@@ -322,6 +335,62 @@ export async function submitBrowserContext(
     status,
     deepLink: browserSubmissionDeepLink(session.id),
   }
+}
+
+/**
+ * The catalogue entry a submission named.
+ *
+ * A lookup in a list this process just built, never a parse of the request: a
+ * lookup can only return something the Host offered, while a parse would let a
+ * browser name any session on this machine by writing its id down.
+ */
+async function resolveSubmissionTarget(
+  deps: BrowserCompanionDeps,
+  deviceId: string,
+  request: BrowserContextSubmitRequestV1
+): Promise<BrowserDeliveryTargetV1> {
+  const target = resolveDeliveryTarget(await deps.listDeliveryTargets(deviceId), request.targetId)
+  if (!target) {
+    throw new BrowserCompanionError(
+      "unknown_target",
+      "the chosen delivery target is not available on this Host, or not in this workspace"
+    )
+  }
+  return target
+}
+
+/**
+ * What the turn is actually asked to do.
+ *
+ * A template supplies it; otherwise it is the caller's own text. One or the
+ * other, never concatenated — a saved prompt already says what to do with the
+ * page, and appending a second ask under it produces a turn carrying two
+ * instructions that may contradict each other.
+ */
+async function resolveSubmissionInstruction(
+  deps: BrowserCompanionDeps,
+  target: BrowserDeliveryTargetV1,
+  request: BrowserContextSubmitRequestV1
+): Promise<string> {
+  const templateId = templateIdOfTarget(target)
+  if (!templateId) return request.instruction
+  const rendered = await deps.renderTemplate(templateId, request.targetParams ?? {})
+  if (!rendered) {
+    throw new BrowserCompanionError(
+      "unknown_target",
+      "the chosen template no longer exists on this Host"
+    )
+  }
+  if (rendered.missing.length > 0) {
+    // Named, because the panel rendered these fields and can point at the one
+    // left empty. A template refused without saying which value is missing is a
+    // dialog the user cannot satisfy.
+    throw new BrowserCompanionError(
+      "target_params_missing",
+      `these values are required: ${rendered.missing.join(", ")}`
+    )
+  }
+  return rendered.text
 }
 
 /**

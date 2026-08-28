@@ -4476,6 +4476,7 @@ paths:
                           enum:
                             - chat
                             - session
+                            - template
                         label:
                           type: string
                         isDefault:
@@ -4485,6 +4486,39 @@ paths:
                           minLength: 1
                         detail:
                           type: string
+                        params:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              - id
+                              - label
+                              - required
+                              - kind
+                            properties:
+                              id:
+                                type: string
+                                minLength: 1
+                              label:
+                                type: string
+                              description:
+                                type: string
+                              required:
+                                type: boolean
+                              kind:
+                                type: string
+                                enum:
+                                  - string
+                                  - enum
+                              options:
+                                type: array
+                                items:
+                                  type: string
+                              defaultValue:
+                                type: string
+                              multiline:
+                                type: boolean
+                            additionalProperties: false
                       additionalProperties: false
                   followsSystem:
                     type: boolean
@@ -5190,6 +5224,11 @@ paths:
                 targetId:
                   type: string
                   minLength: 1
+                targetParams:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  example: {}
                 instruction:
                   type: string
                   minLength: 1

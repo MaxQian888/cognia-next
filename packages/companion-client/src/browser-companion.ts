@@ -133,6 +133,14 @@ export interface BrowserContextSubmitRequestV1 {
    * the only thing that submission could ever have meant.
    */
   targetId?: string
+  /**
+   * Values for {@link BrowserDeliveryTargetV1.params}, by parameter id.
+   *
+   * Text only. The Host keeps the declaration and reads it back, so an entry
+   * naming a parameter the target does not declare is ignored — a client cannot
+   * introduce a substitution by sending one.
+   */
+  targetParams?: Record<string, string>
   instruction: string
   /** Overrides the title derived from the page, when the user typed one. */
   suggestedTitle?: string
@@ -305,7 +313,32 @@ export interface BrowserCompanionWorkspaceV1 {
  * catalogue entry, so a client that sent a `kind` disagreeing with the id it
  * quoted would change nothing.
  */
-export type BrowserDeliveryTargetKind = "chat" | "session"
+export type BrowserDeliveryTargetKind = "chat" | "session" | "template"
+
+/**
+ * A value a target needs before it can run.
+ *
+ * Only the two kinds a browser can actually fill. A Cognia template may also
+ * declare a `resource` parameter — a file or a workspace entity picked through
+ * the `@` menu — and a side panel has no picker for one and must not grow a way
+ * to enumerate the Host's files. A template with such a parameter is simply not
+ * offered, which is a smaller lie than offering it with a field that cannot be
+ * completed.
+ */
+export interface BrowserTargetParamV1 {
+  /** Matches the `{{id}}` token in the target's text. */
+  id: string
+  label: string
+  description?: string
+  required: boolean
+  kind: "string" | "enum"
+  /** Choices, for `kind: "enum"`. */
+  options?: string[]
+  /** Offered as the starting value, from the template or from its last use. */
+  defaultValue?: string
+  /** Render as a multi-line field. */
+  multiline?: boolean
+}
 
 export interface BrowserDeliveryTargetV1 {
   /** Opaque to the extension. Minted and re-resolved by the Host. */
@@ -346,6 +379,15 @@ export interface BrowserDeliveryTargetV1 {
    * them apart is when they ran and how they are doing.
    */
   detail?: string
+  /**
+   * Values this target needs before it will run.
+   *
+   * Absent or empty for a target that needs none. The Host re-reads the
+   * declaration when the submission arrives, so a panel sending a value for a
+   * parameter that no longer exists has it dropped rather than smuggled
+   * through.
+   */
+  params?: BrowserTargetParamV1[]
 }
 
 /**

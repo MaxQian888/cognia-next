@@ -116,6 +116,8 @@ export interface MockHostOptions {
   schemaVersion?: number
   /** Whether the Host reports its theme as "follow the system". */
   followsSystem?: boolean
+  /** Template targets to offer, as a Host with saved templates would. */
+  templates?: NonNullable<BrowserCompanionCapabilityV1["deliveryTargets"]>
 }
 
 export interface MockHost {
@@ -193,6 +195,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
   const appearance = options.appearance ?? DEFAULT_APPEARANCE
   const schemaVersion = options.schemaVersion ?? 1
   const followsSystem = options.followsSystem ?? false
+  const templates = options.templates ?? []
   // Mutable, because the whole point of these two is that they change under a
   // panel that is already open.
   let revision = "rev-1"
@@ -504,7 +507,11 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
       sessionId: appendTarget(request) ?? sessionId,
       workspaceId: request.workspaceId,
       ...(request.targetId ? { targetId: request.targetId } : {}),
-      instruction: request.instruction,
+      instruction: request.targetId?.startsWith("template:")
+        ? `[${request.targetId}] ${Object.entries(request.targetParams ?? {})
+            .map(([id, value]) => `${id}=${value}`)
+            .join(" ")}`
+        : request.instruction,
       captureMode: request.context.captureMode,
       sourceHost: hostOf(request.context.url),
       title: request.suggestedTitle ?? request.context.title,
@@ -570,6 +577,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
   function deliveryTargets(): NonNullable<BrowserCompanionCapabilityV1["deliveryTargets"]> {
     return [
       { id: "chat:new", kind: "chat", label: "New task", isDefault: true },
+      ...templates,
       ...[...submissions].reverse().map((row) => ({
         id: `session:${row.sessionId}`,
         kind: "session" as const,

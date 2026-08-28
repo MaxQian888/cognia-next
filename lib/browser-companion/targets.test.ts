@@ -1,8 +1,11 @@
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { BrowserDeliveryTargetV1 } from "@/types/browser-companion"
 
 import {
   MAX_SESSION_TARGETS,
+  browserFillableParams,
+  templateTargetId,
   NEW_CHAT_LABEL,
   NEW_CHAT_TARGET_ID,
   listDeliveryTargets,
@@ -30,13 +33,28 @@ function row(overrides: Partial<BrowserSubmissionRow> = {}): BrowserSubmissionRo
   }
 }
 
-function deps(rows: BrowserSubmissionRow[]) {
+function template(overrides: Partial<ChatTemplateRow> = {}): ChatTemplateRow {
+  return {
+    id: "tpl-1",
+    name: "Summarize",
+    body: "Summarize this in {{tone}}.",
+    params: [{ id: "tone", label: "Tone", required: true, kind: "string" }],
+    revision: 1,
+    usageCount: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+function deps(rows: BrowserSubmissionRow[], templates: ChatTemplateRow[] = []) {
   return {
     listSubmissions: async (deviceId: string, limit: number) =>
       rows
         .filter((entry) => entry.deviceId === deviceId)
         .sort((left, right) => right.submittedAt - left.submittedAt)
         .slice(0, limit),
+    listTemplates: async () => templates,
   }
 }
 
@@ -166,5 +184,70 @@ describe("sessionIdOfTarget", () => {
         isDefault: true,
       })
     ).toBeUndefined()
+  })
+})
+
+describe("templates as delivery targets", () => {
+  it("offers a saved template with the fields the panel has to show", async () => {
+    const targets = await listDeliveryTargets(deps([], [template()]), "browser-a")
+    expect(targets[1]).toMatchObject({
+      id: templateTargetId("tpl-1"),
+      kind: "template",
+      label: "Summarize",
+      params: [{ id: "tone", label: "Tone", required: true, kind: "string" }],
+    })
+    // No workspace: a template says how to start a task, not where. It runs in
+    // whichever workspace the submission names, exactly as a new task does.
+    expect(targets[1]).not.toHaveProperty("workspaceId")
+  })
+
+  it("does not offer a template a browser cannot fill", async () => {
+    // A `resource` parameter is picked through the `@` menu against the Host's
+    // own workspace. A side panel has no such picker and must not grow a way to
+    // enumerate the Host's files to build one, so the honest answer is to leave
+    // the template out rather than show a field nobody can complete.
+    const withResource = template({
+      id: "tpl-2",
+      params: [
+        { id: "file", label: "File", required: true, kind: "resource", resourceKind: "file" },
+      ],
+    })
+    expect(browserFillableParams(withResource)).toBeNull()
+    const targets = await listDeliveryTargets(deps([], [template(), withResource]), "browser-a")
+    expect(targets.map((entry) => entry.id)).toEqual([
+      NEW_CHAT_TARGET_ID,
+      templateTargetId("tpl-1"),
+    ])
+  })
+
+  it("prefers the last used value over the declared default", async () => {
+    // What the composer offers, for the same reason: nine uses out of ten
+    // repeat most of the values.
+    const remembered = template({
+      params: [
+        { id: "tone", label: "Tone", required: true, kind: "string", defaultValue: "terse" },
+      ],
+      lastParams: { tone: { kind: "text", value: "plain English" } },
+    })
+    expect(browserFillableParams(remembered)?.[0].defaultValue).toBe("plain English")
+  })
+
+  it("does not offer a resource pick as a remembered default either", async () => {
+    const resourceLast = template({
+      lastParams: { tone: { kind: "resource", resourceKind: "file", id: "f1", label: "app.ts" } },
+      params: [
+        { id: "tone", label: "Tone", required: true, kind: "string", defaultValue: "terse" },
+      ],
+    })
+    // The remembered value is not text, so it cannot be prefilled into a text
+    // field — the declared default stands rather than a label pretending to be
+    // one.
+    expect(browserFillableParams(resourceLast)?.[0].defaultValue).toBe("terse")
+  })
+
+  it("omits an empty parameter list rather than sending one", async () => {
+    const noParams = template({ body: "Summarize this page.", params: [] })
+    const targets = await listDeliveryTargets(deps([], [noParams]), "browser-a")
+    expect(targets[1]).not.toHaveProperty("params")
   })
 })

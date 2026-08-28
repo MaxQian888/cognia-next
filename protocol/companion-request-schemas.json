@@ -930,6 +930,12 @@
           "type": "string",
           "minLength": 1
         },
+        "targetParams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "instruction": {
           "type": "string",
           "minLength": 1,

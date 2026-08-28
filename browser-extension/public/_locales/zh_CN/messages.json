@@ -105,6 +105,9 @@
   "targetNewTask": {
     "message": "新建任务"
   },
+  "targetParamsTitle": {
+    "message": "填写"
+  },
   "submit": {
     "message": "开始任务"
   },

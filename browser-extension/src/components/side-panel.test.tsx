@@ -37,6 +37,22 @@ const CAPABILITY: BrowserCompanionCapabilityV1 = {
       isDefault: false,
       workspaceId: "ws-default",
     },
+    {
+      id: "template:tpl-1",
+      kind: "template",
+      label: "Summarize",
+      isDefault: false,
+      params: [
+        { id: "tone", label: "Tone", required: true, kind: "string", defaultValue: "terse" },
+        {
+          id: "length",
+          label: "Length",
+          required: false,
+          kind: "enum",
+          options: ["short", "long"],
+        },
+      ],
+    },
   ],
   appearance: {
     mode: "light",
@@ -492,9 +508,75 @@ describe("SidePanel capture and settings", () => {
 
     fireEvent.click(screen.getByTestId("workspace-select"))
     fireEvent.click(await screen.findByRole("option", { name: "Other" }))
-    // The session lives in ws-default, so the only target left is the new task
-    // — and with one target there is no control at all.
-    await waitFor(() => expect(screen.queryByTestId("target-select")).toBeNull())
+
+    // The session lives in ws-default and is gone; the new task and the
+    // template stay, because neither belongs to a workspace — one is created in
+    // whichever is chosen, the other says how to start a task rather than
+    // where.
+    fireEvent.click(screen.getByTestId("target-select"))
+    await waitFor(() => expect(screen.queryByRole("option", { name: "A guide" })).toBeNull())
+    expect(screen.getByRole("option", { name: "targetNewTask" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Summarize" })).toBeInTheDocument()
+  })
+
+  it("asks for a template's values instead of an instruction", async () => {
+    // A template supplies the instruction on the Host, so showing the free-text
+    // box as well would invite two instructions in one turn.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+
+    fireEvent.click(screen.getByTestId("target-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "Summarize" }))
+
+    await screen.findByTestId("target-params")
+    expect(screen.queryByTestId("instruction")).toBeNull()
+    // Prefilled from what the Host resolved — the declared default, or the
+    // value this template was last used with.
+    expect(screen.getByTestId("param-tone")).toHaveValue("terse")
+
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).toMatchObject({
+      targetId: "template:tpl-1",
+      targetParams: { tone: "terse" },
+      instruction: "",
+    })
+  })
+
+  it("will not submit a template with a required value left empty", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.click(screen.getByTestId("target-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "Summarize" }))
+    await screen.findByTestId("target-params")
+
+    fireEvent.change(screen.getByTestId("param-tone"), { target: { value: "  " } })
+    // A disabled button beats a refusal after the round trip. The Host checks
+    // this too — that is what makes it safe; this is what makes it visible.
+    await waitFor(() => expect(screen.getByTestId("submit")).toBeDisabled())
+  })
+
+  it("does not carry one template's answers into another target", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    fireEvent.click(await screen.findByTestId("capture-now"))
+    await screen.findByTestId("capture-preview")
+    fireEvent.click(screen.getByTestId("target-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "Summarize" }))
+    await screen.findByTestId("target-params")
+
+    fireEvent.click(screen.getByTestId("target-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "targetNewTask" }))
+    await waitFor(() => expect(screen.queryByTestId("target-params")).toBeNull())
+
+    fireEvent.change(screen.getByTestId("instruction"), { target: { value: "Go" } })
+    fireEvent.click(screen.getByTestId("submit"))
+    await waitFor(() => expect(state.submitted).toHaveLength(1))
+    expect(state.submitted[0]).not.toHaveProperty("targetParams")
   })
 
   it("explains a failed submission with the reason the Host recorded", async () => {

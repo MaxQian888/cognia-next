@@ -3068,7 +3068,8 @@
                   "type": "string",
                   "enum": [
                     "chat",
-                    "session"
+                    "session",
+                    "template"
                   ]
                 },
                 "label": {
@@ -3083,6 +3084,53 @@
                 },
                 "detail": {
                   "type": "string"
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "label",
+                      "required",
+                      "kind"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "string",
+                          "enum"
+                        ]
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "defaultValue": {
+                        "type": "string"
+                      },
+                      "multiline": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
                 }
               },
               "additionalProperties": false
@@ -3507,6 +3555,13 @@
           "targetId": {
             "type": "string",
             "minLength": 1
+          },
+          "targetParams": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {}
           },
           "instruction": {
             "type": "string",
@@ -42833,5 +42888,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d06745fcba24e17fd2d281f01abed256a5d809ce8154db7ef451ca1a430d0b19"
+  "catalogHash": "dc6ee15a098a9fded626a07a7e95663bde76d5fe801e3a944df4fa7dc9f081b5"
 }

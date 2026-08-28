@@ -1,4 +1,5 @@
 import type { BrowserSubmissionRow } from "@/lib/db/browser-submissions-types"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 
 import {
   BrowserCompanionError,
@@ -34,11 +35,14 @@ interface Harness {
   abortRefused: boolean
 }
 
-function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
+function harness(
+  overrides: Partial<BrowserCompanionDeps> & { templates?: ChatTemplateRow[] } = {}
+): Harness {
   const rows = new Map<string, BrowserSubmissionRow>()
   const createdSessions: Harness["createdSessions"] = []
   const enqueued: Harness["enqueued"] = []
   const statuses = new Map<string, BrowserSubmissionRow["status"]>()
+  const templates: ChatTemplateRow[] = overrides.templates ?? []
   const answers = new Map<string, { text: string; at: number }>()
   const aborted: string[] = []
   const state = { sessionStatusThrows: false, followsSystem: false, abortRefused: false }
@@ -81,9 +85,24 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
               .filter((row) => row.deviceId === id)
               .sort((left, right) => right.submittedAt - left.submittedAt)
               .slice(0, limit),
+          listTemplates: async () => templates,
         },
         deviceId
       ),
+    renderTemplate: async (templateId, values) => {
+      const found = templates.find((entry) => entry.id === templateId)
+      if (!found) return null
+      const missing = found.params
+        .filter((param) => param.required && !values[param.id]?.trim())
+        .map((param) => param.label)
+      if (missing.length > 0) return { text: "", missing }
+      let text = found.body
+      for (const [id, value] of Object.entries(values)) {
+        if (!found.params.some((param) => param.id === id)) continue
+        text = text.split(`{{${id}}}`).join(value)
+      }
+      return { text, missing: [] }
+    },
     sessionStatus: async (sessionId) => {
       if (state.sessionStatusThrows) throw new Error("runtime unreachable")
       return statuses.get(sessionId) ?? "running"
@@ -665,5 +684,74 @@ describe("cancelBrowserContext", () => {
       cancelBrowserContext(h.deps, "browser-b", { submissionId: "sub-1" })
     ).rejects.toMatchObject({ code: "submission_not_found" })
     expect(h.aborted).toEqual([])
+  })
+})
+
+const TEMPLATE: ChatTemplateRow = {
+  id: "tpl-1",
+  name: "Summarize",
+  body: "Summarize this in {{tone}}.",
+  params: [{ id: "tone", label: "Tone", required: true, kind: "string" }],
+  revision: 1,
+  usageCount: 0,
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+describe("submitting through a template", () => {
+  it("sends the rendered template as the instruction", async () => {
+    const h = harness({ templates: [TEMPLATE] })
+    await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ targetId: "template:tpl-1", targetParams: { tone: "plain English" } })
+    )
+    const text = h.enqueued[0].text
+    expect(text).toContain("Summarize this in plain English.")
+    // One instruction, not two. The caller's own text is replaced rather than
+    // appended: a saved prompt already says what to do with the page.
+    expect(text).not.toContain("Summarise the pricing")
+  })
+
+  it("names the value it is missing rather than refusing blankly", async () => {
+    const h = harness({ templates: [TEMPLATE] })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "template:tpl-1" }))
+    ).rejects.toMatchObject({ code: "target_params_missing" })
+    expect(h.createdSessions).toHaveLength(0)
+  })
+
+  it("refuses a template that is no longer offered", async () => {
+    const h = harness({ templates: [] })
+    await expect(
+      submitBrowserContext(h.deps, "browser-a", payload({ targetId: "template:tpl-1" }))
+    ).rejects.toMatchObject({ code: "unknown_target" })
+  })
+
+  it("reproduces the same prompt on a redrive", async () => {
+    // The reason the template is rendered before the replay branch rather than
+    // inside the fresh one: a retry that re-rendered differently — or not at
+    // all — would put a different message into the transcript the first attempt
+    // was aiming at.
+    let fail = true
+    const texts: string[] = []
+    const h = harness({
+      templates: [TEMPLATE],
+      enqueueMessage: async ({ text }) => {
+        texts.push(text)
+        if (fail) throw new Error("HostState unavailable")
+      },
+    })
+    const body = payload({ targetId: "template:tpl-1", targetParams: { tone: "plain English" } })
+    await expect(submitBrowserContext(h.deps, "browser-a", body)).rejects.toThrow(
+      "HostState unavailable"
+    )
+    fail = false
+    await expect(submitBrowserContext(h.deps, "browser-a", body)).resolves.toMatchObject({
+      status: "queued",
+    })
+    expect(texts).toHaveLength(2)
+    expect(texts[0]).toBe(texts[1])
+    expect(h.createdSessions).toHaveLength(1)
   })
 })

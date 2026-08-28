@@ -105,6 +105,9 @@
   "targetNewTask": {
     "message": "A new task"
   },
+  "targetParamsTitle": {
+    "message": "Fill in"
+  },
   "submit": {
     "message": "Start task"
   },

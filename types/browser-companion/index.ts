@@ -23,6 +23,7 @@ export type {
   BrowserDeliveryTargetKind,
   BrowserDeliveryTargetV1,
   BrowserPageContextV1,
+  BrowserTargetParamV1,
   BrowserReadableText,
   BrowserSubmissionStatus,
 } from "@cognia/companion-client/browser-companion"

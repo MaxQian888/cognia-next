@@ -38,17 +38,19 @@ import {
   APPEARANCE_OVERRIDES,
   STATUSES_WITH_A_REASON,
   appearanceOverrideMessage,
-  stopFailureMessage,
   captureModeFor,
+  initialTargetParams,
   isAppearanceOverride,
-  preferredModeFor,
-  type AppearanceOverride,
   isCompatible,
   panelStateForError,
   pollIntervalFor,
+  preferredModeFor,
   selectedTargetId,
+  stopFailureMessage,
   targetLabel,
+  targetParamsSatisfied,
   targetsForWorkspace,
+  type AppearanceOverride,
   type CapturedPage,
   type PanelState,
 } from "@ext/src/lib/panel-state"
@@ -84,6 +86,7 @@ export function SidePanel({
   const [instruction, setInstruction] = useState("")
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [preferredTargetId, setPreferredTargetId] = useState<string | null>(null)
+  const [targetParams, setTargetParams] = useState<Record<string, string>>({})
   const [wholePage, setWholePage] = useState(false)
   const [includeFullUrl, setIncludeFullUrl] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -525,16 +528,32 @@ export function SidePanel({
     // Recomputed here from the same two helpers the control renders from,
     // rather than read out of state: one rule for "which target is selected"
     // means the value sent is by construction the one on screen.
-    const chosenTarget = selectedTargetId(
-      targetsForWorkspace(state.capability.deliveryTargets, workspaceId),
-      preferredTargetId
-    )
+    const offered = targetsForWorkspace(state.capability.deliveryTargets, workspaceId)
+    const chosenTarget = selectedTargetId(offered, preferredTargetId)
+    const chosen = offered.find((target) => target.id === chosenTarget)
+    const declaredParams = chosen?.params ?? []
+    const declaredTemplate = chosen?.kind === "template"
     setSubmitting(true)
     setSubmitError(null)
     const draft = {
       workspaceId,
       ...(chosenTarget ? { targetId: chosenTarget } : {}),
-      instruction: instruction.trim(),
+      // Only the values the chosen target actually declares. Sending the whole
+      // map would carry a previous target's answers along, and the Host drops
+      // them anyway — this keeps the request describing what was on screen.
+      ...(declaredParams.length > 0
+        ? {
+            targetParams: Object.fromEntries(
+              declaredParams
+                .filter((param) => (targetParams[param.id] ?? "").length > 0)
+                .map((param) => [param.id, targetParams[param.id]])
+            ),
+          }
+        : {}),
+      // A template supplies the instruction on the Host; the field is not shown
+      // for one, so sending its stale contents would be sending something the
+      // user is not looking at.
+      instruction: declaredTemplate ? "" : instruction.trim(),
       context: {
         schemaVersion: 1 as const,
         captureMode: mode,
@@ -562,6 +581,10 @@ export function SidePanel({
       // the cause of.
       chosenTarget,
       draft.instruction,
+      // The values are part of what makes this the same submission: a retry
+      // that changed one and reused the id would ask a different question of
+      // the page the first attempt captured.
+      JSON.stringify(draft.targetParams ?? {}),
       mode,
       captured.url,
       captured.capturedAt,
@@ -608,7 +631,16 @@ export function SidePanel({
     } finally {
       setSubmitting(false)
     }
-  }, [api, includeFullUrl, instruction, preferredTargetId, state, wholePage, workspaceId])
+  }, [
+    api,
+    includeFullUrl,
+    instruction,
+    preferredTargetId,
+    state,
+    targetParams,
+    wholePage,
+    workspaceId,
+  ])
 
   /**
    * Forget this browser entirely.
@@ -700,6 +732,11 @@ export function SidePanel({
   // Host would refuse that submission, correctly and inexplicably.
   const offeredTargets = targetsForWorkspace(state.capability.deliveryTargets, workspaceId)
   const targetId = selectedTargetId(offeredTargets, preferredTargetId)
+  const selectedTarget = offeredTargets.find((target) => target.id === targetId)
+  const paramsReady = targetParamsSatisfied(selectedTarget, targetParams)
+  // A template supplies the instruction, so the free-text box is not the ask
+  // for one — showing both would invite two instructions in one turn.
+  const needsInstruction = selectedTarget?.kind !== "template"
 
   return (
     <div className="flex flex-col gap-4 p-3">
@@ -749,7 +786,17 @@ export function SidePanel({
                 </Label>
                 <Select
                   value={targetId ?? undefined}
-                  onValueChange={(next) => setPreferredTargetId(next)}
+                  onValueChange={(next) => {
+                    setPreferredTargetId(next)
+                    // Rebuilt rather than merged: carrying one template's
+                    // answers into another's field of the same name would
+                    // silently reuse a value nobody re-read.
+                    setTargetParams(
+                      initialTargetParams(
+                        offeredTargets.find((target) => target.id === next)?.params
+                      )
+                    )
+                  }}
                 >
                   <SelectTrigger id="cognia-target" className="w-full" data-testid="target-select">
                     <SelectValue />
@@ -767,18 +814,80 @@ export function SidePanel({
                 </Select>
               </div>
             ) : null}
-            <Textarea
-              rows={3}
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              placeholder={api.message("instructionPlaceholder")}
-              aria-label={api.message("instructionPlaceholder")}
-              data-testid="instruction"
-            />
+            {selectedTarget?.params?.length ? (
+              <div className="space-y-2" data-testid="target-params">
+                <p className="text-xs text-muted-foreground">{api.message("targetParamsTitle")}</p>
+                {selectedTarget.params.map((param) => (
+                  <div key={param.id} className="space-y-1">
+                    <Label
+                      htmlFor={`cognia-param-${param.id}`}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {param.label}
+                    </Label>
+                    {param.kind === "enum" && param.options?.length ? (
+                      <Select
+                        value={targetParams[param.id] ?? undefined}
+                        onValueChange={(next) =>
+                          setTargetParams((current) => ({ ...current, [param.id]: next }))
+                        }
+                      >
+                        <SelectTrigger
+                          id={`cognia-param-${param.id}`}
+                          className="w-full"
+                          data-testid={`param-${param.id}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {param.options.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Textarea
+                        id={`cognia-param-${param.id}`}
+                        rows={param.multiline ? 3 : 1}
+                        value={targetParams[param.id] ?? ""}
+                        onChange={(event) =>
+                          setTargetParams((current) => ({
+                            ...current,
+                            [param.id]: event.target.value,
+                          }))
+                        }
+                        aria-label={param.label}
+                        data-testid={`param-${param.id}`}
+                      />
+                    )}
+                    {param.description ? (
+                      <p className="text-[11px] text-muted-foreground">{param.description}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {needsInstruction ? (
+              <Textarea
+                rows={3}
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder={api.message("instructionPlaceholder")}
+                aria-label={api.message("instructionPlaceholder")}
+                data-testid="instruction"
+              />
+            ) : null}
             <div className="flex items-center gap-2">
               <Button
                 onClick={() => void onSubmit()}
-                disabled={submitting || !instruction.trim() || !workspaceId}
+                disabled={
+                  submitting ||
+                  !workspaceId ||
+                  !paramsReady ||
+                  (needsInstruction && !instruction.trim())
+                }
                 data-testid="submit"
               >
                 {submitting ? api.message("submitting") : api.message("submit")}

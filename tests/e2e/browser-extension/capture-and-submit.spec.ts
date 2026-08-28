@@ -280,6 +280,46 @@ test.describe("submitting a capture", () => {
   })
 })
 
+test.describe("running a saved template on a page", () => {
+  test.use({
+    hostTemplates: [
+      {
+        id: "template:tpl-1",
+        kind: "template",
+        label: "Summarize",
+        isDefault: false,
+        params: [
+          { id: "tone", label: "Tone", required: true, kind: "string", defaultValue: "terse" },
+        ],
+      },
+    ],
+  })
+
+  test("asks for the template's values instead of an instruction", async ({
+    panel,
+    mockHost,
+    serviceWorker,
+    context,
+  }) => {
+    await captureFixturePage({ panel, mockHost, serviceWorker, context }, { mode: "selection" })
+    await panel.getByTestId("target-select").click()
+    await panel.getByRole("option", { name: "Summarize" }).click()
+
+    // The template supplies the instruction on the Host, so the free-text box
+    // is gone — showing both would invite two instructions in one turn.
+    await expect(panel.getByTestId("target-params")).toBeVisible()
+    await expect(panel.getByTestId("instruction")).toBeHidden()
+    await expect(panel.getByTestId("param-tone")).toHaveValue("terse")
+
+    await panel.getByTestId("param-tone").fill("plain English")
+    await panel.getByTestId("submit").click()
+
+    await expect.poll(() => mockHost.submissions().length).toBe(1)
+    expect(mockHost.submissions()[0].targetId).toBe("template:tpl-1")
+    expect(mockHost.submissions()[0].instruction).toContain("tone=plain English")
+  })
+})
+
 test.describe("following a task without leaving the browser", () => {
   test("reads the answer, and only when asked for it", async ({
     panel,
