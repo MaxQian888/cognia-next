@@ -4,6 +4,7 @@
  * Provides session management capabilities to plugins.
  */
 
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useSessionStore } from "@/stores/chat/session-store"
 import { db, messageRepository } from "@/lib/db"
 
@@ -38,16 +39,31 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
   const subscriptions = new Map<string, () => void>()
   const logger = createPluginSystemLogger(pluginId)
 
+  /**
+   * The session store mirrors the chat store's active pointer, but ONLY after
+   * its `load()` has run — and nothing in the app ever called it. That left
+   * `getCurrentSession()` / `getCurrentSessionId()` answering `null` for every
+   * plugin, forever, which is why plugins that needed the active session
+   * reached into `@/stores/chat/chat-store` themselves.
+   *
+   * So: read the id from the chat store, which is the pointer everything else
+   * in the app treats as authoritative, and kick the session store's load once
+   * so the row lookup below has something to find (and so the mirror's
+   * subscription is live for anything else reading it). `load()` guards on its
+   * own `loaded` flag, so repeated construction is free.
+   */
+  void useSessionStore.getState().load?.()
+
+  const activeId = (): string | null => useChatStore.getState().activeSessionId
+
   const api: PluginSessionAPI = {
     getCurrentSession: () => {
-      const store = useSessionStore.getState()
-      if (!store.activeSessionId) return null
-      return store.sessions.find((s) => s.id === store.activeSessionId) || null
+      const id = activeId()
+      if (!id) return null
+      return useSessionStore.getState().sessions.find((s) => s.id === id) || null
     },
 
-    getCurrentSessionId: () => {
-      return useSessionStore.getState().activeSessionId
-    },
+    getCurrentSessionId: activeId,
 
     getSession: async (id: string) => {
       const store = useSessionStore.getState()

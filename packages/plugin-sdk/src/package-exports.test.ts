@@ -25,6 +25,8 @@ describe("plugin-sdk package exports", () => {
     "./api/webview",
     "./api/agent-team-template",
     "./api/automation",
+    "./api/browser",
+    "./api/i18n",
     "./api/balance-adapter",
     "./api/character-pack",
     "./api/cli-tool",

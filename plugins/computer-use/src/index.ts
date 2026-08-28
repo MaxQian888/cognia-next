@@ -7,24 +7,24 @@
  * `cognia-automation`.
  */
 
-import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginTool } from "@cognia/plugin-sdk"
 import { defineSubagent, defineAgentTeamTemplate, defineContextProvider } from "@cognia/plugin-sdk"
 // ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
 // and auto-wired by the plugin manager on enable. The old imperative
 // `registerPluginI18n` / `unregisterPluginI18n` calls are removed; the
 // strings still ship in this file under SLASH_MESSAGES because slash
 // handlers run outside React and pick the locale at call time.
-import { desktop } from "@/lib/automation/client"
+import { desktop } from "@cognia/plugin-sdk/api/automation"
 import type {
   ActionRequest,
   AppLocator,
   ElementHandle,
   GetAppStateOptions,
   Locator,
-} from "@/lib/automation/types"
-import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
-import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
-import type { CallContext } from "@/lib/automation/client"
+} from "@cognia/plugin-sdk"
+import { getActiveComputerUseSettings } from "@cognia/plugin-sdk/api/automation"
+import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@cognia/plugin-sdk/api/sandbox"
+import type { CallContext } from "@cognia/plugin-sdk/api/automation"
 import manifestJson from "../plugin.json"
 
 // ADR-0020 W1 audit-fix — build the CallContext for a chat-path
@@ -76,24 +76,17 @@ async function buildChatCallContext(
 }
 
 /**
- * Best-effort active session id resolver. The Plugin MCP `execute`
- * callback runs in the renderer at the time the SDK dispatches a
- * tool call. The chat-store keeps the active session id under
- * `useChatStore.getState().sessionId`. Late-imported so this module
- * stays Tauri-runtime-only when the host hasn't booted the chat
- * machinery (e.g. settings-only views).
+ * Best-effort active session id resolver. The Plugin MCP `execute` callback
+ * runs in the renderer when the SDK dispatches a tool call and is handed no
+ * context, so `ctx.sessions` is captured at activation instead. Absent (before
+ * activate, or on a host with no chat machinery booted) reads as "no session",
+ * which is what every caller already treats it as.
  */
+let sessions: PluginContext["sessions"] | undefined
+
 function resolveActiveSessionId(): string | undefined {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@/stores/chat/chat-store") as {
-      useChatStore?: { getState: () => { activeSessionId?: string | null } }
-    }
-    const sid = mod.useChatStore?.getState().activeSessionId
-    return typeof sid === "string" && sid.length > 0 ? sid : undefined
-  } catch {
-    return undefined
-  }
+  const sid = sessions?.getCurrentSessionId()
+  return typeof sid === "string" && sid.length > 0 ? sid : undefined
 }
 
 // Plugin-side i18n. Slash-command handlers run outside the React tree so
@@ -462,6 +455,7 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("computer-use plugin activated")
+    sessions = ctx.sessions
 
     // i18n is wired via `manifest.i18n` above; no imperative
     // `registerPluginI18n(...)` call here. See ADR-0026 §5 §D.

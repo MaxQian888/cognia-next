@@ -20,11 +20,19 @@ const messageHooks = {
   deleting: new Set<(primaryKey: string, obj: { sessionId?: string }) => void>(),
 }
 
+// The active pointer now comes from the chat store — the one the rest of the
+// app treats as authoritative — because the session store only mirrors it
+// after a `load()` nothing ever called.
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { getState: () => ({ activeSessionId: mockActiveSessionId }) },
+}))
+
 jest.mock("@/stores/chat/session-store", () => ({
   useSessionStore: {
     getState: jest.fn(() => ({
       sessions: mockSessions,
       activeSessionId: mockActiveSessionId,
+      load: jest.fn(async () => undefined),
       createSession: jest.fn((options = {}) => {
         const session: Session = {
           id: `session-${Date.now()}`,
@@ -165,6 +173,27 @@ describe("Session API", () => {
   })
 
   describe("getCurrentSession / getCurrentSessionId", () => {
+    it("reads the chat store's pointer, not the session store's mirror", () => {
+      // Regression: the session store only copies `activeSessionId` inside its
+      // `load()`, and nothing in the app ever called it — so every plugin
+      // asking for the active session got `null`. Pin the source.
+      mockSessions.push({
+        id: "sess-live",
+        title: "Live",
+        mode: "chat",
+        provider: "openai",
+        model: "gpt-4o",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      mockActiveSessionId = "sess-live"
+
+      const api = createSessionAPI(testPluginId)
+
+      expect(api.getCurrentSessionId()).toBe("sess-live")
+      expect(api.getCurrentSession()?.id).toBe("sess-live")
+    })
+
     it("should return null when no session is active", () => {
       const api = createSessionAPI(testPluginId)
 

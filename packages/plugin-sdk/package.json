@@ -57,6 +57,12 @@
       "require": "./dist/host-environment.cjs",
       "default": "./dist/host-environment.js"
     },
+    "./api/i18n": {
+      "types": "./dist/i18n.d.ts",
+      "import": "./dist/i18n.js",
+      "require": "./dist/i18n.cjs",
+      "default": "./dist/i18n.js"
+    },
     "./api/integration": {
       "types": "./dist/integration.d.ts",
       "import": "./dist/integration.js",
@@ -128,6 +134,12 @@
       "import": "./dist/balance-adapter.js",
       "require": "./dist/balance-adapter.cjs",
       "default": "./dist/balance-adapter.js"
+    },
+    "./api/browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js",
+      "require": "./dist/browser.cjs",
+      "default": "./dist/browser.js"
     },
     "./api/character-pack": {
       "types": "./dist/character-pack.d.ts",

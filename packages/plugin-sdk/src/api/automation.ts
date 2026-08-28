@@ -72,3 +72,13 @@ export type {
  * outcome, not an error.
  */
 export { captureScreenshot } from "@/lib/ui/screenshot"
+
+/**
+ * The computer-use policy in force for a session — the character's
+ * `computerUseSettings`, resolved for the turn. A tool that automates the
+ * desktop MUST read this rather than assume: it carries the user's allowed
+ * action set and confinement, and the host applies none of it once a plugin
+ * tool takes over.
+ */
+export { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+export type { ActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"

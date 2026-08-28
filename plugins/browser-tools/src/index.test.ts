@@ -1,4 +1,4 @@
-jest.mock("@/lib/browser/agent-engine", () => {
+jest.mock("@cognia/plugin-sdk/api/browser", () => {
   // Stateful current URL: navigate moves it, getPage reports it — mirroring the
   // real engine so the live-URL trust gating is exercisable (incl. redirects
   // via __setUrl).
@@ -46,6 +46,9 @@ jest.mock("@/lib/browser/agent-engine", () => {
     __setUrl: (u: string) => {
       state.url = u
     },
+    saveBrowserAnnotation: jest.fn(async () => {}),
+    isBrowserDomainAuthorized: () => true,
+    primeBrowserDomainGrants: async () => [],
     // URL-aware so the public-URL (untrusted) branch is exercisable: anything
     // off localhost is treated as a public origin, mirroring resolveTrustTier.
     routeEngine: (url: string) => {
@@ -61,22 +64,15 @@ jest.mock("@/lib/browser/agent-engine", () => {
 jest.mock("@cognia/plugin-sdk", () => ({
   defineContextProvider: (p: unknown) => p,
 }))
-jest.mock("@/lib/db/browser-annotations", () => ({
-  saveBrowserAnnotation: jest.fn(async () => {}),
-}))
-jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: { getState: jest.fn(() => ({ activeSessionId: "session-1" })) },
-}))
+import definition from "./index"
+import * as browserModule from "@cognia/plugin-sdk/api/browser"
+import { saveBrowserAnnotation } from "@cognia/plugin-sdk/api/browser"
 
-import definition from "@/plugins/browser-tools/src/index"
-import * as engineModule from "@/lib/browser/agent-engine"
-import { saveBrowserAnnotation } from "@/lib/db/browser-annotations"
-import { useChatStore } from "@/stores/chat/chat-store"
-
-const engine = (engineModule as unknown as { __engine: Record<string, jest.Mock> }).__engine
-const setLiveUrl = (engineModule as unknown as { __setUrl: (u: string) => void }).__setUrl
+const engine = (browserModule as unknown as { __engine: Record<string, jest.Mock> }).__engine
+const setLiveUrl = (browserModule as unknown as { __setUrl: (u: string) => void }).__setUrl
 const saveBrowserAnnotationMock = saveBrowserAnnotation as jest.Mock
-const activeSessionMock = useChatStore.getState as jest.Mock
+/** `ctx.sessions.getCurrentSessionId` — the plugin's only session lookup. */
+const activeSessionMock = jest.fn<string | null, []>(() => "session-1")
 
 type Tools = Record<string, (args: unknown) => Promise<unknown>>
 type ToolRegistration = {
@@ -96,6 +92,7 @@ async function collectTools(): Promise<Tools> {
   const ctx = {
     pluginId: "cognia-browser-tools",
     logger: { info: jest.fn() },
+    sessions: { getCurrentSessionId: activeSessionMock },
     agent: {
       registerTool: (t: { name: string; execute: (a: unknown) => Promise<unknown> }) => {
         tools[t.name] = t.execute
@@ -112,6 +109,7 @@ async function collectRegistrations(): Promise<Record<string, ToolRegistration>>
   await definition.activate!({
     pluginId: "cognia-browser-tools",
     logger: { info: jest.fn() },
+    sessions: { getCurrentSessionId: activeSessionMock },
     agent: {
       registerTool: (tool: ToolRegistration) => {
         registrations[tool.name] = tool
@@ -125,7 +123,7 @@ async function collectRegistrations(): Promise<Record<string, ToolRegistration>>
 beforeEach(() => {
   Object.values(engine).forEach((m) => m.mockClear())
   saveBrowserAnnotationMock.mockClear()
-  activeSessionMock.mockReturnValue({ activeSessionId: "session-1" })
+  activeSessionMock.mockReturnValue("session-1")
   setLiveUrl("http://localhost/")
 })
 
@@ -314,7 +312,7 @@ describe("browser-tools plugin", () => {
   })
 
   it("browser_annotate requires an active chat session", async () => {
-    activeSessionMock.mockReturnValueOnce({ activeSessionId: undefined })
+    activeSessionMock.mockReturnValueOnce(null)
     const tools = await collectTools()
     const result = await tools.browser_annotate({
       ref: "e1",

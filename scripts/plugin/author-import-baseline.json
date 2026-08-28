@@ -1,10 +1,8 @@
 {
   "$comment": "Plugins that still import host-private modules instead of @cognia/plugin-sdk. This list may only shrink — see scripts/plugin/check-author-imports.mjs.",
   "notYetMigrated": [
-    "browser-tools",
     "clipboard-tools",
     "cognia-backend-refactor",
-    "computer-use",
     "eval",
     "impeccable",
     "ocr",

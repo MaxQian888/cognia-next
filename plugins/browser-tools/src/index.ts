@@ -8,23 +8,20 @@
  * per-chat RemoteChromiumEngine for cloud/headless sessions. Tool names and
  * arguments stay identical across both adapters.
  */
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { routeEngine } from "@/lib/browser/agent-engine"
-import {
-  isBrowserDomainAuthorized,
-  primeBrowserDomainGrants,
-} from "@/lib/browser/domain-authorization"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import { routeEngine } from "@cognia/plugin-sdk/api/browser"
+import { isBrowserDomainAuthorized, primeBrowserDomainGrants } from "@cognia/plugin-sdk/api/browser"
 import type {
   BrowserActionResult,
   BrowserDialogState,
   BrowserSelection,
-} from "@/lib/browser/protocol"
+} from "@cognia/plugin-sdk/api/browser"
 import {
   saveBrowserAnnotation,
   type BrowserAnnotationIntent,
   type BrowserAnnotationRow,
   type BrowserAnnotationSeverity,
-} from "@/lib/db/browser-annotations"
+} from "@cognia/plugin-sdk/api/browser"
 import { defineContextProvider } from "@cognia/plugin-sdk"
 
 /**
@@ -65,14 +62,16 @@ interface SelectionForRefResult {
   selection: BrowserSelection | null
 }
 
-async function activeSessionId(): Promise<string | undefined> {
-  try {
-    const { useChatStore } = await import("@/stores/chat/chat-store")
-    const sessionId = useChatStore.getState().activeSessionId
-    return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined
-  } catch {
-    return undefined
-  }
+/**
+ * The session a tool call belongs to. `ctx.sessions` is captured at activation
+ * because a tool executor is invoked through the plugin-tool IPC round trip
+ * and never receives the context as an argument.
+ */
+let sessions: PluginContext["sessions"] | undefined
+
+function activeSessionId(): string | undefined {
+  const sessionId = sessions?.getCurrentSessionId()
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined
 }
 
 function parseSelectionForRef(value: unknown): SelectionForRefResult {
@@ -164,6 +163,7 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("browser-tools activated")
+    sessions = ctx.sessions
 
     // Grants live in Dexie but `routeEngine` is synchronous, so warm a snapshot
     // once at activation. Failing to read it leaves nothing authorized, which
@@ -270,7 +270,7 @@ const definition: PluginDefinition = {
           return { ok: false, error: "severity must be blocking, important, or suggestion" }
         }
 
-        const sessionId = await activeSessionId()
+        const sessionId = activeSessionId()
         if (!sessionId) return { ok: false, error: "No active chat session" }
 
         const { engine, untrusted } = await currentRoute()

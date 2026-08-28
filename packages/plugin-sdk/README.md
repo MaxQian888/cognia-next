@@ -53,11 +53,12 @@ export default definePlugin({
 - `@cognia/plugin-sdk/api/<capability>`: the runtime half of one contribution — the
   registry a plugin calls from `activate(ctx)` when it computes its contributions instead
   of declaring them statically, plus that capability's host client. Published for
-  `agent-team-template`, `automation`, `balance-adapter`, `character-pack`, `cli-tool`,
-  `connector`, `context-panel`, `context-provider`, `editor`, `external-agent-adapter`,
-  `external-agent-preset`, `host-environment`, `integration`, `message-renderer`,
-  `ocr-provider`, `sandbox`, `scheduled-task`, `shared-memory-adapter`, `skill`, `skill-recorder`,
-  `slash-command`, `subagent`, `tool-renderer`, `webview`, and `workflow-template`.
+  `agent-team-template`, `automation`, `balance-adapter`, `browser`, `character-pack`,
+  `cli-tool`, `connector`, `context-panel`, `context-provider`, `editor`,
+  `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
+  `integration`, `message-renderer`, `ocr-provider`, `sandbox`, `scheduled-task`,
+  `shared-memory-adapter`, `skill`, `skill-recorder`, `slash-command`, `subagent`,
+  `tool-renderer`, `webview`, and `workflow-template`.
 
   Registries are deliberately absent from the root barrel (pinned by
   `src/index.test.ts`). Importing one is a decision an author writes down, not something

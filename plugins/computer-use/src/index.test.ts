@@ -3,7 +3,9 @@
  * app-session automation client.
  */
 
-jest.mock("@/lib/automation/client", () => ({
+// Every double targets the SDK subpath the plugin imports, so this suite
+// exercises the published surface rather than the host modules behind it.
+jest.mock("@cognia/plugin-sdk/api/automation", () => ({
   desktop: {
     getAppState: jest.fn(),
     listApps: jest.fn(),
@@ -11,27 +13,20 @@ jest.mock("@/lib/automation/client", () => ({
     expandElement: jest.fn(),
     performAction: jest.fn(),
   },
+  getActiveComputerUseSettings: jest.fn(() => null),
 }))
 
-jest.mock("@/lib/slash-commands/registry", () => ({
+jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
   registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
+  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 
-jest.mock("@/lib/i18n/plugin-i18n-registry", () => ({
+jest.mock("@cognia/plugin-sdk/api/i18n", () => ({
   registerPluginI18n: jest.fn(),
   unregisterPluginI18n: jest.fn(),
 }))
 
-jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: { getState: jest.fn(() => ({ activeSessionId: undefined })) },
-}))
-
-jest.mock("@/lib/claude/computer-use-active-settings", () => ({
-  getActiveComputerUseSettings: jest.fn(() => null),
-}))
-
-jest.mock("@/lib/sandbox/session-runtime", () => ({
+jest.mock("@cognia/plugin-sdk/api/sandbox", () => ({
   HOST_FALLBACK_RUNTIME_REF: "sandbox-runtime:host-default",
   sandboxSessionRuntime: {
     decorateComputerUseContext: jest.fn(async (_ref: string, context: object) => ({
@@ -44,23 +39,26 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
 }))
 
 import definition from "./index"
-import { desktop } from "@/lib/automation/client"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
-import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
-import { useChatStore } from "@/stores/chat/chat-store"
-import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
-import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
-import type { ActionRequest } from "@/lib/automation/types"
-import type { PluginTool } from "@/types/plugin/plugin"
-
+import { desktop } from "@cognia/plugin-sdk/api/automation"
+import {
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
+import { registerPluginI18n, unregisterPluginI18n } from "@cognia/plugin-sdk/api/i18n"
+import { getActiveComputerUseSettings } from "@cognia/plugin-sdk/api/automation"
+import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@cognia/plugin-sdk/api/sandbox"
+import type { ActionRequest } from "@cognia/plugin-sdk"
+import type { PluginTool } from "@cognia/plugin-sdk"
 const mockedDesktop = desktop as jest.Mocked<typeof desktop>
-const mockedGetState = (useChatStore as unknown as { getState: jest.Mock }).getState
+/** `ctx.sessions.getCurrentSessionId` — the plugin's only session lookup. */
+const mockedGetCurrentSessionId = jest.fn(() => null as string | null)
 const mockedGetSettings = getActiveComputerUseSettings as jest.Mock
 const mockedDecorate = sandboxSessionRuntime.decorateComputerUseContext as jest.Mock
 
 interface MockAgentContext {
   pluginId: string
   logger?: { info: jest.Mock; warn: jest.Mock }
+  sessions?: { getCurrentSessionId: jest.Mock }
   agent?: {
     registerTool: jest.Mock<void, [PluginTool]>
     unregisterTool: jest.Mock<void, [string]>
@@ -72,6 +70,7 @@ function buildContext(options: { withAgent?: boolean } = {}): MockAgentContext {
   const context: MockAgentContext = {
     pluginId: "cognia-computer-use",
     logger: { info: jest.fn(), warn: jest.fn() },
+    sessions: { getCurrentSessionId: mockedGetCurrentSessionId },
   }
   if (options.withAgent !== false) {
     context.agent = {
@@ -223,7 +222,7 @@ describe("computer-use plugin activate()", () => {
     )
 
     expect(mockedGetSettings).toHaveBeenCalledWith("origin-session")
-    expect(mockedGetState).not.toHaveBeenCalled()
+    expect(mockedGetCurrentSessionId).not.toHaveBeenCalled()
     expect(mockedDesktop.getAppState).toHaveBeenCalledWith(
       "automation-session",
       locator,
