@@ -1,6 +1,6 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { Artifact, ArtifactLanguage } from "@/types/artifact"
-import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+import type { Artifact, ArtifactLanguage } from "@cognia/plugin-sdk"
+import type { PluginSubagentDispatchResult } from "@cognia/plugin-sdk"
 import { workSubagentId } from "./ids"
 
 export type WorkDeliverableKind = "document" | "report" | "spreadsheet" | "presentation" | "site"

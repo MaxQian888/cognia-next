@@ -1,5 +1,5 @@
-import type { PluginContext, PluginTool } from "@/types/plugin"
-import type { PluginDispatchSubagentOptions } from "@/types/plugin/plugin-agent-sdk"
+import type { PluginContext, PluginTool } from "@cognia/plugin-sdk"
+import type { PluginDispatchSubagentOptions } from "@cognia/plugin-sdk"
 import workModePlugin, { manifest } from "./index"
 
 describe("cognia-work-mode plugin", () => {

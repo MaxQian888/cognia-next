@@ -15,9 +15,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import type { PluginContext } from "@/types/plugin"
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
-
+import type { PluginContext } from "@cognia/plugin-sdk"
+import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 const KEY_PREFIX = "template:"
 
 export interface TemplateEntry {

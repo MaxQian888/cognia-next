@@ -2,8 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext } from "@/types/plugin"
-
+import type { PluginContext } from "@cognia/plugin-sdk"
 jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
@@ -13,7 +12,10 @@ jest.mock("@/stores/git/git-store", () => ({
   useGitStore: { getState: () => ({ rootDir: "/repo" }) },
 }))
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import {
+  registerSlashCommand,
+  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
+} from "@cognia/plugin-sdk/api/slash-command"
 import webClonePlugin, {
   parseWebCloneArgs,
   resolveOutput,

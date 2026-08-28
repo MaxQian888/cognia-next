@@ -55,7 +55,8 @@ export default definePlugin({
   of declaring them statically, plus that capability's host client. Published for
   `agent-team-template`, `automation`, `balance-adapter`, `character-pack`, `cli-tool`,
   `connector`, `context-panel`, `context-provider`, `editor`, `external-agent-adapter`,
-  `external-agent-preset`, `integration`, `message-renderer`, `ocr-provider`,
+  `external-agent-preset`, `host-environment`, `integration`, `message-renderer`,
+  `ocr-provider`,
   `scheduled-task`, `shared-memory-adapter`, `skill`, `slash-command`, `subagent`,
   `tool-renderer`, `webview`, and `workflow-template`.
 

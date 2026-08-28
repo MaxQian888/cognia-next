@@ -416,3 +416,13 @@ export type {
   ValidationError,
   ValidationResult,
 } from "./manifest"
+
+/**
+ * Cooperative cancellation. A plugin tool typically holds two signals — the
+ * one the host hands it for the turn, and one of its own for an internal
+ * timeout — and needs a single signal that fires when either does. Doing this
+ * by hand leaks listeners; `combineAbortSignals` returns the merged signal
+ * plus the `cleanup()` that detaches them, and answers `undefined` when there
+ * is nothing to combine.
+ */
+export { combineAbortSignals } from "@/lib/execution/admit"

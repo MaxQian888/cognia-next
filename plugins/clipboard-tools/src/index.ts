@@ -8,16 +8,16 @@
  * clipboard via `@tauri-apps/plugin-clipboard-manager`.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineWorkflowNode } from "@cognia/plugin-sdk"
-// `isTauri` retained as fallback when host doesn't expose
+// `readHostCapabilities()` is the fallback when the host does not expose
 // `ctx.capabilities.tauri` (ADR-0026 §5 §C).
-import { isTauri } from "@/lib/tauri"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 
 /**
  * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
  * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
- * direct `isTauri()` import. Module-scoped so the tool executor (which
+ * direct `readHostCapabilities().tauri` import. Module-scoped so the tool executor (which
  * doesn't receive the plugin context as an argument) can read it without
  * threading `ctx` through every call site.
  */
@@ -26,7 +26,7 @@ let disposeClipboardWorkflowNode: (() => void) | null = null
 
 function resolveTauriHost(): boolean {
   if (tauriHostFlag !== undefined) return tauriHostFlag
-  return isTauri()
+  return readHostCapabilities().tauri
 }
 
 async function readClipboardText(): Promise<string> {
@@ -81,7 +81,7 @@ const definition: PluginDefinition = {
     ctx.logger?.info("clipboard-tools activated")
     disposeClipboardWorkflowNode?.()
     disposeClipboardWorkflowNode = null
-    tauriHostFlag = ctx.capabilities?.tauri ?? isTauri()
+    tauriHostFlag = ctx.capabilities?.tauri ?? readHostCapabilities().tauri
     ctx.agent?.registerTool?.({
       name: "clipboard_status",
       pluginId: ctx.pluginId,

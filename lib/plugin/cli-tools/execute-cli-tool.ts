@@ -30,6 +30,7 @@ import type { BinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import { toBinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import type { CliBinaryEvaluation } from "./cli-binary-policy"
 import { buildArgv, parseOutput, resolveCwd, CliTemplateError } from "./template"
+import { getActiveWorkspaceRoot } from "@/lib/plugin/api/workspace-root"
 
 const CLI_EXECUTE: PluginPermission = "cli:execute"
 
@@ -148,32 +149,7 @@ async function defaultDeps(): Promise<CliToolDeps> {
     appendAudit: async (row) => {
       await getDb().automationAuditLog.add(row)
     },
-    getWorkspaceRoot: () => {
-      try {
-        // Lazy require keeps the store out of non-UI bundles; primaryRootOf
-        // mirrors lib/claude/build-options.ts's cwd resolution.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { useProjectStore } = require("@/stores/project/project-store") as {
-          useProjectStore: {
-            getState: () => {
-              activeProjectId: string | null
-              projects: Array<{ id: string; roots?: unknown }>
-            }
-          }
-        }
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { primaryRootOf } = require("@/lib/workspace/roots") as {
-          primaryRootOf: (p: { roots?: unknown }) => { path?: string } | undefined
-        }
-        const state = useProjectStore.getState()
-        const project = state.activeProjectId
-          ? state.projects.find((p) => p.id === state.activeProjectId)
-          : undefined
-        return project ? primaryRootOf(project)?.path : undefined
-      } catch {
-        return undefined
-      }
-    },
+    getWorkspaceRoot: getActiveWorkspaceRoot,
     now: () => Date.now(),
   }
 }

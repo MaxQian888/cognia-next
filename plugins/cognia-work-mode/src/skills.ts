@@ -1,5 +1,5 @@
 import { defineSkill } from "@cognia/plugin-sdk"
-import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import type { PluginSkillDef } from "@cognia/plugin-sdk"
 import { workSkillId } from "./ids"
 
 function inlineSkill(

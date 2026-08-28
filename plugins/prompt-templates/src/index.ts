@@ -19,7 +19,7 @@
  *   /template-list              — list the available templates
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { createTemplatesPanel } from "./templates-panel"
 import manifestJson from "../plugin.json"
 

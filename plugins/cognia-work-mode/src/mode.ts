@@ -1,6 +1,5 @@
 import { defineMode } from "@cognia/plugin-sdk"
-import type { PluginModeDef } from "@/types/plugin"
-
+import type { PluginModeDef } from "@cognia/plugin-sdk"
 export const WORK_MODE = defineMode({
   id: "work",
   name: "Work",

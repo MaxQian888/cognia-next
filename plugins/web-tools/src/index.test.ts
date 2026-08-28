@@ -7,11 +7,7 @@ const invokeToolMock = jest.fn()
 /** `ctx.network.fetch` — the one door it downloads bytes through. */
 const networkFetchMock = jest.fn()
 const writeFileMock = jest.fn()
-let settingsMock: Record<string, unknown> = {}
 
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: { getState: () => ({ settings: settingsMock }) },
-}))
 jest.mock(
   "@tauri-apps/plugin-fs",
   () => ({ writeFile: (...args: unknown[]) => writeFileMock(...args) }),
@@ -70,7 +66,6 @@ function streamMock(result: Record<string, unknown>) {
 }
 
 beforeEach(() => {
-  settingsMock = {}
   invokeToolMock.mockReset()
   networkFetchMock.mockReset()
   writeFileMock.mockReset()

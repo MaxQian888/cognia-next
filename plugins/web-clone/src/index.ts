@@ -13,9 +13,8 @@
  * only: the engine is a Node process reached via Tauri.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { isTauri } from "@/lib/tauri"
-import { useGitStore } from "@/stores/git/git-store"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import manifestJson from "../plugin.json"
 
 const CODEGEN_FRAMEWORKS = ["vue", "react", "angular", "svelte", "jquery"] as const
@@ -199,7 +198,7 @@ const definition: PluginDefinition = {
     return {
       onCommand: async (command: string, args: string[]) => {
         if (command !== "web-clone") return false
-        if (!isTauri()) {
+        if (!readHostCapabilities().tauri) {
           ctx.ui?.showToast?.("web-clone runs only on the desktop app.", "error")
           return true
         }
@@ -207,7 +206,7 @@ const definition: PluginDefinition = {
         const result = await runWebCloneCommand(args.join(" "), {
           invoke: (cmd, a) =>
             invoke<{ envelope: WebCloneEnvelope }>(cmd, a as Record<string, unknown>),
-          rootDir: () => useGitStore.getState().rootDir,
+          rootDir: () => ctx.git?.getRoot() ?? null,
           now: () => Date.now(),
         })
         if (result?.message) ctx.ui?.showToast?.(result.message, "info")

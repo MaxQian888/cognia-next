@@ -12,11 +12,14 @@
  * manifest.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineWorkflowNode } from "@cognia/plugin-sdk"
-// `isTauri` retained as fallback when host doesn't expose
+// `readHostCapabilities()` is the fallback when the host does not expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
-import { isTauri } from "@/lib/tauri"
+import {
+  getActiveWorkspaceRoot,
+  readHostCapabilities,
+} from "@cognia/plugin-sdk/api/host-environment"
 
 interface ListFilesArgs {
   path?: string
@@ -46,34 +49,14 @@ const NO_WORKSPACE = {
 }
 
 /**
- * Resolve the open workspace root, mirroring the CLI-tools executor's
- * `getWorkspaceRoot` (`lib/plugin/cli-tools/execute-cli-tool.ts`). Lazily
- * required so the project store stays out of non-UI bundles.
+ * Resolve the open workspace root. This used to be a verbatim copy of the
+ * CLI-tools executor's resolution — two implementations of "where is the user
+ * working", each free to drift. Both now call the one host resolver, published
+ * to authors as `@cognia/plugin-sdk/api/host-environment`.
  */
 function workspaceRoot(): string | undefined {
   if (workspaceRootOverride !== undefined) return workspaceRootOverride ?? undefined
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { useProjectStore } = require("@/stores/project/project-store") as {
-      useProjectStore: {
-        getState: () => {
-          activeProjectId: string | null
-          projects: Array<{ id: string; roots?: unknown }>
-        }
-      }
-    }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { primaryRootOf } = require("@/lib/workspace/roots") as {
-      primaryRootOf: (p: { roots?: unknown }) => { path?: string } | undefined
-    }
-    const state = useProjectStore.getState()
-    const project = state.activeProjectId
-      ? state.projects.find((p) => p.id === state.activeProjectId)
-      : undefined
-    return project ? primaryRootOf(project)?.path : undefined
-  } catch {
-    return undefined
-  }
+  return getActiveWorkspaceRoot()
 }
 
 /** Test seam: `null` = "no workspace open", a string = that root. */
@@ -194,7 +177,7 @@ async function symlinkEscapeError(
 /**
  * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
  * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
- * direct `isTauri()` import. Module-scoped so the tool executors (which
+ * direct `readHostCapabilities().tauri` import. Module-scoped so the tool executors (which
  * don't receive the plugin context as an argument) can read it without
  * threading `ctx` through every call site.
  */
@@ -203,7 +186,7 @@ let disposeWorkflowNodes: Array<() => void> = []
 
 function resolveTauriHost(): boolean {
   if (tauriHostFlag !== undefined) return tauriHostFlag
-  return isTauri()
+  return readHostCapabilities().tauri
 }
 
 async function listFiles(args: ListFilesArgs): Promise<unknown> {
@@ -472,7 +455,7 @@ const definition: PluginDefinition = {
     disposeWorkflowNodes = []
     // Resolve the platform once at activate time and cache for the
     // executors below. Prefer ADR-0026 §5 §C `ctx.capabilities.tauri`.
-    tauriHostFlag = ctx.capabilities?.tauri ?? isTauri()
+    tauriHostFlag = ctx.capabilities?.tauri ?? readHostCapabilities().tauri
     ctx.logger?.info(
       `workspace-tools activated (${tauriHostFlag ? "desktop" : "browser fallback"})`
     )

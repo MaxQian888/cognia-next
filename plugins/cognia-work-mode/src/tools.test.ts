@@ -1,4 +1,4 @@
-import type { PluginToolContext } from "@/types/plugin"
+import type { PluginToolContext } from "@cognia/plugin-sdk"
 import type { WorkPluginContext } from "./runtime"
 
 const mockRuntime = {

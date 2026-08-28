@@ -1,4 +1,4 @@
-import type { PluginTool } from "@/types/plugin"
+import type { PluginTool } from "@cognia/plugin-sdk"
 import type {
   CreateDeliverableInput,
   ParallelWorkInput,
@@ -6,7 +6,7 @@ import type {
   UpdateDeliverableInput,
   WorkPluginContext,
 } from "./runtime"
-import { combineAbortSignals } from "@/lib/execution/admit"
+import { combineAbortSignals } from "@cognia/plugin-sdk"
 import { createWorkRuntime } from "./runtime"
 
 const DELIVERABLE_KINDS = ["document", "report", "spreadsheet", "presentation", "site"]

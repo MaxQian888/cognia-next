@@ -191,11 +191,15 @@ const projectCommon: Config = {
     "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk$": "<rootDir>/packages/plugin-sdk/src/index.ts",
-    "^@cognia/plugin-sdk/(manifest|context|events|hooks|permissions|extensions)$":
+    "^@cognia/plugin-sdk/(manifest|context|events|hooks|permissions|extensions|templates)$":
       "<rootDir>/packages/plugin-sdk/src/$1/index.ts",
     "^@cognia/plugin-sdk/contracts$": "<rootDir>/packages/plugin-sdk/src/contracts/catalog.ts",
-    "^@cognia/plugin-sdk/api/(tool|native-anthropic-tool)$":
-      "<rootDir>/packages/plugin-sdk/src/api/$1.ts",
+    // Every published capability subpath, not an allowlist of two. Imports of
+    // the others already resolved through Next's tsconfig-path handling, but
+    // `jest.mock()` calls its own resolver and threw `Cannot find module` —
+    // so a plugin test could import a subpath and not mock it, which is the
+    // one thing a test most needs to do with a registry.
+    "^@cognia/plugin-sdk/api/(.*)$": "<rootDir>/packages/plugin-sdk/src/api/$1.ts",
     "^@cognia/security-findings(.*)$": "<rootDir>/packages/security-findings/src$1",
     "^@cognia/companion-client(.*)$": "<rootDir>/packages/companion-client/src$1",
     // The browser extension's own alias. `@ext/*`, never `@/*`: that

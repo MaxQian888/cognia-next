@@ -4,8 +4,8 @@
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { PluginContext } from "@/types/plugin"
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 import { createTemplatesPanel, readAllTemplates } from "./templates-panel"
 
 function makeCtx(seed: Record<string, string> = {}) {

@@ -6,20 +6,17 @@
     "clipboard-tools",
     "cognia-backend-refactor",
     "cognia-sandboxed-tools",
-    "cognia-work-mode",
     "computer-use",
     "e2b-sandbox",
     "eval",
     "impeccable",
     "ocr",
-    "prompt-templates",
     "screenshot",
     "skill-recorder",
     "sre-agent",
     "strix-security",
     "web-clone",
     "workflow-ai",
-    "workspace-tools",
     "zhihu-content-pipeline"
   ]
 }

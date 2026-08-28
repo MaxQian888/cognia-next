@@ -1,5 +1,5 @@
-import type { Artifact } from "@/types/artifact"
-import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+import type { Artifact } from "@cognia/plugin-sdk"
+import type { PluginSubagentDispatchResult } from "@cognia/plugin-sdk"
 import { createWorkRuntime, type WorkPluginContext } from "./runtime"
 
 function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {

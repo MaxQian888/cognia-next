@@ -37,7 +37,16 @@ function isHostOnlyCogniaPackage(specifier) {
 
 export function findForbiddenAuthorImports(source) {
   const matches = []
-  const importPattern = /(?:from\s*|import\s*\(|require\s*\(|import\s+(?=["']))\s*["']([^"']+)["']/g
+  /**
+   * `jest.mock(...)` and friends are module references too. A test that imports
+   * a symbol from `@cognia/plugin-sdk` but mocks it through `@/lib/...` still
+   * hard-codes a host-private path — it just does so somewhere a plain import
+   * scan cannot see, which is exactly how several first-party plugin tests kept
+   * a foot on the wrong side of the boundary after their imports were migrated.
+   * The SDK subpath is mockable in its place.
+   */
+  const importPattern =
+    /(?:from\s*|import\s*\(|require\s*\(|jest\s*\.\s*(?:mock|doMock|unmock|dontMock|setMock|requireActual|requireMock|createMockFromModule)\s*\(|import\s+(?=["']))\s*["']([^"']+)["']/g
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[1]
     if (

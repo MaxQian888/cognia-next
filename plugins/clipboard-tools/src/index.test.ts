@@ -2,9 +2,8 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
-
+import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import type { PluginNodeDef } from "@cognia/plugin-sdk"
 const isTauriMock = jest.fn(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 

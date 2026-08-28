@@ -1,5 +1,5 @@
 import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "@cognia/plugin-sdk"
 import { workSkillId, workSubagentId } from "./ids"
 
 export const KNOWLEDGE_WORK_TEAM = defineAgentTeamTemplate({

@@ -1,4 +1,4 @@
-import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { PLUGIN_ID } from "./ids"
 import { WORK_MODE } from "./mode"

@@ -2,18 +2,17 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext } from "@/types/plugin"
-
-jest.mock("@/lib/slash-commands/registry", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterCommandsByPlugin: jest.fn(),
-}))
-
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { listSlashCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import promptTemplatesPlugin from "./index"
 
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
+/**
+ * Asserted against the REAL registry rather than a mock of the host module:
+ * this plugin declares its commands in the manifest and must leave the
+ * registry alone, and "the registry has nothing of mine in it" is a stronger
+ * claim than "the function I stubbed was not called".
+ */
+const PLUGIN_ID = "cognia-prompt-templates"
 
 function makeCtx() {
   const store = new Map<string, unknown>()
@@ -53,10 +52,7 @@ function makeCtx() {
   return { ctx: ctx as PluginContext, store, showToast, contextPanels, disposePanel }
 }
 
-beforeEach(() => {
-  registerMock.mockReset()
-  unregisterMock.mockReset()
-})
+beforeEach(() => {})
 
 describe("prompt-templates (built-in)", () => {
   /** Activate and return the declared-command hook + the toast spy. */
@@ -77,7 +73,7 @@ describe("prompt-templates (built-in)", () => {
     const { ctx } = makeCtx()
     await promptTemplatesPlugin.activate?.(ctx)
     // The manager owns registration for manifest-declared commands.
-    expect(registerMock).not.toHaveBeenCalled()
+    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
     const commands = (promptTemplatesPlugin.manifest as { commands?: Array<{ id: string }> })
       .commands
     expect(commands?.map((c) => c.id).sort()).toEqual([
@@ -174,6 +170,6 @@ describe("prompt-templates (built-in)", () => {
 
   it("leaves command teardown to the manager", async () => {
     expect(promptTemplatesPlugin.deactivate).toEqual(expect.any(Function))
-    expect(unregisterMock).not.toHaveBeenCalled()
+    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
   })
 })

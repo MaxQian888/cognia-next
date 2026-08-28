@@ -77,3 +77,18 @@ test("the baseline is a shrinking record, never a growing one", () => {
   // reordered blob.
   assert.deepEqual(baseline, [...new Set(baseline)].sort())
 })
+
+test("counts jest module references, not just imports", () => {
+  // A migrated import list plus a host-private `jest.mock` is still a plugin
+  // pinned to a host path — mock the SDK subpath the plugin actually imports.
+  assert.deepEqual(
+    findForbiddenAuthorImports(`
+      import { registerSlashCommand } from "@cognia/plugin-sdk/api/slash-command"
+      jest.mock("@/lib/slash-commands/registry", () => ({}))
+      jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({}))
+      jest.requireActual("@/stores/chat/chat-store")
+      jest.doMock("@/lib/tauri", () => ({}))
+    `),
+    ["@/lib/slash-commands/registry", "@/stores/chat/chat-store", "@/lib/tauri"]
+  )
+})

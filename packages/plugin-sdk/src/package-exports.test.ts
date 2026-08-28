@@ -31,6 +31,7 @@ describe("plugin-sdk package exports", () => {
     "./api/context-provider",
     "./api/external-agent-adapter",
     "./api/external-agent-preset",
+    "./api/host-environment",
     "./api/message-renderer",
     "./api/ocr-provider",
     "./api/scheduled-task",

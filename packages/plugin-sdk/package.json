@@ -51,6 +51,12 @@
       "require": "./dist/connector.cjs",
       "default": "./dist/connector.js"
     },
+    "./api/host-environment": {
+      "types": "./dist/host-environment.d.ts",
+      "import": "./dist/host-environment.js",
+      "require": "./dist/host-environment.cjs",
+      "default": "./dist/host-environment.js"
+    },
     "./api/integration": {
       "types": "./dist/integration.d.ts",
       "import": "./dist/integration.js",

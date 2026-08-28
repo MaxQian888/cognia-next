@@ -1,6 +1,5 @@
 import { defineSubagent } from "@cognia/plugin-sdk"
-import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
-
+import type { PluginSubagentDef } from "@cognia/plugin-sdk"
 const RESEARCHER = defineSubagent({
   id: "researcher",
   name: "Work Researcher",
