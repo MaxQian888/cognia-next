@@ -226,6 +226,7 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       (async () => {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         const { makeNodeFrontendImporter } = await import("./node-importer")
+        const { makeNodeBuiltinAssetFetcher } = await import("./builtin-asset-fetcher")
         const home = resolveHome(process.env, os.homedir())
         const headless = isHeadlessHost()
         const nodeHostInvoker = headless
@@ -253,6 +254,10 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
           // Frontend plugins load via dynamic `import()` under Node — the
           // Tauri/fetch/eval strategies in the loader don't exist here.
           frontendImporter: makeNodeFrontendImporter(),
+          // The five generated built-ins ship as chunks addressed by a
+          // root-relative URL; Node's fetch cannot parse one, so without this
+          // reader each of them fails to enable with `Failed to parse URL`.
+          builtinAssetFetcher: makeNodeBuiltinAssetFetcher(),
           nodeHostInvoker,
           nodeHostSubscriber,
           lifecycleStateAdapter: createCliPluginLifecycleStateAdapter(home),

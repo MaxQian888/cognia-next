@@ -37,6 +37,11 @@ import {
   createMcpHostBridgePlugin,
   writeCheckedMcpSidecarOutput,
 } from "./lib/mcp-host-bridge.mjs"
+import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import {
+  BUILTIN_PLUGIN_ASSET_DIR,
+  stageBuiltinPluginAssets,
+} from "./lib/stage-builtin-plugin-assets.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
@@ -368,6 +373,28 @@ for (const src of SIDECAR_DATA_FILES) {
 }
 console.log(`build-cli-binary: copied ${SIDECAR_DATA_FILES.length} sidecar data file(s) → ${path.relative(root, sidecarOutDir)}`)
 
+// 2b-ii. Stage the bundled Pi extension. It cannot ride SIDECAR_DATA_FILES:
+// that loop flattens with `path.basename`, and the resolver looks for the
+// exact relative path `sidecar/pi-extension/cognia-pi-extension.ts`, deriving
+// the manifest location by stripping the same suffix. Without it every Pi
+// session on a CLI/brain host refuses with PI_EXTENSION_REQUIRED — the
+// extension holds Pi's native-tool permission gate, so "absent" is a refusal
+// rather than a downgrade to running unintercepted.
+const stagedPiExtension = stagePiExtension({ root, sidecarOutDir })
+console.log(
+  `build-cli-binary: staged pi-extension → ${path.relative(root, stagedPiExtension.dir)} (${stagedPiExtension.sha256.slice(0, 12)}…)`
+)
+
+// 2b-iii. Stage the generated built-in plugin chunks (cognia-office/pdf/
+// documents/presentations/visualize) into `binDir`, from which the per-target
+// layouts copy them next to cli.mjs. Their catalog URLs are root-relative, so
+// the Node reader resolves them against the layout directory; without the tree
+// all five refuse to enable on a CLI or brain host.
+const stagedBuiltinPlugins = stageBuiltinPluginAssets({ root, outDir: binDir })
+console.log(
+  `build-cli-binary: staged ${stagedBuiltinPlugins.pluginIds.length} built-in plugin chunk(s) → ${path.relative(root, stagedBuiltinPlugins.dir)}`
+)
+
 // 2c. Ship the already-built VS Code extension host beside the brain. The
 // Rust server resolves this exact layout from COGNIA_BRAIN_ENTRY and owns the
 // process; only the runtime dependency closure is copied (no TypeScript toolchain).
@@ -439,6 +466,10 @@ if (LAYOUT_ONLY) {
     dereference: true,
   })
   fs.cpSync(sidecarOutDir, path.join(layoutDir, "sidecar"), { recursive: true, dereference: true })
+  fs.cpSync(stagedBuiltinPlugins.dir, path.join(layoutDir, BUILTIN_PLUGIN_ASSET_DIR), {
+    recursive: true,
+    dereference: true,
+  })
   fs.cpSync(externalHostLauncher, path.join(layoutDir, externalHostLauncherName))
   fs.cpSync(workspaceHelper, path.join(layoutDir, workspaceHelperName))
   if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, externalHostLauncherName), 0o755)
@@ -504,13 +535,18 @@ for (const t of TARGETS) {
     // The binary wrote successfully — now refresh the support files next to it.
     // The CJS snapshot entry imports cli.mjs from here, and cli.mjs resolves
     // react/ink from the adjacent node_modules at runtime.
-    for (const child of ["cli.mjs", "node_modules", "sidecar"]) safeRm(path.join(distDir, child))
+    for (const child of ["cli.mjs", "node_modules", "sidecar", "_cognia"])
+      safeRm(path.join(distDir, child))
     fs.cpSync(cliBundle, path.join(distDir, "cli.mjs"))
     fs.cpSync(tuiNodeModules, path.join(distDir, "node_modules"), {
       recursive: true,
       dereference: true,
     })
     fs.cpSync(sidecarOutDir, path.join(distDir, "sidecar"), { recursive: true, dereference: true })
+    fs.cpSync(stagedBuiltinPlugins.dir, path.join(distDir, BUILTIN_PLUGIN_ASSET_DIR), {
+      recursive: true,
+      dereference: true,
+    })
     const nativeTarget =
       (process.platform === "darwin" && process.arch === "arm64" && t.dist === "cognia-agent-macos-arm64") ||
       (process.platform === "linux" && process.arch === "x64" && t.dist === "cognia-agent-linux-x64") ||

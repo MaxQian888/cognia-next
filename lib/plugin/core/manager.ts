@@ -277,6 +277,14 @@ export interface PluginManagerConfig {
    * under Node. See `cli/src/plugin/node-importer.ts`.
    */
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /**
+   * Inject a fetcher for the generated browser built-in plugin chunks. Their
+   * catalog URLs are root-relative (`/_cognia/builtin-plugins/…`), which only
+   * resolves against a document origin — Node's `fetch` rejects them outright.
+   * Node hosts pass a reader for the chunks staged next to the bundle. See
+   * `cli/src/plugin/builtin-asset-fetcher.ts`.
+   */
+  builtinAssetFetcher?: typeof fetch
   /** Host-neutral native lifecycle transport for Node-target plugins. */
   nodeHostInvoker?: import("../launcher/launchPluginJs").PluginJsHostInvoker
   /** Host-neutral native event subscription transport for Node-target plugins. */
@@ -801,6 +809,7 @@ export class PluginManager {
           }))
     this.loader = new PluginLoader({
       frontendImporter: config.frontendImporter,
+      builtinAssetFetcher: config.builtinAssetFetcher,
       nodeHostInvoker: config.nodeHostInvoker,
     })
     this.registry = new PluginRegistry()

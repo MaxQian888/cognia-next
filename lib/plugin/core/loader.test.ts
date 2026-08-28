@@ -245,6 +245,29 @@ describe("PluginLoader", () => {
       )
     })
 
+    it("routes the builtin asset through an injected host fetcher", async () => {
+      const entry = getBrowserBuiltinRegistryEntry("cognia-office")!
+      const builtinAssetFetcher = jest.fn() as unknown as typeof fetch
+      builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset.mockResolvedValue(
+        "module.exports = { activate: function activate() {} }"
+      )
+      const nodeLoader = new PluginLoader({ builtinAssetFetcher })
+
+      await nodeLoader.load({
+        manifest: entry.manifest,
+        path: entry.path,
+        source: "builtin",
+        status: "installed",
+      })
+
+      // Node hosts cannot parse the chunk's root-relative URL, so the fetcher
+      // reaching the verifier is the whole fix — assert the wiring, not a mock.
+      expect(builtinAssetModule.fetchAndVerifyBrowserBuiltinAsset).toHaveBeenCalledWith(
+        entry.asset,
+        builtinAssetFetcher
+      )
+    })
+
     it("rejects a traversing main entry before invoking the importer", async () => {
       const plugin = createMockPlugin("unsafe-main")
       plugin.manifest.main = "..\\outside.js"

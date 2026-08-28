@@ -1,9 +1,14 @@
 const getDocument = jest.fn()
+const workerOptions = { workerSrc: "" }
 
 jest.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
   getDocument,
-  GlobalWorkerOptions: { workerSrc: "" },
+  GlobalWorkerOptions: workerOptions,
 }))
+
+// The browser builtin build injects this as an esbuild `define`; stand in for it here.
+const globalScope = globalThis as { __COGNIA_PDF_WORKER_URL__?: string }
+const workerUrl = "/_cognia/builtin-plugins/_shared/pdf.worker.test.mjs"
 
 import { extractPdfPages, fillPdfFields, inspectPdf } from "./pdf-engine"
 
@@ -45,6 +50,8 @@ function installPdfDocument(bytes: Uint8Array) {
 }
 
 beforeEach(() => {
+  globalScope.__COGNIA_PDF_WORKER_URL__ = workerUrl
+  workerOptions.workerSrc = ""
   fieldValue = "Before"
   pendingValue = "Before"
   getDocument.mockReset()
@@ -78,6 +85,18 @@ describe("PDF engine public file seam", () => {
     const extracted = await extractPdfPages([{ bytes: Uint8Array.from([1]), includePages: [2] }])
 
     await expect(inspectPdf(extracted)).resolves.toMatchObject({ pageCount: 1 })
+  })
+
+  it("points pdf.js at the build-injected worker asset", async () => {
+    await inspectPdf(Uint8Array.from([1]))
+
+    expect(workerOptions.workerSrc).toBe(workerUrl)
+  })
+
+  it("refuses to open a PDF when the worker URL was never injected", async () => {
+    delete globalScope.__COGNIA_PDF_WORKER_URL__
+
+    await expect(inspectPdf(Uint8Array.from([1]))).rejects.toThrow("__COGNIA_PDF_WORKER_URL__")
   })
 
   it("refuses mutation when a signature marker is present", async () => {

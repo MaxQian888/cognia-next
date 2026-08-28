@@ -198,6 +198,16 @@ export interface PluginLoaderOptions {
    * importer cache-bust per plugin for hot reload).
    */
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /**
+   * Inject a fetcher for the generated browser built-in plugin chunks
+   * (`/_cognia/builtin-plugins/<id>/<sha>.cjs`). Those URLs are root-relative,
+   * which only resolves inside a document: under Node `fetch()` rejects with
+   * `Failed to parse URL`, so every asset-delivered built-in failed to enable
+   * on the CLI / brain. A Node host supplies a fetcher that reads the staged
+   * chunk off disk; the digest verification in
+   * {@link fetchAndVerifyBrowserBuiltinAsset} is unchanged either way.
+   */
+  builtinAssetFetcher?: typeof fetch
   /** Host-neutral native lifecycle transport used by Node-target plugins. */
   nodeHostInvoker?: PluginJsHostInvoker
 }
@@ -208,11 +218,13 @@ export class PluginLoader {
   private dirtyTeardowns: Map<string, DirtyTeardownRecord> = new Map()
   private readonly teardownTimeoutMs: number
   private readonly frontendImporter?: PluginLoaderOptions["frontendImporter"]
+  private readonly builtinAssetFetcher?: typeof fetch
   private readonly nodeHostInvoker?: PluginJsHostInvoker
 
   constructor(options: PluginLoaderOptions = {}) {
     this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS
     this.frontendImporter = options.frontendImporter
+    this.builtinAssetFetcher = options.builtinAssetFetcher
     this.nodeHostInvoker = options.nodeHostInvoker
   }
 
@@ -322,7 +334,10 @@ export class PluginLoader {
         ? getBrowserBuiltinRegistryEntry(manifest.id)
         : undefined
       if (builtinRegistryEntry?.asset) {
-        const code = await fetchAndVerifyBrowserBuiltinAsset(builtinRegistryEntry.asset)
+        const code = await fetchAndVerifyBrowserBuiltinAsset(
+          builtinRegistryEntry.asset,
+          this.builtinAssetFetcher
+        )
         await primeSharedModules(builtinRegistryEntry.asset.sharedModules)
         const moduleExports = this.evaluatePluginCode(code, builtinRegistryEntry.asset.url)
         const definition = this.extractDefinition(moduleExports, manifest)

@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 import fs from "node:fs"
 import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
+import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -148,15 +150,21 @@ if (process.platform !== "win32") fs.chmodSync(path.join(outdir, workspaceHelper
 // the bundle directory. Without it every Pi session on an installed CLI fails
 // closed with `extension_handshake_failed` — the extension is what enforces
 // Pi's native-tool permission matrix, so it is required, not optional.
-const piExtensionDir = path.join(root, "sidecar", "pi-extension")
-const piExtensionOut = path.join(outdir, "sidecar", "pi-extension")
-fs.mkdirSync(piExtensionOut, { recursive: true })
-for (const asset of ["cognia-pi-extension.ts", "integrity.json"]) {
-  const source = path.join(piExtensionDir, asset)
-  if (!fs.existsSync(source)) {
-    throw new Error(`build-cli: missing ${path.relative(root, source)}`)
-  }
-  fs.copyFileSync(source, path.join(piExtensionOut, asset))
-}
+// Shared with the pkg and Bun layouts so the three cannot drift; the helper
+// also verifies the pin, so a forgotten `pnpm pi:extension:pin` fails the
+// build instead of shipping an extension that refuses at runtime.
+stagePiExtension({ root, sidecarOutDir: path.join(outdir, "sidecar") })
+
+// The generated built-in plugin chunks (cognia-office/pdf/documents/
+// presentations/visualize). They are addressed by a root-relative URL, which
+// only resolves against a document origin — under Node the loader could not
+// even parse it, so all five failed to enable and the three that declare
+// headless support silently lost their agent tools. Staged into `dist/` so the
+// published package ships them under the existing `files: ["dist"]` entry and
+// the runtime walk-up finds them on the first hop from the bundle directory.
+const stagedBuiltinPlugins = stageBuiltinPluginAssets({ root, outDir: outdir })
+console.log(
+  `build-cli: staged ${stagedBuiltinPlugins.pluginIds.length} built-in plugin chunk(s) → ${path.relative(root, stagedBuiltinPlugins.dir)}`
+)
 
 console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.js`)

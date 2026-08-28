@@ -18,6 +18,8 @@ import {
   parseCliBuildArgs,
 } from "./cli-bun-contract.mjs"
 import { signCliArtifacts } from "./sign-cli-bun.mjs"
+import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -456,14 +458,16 @@ for (const variant of variants) {
   copyRequired(coreExecutable, executable, { executable: true })
   copyRequired(externalHostLauncher, launcher, { executable: true })
   copyRequired(workspaceHelper, worker, { executable: true })
-  copyRequired(
-    path.join(root, "sidecar/pi-extension/cognia-pi-extension.ts"),
-    path.join(layoutRoot, "sidecar/pi-extension/cognia-pi-extension.ts")
-  )
-  copyRequired(
-    path.join(root, "sidecar/pi-extension/integrity.json"),
-    path.join(layoutRoot, "sidecar/pi-extension/integrity.json")
-  )
+  // Shared with build-cli-binary.mjs so the two layouts cannot drift on the
+  // Pi extension again (the Node/pkg path shipped without it for a while, and
+  // a brain image built from that layout could not start any Pi session). The
+  // helper also verifies the pin, which the plain copy here did not: a stale
+  // digest used to ship and then refuse every session at runtime.
+  stagePiExtension({ root, sidecarOutDir: path.join(layoutRoot, "sidecar") })
+  // The generated built-in plugin chunks. Their catalog URLs are
+  // root-relative, so the Node reader resolves them against this layout
+  // directory; without the tree all five refuse to enable on this host.
+  stageBuiltinPluginAssets({ root, outDir: layoutRoot })
   copyRequired(
     path.join(root, "sidecar/node_modules/web-tree-sitter/tree-sitter.wasm"),
     path.join(layoutRoot, "tree-sitter.wasm")

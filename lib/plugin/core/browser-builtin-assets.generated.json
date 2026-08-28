@@ -114,8 +114,8 @@
       "path": "builtin://cognia-pdf",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-pdf/9e297772e5a8df09304c624e20216a0a30a2b380918f8d4741907f70c642be9e.cjs",
-        "sha256": "9e297772e5a8df09304c624e20216a0a30a2b380918f8d4741907f70c642be9e",
+        "url": "/_cognia/builtin-plugins/cognia-pdf/095d459ea43500c7c52e8baaa21e3ba8c7ec7ce66e0ef131b2d72a01c3c37299.cjs",
+        "sha256": "095d459ea43500c7c52e8baaa21e3ba8c7ec7ce66e0ef131b2d72a01c3c37299",
         "sharedModules": []
       }
     },
@@ -287,8 +287,8 @@
       "path": "builtin://cognia-visualize",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-visualize/b65744c02c5c625987f22fddf4f4957b833f06626db332d73df711615f150c9d.cjs",
-        "sha256": "b65744c02c5c625987f22fddf4f4957b833f06626db332d73df711615f150c9d",
+        "url": "/_cognia/builtin-plugins/cognia-visualize/f50da9583eae213b93ec0d799453a0ffa26745b852f41f68a02e89649028bc81.cjs",
+        "sha256": "f50da9583eae213b93ec0d799453a0ffa26745b852f41f68a02e89649028bc81",
         "sharedModules": []
       }
     }
