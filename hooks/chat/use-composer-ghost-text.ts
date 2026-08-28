@@ -13,6 +13,17 @@
  *     feature simply did not exist for most users.
  *   - **model** — a debounced LLM continuation resolved through the renderer
  *     utility client and gated by `hasNoLeakingPii`. Opt-in, because it bills.
+ *   - **agent** — one real agent turn, run only when the user asks for it
+ *     (`requestManual`, bound to a key by the composer). This tier exists
+ *     because the model tier above is unreachable for most users: it needs an
+ *     API key visible to the RENDERER, and a Claude subscription keeps its
+ *     bearer in the keyring / sidecar (ADR-0025). So a user who switched the
+ *     model tier on got silence. The agent turn runs where the credentials
+ *     live, which also means it works for every provider AND every external
+ *     agent the session might be bound to, with no per-agent adapter —
+ *     `resolveSendOptions` inside `buildHeadlessTurnLlmClient` already resolves
+ *     provider, runtime and credentials. It is `manual` rather than debounced
+ *     because one agent turn per typing burst is the wrong cost shape.
  *
  * Thin by design — debounce / cancellation / cache / ranking / cycling all live
  * in the unit-tested engine. The hook builds providers from settings, supplies
@@ -28,11 +39,15 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildHeadlessTurnLlmClient, canRunHeadlessTurn } from "@/lib/ai/headless-turn-llm-client"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { InlineCompletionEngine, type InlineEngineView } from "@/lib/chat/completion/inline/engine"
 import { createHistoryProvider } from "@/lib/chat/completion/inline/history-provider"
 import { createCommandProvider } from "@/lib/chat/completion/inline/command-provider"
-import { createAiCompletionProvider } from "@/lib/chat/completion/inline/ai-provider"
+import {
+  createAgentCompletionProvider,
+  createAiCompletionProvider,
+} from "@/lib/chat/completion/inline/ai-provider"
 import type {
   InlineCommandInfo,
   InlineCompletionProvider,
@@ -48,6 +63,8 @@ const DEFAULT_DEBOUNCE = 500
 const RECENT = 6
 /** Tokens requested for a continuation — a ghost is a phrase, not a paragraph. */
 const MAX_GHOST_TOKENS = 48
+/** Broker lease label for the agent tier, i.e. what it shows up as in the runs console. */
+const AGENT_TURN_LABEL = "Composer completion"
 
 function recentMessages(): GhostMessage[] {
   const msgs = useChatStore.getState().messages
@@ -63,6 +80,8 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  manualAvailable: false,
+  manualPending: false,
 }
 
 export interface UseComposerGhostTextOptions {
@@ -86,6 +105,16 @@ export interface UseComposerGhostTextResult {
   index: number
   /** True while a model query is in flight. */
   pending: boolean
+  /**
+   * True when an agent turn is reachable, i.e. `requestManual` will do
+   * something. False in a pure-web tab with no paired companion, where there
+   * is no transport to carry a turn.
+   */
+  manualAvailable: boolean
+  /** True while the requested agent turn is running. */
+  manualPending: boolean
+  /** Ask the agent tier for a continuation now. Bound to a key by the composer. */
+  requestManual: () => void
   feed: (value: string, opts?: { suppress?: boolean }) => void
   /** Accept the active suggestion; returns the new full textarea value, or null. */
   accept: () => string | null
@@ -112,6 +141,10 @@ export function useComposerGhostText(
   const [rawView, setView] = useState<InlineEngineView>(EMPTY_VIEW)
   const engineRef = useRef<InlineCompletionEngine | null>(null)
   const sessionId = session?.id ?? null
+  // Whether a turn can be carried at all — Tauri, or a web tab with a paired
+  // companion. Read once: it is a property of the shell, not of React state,
+  // and re-reading it per render would rebuild the engine on every pass.
+  const [agentTierReachable] = useState(() => canRunHeadlessTurn())
 
   // Live context, read at query time. Kept in refs so a new history entry or a
   // freshly registered plugin command does NOT tear down and rebuild the
@@ -160,6 +193,29 @@ export function useComposerGhostText(
         })
       )
     }
+    if (aiEnabled && agentTierReachable) {
+      // The manual tier. Note it is added whether or not the direct client
+      // above resolved: with a BYOK key the user gets the cheap debounced
+      // answer for free AND can still ask for a considered one, and `agent`
+      // outranks `ai` so the answer they asked for wins.
+      providers.push(
+        createAgentCompletionProvider({
+          complete: async ({ system, prompt, signal }) => {
+            const client = buildHeadlessTurnLlmClient({
+              session: sessionRef.current ?? null,
+              label: AGENT_TURN_LABEL,
+            })
+            if (!client) return null
+            return client.complete(prompt, {
+              system,
+              temperature: 0.2,
+              maxTokens: MAX_GHOST_TOKENS,
+              abortSignal: signal,
+            })
+          },
+        })
+      )
+    }
     if (providers.length === 0) {
       engineRef.current = null
       return
@@ -186,7 +242,7 @@ export function useComposerGhostText(
       setView(EMPTY_VIEW)
     }
     // `session` identity is keyed by id; the tier flags rebuild the providers.
-  }, [sessionId, debounceMs, maxCandidates, localEnabled, aiEnabled])
+  }, [sessionId, debounceMs, maxCandidates, localEnabled, aiEnabled, agentTierReachable])
 
   // Derived, not stored: with every tier off there is no engine to clear the
   // view, and resetting it from an effect would be a cascading render.
@@ -197,6 +253,7 @@ export function useComposerGhostText(
   }, [])
 
   const accept = useCallback((): string | null => engineRef.current?.accept() ?? null, [])
+  const requestManual = useCallback(() => engineRef.current?.requestManual(), [])
   const cycleNext = useCallback(() => engineRef.current?.cycleNext(), [])
   const cyclePrev = useCallback(() => engineRef.current?.cyclePrev(), [])
   const dismiss = useCallback(() => engineRef.current?.dismiss(), [])
@@ -208,6 +265,9 @@ export function useComposerGhostText(
     candidates: view.candidates,
     index: view.index,
     pending: view.pending,
+    manualAvailable: view.manualAvailable,
+    manualPending: view.manualPending,
+    requestManual,
     feed,
     accept,
     cycleNext,

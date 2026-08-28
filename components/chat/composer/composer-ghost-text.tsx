@@ -16,6 +16,11 @@
 // differently and look identical otherwise: a history completion is exact and
 // free, a model completion is a guess that cost a call. When more than one
 // candidate is ranked it also shows the position and the cycle hint.
+//
+// The overlay also paints WITHOUT a ghost, for one case: `manualHint`. The
+// agent tier only runs when asked, so its key has to be discoverable at the
+// moment it is useful — which is precisely when the cheap tiers produced
+// nothing and there is no ghost to hang a hint off.
 
 import { forwardRef, memo } from "react"
 import { cn } from "@/lib/utils"
@@ -38,6 +43,13 @@ interface ComposerGhostTextProps {
   positionLabel?: string
   /** Translated "Alt+] to cycle" hint. Omit to hide. */
   cycleHint?: string
+  /**
+   * Translated hint for the manually-requested agent tier — or its in-flight
+   * label; the caller picks which, so this component stays a pure view. Shown
+   * even when `ghost` is empty, which is the only case that paints the overlay
+   * without a suggestion. Omit to hide.
+   */
+  manualHint?: string
   /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
   mono?: boolean
   /**
@@ -53,10 +65,20 @@ const BADGE_CLASS =
 
 const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>(
   function ComposerGhostText(
-    { value, ghost, acceptHint, sourceLabel, positionLabel, cycleHint, mono, padEndClass },
+    {
+      value,
+      ghost,
+      acceptHint,
+      sourceLabel,
+      positionLabel,
+      cycleHint,
+      manualHint,
+      mono,
+      padEndClass,
+    },
     innerRef
   ) {
-    if (!ghost) return null
+    if (!ghost && !manualHint) return null
     return (
       <div
         aria-hidden="true"
@@ -91,6 +113,11 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
           {cycleHint ? (
             <span className={BADGE_CLASS} data-testid="composer-ghost-cycle">
               {cycleHint}
+            </span>
+          ) : null}
+          {manualHint ? (
+            <span className={BADGE_CLASS} data-testid="composer-ghost-manual">
+              {manualHint}
             </span>
           ) : null}
         </div>

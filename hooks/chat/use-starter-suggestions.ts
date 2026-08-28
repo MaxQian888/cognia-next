@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildHeadlessTurnLlmClient } from "@/lib/ai/headless-turn-llm-client"
 import { suggestStarters } from "@/lib/chat/completion/suggestions"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
@@ -47,12 +48,21 @@ export function useStarterSuggestions(
     let active = true
     void (async () => {
       const settings = useSettingsStore.getState().settings as AppSettings | undefined
-      const client = buildUtilityLlmClient({
-        session: session ?? null,
-        appSettings: settings,
-        override: settings?.composerAssistance?.model,
-        featureId: "composer-starters",
-      })
+      const client =
+        buildUtilityLlmClient({
+          session: session ?? null,
+          appSettings: settings,
+          override: settings?.composerAssistance?.model,
+          featureId: "composer-starters",
+        }) ??
+        // The direct client needs an API key the renderer can see, which a
+        // Claude subscription never exposes — so on the app's primary auth mode
+        // this feature was silently inert. One headless turn runs where the
+        // credentials live, and works for every external agent too. Opt-in:
+        // see `suggestions.agentFallback` for why it is not the default.
+        (settings?.composerAssistance?.suggestions?.agentFallback === true
+          ? buildHeadlessTurnLlmClient({ session: session ?? null, label: "Starter suggestions" })
+          : null)
       if (!client) return
       const result = await suggestStarters(
         { characterName: persona?.name, characterDescription: persona?.description },

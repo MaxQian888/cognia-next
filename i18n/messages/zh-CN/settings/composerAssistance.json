@@ -1,4 +1,8 @@
 {
+  "agentFallback": {
+    "hint": "没有保存 API key 时，改用一次 Agent 回合来跑这些辅助功能，订阅制下也能用。默认关闭——追问建议每次回复后都会触发，开启即每次多花一个回合。",
+    "label": "无 API key 时改用 Agent 回合"
+  },
   "assistanceModel": {
     "description": "这些辅助功能调用哪个模型。默认走聊天供应商上的便宜模型——如果那个供应商没存 API key，在这里另选一个。",
     "heading": "辅助模型",
@@ -17,7 +21,7 @@
   },
   "ghostText": {
     "debounceLabel": "防抖(毫秒)",
-    "hint": "打字时显示灰色 AI 续写，按 Tab 接受。默认关闭。",
+    "hint": "打字时显示灰色 AI 续写，按 Tab 接受，按 Alt+\\ 让 Agent 生成一条。默认关闭。",
     "label": "行内自动补全"
   },
   "ghostTextLocal": {

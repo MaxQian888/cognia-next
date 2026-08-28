@@ -1,4 +1,13 @@
-import { createTuiInlineComplete, isAiSuggestEnabled, isLocalSuggestEnabled } from "./ai-complete"
+import {
+  createTuiAgentComplete,
+  createTuiInlineComplete,
+  isAgentSuggestEnabled,
+  isAiSuggestEnabled,
+  isLocalSuggestEnabled,
+  lockdownCompletionOptions,
+} from "./ai-complete"
+import type { SendOptions } from "@cognia/agent-config-types"
+import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { ResolvedConfig } from "../../config/schema"
 
 const config = { cwd: "/repo" } as unknown as ResolvedConfig
@@ -128,5 +137,97 @@ describe("suggest tier gating", () => {
     expect(isLocalSuggestEnabled({ autosuggest: {} } as ResolvedConfig)).toBe(true)
     expect(isLocalSuggestEnabled({ autosuggest: { local: true } } as ResolvedConfig)).toBe(true)
     expect(isLocalSuggestEnabled({ autosuggest: { local: false } } as ResolvedConfig)).toBe(false)
+  })
+})
+
+describe("lockdownCompletionOptions", () => {
+  const ctx = {} as BuildOptionsContext
+
+  it("strips every tool and approval prompt from the resolved options", async () => {
+    const resolved = {
+      allowedTools: ["Read", "Bash"],
+      mcpServers: { fs: {} },
+      permissionMode: "default",
+      maxTurns: 20,
+      model: "some-model",
+    } as unknown as SendOptions
+    const out = await lockdownCompletionOptions(ctx, async () => resolved)
+
+    // A completion engine that could reach for Bash would go off and ANSWER the
+    // draft instead of finishing the sentence.
+    expect(out.allowedTools).toEqual([])
+    expect(out.mcpServers).toEqual({})
+    expect(out.permissionMode).toBe("bypassPermissions")
+    expect(out.maxTurns).toBe(1)
+  })
+
+  it("keeps everything else the resolver decided", async () => {
+    const out = await lockdownCompletionOptions(
+      ctx,
+      async () =>
+        ({ model: "picked-by-resolver", allowedTools: ["Read"] }) as unknown as SendOptions
+    )
+    // The resolver is what knows the provider / runtime / credentials for this
+    // session; the lockdown narrows it, it does not replace it.
+    expect(out.model).toBe("picked-by-resolver")
+  })
+})
+
+describe("createTuiAgentComplete", () => {
+  const config = { cwd: "/repo" } as unknown as ResolvedConfig
+
+  it("returns the turn's text", async () => {
+    const runTurn = jest.fn(async () => ({ sessionId: "s", text: " the staging build" })) as never
+    const complete = createTuiAgentComplete({ config, runTurn })
+    const out = await complete({ system: "SYS", prompt: "deploy", signal: signal() })
+    expect(out).toBe(" the staging build")
+  })
+
+  it("carries the system prompt into the turn and locks the turn down", async () => {
+    const runTurn = jest.fn(async () => ({ sessionId: "s", text: "x" })) as never
+    const complete = createTuiAgentComplete({ config, runTurn })
+    await complete({ system: "SYS", prompt: "deploy", signal: signal() })
+
+    const params = (runTurn as unknown as jest.Mock).mock.calls[0][0]
+    expect(params.prompt).toContain("SYS")
+    expect(params.prompt).toContain("deploy")
+    expect(params.timeoutMs).toBeGreaterThan(0)
+    // The turn must be bounded: a wedged one would leave the composer spinning.
+    const opts = await params.resolveOptions({} as BuildOptionsContext)
+    expect(opts.allowedTools).toEqual([])
+    expect(opts.maxTurns).toBe(1)
+  })
+
+  it("forwards the abort signal so an abandoned turn stops billing", async () => {
+    const runTurn = jest.fn(async () => ({ sessionId: "s", text: "x" })) as never
+    const complete = createTuiAgentComplete({ config, runTurn })
+    const ac = new AbortController()
+    await complete({ system: "SYS", prompt: "deploy", signal: ac.signal })
+    expect((runTurn as unknown as jest.Mock).mock.calls[0][0].signal).toBe(ac.signal)
+  })
+
+  it("does not start a turn when the signal already aborted", async () => {
+    const runTurn = jest.fn(async () => ({ sessionId: "s", text: "x" })) as never
+    const complete = createTuiAgentComplete({ config, runTurn })
+    const ac = new AbortController()
+    ac.abort()
+    expect(await complete({ system: "SYS", prompt: "deploy", signal: ac.signal })).toBeNull()
+    expect(runTurn).not.toHaveBeenCalled()
+  })
+
+  it("treats a failed turn as no suggestion", async () => {
+    const runTurn = jest.fn(async () => {
+      throw new Error("no credentials")
+    }) as never
+    const complete = createTuiAgentComplete({ config, runTurn })
+    expect(await complete({ system: "SYS", prompt: "deploy", signal: signal() })).toBeNull()
+  })
+})
+
+describe("agent tier gating", () => {
+  it("stays off unless explicitly enabled", () => {
+    expect(isAgentSuggestEnabled({} as ResolvedConfig)).toBe(false)
+    expect(isAgentSuggestEnabled({ autosuggest: {} } as ResolvedConfig)).toBe(false)
+    expect(isAgentSuggestEnabled({ autosuggest: { agent: true } } as ResolvedConfig)).toBe(true)
   })
 })

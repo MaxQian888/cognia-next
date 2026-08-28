@@ -63,6 +63,10 @@ export function ComposerAssistanceCard() {
   const debounceMs = ca.ghostText?.debounceMs ?? DEFAULT_DEBOUNCE
   const startersEnabled = ca.suggestions?.starters !== false
   const followUpsEnabled = ca.suggestions?.followUps !== false
+  // Opt-in, and shown only when one of the two features it rescues is on:
+  // it is the difference between "silently does nothing on a subscription" and
+  // "spends an agent turn after every reply". See `suggestions.agentFallback`.
+  const agentFallbackEnabled = ca.suggestions?.agentFallback === true
   const providers = useUtilityProviderOptions()
 
   function update(patch: Partial<ComposerAssistance>): void {
@@ -140,6 +144,16 @@ export function ComposerAssistanceCard() {
         checked={followUpsEnabled}
         onChange={(next) => update({ suggestions: { ...ca.suggestions, followUps: next } })}
       />
+
+      {startersEnabled || followUpsEnabled ? (
+        <ToggleRow
+          id="composer-agent-fallback"
+          label={t("agentFallback.label")}
+          hint={t("agentFallback.hint")}
+          checked={agentFallbackEnabled}
+          onChange={(next) => update({ suggestions: { ...ca.suggestions, agentFallback: next } })}
+        />
+      ) : null}
 
       {/* `composerAssistance.model` was readable by all four helpers above and
           writable by nobody — the one knob that lets them run on a provider

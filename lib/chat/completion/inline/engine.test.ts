@@ -65,6 +65,17 @@ function asyncProvider(
   return { id, label: id, priority: 30, sync: false, getCompletions: (ctx) => produce(ctx) }
 }
 
+function manualProvider(
+  id: string,
+  produce: (ctx: InlineCompletionContext) => Promise<InlineSuggestion[]>
+): InlineCompletionProvider {
+  return { id, label: id, priority: 20, manual: true, getCompletions: (ctx) => produce(ctx) }
+}
+
+function agentHit(text: string): InlineSuggestion {
+  return { text, source: "agent", providerId: "manual", score: 0.85 }
+}
+
 function historyHit(text: string): InlineSuggestion {
   return { text, source: "history", providerId: "sync", score: 0.5 }
 }
@@ -532,5 +543,271 @@ describe("InlineCompletionEngine — lifecycle", () => {
     engine.dispose()
     await scheduler.advance(DEBOUNCE)
     expect(calls).toEqual([])
+  })
+})
+
+describe("InlineCompletionEngine — manual tier", () => {
+  it("never runs a manual provider from feed(), however long you wait", async () => {
+    let calls = 0
+    const { engine, scheduler } = build([
+      manualProvider("manual", async () => {
+        calls += 1
+        return [agentHit("deploy the staging build")]
+      }),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    // The whole point of the tier: no debounce fires it, because one agent turn
+    // per typing burst is the cost shape it exists to avoid.
+    await scheduler.advance(10_000)
+    expect(calls).toBe(0)
+    expect(engine.getView().ghost).toBe("")
+  })
+
+  it("runs on requestManual() and merges into the candidate list", async () => {
+    const { engine } = build([
+      syncProvider("sync", () => [historyHit("deploy it")]),
+      manualProvider("manual", async () => [agentHit("deploy the staging build")]),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    expect(engine.getView().ghost).toBe("it")
+
+    engine.requestManual()
+    await drain()
+    const view = engine.getView()
+    // `agent` outranks `history`, so the requested answer is active — and the
+    // history hit is still there to cycle back to.
+    expect(view.ghost).toBe("the staging build")
+    expect(view.candidates).toHaveLength(2)
+    expect(view.manualPending).toBe(false)
+  })
+
+  it("reports manualAvailable so a surface knows whether to offer the key", async () => {
+    const without = build([syncProvider("sync", () => [historyHit("x y")])])
+    without.engine.feed("x ")
+    await drain()
+    expect(without.engine.getView().manualAvailable).toBe(false)
+
+    const withManual = build([manualProvider("manual", async () => [])])
+    withManual.engine.feed("x ")
+    await drain()
+    expect(withManual.engine.getView().manualAvailable).toBe(true)
+  })
+
+  it("reports manualPending while the turn is in flight", async () => {
+    let release: (v: InlineSuggestion[]) => void = () => {}
+    const { engine } = build([
+      manualProvider("manual", () => new Promise<InlineSuggestion[]>((r) => (release = r))),
+    ])
+    engine.feed("deploy ")
+    await drain()
+
+    engine.requestManual()
+    await drain()
+    expect(engine.getView().manualPending).toBe(true)
+
+    release([agentHit("deploy now")])
+    await drain()
+    expect(engine.getView().manualPending).toBe(false)
+    expect(engine.getView().ghost).toBe("now")
+  })
+
+  it("ignores a second request while one is in flight", async () => {
+    let calls = 0
+    let release: (v: InlineSuggestion[]) => void = () => {}
+    const { engine } = build([
+      manualProvider("manual", () => {
+        calls += 1
+        return new Promise<InlineSuggestion[]>((r) => (release = r))
+      }),
+    ])
+    engine.feed("deploy ")
+    await drain()
+
+    engine.requestManual()
+    await drain()
+    engine.requestManual()
+    engine.requestManual()
+    await drain()
+    // A key the user can lean on must not fan out into three agent turns.
+    expect(calls).toBe(1)
+    release([])
+    await drain()
+  })
+
+  it("serves a repeat request for the same draft from cache", async () => {
+    let calls = 0
+    const { engine } = build([
+      manualProvider("manual", async () => {
+        calls += 1
+        return [agentHit("deploy now")]
+      }),
+    ])
+    engine.feed("deploy ")
+    await drain()
+
+    engine.requestManual()
+    await drain()
+    engine.dismiss()
+    engine.feed("deploy ")
+    await drain()
+    engine.requestManual()
+    await drain()
+
+    expect(calls).toBe(1)
+    expect(engine.getView().ghost).toBe("now")
+  })
+
+  it("does not let an auto-tier round answer a later manual request", async () => {
+    let manualCalls = 0
+    const { engine, scheduler } = build([
+      asyncProvider("async", async () => [aiHit("deploy it")]),
+      manualProvider("manual", async () => {
+        manualCalls += 1
+        return [agentHit("deploy the staging build")]
+      }),
+    ])
+    engine.feed("deploy ")
+    await scheduler.advance(DEBOUNCE)
+    expect(engine.getView().ghost).toBe("it")
+
+    // The async tier cached this exact draft. Asking explicitly must still run
+    // the agent — the user asked precisely because the cheap answer was not it.
+    engine.requestManual()
+    await drain()
+    expect(manualCalls).toBe(1)
+    expect(engine.getView().ghost).toBe("the staging build")
+  })
+
+  it("survives typing forward along the suggestion without re-running", async () => {
+    let calls = 0
+    const { engine } = build([
+      manualProvider("manual", async () => {
+        calls += 1
+        return [agentHit("deploy the staging build")]
+      }),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    engine.requestManual()
+    await drain()
+
+    engine.feed("deploy the ")
+    await drain()
+    expect(engine.getView().ghost).toBe("staging build")
+    expect(calls).toBe(1)
+  })
+
+  it("still lands when the user typed along while the turn ran", async () => {
+    let release: (v: InlineSuggestion[]) => void = () => {}
+    const { engine } = build([
+      manualProvider("manual", () => new Promise<InlineSuggestion[]>((r) => (release = r))),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    engine.requestManual()
+    await drain()
+
+    // Typing forward is the normal thing to do while waiting on a slow turn.
+    // The answer the user paid for must survive it.
+    engine.feed("deploy the ")
+    await drain()
+    release([agentHit("deploy the staging build")])
+    await drain()
+
+    expect(engine.getView().ghost).toBe("staging build")
+    expect(engine.getView().manualPending).toBe(false)
+  })
+
+  it("drops an answer whose draft moved on, and clears the spinner", async () => {
+    let release: (v: InlineSuggestion[]) => void = () => {}
+    const { engine } = build([
+      manualProvider("manual", () => new Promise<InlineSuggestion[]>((r) => (release = r))),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    engine.requestManual()
+    await drain()
+
+    // The user kept typing somewhere the answer cannot cover.
+    engine.feed("something else entirely")
+    await drain()
+    release([agentHit("deploy the staging build")])
+    await drain()
+
+    expect(engine.getView().ghost).toBe("")
+    expect(engine.getView().manualPending).toBe(false)
+  })
+
+  it("keeps the empty view identity-stable so surfaces can bail out", async () => {
+    const { engine } = build([manualProvider("manual", async () => [])])
+    engine.feed("deploy ")
+    await drain()
+    const first = engine.getView()
+    expect(first.suggestion).toBeNull()
+    // Both surfaces push this into setState; a fresh object each call would
+    // re-render the composer on every no-op notification.
+    expect(engine.getView()).toBe(first)
+
+    // A run that produces nothing ends on the same flags, so the SAME object
+    // comes back — no re-render for a request that found nothing.
+    engine.requestManual()
+    await drain()
+    expect(engine.getView()).toBe(first)
+  })
+
+  it("allocates a new empty view when a flag actually changes", async () => {
+    let release: (v: InlineSuggestion[]) => void = () => {}
+    const { engine } = build([
+      manualProvider("manual", () => new Promise<InlineSuggestion[]>((r) => (release = r))),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    const idle = engine.getView()
+
+    engine.requestManual()
+    await drain()
+    const pending = engine.getView()
+    // `manualPending` flipped, so the surface MUST see a new object or the
+    // spinner never appears.
+    expect(pending).not.toBe(idle)
+    expect(pending.manualPending).toBe(true)
+    expect(engine.getView()).toBe(pending)
+
+    release([])
+    await drain()
+    expect(engine.getView().manualPending).toBe(false)
+  })
+
+  it("is a no-op with no manual provider registered", async () => {
+    const { engine } = build([syncProvider("sync", () => [historyHit("fix it")])])
+    engine.feed("fix ")
+    await drain()
+    engine.requestManual()
+    await drain()
+    expect(engine.getView().ghost).toBe("it")
+  })
+
+  it("treats a provider that sets both manual and sync as manual", async () => {
+    let calls = 0
+    const both: InlineCompletionProvider = {
+      id: "both",
+      label: "both",
+      sync: true,
+      manual: true,
+      getCompletions: async () => {
+        calls += 1
+        return [agentHit("deploy now")]
+      },
+    }
+    const { engine } = build([both])
+    engine.feed("deploy ")
+    await drain()
+    expect(calls).toBe(0)
+
+    engine.requestManual()
+    await drain()
+    expect(calls).toBe(1)
   })
 })

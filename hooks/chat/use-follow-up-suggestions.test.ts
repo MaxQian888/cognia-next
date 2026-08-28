@@ -23,6 +23,11 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...a: unknown[]) => mockBuildClient(...a),
 }))
 
+const mockHeadless = jest.fn()
+jest.mock("@/lib/ai/headless-turn-llm-client", () => ({
+  buildHeadlessTurnLlmClient: (...a: unknown[]) => mockHeadless(...a),
+}))
+
 const mockSuggest = jest.fn()
 jest.mock("@/lib/chat/completion/suggestions", () => ({
   suggestFollowUps: (...a: unknown[]) => mockSuggest(...a),
@@ -106,5 +111,47 @@ describe("useFollowUpSuggestions", () => {
     rerender()
     await waitFor(() => expect(result.current.suggestions).toEqual(["Next?"]))
     expect(mockSuggest).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("useFollowUpSuggestions — agent fallback", () => {
+  beforeEach(() => {
+    mockChatState.messages = assistantLast()
+    mockChatState.status = "idle"
+    mockBuildClient.mockReset().mockReturnValue(null)
+    mockHeadless.mockReset().mockReturnValue({ complete: async () => "[]" })
+    mockSuggest.mockReset().mockResolvedValue(["and then?"])
+  })
+
+  it("stays inert without the opt-in, even with no direct client", async () => {
+    // The historical behaviour on a subscription. Turning it on by default
+    // would spend an agent turn after every single reply.
+    settingsState.settings = { composerAssistance: { suggestions: { followUps: true } } }
+    const { result } = renderHook(() => useFollowUpSuggestions(session))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mockHeadless).not.toHaveBeenCalled()
+    expect(result.current.suggestions).toEqual([])
+  })
+
+  it("falls back to one agent turn when opted in", async () => {
+    settingsState.settings = {
+      composerAssistance: { suggestions: { followUps: true, agentFallback: true } },
+    }
+    const { result } = renderHook(() => useFollowUpSuggestions(session))
+    await waitFor(() => expect(result.current.suggestions).toEqual(["and then?"]))
+    expect(mockHeadless).toHaveBeenCalled()
+  })
+
+  it("prefers the cheap direct client when one resolves", async () => {
+    mockBuildClient.mockReturnValue({ complete: async () => "[]" })
+    settingsState.settings = {
+      composerAssistance: { suggestions: { followUps: true, agentFallback: true } },
+    }
+    const { result } = renderHook(() => useFollowUpSuggestions(session))
+    await waitFor(() => expect(result.current.suggestions).toEqual(["and then?"]))
+    // A user with a pasted key must never be charged an agent turn for this.
+    expect(mockHeadless).not.toHaveBeenCalled()
   })
 })

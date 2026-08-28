@@ -158,6 +158,7 @@ function InputImpl({
   vimEnabled = false,
   localSuggestEnabled = true,
   aiComplete,
+  agentComplete,
   suggestDebounceMs,
 }: {
   input: InputState
@@ -203,6 +204,8 @@ function InputImpl({
   localSuggestEnabled?: boolean
   /** Model-backed inline completion. Omit/null → local-only autosuggest. */
   aiComplete?: InlineCompleteFn | null
+  /** Agent-turn completion, run only on the alt+\\ request. */
+  agentComplete?: InlineCompleteFn | null
   /** Debounce before querying the model tier, ms. Clamped [200, 2000]. */
   suggestDebounceMs?: number
 }) {
@@ -422,6 +425,7 @@ function InputImpl({
     commands: suggestCommands,
     localEnabled: localSuggestEnabled,
     aiComplete: aiComplete ?? null,
+    agentComplete: agentComplete ?? null,
     debounceMs: suggestDebounceMs,
     cwd,
   })
@@ -436,6 +440,17 @@ function InputImpl({
     return inline.candidates.length > 1
       ? `${source} ${inline.index + 1}/${inline.candidates.length} · alt+] cycles`
       : source
+  })()
+  // The agent tier only runs when asked, so its key has to be visible at the
+  // moment it is useful — which is when the free tiers found nothing and there
+  // is no ghost to hang a badge off. Rendered independently of `suggestion`
+  // for exactly that reason.
+  const manualBadge = (() => {
+    if (!inline.manualAvailable || !cursorAtEnd || disabled || popupOpen) return null
+    if (inline.manualPending) return "asking the agent…"
+    // Nothing to say once a suggestion is already showing its own badge, unless
+    // the user might want a better one — which is always, so keep it short.
+    return text.trim().length > 0 ? "alt+\\ agent" : null
   })()
 
   const setBuffer = (next: InputBuffer) => {
@@ -627,12 +642,25 @@ function InputImpl({
         // handled: false → control chords fall through to the default flow.
       }
     }
+    // Alt+\\ asks the agent tier for a continuation. Outside the `suggestion`
+    // guard below on purpose: the tier exists to produce a suggestion when the
+    // free ones had none, so requiring one first would make the key unreachable
+    // exactly when it is wanted. Still gated on `cursorAtEnd` — a completion
+    // only means anything at the end of the draft — and on the tier being
+    // registered, so the keystroke falls through when it is switched off.
+    if (inline.manualAvailable && cursorAtEnd && !disabled && key.meta && inputCh === "\\") {
+      inline.requestManual()
+      return
+    }
     // Inline ghost-suggestion keys, handled before normal key interpretation.
-    // `→` at the very end of the draft accepts (a no-op move otherwise), and
-    // Alt+]/Alt+[ walk the ranked alternatives — same bindings as the desktop
-    // composer, so the two surfaces are muscle-memory compatible.
+    // Tab and `→` both accept: Tab is what the desktop composer uses (and
+    // `interpretKey` maps it to `none` with no popup open, so it is free here),
+    // while `→` at the end of the draft is a no-op move and was this surface's
+    // original binding — keeping both makes the two composers muscle-memory
+    // compatible without retraining anyone already using the arrow.
+    // Alt+]/Alt+[ walk the ranked alternatives, same as the desktop.
     if (suggestion && cursorAtEnd) {
-      if (key.rightArrow) {
+      if (key.rightArrow || (key.tab && !key.shift)) {
         const next = inline.accept()
         if (next !== null) {
           setBuffer(bufferFromText(next))
@@ -842,6 +870,12 @@ function InputImpl({
                   ) : null}
                 </>
               )}
+              {visualRow.cursorCol !== null && cursorAtEnd && manualBadge ? (
+                <Text color={theme.muted} dimColor>
+                  {"  "}
+                  {manualBadge}
+                </Text>
+              ) : null}
             </Box>
           ))}
         </Box>

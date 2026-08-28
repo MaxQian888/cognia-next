@@ -1096,6 +1096,12 @@ function ComposerInner(props: InnerProps) {
         return t("ghostSourceAi")
       case "agent":
         return t("ghostSourceAgent")
+      // Unreachable today: no plugin can register an inline-completion
+      // provider (no SDK surface, and the provider list is built from the
+      // built-in factories), so nothing ever produces this source. Kept — with
+      // its label — so the branch is ready when that surface lands rather than
+      // being rediscovered then. Pinned by
+      // `lib/chat/completion/inline/types.test.ts`.
       case "plugin":
         return t("ghostSourcePlugin")
       default:
@@ -1965,6 +1971,26 @@ function ComposerInner(props: InnerProps) {
       if (e.key === "Escape" && activeParamId) {
         e.preventDefault()
         setActiveParamId(null)
+        return
+      }
+      // Alt+\ asks the agent tier for a continuation. Deliberately OUTSIDE the
+      // `ghost.ghost` guard below: its whole purpose is to produce a suggestion
+      // when the free tiers had nothing to offer, so requiring one first would
+      // make the key unreachable exactly when it is wanted. `requestManual` is
+      // a no-op when the tier is unavailable, so the keystroke still falls
+      // through on a shell that cannot carry a turn.
+      // `turnStatus === "streaming"` mirrors the ghost's own suppression: while
+      // a turn runs, every `feed` resets the engine, so a manual answer would
+      // appear and be wiped on the next keystroke.
+      if (
+        !completionTrigger &&
+        e.altKey &&
+        e.key === "\\" &&
+        ghost.manualAvailable &&
+        turnStatus !== "streaming"
+      ) {
+        e.preventDefault()
+        ghost.requestManual()
         return
       }
       // Tab accepts the dim continuation; Esc dismisses it; Alt+]/Alt+[ walk

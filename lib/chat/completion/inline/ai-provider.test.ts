@@ -1,4 +1,10 @@
-import { AI_PROVIDER_ID, createAiCompletionProvider, type InlineCompleteFn } from "./ai-provider"
+import {
+  AGENT_PROVIDER_ID,
+  AI_PROVIDER_ID,
+  createAgentCompletionProvider,
+  createAiCompletionProvider,
+  type InlineCompleteFn,
+} from "./ai-provider"
 import type { InlineCompletionContext } from "./types"
 
 function ctx(draft: string, overrides: Partial<InlineCompletionContext> = {}) {
@@ -158,5 +164,40 @@ describe("createAiCompletionProvider", () => {
     })
     const out = await provider.getCompletions(ctx("fix "), signal())
     expect(out[0].score).toBe(0.42)
+  })
+})
+
+describe("createAgentCompletionProvider", () => {
+  const complete: InlineCompleteFn = async () => "the staging build"
+
+  it("is manual, so the engine keeps it off the keystroke path", () => {
+    const p = createAgentCompletionProvider({ complete })
+    expect(p.manual).toBe(true)
+    expect(p.id).toBe(AGENT_PROVIDER_ID)
+    expect(p.id).not.toBe(AI_PROVIDER_ID)
+  })
+
+  it("labels its suggestions `agent`, which outranks `ai`", async () => {
+    const p = createAgentCompletionProvider({ complete })
+    const [s] = await p.getCompletions(ctx("deploy "), new AbortController().signal)
+    expect(s.source).toBe("agent")
+    expect(s.text).toBe("deploy the staging build")
+    expect(s.detail).toBe("agent")
+  })
+
+  it("cannot be talked out of being manual by a caller", () => {
+    // `source` and `manual` are Omit-ed from the options type, but a JS caller
+    // can still pass them; the factory must win.
+    const p = createAgentCompletionProvider({
+      complete,
+      ...({ manual: false, source: "ai" } as Record<string, never>),
+    })
+    expect(p.manual).toBe(true)
+  })
+
+  it("still honours the PII gate", async () => {
+    const p = createAgentCompletionProvider({ complete, isPiiSafe: () => false })
+    const out = await p.getCompletions(ctx("deploy "), new AbortController().signal)
+    expect(out).toEqual([])
   })
 })

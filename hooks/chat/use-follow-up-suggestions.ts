@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { buildHeadlessTurnLlmClient } from "@/lib/ai/headless-turn-llm-client"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { suggestFollowUps } from "@/lib/chat/completion/suggestions"
 import type { GhostMessage } from "@/lib/chat/completion/ghost-prompt"
@@ -69,12 +70,21 @@ export function useFollowUpSuggestions(
     setLoading(true)
     void (async () => {
       const settings = useSettingsStore.getState().settings as AppSettings | undefined
-      const client = buildUtilityLlmClient({
-        session: session ?? null,
-        appSettings: settings,
-        override: settings?.composerAssistance?.model,
-        featureId: "composer-followups",
-      })
+      const client =
+        buildUtilityLlmClient({
+          session: session ?? null,
+          appSettings: settings,
+          override: settings?.composerAssistance?.model,
+          featureId: "composer-followups",
+        }) ??
+        // The direct client needs an API key the renderer can see, which a
+        // Claude subscription never exposes — so on the app's primary auth mode
+        // this feature was silently inert. One headless turn runs where the
+        // credentials live, and works for every external agent too. Opt-in:
+        // see `suggestions.agentFallback` for why it is not the default.
+        (settings?.composerAssistance?.suggestions?.agentFallback === true
+          ? buildHeadlessTurnLlmClient({ session: session ?? null, label: "Follow-up suggestions" })
+          : null)
       if (!client) {
         if (active) {
           setSuggestions([])

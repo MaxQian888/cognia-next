@@ -30,8 +30,19 @@ import type { GhostMessage } from "../ghost-prompt"
  *  - `history` — a prior submitted draft from this session's ring.
  *  - `command` — a registered slash command name.
  *  - `ai`      — a single-shot LLM continuation.
- *  - `agent`   — produced by an agent/tool-using run (richer, slower than `ai`).
- *  - `plugin`  — contributed by a plugin-registered provider.
+ *  - `agent`   — produced by an agent turn (richer, slower and costlier than
+ *                `ai`; see `createAgentCompletionProvider`).
+ *  - `plugin`  — contributed by a plugin-registered provider. **Deliberately
+ *                dormant**: the ranking slot and the composers' badge label
+ *                exist, but no plugin can reach them — there is no SDK surface
+ *                for registering an `InlineCompletionProvider`, and the hosts
+ *                build their provider lists from the built-in factories only.
+ *                Nothing emits this source today, which
+ *                `types.test.ts` pins so the gap cannot be mistaken for a
+ *                regression, and `components/chat/composer.tsx` notes at the
+ *                badge branch that renders it. Adding the surface means a
+ *                `lib/plugin/api/` module plus an entry in the SDK's capability
+ *                clist — not just producing the value here.
  */
 export type InlineSuggestionSource = "history" | "command" | "ai" | "agent" | "plugin"
 
@@ -129,6 +140,31 @@ export interface InlineCompletionProvider {
    * on every keystroke. Such providers are queried un-debounced. Default false.
    */
   sync?: boolean
+  /**
+   * True when this provider is too expensive to run on a debounce and must be
+   * asked for explicitly (the composer's "ask the model" key).
+   *
+   * This is the third tier, and it exists for one concrete reason: the app's
+   * primary auth mode is a Claude **subscription**, whose OAuth bearer lives in
+   * the keyring / sidecar and is never handed to the renderer (ADR-0025). So
+   * `buildRendererLlmClient` — the cheap direct-to-provider path the `sync:
+   * false` AI provider uses — returns `null` for most users, and the model tier
+   * they switched on silently does nothing. The path that DOES work for every
+   * provider and every external agent is a full agent turn
+   * (`runAndCaptureAssistantReply` on the desktop, `runHeadlessTurn` in the
+   * CLI), because it runs where the credentials are.
+   *
+   * That path cannot be wired to a debounce: one agent turn per typing burst is
+   * the wrong cost shape. Marking such a provider `manual` keeps it off the
+   * keystroke path entirely — {@link InlineCompletionEngine.feed} never calls
+   * it — and runs it only from
+   * {@link InlineCompletionEngine.requestManual}, which a surface binds to a
+   * key. Default false.
+   *
+   * `manual` and `sync` are mutually exclusive; a provider that sets both is
+   * treated as manual.
+   */
+  manual?: boolean
   getCompletions(context: InlineCompletionContext, signal: AbortSignal): Promise<InlineSuggestion[]>
 }
 
@@ -136,7 +172,9 @@ export interface InlineCompletionProvider {
  * Source-priority weights for ranking (higher wins). An agent-backed
  * suggestion outranks a plain single-shot LLM one because it had more context
  * to work with; both outrank the purely mechanical local sources. Plugins sit
- * on top so a user-installed provider can deliberately take precedence.
+ * on top so a user-installed provider can deliberately take precedence — a slot
+ * held open for a surface that does not exist yet (see `plugin` on
+ * {@link InlineSuggestionSource}).
  */
 export const INLINE_SOURCE_PRIORITY: Record<InlineSuggestionSource, number> = {
   plugin: 5,

@@ -16,6 +16,16 @@
  * a model round-trip returned, and showed nothing ever if no model was
  * configured.
  *
+ * ## 1b. A third, explicitly-requested tier
+ *
+ * A provider may also declare itself `manual`. Those are never queried by
+ * `feed()` at all — only by {@link InlineCompletionEngine.requestManual},
+ * which a surface binds to a key. This is what lets the expensive
+ * "run a real agent turn" source (the only one that works without a
+ * renderer-visible API key — see `InlineCompletionProvider.manual`) participate
+ * in the same ranking and cycling as the cheap ones, without ever being put on
+ * a debounce it cannot afford.
+ *
  * ## 2. A candidate list, not a single answer
  *
  * Merged results are ranked (`rank.ts`) into a bounded candidate list the user
@@ -97,6 +107,14 @@ export interface InlineEngineView {
   index: number
   /** True while an async provider query is in flight for the current draft. */
   pending: boolean
+  /**
+   * True when a `manual` provider is registered, i.e. there is something for
+   * {@link InlineCompletionEngine.requestManual} to run. Surfaces use this to
+   * decide whether to advertise the "ask the model" affordance at all.
+   */
+  manualAvailable: boolean
+  /** True while a manual query is in flight. */
+  manualPending: boolean
 }
 
 const EMPTY_VIEW: InlineEngineView = {
@@ -105,6 +123,8 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  manualAvailable: false,
+  manualPending: false,
 }
 
 interface CacheEntry {
@@ -116,20 +136,42 @@ export class InlineCompletionEngine {
   private draft = ""
   private syncSuggestions: InlineSuggestion[] = []
   private asyncSuggestions: InlineSuggestion[] = []
+  private manualSuggestions: InlineSuggestion[] = []
   private candidates: InlineSuggestion[] = []
   private index = 0
   /** Text of a candidate the user explicitly cycled to, so re-ranks respect it. */
   private pinnedText: string | null = null
   private pending = false
+  private manualPending = false
   private timer: unknown = null
   private asyncAbort: AbortController | null = null
+  private manualAbort: AbortController | null = null
+  /**
+   * The draft an in-flight manual run was issued for. `feed` needs it to tell
+   * "the user is typing forward along the sentence they asked about" (keep the
+   * turn — its answer will still apply) from "the user changed their mind"
+   * (cancel it). The visible-candidate narrow path cannot answer that, because
+   * a turn that has not returned yet has produced no candidates to narrow.
+   */
+  private manualDraft: string | null = null
+  /** Last no-suggestion view, reused while its flags hold. See {@link getView}. */
+  private emptyView: InlineEngineView | null = null
   private syncRun = 0
   private disposed = false
   private readonly cache = new Map<string, CacheEntry>()
+  /**
+   * Manual results are cached separately from the debounced ones. Sharing one
+   * map would let an auto-tier round for the same draft (which never ran the
+   * manual providers) answer a later `requestManual` from cache — the user
+   * would press the key and get the auto-tier's answer back, having asked
+   * precisely because that answer was unsatisfying or absent.
+   */
+  private readonly manualCache = new Map<string, CacheEntry>()
 
   private readonly providers: readonly InlineCompletionProvider[]
   private readonly syncProviders: readonly InlineCompletionProvider[]
   private readonly asyncProviders: readonly InlineCompletionProvider[]
+  private readonly manualProviders: readonly InlineCompletionProvider[]
   private readonly buildContext: (draft: string) => InlineCompletionContext
   private readonly onChange: () => void
   private readonly debounceMs: number
@@ -146,8 +188,11 @@ export class InlineCompletionEngine {
     this.providers = [...options.providers].sort(
       (a, b) => (a.priority ?? 100) - (b.priority ?? 100)
     )
-    this.syncProviders = this.providers.filter((p) => p.sync === true)
-    this.asyncProviders = this.providers.filter((p) => p.sync !== true)
+    // `manual` is checked first, so a provider that (incorrectly) sets both
+    // flags stays off the keystroke path — the safe reading of the ambiguity.
+    this.manualProviders = this.providers.filter((p) => p.manual === true)
+    this.syncProviders = this.providers.filter((p) => p.manual !== true && p.sync === true)
+    this.asyncProviders = this.providers.filter((p) => p.manual !== true && p.sync !== true)
     this.buildContext = options.buildContext
     this.onChange = options.onChange
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
@@ -197,6 +242,10 @@ export class InlineCompletionEngine {
         // match the draft.
         this.syncSuggestions = this.syncSuggestions.filter((s) => extendsDraft(s.text, draft))
         this.asyncSuggestions = this.asyncSuggestions.filter((s) => extendsDraft(s.text, draft))
+        // A manually-requested suggestion is the most expensive thing the
+        // engine holds, so it survives typing-along exactly like the others —
+        // narrowing must never silently re-bill an agent turn.
+        this.manualSuggestions = this.manualSuggestions.filter((s) => extendsDraft(s.text, draft))
         this.setCandidates(survivors)
         this.onChange()
         return
@@ -207,15 +256,21 @@ export class InlineCompletionEngine {
     // (so no stale ghost is painted), then rebuild both tiers.
     this.syncSuggestions = []
     this.asyncSuggestions = []
+    this.manualSuggestions = []
     this.pinnedText = null
     this.setCandidates([])
     this.cancelAsync()
+    // Keep an in-flight manual run whose answer can still apply: the user asked
+    // for it and is typing forward while it works, which is the normal thing to
+    // do on a slow turn. `merge` drops the answer if it turns out not to extend
+    // the draft after all, so keeping it can only help.
+    if (this.manualDraft === null || !draft.startsWith(this.manualDraft)) this.cancelManual()
     this.cancelTimer()
 
     void this.runSyncProviders(draft)
 
     if (this.asyncProviders.length > 0) {
-      const cached = this.readCache(draft)
+      const cached = this.readCache(this.cache, draft)
       if (cached !== undefined) {
         this.asyncSuggestions = cached
         this.pending = false
@@ -262,10 +317,66 @@ export class InlineCompletionEngine {
     this.onChange()
   }
 
+  /**
+   * Run the `manual` providers for the current draft, right now.
+   *
+   * This is the explicitly-requested tier: the surface binds it to a key, so
+   * the user — not a timer — decides when to spend an agent turn. Results are
+   * merged and ranked alongside whatever the cheap tiers already produced, so
+   * pressing the key while a history hit is showing adds a candidate to cycle
+   * to rather than replacing what is on screen.
+   *
+   * A no-op when no manual provider is registered, when the draft is below the
+   * length floor, or when a manual query for this exact draft is already in
+   * flight — the last of which matters because the binding is a key the user
+   * can lean on.
+   */
+  requestManual(): void {
+    if (this.disposed) return
+    if (this.manualProviders.length === 0) return
+    if (this.draft.trim().length < this.minChars) return
+    if (this.manualPending) return
+
+    const draft = this.draft
+    const cached = this.readCache(this.manualCache, draft)
+    if (cached !== undefined) {
+      this.manualSuggestions = cached
+      this.merge()
+      this.onChange()
+      return
+    }
+
+    this.manualPending = true
+    this.manualDraft = draft
+    this.onChange()
+    void this.runManualProviders(draft)
+  }
+
   getView(): InlineEngineView {
+    const manualAvailable = this.manualProviders.length > 0
     const suggestion = this.candidates[this.index] ?? null
     if (!suggestion) {
-      return this.pending ? { ...EMPTY_VIEW, pending: true } : EMPTY_VIEW
+      // Reuse the last empty view when nothing about it changed. Both surfaces
+      // push this straight into `setState`, so allocating a fresh object every
+      // call would re-render the composer on every no-op notification — React
+      // bails out on identity, and "no suggestion" is by far the common case.
+      const cached = this.emptyView
+      if (
+        cached !== null &&
+        cached.pending === this.pending &&
+        cached.manualAvailable === manualAvailable &&
+        cached.manualPending === this.manualPending
+      ) {
+        return cached
+      }
+      const next: InlineEngineView = {
+        ...EMPTY_VIEW,
+        pending: this.pending,
+        manualAvailable,
+        manualPending: this.manualPending,
+      }
+      this.emptyView = next
+      return next
     }
     return {
       ghost: ghostSuffix(suggestion.text, this.draft),
@@ -273,6 +384,8 @@ export class InlineCompletionEngine {
       candidates: this.candidates,
       index: this.index,
       pending: this.pending,
+      manualAvailable,
+      manualPending: this.manualPending,
     }
   }
 
@@ -284,8 +397,10 @@ export class InlineCompletionEngine {
   dispose(): void {
     this.disposed = true
     this.cancelAsync()
+    this.cancelManual()
     this.cancelTimer()
     this.cache.clear()
+    this.manualCache.clear()
   }
 
   // --- internals ---------------------------------------------------------
@@ -340,10 +455,53 @@ export class InlineCompletionEngine {
     // which is indistinguishable from a genuine "no suggestions" once flattened
     // — caching it would answer the identical draft from a miss for the whole
     // TTL, so a slow provider would look permanently empty rather than slow.
-    if (!results.some((r) => r.timedOut)) this.writeCache(draft, flat)
+    if (!results.some((r) => r.timedOut)) this.writeCache(this.cache, draft, flat)
     this.asyncSuggestions = flat
     this.pending = false
     if (this.asyncAbort === controller) this.asyncAbort = null
+    this.merge()
+    this.onChange()
+  }
+
+  /**
+   * Run the manual providers for `draft`. Unlike the async tier there is no
+   * debounce (the user already asked) and no shared timer — but the same
+   * staleness, timeout, abort and cache discipline applies, because the work
+   * behind an abandoned agent turn keeps billing if it is not cancelled.
+   */
+  private async runManualProviders(draft: string): Promise<void> {
+    // No `cancelManual()` here: it clears `manualPending`, which `requestManual`
+    // has just set, and there is nothing to cancel anyway — that same method
+    // refuses to start a second run while one is in flight.
+    const controller = new AbortController()
+    this.manualAbort = controller
+    const context = this.buildContext(draft)
+
+    const results = await Promise.all(
+      this.manualProviders.map((p) => this.callProvider(p, context, controller.signal, true))
+    )
+
+    if (this.disposed || controller.signal.aborted) return
+    if (this.manualAbort === controller) this.manualAbort = null
+    this.manualPending = false
+    this.manualDraft = null
+
+    // No `this.draft !== draft` guard here, unlike the async tier.
+    //
+    // That guard is how the async tier drops a stale answer, and it is right
+    // there because `feed` cancels the async run on EVERY path. `feed` does not
+    // cancel a manual run on the live-narrow path — typing forward along the
+    // suggestion — precisely so the turn the user paid for still lands. Adding
+    // the guard back would throw that answer away for typing two more
+    // characters while waiting, which is the normal thing to do.
+    //
+    // A draft that moved somewhere the answer cannot apply is already handled
+    // twice over: `feed` aborts this controller (caught above), and `merge`
+    // ranks through `extendsDraft`, which drops anything that no longer extends
+    // the current draft.
+    const flat = results.flatMap((r) => r.suggestions)
+    if (!results.some((r) => r.timedOut)) this.writeCache(this.manualCache, draft, flat)
+    this.manualSuggestions = flat
     this.merge()
     this.onChange()
   }
@@ -406,9 +564,11 @@ export class InlineCompletionEngine {
   /** Re-rank both tiers into the candidate list, preserving any pinned choice. */
   private merge(): void {
     this.setCandidates(
-      rankInlineSuggestions([...this.syncSuggestions, ...this.asyncSuggestions], this.draft, {
-        limit: this.maxCandidates,
-      })
+      rankInlineSuggestions(
+        [...this.syncSuggestions, ...this.asyncSuggestions, ...this.manualSuggestions],
+        this.draft,
+        { limit: this.maxCandidates }
+      )
     )
   }
 
@@ -428,12 +588,15 @@ export class InlineCompletionEngine {
   private reset(): void {
     this.syncSuggestions = []
     this.asyncSuggestions = []
+    this.manualSuggestions = []
     this.candidates = []
     this.index = 0
     this.pinnedText = null
     this.pending = false
+    this.manualPending = false
     this.syncRun++
     this.cancelAsync()
+    this.cancelManual()
     this.cancelTimer()
   }
 
@@ -444,6 +607,15 @@ export class InlineCompletionEngine {
     }
   }
 
+  private cancelManual(): void {
+    if (this.manualAbort) {
+      this.manualAbort.abort()
+      this.manualAbort = null
+    }
+    this.manualPending = false
+    this.manualDraft = null
+  }
+
   private cancelTimer(): void {
     if (this.timer !== null) {
       this.scheduler.clear(this.timer)
@@ -451,21 +623,25 @@ export class InlineCompletionEngine {
     }
   }
 
-  private readCache(draft: string): InlineSuggestion[] | undefined {
-    const hit = this.cache.get(draft)
+  private readCache(cache: Map<string, CacheEntry>, draft: string): InlineSuggestion[] | undefined {
+    const hit = cache.get(draft)
     if (!hit) return undefined
     if (this.clock() - hit.at > this.cacheTtlMs) {
-      this.cache.delete(draft)
+      cache.delete(draft)
       return undefined
     }
     return hit.suggestions
   }
 
-  private writeCache(draft: string, suggestions: InlineSuggestion[]): void {
-    if (this.cache.size >= CACHE_MAX) {
-      const oldest = this.cache.keys().next().value
-      if (oldest !== undefined) this.cache.delete(oldest)
+  private writeCache(
+    cache: Map<string, CacheEntry>,
+    draft: string,
+    suggestions: InlineSuggestion[]
+  ): void {
+    if (cache.size >= CACHE_MAX) {
+      const oldest = cache.keys().next().value
+      if (oldest !== undefined) cache.delete(oldest)
     }
-    this.cache.set(draft, { suggestions, at: this.clock() })
+    cache.set(draft, { suggestions, at: this.clock() })
   }
 }

@@ -11,7 +11,14 @@
  * providers the desktop composer uses, so both surfaces rank identically:
  *
  *   - history + slash commands (local, instant, free);
- *   - an optional model continuation (debounced, cancellable, cached).
+ *   - an optional model continuation (debounced, cancellable, cached);
+ *   - an optional agent turn, run only when the user presses the key.
+ *
+ * That third tier is not a luxury: the model tier needs an API key readable
+ * from settings, and a Claude subscription keeps its bearer in the keyring, so
+ * for most users it silently produces nothing. A headless turn runs where the
+ * credentials are — which is also why it works for whatever provider or
+ * external agent the session is bound to, with no per-agent adapter.
  *
  * The engine is React-free and separately unit-tested; this file is only the
  * Ink-side glue — build providers from config, feed the buffer, expose the
@@ -25,6 +32,7 @@ import { InlineCompletionEngine, type InlineEngineView } from "@/lib/chat/comple
 import { createHistoryProvider } from "@/lib/chat/completion/inline/history-provider"
 import { createCommandProvider } from "@/lib/chat/completion/inline/command-provider"
 import {
+  createAgentCompletionProvider,
   createAiCompletionProvider,
   type InlineCompleteFn,
 } from "@/lib/chat/completion/inline/ai-provider"
@@ -44,6 +52,8 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  manualAvailable: false,
+  manualPending: false,
 }
 
 export interface UseInlineSuggestOptions {
@@ -77,6 +87,11 @@ export interface UseInlineSuggestOptions {
   localEnabled?: boolean
   /** Model completion. Omit or pass null to run local-only. */
   aiComplete?: InlineCompleteFn | null
+  /**
+   * Agent-turn completion, run ONLY from {@link UseInlineSuggestResult.requestManual}.
+   * Omit or pass null to leave the tier off.
+   */
+  agentComplete?: InlineCompleteFn | null
   /** Debounce before querying the model, ms. Clamped [200, 2000]. */
   debounceMs?: number
   sessionId?: string
@@ -94,6 +109,12 @@ export interface UseInlineSuggestResult {
   index: number
   /** True while a model query is in flight. */
   pending: boolean
+  /** True when the agent tier is registered, i.e. its key is worth advertising. */
+  manualAvailable: boolean
+  /** True while the requested agent turn is running. */
+  manualPending: boolean
+  /** Ask the agent tier for a continuation now. No-op when the tier is off. */
+  requestManual: () => void
   /** Accept the active suggestion; returns the new full buffer text, or null. */
   accept: () => string | null
   cycleNext: () => void
@@ -109,6 +130,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
     commands,
     localEnabled = true,
     aiComplete,
+    agentComplete,
     debounceMs,
     sessionId,
     cwd,
@@ -132,7 +154,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
     MAX_DEBOUNCE,
     Math.max(MIN_DEBOUNCE, debounceMs ?? DEFAULT_DEBOUNCE)
   )
-  const active = localEnabled || !!aiComplete
+  const active = localEnabled || !!aiComplete || !!agentComplete
 
   useEffect(() => {
     // Providers are built inside the effect (not a `useMemo`) so no closure
@@ -145,6 +167,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
       providers.push(createCommandProvider())
     }
     if (aiComplete) providers.push(createAiCompletionProvider({ complete: aiComplete }))
+    if (agentComplete) providers.push(createAgentCompletionProvider({ complete: agentComplete }))
     if (providers.length === 0) {
       engineRef.current = null
       return
@@ -171,7 +194,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
       engineRef.current = null
       setView(EMPTY_VIEW)
     }
-  }, [localEnabled, aiComplete, clampedDebounce, sessionId, cwd])
+  }, [localEnabled, aiComplete, agentComplete, clampedDebounce, sessionId, cwd])
 
   // Derived, not stored: with both tiers off there is no engine to clear the
   // view, and resetting it from an effect would be a cascading render.
@@ -187,8 +210,12 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
   const cycleNext = useCallback(() => engineRef.current?.cycleNext(), [])
   const cyclePrev = useCallback(() => engineRef.current?.cyclePrev(), [])
   const dismiss = useCallback(() => engineRef.current?.dismiss(), [])
+  const requestManual = useCallback(() => engineRef.current?.requestManual(), [])
 
   return {
+    manualAvailable: view.manualAvailable,
+    manualPending: view.manualPending,
+    requestManual,
     ghost: view.ghost,
     suggestion: view.suggestion,
     candidates: view.candidates,

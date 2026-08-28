@@ -63,6 +63,7 @@ export interface BottomRegionProps {
   localSuggestEnabled: boolean
   /** Model-backed inline completion; null when the tier is off. */
   aiComplete: InlineCompleteFn | null
+  agentComplete: InlineCompleteFn | null
   /** Debounce before querying the model tier, ms. */
   suggestDebounceMs?: number
   // Footer
@@ -101,6 +102,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     handlePopupOpenChange,
     localSuggestEnabled,
     aiComplete,
+    agentComplete,
     suggestDebounceMs,
     footerPlanTitle,
     footerRowRef,
@@ -215,6 +217,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             onPopupOpenChange={handlePopupOpenChange}
             localSuggestEnabled={localSuggestEnabled}
             aiComplete={aiComplete}
+            agentComplete={agentComplete}
             suggestDebounceMs={suggestDebounceMs}
           />
         </Box>

@@ -121,4 +121,25 @@ describe("ComposerAssistanceCard", () => {
     expect(screen.getByLabelText("followUps.label")).not.toBeChecked()
     expect(screen.getByLabelText("starters.label")).toBeChecked()
   })
+
+  it("keeps the agent fallback OFF by default — it is a cost change, not a repair", () => {
+    render(<ComposerAssistanceCard />)
+    expect(screen.getByLabelText("agentFallback.label")).not.toBeChecked()
+  })
+
+  it("hides the agent fallback when neither feature it rescues is on", () => {
+    mockSettings = { composerAssistance: { suggestions: { starters: false, followUps: false } } }
+    render(<ComposerAssistanceCard />)
+    expect(screen.queryByLabelText("agentFallback.label")).not.toBeInTheDocument()
+  })
+
+  it("toggles the agent fallback without disturbing the other suggestion flags", async () => {
+    const user = userEvent.setup()
+    mockSettings = { composerAssistance: { suggestions: { starters: false } } }
+    render(<ComposerAssistanceCard />)
+    await user.click(screen.getByLabelText("agentFallback.label"))
+    expect(save).toHaveBeenCalledWith({
+      composerAssistance: { suggestions: { starters: false, agentFallback: true } },
+    })
+  })
 })

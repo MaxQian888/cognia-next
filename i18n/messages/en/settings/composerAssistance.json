@@ -1,4 +1,8 @@
 {
+  "agentFallback": {
+    "hint": "When no API key is saved for these helpers, run one agent turn instead so they work on a subscription. Off by default — follow-ups fire after every reply, so this costs a turn each time.",
+    "label": "Use an agent turn when no API key is set"
+  },
   "assistanceModel": {
     "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
     "heading": "Assistance model",
@@ -17,7 +21,7 @@
   },
   "ghostText": {
     "debounceLabel": "Debounce (ms)",
-    "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
+    "hint": "Show a dim AI continuation as you type; press Tab to accept, Alt+\\ to ask the agent for one. Off by default.",
     "label": "Inline autocomplete"
   },
   "ghostTextLocal": {

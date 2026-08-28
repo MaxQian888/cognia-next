@@ -370,6 +370,8 @@
     "ghostAcceptHint": "Tab",
     "ghostCycleHint": "Alt+] / Alt+[ to cycle",
     "ghostDismiss": "Dismiss suggestion",
+    "ghostManualHint": "Alt+\\ ask the agent",
+    "ghostManualPending": "Asking the agent…",
     "ghostPosition": "{index} of {total}",
     "ghostSourceAgent": "From the agent",
     "ghostSourceAi": "Suggested",

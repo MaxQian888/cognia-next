@@ -144,7 +144,16 @@ export interface ComposerBoxProps {
   enhance?: ReactNode
 
   // ── inline completion ───────────────────────────────────────────────────
-  ghost: { ghost: string; candidates: readonly unknown[]; index: number; dismiss: () => void }
+  ghost: {
+    ghost: string
+    candidates: readonly unknown[]
+    index: number
+    dismiss: () => void
+    /** True when the agent tier is reachable, i.e. its key is worth advertising. */
+    manualAvailable?: boolean
+    /** True while the requested agent turn is running. */
+    manualPending?: boolean
+  }
   ghostSourceLabel?: string
   acceptGhost: () => void
 
@@ -439,6 +448,17 @@ export function ComposerBox({
           // The "Tab" hint is meaningless on touch — mobile gets the tappable
           // accept/dismiss control below instead.
           acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
+          // Advertise the agent tier's key only where it can be pressed (not
+          // touch) and only once there is a draft worth continuing — over an
+          // empty box it is noise, and the tier refuses a too-short draft
+          // anyway.
+          manualHint={
+            !isMobile && ghost.manualAvailable && textInput.value.trim().length > 0
+              ? ghost.manualPending
+                ? t("ghostManualPending")
+                : t("ghostManualHint")
+              : undefined
+          }
         />
         {/*
           Layering: the textarea keeps the caret, the selection, the scroll and

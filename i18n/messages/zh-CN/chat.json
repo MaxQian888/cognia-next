@@ -370,6 +370,8 @@
     "ghostAcceptHint": "Tab",
     "ghostCycleHint": "Alt+] / Alt+[ 切换",
     "ghostDismiss": "忽略建议",
+    "ghostManualHint": "Alt+\\ 让 Agent 补全",
+    "ghostManualPending": "Agent 正在思考…",
     "ghostPosition": "第 {index} / {total} 条",
     "ghostSourceAgent": "来自 Agent",
     "ghostSourceAi": "模型建议",

@@ -176,3 +176,94 @@ describe("useInlineSuggest — model tier", () => {
     expect(result.current.suggestion?.source).toBe("ai")
   })
 })
+
+describe("useInlineSuggest — agent tier", () => {
+  it("does not run the agent on a keystroke, however long you wait", async () => {
+    const agentComplete = jest.fn(async () => "the staging build")
+    const { result } = render({ text: "deploy ", agentComplete })
+    await settle(2_000)
+    expect(agentComplete).not.toHaveBeenCalled()
+    expect(result.current.ghost).toBe("")
+  })
+
+  it("reports the tier as available so the composer can advertise its key", async () => {
+    const { result } = render({ text: "deploy ", agentComplete: async () => "now" })
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+
+    const without = render({ text: "deploy " })
+    await settle(0)
+    expect(without.result.current.manualAvailable).toBe(false)
+  })
+
+  it("runs the agent on requestManual and paints its continuation", async () => {
+    const agentComplete = jest.fn(async () => "the staging build")
+    const { result } = render({ text: "deploy ", agentComplete })
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+    expect(agentComplete).toHaveBeenCalledTimes(1)
+    expect(result.current.suggestion?.source).toBe("agent")
+  })
+
+  it("outranks a history hit, and leaves it to cycle back to", async () => {
+    const { result } = render({
+      text: "deploy ",
+      history: ["deploy it"],
+      agentComplete: async () => "the staging build",
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("it"))
+
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+    expect(result.current.candidates).toHaveLength(2)
+  })
+
+  it("accepts the agent continuation into the buffer text", async () => {
+    const { result } = render({ text: "deploy ", agentComplete: async () => "the staging build" })
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+
+    let accepted: string | null = null
+    act(() => {
+      accepted = result.current.accept()
+    })
+    expect(accepted).toBe("deploy the staging build")
+  })
+
+  it("keeps the local tier working when the agent turn fails", async () => {
+    const { result } = render({
+      text: "deploy ",
+      history: ["deploy it"],
+      agentComplete: async () => {
+        throw new Error("no transport")
+      },
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("it"))
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await settle(50)
+    expect(result.current.ghost).toBe("it")
+  })
+
+  it("works as the only tier, with local completion off", async () => {
+    const { result } = render({
+      text: "deploy ",
+      localEnabled: false,
+      agentComplete: async () => "now",
+    })
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("now"))
+  })
+})

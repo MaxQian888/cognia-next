@@ -189,7 +189,9 @@ import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
 import {
+  createTuiAgentComplete,
   createTuiInlineComplete,
+  isAgentSuggestEnabled,
   isAiSuggestEnabled,
   isLocalSuggestEnabled,
 } from "../input/ai-complete"
@@ -953,6 +955,16 @@ export function App({
         ? createTuiInlineComplete({ sessionId: state.sessionId, config: state.config })
         : null,
     [aiSuggestEnabled, state.sessionId, state.config]
+  )
+  // The agent tier. Separate from `aiComplete` because it resolves its
+  // credentials somewhere else entirely — a headless turn rather than a
+  // settings key — which is what lets it work on a subscription and against
+  // every external agent. Never runs on a keystroke; the composer binds it to
+  // alt+\.
+  const agentSuggestEnabled = isAgentSuggestEnabled(state.config)
+  const agentComplete = useMemo(
+    () => (agentSuggestEnabled ? createTuiAgentComplete({ config: state.config }) : null),
+    [agentSuggestEnabled, state.config]
   )
 
   // `@` mention providers — shared by the composer popup and submit-time
@@ -2749,6 +2761,7 @@ export function App({
               handlePopupOpenChange={handlePopupOpenChange}
               localSuggestEnabled={localSuggestEnabled}
               aiComplete={aiComplete}
+              agentComplete={agentComplete}
               suggestDebounceMs={state.config.autosuggest?.debounceMs}
               footerPlanTitle={footerPlanTitle}
               footerRowRef={footerRowRef}

@@ -32,6 +32,13 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...args: unknown[]) => mockBuildClient(...args),
 }))
 
+const mockHeadlessClient = jest.fn()
+const mockCanRunHeadless = jest.fn(() => true)
+jest.mock("@/lib/ai/headless-turn-llm-client", () => ({
+  buildHeadlessTurnLlmClient: (...args: unknown[]) => mockHeadlessClient(...args),
+  canRunHeadlessTurn: () => mockCanRunHeadless(),
+}))
+
 const mockPii = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (t: string) => mockPii(t),
@@ -213,5 +220,124 @@ describe("useComposerGhostText — local tier", () => {
     // ...then the model upgrades it in place.
     await waitFor(() => expect(result.current.ghost).toBe(" world"))
     expect(result.current.candidates.length).toBe(2)
+  })
+})
+
+describe("useComposerGhostText — agent tier", () => {
+  beforeEach(() => {
+    mockSettingsState.settings = {
+      composerAssistance: { ghostText: { enabled: true, local: false, debounceMs: 200 } },
+    }
+    mockChatState.messages = []
+    mockBuildClient.mockReset()
+    mockHeadlessClient.mockReset()
+    mockCanRunHeadless.mockReset()
+    mockCanRunHeadless.mockReturnValue(true)
+    mockPii.mockReset()
+    mockPii.mockReturnValue(true)
+  })
+
+  it("advertises itself when a turn can be carried", async () => {
+    mockBuildClient.mockReturnValue(null)
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "the staging build") })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+  })
+
+  it("stays away when no transport can carry a turn", async () => {
+    // A pure web tab with no paired companion: there is nothing to fall back TO,
+    // so the key must not be advertised.
+    mockCanRunHeadless.mockReturnValue(false)
+    mockBuildClient.mockReturnValue(null)
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await settle(300)
+    expect(result.current.manualAvailable).toBe(false)
+  })
+
+  it("does not run a turn on a keystroke", async () => {
+    mockBuildClient.mockReturnValue(null)
+    const complete = jest.fn(async () => "the staging build")
+    mockHeadlessClient.mockReturnValue({ complete })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await settle(1_000)
+    expect(complete).not.toHaveBeenCalled()
+    expect(result.current.ghost).toBe("")
+  })
+
+  it("rescues the model tier on a subscription — no direct client, still completes", async () => {
+    // The whole point: `buildUtilityLlmClient` returns null on a subscription,
+    // which used to mean the feature the user switched on did nothing at all.
+    mockBuildClient.mockReturnValue(null)
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "the staging build") })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+    expect(result.current.suggestion?.source).toBe("agent")
+  })
+
+  it("outranks the direct model tier when both answer", async () => {
+    mockSettingsState.settings = {
+      composerAssistance: { ghostText: { enabled: true, debounceMs: 50 } },
+    }
+    mockBuildClient.mockReturnValue({ complete: jest.fn(async () => "it") })
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "the staging build") })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await waitFor(() => expect(result.current.ghost).toBe("it"))
+
+    await act(async () => {
+      result.current.requestManual()
+    })
+    // The answer the user deliberately asked for beats the one a timer produced.
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+  })
+
+  it("accepts the agent continuation like any other suggestion", async () => {
+    mockBuildClient.mockReturnValue(null)
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "the staging build") })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await waitFor(() => expect(result.current.ghost).toBe("the staging build"))
+
+    let accepted: string | null = null
+    act(() => {
+      accepted = result.current.accept()
+    })
+    expect(accepted).toBe("deploy the staging build")
+  })
+
+  it("stays silent when the PII gate rejects the draft", async () => {
+    mockBuildClient.mockReturnValue(null)
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "the staging build") })
+    mockPii.mockReturnValue(false)
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+    await act(async () => {
+      result.current.requestManual()
+    })
+    await settle(200)
+    expect(result.current.ghost).toBe("")
+  })
+
+  it("is not offered at all with the model tier switched off", async () => {
+    mockSettingsState.settings = { composerAssistance: { ghostText: { enabled: false } } }
+    mockHeadlessClient.mockReturnValue({ complete: jest.fn(async () => "x") })
+    const { result } = render()
+    act(() => result.current.feed("deploy "))
+    await settle(100)
+    expect(result.current.manualAvailable).toBe(false)
   })
 })

@@ -13,9 +13,18 @@
  * factory serve BOTH halves of "LLM or agent generated":
  *
  *   - pass a one-shot `LlmClient.complete` wrapper → `source: "ai"`;
- *   - pass a function that runs an agent/tool-using turn → `source: "agent"`,
- *     which outranks plain `ai` in {@link INLINE_SOURCE_PRIORITY} because it
- *     had more context to work from.
+ *   - pass a function that runs an agent turn → `source: "agent"` (see
+ *     {@link createAgentCompletionProvider}), which outranks plain `ai` in
+ *     {@link INLINE_SOURCE_PRIORITY} because it had more context to work from.
+ *
+ * The `agent` half is not a nicety — it is the ONLY tier that works on the
+ * app's primary auth mode. A Claude subscription keeps its bearer in the
+ * keyring / sidecar, so the direct renderer client behind the `ai` tier
+ * resolves to `null` and that tier silently produces nothing. Routing through
+ * an agent turn instead runs where the credentials live, which also makes the
+ * feature work for every external agent (codex, opencode, gemini-cli, …)
+ * without a per-agent adapter — `resolveSendOptions` already picks the
+ * provider, runtime and credentials for whatever the session is bound to.
  *
  * Injecting the call also keeps this module free of provider-resolution and
  * credential concerns, so it is importable from the CLI (which resolves its
@@ -69,6 +78,12 @@ export interface AiCompletionProviderOptions {
   minChars?: number
   /** Confidence reported on the suggestion. Defaults to 0.8. */
   score?: number
+  /**
+   * Keep this provider off the keystroke path entirely — the engine runs it
+   * only from `requestManual()`. Set for anything whose per-call cost is an
+   * agent turn rather than a token completion. Defaults to false.
+   */
+  manual?: boolean
 }
 
 /**
@@ -87,6 +102,7 @@ export function createAiCompletionProvider(
     isPiiSafe = hasNoLeakingPii,
     minChars = DEFAULT_MIN_CHARS,
     score = DEFAULT_AI_SCORE,
+    manual = false,
   } = options
 
   return {
@@ -94,6 +110,7 @@ export function createAiCompletionProvider(
     label,
     priority: 30,
     sync: false,
+    manual,
     async getCompletions(
       context: InlineCompletionContext,
       signal: AbortSignal
@@ -132,4 +149,36 @@ export function createAiCompletionProvider(
       return [{ text, source, providerId: id, detail, score }]
     },
   }
+}
+
+/** Provider id for the built-in agent-turn source. */
+export const AGENT_PROVIDER_ID = "builtin:agent"
+
+/** Confidence reported for an agent continuation — it saw more than the `ai` tier did. */
+const DEFAULT_AGENT_SCORE = 0.85
+
+export type AgentCompletionProviderOptions = Omit<AiCompletionProviderOptions, "source" | "manual">
+
+/**
+ * Build the agent-turn provider: `source: "agent"`, and `manual: true` so it is
+ * only ever run from an explicit user request.
+ *
+ * Both of those are the point. `manual` is what makes an agent turn an
+ * affordable completion source at all — a debounce would spend one per typing
+ * burst — and `source: "agent"` puts it above `ai` in the ranking, so on a
+ * machine that has BOTH a pasted API key and a subscription, the answer the
+ * user deliberately asked for wins over the one a timer produced.
+ */
+export function createAgentCompletionProvider(
+  options: AgentCompletionProviderOptions
+): InlineCompletionProvider {
+  return createAiCompletionProvider({
+    id: AGENT_PROVIDER_ID,
+    label: "Agent",
+    detail: "agent",
+    score: DEFAULT_AGENT_SCORE,
+    ...options,
+    source: "agent",
+    manual: true,
+  })
 }
