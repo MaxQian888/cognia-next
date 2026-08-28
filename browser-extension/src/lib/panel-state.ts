@@ -45,6 +45,14 @@ export type PanelState =
       kind: "ready"
       pairing: PairingRecord
       capability: BrowserCompanionCapabilityV1
+      /**
+       * The revision that came with {@link capability}.
+       *
+       * Held so a poll can tell "the Host is the same as when I last read it"
+       * from "something changed" without re-reading the whole capability every
+       * three seconds.
+       */
+      capabilityRevision?: string
       recent: BrowserContextSubmissionSummaryV1[]
       captured: CapturedPage | null
     }
@@ -204,4 +212,62 @@ export function targetLabel(
   message: (key: string) => string
 ): string {
   return target.kind === "chat" ? message("targetNewTask") : target.label
+}
+
+/** How the panel is themed, relative to the Host. */
+export type AppearanceOverride = "follow-host" | "light" | "dark"
+
+export const APPEARANCE_OVERRIDES: readonly AppearanceOverride[] = ["follow-host", "light", "dark"]
+
+export function isAppearanceOverride(value: unknown): value is AppearanceOverride {
+  return APPEARANCE_OVERRIDES.includes(value as AppearanceOverride)
+}
+
+/**
+ * The label for one appearance choice.
+ *
+ * A `switch` with literal keys rather than a lookup table, for the same reason
+ * `failureReasonMessage` is one: the coverage test finds message keys by
+ * reading the source, so a key reached only through a table variable reads as
+ * one nothing asks for — and would be deleted as dead by the gate that exists
+ * to delete dead ones.
+ */
+export function appearanceOverrideMessage(
+  option: AppearanceOverride,
+  message: (key: string) => string
+): string {
+  switch (option) {
+    case "light":
+      return message("appearanceLight")
+    case "dark":
+      return message("appearanceDark")
+    default:
+      return message("appearanceFollowHost")
+  }
+}
+
+/**
+ * The mode to ask the Host to resolve its palette in, or nothing.
+ *
+ * Three cases, and the middle one is why this is not just the override:
+ *
+ * - the user forced a mode → that mode;
+ * - the Host follows the system, and the panel is following the Host → the mode
+ *   this browser's `prefers-color-scheme` reports, because the Host cannot see
+ *   it and had been answering dark for everyone;
+ * - otherwise nothing, and the Host's own setting stands.
+ *
+ * `followsSystem` is only known after the first answer, so the first call of a
+ * session sends nothing and a second one follows when the flag comes back set.
+ * That costs one extra round trip on connect for a Host in system mode, and
+ * only there.
+ */
+export function preferredModeFor(
+  override: AppearanceOverride,
+  followsSystem: boolean | undefined,
+  systemPrefersDark: boolean
+): "light" | "dark" | undefined {
+  if (override !== "follow-host") return override
+  if (!followsSystem) return undefined
+  return systemPrefersDark ? "dark" : "light"
 }

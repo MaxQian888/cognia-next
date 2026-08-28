@@ -199,6 +199,18 @@
   "settingsTitle": {
     "message": "设置"
   },
+  "appearanceLabel": {
+    "message": "外观"
+  },
+  "appearanceFollowHost": {
+    "message": "跟随 Cognia"
+  },
+  "appearanceLight": {
+    "message": "始终浅色"
+  },
+  "appearanceDark": {
+    "message": "始终深色"
+  },
   "disconnect": {
     "message": "断开这个浏览器"
   },

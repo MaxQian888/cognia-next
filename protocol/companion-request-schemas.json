@@ -844,7 +844,15 @@
     },
     "browser_companion_capability": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "preferredMode": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ]
+        }
+      },
       "additionalProperties": false
     },
     "browser_context_get": {

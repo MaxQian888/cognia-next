@@ -104,11 +104,46 @@ describe("createBrowserCompanionDeps", () => {
     const deps = createBrowserCompanionDeps({}, async () => {
       throw new Error("HostState must not be resolved to answer a capability call")
     })
-    const appearance = await deps.appearance()
+    const { appearance, followsSystem } = await deps.appearance()
 
     expect(appearance.mode).toBe("light")
+    expect(followsSystem).toBe(false)
     expect(Object.keys(appearance.cssVars).length).toBeGreaterThan(0)
     // Still null: the reader went to the database, it did not hydrate anything.
     expect(useSettingsStore.getState().settings).toBeNull()
+  })
+
+  it("says when the Host follows the system, and lets the panel decide", async () => {
+    // The Host cannot see the browser's system theme — nothing in the request
+    // carries it — so `system` used to resolve to dark for everyone, including
+    // people whose system is light. It says so instead, and honours the mode
+    // the panel comes back with.
+    await saveSettings({ theme: "system" })
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("HostState must not be resolved to answer a capability call")
+    })
+
+    const unaided = await deps.appearance()
+    expect(unaided.followsSystem).toBe(true)
+
+    const asked = await deps.appearance("light")
+    expect(asked.appearance.mode).toBe("light")
+    expect(asked.appearance.cssVars).not.toEqual(unaided.appearance.cssVars)
+  })
+
+  it("changes its revision when the theme does, and not otherwise", async () => {
+    // What the panel polls on. A revision that moved for an unrelated
+    // preference would repaint on nothing; one that did not move for a theme
+    // change would leave an open panel wearing the old palette until it was
+    // closed and reopened.
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("unused")
+    })
+    await saveSettings({ theme: "dark" })
+    const before = await deps.capabilityRevision("browser-a")
+    expect(await deps.capabilityRevision("browser-a")).toBe(before)
+
+    await saveSettings({ theme: "light" })
+    expect(await deps.capabilityRevision("browser-a")).not.toBe(before)
   })
 })

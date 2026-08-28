@@ -56,6 +56,10 @@ interface Harness {
   /** `browser_context_get` answers, by submission id. */
   details: Map<string, { errorCode?: string }>
   detailReads: string[]
+  /** The `preferredMode` each `capability()` call carried, in order. */
+  capabilityCalls: (string | undefined)[]
+  /** What `list()` reports as the Host's capability revision. */
+  capabilityRevision?: string
   invalidations: string[]
   capabilityError?: unknown
   submitError?: unknown
@@ -69,6 +73,7 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
     recent: [],
     details: new Map(),
     detailReads: [],
+    capabilityCalls: [],
     invalidations: [],
     ...overrides,
     // After the spread, not before: `overrides` carries its own `store`, and
@@ -105,9 +110,15 @@ function harness(overrides: Partial<Harness> = {}): Harness & { makeClient: neve
 
 function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 = CAPABILITY) {
   return () => ({
-    capability: async () => {
+    capability: async (preferredMode?: "light" | "dark") => {
+      state.capabilityCalls.push(preferredMode)
       if (state.capabilityError) throw state.capabilityError
-      return capability
+      // The Host re-resolves its palette in the mode it was asked for. Faking
+      // that here rather than echoing the request back is what lets a test tell
+      // "the panel asked" from "the panel repainted".
+      return preferredMode
+        ? { ...capability, appearance: { ...capability.appearance, mode: preferredMode } }
+        : capability
     },
     submit: async (request: unknown) => {
       state.submitAttempts.push(request)
@@ -121,7 +132,10 @@ function clientFactory(state: Harness, capability: BrowserCompanionCapabilityV1 
         deepLink: "cognia://session/session-1",
       }
     },
-    list: async () => ({ items: state.recent }),
+    list: async () => ({
+      items: state.recent,
+      ...(state.capabilityRevision ? { capabilityRevision: state.capabilityRevision } : {}),
+    }),
     get: async (submissionId: string) => {
       state.detailReads.push(submissionId)
       const detail = state.details.get(submissionId)
@@ -497,6 +511,91 @@ describe("SidePanel capture and settings", () => {
     await screen.findByTestId("recent-list")
     expect(state.detailReads).toEqual([])
   })
+
+  it("asks the Host to repaint rather than flipping the class itself", async () => {
+    // The panel can toggle `.dark`, but the custom properties underneath it are
+    // a palette only the Host can build — a locally-flipped class would paint a
+    // light layout in dark colours. So the override is a request, not an act.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    await screen.findByTestId("appearance-select")
+    expect(state.capabilityCalls).toEqual([undefined])
+
+    fireEvent.click(screen.getByTestId("appearance-select"))
+    fireEvent.click(await screen.findByRole("option", { name: "appearanceDark" }))
+
+    await waitFor(() => expect(state.capabilityCalls).toContain("dark"))
+    // And it is remembered, so reopening the panel does not revert to the
+    // Host's mode and repaint under the user.
+    await waitFor(() => expect(state.store.get(STORAGE_KEYS.appearanceOverride)).toBe("dark"))
+  })
+
+  it("asks again with its own system theme when the Host follows the system", async () => {
+    // The Host has no way to see this browser's `prefers-color-scheme`, so it
+    // says `followsSystem` and lets the panel answer. Before this it resolved
+    // `system` to dark for everyone.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    // The exact bug: a Host in system mode resolves to dark on its own, and the
+    // browser it is painting is on a light system.
+    renderPanel(state, {
+      ...CAPABILITY,
+      followsSystem: true,
+      appearance: { ...CAPABILITY.appearance, mode: "dark" },
+    })
+    await screen.findByTestId("capture-empty")
+    await waitFor(() => expect(state.capabilityCalls).toEqual([undefined, "light"]))
+  })
+
+  it("does not ask again when the system already agrees with the Host", async () => {
+    // `followsSystem` is not on its own a reason for a second round trip. Only
+    // a disagreement is.
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state, { ...CAPABILITY, followsSystem: true })
+    await screen.findByTestId("capture-empty")
+    expect(state.capabilityCalls).toEqual([undefined])
+  })
+
+  it("does not ask twice when the Host has a mode of its own", async () => {
+    const state = harness({ store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never })
+    renderPanel(state)
+    await screen.findByTestId("capture-empty")
+    expect(state.capabilityCalls).toEqual([undefined])
+  })
+
+  it("repaints when the Host's theme changes under an open panel", async () => {
+    // The capability is read on connect and never again; the poll reads the
+    // list. One string on the list is what tells an already-open panel that
+    // anything the capability describes has moved.
+    const state = harness({
+      store: new Map([[STORAGE_KEYS.pairing, PAIRING]]) as never,
+      capabilityRevision: "rev-1",
+      // A running task, so the panel polls at its active rate rather than
+      // backing off to the fifteen seconds it uses for a settled history.
+      recent: [
+        {
+          submissionId: "sub-1",
+          sessionId: "session-1",
+          title: "A guide",
+          sourceHost: "example.com",
+          captureMode: "selection",
+          status: "running",
+          submittedAt: 1,
+          updatedAt: 2,
+          deepLink: "cognia://session/session-1",
+        },
+      ],
+    })
+    renderPanel(state)
+    await screen.findByTestId("recent-list")
+    expect(state.capabilityCalls).toEqual([undefined])
+
+    state.capabilityRevision = "rev-2"
+    await waitFor(() => expect(state.capabilityCalls).toHaveLength(2), { timeout: 10_000 })
+    // And once. A revision it has already acted on must not re-read on every
+    // later poll.
+    await new Promise((resolve) => setTimeout(resolve, 4_000))
+    expect(state.capabilityCalls).toHaveLength(2)
+  }, 20_000)
 
   it("drops the cached token when the device turns out to be revoked", async () => {
     // The token is dead and its refresh will be refused too. Leaving it in the

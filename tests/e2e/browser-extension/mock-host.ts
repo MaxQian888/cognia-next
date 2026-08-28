@@ -112,6 +112,8 @@ export interface MockHostOptions {
   appearance?: BrowserCompanionAppearanceV1
   /** Advertised by `browser_companion_capability`; drives the panel's gate. */
   schemaVersion?: number
+  /** Whether the Host reports its theme as "follow the system". */
+  followsSystem?: boolean
 }
 
 export interface MockHost {
@@ -129,6 +131,13 @@ export interface MockHost {
   devices(): { deviceId: string; extensionOrigin: string; capabilities: string[] }[]
   /** Move a submission along, as a real run would. */
   setStatus(submissionId: string, status: BrowserSubmissionStatus): void
+  /**
+   * Change what the capability would answer, as changing the desktop theme
+   * does. The revision is what an already-open panel notices.
+   */
+  setCapabilityRevision(next: string): void
+  /** Change the mode the Host resolves its palette in, as a theme change does. */
+  setAppearanceMode(mode: "light" | "dark"): void
   /** Make every later authenticated call answer `device_unavailable`. */
   revokeDevices(): void
   /** Refuse every connection, as a stopped Host would. */
@@ -177,6 +186,11 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
   const workspaces = options.workspaces ?? DEFAULT_WORKSPACES
   const appearance = options.appearance ?? DEFAULT_APPEARANCE
   const schemaVersion = options.schemaVersion ?? 1
+  const followsSystem = options.followsSystem ?? false
+  // Mutable, because the whole point of these two is that they change under a
+  // panel that is already open.
+  let revision = "rev-1"
+  let appearanceMode: "light" | "dark" = appearance.mode
 
   const challenges = new Map<string, { nonce: string; expiresAt: number }>()
   const enrollments = new Map<string, { expiresAt: number; spent: boolean }>()
@@ -415,7 +429,17 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
           limits: BROWSER_CONTEXT_LIMITS,
           supportedCaptureModes: ["metadata", "selection", "readable-page"],
           workspaces,
-          appearance,
+          // The Host re-resolves its palette in the mode it was asked for. The
+          // panel never flips a class itself, so a mock that ignored this would
+          // let a broken override pass.
+          appearance: {
+            ...appearance,
+            mode:
+              body.preferredMode === "light" || body.preferredMode === "dark"
+                ? body.preferredMode
+                : appearanceMode,
+          },
+          followsSystem,
           // Rebuilt on every call, as the real Host does: the catalogue gains
           // the conversation a submission just started, and the panel re-reads
           // it after submitting for exactly that reason.
@@ -424,7 +448,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
       case "browser_context_submit":
         return ok(acceptSubmission(body as unknown as BrowserContextSubmitRequestV1))
       case "browser_context_list":
-        return ok({ items: summaries() })
+        return ok({ items: summaries(), capabilityRevision: revision })
       case "browser_context_get": {
         const row = submissions.find((item) => item.submissionId === body.submissionId)
         if (!row) return send(404, errorBody("submission_not_found", "no such submission"))
@@ -610,6 +634,12 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
         extensionOrigin,
         capabilities,
       })),
+    setCapabilityRevision(next) {
+      revision = next
+    },
+    setAppearanceMode(mode) {
+      appearanceMode = mode
+    },
     setStatus(submissionId, status) {
       const row = submissions.find((item) => item.submissionId === submissionId)
       if (!row) throw new Error(`no submission ${submissionId}`)

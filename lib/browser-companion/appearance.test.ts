@@ -1,7 +1,11 @@
 import { THEME_TOKEN_CSS_VARS } from "@/lib/appearance/theme-token-catalog"
 import type { AppPaletteInput } from "@/lib/appearance/resolve-app-palette"
 
-import { appearanceCssVars, buildBrowserCompanionAppearance } from "./appearance"
+import {
+  appearanceCssVars,
+  buildBrowserCompanionAppearance,
+  capabilityRevisionOf,
+} from "./appearance"
 
 function input(overrides: Partial<AppPaletteInput> = {}): AppPaletteInput {
   return {
@@ -88,5 +92,42 @@ describe("buildBrowserCompanionAppearance", () => {
       density: "compact",
     })
     expect(appearance.density).toBe("compact")
+  })
+})
+
+describe("capabilityRevisionOf", () => {
+  const base = {
+    workspaces: [{ id: "ws", label: "Default", isDefault: true }],
+    deliveryTargets: [{ id: "chat:new", kind: "chat", label: "New task", isDefault: true }],
+    appearance: { mode: "dark", cssVars: { "--background": "black" } },
+    followsSystem: false,
+  }
+
+  it("is stable for the same answer", () => {
+    // Polled every few seconds. A digest that moved on its own would repaint
+    // the panel on nothing.
+    expect(capabilityRevisionOf(base)).toBe(capabilityRevisionOf({ ...base }))
+  })
+
+  it("moves when any part of the answer does", () => {
+    const original = capabilityRevisionOf(base)
+    expect(
+      capabilityRevisionOf({
+        ...base,
+        appearance: { mode: "light", cssVars: { "--background": "white" } },
+      })
+    ).not.toBe(original)
+    expect(capabilityRevisionOf({ ...base, workspaces: [] })).not.toBe(original)
+    expect(capabilityRevisionOf({ ...base, deliveryTargets: [] })).not.toBe(original)
+    // Including the flag, because a Host that starts following the system is a
+    // Host the panel has to answer for.
+    expect(capabilityRevisionOf({ ...base, followsSystem: true })).not.toBe(original)
+  })
+
+  it("treats an absent target list as an empty answer, not as a different one", () => {
+    const { deliveryTargets: _dropped, ...without } = base
+    expect(capabilityRevisionOf(without)).toBe(
+      capabilityRevisionOf({ ...without, deliveryTargets: undefined })
+    )
   })
 })

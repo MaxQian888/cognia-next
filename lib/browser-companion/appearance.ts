@@ -53,6 +53,39 @@ export function appearanceCssVars(input: AppPaletteInput): Record<string, string
   return vars
 }
 
+/**
+ * A digest of the whole capability answer, for the panel's change check.
+ *
+ * Over the resolved values rather than over the settings that produced them:
+ * two different settings that resolve to the same palette are the same thing to
+ * look at, and re-sending a palette because an unrelated preference moved is a
+ * repaint for nothing. `JSON.stringify` is stable enough here because every
+ * input is built by this process in a fixed order — there is no user-supplied
+ * object whose key order could vary between two calls.
+ */
+export function capabilityRevisionOf(capability: {
+  workspaces: unknown
+  deliveryTargets?: unknown
+  appearance: unknown
+  followsSystem?: boolean
+}): string {
+  const digest = JSON.stringify([
+    capability.workspaces,
+    capability.deliveryTargets ?? null,
+    capability.appearance,
+    capability.followsSystem ?? false,
+  ])
+  // FNV-1a. A hash rather than the payload because this rides on every poll,
+  // and cryptographic strength buys nothing: the only question it answers is
+  // "did this change", asked by the party that was already sent the content.
+  let hash = 0x811c9dc5
+  for (let index = 0; index < digest.length; index += 1) {
+    hash ^= digest.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
+}
+
 export function buildBrowserCompanionAppearance(
   input: BrowserAppearanceInput
 ): BrowserCompanionAppearanceV1 {

@@ -76,6 +76,8 @@ export const STORAGE_KEYS = {
   lastWorkspaceId: "cognia.workspace.v1",
   /** A submission whose response never arrived, awaiting a safe retry. */
   pendingSubmission: "cognia.pending.v1",
+  /** `follow-host` | `light` | `dark` — how the panel is themed. */
+  appearanceOverride: "cognia.appearanceOverride.v1",
 } as const
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]

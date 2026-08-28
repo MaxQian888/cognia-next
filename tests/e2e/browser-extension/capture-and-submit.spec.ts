@@ -295,4 +295,40 @@ test.describe("the Host's appearance", () => {
     expect(applied.background).toBe("oklch(1 0 0)")
     expect(applied.radius).toBe("0.625rem")
   })
+
+  test("repaints when the Host's theme changes under an open panel", async ({
+    panel,
+    mockHost,
+  }) => {
+    await pairThroughPanel(panel, mockHost.issueEnrollment())
+    await expect(panel.getByTestId("capture-empty")).toBeVisible()
+    await expect(panel.locator("html")).toHaveClass(/light/)
+
+    // What the desktop changing its theme looks like from here: the capability
+    // answers differently, and the revision on the list is how a panel that has
+    // already read the capability finds out.
+    mockHost.setAppearanceMode("dark")
+    mockHost.setCapabilityRevision("rev-2")
+
+    await expect(panel.locator("html")).toHaveClass(/dark/, { timeout: 20_000 })
+  })
+
+  test("asks the Host to repaint instead of flipping the class itself", async ({
+    panel,
+    mockHost,
+  }) => {
+    await pairThroughPanel(panel, mockHost.issueEnrollment())
+    await expect(panel.getByTestId("capture-empty")).toBeVisible()
+
+    await panel.getByTestId("appearance-select").click()
+    await panel.getByRole("option", { name: "Always dark" }).click()
+
+    await expect(panel.locator("html")).toHaveClass(/dark/)
+    // The palette came from the Host, not from a class the panel flipped over
+    // the light one it already had.
+    const requested = mockHost
+      .requests()
+      .filter((request) => request.path.endsWith("browser_companion_capability"))
+    expect(requested.length).toBeGreaterThan(1)
+  })
 })

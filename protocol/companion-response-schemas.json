@@ -291,6 +291,9 @@
             "additionalProperties": false
           }
         },
+        "followsSystem": {
+          "type": "boolean"
+        },
         "appearance": {
           "type": "object",
           "required": ["mode", "cssVars", "radiusBaseRem", "pillRadiusPx", "density"],
@@ -447,7 +450,7 @@
             "$ref": "#/$defs/BrowserSubmissionSummary"
           }
         },
-        "cursor": {
+        "capabilityRevision": {
           "type": "string",
           "minLength": 1
         }

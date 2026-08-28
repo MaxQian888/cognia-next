@@ -7,6 +7,7 @@ describe("STORAGE_KEYS", () => {
     // added for page text or a token fails here instead of shipping.
     expect(Object.keys(STORAGE_KEYS).sort()).toEqual([
       "appearance",
+      "appearanceOverride",
       "lastWorkspaceId",
       "pairing",
       "pendingSubmission",

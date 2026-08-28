@@ -5510,7 +5510,12 @@ paths:
           application/json:
             schema:
               type: object
-              properties: {}
+              properties:
+                preferredMode:
+                  type: string
+                  enum:
+                    - light
+                    - dark
               additionalProperties: false
       responses:
         "200":

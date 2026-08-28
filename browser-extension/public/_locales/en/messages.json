@@ -199,6 +199,18 @@
   "settingsTitle": {
     "message": "Settings"
   },
+  "appearanceLabel": {
+    "message": "Appearance"
+  },
+  "appearanceFollowHost": {
+    "message": "Match Cognia"
+  },
+  "appearanceLight": {
+    "message": "Always light"
+  },
+  "appearanceDark": {
+    "message": "Always dark"
+  },
   "disconnect": {
     "message": "Disconnect this browser"
   },

@@ -86,8 +86,18 @@ export interface BrowserCompanionDeps {
    * A synchronous reader can only see in-memory state, and the one this used to
    * read is hydrated by a React provider — which the headless brain does not
    * have, so it answered the stock preset there forever.
+   *
+   * `preferredMode` is the panel's own light/dark override, or the mode it
+   * resolved from `prefers-color-scheme` when the Host follows the system. It
+   * is resolved HERE rather than applied in the panel: the panel can toggle a
+   * class, but the custom properties it would be toggling over are a palette
+   * only the Host can build, so a locally-flipped class would paint a light
+   * layout in dark colours.
    */
-  appearance: () => Promise<BrowserCompanionCapabilityV1["appearance"]>
+  appearance: (preferredMode?: "light" | "dark") => Promise<{
+    appearance: BrowserCompanionCapabilityV1["appearance"]
+    followsSystem: boolean
+  }>
   /** `startNewSession`, narrowed to what this module needs. */
   createSession: (input: { title: string; projectId: string }) => Promise<{ id: string }>
   /** Enqueue one message on a session and start its turn. */
@@ -104,6 +114,15 @@ export interface BrowserCompanionDeps {
    * looks like from here.
    */
   sessionStatus: (sessionId: string) => Promise<BrowserSubmissionStatus | null>
+  /**
+   * A digest of what {@link browserCompanionCapability} would answer right now.
+   *
+   * Carried on the list because that is the call the panel already makes on a
+   * timer. Without it, a Host whose theme, workspaces or delivery targets
+   * changed had no way to tell an open panel, and the panel had no cheap way to
+   * ask — it read the capability once, on connect.
+   */
+  capabilityRevision: (deviceId: string) => Promise<string>
 }
 
 /** `cognia://session/<id>` — the link that opens the task on the desktop. */
@@ -113,14 +132,25 @@ export function browserSubmissionDeepLink(sessionId: string): string {
 
 export async function browserCompanionCapability(
   deps: BrowserCompanionDeps,
-  deviceId: string
+  deviceId: string,
+  payload: { preferredMode?: unknown } = {}
 ): Promise<BrowserCompanionCapabilityV1> {
+  // Narrowed rather than cast. The RPC schema already refuses anything else,
+  // but this module is also the one a test or an in-process caller reaches
+  // directly, and an unrecognised value must mean "no preference" rather than
+  // reaching `resolveAppPalette` as a mode it does not know.
+  const preferredMode =
+    payload.preferredMode === "light" || payload.preferredMode === "dark"
+      ? payload.preferredMode
+      : undefined
+  const { appearance, followsSystem } = await deps.appearance(preferredMode)
   return {
     schemaVersion: 1,
     limits: BROWSER_CONTEXT_LIMITS,
     supportedCaptureModes: [...BROWSER_CAPTURE_MODES],
     workspaces: await deps.listWorkspaces(),
-    appearance: await deps.appearance(),
+    appearance,
+    followsSystem,
     // Device-scoped like every other read: the targets beyond "new task" are
     // this browser's own past submissions, so an unbound caller is offered the
     // one target that names nothing.
@@ -342,6 +372,7 @@ export async function listBrowserContextSubmissions(
   if (!deviceId) throw new BrowserCompanionError("caller_unbound", "the caller device is unknown")
   const limit = Math.min(50, Math.max(1, Math.trunc(payload.limit ?? 20)))
   const rows = await deps.listSubmissions(deviceId, limit)
+  const capabilityRevision = await deps.capabilityRevision(deviceId)
   const items = await Promise.all(
     rows.map(async (row) => ({
       submissionId: row.submissionId,
@@ -355,7 +386,7 @@ export async function listBrowserContextSubmissions(
       deepLink: browserSubmissionDeepLink(row.sessionId),
     }))
   )
-  return { items }
+  return { items, capabilityRevision }
 }
 
 export async function getBrowserContextSubmission(

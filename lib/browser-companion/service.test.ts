@@ -26,6 +26,7 @@ interface Harness {
   enqueued: { sessionId: string; messageId: string; text: string }[]
   statuses: Map<string, BrowserSubmissionRow["status"]>
   sessionStatusThrows: boolean
+  followsSystem: boolean
 }
 
 function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
@@ -33,7 +34,7 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
   const createdSessions: Harness["createdSessions"] = []
   const enqueued: Harness["enqueued"] = []
   const statuses = new Map<string, BrowserSubmissionRow["status"]>()
-  const state = { sessionStatusThrows: false }
+  const state = { sessionStatusThrows: false, followsSystem: false }
   let sessionCounter = 0
   const deps: BrowserCompanionDeps = {
     now: () => 1_700_000_000_000,
@@ -41,7 +42,10 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
       { id: "ws-default", label: "Default", isDefault: true },
       { id: "ws-other", label: "Other", isDefault: false },
     ],
-    appearance: async () => APPEARANCE,
+    appearance: async (preferredMode) => ({
+      appearance: { ...APPEARANCE, mode: preferredMode ?? APPEARANCE.mode },
+      followsSystem: state.followsSystem,
+    }),
     createSession: async (input) => {
       createdSessions.push(input)
       sessionCounter += 1
@@ -77,6 +81,7 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
       if (state.sessionStatusThrows) throw new Error("runtime unreachable")
       return statuses.get(sessionId) ?? "running"
     },
+    capabilityRevision: async () => "rev-1",
     ...overrides,
   }
   return {
@@ -90,6 +95,12 @@ function harness(overrides: Partial<BrowserCompanionDeps> = {}): Harness {
     },
     set sessionStatusThrows(value: boolean) {
       state.sessionStatusThrows = value
+    },
+    get followsSystem() {
+      return state.followsSystem
+    },
+    set followsSystem(value: boolean) {
+      state.followsSystem = value
     },
   }
 }

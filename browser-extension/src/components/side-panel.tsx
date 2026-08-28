@@ -35,8 +35,13 @@ import {
   type PairingRecord,
 } from "@ext/src/lib/client"
 import {
+  APPEARANCE_OVERRIDES,
   STATUSES_WITH_A_REASON,
+  appearanceOverrideMessage,
   captureModeFor,
+  isAppearanceOverride,
+  preferredModeFor,
+  type AppearanceOverride,
   isCompatible,
   panelStateForError,
   pollIntervalFor,
@@ -86,6 +91,7 @@ export function SidePanel({
   // not appear is a smaller failure than a system dialog nobody was warned
   // about.
   const [hasPermission, setHasPermission] = useState(false)
+  const [override, setOverride] = useState<AppearanceOverride>("follow-host")
   const [failureCodes, setFailureCodes] = useState<Record<string, string>>({})
   const clientRef = useRef<HostClient | null>(null)
   const pendingSubmissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
@@ -108,6 +114,15 @@ export function SidePanel({
 
   useEffect(() => {
     void api.hasLoopbackPermission().then(setHasPermission)
+  }, [api])
+
+  useEffect(() => {
+    void api
+      .read<unknown>(STORAGE_KEYS.appearanceOverride)
+      .then((stored) => {
+        if (isAppearanceOverride(stored)) setOverride(stored)
+      })
+      .catch(() => undefined)
   }, [api])
 
   // Recover a submission whose response never arrived.
@@ -162,11 +177,20 @@ export function SidePanel({
     const client = makeClient({ pairing, signer })
     clientRef.current = client
     try {
-      const capability = await client.capability()
+      let capability = await client.capability(preferredModeFor(override, undefined, prefersDark()))
       if (!isCompatible(capability)) {
         return {
           state: { kind: "incompatible", hostSchemaVersion: capability.schemaVersion },
         }
+      }
+      // Only now is `followsSystem` known, and it is the one input the Host
+      // cannot supply itself. Asking again is a second round trip, and only for
+      // a Host in system mode with no local override — the alternative is
+      // painting the panel dark for everyone whose system is light, which is
+      // what it did before.
+      const wanted = preferredModeFor(override, capability.followsSystem, prefersDark())
+      if (wanted && wanted !== capability.appearance.mode) {
+        capability = await client.capability(wanted)
       }
       applyAppearance(document.documentElement, capability.appearance)
       void api.write(STORAGE_KEYS.appearance, capability.appearance)
@@ -175,9 +199,16 @@ export function SidePanel({
         capability.workspaces.find((w) => w.id === stored) ??
         capability.workspaces.find((w) => w.isDefault) ??
         capability.workspaces[0]
-      const recent = await client.list().then((page) => page.items)
+      const page = await client.list()
       return {
-        state: { kind: "ready", pairing, capability, recent, captured: null },
+        state: {
+          kind: "ready",
+          pairing,
+          capability,
+          capabilityRevision: page.capabilityRevision,
+          recent: page.items,
+          captured: null,
+        },
         workspaceId: chosen?.id ?? null,
       }
     } catch (error) {
@@ -190,7 +221,7 @@ export function SidePanel({
       if (state.kind === "revoked") client.invalidate()
       return { state }
     }
-  }, [api, makeClient])
+  }, [api, makeClient, override])
 
   const connect = useCallback(async () => {
     const next = await resolveConnection()
@@ -336,6 +367,20 @@ export function SidePanel({
   // Poll only while the panel is visible. A hidden side panel is one the user
   // is not reading, and a request every three seconds for a list nobody is
   // looking at is a cost with no reader.
+  // Refs rather than deps: the poll loop is torn down and rebuilt whenever its
+  // dependencies change, and restarting a three-second timer every time the
+  // recent list moves would make the interval meaningless.
+  const revisionRef = useRef<string | undefined>(undefined)
+  const preferredModeRef = useRef<"light" | "dark" | undefined>(undefined)
+  const readyRevision = state.kind === "ready" ? state.capabilityRevision : undefined
+  const followsSystem = state.kind === "ready" ? state.capability.followsSystem : undefined
+  useEffect(() => {
+    revisionRef.current = readyRevision
+  }, [readyRevision])
+  useEffect(() => {
+    preferredModeRef.current = preferredModeFor(override, followsSystem, prefersDark())
+  }, [override, followsSystem])
+
   useEffect(() => {
     if (state.kind !== "ready") return
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -351,6 +396,28 @@ export function SidePanel({
           setState((current) =>
             current.kind === "ready" ? { ...current, recent: page.items } : current
           )
+          // The Host says, in one string, whether anything the capability
+          // describes has moved — its theme, its workspaces, its delivery
+          // targets. Re-reading the whole capability every poll would send a
+          // palette every three seconds for a thing that changes when the user
+          // does something.
+          if (page.capabilityRevision && page.capabilityRevision !== revisionRef.current) {
+            revisionRef.current = page.capabilityRevision
+            const refreshed = await clientRef.current?.capability(preferredModeRef.current)
+            if (refreshed && isCompatible(refreshed) && !stopped) {
+              applyAppearance(document.documentElement, refreshed.appearance)
+              void api.write(STORAGE_KEYS.appearance, refreshed.appearance)
+              setState((current) =>
+                current.kind === "ready"
+                  ? {
+                      ...current,
+                      capability: refreshed,
+                      capabilityRevision: page.capabilityRevision,
+                    }
+                  : current
+              )
+            }
+          }
         }
       } catch {
         // A failed poll is not a state change: the pairing is still good and
@@ -363,7 +430,7 @@ export function SidePanel({
       stopped = true
       if (timer) clearTimeout(timer)
     }
-  }, [state.kind, pollMs])
+  }, [state.kind, pollMs, api])
 
   const onPair = useCallback(
     async (code: string) => {
@@ -710,6 +777,34 @@ export function SidePanel({
         <p className="font-mono text-[11px] text-muted-foreground" data-testid="diagnostics">
           {api.message("diagnostics")}: {state.pairing.baseUrl}
         </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="cognia-appearance" className="text-xs text-muted-foreground">
+            {api.message("appearanceLabel")}
+          </Label>
+          <Select
+            value={override}
+            onValueChange={(next) => {
+              if (!isAppearanceOverride(next)) return
+              setOverride(next)
+              void api.write(STORAGE_KEYS.appearanceOverride, next)
+            }}
+          >
+            <SelectTrigger
+              id="cognia-appearance"
+              className="w-full"
+              data-testid="appearance-select"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {APPEARANCE_OVERRIDES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {appearanceOverrideMessage(option, api.message)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="ghost"
@@ -734,6 +829,20 @@ export function SidePanel({
 }
 
 const EMPTY: BrowserContextSubmissionSummaryV1[] = []
+
+/**
+ * Whether this browser's system theme is dark.
+ *
+ * Guarded because `matchMedia` is absent in a jsdom test and, historically, in
+ * some extension contexts. Defaulting to `false` there means "no preference
+ * expressed", which leaves the Host's own setting standing rather than forcing
+ * a mode nobody asked for.
+ */
+function prefersDark(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches
+    : false
+}
 
 /**
  * The address as it will actually be sent.

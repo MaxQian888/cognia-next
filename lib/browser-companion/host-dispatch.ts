@@ -22,7 +22,7 @@ import type { HostStateService } from "@/lib/sync/host-state-service"
 import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 
-import { buildBrowserCompanionAppearance } from "./appearance"
+import { buildBrowserCompanionAppearance, capabilityRevisionOf } from "./appearance"
 import { listDeliveryTargets } from "./targets"
 import { browserStatusForRun } from "./run-status"
 import {
@@ -58,7 +58,7 @@ export async function dispatchBrowserCompanionCommand(
   const deps = createBrowserCompanionDeps(payload, resolveHostState)
   switch (command) {
     case "browser_companion_capability":
-      return browserCompanionCapability(deps, deviceId)
+      return browserCompanionCapability(deps, deviceId, payload)
     case "browser_context_submit":
       return submitBrowserContext(deps, deviceId, payload)
     case "browser_context_list":
@@ -87,6 +87,18 @@ export function createBrowserCompanionDeps(
     enqueueMessage: (input) => enqueueOnHostAuthority(payload, resolveHostState, input),
     listDeliveryTargets: (callerDeviceId) =>
       listDeliveryTargets({ listSubmissions: listBrowserSubmissions }, callerDeviceId),
+    // Built from the same readers the capability call uses, so the digest and
+    // the answer it describes cannot disagree — a revision derived from
+    // anything else would be a second definition of "what the capability is".
+    capabilityRevision: async (callerDeviceId) =>
+      capabilityRevisionOf({
+        workspaces: await listHostWorkspaces(),
+        deliveryTargets: await listDeliveryTargets(
+          { listSubmissions: listBrowserSubmissions },
+          callerDeviceId
+        ),
+        ...(await hostAppearance()),
+      }),
     recordSubmission: putBrowserSubmission,
     readSubmission: getBrowserSubmission,
     listSubmissions: listBrowserSubmissions,
@@ -124,6 +136,12 @@ async function listHostWorkspaces(): Promise<{ id: string; label: string; isDefa
 /**
  * The Host's appearance, read from the database rather than from a store.
  *
+ * `preferredMode` wins over the Host's own setting when the panel sent one.
+ * That is the local override and the system-theme answer both: a Host set to
+ * "follow the system" cannot see the browser's system theme — nothing in the
+ * request carries it — so it says `followsSystem` and lets the panel come back
+ * with the mode it actually resolved.
+ *
  * This used to read `useSettingsStore`, which is hydrated by exactly one thing
  * in the repo: `components/providers/settings-hydrator.tsx`. A headless brain
  * has no React tree, so on that host — the one a browser reaches when Cognia is
@@ -136,11 +154,19 @@ async function listHostWorkspaces(): Promise<{ id: string; label: string; isDefa
  * with a real `AppSettings` on every host, hydrated or not. Its sibling
  * `listHostWorkspaces` already self-hydrates for the same reason.
  */
-async function hostAppearance(): Promise<BrowserCompanionCapabilityV1["appearance"]> {
+async function hostAppearance(preferredMode?: "light" | "dark"): Promise<{
+  appearance: BrowserCompanionCapabilityV1["appearance"]
+  followsSystem: boolean
+}> {
   const settings = await getSettings()
-  return buildBrowserCompanionAppearance({
+  const followsSystem = settings.theme !== "light" && settings.theme !== "dark"
+  const appearance = buildBrowserCompanionAppearance({
     colorTheme: settings.colorTheme ?? "default",
-    resolvedTheme: settings.theme === "light" ? "light" : "dark",
+    // Dark is the fallback only when nobody has said anything better: the
+    // panel's override first, then the Host's explicit choice. A Host set to
+    // "follow the system" used to land here and resolve to dark for everyone,
+    // including people whose system is light.
+    resolvedTheme: (preferredMode ?? settings.theme) === "light" ? "light" : "dark",
     activeCustomThemeId: settings.activeCustomThemeId ?? null,
     customThemes: settings.customThemes ?? [],
     accentColor: settings.accentColor,
@@ -148,6 +174,7 @@ async function hostAppearance(): Promise<BrowserCompanionCapabilityV1["appearanc
     stylePackId: settings.stylePack?.packId,
     density: settings.density?.global,
   })
+  return { appearance, followsSystem }
 }
 
 /**

@@ -4388,7 +4388,12 @@ paths:
           application/json:
             schema:
               type: object
-              properties: {}
+              properties:
+                preferredMode:
+                  type: string
+                  enum:
+                    - light
+                    - dark
               additionalProperties: false
       responses:
         "200":
@@ -4481,6 +4486,8 @@ paths:
                         detail:
                           type: string
                       additionalProperties: false
+                  followsSystem:
+                    type: boolean
                   appearance:
                     type: object
                     required:
@@ -4802,7 +4809,7 @@ paths:
                           type: string
                           minLength: 1
                       additionalProperties: false
-                  cursor:
+                  capabilityRevision:
                     type: string
                     minLength: 1
                 additionalProperties: false

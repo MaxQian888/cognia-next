@@ -1,13 +1,17 @@
 import {
+  APPEARANCE_OVERRIDES,
   POLL_ACTIVE_MS,
   POLL_IDLE_MS,
   STATUSES_WITH_A_REASON,
   SUPPORTED_SCHEMA_VERSION,
+  appearanceOverrideMessage,
   captureModeFor,
   failureReasonMessage,
+  isAppearanceOverride,
   isCompatible,
   panelStateForError,
   pollIntervalFor,
+  preferredModeFor,
   selectedTargetId,
   targetLabel,
   targetsForWorkspace,
@@ -168,5 +172,49 @@ describe("delivery targets", () => {
     const message = (key: string) => `i18n:${key}`
     expect(targetLabel(NEW_TASK, message)).toBe("i18n:targetNewTask")
     expect(targetLabel(IN_DEFAULT, message)).toBe("A guide")
+  })
+})
+
+describe("appearance override", () => {
+  it("names three choices and recognises only those", () => {
+    expect([...APPEARANCE_OVERRIDES]).toEqual(["follow-host", "light", "dark"])
+    expect(isAppearanceOverride("light")).toBe(true)
+    // What a corrupted or older stored value looks like. It must fall back to
+    // following the Host rather than being applied as a mode.
+    expect(isAppearanceOverride("system")).toBe(false)
+    expect(isAppearanceOverride(undefined)).toBe(false)
+  })
+
+  it("labels each choice from a literal key the coverage gate can find", () => {
+    const message = (key: string) => `i18n:${key}`
+    expect(appearanceOverrideMessage("follow-host", message)).toBe("i18n:appearanceFollowHost")
+    expect(appearanceOverrideMessage("light", message)).toBe("i18n:appearanceLight")
+    expect(appearanceOverrideMessage("dark", message)).toBe("i18n:appearanceDark")
+  })
+})
+
+describe("preferredModeFor", () => {
+  it("sends the forced mode, whatever the Host or the system say", () => {
+    expect(preferredModeFor("dark", true, false)).toBe("dark")
+    expect(preferredModeFor("light", false, true)).toBe("light")
+  })
+
+  it("leaves the Host's own setting alone when it has one", () => {
+    // Sending a mode here would override a choice the user already made in
+    // Cognia, from a panel that is set to follow it.
+    expect(preferredModeFor("follow-host", false, true)).toBeUndefined()
+  })
+
+  it("answers for the Host when the Host is following the system", () => {
+    // The one thing the Host cannot see. Before this it resolved `system` to
+    // dark for everyone, including people whose system is light.
+    expect(preferredModeFor("follow-host", true, true)).toBe("dark")
+    expect(preferredModeFor("follow-host", true, false)).toBe("light")
+  })
+
+  it("says nothing until the Host has answered once", () => {
+    // `followsSystem` arrives with the first capability response, so the first
+    // call of a session cannot carry it.
+    expect(preferredModeFor("follow-host", undefined, true)).toBeUndefined()
   })
 })

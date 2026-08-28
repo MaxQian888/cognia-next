@@ -140,7 +140,16 @@ export async function pairWithHost({
 
 /** The four calls the panel makes, over one authenticated session. */
 export interface HostClient {
-  capability(): Promise<BrowserCompanionCapabilityV1>
+  /**
+   * What the Host can do, and how it looks.
+   *
+   * `preferredMode` is the panel's light/dark override, or the mode it resolved
+   * from `prefers-color-scheme` for a Host that follows the system. It is the
+   * Host that re-resolves the palette: this panel can toggle a class, but the
+   * custom properties underneath it are a palette only the Host can build, so
+   * flipping locally would paint a light layout in dark colours.
+   */
+  capability(preferredMode?: "light" | "dark"): Promise<BrowserCompanionCapabilityV1>
   submit(request: BrowserContextSubmitRequestV1): Promise<BrowserContextSubmitResponseV1>
   list(limit?: number): Promise<BrowserContextSubmissionSummaryPageV1>
   /**
@@ -196,7 +205,11 @@ export function createHostClient({
   }
 
   return {
-    capability: () => call<BrowserCompanionCapabilityV1>("browser_companion_capability", {}),
+    capability: (preferredMode) =>
+      call<BrowserCompanionCapabilityV1>(
+        "browser_companion_capability",
+        preferredMode ? { preferredMode } : {}
+      ),
     submit: (request) =>
       call<BrowserContextSubmitResponseV1>(
         "browser_context_submit",

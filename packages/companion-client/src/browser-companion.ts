@@ -200,8 +200,22 @@ export interface BrowserContextSubmissionSummaryV1 {
 
 export interface BrowserContextSubmissionSummaryPageV1 {
   items: BrowserContextSubmissionSummaryV1[]
-  /** Opaque; absent when this is the last page. */
-  cursor?: string
+  /**
+   * A digest of everything `browser_companion_capability` would answer.
+   *
+   * Rides along here because this is the call the panel already makes on a
+   * timer, and the capability is not: a Host whose theme, workspaces or
+   * delivery targets changed had no way to say so to a panel that was already
+   * open, and the panel had no cheap way to ask. When this differs from the
+   * value that came with the capability it holds, it re-reads it — one string
+   * per poll instead of a palette, and it covers every part of the capability
+   * rather than only the theme.
+   *
+   * Replaced the never-emitted `cursor`: the panel asks for at most 50 rows and
+   * the ledger keeps 100 per device, so there was no second page to fetch and
+   * no producer ever set it.
+   */
+  capabilityRevision?: string
 }
 
 export interface BrowserContextSubmissionStatusV1 {
@@ -325,6 +339,17 @@ export interface BrowserCompanionCapabilityV1 {
   supportedCaptureModes: BrowserCaptureMode[]
   workspaces: BrowserCompanionWorkspaceV1[]
   appearance: BrowserCompanionAppearanceV1
+  /**
+   * Whether the Host's own theme setting is "follow the system".
+   *
+   * `mode` is always a concrete `light` or `dark`, so an older panel keeps
+   * working: widening that enum would break `applyAppearance`, which only knows
+   * how to toggle the two classes. This flag is the extra bit — a panel that
+   * understands it asks again with its own `prefers-color-scheme` as
+   * `preferredMode`, because the Host cannot see the browser's system theme and
+   * had been resolving `system` to dark for everyone.
+   */
+  followsSystem?: boolean
   /**
    * Where a submission may be aimed, default first.
    *
