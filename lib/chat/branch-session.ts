@@ -251,6 +251,11 @@ function buildChildRow(
     accountId: parent.accountId,
     sandboxEnabled: parent.sandboxEnabled,
     computerUseTarget: parent.computerUseTarget,
+    // The third sandbox column, and the one that kept being missed. Without it
+    // a branch re-resolves its tier from whatever `AppSettings.sandboxTier` says
+    // *now* (`lib/sandbox/binding.ts`), so a child of a `microvm` conversation
+    // can silently run on `os`. Isolation must never decrease unannounced.
+    sandboxTier: parent.sandboxTier,
     systemPrompt: parent.systemPrompt,
     activePresetId: parent.activePresetId,
     workingDir: parent.workingDir,

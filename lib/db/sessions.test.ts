@@ -279,6 +279,7 @@ describe("forkSessionFromParent", () => {
       outputStyle: "concise",
       customOutputStyle: "be terse",
       sandboxEnabled: true,
+      sandboxTier: "microvm",
       maxThinkingTokens: 8192,
       toolFilter: { mode: "deny", tools: ["Bash"] },
       effort: "high",
@@ -294,11 +295,29 @@ describe("forkSessionFromParent", () => {
       outputStyle: "concise",
       customOutputStyle: "be terse",
       sandboxEnabled: true,
+      sandboxTier: "microvm",
       maxThinkingTokens: 8192,
       toolFilter: { mode: "deny", tools: ["Bash"] },
       effort: "high",
       forkedFromSdkSessionId: "sdk-parent",
     })
+  })
+
+  it("carries the parent's sandbox tier so isolation cannot silently drop", async () => {
+    // `forkSessionFromParent` already carried a comment saying branch/fork
+    // carry their source's tier and that "Fork never did" — sitting above the
+    // wrong line, with no column and no test under it. Asserted on the field
+    // directly: `toMatchObject` above cannot see a column nobody listed.
+    const parent = await createSession({
+      title: "Parent",
+      sdkSessionId: "sdk-parent",
+      sandboxEnabled: true,
+      sandboxTier: "microvm",
+    })
+
+    const child = await forkSessionFromParent(parent.id)
+
+    expect(child.sandboxTier).toBe("microvm")
   })
 
   it("files the fork in the parent's workspace, not the UI-active one", async () => {

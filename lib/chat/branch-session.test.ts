@@ -294,6 +294,23 @@ describe("branchSessionAtMessage — direct", () => {
     expect(msgs.map((m) => m.id)).not.toContain("u1")
   })
 
+  it("carries the parent's sandbox tier so isolation cannot silently drop", async () => {
+    // Regression. `buildChildRow` carried `sandboxEnabled` and
+    // `computerUseTarget` but not `sandboxTier`, so a child of a `microvm`
+    // conversation re-resolved its tier from `AppSettings.sandboxTier` at send
+    // time and could quietly run on `os`. Asserted on the field directly, not
+    // through a partial `toMatchObject` — a missing column is invisible to one.
+    await seedSource({ sandboxEnabled: true, sandboxTier: "microvm" })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: visible(),
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.sandboxTier).toBe("microvm")
+    expect(child.sandboxEnabled).toBe(true)
+  })
+
   it("mid-conversation branch stores a transcript seed and does not SDK-fork", async () => {
     await seedSource({ sdkSessionId: "sdk-1" })
     const child = await branchSessionAtMessage({

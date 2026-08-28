@@ -612,7 +612,9 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
     toolFilter: parent.toolFilter,
     // `createSession` only stamps the app-wide default tier when BOTH halves
     // are absent, and its own note says branch/fork/import carry their
-    // source's tier. Fork never did.
+    // source's tier. Fork never did — this comment sat here for two rounds
+    // above the line it was written for, which is why the column kept leaking.
+    sandboxTier: parent.sandboxTier,
     effort: parent.effort,
     thinkingLevel: parent.thinkingLevel,
     forkedFromSdkSessionId: parent.sdkSessionId,
