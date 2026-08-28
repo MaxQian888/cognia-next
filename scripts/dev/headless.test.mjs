@@ -67,6 +67,13 @@ test("documents the renderer-free development entry point", async () => {
   assert.match(result.stdout, /--local-debug/)
   assert.match(result.stdout, /pnpm --silent dev:headless token/)
   assert.match(result.stdout, /pnpm --silent dev:headless pair --device-name browser/)
+  assert.match(result.stdout, /pnpm --silent dev:headless browser-enroll --skip-build/)
+  // The two codes are not interchangeable, so the help must not describe them
+  // with one word: `pair` is the app's pair screen, `browser-enroll` is the
+  // extension.
+  assert.match(result.stdout, /cgnp3 pairing invitation/)
+  assert.match(result.stdout, /mint a cgnb1/)
+  assert.match(result.stdout, /enrollment for the browser extension/)
 })
 
 test("pair action issues a browser invitation from the active headless data directory", async (t) => {
@@ -188,6 +195,187 @@ fs.appendFileSync(
     })
   }
 )
+
+/**
+ * The frozen `cgnb1|` vector.
+ *
+ * `packages/companion-client/src/browser-enrollment-payload.test.ts` asserts
+ * that its own encoder produces this exact string for the same issue, and its
+ * decoder reads it back. Two encoders exist — one here, one in the package the
+ * extension bundles — and this literal is the only thing that keeps them equal.
+ * A year-2100 expiry so the freshness check below never dates the fixture out.
+ */
+const BROWSER_ENROLLMENT_VECTOR =
+  "cgnb1|eyJiYXNlIjoiaHR0cDovLzEyNy4wLjAuMToyNzg5MSIsInRlbmFudCI6InRlbmFudC1hIiwiZW5yb2xsbWVudCI6IjlmMWMuYWEyMiIsImV4cCI6NDEwMjQ0NDgwMDAwMH0"
+
+const BROWSER_ENROLLMENT_ISSUE = {
+  enrollment: "9f1c.aa22",
+  expiresAtMs: 4_102_444_800_000,
+  baseUrl: "http://127.0.0.1:27891",
+  tenantId: "tenant-a",
+}
+
+async function browserEnrollmentServer(root, body, { exitCode = 0, stderr = "" } = {}) {
+  const server = path.join(root, "cognia-server")
+  await writeFile(
+    server,
+    `#!/usr/bin/env node
+process.stdout.write(${JSON.stringify(body)})
+process.stderr.write(JSON.stringify({
+  args: process.argv.slice(2),
+  dataDir: process.env.COGNIA_DATA_DIR,
+  hasMasterKey: Boolean(process.env.COGNIA_MASTER_KEY),
+}) + "\\n")
+process.stderr.write(${JSON.stringify(stderr)})
+process.exitCode = ${exitCode}
+`
+  )
+  await chmod(server, 0o755)
+  return server
+}
+
+test("browser-enroll action encodes the native issue into a cgnb1 code", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-enroll-"))
+  const dataDir = path.join(root, "data")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const server = await browserEnrollmentServer(
+    root,
+    `${JSON.stringify(BROWSER_ENROLLMENT_ISSUE)}\n`
+  )
+
+  const result = await run(
+    [
+      "browser-enroll",
+      "--skip-build",
+      "--data-dir",
+      dataDir,
+      "--browser-listener-port",
+      "27891",
+      "--tenant-id",
+      "tenant-a",
+    ],
+    { COGNIA_HEADLESS_SERVER_BIN: server, COGNIA_MASTER_KEY: "a".repeat(64) }
+  )
+
+  assert.equal(result.code, 0, result.stderr)
+  assert.equal(result.stdout, `${BROWSER_ENROLLMENT_VECTOR}\n`)
+  const capture = JSON.parse(result.stderr.split("\n")[0])
+  assert.deepEqual(capture.args, [
+    "devices",
+    "enroll-browser",
+    "--browser-listener-port",
+    "27891",
+    "--tenant-id",
+    "tenant-a",
+  ])
+  assert.equal(capture.dataDir, dataDir)
+  assert.equal(capture.hasMasterKey, true)
+  // Minting the code is only half the door; the extension's own origin has to
+  // be allowed or every request it makes answers 403.
+  assert.match(result.stderr, /chrome-extension:\/\/<id> in COGNIA_ALLOWED_WEB_ORIGINS/)
+})
+
+test("browser-enroll action lets the native command pick the conventional port", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-default-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const server = await browserEnrollmentServer(root, JSON.stringify(BROWSER_ENROLLMENT_ISSUE))
+
+  const result = await run(
+    ["browser-enroll", "--skip-build", "--data-dir", path.join(root, "data")],
+    {
+      COGNIA_HEADLESS_SERVER_BIN: server,
+      COGNIA_MASTER_KEY: "a".repeat(64),
+    }
+  )
+
+  assert.equal(result.code, 0, result.stderr)
+  // No flags invented here: the default lives in the native command, next to
+  // the listener it has to match.
+  assert.deepEqual(JSON.parse(result.stderr.split("\n")[0]).args, ["devices", "enroll-browser"])
+})
+
+test("browser-enroll action refuses an issue it cannot turn into a usable code", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-bad-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const env = { COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  for (const [name, body, expected] of [
+    // A binary that predates the subcommand, or one that printed prose.
+    ["stale", "Pair invitation for device\n", /did not return JSON.*rebuild or redeploy/s],
+    [
+      "partial",
+      JSON.stringify({ ...BROWSER_ENROLLMENT_ISSUE, enrollment: "" }),
+      /omitted enrollment/,
+    ],
+    [
+      "https",
+      JSON.stringify({ ...BROWSER_ENROLLMENT_ISSUE, baseUrl: "https://127.0.0.1:27890" }),
+      /which a browser extension cannot use/,
+    ],
+    [
+      "off-machine",
+      JSON.stringify({ ...BROWSER_ENROLLMENT_ISSUE, baseUrl: "http://10.0.0.4:27891" }),
+      /which a browser extension cannot use/,
+    ],
+  ]) {
+    const dir = path.join(root, name)
+    await mkdir(dir, { recursive: true })
+    const server = await browserEnrollmentServer(dir, body)
+    const result = await run(
+      ["browser-enroll", "--skip-build", "--data-dir", path.join(dir, "data")],
+      { ...env, COGNIA_HEADLESS_SERVER_BIN: server }
+    )
+    assert.equal(result.code, 3, `${name}: ${result.stderr}`)
+    assert.equal(result.stdout, "", name)
+    assert.match(result.stderr, expected, name)
+  }
+})
+
+test("browser-enroll action forwards the native refusal instead of only an exit code", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-refusal-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  // What the native command says when the loopback listener is not bound —
+  // the diagnosis the operator needs, and the reason stderr is forwarded
+  // before the exit code is examined.
+  const server = await browserEnrollmentServer(root, "", {
+    exitCode: 1,
+    stderr: "Error: the browser listener is not reachable at http://127.0.0.1:27891\n",
+  })
+
+  const result = await run(
+    ["browser-enroll", "--skip-build", "--data-dir", path.join(root, "data")],
+    { COGNIA_HEADLESS_SERVER_BIN: server, COGNIA_MASTER_KEY: "a".repeat(64) }
+  )
+
+  assert.equal(result.code, 3)
+  assert.match(
+    result.stderr,
+    /the browser listener is not reachable at http:\/\/127\.0\.0\.1:27891/
+  )
+  assert.match(result.stderr, /browser enrollment issuer failed with exit code 1/)
+})
+
+test("browser-enroll action refuses flags that belong to the other pairing code", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-flags-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const env = { COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  for (const flags of [
+    // A browser device names itself at registration time.
+    ["--device-name", "browser"],
+    // The enrollment always advertises the loopback listener; an advertised
+    // URL here would silently do nothing.
+    ["--advertise-url", "https://cognia.example.com"],
+    ["--gateway"],
+  ]) {
+    const result = await run(
+      ["browser-enroll", "--data-dir", path.join(root, "data"), ...flags],
+      env
+    )
+    assert.equal(result.code, 2, result.stderr)
+    assert.match(result.stderr, /browser-enroll accepts --data-dir, --browser-listener-port/)
+  }
+})
 
 test("the headless compile stages no tauri bundle resources, and no other build step is affected", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-build-env-"))

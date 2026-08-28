@@ -86,6 +86,35 @@ describe("browser enrollment payload", () => {
     }
   })
 
+  /**
+   * The exact code `pnpm dev:headless browser-enroll` prints.
+   *
+   * `scripts/dev/headless.mjs` encodes this format itself — a plain Node script
+   * cannot import this TypeScript package — so two encoders exist, and this
+   * literal is the only thing keeping them equal. `scripts/dev/headless.test.mjs`
+   * asserts the same string end to end, so a change to either encoder turns one
+   * of the two suites red.
+   *
+   * The expiry is in 2100 because the headless script refuses to print a code
+   * that is already stale, which would otherwise date the fixture out.
+   */
+  const HEADLESS_VECTOR =
+    "cgnb1|eyJiYXNlIjoiaHR0cDovLzEyNy4wLjAuMToyNzg5MSIsInRlbmFudCI6InRlbmFudC1hIiwiZW5yb2xsbWVudCI6IjlmMWMuYWEyMiIsImV4cCI6NDEwMjQ0NDgwMDAwMH0"
+  const HEADLESS_PAYLOAD: BrowserEnrollmentPayload = {
+    baseUrl: "http://127.0.0.1:27891",
+    tenantId: "tenant-a",
+    enrollment: "9f1c.aa22",
+    expiresAt: 4_102_444_800_000,
+  }
+
+  it("agrees byte for byte with the headless dev script's encoder", () => {
+    expect(encodeBrowserEnrollmentPayload(HEADLESS_PAYLOAD)).toBe(HEADLESS_VECTOR)
+    expect(decodeBrowserEnrollmentPayload(HEADLESS_VECTOR, NOW)).toEqual({
+      kind: "ok",
+      payload: HEADLESS_PAYLOAD,
+    })
+  })
+
   it("refuses a payload missing any field", () => {
     for (const key of ["base", "tenant", "enrollment", "exp"]) {
       const body = {

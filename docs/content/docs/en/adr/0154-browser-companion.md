@@ -91,6 +91,17 @@ The payload has its own header (`cgnb1|`) rather than a mode on `cgnp3|`,
 because the two are not interchangeable in either direction and a shared header
 would let each be pasted where it silently cannot work.
 
+A headless host has no Settings pane, so the same enrollment is minted by
+`cognia-server devices enroll-browser` and encoded by
+`pnpm dev:headless browser-enroll`. It keeps the refusal rather than inheriting
+it: a separate process cannot read `state.browser_port()`, so it asks the plane
+itself over public `/healthz` and compares the reported `server_id` against the
+one derived from this data directory's signing secret — which distinguishes
+"the listener is bound" from "some other process holds 27891". The `cgnb1|`
+encoder is *not* reimplemented in Rust; the native command prints the issue as
+JSON and the dev script encodes it with the same package the extension bundles,
+so one format cannot drift into two.
+
 **5. Submission creates the session directly and enqueues one message through
 HostState.**
 

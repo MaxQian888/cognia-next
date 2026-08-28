@@ -82,7 +82,7 @@
       "file": "lib/network/platform-fetch.ts",
       "kind": "fetch",
       "reason": "transport-impl",
-      "note": "The browser arm of the platform transport itself \u2014 this is the call the other paths route around."
+      "note": "The browser arm of the platform transport itself — this is the call the other paths route around."
     },
     {
       "file": "lib/network/platform-streaming-fetch.ts",
@@ -203,6 +203,12 @@
       "kind": "fetch",
       "reason": "transport-impl",
       "note": "The package's inert default, replaced at boot by installDesktopNetworkRuntime."
+    },
+    {
+      "file": "src-tauri/src/bin/cognia-server.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Probes http://127.0.0.1:<browser-port>/healthz before minting a browser enrollment; routing a liveness check of this machine's own listener through a proxy would answer for the wrong host."
     },
     {
       "file": "src-tauri/src/codeserver/process.rs",

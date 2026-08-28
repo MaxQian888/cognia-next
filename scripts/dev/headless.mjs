@@ -21,7 +21,7 @@ class PreflightError extends Error {}
 
 const cliOptionsSchema = z
   .object({
-    action: z.enum(["serve", "pair", "token"]).default("serve"),
+    action: z.enum(["serve", "pair", "token", "browser-enroll"]).default("serve"),
     allowRemoteTerminal: z.boolean().default(false),
     advertiseUrl: z.url("--advertise-url must be a valid URL").optional(),
     browserListenerPort: z.coerce
@@ -97,6 +97,35 @@ const cliOptionsSchema = z
         "pair accepts --data-dir, --device-name, --advertise-url, --port, --tenant-id, and --skip-build",
     }
   )
+  // `--device-name` is absent on purpose: a browser device names itself at
+  // registration time (the extension sends `displayName` with its own key), so
+  // a label passed here would be silently dropped.
+  .refine(
+    ({
+      action,
+      advertiseUrl,
+      allowRemoteTerminal,
+      check,
+      deviceName,
+      dryRun,
+      gateway,
+      localDebug,
+      recoverSecretStore,
+    }) =>
+      action !== "browser-enroll" ||
+      (!advertiseUrl &&
+        !allowRemoteTerminal &&
+        !check &&
+        !deviceName &&
+        !dryRun &&
+        !gateway &&
+        !localDebug &&
+        !recoverSecretStore),
+    {
+      message:
+        "browser-enroll accepts --data-dir, --browser-listener-port, --tenant-id, and --skip-build",
+    }
+  )
   .refine(
     ({ action, check, dryRun, recoverSecretStore }) =>
       !recoverSecretStore || (action === "serve" && !check && !dryRun),
@@ -117,9 +146,9 @@ function createProgram() {
     .addArgument(
       new Argument(
         "[action]",
-        "serve, issue a browser pairing invitation, or print a loopback-only debug service token"
+        "serve, issue a cgnp3 pairing invitation for the app's pair screen, mint a cgnb1 enrollment for the browser extension, or print a loopback-only debug service token"
       )
-        .choices(["serve", "pair", "token"])
+        .choices(["serve", "pair", "token", "browser-enroll"])
         .default("serve")
     )
     .configureHelp({ helpWidth: 120 })
@@ -129,8 +158,11 @@ function createProgram() {
     .option("-p, --port <port>", "Companion HTTPS port.", "27890")
     .option("--data-dir <path>", "Persistent development data directory.")
     .option("--advertise-url <url>", "Public URL written into pairing payloads.")
-    .option("--device-name <name>", "Human-readable label for a browser pairing invitation.")
-    .option("--tenant-id <id>", "Tenant encoded into a browser pairing invitation.")
+    .option(
+      "--device-name <name>",
+      "Human-readable label for a cgnp3 pairing invitation (pair only)."
+    )
+    .option("--tenant-id <id>", "Tenant encoded into a pairing invitation or a browser enrollment.")
     .option("--gateway", "Enable the local LLM gateway.")
     .option(
       "--local-debug",
@@ -139,7 +171,7 @@ function createProgram() {
     .option("--allow-remote-terminal", "Enable remote terminal tickets for granted devices.")
     .option(
       "--browser-listener-port <port>",
-      "Also bind the plaintext loopback listener a browser tab can reach without a certificate (27891 by default in dev:web-headless). Off unless passed."
+      "serve: also bind the plaintext loopback listener a browser tab can reach without a certificate (27891 by default in dev:web-headless); off unless passed. browser-enroll: the already-bound listener the enrollment advertises (27891 when omitted)."
     )
     .option("--skip-build", "Reuse existing headless build artifacts.")
     .option(
@@ -150,7 +182,7 @@ function createProgram() {
     .option("--dry-run", "Print the redacted build and launch plan without writes.")
     .addHelpText(
       "after",
-      "\nExamples:\n  pnpm dev:headless\n  pnpm dev:headless --local-debug --skip-build\n  pnpm dev:headless --skip-build\n  pnpm --silent dev:headless pair --device-name browser\n  pnpm --silent dev:headless token\n"
+      "\nExamples:\n  pnpm dev:headless\n  pnpm dev:headless --local-debug --skip-build\n  pnpm dev:headless --skip-build\n  pnpm --silent dev:headless pair --device-name browser\n  pnpm --silent dev:headless browser-enroll --skip-build\n  pnpm --silent dev:headless token\n"
     )
 }
 
@@ -271,6 +303,25 @@ function pairArgs(options) {
   const args = ["pair", "--device-name", options.deviceName || "browser"]
   if (options.advertiseUrl) args.push("--advertise-url", options.advertiseUrl)
   args.push("--port", String(options.port))
+  if (options.tenantId) args.push("--tenant-id", options.tenantId)
+  return args
+}
+
+/**
+ * `devices enroll-browser` — a different code, for a different plane, carrying
+ * a different capability set.
+ *
+ * `pair` mints an Owner invitation (`cgnp3|`) that the app's pair screen
+ * spends. This mints a browser-companion enrollment (`cgnb1|`) that the
+ * extension spends against the plaintext loopback listener for exactly
+ * `browser.submit` + `browser.read-own`. Neither is usable where the other
+ * belongs, which is why they share neither a subcommand nor a header.
+ */
+function browserEnrollArgs(options) {
+  const args = ["devices", "enroll-browser"]
+  if (options.browserListenerPort) {
+    args.push("--browser-listener-port", String(options.browserListenerPort))
+  }
   if (options.tenantId) args.push("--tenant-id", options.tenantId)
   return args
 }
@@ -627,7 +678,7 @@ async function buildHeadlessArtifacts(env) {
   }
 }
 
-async function buildPairArtifact(paths, env) {
+async function buildServerArtifact(paths, env) {
   const buildEnv = { ...env, TAURI_CONFIG: HEADLESS_TAURI_CONFIG }
   delete buildEnv.COGNIA_MASTER_KEY
   if (path.basename(path.dirname(paths.server)) === "debug") {
@@ -636,8 +687,123 @@ async function buildPairArtifact(paths, env) {
   await runProcess(
     env.COGNIA_HEADLESS_PNPM_BIN || "pnpm",
     ["terminal-host:prepare:dev"],
-    "cognia-server pair build",
+    "cognia-server rebuild",
     buildEnv
+  )
+}
+
+/**
+ * `cgnb1|` — encoded here rather than in Rust, deliberately.
+ *
+ * The decoder the extension actually runs lives in
+ * `packages/companion-client/src/browser-enrollment-payload.ts`, and a second
+ * encoder in Rust would be a wire format free to drift from it with nothing
+ * watching. This copy is pinned to that file from both sides: the package's
+ * own suite asserts the exact string for a fixed payload, and so does
+ * `headless.test.mjs`, so changing either encoder turns one of them red.
+ */
+function encodeBrowserEnrollment(issue) {
+  const payload = JSON.stringify({
+    base: issue.baseUrl,
+    tenant: issue.tenantId,
+    enrollment: issue.enrollment,
+    exp: issue.expiresAtMs,
+  })
+  return `cgnb1|${Buffer.from(payload, "utf8").toString("base64url")}`
+}
+
+/**
+ * `http://` on a loopback host — mirrors the decoder's `isLoopbackHttpOrigin`.
+ *
+ * Checked here so a base URL the extension would refuse fails in the terminal
+ * that produced it, with the reason, instead of inside a side panel that only
+ * knows the code is bad.
+ */
+function isLoopbackHttpOrigin(value) {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  if (url.protocol !== "http:") return false
+  const host = url.hostname
+  return host === "localhost" || host === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+}
+
+/**
+ * Read the `BrowserEnrollmentIssue` JSON the native command prints.
+ *
+ * Every field is checked before anything is encoded: a `cgnb1|` string built
+ * from a partial issue decodes as "invalid" in the extension and says nothing
+ * about where it came from, which is the failure this whole action exists to
+ * avoid.
+ */
+function parseBrowserEnrollmentIssue(output) {
+  const stale = "; rebuild or redeploy cognia-server before enrolling a browser"
+  let issue
+  try {
+    issue = JSON.parse(output.trim())
+  } catch {
+    throw new PreflightError(`browser enrollment issuer did not return JSON${stale}`)
+  }
+  if (issue === null || typeof issue !== "object" || Array.isArray(issue)) {
+    throw new PreflightError(`browser enrollment issuer did not return an issue object${stale}`)
+  }
+  for (const field of ["enrollment", "baseUrl", "tenantId"]) {
+    if (typeof issue[field] !== "string" || issue[field].length === 0) {
+      throw new PreflightError(`browser enrollment issuer omitted ${field}${stale}`)
+    }
+  }
+  if (typeof issue.expiresAtMs !== "number" || !Number.isFinite(issue.expiresAtMs)) {
+    throw new PreflightError(`browser enrollment issuer omitted expiresAtMs${stale}`)
+  }
+  if (!isLoopbackHttpOrigin(issue.baseUrl)) {
+    throw new PreflightError(
+      `browser enrollment names ${issue.baseUrl}, which a browser extension cannot use; ` +
+        `the enrollment must advertise the plaintext loopback listener`
+    )
+  }
+  if (issue.expiresAtMs <= Date.now()) {
+    throw new PreflightError(
+      `browser enrollment expired at ${new Date(issue.expiresAtMs).toISOString()} before it was ` +
+        `printed; check this machine's clock`
+    )
+  }
+  return issue
+}
+
+async function runBrowserEnrollProcess(command, args, env) {
+  let result
+  try {
+    result = await execa(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      reject: false,
+    })
+  } catch (error) {
+    throw new PreflightError(
+      `cognia-server browser enrollment issuer could not start: ${error.message}`
+    )
+  }
+  // Forwarded before the exit check, not after: the native command's refusals
+  // — an unbound listener, a port held by another deployment — are the whole
+  // diagnosis, and swallowing them leaves only an exit code.
+  if (result.stderr) {
+    process.stderr.write(result.stderr.endsWith("\n") ? result.stderr : `${result.stderr}\n`)
+  }
+  if (result.exitCode !== 0 || result.signal) {
+    const status = result.signal ? `signal ${result.signal}` : `exit code ${result.exitCode}`
+    throw new PreflightError(`cognia-server browser enrollment issuer failed with ${status}`)
+  }
+  const issue = parseBrowserEnrollmentIssue(result.stdout || "")
+  process.stdout.write(`${encodeBrowserEnrollment(issue)}\n`)
+  process.stderr.write(
+    `Paste it into the Cognia browser extension. It reaches ${issue.baseUrl} and expires at ` +
+      `${new Date(issue.expiresAtMs).toISOString()}.\n` +
+      `The running host must also allow the extension's own origin: ` +
+      `chrome-extension://<id> in COGNIA_ALLOWED_WEB_ORIGINS, or every request answers 403.\n`
   )
 }
 
@@ -692,11 +858,22 @@ async function main() {
   }
   if (options.action === "pair") {
     await prepareSecret(secret, paths.dataDir)
-    if (!options.skipBuild) await buildPairArtifact(paths, process.env)
+    if (!options.skipBuild) await buildServerArtifact(paths, process.env)
     await validateServerArtifact(paths)
     await runPairProcess(
       paths.server,
       pairArgs(options),
+      tokenEnvironment(paths, secret, process.env)
+    )
+    return
+  }
+  if (options.action === "browser-enroll") {
+    await prepareSecret(secret, paths.dataDir)
+    if (!options.skipBuild) await buildServerArtifact(paths, process.env)
+    await validateServerArtifact(paths)
+    await runBrowserEnrollProcess(
+      paths.server,
+      browserEnrollArgs(options),
       tokenEnvironment(paths, secret, process.env)
     )
     return

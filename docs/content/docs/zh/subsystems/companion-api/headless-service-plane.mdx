@@ -110,6 +110,20 @@ pnpm --silent dev:headless pair --device-name browser --skip-build \
 "Failed to fetch"：明文的非回环地址会在邀请被消耗之前就被拒绝，证书不受信任会显示**此浏览器无法验证
 Host 的证书**，而 allowlist 缺条目会直接点名要加的那个 origin。
 
+**Cognia 浏览器扩展要的是另一种码。** `pair` 签发的是给配对*页*用的 Owner 邀请；扩展消费的是
+**browser enrollment**，它只授予 `browser.submit` 和 `browser.read-own`，此外什么都没有
+（ADR-0154）。两者在任一方向都不可互换——扩展的解码器见到 `cgnp3|` 会当场拒绝——所以它有自己的
+动作：
+
+```bash
+pnpm --silent dev:headless browser-enroll --skip-build --browser-listener-port 27891
+```
+
+它打印一个 `cgnb1|…` 码，并且只有当那个端口上的 `/healthz` 回报的 `server_id` 正是本部署的时候
+才会打印："监听器已绑定"和"27891 被别的进程占着"是两个不同的答案，而只有一个能给出可用的码。
+扩展自己的 origin 同样要被放行，所以粘贴之前先把 `chrome-extension://<id>` 加进
+`COGNIA_ALLOWED_WEB_ORIGINS`，否则它发出的每个请求都会收到 `403`。
+
 ## 内部路由
 
 | 路由 | 用途 |

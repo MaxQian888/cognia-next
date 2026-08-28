@@ -121,6 +121,21 @@ than reported as "Failed to fetch": a plaintext non-loopback address is refused 
 invitation is spent, an untrusted certificate reads as **This browser can't verify the Host's
 certificate**, and a missing allowlist entry names the exact origin to add.
 
+**The Cognia browser extension takes a different code.** `pair` mints an Owner invitation for the
+pair *screen*; the extension spends a **browser enrollment**, which grants `browser.submit` and
+`browser.read-own` and nothing else (ADR-0154). The two are not substitutable in either direction —
+the extension's decoder rejects a `cgnp3|` string on sight — so it has its own action:
+
+```bash
+pnpm --silent dev:headless browser-enroll --skip-build --browser-listener-port 27891
+```
+
+It prints a `cgnb1|…` code, and refuses to print one at all unless `/healthz` on that port answers
+with this deployment's own `server_id`: "the listener is bound" and "another process holds 27891"
+are different answers, and only one of them produces a code that works. The extension's own origin
+has to be allowed too, so add `chrome-extension://<id>` to `COGNIA_ALLOWED_WEB_ORIGINS` before you
+paste, or every request it makes answers `403`.
+
 ## Internal routes
 
 | Route | Purpose |

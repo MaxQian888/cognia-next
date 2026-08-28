@@ -236,6 +236,34 @@ enum DevicesCommand {
         #[arg(long, default_value_t = 600)]
         ttl_seconds: i64,
     },
+    /// Mint a one-time browser-companion enrollment and print it as JSON.
+    ///
+    /// The headless counterpart of the desktop settings card. Until this
+    /// existed `create_browser_enrollment` had exactly one caller — a Tauri
+    /// command — so a host with no renderer could not enrol the extension at
+    /// all, and the invitation `pair` prints is a different code entirely
+    /// (`cgnp3|`, the Owner invitation the app's pair screen consumes).
+    ///
+    /// What this prints is the *issue*, not the `cgnb1|…` string the user
+    /// pastes. That encoder lives in `@cognia/companion-client` beside the
+    /// decoder that has to agree with it byte for byte; a second copy here
+    /// would be a wire format free to drift. `pnpm dev:headless browser-enroll`
+    /// encodes this JSON.
+    EnrollBrowser {
+        /// The plaintext loopback listener the extension will dial — the port
+        /// `serve --browser-listener-port` bound. Defaults to the conventional
+        /// one, and is verified to be live before anything is minted.
+        #[arg(long, default_value_t = app_lib::companion_api::browser_access::DEFAULT_BROWSER_PORT)]
+        browser_listener_port: u16,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
+        /// Five minutes by default, matching the desktop card: this code is
+        /// carried from a terminal to a side panel that is already open, not
+        /// to another machine.
+        #[arg(long, default_value_t = 300)]
+        ttl_seconds: i64,
+    },
     /// List Companion API devices for a tenant.
     List {
         /// Defaults to the tenant this host is bound to.
@@ -332,21 +360,29 @@ fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
         .unwrap_or_else(|| format!("https://127.0.0.1:{port}"))
 }
 
-/// Print the Lark entry environment report, refusing to start when any issue
-/// is fatal.
+/// Report the Lark entry environment, refusing to start when any issue is
+/// fatal.
 ///
-/// Warnings are printed and startup continues — they describe a configuration
+/// Warnings are reported and startup continues — they describe a configuration
 /// that works but not for the deployment it looks like (a loopback public
 /// base, a web base with no companion behind it). A fatal issue is a value
 /// that cannot work at all, and letting the server start with one only moves
 /// the discovery to a user inside a Feishu client.
+///
+/// The sink is injected as a record emitter rather than a byte writer so the
+/// issue's own severity picks the log level — production hands it straight to
+/// `log`, which is what puts these on the one timestamped, coloured stream.
 fn report_lark_env(
-    out: &mut impl std::io::Write,
+    emit: &mut dyn FnMut(log::Level, String),
     issues: &[lark_entry::LarkEnvIssue],
 ) -> Result<(), String> {
     for issue in issues {
-        let level = if issue.fatal { "error" } else { "warning" };
-        let _ = writeln!(out, "[cognia-server] lark {level}: {}", issue.message);
+        let level = if issue.fatal {
+            log::Level::Error
+        } else {
+            log::Level::Warn
+        };
+        emit(level, format!("lark: {}", issue.message));
     }
     let fatal = issues.iter().filter(|issue| issue.fatal).count();
     if fatal == 0 {
@@ -377,7 +413,64 @@ fn store_data_dir() -> PathBuf {
 /// supervisor line — including the piped brain/sidecar output — is silently
 /// dropped, which makes a headless install undebuggable. `COGNIA_LOG`
 /// (error|warn|info|debug) tunes the level; default info.
+///
+/// This binary is the *only* terminal-facing sink on the headless path: the
+/// brain and the sidecar are children whose stdout is piped in here, so the
+/// clock, the level tag and the colour are decided here and nowhere else.
+/// Children emit a bare `[LEVEL] [module] message` (`packages/logging`'s
+/// console transport drops its own clock and icon the moment it sees a piped
+/// stdout) and `headless::brain` re-stamps each line at the level it claimed
+/// instead of flattening the lot to INFO.
 struct StderrLogger;
+
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_DIM: &str = "\x1b[2m";
+
+/// SGR colour for a level tag.
+fn level_color(level: log::Level) -> &'static str {
+    match level {
+        log::Level::Error => "\x1b[1;31m",
+        log::Level::Warn => "\x1b[33m",
+        log::Level::Info => "\x1b[34m",
+        log::Level::Debug => "\x1b[36m",
+        log::Level::Trace => "\x1b[90m",
+    }
+}
+
+/// Colour is a property of the sink, not of the message. `NO_COLOR` (set to
+/// anything) wins outright; `FORCE_COLOR` / `CLICOLOR_FORCE` turn colour on
+/// for pipes and `docker logs` (anything but `0`); otherwise it follows
+/// whether stderr is a terminal.
+fn color_enabled(var: impl Fn(&str) -> Option<String>, stderr_is_tty: bool) -> bool {
+    if var("NO_COLOR").is_some() {
+        return false;
+    }
+    for name in ["FORCE_COLOR", "CLICOLOR_FORCE"] {
+        if let Some(value) = var(name) {
+            return value != "0";
+        }
+    }
+    stderr_is_tty
+}
+
+/// `HH:MM:SS.mmm [LEVEL]  message` — the level tag is padded so the messages
+/// of adjacent lines line up regardless of level width.
+fn format_log_line(time: &str, level: log::Level, message: &str, color: bool) -> String {
+    let tag = format!("[{level}]");
+    if color {
+        format!(
+            "{ANSI_DIM}{time}{ANSI_RESET} {}{tag:<7}{ANSI_RESET} {message}",
+            level_color(level)
+        )
+    } else {
+        format!("{time} {tag:<7} {message}")
+    }
+}
+
+static STDERR_LOGGER: StderrLogger = StderrLogger;
+
+/// Resolved once in [`init_logger`]; `log` gives us no place to hang state.
+static STDERR_COLOR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 impl log::Log for StderrLogger {
     fn enabled(&self, _metadata: &log::Metadata) -> bool {
@@ -386,16 +479,29 @@ impl log::Log for StderrLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("[{}] {}", record.level(), record.args());
+            let time = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+            eprintln!(
+                "{}",
+                format_log_line(
+                    &time,
+                    record.level(),
+                    &record.args().to_string(),
+                    *STDERR_COLOR.get().unwrap_or(&false),
+                )
+            );
         }
     }
 
     fn flush(&self) {}
 }
 
-static STDERR_LOGGER: StderrLogger = StderrLogger;
-
 fn init_logger() {
+    use std::io::IsTerminal;
+
+    let _ = STDERR_COLOR.set(color_enabled(
+        |name| std::env::var(name).ok(),
+        std::io::stderr().is_terminal(),
+    ));
     let level = match std::env::var("COGNIA_LOG").as_deref() {
         Ok("error") => log::LevelFilter::Error,
         Ok("warn") => log::LevelFilter::Warn,
@@ -425,7 +531,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let endpoint = endpoint
             .clone()
             .unwrap_or_else(app_lib::terminal_host_service::default_terminal_host_endpoint);
-        eprintln!("[cognia-server] terminal host endpoint: {endpoint}");
+        log::info!("terminal host endpoint: {endpoint}");
         return app_lib::terminal_host_service::run_terminal_host(endpoint)
             .await
             .map_err(Into::into);
@@ -581,7 +687,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::Gateway { command } => run_gateway_admin(command),
-        CliCommand::Devices { command } => run_devices_admin(command),
+        CliCommand::Devices { command } => run_devices_admin(command).await,
         CliCommand::DesktopHost { .. } => unreachable!("handled before headless initialization"),
         CliCommand::RotateMasterKey { .. }
         | CliCommand::Backup { .. }
@@ -630,7 +736,82 @@ fn resolve_tenant(requested: Option<String>) -> String {
         .unwrap_or_else(app_lib::companion_api::host_identity::current_tenant_or_unbound)
 }
 
-fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
+/// The plaintext loopback origin a browser enrollment advertises.
+///
+/// `127.0.0.1` is not a parameter because it is not a choice:
+/// `server::spawn_browser_listener` binds `Ipv4Addr::LOCALHOST`, and
+/// `decodeBrowserEnrollmentPayload` refuses any code whose base is not an
+/// `http://` loopback origin. Anything else would be a code the extension
+/// rejects on paste.
+fn browser_plane_base_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+/// Refuse to mint a code that cannot connect.
+///
+/// The desktop command reads `state.browser_port()` and refuses when the
+/// listener is not bound. A separate CLI process cannot see that state, so it
+/// asks the plane itself: `/healthz` is public, and a request carrying no
+/// `Origin` is `Native` to the origin layer, so no credential is involved.
+///
+/// It compares `server_id`, not just reachability. That id is derived from the
+/// signing secret *this* data directory holds, which is what turns "something
+/// is listening on 27891" — a stray dev process satisfies that — into "the
+/// server this enrollment will be written for is listening on 27891".
+async fn ensure_browser_plane_is_live(
+    base_url: &str,
+    expected_server_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // `no_proxy`: reqwest honours an ambient `HTTP_PROXY` by default, and a
+    // loopback probe routed through a proxy would answer for the wrong host.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()?;
+    let response = client
+        .get(format!("{base_url}/healthz"))
+        .send()
+        .await
+        .map_err(|error| {
+            format!(
+                "the browser listener is not reachable at {base_url} ({error}); start the host \
+                 with `cognia-server serve --browser-listener-port <port>` and \
+                 COGNIA_ALLOWED_WEB_ORIGINS set, then retry"
+            )
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!(
+            "{base_url}/healthz answered {status}; that port is held by something other than \
+             this host"
+        )
+        .into());
+    }
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| {
+            format!(
+                "{base_url}/healthz did not return JSON ({error}); that port is held by something \
+             other than this host"
+            )
+        })?;
+    let reported = body
+        .get("server_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if reported != expected_server_id {
+        return Err(format!(
+            "the listener at {base_url} belongs to a different deployment (server_id \
+             {reported:?}, expected {expected_server_id:?}); point --data-dir at the host that \
+             is actually running"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
     let security = app_lib::companion_api::security_store::security_store()
         .ok_or("security store is not initialized")?;
     match command {
@@ -652,6 +833,52 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             println!("{invitation}");
             eprintln!(
                 "[cognia-server] owner invitation tenant={tenant_id} expires_at={}",
+                now.saturating_add(ttl_seconds)
+            );
+            Ok(())
+        }
+        DevicesCommand::EnrollBrowser {
+            browser_listener_port,
+            tenant_id,
+            ttl_seconds,
+        } => {
+            let tenant_id = resolve_tenant(tenant_id);
+            if !(1..=3_600).contains(&ttl_seconds) {
+                return Err("ttl-seconds must be between 1 and 3600".into());
+            }
+            let base_url = browser_plane_base_url(browser_listener_port);
+            // Probe before minting, never after. A single-use row spent on a
+            // code that could never connect is strictly worse than no code:
+            // the operator retries, gets a second one, and still has no idea
+            // the listener is the problem.
+            let signing_secret = secret::load_or_generate()?;
+            ensure_browser_plane_is_live(
+                &base_url,
+                &app_lib::companion_api::healthz::derive_server_id(&signing_secret),
+            )
+            .await?;
+            let now = chrono::Utc::now().timestamp();
+            let enrollment = security.create_browser_enrollment(
+                &tenant_id,
+                "local-cli-trust-root",
+                now,
+                ttl_seconds,
+            )?;
+            // The struct the desktop command returns, reused rather than
+            // re-declared: two producers of one JSON shape is how the field a
+            // consumer reads gets renamed under it.
+            let issue = app_lib::companion_api::commands::BrowserEnrollmentIssue {
+                enrollment,
+                expires_at_ms: now.saturating_add(ttl_seconds) * 1_000,
+                base_url,
+                tenant_id: tenant_id.clone(),
+            };
+            // Issue on stdout (script-friendly), metadata on stderr — the same
+            // split `issue-service-token` uses.
+            println!("{}", serde_json::to_string(&issue)?);
+            eprintln!(
+                "[cognia-server] browser enrollment tenant={tenant_id} base_url={} expires_at={}",
+                issue.base_url,
                 now.saturating_add(ttl_seconds)
             );
             Ok(())
@@ -872,15 +1099,12 @@ async fn run_pair(
     // Make sure the store opens cleanly — a successful list_sessions also
     // exercises the schema migration on first run.
     let page = store.list_sessions(1, 0, None).await?;
-    eprintln!(
-        "[cognia-server] store ready ({} session{} total)",
+    log::info!(
+        "store ready ({} session{} total)",
         page.total,
         if page.total == 1 { "" } else { "s" }
     );
-    eprintln!(
-        "[cognia-server] tls fingerprint: {}",
-        tls.fingerprint_sha256
-    );
+    log::info!("tls fingerprint: {}", tls.fingerprint_sha256);
 
     const INVITATION_TTL_SECS: i64 = 5 * 60;
     let now = chrono::Utc::now().timestamp();
@@ -995,7 +1219,7 @@ async fn run_serve(
     // Config validation BEFORE anything is installed: a typo'd Lark base
     // would otherwise only surface as a 503 to a user inside a Feishu client.
     report_lark_env(
-        &mut std::io::stderr(),
+        &mut |level, message| log::log!(level, "{message}"),
         &lark_entry::lark_env_issues(|var| std::env::var(var).ok()),
     )?;
 
@@ -1058,7 +1282,7 @@ async fn run_serve(
     }
     push_creds::install(FilePushCredStore::new(&data_dir));
     if let Err(err) = push_creds::reinstall_persisted_dispatchers() {
-        eprintln!("[cognia-server] push-creds reinstall: {err}");
+        log::warn!("push-creds reinstall: {err}");
     }
 
     // One-time import from the retired JSON projection. The SQLite marker is
@@ -1074,7 +1298,7 @@ async fn run_serve(
         chrono::Utc::now().timestamp(),
     )?;
     if imported {
-        println!("[cognia-server] imported legacy device grants into SecurityStore");
+        log::info!("imported legacy device grants into SecurityStore");
     }
 
     // Publish the TLS fingerprint for the whoami handler (P0.3).
@@ -1091,10 +1315,10 @@ async fn run_serve(
     let deny_list = Arc::new(DenyList::new());
     match deny_list.seed_from_store() {
         Some(loaded) => {
-            println!("[cognia-server] deny-list seeded: {loaded} inactive device(s)")
+            log::info!("deny-list seeded: {loaded} inactive device(s)")
         }
-        None => eprintln!(
-            "[cognia-server] deny-list could not be seeded; the security store remains \
+        None => log::warn!(
+            "deny-list could not be seeded; the security store remains \
              authoritative for every authorization decision"
         ),
     }
@@ -1123,9 +1347,7 @@ async fn run_serve(
     // fail at spawn time with a clear path error rather than at boot.
     let api_keys = ApiKeyState::new();
     let sidecar_script = resolve_sidecar_script_path().unwrap_or_else(|| {
-        eprintln!(
-            "[cognia-server] warning: no sidecar script found (set {SIDECAR_SCRIPT_ENV}); claude_send will fail",
-        );
+        log::warn!("no sidecar script found (set {SIDECAR_SCRIPT_ENV}); claude_send will fail");
         PathBuf::from("claude-host.mjs")
     });
     let sidecar_host = Arc::new(HeadlessSidecarHost::new(
@@ -1138,7 +1360,7 @@ async fn run_serve(
     // runner containers. A misconfigured container mode is fatal — degrading
     // to in-container local processes would silently void the T2 isolation.
     let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
-    eprintln!("[cognia-server] exec backend: {}", exec.kind());
+    log::info!("exec backend: {}", exec.kind());
     // Reap what a previous run left behind. A container outlives the process
     // that started it, so a crash used to leak one per agent with no way to
     // find them again — the in-process registry was the only record that they
@@ -1147,22 +1369,22 @@ async fn run_serve(
     // backend itself already failed loudly above if it is misconfigured.
     match exec.reap_orphans().await {
         Ok(reaped) if !reaped.is_empty() => {
-            eprintln!(
-                "[cognia-server] reaped {} orphaned runner(s) from a previous run",
+            log::info!(
+                "reaped {} orphaned runner(s) from a previous run",
                 reaped.len()
             );
         }
         Ok(_) => {}
         Err(error) => {
-            eprintln!("[cognia-server] orphan reap skipped: {error}");
+            log::warn!("orphan reap skipped: {error}");
         }
     }
     app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
         .map_err(|error| format!("remote browser: {error}"))?;
     let remote_browser =
         app_lib::companion_api::browser_gateway::browser_runtime_status(None).await;
-    eprintln!(
-        "[cognia-server] remote browser status: {}",
+    log::info!(
+        "remote browser status: {}",
         serde_json::to_string(&remote_browser)
             .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
     );
@@ -1242,11 +1464,11 @@ async fn run_serve(
                     event_bus: Arc::clone(&shared.event_bus),
                 });
             match gateway.start(host).await {
-                Ok(()) => println!(
-                    "[cognia-server] LLM gateway listening on port {:?}",
+                Ok(()) => log::info!(
+                    "LLM gateway listening on port {:?}",
                     gateway.status().bound_port
                 ),
-                Err(error) => eprintln!("[cognia-server] LLM gateway not started: {error}"),
+                Err(error) => log::warn!("LLM gateway not started: {error}"),
             }
         }
     }
@@ -1274,15 +1496,12 @@ async fn run_serve(
     } else {
         "0.0.0.0"
     };
-    println!(
-        "[cognia-server] HTTPS listening on https://{bind_host}:{}",
+    log::info!(
+        "HTTPS listening on https://{bind_host}:{}",
         handle.bound_port
     );
-    println!("[cognia-server] advertised base URL: {public_url}");
-    println!(
-        "[cognia-server] fingerprint: {}",
-        tls_material.fingerprint_sha256
-    );
+    log::info!("advertised base URL: {public_url}");
+    log::info!("fingerprint: {}", tls_material.fingerprint_sha256);
 
     // Opt-in plaintext loopback plane for browsers (`browser_access`). The
     // desktop reads its allowlist from a saved config because a GUI-launched
@@ -1300,14 +1519,14 @@ async fn run_serve(
             // depends on the server that just came up.
             match server::spawn_browser_listener(browser_port, Arc::clone(&shared), policy).await {
                 Ok(handle) => {
-                    println!(
-                        "[cognia-server] browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
+                    log::info!(
+                        "browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
                         handle.bound_port
                     );
                     Some(handle)
                 }
                 Err(error) => {
-                    eprintln!("[cognia-server] browser listener could not start: {error}");
+                    log::warn!("browser listener could not start: {error}");
                     None
                 }
             }
@@ -1343,24 +1562,24 @@ async fn run_serve(
             let supervisor = brain::BrainSupervisor::new(config, Arc::clone(&shared));
             brain::install_brain(Some(Arc::clone(&supervisor)));
             supervisor.start();
-            println!("[cognia-server] brain supervisor started");
+            log::info!("brain supervisor started");
             brain_supervisor = Some(supervisor);
         }
         None => {
-            eprintln!(
-                "[cognia-server] warning: {} not set — running without a brain (degraded data plane only)",
+            log::warn!(
+                "{} not set — running without a brain (degraded data plane only)",
                 brain::BRAIN_ENTRY_ENV
             );
         }
     }
-    println!("[cognia-server] press Ctrl-C to stop.");
+    log::info!("press Ctrl-C to stop.");
 
     // Block until Ctrl-C, then trigger graceful shutdown: brain + sidecar
     // first (children), then the HTTP listener.
     tokio::signal::ctrl_c()
         .await
         .map_err(|e| format!("ctrl-c handler: {e}"))?;
-    println!("[cognia-server] shutting down…");
+    log::info!("shutting down…");
     app_lib::companion_api::server::begin_draining();
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
@@ -1410,12 +1629,73 @@ async fn run_serve(
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_session_store_path, encode_pair_invitation_payload, lark_entry, plugin_storage_dir,
-        report_lark_env, Cli, CliCommand,
+        agent_session_store_path, browser_plane_base_url, color_enabled,
+        encode_pair_invitation_payload, format_log_line, lark_entry, plugin_storage_dir,
+        report_lark_env, Cli, CliCommand, DevicesCommand,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
     use std::path::Path;
+
+    /// Colour is decided by the sink, so every knob is exercised against a
+    /// stubbed environment rather than the ambient one.
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| (*v).to_string())
+        }
+    }
+
+    #[test]
+    fn color_follows_the_terminal_when_nothing_is_forced() {
+        assert!(color_enabled(env_of(&[]), true));
+        assert!(!color_enabled(env_of(&[]), false));
+    }
+
+    #[test]
+    fn no_color_beats_a_terminal_and_a_force_flag() {
+        assert!(!color_enabled(env_of(&[("NO_COLOR", "")]), true));
+        assert!(!color_enabled(
+            env_of(&[("NO_COLOR", "1"), ("FORCE_COLOR", "1")]),
+            true
+        ));
+    }
+
+    #[test]
+    fn force_color_turns_colour_on_for_a_pipe_and_zero_turns_it_off() {
+        // `docker logs` / a supervisor pipe is not a tty; this is the knob
+        // that keeps the level colours in a container's log stream.
+        assert!(color_enabled(env_of(&[("FORCE_COLOR", "1")]), false));
+        assert!(color_enabled(env_of(&[("CLICOLOR_FORCE", "1")]), false));
+        assert!(!color_enabled(env_of(&[("FORCE_COLOR", "0")]), true));
+    }
+
+    #[test]
+    fn plain_lines_carry_one_clock_and_a_padded_level_tag() {
+        assert_eq!(
+            format_log_line("12:34:56.789", log::Level::Info, "brain ready", false),
+            "12:34:56.789 [INFO]  brain ready"
+        );
+        // ERROR is the widest tag, so it sets the column the others pad to.
+        assert_eq!(
+            format_log_line("12:34:56.789", log::Level::Error, "boom", false),
+            "12:34:56.789 [ERROR] boom"
+        );
+    }
+
+    #[test]
+    fn coloured_lines_wrap_the_level_tag_and_always_reset() {
+        let line = format_log_line("12:34:56.789", log::Level::Warn, "slow", true);
+        assert!(
+            line.contains("\x1b[33m[WARN]"),
+            "warn tag is yellow: {line}"
+        );
+        assert!(line.ends_with(" slow"), "message stays unstyled: {line}");
+        // Two resets: one closing the dim clock, one closing the level tag.
+        assert_eq!(line.matches("\x1b[0m").count(), 2, "{line}");
+    }
 
     #[test]
     fn plugin_storage_is_scoped_beneath_the_server_data_directory() {
@@ -1451,23 +1731,31 @@ mod tests {
 
     #[test]
     fn lark_env_report_warns_but_only_refuses_to_start_on_a_fatal_value() {
-        let mut quiet = Vec::new();
-        assert!(report_lark_env(&mut quiet, &[]).is_ok());
+        let mut quiet: Vec<(log::Level, String)> = Vec::new();
+        assert!(report_lark_env(&mut |level, message| quiet.push((level, message)), &[]).is_ok());
         assert!(quiet.is_empty());
 
-        let mut warned = Vec::new();
+        let mut warned: Vec<(log::Level, String)> = Vec::new();
         let warning = lark_entry::LarkEnvIssue {
             var: lark_entry::ENV_PUBLIC_BASE,
             fatal: false,
             message: "points at loopback".into(),
         };
-        assert!(report_lark_env(&mut warned, std::slice::from_ref(&warning)).is_ok());
-        let text = String::from_utf8(warned).unwrap();
-        assert!(text.contains("lark warning: points at loopback"), "{text}");
+        assert!(report_lark_env(
+            &mut |level, message| warned.push((level, message)),
+            std::slice::from_ref(&warning)
+        )
+        .is_ok());
+        // A non-fatal issue reports at WARN, so the shared sink colours it as
+        // one instead of spelling the severity into the message text.
+        assert_eq!(
+            warned,
+            vec![(log::Level::Warn, "lark: points at loopback".to_string())]
+        );
 
-        let mut failed = Vec::new();
+        let mut failed: Vec<(log::Level, String)> = Vec::new();
         let error = report_lark_env(
-            &mut failed,
+            &mut |level, message| failed.push((level, message)),
             &[
                 warning,
                 lark_entry::LarkEnvIssue {
@@ -1479,11 +1767,19 @@ mod tests {
         )
         .expect_err("a fatal issue must abort startup");
         assert!(error.contains('1'), "{error}");
-        // Both lines are printed even though only one is fatal — an operator
-        // fixing the refusal should see the warning in the same output.
-        let text = String::from_utf8(failed).unwrap();
-        assert!(text.contains("lark warning:"), "{text}");
-        assert!(text.contains("lark error:"), "{text}");
+        // Both issues are reported even though only one is fatal — an operator
+        // fixing the refusal should see the warning in the same output — and
+        // each carries its own level.
+        assert_eq!(
+            failed,
+            vec![
+                (log::Level::Warn, "lark: points at loopback".to_string()),
+                (
+                    log::Level::Error,
+                    "lark: COGNIA_LARK_WEB_BASE is set but must be https://".to_string()
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -1626,5 +1922,87 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_browser_enrollment_defaults_to_the_conventional_loopback_plane() {
+        let cli = Cli::try_parse_from(["cognia-server", "devices", "enroll-browser"])
+            .expect("enroll-browser arguments");
+        let CliCommand::Devices {
+            command:
+                DevicesCommand::EnrollBrowser {
+                    browser_listener_port,
+                    tenant_id,
+                    ttl_seconds,
+                },
+        } = cli.command
+        else {
+            panic!("expected devices enroll-browser");
+        };
+        // The port `dev:web-headless` binds and `DEFAULT_BROWSER_PORT` names.
+        assert_eq!(browser_listener_port, 27891);
+        // Unset means "the tenant this host is bound to", resolved at run time.
+        assert_eq!(tenant_id, None);
+        // Five minutes, matching the desktop settings card.
+        assert_eq!(ttl_seconds, 300);
+    }
+
+    #[test]
+    fn a_browser_enrollment_takes_an_explicit_port_tenant_and_ttl() {
+        let cli = Cli::try_parse_from([
+            "cognia-server",
+            "devices",
+            "enroll-browser",
+            "--browser-listener-port",
+            "28901",
+            "--tenant-id",
+            "tenant-a",
+            "--ttl-seconds",
+            "60",
+        ])
+        .expect("enroll-browser arguments");
+        assert!(matches!(
+            cli.command,
+            CliCommand::Devices {
+                command: DevicesCommand::EnrollBrowser {
+                    browser_listener_port: 28901,
+                    tenant_id: Some(ref tenant),
+                    ttl_seconds: 60,
+                },
+            } if tenant == "tenant-a"
+        ));
+    }
+
+    #[test]
+    fn the_browser_plane_url_is_always_a_plaintext_loopback_origin() {
+        // `decodeBrowserEnrollmentPayload` refuses anything else, so a code
+        // built on any other shape is one the extension rejects on paste.
+        assert_eq!(browser_plane_base_url(27891), "http://127.0.0.1:27891");
+        assert_eq!(browser_plane_base_url(1), "http://127.0.0.1:1");
+    }
+
+    #[test]
+    fn the_browser_enrollment_json_carries_the_field_names_the_dev_script_reads() {
+        // `scripts/dev/headless.mjs` parses this and encodes it into `cgnb1|…`;
+        // the desktop settings card serializes the same struct. Pin the wire
+        // names so neither producer can rename a field out from under the
+        // consumer — a rename would surface as a `cgnb1|` code with an
+        // `undefined` field inside, which decodes as "invalid" in the
+        // extension and says nothing about where it came from.
+        let issue = app_lib::companion_api::commands::BrowserEnrollmentIssue {
+            enrollment: "9f1c.aa22".to_string(),
+            expires_at_ms: 1_700_000_300_000,
+            base_url: "http://127.0.0.1:27891".to_string(),
+            tenant_id: "tenant-a".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&issue).expect("serializes"),
+            serde_json::json!({
+                "enrollment": "9f1c.aa22",
+                "expiresAtMs": 1_700_000_300_000_i64,
+                "baseUrl": "http://127.0.0.1:27891",
+                "tenantId": "tenant-a",
+            })
+        );
     }
 }

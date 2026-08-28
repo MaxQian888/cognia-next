@@ -66,6 +66,13 @@ Browser Use 的调研给出了更重要的否定结论：Browser Use **不需要
 载荷有自己的头部（`cgnb1|`）而不是 `cgnp3|` 上的一个模式位，因为两者在任一方向都不可互换，
 共用头部只会让每种码都能被粘贴到它注定失效的地方。
 
+无头宿主没有设置页，所以同一份 enrollment 由 `cognia-server devices enroll-browser` 铸造、
+由 `pnpm dev:headless browser-enroll` 编码。它保留了那道拒绝而不是继承它：另一个进程读不到
+`state.browser_port()`，于是它直接问平面本身——请求公开的 `/healthz`，把回报的 `server_id`
+与本数据目录签名密钥推导出的那个比对，这才把"监听器已绑定"和"27891 被别的进程占着"分开。
+`cgnb1|` 编码器**没有**在 Rust 里再实现一遍：原生命令把 issue 以 JSON 打印，开发脚本用扩展
+所打包的同一个包完成编码，一种格式因此不会裂成两种。
+
 **5. 提交直接创建会话，再经 HostState 入队一条消息。**
 
 把两半都交给 HostState 错了两次。`session.create` 映射到 `process.spawn`——即 Agent Control 授权——
