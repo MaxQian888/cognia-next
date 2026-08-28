@@ -4477,6 +4477,8 @@ paths:
                             - chat
                             - session
                             - template
+                            - issue
+                            - agent-task
                         label:
                           type: string
                         isDefault:
@@ -4659,7 +4661,6 @@ paths:
                 type: object
                 required:
                   - submissionId
-                  - sessionId
                   - status
                   - updatedAt
                   - deepLink
@@ -4670,6 +4671,12 @@ paths:
                   sessionId:
                     type: string
                     minLength: 1
+                  workKind:
+                    type: string
+                    enum:
+                      - session
+                      - issue
+                      - agent-task
                   status:
                     type: string
                     enum:
@@ -4792,7 +4799,6 @@ paths:
                 type: object
                 required:
                   - submissionId
-                  - sessionId
                   - status
                   - updatedAt
                   - deepLink
@@ -4803,6 +4809,12 @@ paths:
                   sessionId:
                     type: string
                     minLength: 1
+                  workKind:
+                    type: string
+                    enum:
+                      - session
+                      - issue
+                      - agent-task
                   status:
                     type: string
                     enum:
@@ -4934,7 +4946,6 @@ paths:
                       type: object
                       required:
                         - submissionId
-                        - sessionId
                         - title
                         - sourceHost
                         - captureMode
@@ -4949,6 +4960,12 @@ paths:
                         sessionId:
                           type: string
                           minLength: 1
+                        workKind:
+                          type: string
+                          enum:
+                            - session
+                            - issue
+                            - agent-task
                         title:
                           type: string
                         sourceHost:
@@ -5085,7 +5102,6 @@ paths:
                 type: object
                 required:
                   - submissionId
-                  - sessionId
                   - status
                   - updatedAt
                   - deepLink
@@ -5096,6 +5112,12 @@ paths:
                   sessionId:
                     type: string
                     minLength: 1
+                  workKind:
+                    type: string
+                    enum:
+                      - session
+                      - issue
+                      - agent-task
                   status:
                     type: string
                     enum:
@@ -5302,7 +5324,6 @@ paths:
                 type: object
                 required:
                   - submissionId
-                  - sessionId
                   - acceptedAt
                   - status
                   - deepLink
@@ -5313,6 +5334,12 @@ paths:
                   sessionId:
                     type: string
                     minLength: 1
+                  workKind:
+                    type: string
+                    enum:
+                      - session
+                      - issue
+                      - agent-task
                   acceptedAt:
                     type: integer
                   status:

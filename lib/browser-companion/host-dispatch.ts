@@ -13,7 +13,10 @@ import type { ChatTemplateBinding, ChatTemplateParamValue } from "@/lib/chat/tem
 import { listParamTokens } from "@/lib/chat/template/param-segments"
 import { renderParamTokens } from "@/lib/chat/template/render-params"
 import { getChatTemplate, listChatTemplates, recordChatTemplateUse } from "@/lib/db/chat-templates"
-import type { BrowserCompanionCapabilityV1 } from "@/types/browser-companion"
+import type {
+  BrowserCompanionCapabilityV1,
+  BrowserSubmissionStatus,
+} from "@/types/browser-companion"
 import {
   getBrowserSubmission,
   listBrowserSubmissions,
@@ -28,7 +31,7 @@ import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 
 import { buildBrowserCompanionAppearance, capabilityRevisionOf } from "./appearance"
 import { listDeliveryTargets } from "./targets"
-import { browserStatusForRun } from "./run-status"
+import { browserStatusForAgentTask, browserStatusForIssue, browserStatusForRun } from "./run-status"
 import {
   BrowserCompanionError,
   browserCompanionCapability,
@@ -108,6 +111,9 @@ export function createBrowserCompanionDeps(
         deliveryTargets: await listDeliveryTargets(targetDeps(), callerDeviceId),
         ...(await hostAppearance()),
       }),
+    createIssue: fileHostIssue,
+    createAgentTask: startHostAgentTask,
+    workStatus: hostWorkStatus,
     latestAnswer: latestAssistantAnswer,
     abortTurn: (sessionId) => abortOnHostAuthority(payload, resolveHostState, sessionId),
     recordSubmission: putBrowserSubmission,
@@ -291,7 +297,7 @@ async function latestAssistantAnswer(
       .join("")
       .trim()
     if (!text) continue
-    const at = message.metadata?.createdAt
+    const at = (message.metadata as { createdAt?: unknown } | undefined)?.createdAt
     return { text, at: typeof at === "number" ? at : Date.now() }
   }
   return null
@@ -357,7 +363,47 @@ async function abortOnHostAuthority(
  * than the one that was sent is a revision that lies.
  */
 function targetDeps() {
-  return { listSubmissions: listBrowserSubmissions, listTemplates: listChatTemplates }
+  return {
+    listSubmissions: listBrowserSubmissions,
+    listTemplates: listChatTemplates,
+    listIssueProjects: hostIssueBoards,
+    listTaskAgents: hostTaskAgents,
+  }
+}
+
+/**
+ * Every issue board this Host has, tagged with the workspace it belongs to.
+ *
+ * Open boards only: a completed, cancelled or paused board is not a place to
+ * file new work, and offering one would put an issue somewhere nobody is
+ * looking. `backlog` is left out for the same reason — it is a board nobody has
+ * started.
+ */
+async function hostIssueBoards(): Promise<{ id: string; name: string; workspaceId: string }[]> {
+  const { listIssueProjects } = await import("@/lib/db/issue-projects")
+  const boards = await listIssueProjects({ statuses: ["planned", "in_progress"] })
+  return boards.map((board) => ({
+    id: board.id,
+    name: board.name,
+    workspaceId: board.projectId,
+  }))
+}
+
+/**
+ * The agents a task may be handed to, or none.
+ *
+ * An agent task runs through the scheduler's `agent` executor, which
+ * `host-support.ts` gates on the `sidecar` capability. A Host without one — a
+ * phone, a plain browser — would accept the task and refuse it at dispatch, so
+ * the target is simply not offered there. That check is the scheduler's own, so
+ * this cannot drift from what the executor will actually accept.
+ */
+async function hostTaskAgents(): Promise<{ id: string; name: string }[]> {
+  const { getTaskTypeHostSupport } = await import("@/lib/scheduler/host-support")
+  if (!getTaskTypeHostSupport("agent").supported) return []
+  const { listCharacters } = await import("@/lib/db/characters")
+  const characters = await listCharacters()
+  return characters.map((character) => ({ id: character.id, name: character.name }))
 }
 
 /**
@@ -415,4 +461,88 @@ async function renderHostTemplate(
   const rendered = renderParamTokens(template.body, listParamTokens(template.body), binding)
   await recordChatTemplateUse(template.id, params).catch(() => undefined)
   return { text: rendered.text, missing: [] }
+}
+
+/**
+ * File a captured page on an issue board.
+ *
+ * `origin` records that a browser filed it — the same field an IM-created issue
+ * uses, so the board can say where a card came from without the tracker growing
+ * a browser-shaped special case. `createdBy` is the human who was looking at
+ * the page: a browser is not an actor on this plane, it is a place the person
+ * was standing.
+ */
+async function fileHostIssue(input: {
+  issueProjectId: string
+  workspaceId: string
+  title: string
+  description: string
+  sourceHost: string
+  url: string
+}): Promise<{ id: string }> {
+  const { createIssue } = await import("@/lib/db/issues")
+  const issue = await createIssue({
+    projectId: input.workspaceId,
+    issueProjectId: input.issueProjectId,
+    title: input.title,
+    // The address goes in the body rather than only in `origin`, because the
+    // board renders a description and not a provenance record.
+    description: `${input.description}\n\n${input.url}`.trim(),
+    createdBy: { kind: "human" },
+    origin: { kind: "browser", sourceHost: input.sourceHost },
+  })
+  return { id: issue.id }
+}
+
+/**
+ * Create an agent task for the captured page and start it.
+ *
+ * Started rather than left pending because "send this page to an agent" is a
+ * request to do something: a task queued where nobody is looking would be the
+ * issue target wearing another name. `runAgentTaskNow` is the same path the
+ * task board's own Run button takes, so approvals and the scheduler's host
+ * gating apply unchanged.
+ */
+async function startHostAgentTask(input: {
+  agentId: string
+  workspaceId: string
+  title: string
+  description: string
+}): Promise<{ id: string }> {
+  const { createAgentTask } = await import("@/lib/db/agent-tasks")
+  const { runAgentTaskNow } = await import("@/lib/agent-tasks/runtime")
+  const task = await createAgentTask({
+    agentId: input.agentId,
+    projectId: input.workspaceId,
+    title: input.title,
+    description: input.description,
+  })
+  // Not awaited for its result: the run is a turn that may take minutes, and
+  // the RPC answers as soon as the work is accepted. A failure to start is
+  // read back by `workStatus` on the next poll rather than turned into a
+  // refusal of a task that has already been created.
+  void runAgentTaskNow(task.id).catch(() => undefined)
+  return { id: task.id }
+}
+
+/**
+ * The status of work that is not a conversation, projected onto the panel's
+ * vocabulary.
+ *
+ * `null` when the plane has nothing to say — the issue or task was deleted, or
+ * the reader is unavailable — which leaves the recorded status standing rather
+ * than rewriting history as a failure.
+ */
+async function hostWorkStatus(
+  kind: "issue" | "agent-task",
+  workId: string
+): Promise<BrowserSubmissionStatus | null> {
+  if (kind === "issue") {
+    const { getIssue } = await import("@/lib/db/issues")
+    const issue = await getIssue(workId)
+    return issue ? browserStatusForIssue(issue.status) : null
+  }
+  const { getAgentTask } = await import("@/lib/db/agent-tasks")
+  const task = await getAgentTask(workId)
+  return task ? browserStatusForAgentTask(task.status) : null
 }

@@ -168,13 +168,25 @@ export interface IssueProject {
  * additive (no schema bump). The IM origin is what lets `lib/issues/notify.ts`
  * push the issue's lifecycle back to the conversation that created it.
  */
-export type IssueOrigin = {
-  kind: "im"
-  /** Connector conversation key (`<adapterId>:<conversationRef>`). */
-  conversationKey: string
-  /** Platform message that was turned into (or asked for) the issue. */
-  messageId?: string
-}
+export type IssueOrigin =
+  | {
+      kind: "im"
+      /** Connector conversation key (`<adapterId>:<conversationRef>`). */
+      conversationKey: string
+      /** Platform message that was turned into (or asked for) the issue. */
+      messageId?: string
+    }
+  | {
+      kind: "browser"
+      /**
+       * The site the page came from — hostname only, never the path or query.
+       *
+       * The same rule the Browser Companion's own ledger follows: a full
+       * address routinely carries session tokens and search terms, and a board
+       * that renders provenance would put them on screen.
+       */
+      sourceHost: string
+    }
 
 /** Link from a local issue to its GitHub counterpart. */
 export interface IssueGithubRef {

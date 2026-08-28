@@ -32,17 +32,29 @@ interface Harness {
   followsSystem: boolean
   answers: Map<string, { text: string; at: number }>
   aborted: string[]
+  filedIssues: unknown[]
+  startedTasks: unknown[]
+  workStatuses: Map<string, BrowserSubmissionRow["status"]>
   abortRefused: boolean
 }
 
 function harness(
-  overrides: Partial<BrowserCompanionDeps> & { templates?: ChatTemplateRow[] } = {}
+  overrides: Partial<BrowserCompanionDeps> & {
+    templates?: ChatTemplateRow[]
+    boards?: { id: string; name: string; workspaceId: string }[]
+    agents?: { id: string; name: string }[]
+  } = {}
 ): Harness {
   const rows = new Map<string, BrowserSubmissionRow>()
   const createdSessions: Harness["createdSessions"] = []
   const enqueued: Harness["enqueued"] = []
   const statuses = new Map<string, BrowserSubmissionRow["status"]>()
   const templates: ChatTemplateRow[] = overrides.templates ?? []
+  const boards = overrides.boards ?? []
+  const agents = overrides.agents ?? []
+  const filedIssues: unknown[] = []
+  const startedTasks: unknown[] = []
+  const workStatuses = new Map<string, BrowserSubmissionRow["status"]>()
   const answers = new Map<string, { text: string; at: number }>()
   const aborted: string[] = []
   const state = { sessionStatusThrows: false, followsSystem: false, abortRefused: false }
@@ -86,9 +98,20 @@ function harness(
               .sort((left, right) => right.submittedAt - left.submittedAt)
               .slice(0, limit),
           listTemplates: async () => templates,
+          listIssueProjects: async () => boards,
+          listTaskAgents: async () => agents,
         },
         deviceId
       ),
+    createIssue: async (input) => {
+      filedIssues.push(input)
+      return { id: `issue-${filedIssues.length}` }
+    },
+    createAgentTask: async (input) => {
+      startedTasks.push(input)
+      return { id: `agent-task-${startedTasks.length}` }
+    },
+    workStatus: async (_kind, workId) => workStatuses.get(workId) ?? null,
     renderTemplate: async (templateId, values) => {
       const found = templates.find((entry) => entry.id === templateId)
       if (!found) return null
@@ -123,6 +146,9 @@ function harness(
     statuses,
     answers,
     aborted,
+    filedIssues,
+    startedTasks,
+    workStatuses,
     get sessionStatusThrows() {
       return state.sessionStatusThrows
     },
@@ -753,5 +779,80 @@ describe("submitting through a template", () => {
     expect(texts).toHaveLength(2)
     expect(texts[0]).toBe(texts[1])
     expect(h.createdSessions).toHaveLength(1)
+  })
+})
+
+describe("filing and dispatching instead of chatting", () => {
+  const BOARDS = [{ id: "board-1", name: "Inbox", workspaceId: "ws-default" }]
+  const AGENTS = [{ id: "char-1", name: "Researcher" }]
+
+  it("files an issue and starts no conversation", async () => {
+    const h = harness({ boards: BOARDS })
+    const response = await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ targetId: "issue:board-1" })
+    )
+
+    expect(h.createdSessions).toHaveLength(0)
+    expect(h.enqueued).toHaveLength(0)
+    expect(h.filedIssues).toHaveLength(1)
+    // No `sessionId`, and a link that points where the work actually is.
+    expect(response.sessionId).toBeUndefined()
+    expect(response.workKind).toBe("issue")
+    expect(response.deepLink).toBe("cognia://issues/issue-1")
+  })
+
+  it("carries the page's address into the issue but only its host into provenance", async () => {
+    const h = harness({ boards: BOARDS })
+    await submitBrowserContext(h.deps, "browser-a", payload({ targetId: "issue:board-1" }))
+    expect(h.filedIssues[0]).toMatchObject({
+      issueProjectId: "board-1",
+      workspaceId: "ws-default",
+      sourceHost: "example.com",
+      url: "https://example.com/pricing",
+    })
+  })
+
+  it("hands a page to an agent as a task", async () => {
+    const h = harness({ agents: AGENTS })
+    const response = await submitBrowserContext(
+      h.deps,
+      "browser-a",
+      payload({ targetId: "agent-task:char-1" })
+    )
+    expect(h.startedTasks[0]).toMatchObject({ agentId: "char-1", workspaceId: "ws-default" })
+    expect(response.workKind).toBe("agent-task")
+    expect(h.createdSessions).toHaveLength(0)
+  })
+
+  it("reads a filed issue's status from its own plane", async () => {
+    const h = harness({ boards: BOARDS })
+    await submitBrowserContext(h.deps, "browser-a", payload({ targetId: "issue:board-1" }))
+    h.workStatuses.set("issue-1", "completed")
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items[0]).toMatchObject({ status: "completed", workKind: "issue" })
+  })
+
+  it("keeps the recorded status when that plane cannot be read", async () => {
+    // Same rule as a session: a reader that has nothing to say must not rewrite
+    // history as a failure.
+    const h = harness({ boards: BOARDS })
+    await submitBrowserContext(h.deps, "browser-a", payload({ targetId: "issue:board-1" }))
+    const page = await listBrowserContextSubmissions(h.deps, "browser-a")
+    expect(page.items[0].status).toBe("queued")
+  })
+
+  it("has no answer to read and nothing to stop", async () => {
+    // A card on a board has no transcript and no turn. Both reads say so
+    // rather than reaching for a session id that is not there.
+    const h = harness({ boards: BOARDS })
+    await submitBrowserContext(h.deps, "browser-a", payload({ targetId: "issue:board-1" }))
+    await expect(
+      getBrowserContextResult(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).resolves.not.toHaveProperty("text")
+    await expect(
+      cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).rejects.toMatchObject({ code: "nothing_to_stop" })
   })
 })

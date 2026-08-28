@@ -26,6 +26,7 @@ export type {
   BrowserTargetParamV1,
   BrowserReadableText,
   BrowserSubmissionStatus,
+  BrowserWorkKind,
 } from "@cognia/companion-client/browser-companion"
 
 export {

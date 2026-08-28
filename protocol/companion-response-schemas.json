@@ -272,7 +272,7 @@
               },
               "kind": {
                 "type": "string",
-                "enum": ["chat", "session", "template"]
+                "enum": ["chat", "session", "template", "issue", "agent-task"]
               },
               "label": {
                 "type": "string"
@@ -367,7 +367,7 @@
     },
     "BrowserSubmissionReceipt": {
       "type": "object",
-      "required": ["submissionId", "sessionId", "acceptedAt", "status", "deepLink"],
+      "required": ["submissionId", "acceptedAt", "status", "deepLink"],
       "properties": {
         "submissionId": {
           "type": "string",
@@ -376,6 +376,10 @@
         "sessionId": {
           "type": "string",
           "minLength": 1
+        },
+        "workKind": {
+          "type": "string",
+          "enum": ["session", "issue", "agent-task"]
         },
         "acceptedAt": {
           "type": "integer"
@@ -392,7 +396,7 @@
     },
     "BrowserSubmissionResult": {
       "type": "object",
-      "required": ["submissionId", "sessionId", "status", "updatedAt", "deepLink"],
+      "required": ["submissionId", "status", "updatedAt", "deepLink"],
       "properties": {
         "submissionId": {
           "type": "string",
@@ -401,6 +405,10 @@
         "sessionId": {
           "type": "string",
           "minLength": 1
+        },
+        "workKind": {
+          "type": "string",
+          "enum": ["session", "issue", "agent-task"]
         },
         "status": {
           "$ref": "#/$defs/BrowserSubmissionStatus"
@@ -441,7 +449,7 @@
     },
     "BrowserSubmissionStatusResult": {
       "type": "object",
-      "required": ["submissionId", "sessionId", "status", "updatedAt", "deepLink"],
+      "required": ["submissionId", "status", "updatedAt", "deepLink"],
       "properties": {
         "submissionId": {
           "type": "string",
@@ -450,6 +458,10 @@
         "sessionId": {
           "type": "string",
           "minLength": 1
+        },
+        "workKind": {
+          "type": "string",
+          "enum": ["session", "issue", "agent-task"]
         },
         "status": {
           "$ref": "#/$defs/BrowserSubmissionStatus"
@@ -471,7 +483,6 @@
       "type": "object",
       "required": [
         "submissionId",
-        "sessionId",
         "title",
         "sourceHost",
         "captureMode",
@@ -488,6 +499,10 @@
         "sessionId": {
           "type": "string",
           "minLength": 1
+        },
+        "workKind": {
+          "type": "string",
+          "enum": ["session", "issue", "agent-task"]
         },
         "title": {
           "type": "string"

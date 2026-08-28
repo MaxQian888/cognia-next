@@ -16,8 +16,10 @@
  * precisely because the enqueue never happened. The reader answers `null` for
  * that case and the recorded row stands.
  */
+import type { AgentTaskStatus } from "@/types/agent/agent-task"
 import type { BrowserSubmissionStatus } from "@/types/browser-companion"
 import type { ExecutionRunStatus } from "@/types/execution/run"
+import { statusCategoryOf, type IssueStatus } from "@/types/issues"
 
 export function browserStatusForRun(status: ExecutionRunStatus): BrowserSubmissionStatus {
   switch (status) {
@@ -40,6 +42,56 @@ export function browserStatusForRun(status: ExecutionRunStatus): BrowserSubmissi
     // there; reporting it as `failed` sends them to the desktop, which is the
     // only place it can be resolved.
     case "recovery_required":
+    case "failed":
+      return "failed"
+  }
+}
+
+/**
+ * Project an issue's column onto the panel's vocabulary.
+ *
+ * Through `statusCategoryOf` rather than the raw column, because that mapping
+ * is the tracker's stated authority for every cross-system projection — a
+ * custom column added later lands in a category and needs no change here.
+ *
+ * A filed issue is never `running`: nothing is executing it. `unstarted` and
+ * `started` both read as `queued`, which is the honest thing to say about a
+ * card on a board — it is waiting for somebody, and the panel offers no way to
+ * be that somebody.
+ */
+export function browserStatusForIssue(status: IssueStatus): BrowserSubmissionStatus {
+  switch (statusCategoryOf(status)) {
+    case "completed":
+      return "completed"
+    case "canceled":
+      return "cancelled"
+    default:
+      return "queued"
+  }
+}
+
+/**
+ * Project an agent task's state onto the panel's vocabulary.
+ *
+ * `blocked` is `queued` rather than `needs_input`: it is waiting on another
+ * task, not on a person, and "it wants you" would send somebody looking for a
+ * prompt that does not exist. `review` and `paused` are the two that genuinely
+ * want a person, which is what `needs_input` means everywhere else here.
+ */
+export function browserStatusForAgentTask(status: AgentTaskStatus): BrowserSubmissionStatus {
+  switch (status) {
+    case "pending":
+    case "blocked":
+      return "queued"
+    case "in_progress":
+      return "running"
+    case "review":
+    case "paused":
+      return "needs_input"
+    case "completed":
+      return "completed"
+    case "cancelled":
+      return "cancelled"
     case "failed":
       return "failed"
   }

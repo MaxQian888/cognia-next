@@ -109,6 +109,35 @@ describe("RecentList", () => {
     expect(screen.queryByTestId("recent-stop-sub-2")).toBeNull()
   })
 
+  it("offers neither an answer nor a stop for work with no transcript", () => {
+    // A filed issue is a card on a board: nothing is running and nothing has
+    // been said. Controls that would refuse are worse than no controls.
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ status: "queued", workKind: "issue" })]}
+        onStop={jest.fn()}
+        onToggleAnswer={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("recent-stop-sub-1")).toBeNull()
+    expect(screen.queryByTestId("recent-answer-toggle-sub-1")).toBeNull()
+    // The way to reach it is still there.
+    expect(screen.getByText("openInCognia")).toBeInTheDocument()
+  })
+
+  it("treats a row from an older Host as the conversation it was", () => {
+    render(
+      <RecentList
+        api={makeApi()}
+        items={[item({ status: "running" })]}
+        onStop={jest.fn()}
+        onToggleAnswer={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("recent-stop-sub-1")).toBeInTheDocument()
+  })
+
   it("keeps one row per submission", () => {
     render(
       <RecentList

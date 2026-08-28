@@ -74,7 +74,7 @@ export function RecentList({
                   {failureReasonMessage(failureCodes[item.submissionId], api.message)}
                 </p>
               ) : null}
-              {expanded.includes(item.submissionId) ? (
+              {expanded.includes(item.submissionId) && hasTranscript(item) ? (
                 <div className="space-y-1" data-testid={`recent-answer-${item.submissionId}`}>
                   {answers[item.submissionId]?.text ? (
                     // `whitespace-pre-wrap` because an assistant answer carries
@@ -100,7 +100,11 @@ export function RecentList({
                   {item.sourceHost}
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
-                  {onStop && STOPPABLE_STATUSES.includes(item.status) ? (
+                  {/* Only a conversation has a turn to stop or a transcript to
+                      read. A filed issue and a queued agent task have neither,
+                      and offering controls that would refuse is worse than
+                      offering none. */}
+                  {onStop && hasTranscript(item) && STOPPABLE_STATUSES.includes(item.status) ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -113,7 +117,7 @@ export function RecentList({
                         : api.message("stop")}
                     </Button>
                   ) : null}
-                  {onToggleAnswer ? (
+                  {onToggleAnswer && hasTranscript(item) ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -138,4 +142,15 @@ export function RecentList({
       ))}
     </ul>
   )
+}
+
+/**
+ * Whether a submission produced a conversation.
+ *
+ * Absent `workKind` means one, which is what every submission was before an
+ * issue or an agent task could be one — an older Host sends no field and its
+ * rows are all sessions.
+ */
+function hasTranscript(item: BrowserContextSubmissionSummaryV1): boolean {
+  return !item.workKind || item.workKind === "session"
 }

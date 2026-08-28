@@ -64,11 +64,39 @@ export interface DeliveryTargetDeps {
   listSubmissions: (deviceId: string, limit: number) => Promise<BrowserSubmissionRow[]>
   /** The Host's saved chat templates. */
   listTemplates: () => Promise<ChatTemplateRow[]>
+  /**
+   * Every issue board, each carrying the workspace it belongs to.
+   *
+   * All of them rather than one workspace's, because the capability call does
+   * not know which workspace the panel has selected — it answers with the whole
+   * catalogue and the panel filters on `workspaceId`, the same way it already
+   * does for a conversation.
+   */
+  listIssueProjects: () => Promise<{ id: string; name: string; workspaceId: string }[]>
+  /**
+   * Agents this Host can actually run a task on.
+   *
+   * Empty when the host cannot run one at all — an agent task needs the
+   * sidecar, and a mobile or plain-browser Host has none. Offering the target
+   * there would produce a task that is refused the moment it is dispatched,
+   * which is a worse answer than not offering it.
+   */
+  listTaskAgents: () => Promise<{ id: string; name: string }[]>
 }
 
 /** `template:<id>` — the id form, in one place so the reader and writer agree. */
 export function templateTargetId(templateId: string): string {
   return `template:${templateId}`
+}
+
+/** `issue:<issueProjectId>` — file the page on that board. */
+export function issueTargetId(issueProjectId: string): string {
+  return `issue:${issueProjectId}`
+}
+
+/** `agent-task:<characterId>` — hand the page to that agent. */
+export function agentTaskTargetId(characterId: string): string {
+  return `agent-task:${characterId}`
 }
 
 /**
@@ -126,6 +154,10 @@ export async function listDeliveryTargets(
     // own retry is the way to finish it, and offering it here would look like
     // a second, different way to do the same thing.
     if (row.status === "submitting" || row.status === "failed") continue
+    // Only a conversation can be appended to. A filed issue and an agent task
+    // are work on their own planes, and "add this page to that" would mean
+    // something different for each.
+    if (!row.sessionId || (row.workKind && row.workKind !== "session")) continue
     targets.push({
       id: sessionTargetId(row.sessionId),
       kind: "session",
@@ -150,6 +182,26 @@ export async function listDeliveryTargets(
       // task does.
       ...(template.description ? { detail: template.description } : {}),
       ...(params.length > 0 ? { params } : {}),
+    })
+  }
+  for (const board of await deps.listIssueProjects()) {
+    targets.push({
+      id: issueTargetId(board.id),
+      kind: "issue",
+      label: board.name,
+      isDefault: false,
+      // A board belongs to a workspace, so the target does too — filing does
+      // not move an issue between them any more than an append moves a
+      // conversation.
+      workspaceId: board.workspaceId,
+    })
+  }
+  for (const agent of await deps.listTaskAgents()) {
+    targets.push({
+      id: agentTaskTargetId(agent.id),
+      kind: "agent-task",
+      label: agent.name,
+      isDefault: false,
     })
   }
   return targets
@@ -194,4 +246,18 @@ export function templateIdOfTarget(target: BrowserDeliveryTargetV1): string | un
   if (target.kind !== "template") return undefined
   const templateId = target.id.slice("template:".length)
   return templateId.length > 0 ? templateId : undefined
+}
+
+/** The board a resolved `issue:` target files on. */
+export function issueProjectIdOfTarget(target: BrowserDeliveryTargetV1): string | undefined {
+  if (target.kind !== "issue") return undefined
+  const boardId = target.id.slice("issue:".length)
+  return boardId.length > 0 ? boardId : undefined
+}
+
+/** The agent a resolved `agent-task:` target hands the page to. */
+export function agentIdOfTarget(target: BrowserDeliveryTargetV1): string | undefined {
+  if (target.kind !== "agent-task") return undefined
+  const agentId = target.id.slice("agent-task:".length)
+  return agentId.length > 0 ? agentId : undefined
 }

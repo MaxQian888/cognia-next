@@ -3069,7 +3069,9 @@
                   "enum": [
                     "chat",
                     "session",
-                    "template"
+                    "template",
+                    "issue",
+                    "agent-task"
                   ]
                 },
                 "label": {
@@ -3217,7 +3219,6 @@
         "type": "object",
         "required": [
           "submissionId",
-          "sessionId",
           "status",
           "updatedAt",
           "deepLink"
@@ -3230,6 +3231,14 @@
           "sessionId": {
             "type": "string",
             "minLength": 1
+          },
+          "workKind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "issue",
+              "agent-task"
+            ]
           },
           "status": {
             "type": "string",
@@ -3290,7 +3299,6 @@
         "type": "object",
         "required": [
           "submissionId",
-          "sessionId",
           "status",
           "updatedAt",
           "deepLink"
@@ -3303,6 +3311,14 @@
           "sessionId": {
             "type": "string",
             "minLength": 1
+          },
+          "workKind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "issue",
+              "agent-task"
+            ]
           },
           "status": {
             "type": "string",
@@ -3373,7 +3389,6 @@
               "type": "object",
               "required": [
                 "submissionId",
-                "sessionId",
                 "title",
                 "sourceHost",
                 "captureMode",
@@ -3390,6 +3405,14 @@
                 "sessionId": {
                   "type": "string",
                   "minLength": 1
+                },
+                "workKind": {
+                  "type": "string",
+                  "enum": [
+                    "session",
+                    "issue",
+                    "agent-task"
+                  ]
                 },
                 "title": {
                   "type": "string"
@@ -3472,7 +3495,6 @@
         "type": "object",
         "required": [
           "submissionId",
-          "sessionId",
           "status",
           "updatedAt",
           "deepLink"
@@ -3485,6 +3507,14 @@
           "sessionId": {
             "type": "string",
             "minLength": 1
+          },
+          "workKind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "issue",
+              "agent-task"
+            ]
           },
           "status": {
             "type": "string",
@@ -3656,7 +3686,6 @@
         "type": "object",
         "required": [
           "submissionId",
-          "sessionId",
           "acceptedAt",
           "status",
           "deepLink"
@@ -3669,6 +3698,14 @@
           "sessionId": {
             "type": "string",
             "minLength": 1
+          },
+          "workKind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "issue",
+              "agent-task"
+            ]
           },
           "acceptedAt": {
             "type": "integer"
@@ -42888,5 +42925,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "dc6ee15a098a9fded626a07a7e95663bde76d5fe801e3a944df4fa7dc9f081b5"
+  "catalogHash": "864b658aca2163579a87cfe965fab77b8fc40fb6042365bd9729513bb78fdda4"
 }

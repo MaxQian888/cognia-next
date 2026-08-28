@@ -96,6 +96,8 @@ export interface RecordedSubmission {
   targetId?: string
   /** The whole serialized request, so a test can assert on its size. */
   requestBytes: number
+  /** Which plane the work lives on. */
+  workKind: "session" | "issue" | "agent-task"
   /** What the task answered, when a test has set one. */
   answer?: string
   /** Present only when the capture carried one. */
@@ -504,6 +506,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
       submissionId: request.submissionId,
       // An append reuses the conversation the target names, so one user action
       // still produces one session — which `sessionIds()` is asserted on.
+      workKind: workKindOf(request),
       sessionId: appendTarget(request) ?? sessionId,
       workspaceId: request.workspaceId,
       ...(request.targetId ? { targetId: request.targetId } : {}),
@@ -545,13 +548,24 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     if (!request.targetId || request.targetId === "chat:new") return undefined
     const offered = deliveryTargets().find((target) => target.id === request.targetId)
     if (!offered) throw new Error(`unknown_target: ${request.targetId}`)
-    return request.targetId.slice("session:".length)
+    return offered.kind === "session" ? request.targetId.slice("session:".length) : undefined
+  }
+
+  /** The plane a target's work lives on, as the Host records it. */
+  function workKindOf(request: BrowserContextSubmitRequestV1): RecordedSubmission["workKind"] {
+    const offered = deliveryTargets().find((target) => target.id === request.targetId)
+    if (offered?.kind === "issue") return "issue"
+    if (offered?.kind === "agent-task") return "agent-task"
+    return "session"
   }
 
   function summaryOf(row: RecordedSubmission): BrowserContextSubmissionSummaryV1 {
     return {
       submissionId: row.submissionId,
-      sessionId: row.sessionId,
+      // Work with no transcript carries no session id and says which plane it
+      // is on instead — the panel branches on exactly that to decide whether
+      // there is an answer to read or a turn to stop.
+      ...(row.workKind === "session" ? { sessionId: row.sessionId } : { workKind: row.workKind }),
       title: row.title,
       sourceHost: row.sourceHost,
       captureMode: row.captureMode as BrowserContextSubmissionSummaryV1["captureMode"],

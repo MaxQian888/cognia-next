@@ -13,14 +13,40 @@
  * second store of the same web content with none of the same controls, and the
  * side panel — the only reader — never displays them.
  */
-import type { BrowserCaptureMode, BrowserSubmissionStatus } from "@/types/browser-companion"
+import type {
+  BrowserCaptureMode,
+  BrowserSubmissionStatus,
+  BrowserWorkKind,
+} from "@/types/browser-companion"
 
 export interface BrowserSubmissionRow {
   /** Client-minted; also the RPC `Idempotency-Key`. */
   submissionId: string
   /** The browser device that submitted. Scopes every `browser.read-own` read. */
   deviceId: string
-  sessionId: string
+  /**
+   * The conversation this submission started, when it started one.
+   *
+   * Absent for work that has no transcript: a filed issue, an agent task
+   * queued for later. It stays the indexed column for the common case and is
+   * simply missing from that index for the rest — nothing queries the table by
+   * it, so a partial index costs nothing.
+   */
+  sessionId?: string
+  /**
+   * Which plane the work lives on. Absent means `session`, which is what every
+   * row written before an issue or an agent task could be one was.
+   */
+  workKind?: BrowserWorkKind
+  /**
+   * The work's id on its own plane — an issue id, an agent task id.
+   *
+   * Separate from `sessionId` rather than overloading it, because the two are
+   * read by different subsystems and a column that means "a session id, except
+   * sometimes it is an issue id" is one every later reader has to be warned
+   * about.
+   */
+  workId?: string
   /** The session title at submission time, for the recent list. */
   title: string
   /** Hostname only — never the path or the query. */

@@ -177,7 +177,16 @@ export function isTerminalBrowserSubmissionStatus(status: BrowserSubmissionStatu
 
 export interface BrowserContextSubmitResponseV1 {
   submissionId: string
-  sessionId: string
+  /**
+   * The conversation this started, when it started one.
+   *
+   * Absent for work that has no transcript — a filed issue, an agent task
+   * queued for later. `deepLink` is the reference that always resolves; this is
+   * here because a client that only ever starts conversations still reads it.
+   */
+  sessionId?: string
+  /** Absent means `session`. */
+  workKind?: BrowserWorkKind
   acceptedAt: number
   status: BrowserSubmissionStatus
   /** `cognia://session/<id>` — opens the task in the desktop app. */
@@ -195,7 +204,10 @@ export interface BrowserContextSubmitResponseV1 {
  */
 export interface BrowserContextSubmissionSummaryV1 {
   submissionId: string
-  sessionId: string
+  /** Absent for work with no transcript. See the submit response. */
+  sessionId?: string
+  /** Absent means `session`. */
+  workKind?: BrowserWorkKind
   title: string
   /** Hostname only — never the full URL. */
   sourceHost: string
@@ -228,7 +240,10 @@ export interface BrowserContextSubmissionSummaryPageV1 {
 
 export interface BrowserContextSubmissionStatusV1 {
   submissionId: string
-  sessionId: string
+  /** Absent for work with no transcript. See the submit response. */
+  sessionId?: string
+  /** Absent means `session`. */
+  workKind?: BrowserWorkKind
   status: BrowserSubmissionStatus
   updatedAt: number
   /** A machine-readable reason, present only on `failed`. */
@@ -313,7 +328,18 @@ export interface BrowserCompanionWorkspaceV1 {
  * catalogue entry, so a client that sent a `kind` disagreeing with the id it
  * quoted would change nothing.
  */
-export type BrowserDeliveryTargetKind = "chat" | "session" | "template"
+export type BrowserDeliveryTargetKind = "chat" | "session" | "template" | "issue" | "agent-task"
+
+/**
+ * What a submission produced, and therefore what its deep link points at.
+ *
+ * Absent means `session`, which is what every submission was before an issue
+ * or an agent task could be one. The panel branches on it for exactly one
+ * thing: whether there is a transcript to read an answer out of, or a turn to
+ * stop. A filed issue has neither and says so, rather than offering controls
+ * that would refuse.
+ */
+export type BrowserWorkKind = "session" | "issue" | "agent-task"
 
 /**
  * A value a target needs before it can run.

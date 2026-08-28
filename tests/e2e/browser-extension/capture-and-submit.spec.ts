@@ -320,6 +320,45 @@ test.describe("running a saved template on a page", () => {
   })
 })
 
+test.describe("filing a page instead of asking about it", () => {
+  test.use({
+    hostTemplates: [
+      {
+        id: "issue:board-1",
+        kind: "issue",
+        label: "Triage",
+        isDefault: false,
+        // The workspace the panel preselects, so the board is on offer without
+        // the test having to switch workspaces first.
+        workspaceId: "workspace-research",
+      },
+    ],
+  })
+
+  test("files it, and offers no answer or stop for a card on a board", async ({
+    panel,
+    mockHost,
+    serviceWorker,
+    context,
+  }) => {
+    await captureFixturePage({ panel, mockHost, serviceWorker, context }, { mode: "selection" })
+    await panel.getByTestId("target-select").click()
+    await panel.getByRole("option", { name: "Triage" }).click()
+    await panel.getByTestId("instruction").fill("Worth reading later")
+    await panel.getByTestId("submit").click()
+
+    await expect(panel.getByTestId("recent-list")).toBeVisible()
+    const submissionId = mockHost.submissions()[0].submissionId
+    expect(mockHost.submissions()[0].workKind).toBe("issue")
+
+    // Nothing is running and nothing has been said, so the panel offers
+    // neither control — and still offers the way to reach it.
+    await expect(panel.getByTestId(`recent-stop-${submissionId}`)).toBeHidden()
+    await expect(panel.getByTestId(`recent-answer-toggle-${submissionId}`)).toBeHidden()
+    await expect(panel.getByRole("button", { name: "Open in Cognia" })).toBeVisible()
+  })
+})
+
 test.describe("following a task without leaving the browser", () => {
   test("reads the answer, and only when asked for it", async ({
     panel,

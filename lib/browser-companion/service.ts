@@ -38,6 +38,7 @@
 import type {
   BrowserCompanionCapabilityV1,
   BrowserContextResultV1,
+  BrowserWorkKind,
   BrowserDeliveryTargetV1,
   BrowserContextSubmissionStatusV1,
   BrowserContextSubmissionSummaryPageV1,
@@ -58,6 +59,8 @@ import { sha256Hex } from "@/lib/share/hash"
 import { buildBrowserContextPrompt, sourceHostOf } from "./build-prompt"
 import {
   NEW_CHAT_TARGET_ID,
+  agentIdOfTarget,
+  issueProjectIdOfTarget,
   resolveDeliveryTarget,
   sessionIdOfTarget,
   templateIdOfTarget,
@@ -147,6 +150,42 @@ export interface BrowserCompanionDeps {
    */
   capabilityRevision: (deviceId: string) => Promise<string>
   /**
+   * The live status of work that is not a conversation.
+   *
+   * `null` when that plane has nothing to say — the work was deleted, or the
+   * reader is unavailable — which leaves the recorded status standing.
+   */
+  workStatus: (
+    kind: Exclude<BrowserWorkKind, "session">,
+    workId: string
+  ) => Promise<BrowserSubmissionStatus | null>
+  /**
+   * File the captured page as an issue on a delivery container the Host
+   * offered, and answer its id.
+   */
+  createIssue: (input: {
+    issueProjectId: string
+    workspaceId: string
+    title: string
+    description: string
+    sourceHost: string
+    url: string
+  }) => Promise<{ id: string }>
+  /**
+   * Create an agent task for a character the Host offered, and start it.
+   *
+   * Started here rather than left pending because "send this page to an agent"
+   * is a request to do something, not to write it down — a task that sat in a
+   * queue nobody looked at would be the filed-issue target wearing another
+   * name.
+   */
+  createAgentTask: (input: {
+    agentId: string
+    workspaceId: string
+    title: string
+    description: string
+  }) => Promise<{ id: string }>
+  /**
    * The last thing the assistant said in a session, or `null` while it has not
    * said anything yet.
    *
@@ -167,6 +206,37 @@ export interface BrowserCompanionDeps {
 /** `cognia://session/<id>` — the link that opens the task on the desktop. */
 export function browserSubmissionDeepLink(sessionId: string): string {
   return `cognia://session/${encodeURIComponent(sessionId)}`
+}
+
+/**
+ * The link that opens a submission's work, whatever plane it is on.
+ *
+ * One function rather than a field on the row, because a link is derived from
+ * where the work lives and a stored one would be a second copy that can fall
+ * behind the route it names.
+ */
+export function workDeepLink(row: BrowserSubmissionRow): string {
+  switch (row.workKind) {
+    case "issue":
+      return `cognia://issues/${encodeURIComponent(row.workId ?? "")}`
+    case "agent-task":
+      return `cognia://agent-tasks/${encodeURIComponent(row.workId ?? "")}`
+    default:
+      return browserSubmissionDeepLink(row.sessionId ?? "")
+  }
+}
+
+/** The fields every read answers with, derived from wherever the work lives. */
+function workReference(row: BrowserSubmissionRow): {
+  sessionId?: string
+  workKind?: BrowserWorkKind
+  deepLink: string
+} {
+  return {
+    ...(row.sessionId ? { sessionId: row.sessionId } : {}),
+    ...(row.workKind && row.workKind !== "session" ? { workKind: row.workKind } : {}),
+    deepLink: workDeepLink(row),
+  }
 }
 
 export async function browserCompanionCapability(
@@ -252,10 +322,9 @@ export async function submitBrowserContext(
     }
     return {
       submissionId: existing.submissionId,
-      sessionId: existing.sessionId,
       acceptedAt: existing.submittedAt,
       status,
-      deepLink: browserSubmissionDeepLink(existing.sessionId),
+      ...workReference(existing),
     }
   }
 
@@ -287,26 +356,28 @@ export async function submitBrowserContext(
     instruction,
     request.suggestedTitle
   )
-  // An append reuses the conversation the target names; only a new task creates
-  // one. Deciding it here rather than inside `createSession` keeps the two
-  // effects visible side by side, which is the difference the capability
-  // argument turns on.
-  const appendTo = sessionIdOfTarget(target)
-  const session = appendTo
-    ? { id: appendTo }
-    : await deps.createSession({ title: derivedTitle, projectId: request.workspaceId })
-
   const now = deps.now()
+  // Where the work goes, decided in one place. The three conversation kinds
+  // differ only in whether they create the conversation; the other two do not
+  // produce one at all, which is the whole reason the row and the wire stopped
+  // assuming they did.
+  const placement = await placeWork(deps, target, {
+    title: derivedTitle,
+    instruction,
+    workspaceId: request.workspaceId,
+    sourceHost: sourceHostOf(request.context.url),
+    url: request.context.url,
+  })
   // Persist the recoverable intent first, then settle the status only after
   // HostState has answered. A retry can redrive any row still in
   // `REDRIVABLE_STATUSES` without creating another session or transcript item.
   const submission: BrowserSubmissionRow = {
     submissionId: request.submissionId,
     deviceId,
-    sessionId: session.id,
-    // The append keeps the conversation's own title. Overwriting it with the
+    ...placement.row,
+    // An append keeps the conversation's own title. Overwriting it with the
     // page just captured would rename a task from under whoever is reading it.
-    title: appendTo ? target.label : derivedTitle,
+    title: placement.row.sessionId && target.kind === "session" ? target.label : derivedTitle,
     sourceHost: sourceHostOf(request.context.url),
     urlFingerprint,
     workspaceId: request.workspaceId,
@@ -314,27 +385,106 @@ export async function submitBrowserContext(
     captureMode: request.context.captureMode,
     contentBytes: capturedContentBytes(request),
     truncated: capturedTruncated(request),
-    status: "submitting",
+    // `submitting` means "the row exists and the work has not started yet",
+    // which is only ever true of the enqueue path. Issue and agent-task work is
+    // already created by the time this row is written, so it starts at
+    // `queued` — a filed issue stuck at `submitting` would be a claim that
+    // something is still being sent.
+    status: placement.row.sessionId ? "submitting" : "queued",
     submittedAt: now,
     updatedAt: now,
   }
   await deps.recordSubmission(submission)
 
-  const status = await enqueueAndSettle(deps, submission, {
-    // Derived from the submission id rather than random: a retry that gets
-    // past the ledger must still resolve to the same message, or the same
-    // capture arrives twice in one transcript.
-    messageId: `browser-${request.submissionId}`,
-    text: prompt,
-  })
+  // Only a conversation takes a turn. Issue and agent-task work is already
+  // under way — or already written down — by the time it is recorded, so it
+  // settles at the status its own plane reports.
+  const status = placement.row.sessionId
+    ? await enqueueAndSettle(deps, submission, {
+        // Derived from the submission id rather than random: a retry that gets
+        // past the ledger must still resolve to the same message, or the same
+        // capture arrives twice in one transcript.
+        messageId: `browser-${request.submissionId}`,
+        text: prompt,
+      })
+    : await settleWithoutTurn(deps, submission)
 
   return {
     submissionId: request.submissionId,
-    sessionId: session.id,
     acceptedAt: now,
     status,
-    deepLink: browserSubmissionDeepLink(session.id),
+    ...workReference({ ...submission, status }),
   }
+}
+
+/**
+ * Create whatever the target says this submission produces.
+ *
+ * The one place the five kinds diverge. Everything downstream — the row, the
+ * reads, the deep link — works off what this returns rather than re-deciding,
+ * so a sixth kind is one branch here and nothing anywhere else.
+ */
+async function placeWork(
+  deps: BrowserCompanionDeps,
+  target: BrowserDeliveryTargetV1,
+  work: {
+    title: string
+    instruction: string
+    workspaceId: string
+    sourceHost: string
+    url: string
+  }
+): Promise<{ row: Pick<BrowserSubmissionRow, "sessionId" | "workKind" | "workId"> }> {
+  const issueProjectId = issueProjectIdOfTarget(target)
+  if (issueProjectId) {
+    const issue = await deps.createIssue({
+      issueProjectId,
+      workspaceId: work.workspaceId,
+      title: work.title,
+      description: work.instruction,
+      sourceHost: work.sourceHost,
+      url: work.url,
+    })
+    return { row: { workKind: "issue", workId: issue.id } }
+  }
+
+  const agentId = agentIdOfTarget(target)
+  if (agentId) {
+    const task = await deps.createAgentTask({
+      agentId,
+      workspaceId: work.workspaceId,
+      title: work.title,
+      description: work.instruction,
+    })
+    return { row: { workKind: "agent-task", workId: task.id } }
+  }
+
+  // An append reuses the conversation the target names; the other two create
+  // one. Deciding it here rather than inside `createSession` keeps the two
+  // effects visible side by side, which is the difference the capability
+  // argument turns on.
+  const appendTo = sessionIdOfTarget(target)
+  const session = appendTo
+    ? { id: appendTo }
+    : await deps.createSession({ title: work.title, projectId: work.workspaceId })
+  return { row: { sessionId: session.id, workKind: "session" } }
+}
+
+/**
+ * Settle a submission whose work does not take a turn.
+ *
+ * Its own plane already knows what state it is in, so the row is written at
+ * that state rather than at `queued` — which for a filed issue would be a claim
+ * that something is about to run.
+ */
+async function settleWithoutTurn(
+  deps: BrowserCompanionDeps,
+  row: BrowserSubmissionRow
+): Promise<BrowserSubmissionStatus> {
+  const status = await currentStatus(deps, row)
+  if (status === row.status) return status
+  await deps.recordSubmission({ ...row, status, updatedAt: deps.now() })
+  return status
 }
 
 /**
@@ -431,8 +581,19 @@ async function enqueueAndSettle(
   row: BrowserSubmissionRow,
   message: { messageId: string; text: string }
 ): Promise<BrowserSubmissionStatus> {
+  if (!row.sessionId) {
+    // Unreachable by construction: only a `chat`, `session` or `template`
+    // target enqueues, and all three have a conversation. Stated rather than
+    // coerced, so a fourth kind that forgets to create one fails here instead
+    // of enqueueing into the empty string.
+    throw new BrowserCompanionError(
+      "enqueue_failed",
+      "this submission has no conversation to enqueue into"
+    )
+  }
+  const sessionId = row.sessionId
   try {
-    await deps.enqueueMessage({ sessionId: row.sessionId, ...message })
+    await deps.enqueueMessage({ sessionId, ...message })
   } catch (error) {
     const code = error instanceof BrowserCompanionError ? error.code : "enqueue_failed"
     const status: BrowserSubmissionStatus =
@@ -466,14 +627,13 @@ export async function listBrowserContextSubmissions(
   const items = await Promise.all(
     rows.map(async (row) => ({
       submissionId: row.submissionId,
-      sessionId: row.sessionId,
       title: row.title,
       sourceHost: row.sourceHost,
       captureMode: row.captureMode,
       status: await currentStatus(deps, row),
       submittedAt: row.submittedAt,
       updatedAt: row.updatedAt,
-      deepLink: browserSubmissionDeepLink(row.sessionId),
+      ...workReference(row),
     }))
   )
   return { items, capabilityRevision }
@@ -497,11 +657,10 @@ export async function getBrowserContextSubmission(
   }
   return {
     submissionId: row.submissionId,
-    sessionId: row.sessionId,
     status: await currentStatus(deps, row),
     updatedAt: row.updatedAt,
     ...(row.errorCode ? { errorCode: row.errorCode } : {}),
-    deepLink: browserSubmissionDeepLink(row.sessionId),
+    ...workReference(row),
   }
 }
 
@@ -525,6 +684,10 @@ export async function getBrowserContextResult(
   payload: { submissionId?: unknown }
 ): Promise<BrowserContextResultV1> {
   const status = await getBrowserContextSubmission(deps, deviceId, payload)
+  // Only a conversation has a transcript to read an answer out of. A filed
+  // issue and a queued agent task answer the status alone, and the panel shows
+  // "no answer yet" — which is true, rather than an error about a shape.
+  if (!status.sessionId) return status
   const answer = await deps.latestAnswer(status.sessionId)
   if (!answer) return status
   const clipped = clipToBytes(answer.text, BROWSER_RESULT_TEXT_BYTES)
@@ -554,6 +717,16 @@ export async function cancelBrowserContext(
   payload: { submissionId?: unknown }
 ): Promise<BrowserContextSubmissionStatusV1> {
   const status = await getBrowserContextSubmission(deps, deviceId, payload)
+  if (!status.sessionId) {
+    // Nothing is running. A filed issue is a note on a board and an agent task
+    // that has not started has no turn — the panel does not offer a stop for
+    // either, so reaching here means a stale view rather than a refusal the
+    // user chose.
+    throw new BrowserCompanionError(
+      "nothing_to_stop",
+      "this submission did not start a conversation"
+    )
+  }
   const stopped = await deps.abortTurn(status.sessionId)
   if (!stopped) {
     throw new BrowserCompanionError(
@@ -598,7 +771,14 @@ async function currentStatus(
   row: BrowserSubmissionRow
 ): Promise<BrowserSubmissionStatus> {
   try {
-    return (await deps.sessionStatus(row.sessionId)) ?? row.status
+    if (row.workKind && row.workKind !== "session") {
+      // The work has its own lifecycle and its own reader. The recorded status
+      // still stands when that reader has nothing to say, for the same reason
+      // it does for a session: a plane that cannot be read must not rewrite
+      // history as a failure.
+      return (row.workId ? await deps.workStatus(row.workKind, row.workId) : null) ?? row.status
+    }
+    return (row.sessionId ? await deps.sessionStatus(row.sessionId) : null) ?? row.status
   } catch {
     return row.status
   }

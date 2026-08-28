@@ -4,7 +4,9 @@ import type { BrowserDeliveryTargetV1 } from "@/types/browser-companion"
 
 import {
   MAX_SESSION_TARGETS,
+  agentTaskTargetId,
   browserFillableParams,
+  issueTargetId,
   templateTargetId,
   NEW_CHAT_LABEL,
   NEW_CHAT_TARGET_ID,
@@ -47,8 +49,17 @@ function template(overrides: Partial<ChatTemplateRow> = {}): ChatTemplateRow {
   }
 }
 
-function deps(rows: BrowserSubmissionRow[], templates: ChatTemplateRow[] = []) {
+function deps(
+  rows: BrowserSubmissionRow[],
+  templates: ChatTemplateRow[] = [],
+  extra: {
+    boards?: { id: string; name: string; workspaceId: string }[]
+    agents?: { id: string; name: string }[]
+  } = {}
+) {
   return {
+    listIssueProjects: async () => extra.boards ?? [],
+    listTaskAgents: async () => extra.agents ?? [],
     listSubmissions: async (deviceId: string, limit: number) =>
       rows
         .filter((entry) => entry.deviceId === deviceId)
@@ -249,5 +260,66 @@ describe("templates as delivery targets", () => {
     const noParams = template({ body: "Summarize this page.", params: [] })
     const targets = await listDeliveryTargets(deps([], [noParams]), "browser-a")
     expect(targets[1]).not.toHaveProperty("params")
+  })
+})
+
+describe("issue and agent-task targets", () => {
+  it("offers a board only under the workspace it belongs to", async () => {
+    // Filing does not move an issue between workspaces, any more than an
+    // append moves a conversation.
+    const targets = await listDeliveryTargets(
+      deps([], [], { boards: [{ id: "board-1", name: "Inbox", workspaceId: "ws-other" }] }),
+      "browser-a"
+    )
+    expect(targets[1]).toMatchObject({
+      id: issueTargetId("board-1"),
+      kind: "issue",
+      label: "Inbox",
+      workspaceId: "ws-other",
+    })
+  })
+
+  it("offers an agent in every workspace, because a task is created in the chosen one", async () => {
+    const targets = await listDeliveryTargets(
+      deps([], [], { agents: [{ id: "char-1", name: "Researcher" }] }),
+      "browser-a"
+    )
+    expect(targets[1]).toMatchObject({
+      id: agentTaskTargetId("char-1"),
+      kind: "agent-task",
+      label: "Researcher",
+    })
+    expect(targets[1]).not.toHaveProperty("workspaceId")
+  })
+
+  it("offers no agent when the Host cannot run one", async () => {
+    // An agent task needs the sidecar. A Host without one would accept the task
+    // and refuse it at dispatch, which is a worse answer than not offering it —
+    // so the reader returns nothing and there is no target.
+    const targets = await listDeliveryTargets(deps([], [], { agents: [] }), "browser-a")
+    expect(targets.map((entry) => entry.kind)).toEqual(["chat"])
+  })
+
+  it("does not offer non-conversation work as something to append to", async () => {
+    // "Add this page to that" means something different for an issue and for a
+    // task, and the append path only knows how to enqueue into a transcript.
+    const targets = await listDeliveryTargets(
+      deps([
+        row({ submissionId: "a", sessionId: "session-a", status: "completed" }),
+        row({
+          submissionId: "b",
+          sessionId: undefined,
+          workKind: "issue",
+          workId: "issue-1",
+          status: "queued",
+          submittedAt: 9,
+        }),
+      ]),
+      "browser-a"
+    )
+    expect(targets.map((entry) => entry.id)).toEqual([
+      NEW_CHAT_TARGET_ID,
+      sessionTargetId("session-a"),
+    ])
   })
 })
