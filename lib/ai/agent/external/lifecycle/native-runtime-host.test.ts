@@ -235,11 +235,35 @@ describe("createNativeRuntimeHost", () => {
     )
 
     const { assessment } = await host.inspect("codex-app-server")
-    // No supportedRange is catalogued yet, so the fail-closed policy resolves a
-    // readable version to "needs one explicit consent" rather than a pass.
+    // `codex-app-server` now catalogues `supportedRange: ">=0.149.0"`, which
+    // 1.2.3 satisfies, but only the versions in `certifiedVersions` pass
+    // outright — anything else still needs one explicit consent.
     expect(assessment.detectedVersion).toBe("1.2.3")
     expect(assessment.verdict).toBe("supported-uncertified")
     expect(assessment.checkedAt).toBe("2026-02-02T00:00:00.000Z")
+  })
+
+  it("certifies the Codex version the adapter was actually verified against", async () => {
+    const host = createNativeRuntimeHost(
+      deps({ invoke: jest.fn(async () => ({ output: "codex-cli 0.150.1" }) as never) })
+    )
+
+    const { assessment } = await host.inspect("codex-app-server")
+    expect(assessment.detectedVersion).toBe("0.150.1")
+    expect(assessment.verdict).toBe("certified")
+  })
+
+  it("refuses a Codex older than the wire contract the adapter speaks", async () => {
+    // Below 0.149 there is no `permissions` profile field, `thread/resume` does
+    // not restore the thread's own policy, and `thread/fork` takes none of it —
+    // so the adapter's resume/fork semantics silently do not apply.
+    const host = createNativeRuntimeHost(
+      deps({ invoke: jest.fn(async () => ({ output: "codex-cli 0.144.4" }) as never) })
+    )
+
+    const { assessment } = await host.inspect("codex-app-server")
+    expect(assessment.verdict).toBe("unsupported")
+    expect(assessment.blockingCode).toBe("version_unsupported")
   })
 
   it("reports a runtime that is not installed as missing", async () => {

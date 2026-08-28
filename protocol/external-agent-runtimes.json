@@ -30,6 +30,8 @@
         "parser": "semver-anywhere",
         "timeoutMs": 10000
       },
+      "supportedRange": ">=0.149.0",
+      "certifiedVersions": ["0.150.1"],
       "distributions": [],
       "sandbox": {
         "required": true,
@@ -57,7 +59,10 @@
         "required": true,
         "windowsExceptionEligible": true
       },
-      "docsUrl": "https://github.com/zed-industries/codex-acp"
+      "docsUrl": "https://github.com/zed-industries/codex-acp",
+      "notes": {
+        "certification": "Deliberately uncertified. This runtime launches through `npx -y @zed-industries/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers."
+      }
     },
     {
       "runtimeId": "claude-agent-acp",

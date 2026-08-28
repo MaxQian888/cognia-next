@@ -168,6 +168,27 @@ function stdioConfig(overrides: Partial<LifecycleAgentConfig> = {}): LifecycleAg
 
 // ---------------------------------------------------------------------------
 
+describe("assessReadiness and version certification", () => {
+  it("stays ready on an uncertified runtime version — certification is informational", () => {
+    // DELIBERATE, and pinned here so it is not "fixed" by accident.
+    //
+    // `assessRuntimeVersion` fails closed on `missing`, and `missing` is what a
+    // runtime whose binary is not on PATH reports. Feeding the version verdict
+    // into readiness would therefore block EVERY agent on any machine that has
+    // not installed that particular CLI, which is far worse than the problem it
+    // would solve. So the verdict drives the governance panel and the consent
+    // receipt, never admission.
+    //
+    // The one thing that DOES gate is `verdictFailsClosed`, applied where a
+    // launch is actually attempted — not here.
+    return build()
+      .service.assessReadiness(stdioConfig())
+      .then((verdict) => {
+        expect(verdict.status).toBe("ready")
+      })
+  })
+})
+
 describe("isRuntimeAffectingUpdate", () => {
   it("treats launch-shaping fields as runtime-affecting", () => {
     expect(isRuntimeAffectingUpdate({ process: { command: "x" } })).toBe(true)

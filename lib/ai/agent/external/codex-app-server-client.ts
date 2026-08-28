@@ -80,9 +80,13 @@ const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 // ============================================================================
 
 // Wire-format ground truth: verified against `codex app-server generate-json-schema
-// --out <dir>` (codex-cli 0.149.0). Key invariants encoded below:
+// --out <dir>` AND `--experimental --out <dir>` (codex-cli **0.150.1**). Both
+// bundles matter: the adapter negotiates `experimentalApi: true`, so a field
+// present only in the experimental dump is one we may use even though the
+// default dump says it does not exist. Key invariants encoded below:
+//
 // - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-request" |
-//   "never" (or a `{ granular: … }` object we don't emit).
+//   "never" (or a `{ granular: … }` object we don't emit). UNCHANGED in 0.150.
 // - THE SANDBOX HAS TWO DIFFERENT SHAPES, and conflating them is a hard
 //   `-32600 Invalid request` at the JSON-RPC boundary:
 //     · `thread/start` + `thread/resume` take `sandbox`: a plain kebab-case
@@ -93,9 +97,38 @@ const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 //       the two that can carry writableRoots / networkAccess.
 //   Sending the union to `thread/start` makes serde read the object's `type` key
 //   as the enum variant and fail with "unknown variant `type`".
+//   `SandboxMode` and `AskForApproval` are both UNCHANGED in 0.150.1.
+// - A THIRD SHAPE JOINS THEM IN 0.150: `permissions`, a permission-profile ID
+//   string, accepted by `thread/start`, `thread/resume`, `thread/fork` and
+//   `turn/start`. The schema says, verbatim, that it "Cannot be combined with
+//   `sandbox`" (thread-level) / "`sandboxPolicy`" (turn-level). So the three are
+//   MUTUALLY EXCLUSIVE per request and a caller must pick one — see
+//   {@link codexPermissionParams}, which is the only place allowed to decide.
+// - The selected profile is reported back, never echoed from the request:
+//   `activePermissionProfile: { id, extends? }` appears on `ThreadStartResponse`
+//   and `ThreadResumeResponse` only.
+// - `ThreadResumeResponse` carries the thread's RESTORED context —
+//   `activePermissionProfile`, `approvalPolicy`, `approvalsReviewer`, `sandbox`
+//   (a `SandboxPolicy`, documented "Legacy … prefer `activePermissionProfile`
+//   for profile provenance"), `cwd`, `model`, `runtimeWorkspaceRoots`. Since
+//   0.148 Codex restores cwd + approval policy on resume, and since 0.149 the
+//   permission profile as well, so re-asserting our current config here
+//   OVERWRITES what it just restored. `thread/read` is NOT needed for this.
 // - `effort` is a free-form model-advertised string; `summary` is
 //   "auto" | "concise" | "detailed" | "none".
 // - `thread/start` also accepts `developerInstructions` (system-prompt channel).
+// - NOT A METHOD: `codex/sandbox-state-meta` is an MCP `_meta` key Codex
+//   attaches when calling an MCP server (it sits beside `codex/tool-catalog-cache`
+//   in `codex-mcp/src/rmcp_client.rs`), which is why `codex sandbox
+//   --sandbox-state-json` names it. It is not callable over the app-server and
+//   must not be wired as one — `callOptional` would take a single `-32601`,
+//   negative-cache it forever, and leave an inert feature that looks connected.
+// - Enterprise/managed limits are readable: `configRequirements/read` returns
+//   `allowedSandboxModes[]`, `allowedApprovalPolicies[]`, `allowedWebSearchModes[]`
+//   and `allowedPermissionProfiles` — the last an object MAP `{[id]: boolean}`,
+//   not an array. There is NO typed refusal error: `CodexErrorInfo` has
+//   `badRequest` / `sandboxError` but no policy-refusal variant, so a request
+//   that violates them must be caught BEFORE it is sent.
 
 /** A user input item for `thread/start` / `turn/start`. */
 type CodexUserInput =
