@@ -7,15 +7,21 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import type { MessagePartRendererProps } from "@/lib/plugin/api/message-part-renderers"
-import type { OcrResultPart, OcrSourceRef } from "@/lib/slash-commands/actions/ocr"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { ImageBlock } from "@/components/chat/renderers/image-block"
-import { COMPOSER_APPEND_EVENT } from "@/components/chat/composer"
-import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@cognia/logging"
-import { isTauri } from "@/lib/platform/detect"
+import { Badge, Button } from "@cognia/plugin-ui"
+import { createPluginLogger, readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
+import {
+  COMPOSER_APPEND_EVENT,
+  type MessagePartRendererProps,
+} from "@cognia/plugin-sdk/api/message-renderer"
+import { type OcrResultPart, type OcrSourceRef } from "@cognia/plugin-sdk/api/ocr-provider"
+import { ImageBlock, useCopy } from "@cognia/plugin-sdk/api/tool-renderer"
+
+/**
+ * Plugin-scoped logger for a card that renders outside `activate(ctx)`, so a
+ * clipboard failure is attributed to this plugin rather than to whichever host
+ * module it borrowed a logger from.
+ */
+const cardLogger = createPluginLogger("cognia-ocr")
 
 function isOcrResultPart(part: unknown): part is OcrResultPart {
   const p = part as { type?: unknown; text?: unknown }
@@ -33,7 +39,7 @@ function useThumbnailSrc(sourceRef: OcrSourceRef | undefined): string | null {
   // ref change reads correctly without a state reset inside the effect. The
   // effect only resolves the async Tauri file-path case.
   const directSrc = sourceRef?.kind === "data-url" ? sourceRef.value : null
-  const needsTauriResolve = sourceRef?.kind === "file-path" && isTauri()
+  const needsTauriResolve = sourceRef?.kind === "file-path" && readHostCapabilities().tauri
   const [resolved, setResolved] = useState<{ ref: OcrSourceRef; src: string | null } | null>(null)
   useEffect(() => {
     if (!needsTauriResolve || !sourceRef) return
@@ -62,7 +68,7 @@ export function OcrResultCard({ part }: MessagePartRendererProps) {
   // shape isn't in it, so narrow via `unknown`.
   const ocr: OcrResultPart | null = isOcrResultPart(part) ? (part as OcrResultPart) : null
   const t = useTranslations("chat.ocrResult")
-  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
+  const { copied, copy } = useCopy({ logger: cardLogger, scope: "ocr" })
   const thumbnail = useThumbnailSrc(ocr?.sourceRef)
 
   if (!ocr) return null

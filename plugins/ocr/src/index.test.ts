@@ -1,7 +1,6 @@
 /** @jest-environment jsdom */
-import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
+import { createNullOcrCache, createNullOcrPageCache } from "@cognia/plugin-sdk"
 import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
   defaultDepsBuilder,
   ocrPluginDefinition,
@@ -9,9 +8,8 @@ import {
   TOOL_PARAMETERS,
   type OcrToolInput,
 } from "./index"
-import { createOcrRegistry, getSharedOcrRegistry } from "@/lib/ocr/registry"
-import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@/types/ocr"
-
+import { createOcrRegistry, getSharedOcrRegistry } from "@cognia/plugin-sdk/api/ocr-provider"
+import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@cognia/plugin-sdk"
 function makeProvider(): OcrProvider {
   return {
     id: "mock",
@@ -45,13 +43,6 @@ function makeDeps() {
     pageCache: createNullOcrPageCache(),
   }
 }
-
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
 
 describe("ocrPluginDefinition", () => {
   it("declares the cognia-ocr manifest", () => {
@@ -143,7 +134,7 @@ describe("runOcrTool", () => {
       ...makeProvider(),
       id: "boom",
       async extract() {
-        const { OcrError } = await import("@/lib/ocr/errors")
+        const { OcrError } = await import("@cognia/plugin-sdk/api/ocr-provider")
         throw new OcrError("rate_limited", "boom", "slow")
       },
     })

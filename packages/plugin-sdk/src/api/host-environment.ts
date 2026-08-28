@@ -48,3 +48,12 @@ export { APP_VERSION } from "@/lib/app-version"
  */
 export { setTransport } from "@/lib/tauri"
 export type { Transport } from "@/lib/tauri/transport-types"
+
+/**
+ * A logger for code that runs outside `activate(ctx)` — a React card in the
+ * transcript, a module-scope helper, a tool executor dispatched over IPC.
+ * `ctx.logger` is the one to use whenever a context is in hand; this produces
+ * the same plugin-scoped child logger without one, so failures are attributed
+ * to the plugin rather than to whichever host module it borrowed a logger from.
+ */
+export { createPluginSystemLogger as createPluginLogger } from "@/lib/plugin/core/logger"

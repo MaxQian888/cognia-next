@@ -82,3 +82,44 @@ export type {
 } from "@/lib/ocr/cache-contract"
 
 export { OcrError } from "@/lib/ocr/errors"
+
+/**
+ * The `/ocr` slash-command action, and the message part it produces.
+ *
+ * A plugin that OWNS OCR needs the host's action rather than a private
+ * re-implementation: it resolves the source (attachment, path, clipboard),
+ * routes through the same provider chain, persists the result where the OCR
+ * console reads it, and produces the `OcrResultPart` the renderer below knows
+ * how to draw. Two implementations would mean a `/ocr` result and a
+ * plugin-tool result that look and persist differently.
+ */
+export {
+  buildOcrResultPart,
+  handleOcrSlashCommand,
+  parseOcrArgs,
+} from "@/lib/slash-commands/actions/ocr"
+
+export type {
+  OcrResultPart,
+  OcrSourceRef,
+  SlashOcrInput,
+  SlashOcrResult,
+} from "@/lib/slash-commands/actions/ocr"
+
+/**
+ * The user's OCR configuration — default provider, per-platform overrides,
+ * cache TTL. `ctx.settings` is a plugin-scoped key/value store, deliberately
+ * not the host's settings row, so this is the narrow accessor for the one
+ * slice an OCR plugin needs. `undefined` means "unconfigured": fall back to
+ * `DEFAULT_OCR_SETTINGS`.
+ */
+export { loadUserOcrSettings } from "@/lib/ocr/user-settings"
+
+/**
+ * Capture the screen and OCR it in one step — the screenshot source an OCR
+ * tool offers alongside file and attachment sources. Desktop only; it goes
+ * through the native capture path, so check `readHostCapabilities().tauri`
+ * first.
+ */
+export { ocrScreen, ocrScreenWith } from "@/lib/automation/ocr-screen"
+export type { OcrScreenDeps } from "@/lib/automation/ocr-screen"

@@ -138,6 +138,24 @@ describe("chat write surface", () => {
     expect(appended).toEqual([])
   })
 
+  it("appends a custom message part and stamps the plugin into the message id", () => {
+    // The other half of `defineMessageRenderer`: without this a plugin can
+    // register a renderer for a part type it invents and never get a message
+    // carrying that part into the transcript.
+    const part = { type: "data-ocr-result", text: "Hello" }
+    const id = createChatAPI("cognia-ocr").appendMessagePart(part)
+
+    expect(id).toMatch(/^plugin-cognia-ocr-/)
+    const messages = useChatStore.getState().messages
+    const appendedMessage = messages.find((m) => m.id === id)
+    expect(appendedMessage).toMatchObject({ role: "system", parts: [part] })
+  })
+
+  it("returns null instead of throwing when there is no session to append to", () => {
+    useChatStore.setState({ activeSessionId: null })
+    expect(createChatAPI("cognia-ocr").appendMessagePart({ type: "x" })).toBeNull()
+  })
+
   it("stages an intent against the active session by default", () => {
     const candidateId = createChatAPI("wiki").stageIntent("Explain this module")
     expect(candidateId).toMatch(/^plugin_wiki_/)

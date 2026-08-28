@@ -100,6 +100,22 @@ export interface PluginChatAPI {
    * twice can tell which one was taken. Requires `session:write`.
    */
   stageIntent(prompt: string, options?: PluginComposerIntentOptions): string
+
+  /**
+   * Append a system message carrying a custom part into a transcript.
+   *
+   * This is the other half of `defineMessageRenderer`. A plugin can register a
+   * renderer for a part type it invents, but until now nothing could put a
+   * message carrying that part into the conversation — so the renderer only
+   * ever drew if the HOST happened to emit the part, which for a
+   * plugin-invented type it never does. The OCR plugin worked around it by
+   * writing to the chat store directly.
+   *
+   * The part is passed through untouched; the host owns only the envelope
+   * (id, `system` role, ordering). Returns the message id, or `null` when
+   * there is no session to append to. Requires `session:write`.
+   */
+  appendMessagePart(part: unknown, options?: { sessionId?: string }): string | null
 }
 
 const ownedByPlugin = new Map<string, Set<string>>()
@@ -168,6 +184,23 @@ export function createChatAPI(pluginId: string): PluginChatAPI {
       })
       logger.info(`[chat] staged an intent for session ${sessionId}`)
       return candidateId
+    },
+
+    appendMessagePart(part, options) {
+      const state = useChatStore.getState()
+      const sessionId = options?.sessionId ?? state.activeSessionId
+      if (!sessionId) {
+        logger.warn("[chat] appendMessagePart: no session to append to")
+        return null
+      }
+      const id = `plugin-${pluginId}-${nanoid(8)}`
+      state.appendMessage({
+        id,
+        role: "system",
+        parts: [part],
+      } as never)
+      logger.info(`[chat] appended a message part to session ${sessionId}`)
+      return id
     },
   }
 }

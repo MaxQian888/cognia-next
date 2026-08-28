@@ -16,14 +16,23 @@
  * `getSharedOcrRegistry()` this dispatcher reads from.
  */
 
-import type { UIMessage } from "ai"
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { extract, type ExtractDeps } from "@/lib/ocr/index"
-import { getSharedOcrRegistry } from "@/lib/ocr/registry"
-import { isTauri } from "@/lib/tauri"
-import { buildOcrDeps } from "@/lib/ocr/deps"
-import { type OcrInput, type OcrResult, type UserOcrSettings } from "@/types/ocr"
-import { buildOcrResultPart, handleOcrSlashCommand } from "@/lib/slash-commands/actions/ocr"
+import type {
+  OcrInput,
+  OcrResult,
+  PluginContext,
+  PluginDefinition,
+  UserOcrSettings,
+} from "@cognia/plugin-sdk"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
+import {
+  buildOcrDeps,
+  buildOcrResultPart,
+  extract,
+  getSharedOcrRegistry,
+  handleOcrSlashCommand,
+  loadUserOcrSettings,
+  type ExtractDeps,
+} from "@cognia/plugin-sdk/api/ocr-provider"
 import { OcrResultCard } from "./ocr-result-card"
 import manifestJson from "../plugin.json"
 
@@ -57,7 +66,7 @@ async function readFilePathSource(path: string): Promise<{
   mimeType: string
   bytes: Uint8Array
 }> {
-  if (!isTauri()) {
+  if (!readHostCapabilities().tauri) {
     throw new Error("file-path OCR requires the desktop app (no filesystem access in the browser).")
   }
   const { readFile } = await import("@tauri-apps/plugin-fs")
@@ -99,14 +108,7 @@ export async function defaultDepsBuilder(
 }
 
 /** Best-effort read of the persisted OCR settings; falls back to the defaults. */
-async function loadUserOcrSettings(): Promise<UserOcrSettings | undefined> {
-  try {
-    const { getSettings } = await import("@/lib/db/settings")
-    return (await getSettings())?.ocrSettings
-  } catch {
-    return undefined
-  }
-}
+// `loadUserOcrSettings` comes from the SDK — see the import above.
 
 export async function runOcrTool(
   input: OcrToolInput,
@@ -186,7 +188,7 @@ function extractMime(dataUrl: string): string {
  * permission layer (surface/tier) on the Rust side.
  */
 async function defaultCaptureScreen(languages?: string[]): Promise<OcrResult> {
-  const { ocrScreen } = await import("@/lib/automation/ocr-screen")
+  const { ocrScreen } = await import("@cognia/plugin-sdk/api/ocr-provider")
   return ocrScreen({ languages })
 }
 
@@ -242,6 +244,7 @@ export const ocrPluginDefinition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("ocr plugin activated")
+    chat = ctx.chat
     ctx.agent?.registerTool?.({
       name: TOOL_NAME,
       pluginId: ctx.pluginId,
@@ -292,23 +295,24 @@ export const ocrPluginDefinition: PluginDefinition = {
   deactivate: async () => {
     disposeOcrRenderer?.()
     disposeOcrRenderer = undefined
+    chat = undefined
   },
 }
 
 /** Disposer for the `ocr-result` part renderer (set on activate). */
 let disposeOcrRenderer: (() => void) | undefined
-/** Monotonic counter for unique system-message ids (avoids Math.random). */
-let ocrMessageSeq = 0
+/**
+ * `ctx.chat`, captured at activation: the slash-command handler runs outside
+ * `activate(ctx)` and is handed no context.
+ */
+let chat: PluginContext["chat"] | undefined
 
 /** Append an `ocr-result` system message to the active chat session. */
 async function appendOcrResultMessage(part: ReturnType<typeof buildOcrResultPart>): Promise<void> {
   try {
-    const { useChatStore } = await import("@/stores/chat/chat-store")
-    useChatStore.getState().appendMessage({
-      id: `sys-ocr-${Date.now()}-${(ocrMessageSeq += 1)}`,
-      role: "system",
-      parts: [part],
-    } as unknown as UIMessage)
+    // `ctx.chat.appendMessagePart` owns the envelope (id, system role,
+    // ordering); the plugin supplies only the part its own renderer draws.
+    chat?.appendMessagePart(part)
   } catch {
     // best-effort — a store/runtime hiccup must not fail the OCR command.
   }

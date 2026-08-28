@@ -3,8 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import { OcrResultCard } from "./ocr-result-card"
-import type { OcrResultPart } from "@/lib/slash-commands/actions/ocr"
-
+import type { OcrResultPart } from "@cognia/plugin-sdk/api/ocr-provider"
 // The renderer prop is typed as the SDK UIMessage part union; our custom part
 // isn't in it, so cast the component to accept the OcrResultPart fixture.
 const Card = OcrResultCard as unknown as (p: {
@@ -15,21 +14,19 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
-jest.mock("@/components/chat/renderers/image-block", () => ({
-  ImageBlock: ({ src }: { src: string }) => <img data-testid="ocr-thumb" src={src} alt="" />,
-}))
+// Doubled at the SDK subpaths the card imports, not the host modules behind
+// them. Mocking `@/lib/platform/detect` in particular used to reach past the
+// card into the host's keyring store and break unrelated modules.
 const copy = jest.fn()
-jest.mock("@/hooks/ui/use-copy", () => ({
+jest.mock("@cognia/plugin-sdk/api/tool-renderer", () => ({
+  ...jest.requireActual("@cognia/plugin-sdk/api/tool-renderer"),
+  ImageBlock: ({ src }: { src: string }) => <img data-testid="ocr-thumb" src={src} alt="" />,
   useCopy: () => ({ copied: false, copy }),
 }))
-jest.mock("@cognia/logging", () => ({ loggers: { chat: {} } }))
-jest.mock("@/lib/platform/detect", () => ({
-  isTauri: () => false,
-  isCapacitor: () => false,
-  isNativeMobile: () => false,
-  detectPlatform: () => "web",
+jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
+  readHostCapabilities: () => ({ tauri: false, platform: "web" }),
+  createPluginLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }))
-jest.mock("@/components/chat/composer", () => ({ COMPOSER_APPEND_EVENT: "cognia:composer-append" }))
 
 function part(over: Partial<OcrResultPart> = {}): OcrResultPart {
   return {
