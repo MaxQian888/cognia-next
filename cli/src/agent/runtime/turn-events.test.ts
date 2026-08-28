@@ -29,6 +29,31 @@ function emitter(overrides: Partial<Parameters<typeof createEnvelopeEmitter>[0]>
 }
 
 describe("canonicalFromCapture", () => {
+  it("maps a retry to the canonical kind, not to a suppressed diagnostic", () => {
+    // The `default` branch turns unknown capture events into `diagnostic`,
+    // which `fromCapture` drops unless `includeDiagnostics` is on — so a
+    // missing case here is indistinguishable from the retry never happening.
+    expect(
+      canonicalFromCapture({
+        type: "retry",
+        phase: "scheduled",
+        attempt: 2,
+        maxRetries: 10,
+        code: "api_retry",
+        delayMs: 1_089,
+        message: "unknown",
+      })
+    ).toEqual({
+      kind: "retry",
+      phase: "scheduled",
+      attempt: 2,
+      maxRetries: 10,
+      code: "api_retry",
+      delayMs: 1_089,
+      message: "unknown",
+    })
+  })
+
   it("maps the text-ish deltas", () => {
     expect(canonicalFromCapture({ type: "text-delta", delta: "hi" })).toEqual({
       kind: "text-delta",
@@ -183,6 +208,20 @@ describe("sideEffectReason", () => {
     expect(sideEffectReason({ kind: "thinking-delta", delta: "private" })).toBeNull()
     expect(sideEffectReason({ kind: "usage", usage: {} })).toBeNull()
     expect(sideEffectReason({ kind: "lifecycle", phase: "started" })).toBeNull()
+  })
+
+  it("does not count a retry — it happens before any output", () => {
+    // A retry that marked the turn unreplayable would defeat the retry policy
+    // itself: `decideRetry` refuses to replay once a side effect is recorded.
+    expect(
+      sideEffectReason({
+        kind: "retry",
+        phase: "scheduled",
+        attempt: 1,
+        maxRetries: 10,
+        code: "api_retry",
+      })
+    ).toBeNull()
   })
 })
 

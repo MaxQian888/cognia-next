@@ -237,13 +237,29 @@ function applyA2UIToolCall(
 }
 
 export class RunAndCaptureError extends Error {
+  /**
+   * HTTP status behind the failure, when the sidecar forwarded one on
+   * `session_ended` (`extractHttpErrorMeta` / `sessionEndedFromResult`).
+   *
+   * Without it a caller can only classify off `code`, which is a CAPTURE-level
+   * label, not an errno — so `unified-runtime`'s `errorFrom` read the presence
+   * of `code` as "transport failure" and reported every provider error,
+   * including a 404, as `transport_error`.
+   */
+  readonly httpStatus?: number
+  /** `Retry-After` in ms, when the provider sent one. */
+  readonly retryAfterMs?: number
+
   constructor(
     message: string,
     readonly code:
-      "session_error" | "no_assistant_text" | "aborted" | "send_failed" | "sidecar_exited"
+      "session_error" | "no_assistant_text" | "aborted" | "send_failed" | "sidecar_exited",
+    meta?: { httpStatus?: number; retryAfterMs?: number }
   ) {
     super(message)
     this.name = "RunAndCaptureError"
+    if (typeof meta?.httpStatus === "number") this.httpStatus = meta.httpStatus
+    if (typeof meta?.retryAfterMs === "number") this.retryAfterMs = meta.retryAfterMs
   }
 }
 
@@ -305,6 +321,31 @@ export type CaptureStreamEvent =
    * user-requested `/compact` and `"auto"` for the threshold-driven one.
    */
   | { type: "compact"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
+  /**
+   * The provider leg failed transiently and is being retried, or the retry
+   * budget is spent. Mirrors the canonical `retry` event so the projection is
+   * lossless in both directions.
+   *
+   * This is the only signal a caller gets during the Agent SDK's own retry
+   * ladder, whose backoff reaches ~40s per step: without it a turn against an
+   * unreachable endpoint streamed NOTHING for minutes and then failed with a
+   * stall message that named no cause, because the ladder's `api_retry` frames
+   * had no capture projection and the headless stream carries only this union.
+   */
+  | {
+      type: "retry"
+      phase: "scheduled" | "started" | "succeeded" | "exhausted"
+      /** 1-based; equals `maxRetries` on the last `scheduled`. */
+      attempt: number
+      maxRetries: number
+      /** Failure code that triggered the retry (`api_retry` from the SDK). */
+      code: string
+      /** Backoff about to be applied, post-jitter. */
+      delayMs?: number
+      /** HTTP status behind the failure, when the runtime reported one. */
+      status?: number
+      message?: string
+    }
 
 /**
  * Read a `compact_boundary` system message into the typed {@link CaptureStreamEvent}
@@ -328,6 +369,44 @@ export function compactBoundaryFromInner(
     trigger: meta.trigger === "manual" ? "manual" : "auto",
     preTokens: toNum(meta.pre_tokens),
     postTokens: toNum(meta.post_tokens),
+  }
+}
+
+/**
+ * Read an `api_retry` system message into the typed {@link CaptureStreamEvent}
+ * `retry` shape, or return `null` when `inner` is not one.
+ *
+ * The Agent SDK announces every backoff step this way (`sidecar/dispatch/
+ * sdk-canonical-events.mjs` maps the same frame onto the canonical `retry`
+ * event). `error_status` is `null` on a transport-level failure — the SDK has
+ * no HTTP response to report — so it is only forwarded when it is a number.
+ */
+export function retryFromInner(
+  inner: unknown
+): Extract<CaptureStreamEvent, { type: "retry" }> | null {
+  const ev = inner as {
+    type?: string
+    subtype?: string
+    attempt?: unknown
+    max_retries?: unknown
+    retry_delay_ms?: unknown
+    error_status?: unknown
+    error?: unknown
+  } | null
+  if (!ev || ev.type !== "system" || ev.subtype !== "api_retry") return null
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined
+  return {
+    type: "retry",
+    phase: "scheduled",
+    attempt: num(ev.attempt) ?? 0,
+    maxRetries: num(ev.max_retries) ?? 0,
+    code: "api_retry",
+    ...(num(ev.retry_delay_ms) !== undefined ? { delayMs: num(ev.retry_delay_ms) } : {}),
+    ...(num(ev.error_status) !== undefined ? { status: num(ev.error_status) } : {}),
+    // The SDK reports `"unknown"` for a transport failure it could not
+    // classify; carrying it is still better than an unexplained silence.
+    ...(typeof ev.error === "string" && ev.error ? { message: ev.error } : {}),
   }
 }
 
@@ -935,7 +1014,17 @@ async function captureAssistantReplyCore(
           return
         }
         if (evt.error) {
-          finishErr(new RunAndCaptureError(evt.error, "session_error"))
+          // Carry the sidecar's authoritative HTTP metadata onto the thrown
+          // error. Both dispatch rails attach it (`extractHttpErrorMeta` on a
+          // caught provider error, `sessionEndedFromResult` on an Agent SDK
+          // `result` frame reporting `api_error_status`), and without it every
+          // caller has to string-match the message to classify the failure.
+          finishErr(
+            new RunAndCaptureError(evt.error, "session_error", {
+              ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
+              ...(typeof evt.retryAfterMs === "number" ? { retryAfterMs: evt.retryAfterMs } : {}),
+            })
+          )
           return
         }
         // Prefer assembled text from the assistant event because it has
@@ -999,6 +1088,14 @@ async function captureAssistantReplyCore(
         const compactEvent = compactBoundaryFromInner(inner)
         if (compactEvent) {
           if (cap?.onEvent) emitEvent(compactEvent)
+          return
+        }
+        // A provider retry. Same deal as the compaction boundary — no assistant
+        // content, but the caller must not be left staring at a dead stream
+        // while the SDK backs off for tens of seconds at a time.
+        const retryEvent = retryFromInner(inner)
+        if (retryEvent) {
+          if (cap?.onEvent) emitEvent(retryEvent)
           return
         }
         if (inner.type === "stream_event") {

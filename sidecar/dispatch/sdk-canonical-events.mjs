@@ -28,6 +28,11 @@
 //     durability alarm, not a turn outcome.
 
 import { classifyStructuredOutcome } from "@cognia/agent-config-types/claude-agent-sdk-options"
+import {
+  failureCodeFromResult,
+  isProviderFailureResult,
+  providerFailureMessage,
+} from "./result-terminal.mjs"
 
 /**
  * Fresh per-attempt state for {@link canonicalEventsFromSdkMessage}.
@@ -211,8 +216,16 @@ function fromResult(evt, state) {
     events.push(
       compact({
         kind: "failure",
-        code: String(evt.subtype ?? "error"),
-        message: asString(evt.result) ?? String(evt.subtype ?? "error"),
+        // NOT `String(evt.subtype)`: an upstream 404 arrives as
+        // `subtype: "success"` with `is_error: true`, which published the
+        // nonsense failure code `"success"`. See `failureCodeFromResult`.
+        code: failureCodeFromResult(evt),
+        // A provider failure gets the status-led message, so a mistyped base
+        // URL reads as `HTTP 404: …` rather than as the SDK's model-shaped
+        // prose. Caller-owned ceilings keep their existing wording.
+        message: isProviderFailureResult(evt)
+          ? providerFailureMessage(evt)
+          : (asString(evt.result) ?? String(evt.subtype ?? "error")),
         // Budget and turn ceilings are the caller's policy, not a transient
         // fault — retrying the same request hits the same wall. Schema retries
         // are likewise already exhausted by the SDK itself.

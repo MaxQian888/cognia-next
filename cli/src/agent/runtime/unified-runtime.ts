@@ -163,21 +163,38 @@ function errorFrom(error: unknown): FailureSignal {
       message?: unknown
       status?: unknown
       statusCode?: unknown
+      httpStatus?: unknown
       code?: unknown
       retryAfter?: unknown
+      retryAfterMs?: unknown
       headers?: { get?: (name: string) => string | null }
     }
+    // `httpStatus` is the third spelling: `RunAndCaptureError` carries the
+    // status the sidecar forwarded on `session_ended`. Reading only
+    // `status`/`statusCode` left it undefined, and because that error also has
+    // a `code` (a capture label like `session_error`, NOT an errno) the branch
+    // below classified every provider failure — a 404 included — as
+    // `transport_error`.
     const status =
       typeof candidate.status === "number"
         ? candidate.status
         : typeof candidate.statusCode === "number"
           ? candidate.statusCode
-          : undefined
+          : typeof candidate.httpStatus === "number"
+            ? candidate.httpStatus
+            : undefined
     const headerRetryAfter = candidate.headers?.get?.("retry-after") ?? undefined
     const retryAfter =
       typeof candidate.retryAfter === "string" || typeof candidate.retryAfter === "number"
         ? candidate.retryAfter
-        : (headerRetryAfter ?? undefined)
+        : // `parseRetryAfter` reads a bare number as Retry-After SECONDS (the
+          // header's own unit), so the sidecar's millisecond field has to be
+          // converted — handing it over as-is turned a 30s cooldown into 8
+          // hours and tripped `MAX_RETRY_AFTER_MS`, failing a turn that should
+          // simply have waited.
+          typeof candidate.retryAfterMs === "number" && Number.isFinite(candidate.retryAfterMs)
+          ? candidate.retryAfterMs / 1000
+          : (headerRetryAfter ?? undefined)
     return {
       // A transport-level failure surfaces as an errno, an HTTP one as a status.
       code:

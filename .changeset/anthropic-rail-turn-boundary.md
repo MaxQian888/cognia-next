@@ -1,0 +1,13 @@
+---
+"cognia-next": patch
+---
+
+Fix headless Anthropic turns hanging until their wall-clock deadline, and surface the real provider error instead of "ended with no assistant text".
+
+The `claude-agent-sdk` rail drives `query()` with a streaming input iterable, so the SDK keeps the query open after the end-of-turn `result` frame and the message iterator does not end on its own — it ends when the input stream closes, which only happened at session teardown. `session_ended` is the only signal `runAndCaptureAssistantReply` completes on, so every consumer of it on that rail (`cognia-agent run`, the CLI TUI, connector auto-mode, the goal runner) ran to its timeout regardless of whether the turn had succeeded. The dispatcher now ends the turn on the `result` frame — after every prompt pushed into the query has been answered, so a live steer still extends the turn — and closes the input so the subprocess exits.
+
+The same frame is where the SDK reports an upstream API failure: it does not throw, it sets `is_error` / `terminal_reason` / `api_error_status` while leaving `subtype: "success"`. A mistyped `ANTHROPIC_BASE_URL` therefore produced a 404 that nothing classified as a failure. Those frames now end the turn with the real message and status (`HTTP 404: …`), the canonical failure envelope carries `code: "api_error"` instead of the nonsensical `"success"`, and the status/`Retry-After` ride through `RunAndCaptureError` so callers classify off authoritative data instead of string-matching — which also stops every provider failure from being reported as `transport_error`, and fixes a millisecond/second unit mismatch that inflated a 30s `Retry-After` into an 8-hour wait.
+
+`cognia-agent run --output-format json|stream-json` now terminates the stream with `{"type":"result","is_error":true,"subtype":…,"error":…}` on stdout when a run fails. Previously the reason went to stderr as prose and stdout stayed empty, so a machine consumer saw an empty stream and a bare exit code.
+
+Provider retries are also visible on that stream now. `CaptureStreamEvent` gains a `retry` member carrying the attempt, ceiling, backoff and status, projected from the SDK's `api_retry` frames and losslessly convertible to and from the canonical `retry` event. Because the headless stream carries only the capture union, those frames used to vanish: a turn against an unreachable endpoint streamed nothing for minutes while the SDK worked through a ten-step ladder with ~40s backoffs, then failed with a stall message that named no cause. A retry is explicitly not a replay side effect, so it does not disarm the retry policy. The TUI already rendered these from the canonical envelope stream and is unchanged.

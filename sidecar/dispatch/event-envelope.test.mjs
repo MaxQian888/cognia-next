@@ -198,3 +198,35 @@ test("the structured-output expectation reaches the mapper, per emitter", () => 
     ["lifecycle"]
   )
 })
+
+test("a session_ended carrying a failed result does not double-report the failure", () => {
+  // The Anthropic rail ends the turn ON the `result` frame, so that frame's
+  // own failure envelope has already gone out with the specific code.
+  const events = canonicalEventsFromWireMessage({
+    type: "session_ended",
+    sessionId: "s1",
+    error: "HTTP 404: model not found",
+    result: { type: "result", subtype: "success", is_error: true, api_error_status: 404 },
+  })
+  assert.deepEqual(events, [{ kind: "lifecycle", phase: "ended" }])
+})
+
+test("a session_ended with no result still synthesizes the failure", () => {
+  // Thrown stream faults, interrupts and the pre-dispatch guards all emit a
+  // bare `session_ended` — nothing else reports those.
+  assert.deepEqual(
+    canonicalEventsFromWireMessage({ type: "session_ended", sessionId: "s1", error: "boom" }),
+    [{ kind: "failure", code: "session_error", message: "boom" }]
+  )
+})
+
+test("a session_ended carrying a SUCCESSFUL result ends the turn cleanly", () => {
+  assert.deepEqual(
+    canonicalEventsFromWireMessage({
+      type: "session_ended",
+      sessionId: "s1",
+      result: { type: "result", subtype: "success", is_error: false },
+    }),
+    [{ kind: "lifecycle", phase: "ended" }]
+  )
+})

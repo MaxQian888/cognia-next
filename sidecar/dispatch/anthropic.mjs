@@ -27,6 +27,7 @@ import {
 import { makeInputStream } from "./input-stream.mjs"
 import { buildSubprocessEnv } from "./subprocess-env.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import { sessionEndedFromResult } from "./result-terminal.mjs"
 import { createProviderStreamLogger } from "./provider-stream-log.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
@@ -820,6 +821,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     steerCloseTimer = undefined
     inputStream.close()
   }
+  // Prompts pushed into this query that the SDK has not answered with a
+  // `result` frame yet. The stream loop ends the turn when this reaches zero,
+  // which is what lets a STEER extend the turn: `routeSteer` pushes a second
+  // user message into the live query, and ending on the first `result` would
+  // close the input before the steered leg ever ran.
+  let outstandingPrompts = 0
   const session = {
     q,
     pushUserMessage: (content, priority) => {
@@ -829,13 +836,17 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // crosses the threshold on the 3rd TURN of a multi-turn session and
       // forces approval prompts forever after.
       doomGuard.reset()
-      return inputStream.push({
+      const accepted = inputStream.push({
         type: "user",
         message: { role: "user", content },
         parent_tool_use_id: null,
         session_id: sessionId,
         ...(priority ? { priority } : {}),
       })
+      // Only an ACCEPTED push earns a `result`; a rejected one (closed input)
+      // would leave the counter permanently above zero and hang the turn.
+      if (accepted !== false) outstandingPrompts += 1
+      return accepted
     },
     // Manual compaction: the Agent SDK owns compaction and intercepts a
     // `/compact [focus]` user turn (emitting its own `compact_boundary`). We
@@ -881,6 +892,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Separates "the provider never answered" from "the stream broke mid-flight"
   // when a turn stalls — see `./provider-stream-log.mjs`.
   const streamLog = createProviderStreamLogger({ sessionId, turnId: sendOptions.turnId, log })
+  // `session_ended` is emitted exactly once per turn, from whichever of the
+  // three exits below is reached first (the `result` frame, the iterator
+  // draining, or a throw).
+  let turnEnded = false
+  const endTurn = (event) => {
+    if (turnEnded) return
+    turnEnded = true
+    emit(event)
+  }
   ;(async () => {
     try {
       for await (const evt of q) {
@@ -895,12 +915,43 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         }
         mcpAutoReconnect.onEvent(evt)
         emit({ type: "event", sessionId, event: evt })
+        // THE turn boundary. `query()` is driven by a streaming input iterable,
+        // so the SDK keeps the query open for another prompt after the `result`
+        // frame and this `for await` does not end on its own — it ends when the
+        // input stream closes, which for this rail only happens at session
+        // teardown. Waiting for that meant `session_ended` never fired per
+        // turn, and `run-and-capture` (CLI, connectors, goal runner) completes
+        // on nothing else: every turn ran to its wall-clock deadline, and an
+        // upstream failure carried on this frame — a 404 from a mistyped
+        // `ANTHROPIC_BASE_URL` — never reached the caller at all.
+        //
+        // The desktop adapter has always treated `result` as the end of the
+        // turn (`turnComplete: true` in `lib/claude/adapter.ts`); this makes
+        // the sidecar say the same thing to everyone else.
+        if (evt?.type === "result") {
+          outstandingPrompts -= 1
+          // A steer pushed a second prompt into this same query; its `result`
+          // is still to come, so the turn is not over.
+          if (outstandingPrompts > 0) continue
+          streamLog.onEnd()
+          endTurn(sessionEndedFromResult(sessionId, evt))
+          // Every prompt has been answered. Context is rebuilt next turn via
+          // SDK `resume` (see `restartReason` in agent-host.mjs, which retires
+          // an Anthropic session on every `session_ended`), so close the input
+          // and let the subprocess exit instead of idling until teardown.
+          closeInput()
+          break
+        }
       }
-      streamLog.onEnd()
-      emit({ type: "session_ended", sessionId })
+      // Reached when the iterator drained without a `result` frame (input
+      // closed, or the query was torn down). Already-ended turns skip it.
+      if (!turnEnded) {
+        streamLog.onEnd()
+        endTurn({ type: "session_ended", sessionId })
+      }
     } catch (err) {
       streamLog.onError(err)
-      emit({
+      endTurn({
         type: "session_ended",
         sessionId,
         error: err?.message ?? String(err),

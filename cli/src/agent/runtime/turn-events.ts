@@ -107,6 +107,16 @@ export function canonicalFromCapture(event: CaptureStreamEvent): CanonicalAgentE
         ...(typeof event.preTokens === "number" ? { preTokens: event.preTokens } : {}),
         ...(typeof event.postTokens === "number" ? { postTokens: event.postTokens } : {}),
       }
+    case "retry":
+      return {
+        kind: "retry",
+        phase: event.phase,
+        attempt: event.attempt,
+        maxRetries: event.maxRetries,
+        code: event.code,
+        ...(typeof event.delayMs === "number" ? { delayMs: event.delayMs } : {}),
+        ...(event.message !== undefined ? { message: event.message } : {}),
+      }
     default:
       return { kind: "diagnostic", runtime: "capture", payload: event }
   }

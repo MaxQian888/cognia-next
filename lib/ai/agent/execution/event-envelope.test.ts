@@ -218,6 +218,51 @@ describe("canonicalEventFromCaptureEvent", () => {
       })
     ).toBeNull()
   })
+
+  it("round-trips a retry through both projections without loss", () => {
+    // Retries are the only progress signal during the Agent SDK's backoff
+    // ladder, and the headless stream carries the capture union only — so the
+    // narrowing has to be lossless in both directions or the ladder goes dark
+    // again on whichever side drops it.
+    const capture = {
+      type: "retry",
+      phase: "scheduled",
+      attempt: 3,
+      maxRetries: 10,
+      code: "api_retry",
+      delayMs: 2_495,
+      message: "overloaded_error",
+    } as const
+    const canonical = canonicalEventFromCaptureEvent(capture)
+    expect(canonical).toEqual({
+      kind: "retry",
+      phase: "scheduled",
+      attempt: 3,
+      maxRetries: 10,
+      code: "api_retry",
+      delayMs: 2_495,
+      message: "overloaded_error",
+    })
+    expect(captureEventFromCanonical(canonical!)).toEqual(capture)
+  })
+
+  it("keeps a retry on the capture stream instead of dropping it", () => {
+    expect(
+      captureEventFromCanonical({
+        kind: "retry",
+        phase: "exhausted",
+        attempt: 10,
+        maxRetries: 10,
+        code: "api_retry",
+      })
+    ).toEqual({
+      type: "retry",
+      phase: "exhausted",
+      attempt: 10,
+      maxRetries: 10,
+      code: "api_retry",
+    })
+  })
 })
 
 describe("redactAgentEventEnvelope", () => {

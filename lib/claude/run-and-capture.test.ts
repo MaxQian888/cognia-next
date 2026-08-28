@@ -10,6 +10,7 @@ import {
   runAndCaptureAssistantReply,
   RunAndCaptureError,
   compactBoundaryFromInner,
+  retryFromInner,
   type CaptureStreamEvent,
 } from "./run-and-capture"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
@@ -106,10 +107,17 @@ const assistantEvent = (text: string, opts?: { uuid?: string; messageId?: string
     },
   }) as unknown as ClaudeEvent
 
-const sessionEnded = (opts?: { error?: string; resultText?: string }): ClaudeEvent => ({
+const sessionEnded = (opts?: {
+  error?: string
+  resultText?: string
+  httpStatus?: number
+  retryAfterMs?: number
+}): ClaudeEvent => ({
   type: "session_ended",
   sessionId: SESSION,
   error: opts?.error,
+  ...(opts?.httpStatus !== undefined ? { httpStatus: opts.httpStatus } : {}),
+  ...(opts?.retryAfterMs !== undefined ? { retryAfterMs: opts.retryAfterMs } : {}),
   result: opts?.resultText
     ? {
         type: "result",
@@ -310,6 +318,33 @@ describe("runAndCaptureAssistantReply", () => {
       message: "rate-limited",
     })
     expect(unlistenMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("carries the sidecar's HTTP metadata onto the rejection", async () => {
+    // `code` is a CAPTURE label, not an errno, so a caller that classifies off
+    // it alone reported every provider failure as a transport error. The status
+    // the sidecar forwarded is what makes a 404 distinguishable from a socket
+    // reset without string-matching the message.
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(sessionEnded({ error: "HTTP 404: model not found", httpStatus: 404, retryAfterMs: 1_500 }))
+    await expect(promise).rejects.toMatchObject({
+      code: "session_error",
+      httpStatus: 404,
+      retryAfterMs: 1_500,
+    })
+  })
+
+  it("omits HTTP metadata the sidecar did not send", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(sessionEnded({ error: "boom" }))
+    const error = await promise.then(
+      () => null,
+      (e: unknown) => e as { httpStatus?: number; retryAfterMs?: number }
+    )
+    expect(error?.httpStatus).toBeUndefined()
+    expect(error?.retryAfterMs).toBeUndefined()
   })
 
   it("rejects with no_assistant_text when nothing was captured", async () => {
@@ -1214,6 +1249,66 @@ describe("runAndCaptureAssistantReply", () => {
     })
   })
 
+  const apiRetry = (
+    attempt: number,
+    delayMs: number,
+    extra: Record<string, unknown> = {}
+  ): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "api_retry",
+        uuid: `uuid-retry-${attempt}`,
+        session_id: SESSION,
+        attempt,
+        max_retries: 10,
+        retry_delay_ms: delayMs,
+        error_status: null,
+        error: "unknown",
+        ...extra,
+      },
+    }) as unknown as ClaudeEvent
+
+  it("streams the provider's retry ladder instead of going silent", async () => {
+    // The Agent SDK backs off up to ~40s per step. With no projection for these
+    // frames a headless consumer saw nothing at all for minutes and then a
+    // stall message that named no cause.
+    const events: CaptureStreamEvent[] = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e),
+    })
+    await flushUntilSubscribed()
+    fire(apiRetry(1, 564))
+    fire(apiRetry(2, 1_089, { error_status: 503, error: "overloaded_error" }))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(events.filter((e) => e.type === "retry")).toEqual([
+      {
+        type: "retry",
+        phase: "scheduled",
+        attempt: 1,
+        maxRetries: 10,
+        code: "api_retry",
+        delayMs: 564,
+        message: "unknown",
+      },
+      {
+        type: "retry",
+        phase: "scheduled",
+        attempt: 2,
+        maxRetries: 10,
+        code: "api_retry",
+        delayMs: 1_089,
+        status: 503,
+        message: "overloaded_error",
+      },
+    ])
+  })
+
   it("emits a tool-call event for tool_use blocks", async () => {
     const events: Array<{ type: string; toolName?: string }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -1561,6 +1656,64 @@ describe("compactBoundaryFromInner", () => {
     expect(compactBoundaryFromInner(null)).toBeNull()
     expect(compactBoundaryFromInner({ type: "assistant" })).toBeNull()
     expect(compactBoundaryFromInner({ type: "system", subtype: "init" })).toBeNull()
+  })
+})
+
+describe("retryFromInner", () => {
+  it("maps an api_retry system message to the typed retry event", () => {
+    expect(
+      retryFromInner({
+        type: "system",
+        subtype: "api_retry",
+        attempt: 3,
+        max_retries: 10,
+        retry_delay_ms: 2_495,
+        error_status: 429,
+        error: "rate_limit_error",
+      })
+    ).toEqual({
+      type: "retry",
+      phase: "scheduled",
+      attempt: 3,
+      maxRetries: 10,
+      code: "api_retry",
+      delayMs: 2_495,
+      status: 429,
+      message: "rate_limit_error",
+    })
+  })
+
+  it("omits the status the SDK reports as null on a transport failure", () => {
+    // An unreachable endpoint has no HTTP response, so the SDK sends
+    // `error_status: null` / `error: "unknown"`.
+    const event = retryFromInner({
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 10,
+      retry_delay_ms: 564,
+      error_status: null,
+      error: "unknown",
+    })
+    expect(event).not.toBeNull()
+    expect(event && "status" in event).toBe(false)
+    expect(event?.message).toBe("unknown")
+  })
+
+  it("defaults the counters rather than emitting NaN", () => {
+    expect(retryFromInner({ type: "system", subtype: "api_retry" })).toEqual({
+      type: "retry",
+      phase: "scheduled",
+      attempt: 0,
+      maxRetries: 0,
+      code: "api_retry",
+    })
+  })
+
+  it("returns null for non-retry inputs", () => {
+    expect(retryFromInner(null)).toBeNull()
+    expect(retryFromInner({ type: "assistant" })).toBeNull()
+    expect(retryFromInner({ type: "system", subtype: "init" })).toBeNull()
   })
 })
 

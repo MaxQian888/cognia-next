@@ -61,6 +61,18 @@ describe("runFlagsToOverrides", () => {
     })
   })
 
+  it("carries --protocol so a custom endpoint's wire dialect is selectable", () => {
+    // Base URL and key were already overridable per run; the dialect they are
+    // spoken in was not, so an Anthropic-format gateway needed a config-file
+    // edit. `resolveConfig` binds this onto the active provider and rejects an
+    // unknown value.
+    const args = parseArgv(["run", "hi", "--provider", "openrouter", "--protocol", "anthropic"])
+    expect(runFlagsToOverrides(args)).toEqual({
+      provider: "openrouter",
+      protocol: "anthropic",
+    })
+  })
+
   it("maps --bypass (and its Claude Code alias) onto the bypassPermissions mode", () => {
     for (const flag of ["--bypass", "--dangerously-skip-permissions"]) {
       expect(runFlagsToOverrides(parseArgv(["chat", flag]))).toEqual({
@@ -338,6 +350,45 @@ describe("runCommand", () => {
     })
     expect(code).toBe(1)
     expect(s.stderr.join("")).toMatch(/run failed: boom/)
+    expect(s.jsonl).toHaveLength(0) // text mode keeps stdout for the reply only
+  })
+
+  it("terminates the JSONL stream with an error result when the turn throws", async () => {
+    // A failing run used to write NOTHING to stdout in json/stream-json mode —
+    // the reason went to stderr as prose — so a consumer could not tell a
+    // provider 404 from a turn that produced no reply.
+    const s = sink()
+    const failure = Object.assign(new Error("HTTP 404: model not found"), {
+      name: "session_error",
+    })
+    const code = await runCommand(parseArgv(["run", "hi", "--output-format", "stream-json"]), {
+      out: s.out,
+      loadConfig: () => cfg(),
+      run: jest.fn().mockRejectedValue(failure),
+      ...noStdin,
+    })
+    expect(code).toBe(1)
+    expect(s.jsonl).toEqual([
+      {
+        type: "result",
+        is_error: true,
+        subtype: "session_error",
+        error: "HTTP 404: model not found",
+      },
+    ])
+    expect(s.stderr.join("")).toMatch(/run failed: HTTP 404: model not found/)
+  })
+
+  it("falls back to error_during_execution when the failure carries no code", async () => {
+    const s = sink()
+    const code = await runCommand(parseArgv(["run", "hi", "--output-format", "json"]), {
+      out: s.out,
+      loadConfig: () => cfg(),
+      run: jest.fn().mockRejectedValue(new Error("boom")),
+      ...noStdin,
+    })
+    expect(code).toBe(1)
+    expect(s.jsonl[0]).toMatchObject({ is_error: true, subtype: "error_during_execution" })
   })
 
   it("returns exit 2 on a config load error", async () => {

@@ -202,6 +202,16 @@ export function canonicalEventFromCaptureEvent(
         preTokens: event.preTokens,
         postTokens: event.postTokens,
       }
+    case "retry":
+      return {
+        kind: "retry",
+        phase: event.phase,
+        attempt: event.attempt,
+        maxRetries: event.maxRetries,
+        code: event.code,
+        ...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+        ...(event.message !== undefined ? { message: event.message } : {}),
+      }
     case "tool-summary":
       return null
   }
@@ -270,6 +280,19 @@ export function captureEventFromCanonical(event: CanonicalAgentEvent): CaptureSt
         trigger: event.trigger,
         preTokens: event.preTokens ?? 0,
         postTokens: event.postTokens ?? 0,
+      }
+    case "retry":
+      // Retries are progress, not content, and the headless stream carries only
+      // this union — so dropping them left `cognia-agent run` silent for the
+      // whole of the Agent SDK's backoff ladder (10 steps, up to ~40s each).
+      return {
+        type: "retry",
+        phase: event.phase,
+        attempt: event.attempt,
+        maxRetries: event.maxRetries,
+        code: event.code,
+        ...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+        ...(event.message !== undefined ? { message: event.message } : {}),
       }
     default:
       return null

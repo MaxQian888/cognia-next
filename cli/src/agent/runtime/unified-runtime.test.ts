@@ -537,6 +537,52 @@ describe("failure classification", () => {
     expect(result.error?.code).toBe("provider_error")
   })
 
+  it("reads the httpStatus a RunAndCaptureError carries", async () => {
+    // `RunAndCaptureError` has a `code` — but it is a capture label
+    // (`session_error`), not an errno, so the transport branch used to swallow
+    // every provider failure. The status the sidecar forwarded decides it.
+    const result = await failWith(
+      createMemoryFs(),
+      Object.assign(new Error("HTTP 404: model not found"), {
+        code: "session_error",
+        httpStatus: 404,
+      })
+    )
+    expect(result.error).toMatchObject({
+      code: "provider_error",
+      message: "HTTP 404: model not found",
+    })
+  })
+
+  it("converts the sidecar's retryAfterMs into Retry-After seconds", async () => {
+    // `parseRetryAfter` reads a bare number as SECONDS. Forwarding the
+    // sidecar's 1500ms unconverted would ask for a 1500-SECOND wait, so the
+    // scheduled delay is what proves the unit.
+    const fsx = createMemoryFs()
+    const seen: AgentEventEnvelope[] = []
+    await runUnifiedTurn(
+      params(fsx, {
+        retry: { maxRetries: 1, baseBackoffMs: 60_000 },
+        onEnvelope: (e) => seen.push(e),
+        createSession: fakeSession([
+          {
+            kind: "throw",
+            error: Object.assign(new Error("slow down"), {
+              code: "session_error",
+              httpStatus: 429,
+              retryAfterMs: 1500,
+            }),
+          },
+          { kind: "reply", text: "ok" },
+        ]).factory,
+      })
+    )
+    const scheduled = seen.find(
+      (e) => e.event.kind === "retry" && (e.event as { phase: string }).phase === "scheduled"
+    )
+    expect(scheduled?.event).toMatchObject({ retryAfterMs: 1500, delayMs: 1500 })
+  })
+
   it("honours a Retry-After response header", async () => {
     const fsx = createMemoryFs()
     const seen: AgentEventEnvelope[] = []

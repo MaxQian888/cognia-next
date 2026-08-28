@@ -50,12 +50,20 @@ export function canonicalEventsFromWireMessage(msg, state) {
           message: String(msg.reason ?? "permission waiter interrupted"),
         },
       ]
-    case "session_ended":
-      return [
-        msg.error
-          ? { kind: "failure", code: "session_error", message: String(msg.error) }
-          : { kind: "lifecycle", phase: "ended" },
-      ]
+    case "session_ended": {
+      // A `session_ended` that carries the SDK `result` frame was emitted BY
+      // that frame (the Anthropic rail ends the turn on it). The frame went out
+      // as its own `type: "event"` immediately before, and `fromResult` already
+      // published the failure — with the better code (`api_error`, not the
+      // generic `session_error`). Re-deriving it here would put two failure
+      // events on the stream for one turn, so only the lifecycle end is left.
+      const reportedByResult =
+        msg.result && (msg.result.subtype !== "success" || msg.result.is_error === true)
+      if (msg.error && !reportedByResult) {
+        return [{ kind: "failure", code: "session_error", message: String(msg.error) }]
+      }
+      return [{ kind: "lifecycle", phase: "ended" }]
+    }
     case "capability_error":
       return [{ kind: "capability-error", capability: msg.capability, command: msg.command }]
     default:

@@ -311,6 +311,28 @@ test("a failing result reports the SDK subtype as the failure code", () => {
   assert.equal(events[1].retryable, undefined, "a turn ceiling is policy, not a transient fault")
 })
 
+test("an upstream 404 riding on subtype:success is not coded 'success'", () => {
+  // A wrong ANTHROPIC_BASE_URL produces exactly this frame: the SDK keeps
+  // `subtype: "success"` and reports the failure through `is_error` +
+  // `api_error_status`, so `String(evt.subtype)` published `code: "success"`
+  // on a failure envelope and the status never appeared anywhere.
+  const events = canonicalEventsFromSdkMessage(
+    {
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      terminal_reason: "api_error",
+      api_error_status: 404,
+      result: "There's an issue with the selected model (claude-sonnet-4-5). It may not exist…",
+      usage: {},
+    },
+    createSdkMappingState()
+  )
+  const failure = events.find((e) => e.kind === "failure")
+  assert.equal(failure.code, "api_error")
+  assert.match(failure.message, /^HTTP 404: /)
+})
+
 // ---- structured output ------------------------------------------------------
 
 const structured = (evt) =>

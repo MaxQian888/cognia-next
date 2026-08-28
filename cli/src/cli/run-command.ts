@@ -2,7 +2,7 @@
  * `cognia-agent run "<prompt>"` (or `cognia-agent -p "<prompt>"`) — headless
  * one-shot turn.
  *
- * Flags: --model --provider --cwd --system --allow a,b --yes --timeout
+ * Flags: --model --provider --protocol --cwd --system --allow a,b --yes --timeout
  *        --max-turns --output-format text|json|stream-json (--json ⇒ stream-json)
  *        --plugin-tools --dev-plugins [--dev-plugins-dir <dir>].
  *
@@ -100,6 +100,14 @@ export function runFlagsToOverrides(args: ParsedArgs): Partial<CliConfigFile> {
   if (model) flags.model = model
   const provider = stringFlag(args, "provider")
   if (provider) flags.provider = provider
+  // Wire dialect for the active provider. `--base-url`-style endpoint
+  // redirection is already reachable through COGNIA_BASE_URL, but the dialect
+  // that endpoint speaks was not: an Anthropic-format deployment could only be
+  // reached by picking a provider id that already happened to speak Anthropic.
+  // Validated in `resolveConfig` so a typo fails loudly instead of silently
+  // sending the turn in the wrong shape.
+  const protocol = stringFlag(args, "protocol")
+  if (protocol) flags.protocol = protocol as NonNullable<CliConfigFile["protocol"]>
   const backend = stringFlag(args, "backend")
   if (backend) flags.agentBackend = backend
   const cwd = stringFlag(args, "cwd")
@@ -223,6 +231,7 @@ export async function runCommand(args: ParsedArgs, deps: RunDeps = {}): Promise<
       // `json` emits ONLY this line, `stream-json` appends it after the events.
       out.json({
         type: "result",
+        is_error: false,
         sessionId: result.sessionId,
         text: result.text,
         usage: result.usage,
@@ -237,7 +246,23 @@ export async function runCommand(args: ParsedArgs, deps: RunDeps = {}): Promise<
     }
     return 0
   } catch (err) {
-    out.error(`run failed: ${(err as Error).message}`)
+    const error = err as Error
+    // A failed run must still TERMINATE the machine-readable stream. Without
+    // this, `--output-format json|stream-json` wrote nothing at all to stdout
+    // on failure — the reason went to stderr as prose — so a consumer saw an
+    // empty stream plus a bare exit code and could not tell a provider 404
+    // from a turn that genuinely produced no reply. Mirrors the success
+    // branch's terminal `result` line, and carries the structured code
+    // `runHeadlessTurn` stamps onto `error.name` (`AgentStructuredError.code`).
+    if (format !== "text") {
+      out.json({
+        type: "result",
+        is_error: true,
+        subtype: error.name && error.name !== "Error" ? error.name : "error_during_execution",
+        error: error.message,
+      })
+    }
+    out.error(`run failed: ${error.message}`)
     return 1
   }
 }
