@@ -13,9 +13,8 @@ use tokio::sync::{broadcast, watch};
 
 #[cfg(feature = "workspace-runtime-exec")]
 use crate::external_agent::workspace_runtime_backend::{
-    EnvironmentWorkspaceRuntimeLocator, HttpWorkspaceRuntimeClient, WorkspaceRuntimeClient,
-    WorkspaceRuntimeEndpoint, WorkspaceRuntimeLocator, WORKSPACE_RUNTIME_SECRET_DIR_ENV,
-    WORKSPACE_RUNTIME_URL_TEMPLATE_ENV,
+    locator_from_env, HttpWorkspaceRuntimeClient, WorkspaceRuntimeClient, WorkspaceRuntimeEndpoint,
+    WorkspaceRuntimeLocator,
 };
 
 const AGENT_LEASE_MS: i64 = 15_000;
@@ -25,6 +24,13 @@ const MAX_SESSIONS_PER_WORKSPACE: usize = 3;
 const MAX_VIEWERS_PER_SESSION: usize = 5;
 const SESSION_IDLE_MS: i64 = 30 * 60 * 1_000;
 const SESSION_MAX_LIFETIME_MS: i64 = 8 * 60 * 60 * 1_000;
+
+/// Named once so the installer's hard failure and the status reason cannot
+/// drift apart — a developer reading either one is told about both topologies.
+#[cfg(feature = "workspace-runtime-exec")]
+const RUNTIME_UNCONFIGURED: &str = "workspace runtime is unconfigured: set \
+     COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE + COGNIA_WORKSPACE_RUNTIME_SECRET_DIR (deployed), or \
+     COGNIA_WORKSPACE_RUNTIME_URL + COGNIA_WORKSPACE_RUNTIME_SECRET (loopback runtime)";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -914,13 +920,9 @@ pub fn install_workspace_runtime_control_from_env() -> Result<bool, String> {
     {
         return Ok(false);
     }
-    let url_template = std::env::var(WORKSPACE_RUNTIME_URL_TEMPLATE_ENV)
-        .map_err(|_| format!("{WORKSPACE_RUNTIME_URL_TEMPLATE_ENV} is required"))?;
-    let secret_dir = std::env::var(WORKSPACE_RUNTIME_SECRET_DIR_ENV)
-        .map(std::path::PathBuf::from)
-        .map_err(|_| format!("{WORKSPACE_RUNTIME_SECRET_DIR_ENV} is required"))?;
+    let locator = locator_from_env()?.ok_or_else(|| RUNTIME_UNCONFIGURED.to_string())?;
     let control = Arc::new(WorkspaceRuntimeBrowserControl {
-        locator: EnvironmentWorkspaceRuntimeLocator::new(url_template, secret_dir),
+        locator,
         client: HttpWorkspaceRuntimeClient::new(),
         endpoints: Mutex::new(HashMap::new()),
     });
@@ -952,12 +954,12 @@ pub async fn browser_runtime_status(workspace_id: Option<&str>) -> BrowserRuntim
     let enabled = std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
         .ok()
         .is_some_and(|value| value.eq_ignore_ascii_case("true"));
-    let configured = std::env::var(WORKSPACE_RUNTIME_URL_TEMPLATE_ENV)
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty())
-        && std::env::var(WORKSPACE_RUNTIME_SECRET_DIR_ENV)
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty());
+    // One reader for "how is a runtime addressed", shared with the installer
+    // and the exec backend: a status that answered from its own copy of the
+    // env rules would report `configured` for a configuration the installer
+    // then rejects.
+    let configuration = locator_from_env();
+    let configured = matches!(configuration, Ok(Some(_)));
     let base = BrowserRuntimeStatus {
         compiled: true,
         enabled,
@@ -974,7 +976,10 @@ pub async fn browser_runtime_status(workspace_id: Option<&str>) -> BrowserRuntim
     }
     if !configured {
         return BrowserRuntimeStatus {
-            reason: Some("workspace runtime URL template or secret directory is missing".into()),
+            reason: Some(match configuration {
+                Err(error) => error,
+                _ => RUNTIME_UNCONFIGURED.to_string(),
+            }),
             ..base
         };
     }

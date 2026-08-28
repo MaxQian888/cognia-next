@@ -94,6 +94,9 @@ if (service === "dev:headless") {
       PATH: `${root}${path.delimiter}${process.env.PATH}`,
       COGNIA_DEV_BLOCKER_PID: String(blocker.pid),
       COGNIA_DEV_PROCESS_LOG: logPath,
+      // The script generates the shared runtime secret before it spawns
+      // anything; keep that write inside the test's own directory.
+      COGNIA_DATA_DIR: root,
     })
 
     assert.equal(result.code, 7, result.stderr)
@@ -103,6 +106,8 @@ if (service === "dev:headless") {
       "dev:headless:started",
       "dev:started",
       "dev:stopped",
+      "dev:workspace-runtime:started",
+      "dev:workspace-runtime:stopped",
     ])
     assert.equal(blocker.exitCode, null)
     assert.equal(blocker.signalCode, "SIGKILL")
@@ -144,6 +149,7 @@ if (service === "dev:headless") {
     const result = await run([], {
       PATH: `${root}${path.delimiter}${process.env.PATH}`,
       COGNIA_DEV_PROCESS_LOG: logPath,
+      COGNIA_DATA_DIR: root,
     })
 
     assert.equal(result.code, 7, result.stderr)
@@ -152,6 +158,8 @@ if (service === "dev:headless") {
       "dev:headless:started",
       "dev:started",
       "dev:stopped",
+      "dev:workspace-runtime:started",
+      "dev:workspace-runtime:stopped",
     ])
   }
 )
@@ -174,8 +182,32 @@ test("dev:web-headless starts both services and tears down the peer on exit", as
         command: "pnpm",
         args: ["dev:headless", "--browser-listener-port", "27891"],
       },
+      { name: "workspace-runtime", command: "pnpm", args: ["dev:workspace-runtime"] },
     ],
   })
+})
+
+test("the remote browser's runtime is a service, not a manual extra step", async () => {
+  // The Host compiled with `workspace-runtime-exec` and pointed at a loopback
+  // runtime still shows an unhealthy browser plane if nothing is listening on
+  // 27910. Starting it here is what makes `dev:web-headless` a complete
+  // topology rather than three quarters of one.
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"))
+  assert.equal(
+    packageJson.scripts["dev:workspace-runtime"],
+    "node scripts/dev/workspace-runtime.mjs"
+  )
+
+  const result = await run(["--dry-run"])
+  const runtime = JSON.parse(result.stdout).services.find(
+    ({ name }) => name === "workspace-runtime"
+  )
+  assert.deepEqual(runtime.args, ["dev:workspace-runtime"])
+
+  // The port has to agree with the URL the Host is handed; they are derived
+  // from the same constant, and this is the assertion that keeps them so.
+  const script = await readFile(new URL("./workspace-runtime.mjs", import.meta.url), "utf8")
+  assert.match(script, /export const DEFAULT_WORKSPACE_RUNTIME_PORT = 27_910/)
 })
 
 test("dev:web-headless opens the one port a browser tab can reach the Host on", async () => {

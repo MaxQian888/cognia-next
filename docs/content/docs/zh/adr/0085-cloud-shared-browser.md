@@ -24,6 +24,14 @@ Tauri 内嵌浏览器为桌面端提供了有效的人机共享界面，但 clou
 
 `cognia-server` 通过私网 URL 模板与每-runtime secret 文件定位 runtime。私有 v1 协议仅暴露 health、control、Agent events 与 latest-frame media；客户端永远得不到 runtime、Playwright 或 CDP endpoint。
 
+runtime secret 是 `COGNIA_WORKSPACE_RUNTIME_SECRET_DIR` 下以 workspace id 命名的那个文件——runtime 容器 entrypoint 写的就是这个名字，`--from-literal=<workspace-id>=…` 的 Kubernetes Secret 投影出来的也是。`<workspace-id>.secret` 作为回退仍可读。
+
+### 开发拓扑
+
+单机满足不了上面的契约：`{workspace_id}` 需要在 DNS 里解析，而客户端送来的 workspace id 是运行期才产生的 project id，没有任何脚本能预先放好它的 secret 文件。因此开发环境改为用 `COGNIA_WORKSPACE_RUNTIME_URL` 直连单个 runtime，配一个共享的 `COGNIA_WORKSPACE_RUNTIME_SECRET`——runtime 自己读的就是这个变量。这一对仅在 URL 指向回环地址时被接受：一个 URL 加一个 secret 意味着所有 workspace 共用同一个浏览器，而这正是模板定位器要提供的隔离。
+
+`pnpm dev:web-headless` 会把该 runtime 作为第三个本地服务拉起，并把这一对下发给 Host；`pnpm dev:workspace-runtime` 用于单独启动它。本地 `cognia-server` 必须带 `--features workspace-runtime-exec` 编译，`terminal-host:prepare:dev` 已经这么做。Chromium 不随包分发：开会话前需要 `pnpm exec playwright install chromium`，缺失时只在启动时提示，不阻断启动。
+
 ### BrowserSession 与统一引擎
 
 父 ChatSession 独占一个 `BrowserSession`，team 子会话复用父绑定。一个 remote session 对应一个 Playwright `BrowserContext`，最多八个 page，且全局只有一个 active page。默认 ephemeral；named profile 按 workspace 隔离且互斥占用。

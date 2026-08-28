@@ -3,6 +3,12 @@
 import { spawn } from "node:child_process"
 
 import { findListenerPids, freePort } from "./free-port.mjs"
+import {
+  DEFAULT_WORKSPACE_RUNTIME_PORT,
+  ensureRuntimeSecret,
+  runtimeDataDir,
+  serverEnvironment,
+} from "./workspace-runtime.mjs"
 
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
 
@@ -18,7 +24,18 @@ const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
  * is for is also the one that needs this port.
  */
 const BROWSER_LISTENER_PORT = 27_891
-const requiredPorts = [3000, 27_890, BROWSER_LISTENER_PORT]
+/**
+ * The remote browser's runtime (ADR-0085), run here as a third local service.
+ *
+ * A deployment gives every workspace its own runtime container and reaches it
+ * by name; a laptop has neither the DNS nor the per-workspace secret files that
+ * contract needs. So dev runs one runtime on loopback and points the Host at it
+ * with `COGNIA_WORKSPACE_RUNTIME_URL` + a shared secret — the pair the Rust
+ * locator accepts only for a loopback host. Without this service the browser
+ * pane's remote engine is compiled and configured but has nothing to talk to.
+ */
+const WORKSPACE_RUNTIME_PORT = DEFAULT_WORKSPACE_RUNTIME_PORT
+const requiredPorts = [3000, 27_890, BROWSER_LISTENER_PORT, WORKSPACE_RUNTIME_PORT]
 const services = [
   { name: "web", command: pnpmCommand, args: ["dev"] },
   {
@@ -26,6 +43,7 @@ const services = [
     command: pnpmCommand,
     args: ["dev:headless", "--browser-listener-port", String(BROWSER_LISTENER_PORT)],
   },
+  { name: "workspace-runtime", command: pnpmCommand, args: ["dev:workspace-runtime"] },
 ]
 
 async function findOccupiedPorts() {
@@ -54,13 +72,13 @@ async function waitForPortsToClear(timeoutMs = 5_000) {
   return occupiedPorts
 }
 
-function startServices() {
+function startServices(serviceEnvironments = {}) {
   const useProcessGroups = process.platform !== "win32"
   const children = services.map((service) => ({
     service,
     child: spawn(service.command, service.args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: { ...process.env, ...(serviceEnvironments[service.name] ?? {}) },
       stdio: "inherit",
       detached: useProcessGroups,
     }),
@@ -153,7 +171,13 @@ if (process.argv.includes("--dry-run")) {
       process.stderr.write("[dev:web-headless] Failed to release every required port.\n")
       process.exitCode = 3
     } else {
-      startServices()
+      // Generated once, on disk, in the headless data dir: the runtime service
+      // resolves the same file for itself, so the two processes share a secret
+      // without either one having to be started first.
+      const secret = await ensureRuntimeSecret(runtimeDataDir())
+      startServices({
+        headless: serverEnvironment({ secret, port: WORKSPACE_RUNTIME_PORT }),
+      })
     }
   }
 }

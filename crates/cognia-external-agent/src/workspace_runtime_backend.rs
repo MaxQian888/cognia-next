@@ -17,11 +17,32 @@ use crate::process::{ExternalAgentEventSink, ExternalAgentProcessState, External
 pub const WORKSPACE_RUNTIME_WORKSPACES_ENV: &str = "COGNIA_WORKSPACE_RUNTIME_WORKSPACES";
 pub const WORKSPACE_RUNTIME_URL_TEMPLATE_ENV: &str = "COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE";
 pub const WORKSPACE_RUNTIME_SECRET_DIR_ENV: &str = "COGNIA_WORKSPACE_RUNTIME_SECRET_DIR";
+/// Single-runtime override: one base URL and one secret serve every workspace.
+/// Loopback only — see [`LoopbackWorkspaceRuntimeLocator`].
+pub const WORKSPACE_RUNTIME_URL_ENV: &str = "COGNIA_WORKSPACE_RUNTIME_URL";
+/// Shared secret for [`WORKSPACE_RUNTIME_URL_ENV`]. Deliberately the same
+/// variable the runtime process itself reads
+/// (`services/workspace-runtime/src/main.mjs`), so one value configures both
+/// halves of a single-machine topology.
+pub const WORKSPACE_RUNTIME_SECRET_ENV: &str = "COGNIA_WORKSPACE_RUNTIME_SECRET";
 
 #[derive(Clone)]
 pub struct WorkspaceRuntimeEndpoint {
     pub base_url: String,
     pub secret: String,
+}
+
+/// Hand-written for the same reason as [`LoopbackWorkspaceRuntimeLocator`]'s:
+/// this struct carries the runtime's bearer secret, and a derived `Debug`
+/// would leak it into the first log line that formatted an endpoint.
+impl std::fmt::Debug for WorkspaceRuntimeEndpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkspaceRuntimeEndpoint")
+            .field("base_url", &self.base_url)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -84,7 +105,17 @@ impl EnvironmentWorkspaceRuntimeLocator {
         })
     }
 
-    fn endpoint_paths(&self, workspace_id: &str) -> Result<(String, PathBuf), String> {
+    /// URL for this workspace plus the secret files to try, in order.
+    ///
+    /// `<dir>/<workspace_id>` comes first because it is the name both shipped
+    /// deployments actually write: the runtime container's `entrypoint.sh`
+    /// writes `/runtime-secrets/$COGNIA_WORKSPACE_ID`, and a k8s Secret built
+    /// with `--from-literal=<workspace-id>=…` projects that same bare key.
+    /// This locator used to accept only `<workspace_id>.secret`, which matched
+    /// neither, so a T2/T3 deployment following the documented steps could
+    /// never resolve a runtime. The suffixed name stays as a fallback for
+    /// anyone who hand-placed files to satisfy the old code.
+    fn endpoint_paths(&self, workspace_id: &str) -> Result<(String, Vec<PathBuf>), String> {
         let safe = !workspace_id.is_empty()
             && workspace_id.len() <= 128
             && workspace_id
@@ -100,32 +131,185 @@ impl EnvironmentWorkspaceRuntimeLocator {
         }
         Ok((
             self.url_template.replace("{workspace_id}", workspace_id),
-            self.secret_dir.join(format!("{workspace_id}.secret")),
+            vec![
+                self.secret_dir.join(workspace_id),
+                self.secret_dir.join(format!("{workspace_id}.secret")),
+            ],
         ))
     }
+}
+
+/// A runtime secret is a bearer credential for a process that drives a real
+/// browser — anything shorter than the runtime's own floor
+/// (`COGNIA_WORKSPACE_RUNTIME_SECRET must be at least 32 chars`) is refused
+/// here too, so the two halves cannot disagree about what counts as a secret.
+fn validate_secret(secret: &str, source: &str) -> Result<String, String> {
+    let secret = secret.trim().to_string();
+    if secret.len() < 32 {
+        return Err(format!(
+            "runtime secret {source} must be at least 32 characters"
+        ));
+    }
+    Ok(secret)
 }
 
 #[async_trait]
 impl WorkspaceRuntimeLocator for EnvironmentWorkspaceRuntimeLocator {
     async fn locate(&self, workspace_id: &str) -> Result<WorkspaceRuntimeEndpoint, String> {
-        let (base_url, secret_path) = self.endpoint_paths(workspace_id)?;
-        let secret = tokio::fs::read_to_string(&secret_path)
-            .await
-            .map_err(|error| {
-                format!(
-                    "cannot read runtime secret {}: {error}",
-                    secret_path.display()
-                )
-            })?
-            .trim()
-            .to_string();
-        if secret.len() < 32 {
+        let (base_url, secret_paths) = self.endpoint_paths(workspace_id)?;
+        let mut last_error = None;
+        for secret_path in &secret_paths {
+            match tokio::fs::read_to_string(secret_path).await {
+                Ok(raw) => {
+                    let secret = validate_secret(&raw, &secret_path.display().to_string())?;
+                    return Ok(WorkspaceRuntimeEndpoint { base_url, secret });
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(format!(
+            "cannot read runtime secret from {}: {}",
+            secret_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" or "),
+            last_error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "no candidate path".into())
+        ))
+    }
+}
+
+/// One runtime, addressed directly, serving every workspace id.
+///
+/// The templated locator above is the deployment contract: one runtime per
+/// workspace, reached by name, each with its own secret file. A single machine
+/// cannot satisfy it — `{workspace_id}` has to resolve in DNS, and the
+/// workspace id a client sends is a project id minted at runtime, so nothing
+/// can pre-place its secret file. This locator is the development topology
+/// instead: one runtime process on loopback, one shared secret.
+///
+/// Loopback is the whole safety argument, so it is enforced rather than
+/// documented: a non-loopback host here would hand every workspace in a
+/// deployment the same credential and the same browser, which is exactly the
+/// isolation the templated locator exists to provide.
+pub struct LoopbackWorkspaceRuntimeLocator {
+    base_url: String,
+    secret: String,
+}
+
+impl LoopbackWorkspaceRuntimeLocator {
+    pub fn new(base_url: String, secret: String) -> Result<Arc<Self>, String> {
+        let host = loopback_host(&base_url)?;
+        if !is_loopback_host(host) {
             return Err(format!(
-                "runtime secret {} must be at least 32 characters",
-                secret_path.display()
+                "{WORKSPACE_RUNTIME_URL_ENV} must address a loopback host (got {host}); use \
+                 {WORKSPACE_RUNTIME_URL_TEMPLATE_ENV} for a deployed runtime"
             ));
         }
-        Ok(WorkspaceRuntimeEndpoint { base_url, secret })
+        let secret = validate_secret(&secret, WORKSPACE_RUNTIME_SECRET_ENV)?;
+        Ok(Arc::new(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            secret,
+        }))
+    }
+}
+
+/// Written by hand, not derived: this type holds a bearer credential, and a
+/// derived `Debug` would put it in the first log line or panic message that
+/// ever formatted the locator.
+impl std::fmt::Debug for LoopbackWorkspaceRuntimeLocator {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoopbackWorkspaceRuntimeLocator")
+            .field("base_url", &self.base_url)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
+#[async_trait]
+impl WorkspaceRuntimeLocator for LoopbackWorkspaceRuntimeLocator {
+    async fn locate(&self, _workspace_id: &str) -> Result<WorkspaceRuntimeEndpoint, String> {
+        Ok(WorkspaceRuntimeEndpoint {
+            base_url: self.base_url.clone(),
+            secret: self.secret.clone(),
+        })
+    }
+}
+
+/// Host of an `http(s)` URL, with no dependency on a URL parser: this runs in
+/// the default build, where `reqwest` is not compiled in.
+fn loopback_host(base_url: &str) -> Result<&str, String> {
+    let rest = base_url
+        .strip_prefix("http://")
+        .or_else(|| base_url.strip_prefix("https://"))
+        .ok_or_else(|| format!("{WORKSPACE_RUNTIME_URL_ENV} must be an http(s) URL"))?;
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{WORKSPACE_RUNTIME_URL_ENV} has no host"))?;
+    if authority.contains('@') {
+        return Err(format!(
+            "{WORKSPACE_RUNTIME_URL_ENV} must not carry credentials"
+        ));
+    }
+    // `[::1]:27910` keeps its brackets so the port split below cannot cut an
+    // IPv6 address in half.
+    if let Some(end) = authority.find(']') {
+        return Ok(&authority[..=end]);
+    }
+    Ok(authority.split(':').next().unwrap_or(authority))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_matches(|c| c == '[' || c == ']')
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// The one place either half of the runtime plane — the browser gateway and
+/// the exec backend — decides how a runtime is addressed. `Ok(None)` means
+/// "nothing is configured", which is a valid state for both callers; `Err`
+/// means a caller asked for a runtime and the configuration is wrong.
+pub fn locator_from_env() -> Result<Option<Arc<dyn WorkspaceRuntimeLocator>>, String> {
+    let single_url = std::env::var(WORKSPACE_RUNTIME_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(base_url) = single_url {
+        let secret = std::env::var(WORKSPACE_RUNTIME_SECRET_ENV).map_err(|_| {
+            format!("{WORKSPACE_RUNTIME_SECRET_ENV} is required with {WORKSPACE_RUNTIME_URL_ENV}")
+        })?;
+        return Ok(Some(LoopbackWorkspaceRuntimeLocator::new(
+            base_url, secret,
+        )?));
+    }
+    let url_template = std::env::var(WORKSPACE_RUNTIME_URL_TEMPLATE_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let secret_dir = std::env::var(WORKSPACE_RUNTIME_SECRET_DIR_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match (url_template, secret_dir) {
+        (Some(url_template), Some(secret_dir)) => Ok(Some(EnvironmentWorkspaceRuntimeLocator::new(
+            url_template,
+            PathBuf::from(secret_dir),
+        ))),
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(format!(
+            "{WORKSPACE_RUNTIME_SECRET_DIR_ENV} is required with {WORKSPACE_RUNTIME_URL_TEMPLATE_ENV}"
+        )),
+        (None, Some(_)) => Err(format!(
+            "{WORKSPACE_RUNTIME_URL_TEMPLATE_ENV} is required with {WORKSPACE_RUNTIME_SECRET_DIR_ENV}"
+        )),
     }
 }
 
@@ -688,15 +872,13 @@ pub fn wrap_with_workspace_runtime_from_env(
                 WORKSPACE_RUNTIME_WORKSPACES_ENV
             )
         })?;
-    let url_template = std::env::var(WORKSPACE_RUNTIME_URL_TEMPLATE_ENV).map_err(|_| {
-        format!("{WORKSPACE_RUNTIME_URL_TEMPLATE_ENV} is required for workspace runtimes")
+    let locator = locator_from_env()?.ok_or_else(|| {
+        format!(
+            "{WORKSPACE_RUNTIME_URL_TEMPLATE_ENV} and {WORKSPACE_RUNTIME_SECRET_DIR_ENV} (or \
+             {WORKSPACE_RUNTIME_URL_ENV} and {WORKSPACE_RUNTIME_SECRET_ENV} on loopback) are \
+             required for workspace runtimes"
+        )
     })?;
-    let secret_dir = std::env::var(WORKSPACE_RUNTIME_SECRET_DIR_ENV)
-        .map(PathBuf::from)
-        .map_err(|_| {
-            format!("{WORKSPACE_RUNTIME_SECRET_DIR_ENV} is required for workspace runtimes")
-        })?;
-    let locator = EnvironmentWorkspaceRuntimeLocator::new(url_template, secret_dir);
     let runtime = WorkspaceRuntimeBackend::new(
         locator,
         HttpWorkspaceRuntimeClient::new(),
@@ -883,6 +1065,164 @@ mod tests {
             .spawn(config("agent-1", "/tmp/escape"), Arc::new(Sink))
             .await;
         assert!(result.unwrap_err().contains("outside the workspace root"));
+    }
+
+    #[tokio::test]
+    async fn environment_locator_reads_the_secret_name_deployments_actually_write() {
+        // `entrypoint.sh` writes `/runtime-secrets/$COGNIA_WORKSPACE_ID` and a
+        // k8s Secret projects `--from-literal=<workspace-id>=…` under that same
+        // bare key. Requiring `<id>.secret` — as this locator once did — made
+        // both documented deployments unable to resolve a runtime at all.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let locator = EnvironmentWorkspaceRuntimeLocator::new(
+            "http://runtime-{workspace_id}:27910".into(),
+            dir.path().to_path_buf(),
+        );
+        std::fs::write(dir.path().join("ws-a"), format!("{}\n", "s".repeat(40))).expect("write");
+        let endpoint = locator.locate("ws-a").await.expect("locate");
+        assert_eq!(endpoint.base_url, "http://runtime-ws-a:27910");
+        assert_eq!(endpoint.secret, "s".repeat(40));
+
+        // The suffixed name stays readable for anyone who placed files to
+        // satisfy the old code.
+        std::fs::write(dir.path().join("ws-b.secret"), "t".repeat(40)).expect("write");
+        assert_eq!(
+            locator.locate("ws-b").await.expect("locate").secret,
+            "t".repeat(40)
+        );
+
+        let error = locator.locate("ws-c").await.unwrap_err();
+        assert!(error.contains("ws-c"), "{error}");
+        assert!(error.contains("ws-c.secret"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn environment_locator_refuses_a_short_secret() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let locator = EnvironmentWorkspaceRuntimeLocator::new(
+            "http://runtime-{workspace_id}:27910".into(),
+            dir.path().to_path_buf(),
+        );
+        std::fs::write(dir.path().join("ws-a"), "too-short").expect("write");
+        let error = locator.locate("ws-a").await.unwrap_err();
+        assert!(error.contains("at least 32 characters"), "{error}");
+    }
+
+    #[test]
+    fn loopback_locator_refuses_anything_a_lan_could_reach() {
+        let secret = "s".repeat(40);
+        for routable in [
+            "http://runtime-a:27910",
+            "http://10.0.0.5:27910",
+            "http://0.0.0.0:27910",
+            "https://runtime.example.com",
+            "http://192.168.1.20:27910",
+        ] {
+            let error = LoopbackWorkspaceRuntimeLocator::new(routable.into(), secret.clone())
+                .expect_err(routable);
+            assert!(error.contains("loopback"), "{routable}: {error}");
+        }
+        for loopback in [
+            "http://127.0.0.1:27910",
+            "http://127.2.3.4:27910",
+            "http://localhost:27910",
+            "http://LOCALHOST:27910",
+            "http://[::1]:27910",
+        ] {
+            LoopbackWorkspaceRuntimeLocator::new(loopback.into(), secret.clone()).expect(loopback);
+        }
+        assert!(LoopbackWorkspaceRuntimeLocator::new(
+            "ws://127.0.0.1:27910".into(),
+            secret.clone()
+        )
+        .is_err());
+        assert!(LoopbackWorkspaceRuntimeLocator::new(
+            "http://user:pass@127.0.0.1:27910".into(),
+            secret.clone()
+        )
+        .is_err());
+        assert!(LoopbackWorkspaceRuntimeLocator::new(
+            "http://127.0.0.1:27910".into(),
+            "short".into()
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn loopback_locator_serves_every_workspace_from_one_runtime() {
+        // The single-runtime topology is the point: a dev machine has one
+        // browser process and the workspace id is a project id minted at run
+        // time, so there is nothing to look up per workspace.
+        let locator =
+            LoopbackWorkspaceRuntimeLocator::new("http://127.0.0.1:27910/".into(), "s".repeat(40))
+                .expect("locator");
+        let first = locator.locate("default").await.expect("locate");
+        let second = locator
+            .locate("019217ab-0000-7000-8000-000000000000")
+            .await
+            .expect("locate");
+        assert_eq!(first.base_url, "http://127.0.0.1:27910");
+        assert_eq!(second.base_url, first.base_url);
+        assert_eq!(second.secret, first.secret);
+    }
+
+    #[tokio::test]
+    async fn locator_from_env_prefers_the_single_url_and_reports_half_configurations() {
+        let _guard = crate::test_env_lock::env_lock().await;
+        // `Arc<dyn WorkspaceRuntimeLocator>` is not `Debug`, so `unwrap_err`
+        // is unavailable on this Result.
+        fn env_error() -> String {
+            match locator_from_env() {
+                Err(error) => error,
+                Ok(_) => panic!("expected a configuration error"),
+            }
+        }
+        for key in [
+            WORKSPACE_RUNTIME_URL_ENV,
+            WORKSPACE_RUNTIME_SECRET_ENV,
+            WORKSPACE_RUNTIME_URL_TEMPLATE_ENV,
+            WORKSPACE_RUNTIME_SECRET_DIR_ENV,
+        ] {
+            std::env::remove_var(key);
+        }
+        assert!(matches!(locator_from_env(), Ok(None)));
+
+        std::env::set_var(
+            WORKSPACE_RUNTIME_URL_TEMPLATE_ENV,
+            "http://rt-{workspace_id}:27910",
+        );
+        let error = env_error();
+        assert!(error.contains(WORKSPACE_RUNTIME_SECRET_DIR_ENV), "{error}");
+        std::env::set_var(WORKSPACE_RUNTIME_SECRET_DIR_ENV, "/run/secrets");
+        assert!(matches!(locator_from_env(), Ok(Some(_))));
+
+        // The loopback pair wins when both are present: it is the development
+        // override, and a dev machine also carries the deployment defaults in
+        // its environment more often than not.
+        std::env::set_var(WORKSPACE_RUNTIME_URL_ENV, "http://127.0.0.1:27910");
+        let error = env_error();
+        assert!(error.contains(WORKSPACE_RUNTIME_SECRET_ENV), "{error}");
+        std::env::set_var(WORKSPACE_RUNTIME_SECRET_ENV, "s".repeat(40));
+        let locator = match locator_from_env() {
+            Ok(Some(locator)) => locator,
+            _ => panic!("the loopback pair must configure a locator"),
+        };
+        assert_eq!(
+            locator.locate("anything").await.expect("locate").base_url,
+            "http://127.0.0.1:27910"
+        );
+
+        std::env::set_var(WORKSPACE_RUNTIME_URL_ENV, "http://runtime-a:27910");
+        assert!(env_error().contains("loopback"));
+
+        for key in [
+            WORKSPACE_RUNTIME_URL_ENV,
+            WORKSPACE_RUNTIME_SECRET_ENV,
+            WORKSPACE_RUNTIME_URL_TEMPLATE_ENV,
+            WORKSPACE_RUNTIME_SECRET_DIR_ENV,
+        ] {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]
