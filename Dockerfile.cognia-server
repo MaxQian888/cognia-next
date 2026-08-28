@@ -267,15 +267,27 @@ RUN node --version
 FROM node:26-bookworm-slim AS runtime-slim
 # The binary dynamically links the Tauri desktop stack (see the chef-stage
 # note) — ship the runtime .so set alongside the headless essentials.
+# bubblewrap is not optional: cognia-external-agent-launcher (shipped in the
+# brain layout below) refuses to spawn without `bwrap` on the PATH, and
+# SandboxError has no "continue unsandboxed" variant. Without it EVERY external
+# agent on this image — Pi included — fails with "bubblewrap (bwrap) is
+# required for strict external-agent hosting". The compose seccomp profile was
+# already tuned to let bwrap create user namespaces; only the binary was absent.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates libssl3 curl git \
+       ca-certificates libssl3 curl git bubblewrap \
        libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
        libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 libpipewire-0.3-0 libgbm1 \
     && rm -rf /var/lib/apt/lists/*
+# `/data/workspaces` is COGNIA_WORKSPACES_DIR (the per-run writable root the
+# sandbox binds) and `/data/pi-home/.pi/agent` is PI_CODING_AGENT_DIR, which
+# holds Pi's credentials — both must exist and be writable by the runtime uid
+# before the first spawn. Created here, ahead of `VOLUME /data`, so a fresh
+# anonymous or empty named volume is seeded with them; a pre-populated volume
+# mounted from an older image still needs them created by hand.
 RUN groupadd --system --gid 10001 cognia \
     && useradd --system --uid 10001 --gid cognia --home-dir /data --shell /usr/sbin/nologin cognia \
-    && mkdir -p /data \
+    && mkdir -p /data /data/workspaces /data/pi-home/.pi/agent \
     && chown -R cognia:cognia /data
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
@@ -292,7 +304,16 @@ COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/
 # COGNIA_SMOKE_AGENT=1 is set on the server — inert otherwise.
 COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
 
-ENV COGNIA_DATA_DIR=/data \
+# NODE_ENV=production disables $COGNIA_PI_EXTENSION_PATH (see
+# piExtensionOverrideAllowed): in a shipped image that variable would swap out
+# the component holding Pi's native-tool permission gate, which is exactly the
+# substitution the digest pin exists to prevent. HOME is set explicitly because
+# `USER 10001:10001` does not reliably export the passwd entry's home.
+ENV NODE_ENV=production \
+    HOME=/data \
+    COGNIA_DATA_DIR=/data \
+    COGNIA_WORKSPACES_DIR=/data/workspaces \
+    PI_CODING_AGENT_DIR=/data/pi-home/.pi/agent \
     COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
     COGNIA_PLUGIN_NODE_PATH=/opt/cognia/plugin-node/bin/node \
     COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs \

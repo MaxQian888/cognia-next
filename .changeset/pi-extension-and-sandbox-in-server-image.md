@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix external agents — Pi in particular — being unable to start on the self-hosted server image. Two shipped preconditions were enforced at runtime and satisfied nowhere: the container never installed `bubblewrap`, so the sandbox launcher refused every external-agent spawn ("bubblewrap (bwrap) is required for strict external-agent hosting"), and the pkg/Node CLI layout that becomes the brain never staged the bundled Pi extension, so every Pi session refused with the extension reported missing. The image now installs bubblewrap, runs with `NODE_ENV=production` (which disables the `COGNIA_PI_EXTENSION_PATH` override that could otherwise swap out the component holding Pi's native-tool permission gate), and creates the workspace and Pi credential directories owned by the runtime user. All three CLI layout builds now stage the Pi extension through one shared helper that also verifies its pinned digest, so a forgotten re-pin fails the build instead of shipping an extension that refuses on the user's machine.

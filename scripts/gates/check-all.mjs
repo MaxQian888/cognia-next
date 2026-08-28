@@ -164,6 +164,7 @@ const REGISTRY = [
   // uninstall path while every other gate stayed green. Also counts the
   // remaining unpinned launches so the hole shrinks instead of going quiet.
   { script: "audit:external-agent-runtimes", group: "audit" },
+  { script: "audit:agent-host-image", group: "audit" },
   // Its sibling: the capability answer per protocol, plus the binary allowlist
   // and sandbox state roots the Rust launcher keeps compiled in. Those literals
   // cannot read the JSON at runtime — an allowlist that does is not one — so
@@ -252,6 +253,7 @@ const REGISTRY = [
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
+  { script: "audit:agent-host-image:test", group: "gate-tests" },
   // `node --test` over the live-IM harness (scripts/smoke/im-live/). Pure
   // logic — markers, redaction, the diagnostic table, the per-conversation
   // lock, and every driver against a local fake server — so it needs no
