@@ -7,10 +7,18 @@ import {
   registerContextProvider,
 } from "@/lib/plugin/registries/context-provider-registry"
 
-jest.mock("@/lib/ai/agent/agent-executor", () => ({
-  __esModule: true,
-  executeAgent: jest.fn(),
-}))
+jest.mock("@/lib/ai/agent/agent-executor", () => {
+  // The execution service dispatches through the rail functions, not
+  // `executeAgent` directly. Both rails delegate to the one mock so every
+  // assertion below still reads the config the service actually built.
+  const executeAgent = jest.fn()
+  return {
+    __esModule: true,
+    executeAgent,
+    runAgentRail: (...a: unknown[]) => executeAgent(...(a as [])),
+    runCompletionRail: (...a: unknown[]) => executeAgent(...(a as [])),
+  }
+})
 // ADR-0090 Phase 6: runs route through the unified authority. Default
 // delegates to the REAL wrapper (flag off ⇒ the executeAgent mock above).
 const mockRendererTurn = jest.fn()
@@ -165,9 +173,32 @@ describe("runPluginAgent", () => {
     expect(cfg.abortSignal).toBeInstanceOf(AbortSignal)
   })
 
-  it("does not pass a canUseTool when neither run- nor tool-level gate is set", async () => {
+  it("always gates on the host PII redactor, even with no plugin-supplied gate", async () => {
+    // A plugin-driven tool call has no human reviewing its arguments, so the
+    // redactor is the host's to apply — not something an author opts into by
+    // remembering to pass `canUseTool`. It runs even when the plugin sets none.
     await runPluginAgent("hi", {})
-    expect(mockExecute.mock.calls[0][1]!.canUseTool).toBeUndefined()
+    const gate = mockExecute.mock.calls[0][1]!.canUseTool
+    expect(gate).toEqual(expect.any(Function))
+
+    const decision = await gate!("send", { to: "ada@example.com" }, {} as never)
+    expect(decision.behavior).toBe("allow")
+    expect(decision.updatedInput?.to).not.toContain("ada@example.com")
+  })
+
+  it("redacts before a plugin-supplied gate sees the input", async () => {
+    // Ordering is load-bearing: a plugin gate that logs or forwards its input
+    // must never be handed the raw value.
+    const seen: unknown[] = []
+    const runGate = jest.fn(async (_n: string, input: Record<string, unknown>) => {
+      seen.push(input.to)
+      return { behavior: "allow" as const }
+    })
+    await runPluginAgent("hi", { canUseTool: runGate })
+    const gate = mockExecute.mock.calls[0][1]!.canUseTool
+    await gate!("send", { to: "ada@example.com" }, {} as never)
+    expect(seen).toHaveLength(1)
+    expect(String(seen[0])).not.toContain("ada@example.com")
   })
 
   it("composes tool-level then run-level gates (rewrite chains through)", async () => {

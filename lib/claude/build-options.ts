@@ -2427,11 +2427,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // IM-bound sessions (no embedded webview there).
   const browserAllowedForChat = character?.enableBrowserTools === true && !imSession
 
-  // First-class web tools (web_search + web_fetch). Default ON; ungated by the
-  // pluginTools toggle. When on, the web-tools plugin's duplicate entries are
-  // filtered out (below) and the promoted built-ins are appended unconditionally.
-  const webCapabilityOn = appSettings?.webTools?.enabled ?? true
-
   // OCR tool (`cognia-ocr` / `ocr.extract`, ADR-0024) is low-risk and
   // default-allowed everywhere (incl. IM); see `isOcrToolAllowed`.
   const ocrAllowedForChat =
@@ -2485,17 +2480,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (!browserAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-browser-tools")
       }
-      // When the first-class web tools are on, drop the web-tools plugin's
-      // duplicate web_search/web_fetch so the model sees exactly one of each.
+      // Always drop the plugin's duplicate web_search/web_fetch. The promoted
+      // tools are appended later only when web access resolves on; otherwise a
+      // stale plugin registration would bypass the master switch.
       // The plugin's own web_download / web_research survive.
-      if (webCapabilityOn) {
-        manifest = manifest.filter(
-          (entry) =>
-            !(
-              entry.pluginId === "cognia-web-tools" &&
-              (entry.name === "web_search" || entry.name === "web_fetch")
-            )
-        )
+      manifest = manifest.filter(
+        (entry) =>
+          !(
+            entry.pluginId === "cognia-web-tools" &&
+            (entry.name === "web_search" || entry.name === "web_fetch")
+          )
+      )
+      if (appSettings?.webTools?.enabled === false) {
+        manifest = manifest.filter((entry) => entry.pluginId !== "cognia-deep-research")
       }
       // The capability-filtered manifest BEFORE semantic pruning. The ultracode
       // tier below re-attaches workflow entries from it, so that tier's tool
@@ -2713,6 +2710,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       loggers.app.warn("failed to append web built-in tools", { error: String(err) })
     }
+  }
+  if (
+    webAccess.reason === "disabled" &&
+    anthropicNativeWebSearch(providerId, isStandaloneChatMode())
+  ) {
+    const denied = new Set(opts.disallowedTools ?? [])
+    denied.add("WebSearch")
+    denied.add("WebFetch")
+    opts.disallowedTools = [...denied]
   }
   // Reaching native BY DEFAULT writes nothing: on an unnarrowed turn the SDK
   // already exposes WebSearch / WebFetch, and naming them in `allowedTools`

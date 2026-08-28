@@ -36,6 +36,34 @@ export type {
 export { SystemEvents } from "./events"
 export { CANONICAL_EXTENSION_POINTS } from "./extensions"
 
+/**
+ * Author-callable host tools. The names + narrowing helpers are runtime values
+ * (the types ride along on the `./context` re-export above), so a plugin can
+ * validate a `ctx.agent.invokeTool("web_search" | "web_fetch", …)` result
+ * without hand-rolling shape checks.
+ */
+export {
+  PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS,
+  isAuthorCallableHostTool,
+  isPluginHostToolFailure,
+  isPluginWebFetchSuccess,
+  isPluginWebSearchSuccess,
+  pluginWebFetchText,
+} from "@/types/plugin/plugin-host-tools"
+
+/**
+ * The host's prompt-injection framing for third-party text. Re-exported (not
+ * re-declared) so a plugin that composes fetched pages or search snippets into
+ * a model prompt frames them with the SAME banner the host uses — two copies
+ * would drift, and a drifted banner is one the model has not been trained by
+ * the rest of the app to distrust.
+ */
+export {
+  UNTRUSTED_CONTENT_NOTICE,
+  unwrapUntrustedContent,
+  wrapUntrustedContent,
+} from "@/lib/web/untrusted-content"
+
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,

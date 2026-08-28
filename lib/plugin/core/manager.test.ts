@@ -4083,6 +4083,78 @@ describe("PluginManager", () => {
       )
     })
 
+    it("gives the plugin's own message to the chat, and forwards the invoking session", async () => {
+      // Before this, EVERY plugin command answered with the host's generic
+      // "Command handled by plugin" line, so a command whose whole point is its
+      // output (a cited report, a diff) had to smuggle it out through a toast.
+      const store = {
+        plugins: { "cmd-plugin": createCommandPlugin("loaded") } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginCommand: jest.fn(),
+        updateLastUsedAt: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("cmd-plugin", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+
+      const onCommand = jest.fn(() => ({
+        handled: true,
+        message: "## Findings\n\n1. [source](https://x)",
+        payload: { citations: 1 },
+      }))
+      getPluginLifecycleHooks().registerHooks("cmd-plugin", { onCommand })
+
+      await manager.enablePlugin("cmd-plugin")
+      const registration = mockRegisterSlashCommand.mock.calls
+        .map(([def]) => def)
+        .find((def) => def.id === "cmd-plugin.cmd-plugin.run")
+      expect(registration).toBeDefined()
+
+      const result = await registration!.handler("deep dive", {
+        sessionId: "s-1",
+        characterId: "c-1",
+      })
+      expect(onCommand).toHaveBeenCalledWith("cmd-plugin.run", ["deep", "dive"], {
+        sessionId: "s-1",
+        characterId: "c-1",
+      })
+      expect(result).toEqual({
+        message: "## Findings\n\n1. [source](https://x)",
+        payload: { citations: 1 },
+      })
+    })
+
+    it("keeps the generic acknowledgement for a legacy boolean handler", async () => {
+      const store = {
+        plugins: { "cmd-plugin": createCommandPlugin("loaded") } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginCommand: jest.fn(),
+        updateLastUsedAt: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("cmd-plugin", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+      getPluginLifecycleHooks().registerHooks("cmd-plugin", { onCommand: () => true })
+
+      await manager.enablePlugin("cmd-plugin")
+      const registration = mockRegisterSlashCommand.mock.calls
+        .map(([def]) => def)
+        .find((def) => def.id === "cmd-plugin.cmd-plugin.run")
+      await expect(registration!.handler("", undefined)).resolves.toEqual({
+        message: "Command handled by plugin: /cmd-plugin.run",
+      })
+    })
+
     it("should unregister slash commands when plugin is disabled", async () => {
       const store = {
         plugins: {

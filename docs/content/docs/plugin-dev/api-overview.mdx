@@ -25,6 +25,83 @@ export async function activate(ctx) {
 }
 ```
 
+## Calling the host's web tools
+
+`web_search` and `web_fetch` are **author-callable host tools**: they run inside
+the host, so a plugin that calls them inherits the user's configured search
+providers, the shared result cache, source verification, PII redaction, the SSRF
+guard, and the outbound rate limiter. Do not ship your own provider HTTP or HTML
+extraction — a second copy is a second, weaker policy.
+
+```ts
+import { isPluginHostToolFailure, pluginWebFetchText } from "@cognia/plugin-sdk"
+
+const results = await ctx.agent.invokeTool(
+  "web_search",
+  { query: "cognia plugin sdk", maxResults: 5 },
+  { sessionId } // route the call to the session that asked for it
+)
+
+if (isPluginHostToolFailure(results)) {
+  // Branch on `code`, never on the message — codes are stable, prose is not.
+  if (results.code === "no-search-provider") return promptUserToConfigureSearch()
+  throw new Error(results.error)
+}
+
+const page = await ctx.agent.invokeTool(
+  "web_fetch",
+  { url: results.results[0].url, format: "text" },
+  { sessionId }
+)
+const text = isPluginHostToolFailure(page) ? "" : pluginWebFetchText(page)
+```
+
+Both calls are typed: `invokeTool` has overloads for these two names, so the
+input and result shapes are checked and no cast is needed. Any other name
+resolves against **your own** registered tools; the host's internal tools
+(`dispatch_agent`, `ask_user`, session control, …) are refused with
+`not-author-callable`. To call another plugin's tool, declare it as a manifest
+dependency and use `ctx.agent.invokeDependencyTool`.
+
+Third-party text is framed for the model with `wrapUntrustedContent()` — use the
+SDK's export rather than your own banner, so the model sees the same framing the
+rest of the app trained it to distrust.
+
+Declaring `agent:control` is what unlocks `invokeTool`. You do **not** need
+`network:fetch` or `networkAccess` for these calls: your plugin never opens the
+socket.
+
+## Passing the session through
+
+`ctx.ai.chat`, `ctx.ai.embed` and `ctx.agent.invokeTool` all accept a
+`sessionId`. Pass it whenever you have one — from `PluginToolContext.sessionId`
+in a tool, or `PluginCommandContext.sessionId` in a command handler.
+
+It is not metadata. The host resolves *which* provider, key and usage account
+answers the call from it. On a single-user desktop the ambient settings answer
+either way; on the CLI, where several sessions share one process with different
+credentials, a call without a session id has no credentials at all and fails
+closed rather than risk billing the wrong account.
+
+## Answering a slash command
+
+A command handler may return its own content instead of the host's generic
+acknowledgement:
+
+```ts
+return {
+  onCommand: async (command, args, context) => {
+    if (command !== "research") return false // decline; another handler may take it
+    const report = await run(args.join(" "), context?.sessionId)
+    return { handled: true, message: report.markdown, payload: { citations: report.citations } }
+  },
+}
+```
+
+`message` is inserted into the originating chat verbatim (markdown, so a full
+report is fine). Returning `true` keeps the legacy behavior — handled, host
+writes the response line — and `false` / `{ handled: false }` declines.
+
 ## Governance pipeline
 
 Calls registered in the catalog are evaluated in this order:

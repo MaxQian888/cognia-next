@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process"
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -90,23 +91,38 @@ try {
         type: "module",
         private: true,
         packageManager: "pnpm@10.30.3",
+        // Only this project's own direct edges. The edge that actually matters
+        // — `@cognia/plugin-sdk` -> these three — is rewritten by the
+        // `overrides` in the pnpm-workspace.yaml written below.
         dependencies: {
           "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
           "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
           "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
-        },
-        pnpm: {
-          overrides: {
-            "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
-            "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
-            "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
-          },
         },
       },
       null,
       2
     )}\n`
   )
+  // The packed SDK declares all three providers as `"0.0.0"` — a version no
+  // registry serves, since none of them are published. Without an override the
+  // install dies on "@cognia/provider-routing is not in the npm registry":
+  // provider-routing has no direct edge at all, it is reachable only through
+  // the SDK. This used to live in the manifest's `pnpm.overrides`, which pnpm
+  // 10.30 still honours but warns about on every run, and pnpm 11 ignores
+  // outright — at which point the harness would have broken exactly that way.
+  writeFileSync(
+    join(consumer, "pnpm-workspace.yaml"),
+    [
+      "packages: []",
+      "overrides:",
+      ...["provider-core", "provider-routing", "provider-types"].map(
+        (name) => `  "@cognia/${name}": "link:${join(repoRoot, "packages", name)}"`
+      ),
+      "",
+    ].join("\n")
+  )
+
   run(
     "pnpm",
     [
@@ -118,6 +134,9 @@ try {
       `@types/react@${installedVersion("@types/react")}`,
       `@types/node@${installedVersion("@types/node")}`,
       `@types/json-schema@${installedVersion("@types/json-schema")}`,
+      // The packed declarations import ACP types at the top level, so an author
+      // cannot type-check ANY SDK import without this peer resolving.
+      `@agentclientprotocol/sdk@${installedVersion("@agentclientprotocol/sdk")}`,
     ],
     consumer
   )
@@ -152,7 +171,7 @@ try {
       'import { definePlugin as invalidHookExport } from "@cognia/plugin-sdk/hooks";',
       'const manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };',
       "const probe: [EventFilter?, PluginHooks?, PluginPermission?, ExtensionPoint?] = [];",
-      'const contractProbe: ["1.0.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
+      'const contractProbe: ["1.1.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
       'defineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });',
       "void manifest; void probe; void contractProbe; void invalidHookExport;",
       "",
@@ -186,6 +205,73 @@ try {
     ],
     consumer
   )
+
+  // ── Reference-plugin isolation ───────────────────────────────────────────
+  // Type-check a REAL in-tree plugin against the packed SDK alone, in a
+  // directory that inherits none of the repo's `@/*` path aliases.
+  //
+  // The import gate (`check-author-imports.mjs`) can only see the specifiers a
+  // file writes. This proves the stronger property: that the SDK's published
+  // types actually CARRY everything Deep Research needs. A type the SDK forgot
+  // to export still resolves inside the monorepo — tsconfig maps it straight to
+  // the host source — and would only fail for the first outside author to try.
+  const providerTypePaths = {}
+  for (const [name, dist] of [
+    ["@cognia/provider-types", join(repoRoot, "packages/provider-types/dist")],
+    ["@cognia/provider-core", join(repoRoot, "packages/provider-core/dist")],
+  ]) {
+    if (!existsSync(join(dist, "index.d.ts"))) {
+      throw new Error(`${name} has no built declarations at ${dist} — run its build first`)
+    }
+    providerTypePaths[name] = [join(dist, "index.d.ts")]
+    providerTypePaths[`${name}/*`] = [join(dist, "*.d.ts")]
+  }
+
+  const pluginSource = join(repoRoot, "plugins/deep-research")
+  const pluginDir = join(consumer, "deep-research")
+  cpSync(pluginSource, pluginDir, {
+    recursive: true,
+    filter: (entry) => !/\.(test|spec)\.tsx?$/.test(entry),
+  })
+  writeFileSync(
+    join(consumer, "tsconfig.plugin.json"),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          noEmit: true,
+          strict: true,
+          exactOptionalPropertyTypes: true,
+          target: "ES2022",
+          module: "ESNext",
+          // Bundler resolution, matching how the host compiles plugin sources:
+          // extensionless relative imports, package `exports` respected.
+          moduleResolution: "Bundler",
+          resolveJsonModule: true,
+          esModuleInterop: true,
+          skipLibCheck: true,
+          lib: ["ES2022", "DOM"],
+          types: ["node"],
+          // No `@/*` host aliases — an author's project has none, so neither
+          // does this. The two entries below are NOT host aliases. The packed
+          // declarations deliberately keep `@cognia/provider-types` (five
+          // subpaths) and `@cognia/provider-core/core/client` as bare imports,
+          // and `generate-author-types.mjs` vendors those two packages' BUILT
+          // `.d.ts` trees into the CLI's author-types asset — so a scaffolded
+          // project resolves them to declarations, which `skipLibCheck` then
+          // skips. Without these, the workspace `link:` routes them to
+          // `src/*.ts` instead (their `exports` map has no dist entry at all,
+          // every condition points at source) and tsc type-checks HOST code
+          // under the plugin's stricter flags. That is not what an author
+          // gets, and not what this test is for.
+          paths: providerTypePaths,
+        },
+        include: ["deep-research/**/*.ts"],
+      },
+      null,
+      2
+    )}\n`
+  )
+  run(join(repoRoot, "node_modules/.bin/tsc"), ["-p", "tsconfig.plugin.json"], consumer)
 } finally {
   rmSync(workDir, { recursive: true, force: true })
 }

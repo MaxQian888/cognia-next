@@ -37,6 +37,8 @@ import {
   gitRemotes,
 } from "@/lib/git/commands"
 import { transport } from "@/lib/tauri"
+import { gitTargetFromPluginCache } from "@/lib/git/target"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 
 import { parseRepoSpec, repoCacheSegments, type RepoSpec } from "./repo-spec"
 
@@ -327,12 +329,18 @@ export function defaultAcquireDeps(
   return {
     openRoots,
     repoCacheDir: (segments) =>
-      transport.call<string>("plugin_workspace_repo_dir", { pluginId, segments }),
+      isRemoteHostActive()
+        ? Promise.resolve(gitTargetFromPluginCache(pluginId, segments))
+        : transport.call<string>("plugin_workspace_repo_dir", { pluginId, segments }),
     removeRepoCache: (segments) =>
       transport.call<boolean>("plugin_workspace_repo_remove", { pluginId, segments }),
     clone: gitCloneGuarded,
     headOf: defaultHeadOf,
-    remotesOf: async (root) => (await gitRemotes(root)).map(({ name, url }) => ({ name, url })),
+    // `cacheIsReusable` asks "was this cache dir cloned from the URL we are
+    // about to clone from" — that is the fetch side of the remote, not the push
+    // side (a fork's push URL routinely differs from where it fetches).
+    remotesOf: async (root) =>
+      (await gitRemotes(root)).map(({ name, fetchUrl }) => ({ name, url: fetchUrl })),
     fetchAll: (root) => gitFetch(root),
     checkoutRef: (root, ref) => gitCheckoutBranch(root, ref),
   }

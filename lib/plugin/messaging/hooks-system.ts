@@ -29,6 +29,8 @@ import type {
   PluginSharedMemoryDeletePayload,
   PluginTeamDelegationStartPayload,
   PluginTeamDelegationCompletePayload,
+  PluginCommandContext,
+  PluginCommandResult,
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin-runtime"
@@ -904,21 +906,36 @@ export class PluginLifecycleHooks {
   // Hook Dispatchers - Command
   // ===========================================================================
 
-  async dispatchOnCommand(command: string, args: string[]): Promise<boolean> {
+  /**
+   * Offer a command to every registered handler in hook order and return the
+   * first structured acceptance, or `null` when nobody handled it.
+   *
+   * Two handler contracts coexist. The legacy one returns `true`, which
+   * normalizes to a bare `{ handled: true }` and leaves the host to write the
+   * generic response line. The current one returns a {@link PluginCommandResult}
+   * whose `message` becomes the command's actual chat response — that is what
+   * lets a command answer with its own content instead of a toast plus a
+   * placeholder. Declining (`false` / `{ handled: false }`) keeps the search
+   * going, so a plugin can inspect the arguments and pass.
+   */
+  async dispatchOnCommand(
+    command: string,
+    args: string[],
+    context?: PluginCommandContext
+  ): Promise<PluginCommandResult | null> {
     for (const pluginId of this.hookExecutionOrder) {
       const registered = this.registered(pluginId)
       if (registered?.hooks.onCommand) {
         try {
-          const handled = await registered.hooks.onCommand(command, args)
-          if (handled) {
-            return true
-          }
+          const outcome = await registered.hooks.onCommand(command, args, context)
+          if (outcome === true) return { handled: true }
+          if (outcome && typeof outcome === "object" && outcome.handled) return outcome
         } catch (error) {
           loggers.hooks.error(`Error in plugin ${pluginId} onCommand:`, error)
         }
       }
     }
-    return false
+    return null
   }
 
   // ===========================================================================

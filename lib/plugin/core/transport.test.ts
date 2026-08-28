@@ -3,6 +3,11 @@
  */
 
 import type { PluginApiInvokeResponse } from "./transport"
+import {
+  PLUGIN_CONTRACT_VERSION,
+  PLUGIN_PROTOCOL_VERSION,
+  PLUGIN_SDK_VERSION,
+} from "@cognia/plugin-sdk/contracts"
 
 const mockDirectInvoke = jest.fn()
 const mockTransportCall = jest.fn()
@@ -88,10 +93,14 @@ describe("normalizePluginRuntimeHandshake", () => {
   })
 
   it("marks runtimes without a handshake as legacy", () => {
+    // Read the versions from the generated contract rather than pinning
+    // literals: the assertion that matters is "a silent runtime is stamped with
+    // the HOST's current versions and flagged legacy", and hard-coded numbers
+    // turn every contract bump into an unrelated test failure.
     expect(normalizePluginRuntimeHandshake({ tool_count: 1 }, "python")).toMatchObject({
-      sdk_version: "0.1.0",
-      protocol_version: "2.0.0",
-      contract_version: "1.0.0",
+      sdk_version: PLUGIN_SDK_VERSION,
+      protocol_version: PLUGIN_PROTOCOL_VERSION,
+      contract_version: PLUGIN_CONTRACT_VERSION,
       runtime_id: "python",
       capabilities: [],
       legacy_adapter: true,

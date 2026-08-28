@@ -7,13 +7,13 @@ description: Generated from the canonical Plugin Interface Catalog.
 
 # Plugin API Reference
 
-Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
+Contract `1.1.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
 
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.agent` | 27 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
-| `ctx.ai` | 7 | None | frontend, hybrid | sensitive |
+| `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid | sensitive |
 | `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
 | `ctx.automation` | 18 | `automation:read`, `automation:click`, `automation:pointer`, `automation:window`, `automation:type`, `automation:screenshot` | frontend, hybrid | internal |
@@ -143,8 +143,8 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
-| `ai.chat` | None | low | No |
-| `ai.embed` | None | low | No |
+| `ai.chat` | `ai:chat` | medium | No |
+| `ai.embed` | `ai:embed` | medium | No |
 | `ai.getAvailableModels` | None | low | Yes |
 | `ai.getDefaultModel` | None | low | Yes |
 | `ai.getDefaultProvider` | None | low | Yes |

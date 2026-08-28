@@ -1308,3 +1308,74 @@ describe("executeHook timer hygiene", () => {
     }
   })
 })
+
+describe("PluginLifecycleHooks.dispatchOnCommand", () => {
+  let lifecycleHooks: PluginLifecycleHooks
+
+  beforeEach(() => {
+    lifecycleHooks = new PluginLifecycleHooks()
+    seedPlugins({ plugins: {} })
+  })
+
+  it("normalizes the legacy boolean contract to a bare acceptance", async () => {
+    // Plugins written against SDK 0.1 return `true`. They must keep working
+    // untouched — the host then supplies its own generic response line.
+    lifecycleHooks.registerHooks("legacy", { onCommand: () => true })
+    await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toEqual({ handled: true })
+  })
+
+  it("passes a structured result through untouched", async () => {
+    lifecycleHooks.registerHooks("modern", {
+      onCommand: () => ({ handled: true, message: "# Report", payload: { citations: 3 } }),
+    })
+    await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toEqual({
+      handled: true,
+      message: "# Report",
+      payload: { citations: 3 },
+    })
+  })
+
+  it("hands the command, argv and invoking context to the handler", async () => {
+    const onCommand = jest.fn(() => true)
+    lifecycleHooks.registerHooks("p", { onCommand })
+    await lifecycleHooks.dispatchOnCommand("research", ["a", "b"], {
+      sessionId: "s1",
+      characterId: "c1",
+    })
+    expect(onCommand).toHaveBeenCalledWith("research", ["a", "b"], {
+      sessionId: "s1",
+      characterId: "c1",
+    })
+  })
+
+  it("returns null when nobody handled it", async () => {
+    lifecycleHooks.registerHooks("p", { onCommand: () => false })
+    await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toBeNull()
+  })
+
+  it("treats `{ handled: false }` as a decline and keeps looking", async () => {
+    const declining = jest.fn(() => ({ handled: false as const }))
+    lifecycleHooks.registerHooks("first", { onCommand: declining })
+    lifecycleHooks.registerHooks("second", {
+      onCommand: () => ({ handled: true, message: "mine" }),
+    })
+    await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toEqual({
+      handled: true,
+      message: "mine",
+    })
+    expect(declining).toHaveBeenCalled()
+  })
+
+  it("keeps looking past a handler that threw", async () => {
+    lifecycleHooks.registerHooks("boom", {
+      onCommand: () => {
+        throw new Error("nope")
+      },
+    })
+    lifecycleHooks.registerHooks("ok", { onCommand: () => ({ handled: true, message: "mine" }) })
+    await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toEqual({
+      handled: true,
+      message: "mine",
+    })
+  })
+})

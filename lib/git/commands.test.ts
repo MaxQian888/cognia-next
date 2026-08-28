@@ -34,6 +34,7 @@ import {
   gitCheckoutBranch,
   gitCherryPick,
   gitClone,
+  gitCloneGuarded,
   gitCommit,
   gitCommitFiles,
   gitConflicts,
@@ -100,7 +101,7 @@ import {
   runGitUserAction,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
-import { gitTargetFromRemote } from "./target"
+import { gitTargetFromPluginCache, gitTargetFromRemote } from "./target"
 
 beforeEach(() => {
   isTauriMock.mockReset()
@@ -210,7 +211,6 @@ describe("when on a companion transport (Capacitor / paired web)", () => {
     expect(callMock).toHaveBeenCalledWith("host_admin_lease_issue", {
       operations: ["git_stage"],
       ttlSeconds: 120,
-      confirmed: true,
     })
     expect(callMock).toHaveBeenCalledWith("git_stage", {
       workspaceId: "workspace-a",
@@ -224,6 +224,30 @@ describe("when on a companion transport (Capacitor / paired web)", () => {
   it("refuses absolute host paths on companion transports", async () => {
     await expect(gitStatus("/Users/host/private/repo")).rejects.toThrow("opaque workspace target")
     expect(callMock).not.toHaveBeenCalled()
+  })
+
+  it("clones guarded repositories through a logical plugin cache ref", async () => {
+    const target = gitTargetFromPluginCache("docs-plugin", ["github.com", "openai", "codex"])
+    callMock.mockResolvedValueOnce({
+      kind: "plugin-cache",
+      pluginId: "docs-plugin",
+      segments: ["github.com", "openai", "codex"],
+    })
+
+    await expect(
+      gitCloneGuarded("https://github.com/openai/codex.git", target, {
+        allowedHosts: ["github.com"],
+      })
+    ).resolves.toBe(target)
+    expect(callMock).toHaveBeenCalledWith("git_clone_guarded", {
+      remoteUrl: "https://github.com/openai/codex.git",
+      guards: { allowedHosts: ["github.com"] },
+      workspaceRef: {
+        kind: "plugin-cache",
+        pluginId: "docs-plugin",
+        segments: ["github.com", "openai", "codex"],
+      },
+    })
   })
 
   it("the fs watcher stays Tauri-only", async () => {

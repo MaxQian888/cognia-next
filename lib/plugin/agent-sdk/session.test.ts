@@ -3,10 +3,18 @@ import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import { createSession, getSession, deleteSession } from "@/lib/db/sessions"
 
-jest.mock("@/lib/ai/agent/agent-executor", () => ({
-  __esModule: true,
-  executeAgent: jest.fn(),
-}))
+jest.mock("@/lib/ai/agent/agent-executor", () => {
+  // The execution service dispatches through the rail functions, not
+  // `executeAgent` directly. Both rails delegate to the one mock so every
+  // assertion below still reads the config the service actually built.
+  const executeAgent = jest.fn()
+  return {
+    __esModule: true,
+    executeAgent,
+    runAgentRail: (...a: unknown[]) => executeAgent(...(a as [])),
+    runCompletionRail: (...a: unknown[]) => executeAgent(...(a as [])),
+  }
+})
 // ADR-0090 Phase 6: sends route through the unified authority. Default
 // delegates to the REAL wrapper (flag off ⇒ the executeAgent mock above).
 const mockRendererTurn = jest.fn()
@@ -151,6 +159,15 @@ describe("createPluginAgentSession", () => {
   })
 
   it("omits execution meta from the send result when the turn ran without it", async () => {
+    // Drive the turn directly: the real execution service always stamps a
+    // `runtime`, so going through it can never exercise "the turn reported no
+    // meta". What is under test is that the session layer copies meta across
+    // rather than inventing it.
+    mockRendererTurn.mockResolvedValue({
+      text: "reply",
+      channel: "sidecar",
+      toolsAvailable: true,
+    })
     const session = await createPluginAgentSession({})
     const res = await session.send("hi")
     expect(res).not.toHaveProperty("runtime")

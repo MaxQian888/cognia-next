@@ -1273,11 +1273,11 @@
       "javascriptEntryRequiredForContributions": false
     }
   },
-  "contractVersion": "1.0.0",
+  "contractVersion": "1.1.0",
   "protocol": {
     "version": "2.0.0",
     "minimumSdkVersion": "0.1.0",
-    "sdkVersion": "0.1.0",
+    "sdkVersion": "0.2.0",
     "gatewayClientVersion": "2.0.0",
     "minimumGatewayClientVersion": "1.0.0",
     "legacyAdapter": true
@@ -1558,7 +1558,7 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }
@@ -1654,7 +1654,7 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }
@@ -1678,7 +1678,7 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }
@@ -1765,11 +1765,11 @@
         {
           "id": "ai.chat",
           "name": "chat",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
+          "requiredPermissions": ["ai:chat"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }
@@ -1777,11 +1777,11 @@
         {
           "id": "ai.embed",
           "name": "embed",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
+          "requiredPermissions": ["ai:embed"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }

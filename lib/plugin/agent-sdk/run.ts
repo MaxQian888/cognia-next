@@ -21,6 +21,7 @@ import { createPluginAgentRun } from "./stream"
 import { runInputGuardrails, runOutputGuardrails } from "./guardrails"
 import { resolveContextContributions } from "./context-providers"
 import { withRunTrace } from "./tracing"
+import { createPiiRedactionGate } from "./pii-gate"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   PluginAgentRun,
@@ -42,25 +43,35 @@ export interface RunPluginAgentMeta {
  * Compose the permission gates that guard a run into a single
  * {@link PluginToolPermissionFn}. Stages run in order and a `deny` from any one
  * short-circuits; each stage's (possibly rewritten) input flows into the next:
+ *   0. PII redaction — host-applied, always
  *   1. per-tool `canUseTool` (declared on an inline tool)
  *   2. run-level `canUseTool`
  *   3. `hooks.onPreToolUse` lifecycle hook — sees the fully-rewritten input
- * Returns `undefined` when there is nothing to gate.
+ *
+ * Stage 0 is the host's, not the plugin's. A plugin-driven tool call has no
+ * human reviewing its arguments, so the redactor runs on EVERY plugin run
+ * rather than only the ones whose author remembered to pass
+ * `canUseTool: createPiiRedactionGate()`. It runs first so every later stage —
+ * and the tool itself — only ever sees placeholders. This is why the gate
+ * implementation stays off the author surface: it is not something a plugin
+ * opts into.
+ *
+ * Always returns a gate for that reason.
  */
 function composeGate(
   runGate: PluginToolPermissionFn | undefined,
   tools: PluginAgentRunOptions["tools"],
   preToolUse: PluginToolPermissionFn | undefined
-): PluginToolPermissionFn | undefined {
+): PluginToolPermissionFn {
   const toolGates = new Map<string, PluginToolPermissionFn>()
   for (const tool of tools ?? []) {
     if (tool.canUseTool) toolGates.set(tool.name, tool.canUseTool)
   }
-  if (!runGate && toolGates.size === 0 && !preToolUse) return undefined
+  const piiGate = createPiiRedactionGate()
 
   return async (toolName, input, ctx) => {
     let current = input
-    for (const gate of [toolGates.get(toolName), runGate, preToolUse]) {
+    for (const gate of [piiGate, toolGates.get(toolName), runGate, preToolUse]) {
       if (!gate) continue
       const r = await gate(toolName, current, ctx)
       if (r.behavior === "deny") return r
@@ -111,7 +122,7 @@ function toExecuteConfig(
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.outputFormat ? { outputFormat: options.outputFormat } : {}),
-    ...(gate ? { canUseTool: gate } : {}),
+    canUseTool: gate,
     ...(options.hooks?.onPostToolUse ? { onPostToolUse: options.hooks.onPostToolUse } : {}),
     abortSignal: signal,
     ...(onEvent ? { onEvent } : {}),

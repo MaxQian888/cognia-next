@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import type { SlashCommandContext } from "@/lib/slash-commands/registry"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import type {
   ExtensionCompatibilityDiagnostic,
@@ -5010,6 +5011,9 @@ export class PluginManager {
       description: manifestCommand.description,
       icon: manifestCommand.icon,
       execute: async () => {
+        // Palette invocation has no chat session to answer into, so a
+        // structured result's `message` has nowhere to go here; the slash path
+        // below is the surface that renders it.
         await this.hooksManager.dispatchOnCommand(manifestCommand.id, [])
       },
     }
@@ -5046,7 +5050,7 @@ export class PluginManager {
         )
       )
 
-      const handler = async (args: string) => {
+      const handler = async (args: string, ctx?: SlashCommandContext) => {
         // Refresh the idle-suspend clock on command invocation (mirrors the
         // tool-dispatch refresh) so command-driven plugins aren't suspended
         // between uses.
@@ -5055,10 +5059,21 @@ export class PluginManager {
         // us the post-`/cmd ` tail as a single string. Splitting on
         // whitespace mirrors how the chat composer used to forward them.
         const argv = args.trim().length > 0 ? args.trim().split(/\s+/) : []
-        const handled = await this.hooksManager.dispatchOnCommand(manifestCommand.id, argv)
-        return handled
-          ? { message: `Command handled by plugin: /${commandName}` }
-          : { message: `Plugin command not handled: /${commandName}` }
+        // Forward the invoking session/character. Without it a plugin has no
+        // way to bill its model calls to the session the user typed in — and on
+        // the CLI, where nothing is ambient, it simply cannot reach a provider.
+        const result = await this.hooksManager.dispatchOnCommand(manifestCommand.id, argv, {
+          ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
+          ...(ctx?.characterId ? { characterId: ctx.characterId } : {}),
+        })
+        if (!result) return { message: `Plugin command not handled: /${commandName}` }
+        // A handler that returned its own message OWNS the response: the host's
+        // generic acknowledgement would otherwise replace a real answer (a
+        // cited report, a diff, a table) with "Command handled by plugin".
+        return {
+          message: result.message ?? `Command handled by plugin: /${commandName}`,
+          ...(result.payload ? { payload: result.payload } : {}),
+        }
       }
 
       registerSlashCommand({

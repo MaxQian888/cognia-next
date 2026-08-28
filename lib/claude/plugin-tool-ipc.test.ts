@@ -52,6 +52,9 @@ jest.mock("@cognia/web-search/search-cache", () => ({
     set: jest.fn(),
   })),
 }))
+jest.mock("@/lib/search/configured-search", () => ({
+  searchWithAppSettings: jest.fn(async () => ({ results: [], provider: "tavily", query: "hi" })),
+}))
 // Built-in-skill context hydration (W2) — overridable per test so the suite
 // can pin that the HYDRATED context (imBinding + override row) reaches
 // runBuiltInSkill, closing the old bare-{sessionId} gate bypass.
@@ -103,9 +106,7 @@ describe("handlePluginToolExec", () => {
     __setPluginToolResolverForTesting({
       getTool: () => ({ pluginId: "cognia-web-tools", execute }),
     })
-    __setWebToolDepsForTesting(() => ({
-      providerSettings: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } } as never,
-    }))
+    __setWebToolDepsForTesting(() => ({ searchExecutor: jest.fn() }))
 
     const response = await handlePluginToolExec(
       makeRequest({ name: "web_search", args: { query: "hi" } })
@@ -375,11 +376,11 @@ describe("handlePluginToolExec — unified invokePluginTool path", () => {
           getPlugin: () => plugin,
           getRegistry: () => ({
             getTool: (name: string) =>
-              name === "demo_tool"
+              name === "demo_tool" || name === "deep_research"
                 ? {
-                    name: "demo_tool",
+                    name,
                     pluginId: "plug-a",
-                    definition: { name: "demo_tool", description: "d", parametersSchema: {} },
+                    definition: { name, description: "d", parametersSchema: {} },
                     execute,
                   }
                 : undefined,
@@ -412,6 +413,28 @@ describe("handlePluginToolExec — unified invokePluginTool path", () => {
     expect(execute).toHaveBeenCalledWith(
       { hello: "world" },
       expect.objectContaining({ sessionId: "session-1", config: { token: "t" } })
+    )
+  })
+
+  it("gives no plugin private host dependencies, whatever its tool is called", async () => {
+    // The host used to branch on `request.name === "deep_research"` and inject
+    // a web binding plus a model bridge into that one plugin. Every plugin now
+    // reaches both through the public API, so the tool context carries nothing
+    // host-private for anyone.
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const { execute, deps } = makeSeamDeps()
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    const response = await handlePluginToolExec(makeRequest({ name: "deep_research" }), {
+      resolveWebToolDeps: () => ({ enabled: true }),
+    })
+
+    expect(response.error).toBeUndefined()
+    const context = execute.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(context).not.toHaveProperty("hostContext")
+    expect(Object.values(context)).not.toContainEqual(
+      expect.objectContaining({ chat: expect.anything() })
     )
   })
 
@@ -945,12 +968,11 @@ describe("resolveWebToolDeps (default resolver)", () => {
       recency: "week",
       country: "us",
       language: "en",
-      includeDomains: ["good.test"],
       excludeDomains: ["bad.test"],
       includeAnswer: true,
       includeRawContent: true,
     })
-    expect(deps.searchCache).toBeDefined()
+    expect(deps.searchExecutor).toEqual(expect.any(Function))
     expect(deps.sourceVerification).toEqual({ enabled: true })
   })
 
@@ -960,10 +982,19 @@ describe("resolveWebToolDeps (default resolver)", () => {
     expect(deps.cache).toBeDefined()
   })
 
-  it("omits the search cache when the user disabled it", async () => {
+  it("tells the executor to bypass the cache when the user disabled it", async () => {
     mockSettings.searchCacheEnabled = false
     const deps = await searchDeps()
-    expect(deps.searchCache).toBeUndefined()
+    const executor = deps.searchExecutor as (q: string, o: unknown) => Promise<unknown>
+    await executor("hi", {})
+    // Resolved here, not from a top-level binding: sibling describes call
+    // `jest.resetModules()`, so the instance the source's dynamic import got is
+    // the CURRENT registry's, not the one this file imported at load time.
+    const { searchWithAppSettings } = await import("@/lib/search/configured-search")
+    expect(searchWithAppSettings).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({ useCache: false })
+    )
   })
 
   it("omits summarize when no utility model resolves", async () => {
@@ -980,7 +1011,29 @@ describe("resolveWebToolDeps (default resolver)", () => {
     const deps = await searchDeps()
     expect(deps.searchOptions).toEqual({})
     expect(deps.sourceVerification).toBeUndefined()
-    // Cache is on by default (searchCacheEnabled undefined ≠ false).
-    expect(deps.searchCache).toBeDefined()
+    // The cache is owned by the canonical executor, not re-wired onto the deps.
+    expect(deps.searchExecutor).toEqual(expect.any(Function))
+  })
+})
+
+describe("handlePluginToolExec — host web dependency injection", () => {
+  it("lets a non-renderer host supply search config without Zustand", async () => {
+    const searchExecutor = jest.fn()
+    const response = await handlePluginToolExec(
+      {
+        type: "plugin_tool_exec",
+        sessionId: "cli",
+        toolUseId: "u",
+        name: "web_search",
+        args: { query: "hi" },
+      },
+      { resolveWebToolDeps: () => ({ searchExecutor }) }
+    )
+
+    expect(response.error).toBeUndefined()
+    expect(mockWebSearch).toHaveBeenCalledWith(
+      { query: "hi" },
+      expect.objectContaining({ searchExecutor })
+    )
   })
 })

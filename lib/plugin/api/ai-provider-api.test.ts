@@ -13,6 +13,11 @@ import {
 } from "./ai-provider-api"
 import { initializePluginPermissions } from "./permission-api"
 import {
+  __resetPluginHostRuntimesForTesting,
+  disableAmbientHostRuntime,
+  registerSessionHostRuntime,
+} from "@/lib/plugin/runtime/host-runtime"
+import {
   getProtocolAdapter,
   getCodeAdapterExecutor,
   __resetProtocolAdaptersForTesting,
@@ -703,6 +708,40 @@ describe("AI Provider API", () => {
 
       const defaultProvider = api.getDefaultProvider()
       expect(defaultProvider).toBe("openai")
+    })
+  })
+
+  describe("session-scoped hosts", () => {
+    afterEach(() => {
+      __resetPluginHostRuntimesForTesting()
+    })
+
+    it("answers from the named session's runtime", () => {
+      registerSessionHostRuntime("s-42", () => ({
+        runHostTool: async () => ({}),
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "anthropic",
+        getDefaultModel: () => "claude-sonnet",
+      }))
+      disableAmbientHostRuntime()
+      const api = createAIProviderAPI(testPluginId)
+
+      expect(api.getDefaultModel({ sessionId: "s-42" })).toBe("claude-sonnet")
+      expect(api.getDefaultProvider({ sessionId: "s-42" })).toBe("anthropic")
+    })
+
+    it("degrades to '' instead of throwing out of a sync getter", () => {
+      // The CLI turns ambient resolution off, so an unrouted call has no honest
+      // answer. These two are introspection, not spend — throwing from a
+      // `() => string` left the plugin no recovery, while `chat`/`embed`, which
+      // DO spend the user's quota, still fail loudly.
+      disableAmbientHostRuntime()
+      const api = createAIProviderAPI(testPluginId)
+
+      expect(api.getDefaultModel()).toBe("")
+      expect(api.getDefaultProvider()).toBe("")
+      expect(api.getDefaultModel({ sessionId: "unbound" })).toBe("")
     })
   })
 

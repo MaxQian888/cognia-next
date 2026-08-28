@@ -9,7 +9,31 @@ const AUTHOR_ROOTS = [
   "crates/cognia-plugin-template-ts",
   "crates/cognia-plugin-template-hybrid",
   "crates/cognia-plugin-template-vscode-extension",
+  // Deep Research is the reference in-tree plugin for the public SDK: it is a
+  // real, non-trivial plugin (an autonomous research loop) that nonetheless
+  // compiles against `@cognia/plugin-sdk` alone. Gating it here is what keeps
+  // that true — the templates prove the boundary is expressible, this proves it
+  // survives a plugin big enough to be tempted across it.
+  "plugins/deep-research",
 ]
+
+/**
+ * The `@cognia/*` packages a plugin author may import. Everything else in the
+ * workspace is host-internal.
+ *
+ * An allowlist rather than a denylist on purpose: the repo grows packages
+ * regularly, and a denylist would silently admit each new one. An author who
+ * needs something from a host package needs it re-exported through the SDK,
+ * where it becomes a contract instead of an accident.
+ */
+export const AUTHOR_PACKAGES = ["@cognia/plugin-sdk", "@cognia/plugin-ui"]
+
+function isHostOnlyCogniaPackage(specifier) {
+  if (!specifier.startsWith("@cognia/")) return false
+  return !AUTHOR_PACKAGES.some(
+    (allowed) => specifier === allowed || specifier.startsWith(`${allowed}/`)
+  )
+}
 
 export function findForbiddenAuthorImports(source) {
   const matches = []
@@ -21,8 +45,11 @@ export function findForbiddenAuthorImports(source) {
       specifier.startsWith("@/types") ||
       specifier.startsWith("@/components") ||
       specifier.startsWith("@/stores") ||
+      specifier.startsWith("@/hooks") ||
+      specifier.startsWith("@/plugins") ||
       specifier === "@cognia/plugin-sdk/host" ||
-      specifier.startsWith("@cognia/plugin-sdk/host/")
+      specifier.startsWith("@cognia/plugin-sdk/host/") ||
+      isHostOnlyCogniaPackage(specifier)
     ) {
       matches.push(specifier)
     }

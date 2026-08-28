@@ -371,16 +371,17 @@ async function resolveVectorToolDeps(): Promise<VectorToolRunDeps> {
   }
 }
 
-async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
+export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
   if (webToolDepsOverride) return webToolDepsOverride()
   try {
     const { useSettingsStore } = await import("@/stores/settings")
     const s = useSettingsStore.getState().settings
     const deps: WebToolRunDeps = {
-      providerSettings: s?.searchProviders,
+      enabled: s?.webTools?.enabled ?? true,
       searchMaxResults: s?.searchMaxResults,
-      searchFallbackEnabled: s?.searchFallbackEnabled,
-      searchMaxRetries: s?.searchMaxRetries,
+      // Provider settings, fallback and retry counts are NOT forwarded: the
+      // canonical executor below reads them straight off the same settings
+      // store, and a second copy here would drift from the policy that runs.
       // Forward the user's Settings → Search defaults so the agent honors them
       // (previously only provider + maxResults reached the search service).
       searchOptions: {
@@ -389,7 +390,9 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
         ...(s?.defaultSearchRecency ? { recency: s.defaultSearchRecency } : {}),
         ...(s?.defaultSearchCountry ? { country: s.defaultSearchCountry } : {}),
         ...(s?.defaultSearchLanguage ? { language: s.defaultSearchLanguage } : {}),
-        ...(s?.defaultIncludeDomains?.length ? { includeDomains: s.defaultIncludeDomains } : {}),
+        // Domain sources are resolved by the canonical executor. Forwarding
+        // the legacy default here as a request override would replace the
+        // user's selected Wikipedia/arXiv/GitHub/Stack Overflow hard filter.
         ...(s?.defaultExcludeDomains?.length ? { excludeDomains: s.defaultExcludeDomains } : {}),
         ...(typeof s?.defaultIncludeAnswer === "boolean"
           ? { includeAnswer: s.defaultIncludeAnswer }
@@ -403,20 +406,18 @@ async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
       allowPrivateHosts: s?.webTools?.allowPrivateHosts === true,
       alwaysDistill: s?.webTools?.alwaysDistill === true,
     }
-    // Reuse the search-result cache (shared with the search UI) unless the user
-    // turned it off; apply their TTL / size config.
-    if (s?.searchCacheEnabled !== false) {
-      try {
-        const { getSearchCache } = await import("@cognia/web-search/search-cache")
-        const cache = getSearchCache()
-        cache.setConfig({
-          ...(s?.searchCacheTTL ? { defaultTTL: s.searchCacheTTL } : {}),
-          ...(s?.searchCacheMaxEntries ? { maxSize: s.searchCacheMaxEntries } : {}),
-        })
-        deps.searchCache = cache
-      } catch {
-        // Cache is optional.
-      }
+    // The executor owns the shared result cache (it calls `getSearchCache()`
+    // and applies the user's TTL / size config itself), so there is no second
+    // cache to wire up here.
+    //
+    // Attached ONLY when a provider is actually configured, so its presence is
+    // a truthful "search can run" signal that callers can read without keeping
+    // their own copy of `searchProviders` to re-derive the same answer.
+    const { configuredSearchProviders } = await import("@/lib/chat/web-access")
+    if (configuredSearchProviders(s?.searchProviders, s?.defaultSearchProvider).length > 0) {
+      const { searchWithAppSettings } = await import("@/lib/search/configured-search")
+      deps.searchExecutor = (query, options) =>
+        searchWithAppSettings(query, { options, useCache: s?.searchCacheEnabled !== false })
     }
     // Query-focused web_fetch extraction — when the model passes a `prompt`, the
     // page is distilled to just the relevant content via the cheap utility
@@ -499,8 +500,14 @@ export function __setPluginToolResolverForTesting(resolver: PluginToolResolver |
  * `error` field of the response so the sidecar-side promise always
  * resolves and the MCP tool can return a clean error envelope.
  */
+export interface PluginToolExecHostDeps {
+  /** Host-specific web settings (CLI supplies config without a renderer store). */
+  resolveWebToolDeps?: () => Promise<WebToolRunDeps> | WebToolRunDeps
+}
+
 export async function handlePluginToolExec(
-  request: PluginToolExecRequest
+  request: PluginToolExecRequest,
+  hostDeps: PluginToolExecHostDeps = {}
 ): Promise<PluginToolExecResponse> {
   const baseResponse = {
     type: "plugin_tool_response" as const,
@@ -515,7 +522,10 @@ export async function handlePluginToolExec(
     // available (ungated by pluginTools); host-side because they reuse
     // lib/search + lib/document, which the .mjs sidecar can't import.
     if (isWebBuiltinTool(request.name)) {
-      const result = await runWebBuiltinTool(request.name, request.args, await resolveWebToolDeps())
+      const webDeps = hostDeps.resolveWebToolDeps
+        ? await hostDeps.resolveWebToolDeps()
+        : await resolveWebToolDeps()
+      const result = await runWebBuiltinTool(request.name, request.args, webDeps)
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted editor built-in — read_active_editor (Pro IDE → agent) ────
@@ -629,6 +639,11 @@ export async function handlePluginToolExec(
         await import("@/lib/plugin/core/invoke-plugin-tool")
       const resolved = await resolvePluginToolByName(request.name)
       if (resolved) {
+        // No per-plugin special case here on purpose. A plugin that needs the
+        // host's search, page reader or model reaches them through the public
+        // API (`ctx.agent.invokeTool` / `ctx.ai`), and the host resolves those
+        // per session. Injecting private dependencies for one hard-coded tool
+        // name is what made those capabilities available to exactly one plugin.
         const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
           signal: request.abortSignal,
           sessionId: request.sessionId,

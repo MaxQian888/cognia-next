@@ -3948,7 +3948,7 @@ describe("resolveSendOptions — first-class web tools supersede the plugin", ()
   const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
 
   beforeEach(() => {
-    // The web-tools plugin still registers all four of its tools.
+    // Include legacy duplicate registrations to verify the defensive filter.
     mBuildManifest.mockReset().mockReturnValue([
       {
         name: "web_search",
@@ -3964,6 +3964,12 @@ describe("resolveSendOptions — first-class web tools supersede the plugin", ()
       },
       { name: "web_download", description: "dl", jsonSchema: {}, pluginId: "cognia-web-tools" },
       { name: "web_research", description: "rsrch", jsonSchema: {}, pluginId: "cognia-web-tools" },
+      {
+        name: "deep_research",
+        description: "deep",
+        jsonSchema: {},
+        pluginId: "cognia-deep-research",
+      },
     ])
   })
 
@@ -3985,6 +3991,21 @@ describe("resolveSendOptions — first-class web tools supersede the plugin", ()
     // The plugin's exclusive tools are untouched.
     expect(names).toContain("web_download")
     expect(names).toContain("web_research")
+    expect(names).toContain("deep_research")
+  })
+
+  it("drops plugin search/fetch when the master switch is off but keeps exclusive tools", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-disabled" }),
+      character: makeChar({ providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: { webTools: { enabled: false } } as AppSettings,
+    })
+    const names = (opts.pluginTools ?? []).map((tool) => tool.name)
+    expect(names).not.toContain("web_search")
+    expect(names).not.toContain("web_fetch")
+    expect(names).toContain("web_download")
+    expect(names).toContain("web_research")
+    expect(names).not.toContain("deep_research")
   })
 })
 
@@ -4958,6 +4979,16 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
       appSettings: { webTools: { enabled: false } } as AppSettings,
     })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+  })
+
+  it("denies ambient Anthropic native web tools when the capability is off", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { webTools: { enabled: false } } as AppSettings,
+    })
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]))
     expect(webNames(opts)).not.toContain("web_search")
     expect(webNames(opts)).not.toContain("web_fetch")
   })

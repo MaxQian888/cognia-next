@@ -12,7 +12,7 @@
  *    `HookPriority` type alias, sandbox execution result)
  */
 
-export type { PluginHooks } from "@/types/plugin/plugin"
+export type { PluginCommandContext, PluginCommandResult, PluginHooks } from "@/types/plugin/plugin"
 
 export type {
   // Domain-specific hook event shapes

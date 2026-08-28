@@ -295,9 +295,31 @@ export type {
   AIChatMessage,
   AIChatOptions,
   AIChatChunk,
+  AIEmbedOptions,
+  PluginCommandContext,
+  PluginCommandResult,
   AIModel,
   AIProviderDefinition,
   PluginExtensionAPI,
   PluginPermissionAPI,
   PluginContextAPI,
 } from "@/types/plugin/plugin"
+
+// =============================================================================
+// Author-callable host tools (`ctx.agent.invokeTool`)
+// =============================================================================
+export type {
+  PluginAuthorCallableHostTool,
+  PluginAuthorCallableHostToolMap,
+  PluginHostToolErrorCode,
+  PluginHostToolFailure,
+  PluginInvocationOptions,
+  PluginWebFetchFormat,
+  PluginWebFetchInput,
+  PluginWebFetchResult,
+  PluginWebFetchSuccess,
+  PluginWebSearchHit,
+  PluginWebSearchInput,
+  PluginWebSearchResult,
+  PluginWebSearchSuccess,
+} from "@/types/plugin/plugin-host-tools"

@@ -49,7 +49,32 @@
       // Reached INDIRECTLY: this package compiles `lib/plugin/api/memory-api.ts`,
       // which imports `@/types/memory/memory` — now a shim over @cognia/memory.
       "@cognia/memory": ["../../packages/memory/src/index.ts"],
-      "@cognia/memory/*": ["../../packages/memory/src/*"]
+      "@cognia/memory/*": ["../../packages/memory/src/*"],
+      // Reached INDIRECTLY too, through the host sources this package compiles:
+      // `lib/db/schema.ts` re-exports `lib/db/eval-lab.ts` (@cognia/eval-core),
+      // `types/browser-companion` re-exports @cognia/companion-client, and
+      // `lib/workflow/nodes/ai/browser-model.ts` imports @cognia/transformers-
+      // runtime. These `paths` REPLACE the root's, so a package the root
+      // resolves is unresolvable here until it is listed by name.
+      "@cognia/eval-core": ["../../packages/eval-core/src/index.ts"],
+      "@cognia/eval-core/*": ["../../packages/eval-core/src/*"],
+      "@cognia/companion-client": ["../../packages/companion-client/src/index.ts"],
+      "@cognia/companion-client/*": ["../../packages/companion-client/src/*"],
+      "@cognia/transformers-runtime": ["../../packages/transformers-runtime/src/index.ts"],
+      "@cognia/transformers-runtime/*": ["../../packages/transformers-runtime/src/*"],
+      // Mapped for a DIFFERENT reason than the three above, and it must stay:
+      // `@cognia/agent` is the only package in this graph whose `exports` map
+      // has no source condition, so unmapped it resolves to its prebuilt
+      // `dist/index.d.ts` — and rollup-dts inlines that file's body while
+      // leaving its own `./handoff-envelope.js` re-export external. The bundle
+      // then ships a relative import resolving against the author's `dist/`,
+      // where no such file exists, and EVERY SDK import fails to type-check.
+      // Reached via `types/agent/agent-team.ts` -> the deprecated
+      // `@cognia/agent-config-types/handoff-envelope` shim -> `@cognia/agent`.
+      // `/*` rather than the root tsconfig's three explicit subpaths: that list
+      // predates `./worker-manifest` and is already incomplete.
+      "@cognia/agent": ["../../packages/agent/src/index.ts"],
+      "@cognia/agent/*": ["../../packages/agent/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../../types/optional-modules.d.ts"],

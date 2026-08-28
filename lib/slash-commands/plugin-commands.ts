@@ -13,12 +13,35 @@
 import type { SlashCommand, SlashContext } from "./builtin"
 import { dispatchSlashCommand, listSlashCommands, type SlashCommandDefinition } from "./registry"
 
+/**
+ * The character bound to a session, or `undefined`.
+ *
+ * Read from Dexie rather than a store: `SlashContext` carries only the session
+ * id, and the character binding lives on the session row. A plugin that
+ * personalizes its answer (or bills a character's model) needs it, and reading
+ * the authoritative row avoids depending on which surface happens to have
+ * hydrated a mirror.
+ */
+async function resolveCharacterId(sessionId: string | null): Promise<string | undefined> {
+  if (!sessionId) return undefined
+  try {
+    const { getSession } = await import("@/lib/db/sessions")
+    const session = await getSession(sessionId)
+    return session?.characterId ?? undefined
+  } catch {
+    // No Dexie on this host (tests, headless) — the id is optional.
+    return undefined
+  }
+}
+
 /** Build the composer-side action handler for one plugin command def. */
 function makePluginHandler(def: SlashCommandDefinition): (ctx: SlashContext) => Promise<void> {
   return async (ctx: SlashContext) => {
     const line = `/${def.id}${ctx.args ? ` ${ctx.args}` : ""}`
+    const characterId = await resolveCharacterId(ctx.activeSessionId)
     const res = await dispatchSlashCommand(line, {
       sessionId: ctx.activeSessionId ?? undefined,
+      ...(characterId ? { characterId } : {}),
     })
     if (res?.message) ctx.pushSystemMessage(res.message)
   }

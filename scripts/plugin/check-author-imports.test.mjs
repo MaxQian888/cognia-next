@@ -11,7 +11,10 @@ test("detects host-private author imports without flagging public SDK subpaths",
       import "@/lib/plugin/private-side-effect"
       import Widget from "@/components/private"
       const store = require("@/stores/private")
+      import { useThing } from "@/hooks/private"
+      import sibling from "@/plugins/other-plugin/src/internals"
       import { definePlugin } from "@cognia/plugin-sdk/manifest"
+      import { Button } from "@cognia/plugin-ui"
     `),
     [
       "@/types/plugin",
@@ -19,8 +22,31 @@ test("detects host-private author imports without flagging public SDK subpaths",
       "@/lib/plugin/private-side-effect",
       "@/components/private",
       "@/stores/private",
+      "@/hooks/private",
+      "@/plugins/other-plugin/src/internals",
     ]
   )
+})
+
+test("refuses host-internal @cognia packages, admits the author-facing ones", () => {
+  // An allowlist, so a package added to the workspace next month is refused by
+  // default rather than quietly becoming part of the author surface.
+  assert.deepEqual(
+    findForbiddenAuthorImports(`
+      import { hasNoLeakingPii } from "@cognia/redact"
+      import { searchWithSettings } from "@cognia/web-search/types"
+      import type { AppSettings } from "@cognia/agent-config-types"
+      import { definePlugin } from "@cognia/plugin-sdk"
+      import { Button } from "@cognia/plugin-ui/button"
+    `),
+    ["@cognia/redact", "@cognia/web-search/types", "@cognia/agent-config-types"]
+  )
+})
+
+test("the reference in-tree plugin compiles against the SDK alone", () => {
+  // Deep Research is a real, non-trivial plugin. Gating it is what proves the
+  // boundary survives something bigger than a template.
+  assert.deepEqual(checkAuthorImports(process.cwd(), ["plugins/deep-research"]), [])
 })
 
 test("repository author templates pass the private-import gate", () => {

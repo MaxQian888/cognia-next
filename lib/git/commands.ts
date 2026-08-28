@@ -21,7 +21,14 @@ import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { resolveOperationAvailability } from "@/lib/runtime/operation-availability"
 import { languageFromPath } from "./language-map"
-import { gitTargetArgs, gitTargetFromRemote, isRemoteGitTarget, parseGitTarget } from "./target"
+import {
+  gitTargetArgs,
+  gitTargetFromPluginCache,
+  gitTargetFromRemote,
+  isRemoteGitTarget,
+  parseGitTarget,
+  type HostWorkspaceRef,
+} from "./target"
 import {
   EMPTY_REPO_STATE,
   EMPTY_STATUS,
@@ -102,7 +109,7 @@ function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<stri
     throw new Error("Remote Git requests require an opaque workspace target")
   }
   if (
-    command === "git_clone" &&
+    (command === "git_clone" || command === "git_clone_guarded") &&
     typeof args.destination === "string" &&
     isRemoteGitTarget(args.destination)
   ) {
@@ -111,8 +118,15 @@ function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<stri
       args.workspaceId = target.workspaceId
       args.destinationRelativePath = target.relativePath
       delete args.destination
+    } else if (target.kind === "plugin-cache") {
+      Object.assign(args, gitTargetArgs(args.destination as string))
+      delete args.destination
     }
-  } else if (command === "git_clone" && typeof args.destination === "string" && !isTauri()) {
+  } else if (
+    (command === "git_clone" || command === "git_clone_guarded") &&
+    typeof args.destination === "string" &&
+    !isTauri()
+  ) {
     throw new Error("Remote Git requests require an opaque workspace target")
   }
   const descriptor = getCommandDescriptor(command)
@@ -781,7 +795,16 @@ export async function gitCloneGuarded(
   guards?: GitCloneGuards
 ): Promise<string> {
   if (!hasGitBridge()) return ""
-  return transport.call<string>("git_clone_guarded", { remoteUrl, destination, guards })
+  const cloned = await transport.call<string | HostWorkspaceRef>("git_clone_guarded", {
+    remoteUrl,
+    destination,
+    guards,
+  })
+  if (typeof cloned === "string") return cloned
+  if (cloned.kind === "plugin-cache") {
+    return gitTargetFromPluginCache(cloned.pluginId, cloned.segments)
+  }
+  return gitTargetFromRemote(cloned.rootId, cloned.relativePath)
 }
 
 /**

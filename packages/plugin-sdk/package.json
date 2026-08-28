@@ -1,6 +1,6 @@
 {
   "name": "@cognia/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Standalone TypeScript SDK for authoring Cognia plugins.",
   "license": "AGPL-3.0-only",
@@ -117,7 +117,7 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/build-package.mjs",
     "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
-    "pack:test": "pnpm --dir ../provider-types build && pnpm build && node ../../scripts/plugin/test-sdk-package.mjs",
+    "pack:test": "pnpm --dir ../provider-types build && pnpm --dir ../provider-core build && pnpm build && node ../../scripts/plugin/test-sdk-package.mjs",
     "performance:check": "node scripts/check-performance-budget.mjs"
   },
   "dependencies": {
@@ -126,6 +126,7 @@
     "@cognia/provider-types": "workspace:*"
   },
   "peerDependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0",
     "@types/json-schema": "^7.0.0",
     "@types/node": ">=20.0.0",
     "@types/react": "^19.0.0",

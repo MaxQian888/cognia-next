@@ -10,6 +10,8 @@ import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialo
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import {
   assertNetworkRequestAllowed,
+  hostFromUrl,
+  matchHost,
   type NetworkHttpMethod,
 } from "@/lib/plugin/security/network-allowlist"
 import { sanitizePluginNetworkEgress } from "@/lib/plugin/api/plugin-pii-gate"
@@ -81,6 +83,12 @@ import type {
   PluginSharedMemoryReadOptions,
   PluginTwinMemoryQueryOptions,
 } from "@/types/plugin"
+import {
+  isAuthorCallableHostTool,
+  type PluginHostToolFailure,
+  type PluginInvocationOptions,
+} from "@/types/plugin/plugin-host-tools"
+import { resolvePluginHostRuntime } from "@/lib/plugin/runtime/host-runtime"
 import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
@@ -741,6 +749,48 @@ function gateToolEnabledRun(pluginId: string, toolsEnabled: boolean | undefined)
   }
 }
 
+/**
+ * Apply the plugin's `networkAccess` egress clamp to a promoted host tool whose
+ * target the plugin supplies.
+ *
+ * Returns a structured {@link PluginHostToolFailure} rather than throwing: the
+ * author-callable contract is that an expected refusal arrives as a coded
+ * result, and `"blocked"` is the code reserved for a guard saying no. A plugin
+ * with no `networkAccess` declaration is denied, matching `ctx.network` — the
+ * host tool must not be the softer door into the same network.
+ *
+ * Scope is ONLY the manifest domain clamp. The SSRF target policy
+ * (scheme, private/loopback/link-local hosts) belongs to `runWebBuiltinTool`,
+ * which is the layer that knows the user's `webTools.allowPrivateHosts`
+ * opt-in; running `evaluateEgress` here re-decided it with the default policy,
+ * so a user who had opted in still got a refusal — reported, wrongly, as the
+ * plugin's manifest denying its own `["*"]`.
+ */
+function deniedHostToolEgress(
+  pluginId: string,
+  manager: PluginManager,
+  name: string,
+  args: Record<string, unknown> | undefined
+): PluginHostToolFailure | null {
+  if (name !== "web_fetch") return null
+  const url = args?.url
+  if (typeof url !== "string" || !url) return null
+  const host = hostFromUrl(url)
+  // Unparseable target: not a domain question. `runWebBuiltinTool`'s guard
+  // rejects it with the accurate reason.
+  if (!host) return null
+  const networkAccess = manager.getPlugin(pluginId)?.manifest.networkAccess
+  const domains = networkAccess?.allowedDomains ?? networkAccess?.rules?.map((rule) => rule.domain)
+  if (domains && matchHost(host, domains)) return null
+  return {
+    ok: false,
+    code: "blocked",
+    error: domains
+      ? `web_fetch to ${host} is outside plugin ${pluginId}'s networkAccess.allowedDomains.`
+      : `web_fetch is refused: plugin ${pluginId} declares no networkAccess.`,
+  }
+}
+
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
     registerTool: (tool: PluginTool) => {
@@ -803,10 +853,10 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       return runPluginAgentStreamed(prompt, options, { pluginId })
     },
 
-    invokeTool: async (
+    invokeTool: (async (
       name: string,
       args: Record<string, unknown>,
-      opts?: { signal?: AbortSignal }
+      opts?: PluginInvocationOptions
     ) => {
       if (!pluginHasApiPermission(pluginId, "agent:control")) {
         throw new Error(
@@ -816,12 +866,43 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       if (typeof name !== "string" || !name) {
         throw new Error("agent.invokeTool requires a tool name")
       }
+      // ── 1. Author-callable host tools ─────────────────────────────────────
+      // Resolved FIRST so a plugin cannot shadow a promoted host tool by
+      // registering the same name — the host's search/fetch policy (providers,
+      // cache, source verification, PII, SSRF, rate limit) must be the one that
+      // runs. Only the names on the allowlist reach here; every other host tool
+      // stays private to the agent loop.
+      if (isAuthorCallableHostTool(name)) {
+        // Running host-side reuses the host's SSRF guard and rate limiter, but
+        // NOT the plugin's own egress clamp — `runWebBuiltinTool` has never
+        // heard of a manifest. `web_fetch` is the one promoted tool whose
+        // target the PLUGIN chooses, so it stays inside
+        // `networkAccess.allowedDomains` exactly like `ctx.network` would.
+        // (`web_search` reaches only the user's configured search providers,
+        // which the plugin does not pick, so the allowlist does not apply.)
+        const egressDenial = deniedHostToolEgress(pluginId, manager, name, args)
+        if (egressDenial) return egressDenial
+        const runtime = resolvePluginHostRuntime({
+          pluginId,
+          ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+          ...(opts?.messageId ? { messageId: opts.messageId } : {}),
+        })
+        return runtime.runHostTool(name, args ?? {}, {
+          ...(opts?.signal ? { signal: opts.signal } : {}),
+        })
+      }
+      // ── 2. The calling plugin's own tools ─────────────────────────────────
+      // Cross-plugin calls are NOT reachable from here: `invokePluginTool`
+      // enforces ownership, and a plugin that means to call another plugin's
+      // tool must declare the dependency and use `invokeDependencyTool`.
       const { result } = await invokePluginTool(pluginId, name, args ?? {}, {
         ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(opts?.messageId ? { messageId: opts.messageId } : {}),
         reason: `plugin ${pluginId} invoked tool ${name}`,
       })
       return result
-    },
+    }) as PluginAgentAPI["invokeTool"],
 
     invokeDependencyTool: async (dependencyId, name, args, opts) => {
       if (!pluginHasApiPermission(pluginId, "agent:control")) {

@@ -29,6 +29,7 @@ import type {
   KnowledgeFile,
   ChatMode,
 } from "./_compat"
+import type { PluginAuthorCallableHostToolMap, PluginInvocationOptions } from "./plugin-host-tools"
 import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
 import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginCharacterPackDef } from "./plugin-character-pack"
@@ -1820,6 +1821,32 @@ export interface PluginUpdateInfo {
 }
 
 /**
+ * Where a slash command was invoked from. Handed to `PluginHooks.onCommand` so
+ * a plugin can attribute model calls and tool invocations to the right session
+ * instead of guessing at an ambient "current" one (there isn't one on the CLI,
+ * and there are several during a team run).
+ */
+export interface PluginCommandContext {
+  /** Chat session the command was typed in, when there is one. */
+  sessionId?: string
+  /** Character bound to that session, when there is one. */
+  characterId?: string
+}
+
+/**
+ * A command handler's structured answer. See `PluginHooks.onCommand` for the
+ * `boolean` legacy form and how the two interact.
+ */
+export interface PluginCommandResult {
+  /** `false` declines the command and lets the next handler try. */
+  handled: boolean
+  /** Markdown inserted into the originating chat as the command's response. */
+  message?: string
+  /** Free-form data for callers that dispatch commands programmatically. */
+  payload?: Record<string, unknown>
+}
+
+/**
  * Hook definitions that plugins can implement
  */
 export interface PluginHooks {
@@ -1877,7 +1904,26 @@ export interface PluginHooks {
   onSessionClear?: (sessionId: string) => void
 
   // Command hooks
-  onCommand?: (command: string, args: string[]) => boolean | Promise<boolean>
+  /**
+   * Handle a manifest-declared slash command.
+   *
+   * Return `true` for the legacy contract — the host then answers with its own
+   * generic "Command handled by plugin" line. Return a
+   * {@link PluginCommandResult} to own the response: `message` is inserted into
+   * the originating chat verbatim (markdown, so a full report can be returned)
+   * and `payload` reaches richer dispatch callers untouched. Returning `false`
+   * or `{ handled: false }` declines, and the host keeps looking for another
+   * handler before falling back to "Plugin command not handled".
+   *
+   * `context` carries the invoking session — pass it back into `ctx.ai.*` /
+   * `ctx.agent.invokeTool` so the work is billed and routed to the session the
+   * user actually typed the command in.
+   */
+  onCommand?: (
+    command: string,
+    args: string[],
+    context?: PluginCommandContext
+  ) => boolean | PluginCommandResult | Promise<boolean | PluginCommandResult>
 
   // Chat flow hooks
   /** Called when user regenerates an AI response */
@@ -2509,17 +2555,26 @@ export interface PluginAgentAPI {
    * from inside its code. Routes through the unified `invokePluginTool` seam
    * (ownership + permission gate + lazy activation). Requires `agent:control`.
    */
-  invokeTool: (
-    name: string,
-    args: Record<string, unknown>,
-    opts?: { signal?: AbortSignal }
-  ) => Promise<unknown>
+  invokeTool: {
+    /**
+     * Author-callable host tool (`web_search` / `web_fetch`) — typed input and
+     * result. These resolve BEFORE the plugin's own tools, so a plugin cannot
+     * shadow a promoted host tool by registering the same name.
+     */
+    <K extends keyof PluginAuthorCallableHostToolMap>(
+      name: K,
+      args: PluginAuthorCallableHostToolMap[K]["input"],
+      opts?: PluginInvocationOptions
+    ): Promise<PluginAuthorCallableHostToolMap[K]["result"]>
+    /** Any other name resolves against the calling plugin's own tools. */
+    (name: string, args: Record<string, unknown>, opts?: PluginInvocationOptions): Promise<unknown>
+  }
   /** Invoke a tool owned by a required dependency declared in the manifest. */
   invokeDependencyTool: (
     dependencyId: string,
     name: string,
     args: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; sessionId?: string; messageId?: string }
+    opts?: PluginInvocationOptions
   ) => Promise<unknown>
   /**
    * @deprecated Use {@link run} / {@link runStreamed}. Retained as a thin shim
@@ -4828,6 +4883,29 @@ export interface AIChatOptions {
    * may honour it.
    */
   signal?: AbortSignal
+  /**
+   * Session the call belongs to. The host resolves WHICH runtime answers from
+   * it — on the CLI several sessions run concurrently, each with its own
+   * provider, key and usage accounting, and there is no ambient store to fall
+   * back to. Omitting it on such a host fails closed rather than borrowing
+   * another session's credentials.
+   */
+  sessionId?: string
+  /** Message the call belongs to, when the caller is inside a turn. */
+  messageId?: string
+}
+
+/**
+ * Options for `ctx.ai.embed`. Same session-routing contract as
+ * {@link AIChatOptions}; embeddings bill the same provider account.
+ */
+export interface AIEmbedOptions {
+  /** Cancellation signal; aborts the embedding request. */
+  signal?: AbortSignal
+  /** Session the call belongs to — see {@link AIChatOptions.sessionId}. */
+  sessionId?: string
+  /** Message the call belongs to, when the caller is inside a turn. */
+  messageId?: string
 }
 
 /**
@@ -4864,7 +4942,7 @@ export interface AIProviderDefinition {
   icon?: PluginIconName
   models: AIModel[]
   chat: (messages: AIChatMessage[], options?: AIChatOptions) => AsyncIterable<AIChatChunk>
-  embed?: (texts: string[]) => Promise<number[][]>
+  embed?: (texts: string[], options?: AIEmbedOptions) => Promise<number[][]>
   validateApiKey?: (apiKey: string) => Promise<boolean>
 }
 
@@ -4885,13 +4963,20 @@ export interface PluginAIProviderAPI {
   chat: (messages: AIChatMessage[], options?: AIChatOptions) => AsyncIterable<AIChatChunk>
 
   /** Generate embeddings */
-  embed: (texts: string[]) => Promise<number[][]>
+  embed: (texts: string[], options?: AIEmbedOptions) => Promise<number[][]>
 
-  /** Get current default model */
-  getDefaultModel: () => string
+  /**
+   * Get current default model.
+   *
+   * `options.sessionId` is what makes this answerable on a session-scoped host
+   * (the CLI runs several sessions, each with its own provider, in one
+   * process). Omitting it there yields `""` — "this host cannot say" — rather
+   * than another session's model.
+   */
+  getDefaultModel: (options?: PluginInvocationOptions) => string
 
-  /** Get current default provider */
-  getDefaultProvider: () => string
+  /** Get current default provider. Same routing contract as {@link PluginAIProviderAPI.getDefaultModel}. */
+  getDefaultProvider: (options?: PluginInvocationOptions) => string
 }
 
 // =============================================================================
