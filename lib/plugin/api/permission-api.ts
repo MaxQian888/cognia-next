@@ -21,6 +21,7 @@ import {
 } from "@/lib/plugin/core/transport"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { pluginRuntimeAccountAvailable } from "@/lib/plugin/security/account-runtime-gate"
 
 // Permission grants by plugin
 const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
@@ -261,7 +262,14 @@ export function createPermissionAPI(
  * sidecar. Returns `false` when the plugin has no initialised permission set.
  */
 export function pluginHasApiPermission(pluginId: string, permission: PluginAPIPermission): boolean {
+  if (!pluginRuntimeAccountAvailable()) return false
   return grantedPermissions.get(pluginId)?.has(permission) ?? false
+}
+
+/** Clear process-wide API grants when a LocalProfile locks or changes. */
+export function clearAllPluginApiPermissions(): void {
+  grantedPermissions.clear()
+  contextPanelRegistry.refresh()
 }
 
 /**

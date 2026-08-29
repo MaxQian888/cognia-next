@@ -772,6 +772,10 @@ pub async fn plugin_unload_vscode_for_state(
     plugin_unload_vscode_generation_for_state(state, plugin_id, generation).await
 }
 
+pub fn plugin_vscode_list_for_state(state: &VscodeExtensionState) -> Vec<String> {
+    state.sidecars.read().keys().cloned().collect()
+}
+
 pub async fn plugin_unload_vscode_generation_for_state(
     state: &VscodeExtensionState,
     plugin_id: String,
@@ -1006,6 +1010,7 @@ mod tests {
     fn node_module_grants_require_every_permission_in_each_group() {
         let temp = tempfile::tempdir().unwrap();
         let runtime = PluginRuntimeState::new(temp.path().join("plugins"));
+        runtime.activate_account("acct_test").unwrap();
         let plugin_id = "cognia.permission-test";
 
         runtime.permissions.write().insert(

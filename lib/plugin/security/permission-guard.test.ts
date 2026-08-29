@@ -17,6 +17,15 @@ import {
   WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "./permission-guard"
 import type { PluginPermission as _PluginPermission } from "@/types/plugin"
+import { activatePluginRuntimeAccount, clearPluginRuntimeAccount } from "./account-runtime-gate"
+
+beforeEach(() => {
+  activatePluginRuntimeAccount("acct-permission-guard-test")
+})
+
+afterAll(() => {
+  clearPluginRuntimeAccount()
+})
 
 describe("PermissionGuard", () => {
   let guard: PermissionGuard
@@ -69,6 +78,21 @@ describe("PermissionGuard", () => {
     it("should check any permission", () => {
       expect(guard.checkAny("plugin-a", ["network:fetch", "filesystem:write"])).toBe(true)
       expect(guard.checkAny("plugin-a", ["filesystem:read", "filesystem:write"])).toBe(false)
+    })
+
+    it("fails closed and audits the denial while the LocalProfile is locked", () => {
+      clearPluginRuntimeAccount()
+
+      expect(guard.check("plugin-a", "network:fetch", "locked account attempt")).toBe(false)
+      expect(guard.getAuditLog({ pluginId: "plugin-a" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: "check",
+            allowed: false,
+            context: "locked account attempt",
+          }),
+        ])
+      )
     })
   })
 

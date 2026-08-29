@@ -63,6 +63,16 @@ jest.mock("@tauri-apps/api/path", () => ({
 }))
 
 const mockDetectPlatform = detectPlatform as jest.MockedFunction<typeof detectPlatform>
+let mockUnlockedAccountId: string | null = "acct_test"
+let mockAccountRevision = 1
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      unlockedAccountId: mockUnlockedAccountId,
+      accountRevision: mockAccountRevision,
+    }),
+}))
 
 describe("PluginRuntimeInitializer", () => {
   const warningRefreshTeardown = jest.fn()
@@ -72,6 +82,8 @@ describe("PluginRuntimeInitializer", () => {
     mockInitializeManager.mockResolvedValue(undefined)
     mockInstallPackWarningRefreshWiring.mockReturnValue(warningRefreshTeardown)
     mockPluginRuntimeRequested = true
+    mockUnlockedAccountId = "acct_test"
+    mockAccountRevision = 1
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
     window.history.replaceState({}, "", "/")
@@ -109,6 +121,12 @@ describe("PluginRuntimeInitializer", () => {
     // The Tauri path/window APIs must not be touched in web mode.
     expect(mockGetCurrentWindow).not.toHaveBeenCalled()
     expect(mockAppDataDir).not.toHaveBeenCalled()
+  })
+
+  it("does not boot while the LocalProfile is locked", () => {
+    mockUnlockedAccountId = null
+    render(<PluginRuntimeInitializer />)
+    expect(mockInitializeManager).not.toHaveBeenCalled()
   })
 
   it("installs character-pack warning refresh wiring in the browser", () => {

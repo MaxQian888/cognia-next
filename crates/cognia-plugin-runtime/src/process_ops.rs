@@ -27,14 +27,26 @@ pub async fn plugin_process_kill(
     process_id: String,
     #[allow(unused_variables)] signal: Option<String>,
 ) -> Result<()> {
+    kill_tracked_process(state.inner(), &process_id, signal.as_deref());
+    Ok(())
+}
+
+pub fn kill_all_tracked_processes_for_state(state: &PluginRuntimeState) {
+    let process_ids: Vec<String> = state.processes.read().keys().cloned().collect();
+    for process_id in process_ids {
+        kill_tracked_process(state, &process_id, Some("KILL"));
+    }
+}
+
+fn kill_tracked_process(state: &PluginRuntimeState, process_id: &str, signal: Option<&str>) {
     let mut processes = state.processes.write();
-    if let Some(record) = processes.remove(&process_id) {
+    if let Some(record) = processes.remove(process_id) {
         if let Some(pid) = record.pid {
             #[cfg(unix)]
             {
                 use std::process::Command;
                 let _ = Command::new("kill")
-                    .arg(format!("-{}", signal.as_deref().unwrap_or("TERM")))
+                    .arg(format!("-{}", signal.unwrap_or("TERM")))
                     .arg(pid.to_string())
                     .status();
             }
@@ -47,7 +59,6 @@ pub async fn plugin_process_kill(
             }
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]

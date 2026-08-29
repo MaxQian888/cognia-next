@@ -8,6 +8,7 @@
 import type { PluginPermission } from "@/types/plugin"
 
 import { getPluginConsentBroker } from "./consent-broker"
+import { pluginRuntimeAccountAvailable } from "./account-runtime-gate"
 
 // =============================================================================
 // Types
@@ -531,6 +532,10 @@ export class PermissionGuard {
   // ===========================================================================
 
   check(pluginId: string, permission: PluginPermission, context?: string): boolean {
+    if (!pluginRuntimeAccountAvailable()) {
+      this.audit(pluginId, permission, "check", false, context)
+      return false
+    }
     const grant = this.grants.get(pluginId)?.get(permission)
     const allowed = this.isGrantValid(grant)
 

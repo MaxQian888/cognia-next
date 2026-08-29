@@ -13,6 +13,7 @@ import {
   isBootCapabilityRequested,
   subscribeBootCapabilities,
 } from "@/lib/boot/capabilities"
+import { useAccountStore } from "@/stores/account/account-store"
 
 const log = loggers.plugin
 
@@ -52,7 +53,9 @@ export interface PluginRuntimeInitializerProps {
 export function PluginRuntimeInitializer({
   onlyForPluginSurfaceE2E = false,
 }: PluginRuntimeInitializerProps = {}) {
-  const hasInitialized = useRef(false)
+  const initializedForAccount = useRef<string | null>(null)
+  const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const accountRevision = useAccountStore((state) => state.accountRevision)
   useSyncExternalStore(
     subscribeBootCapabilities,
     getBootCapabilitySnapshot,
@@ -74,8 +77,10 @@ export function PluginRuntimeInitializer({
 
   useEffect(() => {
     if (!requested || !isAllowedRoute) return
-    if (hasInitialized.current) return
-    hasInitialized.current = true
+    if (!unlockedAccountId) return
+    const accountKey = `${unlockedAccountId}:${accountRevision}`
+    if (initializedForAccount.current === accountKey) return
+    initializedForAccount.current = accountKey
     window.__cogniaPluginRuntimeReady = false
 
     const initialize = async () => {
@@ -134,14 +139,14 @@ export function PluginRuntimeInitializer({
         // it). Best-effort; no payload (ids-only convention, nothing to carry).
         emitSystemBusEvent(SystemEvents.APP_READY, {})
       } catch (err) {
-        hasInitialized.current = false
+        initializedForAccount.current = null
         markBootCapabilityFailed("plugin-runtime", err)
         log.warn("plugin-runtime: boot threw", { err })
       }
     }
 
     void initialize()
-  }, [isAllowedRoute, requested])
+  }, [accountRevision, isAllowedRoute, requested, unlockedAccountId])
 
   // Emit `APP_CLOSING` on page unload so plugins can flush state / cancel
   // in-flight work. The handler must be synchronous (a dynamic import wouldn't

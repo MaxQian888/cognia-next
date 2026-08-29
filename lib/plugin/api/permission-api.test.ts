@@ -10,10 +10,15 @@ import {
   revokePermission,
   pluginHasApiPermission,
   expandManifestPermission,
+  clearAllPluginApiPermissions,
 } from "./permission-api"
 import type { PluginAPIPermission } from "@/types/plugin/plugin"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
+import {
+  activatePluginRuntimeAccount,
+  clearPluginRuntimeAccount,
+} from "@/lib/plugin/security/account-runtime-gate"
 
 jest.mock("@/lib/plugin/security/permission-requests", () => ({
   requestPluginPermission: jest.fn(),
@@ -27,6 +32,9 @@ jest.mock("@/lib/plugin/core/transport", () => ({
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
 }))
+jest.mock("@/lib/context-workbench/panel-registry", () => ({
+  contextPanelRegistry: { refresh: jest.fn() },
+}))
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const transport = require("@/lib/plugin/core/transport") as {
   grantPluginPermission: jest.Mock
@@ -38,19 +46,29 @@ const transport = require("@/lib/plugin/core/transport") as {
 const diag = require("../contracts/diagnostics-store") as {
   recordSilentFailure: jest.Mock
 }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const panelRegistry = require("@/lib/context-workbench/panel-registry") as {
+  contextPanelRegistry: { refresh: jest.Mock }
+}
 
 describe("Permission API", () => {
   const testPluginId = "test-plugin"
 
   beforeEach(() => {
+    activatePluginRuntimeAccount("acct-permission-test")
     // Revoke all permissions before each test
-    revokePluginPermissions(testPluginId)
+    clearAllPluginApiPermissions()
     ;(requestPluginPermission as jest.Mock).mockReset()
     transport.grantPluginPermission.mockReset().mockResolvedValue(undefined)
     transport.isPluginGatewayAvailable.mockReset().mockReturnValue(true)
     transport.listPluginPermissions.mockReset().mockResolvedValue([])
     transport.revokePluginPermission.mockReset().mockResolvedValue(undefined)
     diag.recordSilentFailure.mockReset()
+    panelRegistry.contextPanelRegistry.refresh.mockClear()
+  })
+
+  afterEach(() => {
+    clearPluginRuntimeAccount()
   })
 
   describe("createPermissionAPI", () => {
@@ -294,6 +312,25 @@ describe("Permission API", () => {
     it("returns false for a permission the plugin did not declare", () => {
       initializePluginPermissions("narrow-plugin", ["session:read"])
       expect(pluginHasApiPermission("narrow-plugin", "agent:control")).toBe(false)
+    })
+
+    it("fails closed while the LocalProfile runtime is locked", () => {
+      initializePluginPermissions("locked-plugin", ["agent:control"])
+      clearPluginRuntimeAccount()
+
+      expect(pluginHasApiPermission("locked-plugin", "agent:control")).toBe(false)
+    })
+
+    it("clears every process-local grant and refreshes permission consumers", () => {
+      initializePluginPermissions("plugin-a", ["agent:control"])
+      initializePluginPermissions("plugin-b", ["session:read"])
+      panelRegistry.contextPanelRegistry.refresh.mockClear()
+
+      clearAllPluginApiPermissions()
+
+      expect(pluginHasApiPermission("plugin-a", "agent:control")).toBe(false)
+      expect(pluginHasApiPermission("plugin-b", "session:read")).toBe(false)
+      expect(panelRegistry.contextPanelRegistry.refresh).toHaveBeenCalledTimes(1)
     })
   })
 

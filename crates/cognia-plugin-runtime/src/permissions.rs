@@ -17,6 +17,7 @@ use tauri::State;
 use super::{PermissionGrant, PluginError, PluginRuntimeState, Result};
 
 const HOST_STATE_DIR: &str = ".host-state";
+const ACCOUNT_STATE_DIR: &str = "accounts";
 const LEDGER_FILE: &str = "permissions.json";
 
 fn open_ledger_dir(
@@ -25,6 +26,7 @@ fn open_ledger_dir(
     create: bool,
 ) -> Result<Option<Dir>> {
     let plugin_id = crate::validate_plugin_id_path_component(plugin_id)?;
+    let account_id = state.active_account_id()?;
     fs::create_dir_all(&state.plugin_install_dir)?;
     let install = Dir::open_ambient_dir(&state.plugin_install_dir, ambient_authority())?;
     if create {
@@ -40,13 +42,37 @@ fn open_ledger_dir(
         Err(error) => return Err(error.into()),
     };
     if create {
-        match host_state.create_dir(&plugin_id) {
+        match host_state.create_dir(ACCOUNT_STATE_DIR) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
     }
-    match host_state.open_dir_nofollow(&plugin_id) {
+    let accounts = match host_state.open_dir_nofollow(ACCOUNT_STATE_DIR) {
+        Ok(dir) => dir,
+        Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if create {
+        match accounts.create_dir(&account_id) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let account = match accounts.open_dir_nofollow(&account_id) {
+        Ok(dir) => dir,
+        Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if create {
+        match account.create_dir(&plugin_id) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    match account.open_dir_nofollow(&plugin_id) {
         Ok(dir) => Ok(Some(dir)),
         Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
@@ -216,7 +242,9 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_state(tmp: &TempDir) -> PluginRuntimeState {
-        PluginRuntimeState::new(PathBuf::from(tmp.path()))
+        let state = PluginRuntimeState::new(PathBuf::from(tmp.path()));
+        state.activate_account("acct_test").unwrap();
+        state
     }
 
     #[tokio::test]
@@ -300,7 +328,9 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!state.has_permission("demo", "filesystem:write"));
-        assert!(!attacker.join("demo/permissions.json").exists());
+        assert!(!attacker
+            .join("accounts/acct_test/demo/permissions.json")
+            .exists());
     }
 
     #[test]
@@ -344,6 +374,39 @@ mod tests {
         )
         .is_err());
         assert!(state.permissions.read().is_empty());
+    }
+
+    #[test]
+    fn permission_ledgers_are_isolated_by_active_local_profile() {
+        let tmp = TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(PathBuf::from(tmp.path()));
+        state.activate_account("acct_a").unwrap();
+        grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:read".into(),
+            "user".into(),
+            None,
+        )
+        .unwrap();
+        assert!(state.has_permission("demo", "filesystem:read"));
+
+        state.activate_account("acct_b").unwrap();
+        assert!(!state.has_permission("demo", "filesystem:read"));
+        assert!(list_permissions_for_state(&state, "demo".into())
+            .unwrap()
+            .is_empty());
+
+        state.activate_account("acct_a").unwrap();
+        assert!(state.has_permission("demo", "filesystem:read"));
+    }
+
+    #[test]
+    fn permission_checks_fail_closed_without_an_active_local_profile() {
+        let tmp = TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(PathBuf::from(tmp.path()));
+        assert!(!state.has_permission("demo", "filesystem:read"));
+        assert!(list_permissions_for_state(&state, "demo".into()).is_err());
     }
 
     #[test]

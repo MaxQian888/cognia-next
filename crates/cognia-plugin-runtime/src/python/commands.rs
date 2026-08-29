@@ -1486,7 +1486,9 @@ mod tests {
     }
 
     fn plugins_state(tmp: &TempDir) -> PluginRuntimeState {
-        PluginRuntimeState::new(tmp.path().join("plugins"))
+        let state = PluginRuntimeState::new(tmp.path().join("plugins"));
+        state.activate_account("acct_test").unwrap();
+        state
     }
 
     fn grant_execute(plugins: &PluginRuntimeState, plugin_id: &str) {
@@ -2736,8 +2738,8 @@ def rewrite(payload):
         assert_eq!(json["runtime_id"], "python");
 
         let host = rendered_host_script();
-        assert!(host.contains(r#""sdk_version": "0.1.0""#));
-        assert!(host.contains(r#""contract_version": "1.0.0""#));
+        assert!(host.contains(r#""sdk_version": "0.2.0""#));
+        assert!(host.contains(r#""contract_version": "1.1.0""#));
         assert!(!host.contains("__COGNIA_"));
     }
 

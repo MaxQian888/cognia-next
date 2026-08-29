@@ -203,6 +203,13 @@ const initialState: PluginStoreState & {
   eventListeners: new Map(),
 }
 
+const LEGACY_PLUGIN_STORAGE_KEY = "cognia-plugins"
+
+export function pluginAccountStorageKey(accountId: string): string {
+  if (!accountId.trim()) throw new Error("Plugin account storage requires an account id.")
+  return `cognia-account-${accountId}:plugins`
+}
+
 /**
  * Map a runtime plugin status to the *resting* status that is safe to persist.
  *
@@ -1114,7 +1121,7 @@ export const usePluginStore = create<PluginState>()(
       },
     }),
     {
-      name: "cognia-plugins",
+      name: LEGACY_PLUGIN_STORAGE_KEY,
       version: 2,
       storage: persistLocalStorage(),
       migrate: (persistedState: unknown, version: number) => {
@@ -1210,6 +1217,86 @@ export const usePluginStore = create<PluginState>()(
     }
   )
 )
+
+/**
+ * Select the persisted plugin policy for one LocalProfile. The old global
+ * snapshot is adopted once, with every remembered grant removed and every
+ * third-party plugin disabled so an upgrade cannot silently inherit authority.
+ */
+export function activatePluginAccountStorage(accountId: string): void {
+  if (typeof window === "undefined") return
+  const storageKey = pluginAccountStorageKey(accountId)
+  if (window.localStorage.getItem(storageKey) === null) {
+    const legacy = window.localStorage.getItem(LEGACY_PLUGIN_STORAGE_KEY)
+    if (legacy) {
+      window.localStorage.setItem(storageKey, sanitizeLegacyPluginSnapshot(legacy))
+      window.localStorage.removeItem(LEGACY_PLUGIN_STORAGE_KEY)
+    }
+  }
+  usePluginStore.persist.setOptions({ name: storageKey })
+  usePluginStore.setState(readPluginAccountState(storageKey))
+}
+
+export function clearPluginAccountStorage(): void {
+  usePluginStore.persist.setOptions({ name: LEGACY_PLUGIN_STORAGE_KEY })
+  usePluginStore.setState({ ...initialState, eventListeners: new Map() })
+}
+
+export function purgePluginAccountStorage(accountId: string): void {
+  if (typeof window === "undefined") return
+  window.localStorage.removeItem(pluginAccountStorageKey(accountId))
+}
+
+function readPluginAccountState(storageKey: string): Partial<PluginState> {
+  const raw = window.localStorage.getItem(storageKey)
+  if (!raw) return { ...initialState, eventListeners: new Map() }
+  try {
+    const parsed = JSON.parse(raw) as { state?: Partial<PluginState> }
+    const persisted = parsed.state ?? {}
+    const plugins = Object.fromEntries(
+      Object.entries(persisted.plugins ?? {}).map(([id, plugin]) => [
+        id,
+        { ...plugin, status: normalizePersistedPluginStatus(plugin.status) },
+      ])
+    )
+    return {
+      ...initialState,
+      ...persisted,
+      plugins,
+      pluginSettings: { ...initialState.pluginSettings, ...(persisted.pluginSettings ?? {}) },
+      rememberedPermissions: { ...(persisted.rememberedPermissions ?? {}) },
+      groupPermissionPolicies: { ...(persisted.groupPermissionPolicies ?? {}) },
+      reviews: { ...(persisted.reviews ?? {}) },
+      loading: new Set(),
+      eventListeners: new Map(),
+    }
+  } catch {
+    return { ...initialState, eventListeners: new Map() }
+  }
+}
+
+function sanitizeLegacyPluginSnapshot(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { state?: Partial<PluginState>; version?: number }
+    const state = parsed.state ?? {}
+    const plugins = Object.fromEntries(
+      Object.entries(state.plugins ?? {}).map(([id, plugin]) => [
+        id,
+        {
+          ...plugin,
+          status: plugin.source === "builtin" ? "installed" : "disabled",
+        },
+      ])
+    )
+    return JSON.stringify({
+      ...parsed,
+      version: 2,
+      state: { ...state, plugins, rememberedPermissions: {} },
+    })
+  } catch {
+    return JSON.stringify({ version: 2, state: {} })
+  }
+}
 
 // =============================================================================
 // Selectors

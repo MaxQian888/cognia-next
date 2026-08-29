@@ -117,6 +117,9 @@ pub enum NodePluginProcessState {
 pub struct PluginRuntimeState {
     pub plugins: Arc<RwLock<HashMap<String, PluginRecord>>>,
     pub permissions: Arc<RwLock<HashMap<String, Vec<PermissionGrant>>>>,
+    /// LocalProfile currently authenticated by the native account boundary.
+    /// Permission ledgers are unreachable while this is `None`.
+    active_account: Arc<RwLock<Option<String>>>,
     /// Per-plugin network egress allowlist for `network:fetch`/`download`/
     /// `upload`, declared in `manifest.networkAccess.allowedDomains`. A plugin
     /// with no entry is denied; `["*"]` is the explicit unrestricted-host
@@ -193,6 +196,7 @@ impl PluginRuntimeState {
         let state = Self {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
+            active_account: Arc::new(RwLock::new(None)),
             network_allowlist: Arc::new(RwLock::new(HashMap::new())),
             network_rules: Arc::new(RwLock::new(HashMap::new())),
             plugin_install_dir: install_dir,
@@ -218,6 +222,30 @@ impl PluginRuntimeState {
             log::error!("{failure}");
         }
         state
+    }
+
+    /// Select the only LocalProfile whose plugin grants may be read. Changing
+    /// profiles drops the in-memory cache before any ledger lookup can occur.
+    pub fn activate_account(&self, account_id: &str) -> Result<()> {
+        let account_id = validate_plugin_id_path_component(account_id)?;
+        let mut active = self.active_account.write();
+        if active.as_deref() != Some(account_id.as_str()) {
+            self.permissions.write().clear();
+            *active = Some(account_id);
+        }
+        Ok(())
+    }
+
+    pub fn clear_account(&self) {
+        self.permissions.write().clear();
+        *self.active_account.write() = None;
+    }
+
+    pub(crate) fn active_account_id(&self) -> Result<String> {
+        self.active_account
+            .read()
+            .clone()
+            .ok_or_else(|| PluginError::Internal("plugin account is locked or unbound".into()))
     }
 
     /// Replace a plugin's declared shell-command allowlist (from its manifest
@@ -256,6 +284,9 @@ impl PluginRuntimeState {
     /// mirroring `plugin_permission_list`. Used as the defense-in-depth
     /// gate by the `plugin_python_*` execution commands.
     pub fn has_permission(&self, plugin_id: &str, permission: &str) -> bool {
+        if self.active_account.read().is_none() {
+            return false;
+        }
         let cached = self.permissions.read().get(plugin_id).cloned();
         let grants = match cached {
             Some(grants) => grants,
@@ -347,6 +378,81 @@ impl PluginRuntimeState {
                     .iter()
                     .any(|pattern| wildcard_path_matches(path, pattern))
         })
+    }
+}
+
+/// Native account-boundary teardown. This is deliberately independent of the
+/// renderer's plugin manager so a direct IPC lock cannot preserve a runtime.
+pub async fn teardown_account_runtimes(
+    plugins: &PluginRuntimeState,
+    python: &python::PythonRuntimeState,
+    wasm: &wasm::WasmPluginState,
+    vscode: &vscode::VscodeExtensionState,
+) -> Result<()> {
+    use tokio::time::{timeout, Duration};
+
+    // Revoke authorization before awaiting any child process.
+    plugins.clear_account();
+    let mut failures = Vec::new();
+
+    if timeout(
+        Duration::from_secs(5),
+        lifecycle::stop_all_node_plugins(plugins),
+    )
+    .await
+    .is_err()
+    {
+        failures.push("Node plugin teardown timed out".to_owned());
+    }
+
+    for plugin_id in python::commands::plugin_python_list_for_state(python) {
+        match timeout(
+            Duration::from_secs(5),
+            python::commands::plugin_python_unload_for_state(python, &plugin_id),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("Python plugin {plugin_id}: {error}")),
+            Err(_) => failures.push(format!("Python plugin {plugin_id} teardown timed out")),
+        }
+    }
+
+    for snapshot in wasm::WasmPluginHost::snapshot(wasm) {
+        wasm::WasmPluginHost::unload(wasm, &snapshot.plugin_id);
+    }
+
+    for plugin_id in vscode::commands::plugin_vscode_list_for_state(vscode) {
+        match timeout(
+            Duration::from_secs(5),
+            vscode::commands::plugin_unload_vscode_for_state(vscode, plugin_id.clone()),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("VS Code plugin {plugin_id}: {error:?}")),
+            Err(_) => failures.push(format!("VS Code plugin {plugin_id} teardown timed out")),
+        }
+    }
+
+    process_ops::kill_all_tracked_processes_for_state(plugins);
+    plugins.fs_watchers.write().clear();
+    plugins.shortcuts.write().clear();
+    plugins.context_menus.write().clear();
+    plugins.tray_items.write().clear();
+    plugins.db_connections.write().clear();
+    plugins.network_allowlist.write().clear();
+    plugins.network_rules.write().clear();
+    plugins.shell_allowlist.write().clear();
+    plugins.plugins.write().clear();
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(PluginError::Internal(format!(
+            "plugin account teardown incomplete; restart required: {}",
+            failures.join("; ")
+        )))
     }
 }
 
@@ -652,6 +758,41 @@ mod tests {
         assert!(state.network_rules.read().is_empty());
     }
 
+    #[tokio::test]
+    async fn native_account_teardown_revokes_authority_and_clears_host_registries() {
+        let temp = tempfile::tempdir().unwrap();
+        let plugins = PluginRuntimeState::new(temp.path().join("plugins"));
+        plugins.activate_account("acct_test").unwrap();
+        plugins.permissions.write().insert(
+            "demo".into(),
+            vec![PermissionGrant {
+                plugin_id: "demo".into(),
+                permission: "python:execute".into(),
+                granted_by: "test".into(),
+                granted_at: chrono::Utc::now().to_rfc3339(),
+                expires_at: None,
+            }],
+        );
+        plugins.set_network_allowlist("demo", vec!["example.com".into()]);
+        plugins.set_shell_allowlist("demo", vec!["git".into()]);
+
+        let python = python::PythonRuntimeState::new(temp.path().join("python"));
+        let wasm = wasm::WasmPluginState::default();
+        let vscode = vscode::VscodeExtensionState::new(temp.path().join("vscode"));
+
+        teardown_account_runtimes(&plugins, &python, &wasm, &vscode)
+            .await
+            .unwrap();
+
+        assert!(!plugins.has_permission("demo", "python:execute"));
+        assert!(plugins.permissions.read().is_empty());
+        assert!(plugins.network_allowlist.read().is_empty());
+        assert!(plugins.shell_allowlist.read().is_empty());
+        assert!(python::commands::plugin_python_list_for_state(&python).is_empty());
+        assert!(wasm::WasmPluginHost::snapshot(&wasm).is_empty());
+        assert!(vscode::commands::plugin_vscode_list_for_state(&vscode).is_empty());
+    }
+
     #[test]
     fn network_host_allowed_undeclared_plugin_is_denied() {
         let state = PluginRuntimeState::new(PathBuf::from("/tmp"));
@@ -757,6 +898,7 @@ mod tests {
     fn has_permission_true_after_in_memory_grant() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.activate_account("acct_test").unwrap();
         state.permissions.write().insert(
             "demo".into(),
             vec![make_grant("demo", "python:execute", None)],
@@ -769,8 +911,13 @@ mod tests {
     fn has_permission_falls_back_to_disk_ledger() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.activate_account("acct_test").unwrap();
         let grants = vec![make_grant("demo", "python:execute", None)];
-        let dir = state.plugin_host_state_dir("demo");
+        let dir = state
+            .plugin_state_dir
+            .join("accounts")
+            .join("acct_test")
+            .join("demo");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("permissions.json"),
@@ -787,6 +934,7 @@ mod tests {
     fn has_permission_expired_grant_is_false() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.activate_account("acct_test").unwrap();
         state.permissions.write().insert(
             "demo".into(),
             vec![make_grant(
@@ -802,6 +950,7 @@ mod tests {
     fn has_permission_future_expiry_is_true() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.activate_account("acct_test").unwrap();
         state.permissions.write().insert(
             "demo".into(),
             vec![make_grant(
@@ -817,6 +966,7 @@ mod tests {
     fn has_permission_unparseable_expiry_fails_closed() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        state.activate_account("acct_test").unwrap();
         state.permissions.write().insert(
             "demo".into(),
             vec![make_grant(

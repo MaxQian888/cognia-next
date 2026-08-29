@@ -396,9 +396,9 @@ mod tests {
 
     #[test]
     fn exposes_protocol_versions_from_the_canonical_catalog() {
-        assert_eq!(contract_version(), "1.0.0");
+        assert_eq!(contract_version(), "1.1.0");
         assert_eq!(protocol_version(), "2.0.0");
-        assert_eq!(sdk_version(), "0.1.0");
+        assert_eq!(sdk_version(), "0.2.0");
         assert_eq!(gateway_client_version(), "2.0.0");
         assert_eq!(minimum_gateway_client_version(), "1.0.0");
     }

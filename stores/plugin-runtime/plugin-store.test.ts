@@ -7,7 +7,13 @@ jest.mock("@/lib/plugin/core/policy-runtime", () => ({
   applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicyMock(...args),
 }))
 
-import { usePluginStore, normalizePersistedPluginStatus } from "./plugin-store"
+import {
+  activatePluginAccountStorage,
+  clearPluginAccountStorage,
+  normalizePersistedPluginStatus,
+  pluginAccountStorageKey,
+  usePluginStore,
+} from "./plugin-store"
 import * as barrel from "./"
 import type { PluginStatus } from "@/types/plugin/plugin"
 
@@ -87,6 +93,52 @@ describe("persist migration (v1 -> v2)", () => {
     expect(plugins["user-disabled-plugin"].status).toBe("disabled")
 
     window.localStorage.clear()
+  })
+})
+
+describe("LocalProfile persistence", () => {
+  afterEach(() => {
+    clearPluginAccountStorage()
+    window.localStorage.clear()
+  })
+
+  it("does not carry remembered permissions between accounts", () => {
+    window.localStorage.setItem(
+      pluginAccountStorageKey("acct_a"),
+      JSON.stringify({ version: 2, state: { rememberedPermissions: { demo: { shell: "allow" } } } })
+    )
+    window.localStorage.setItem(
+      pluginAccountStorageKey("acct_b"),
+      JSON.stringify({ version: 2, state: { rememberedPermissions: {} } })
+    )
+
+    activatePluginAccountStorage("acct_a")
+    expect(usePluginStore.getState().rememberedPermissions.demo).toBeDefined()
+    activatePluginAccountStorage("acct_b")
+    expect(usePluginStore.getState().rememberedPermissions.demo).toBeUndefined()
+  })
+
+  it("revokes global grants and disables third-party plugins during legacy adoption", () => {
+    window.localStorage.setItem(
+      "cognia-plugins",
+      JSON.stringify({
+        version: 2,
+        state: {
+          rememberedPermissions: { demo: { "shell:execute": "allow" } },
+          plugins: {
+            builtin: { manifest: { id: "builtin" }, source: "builtin", status: "enabled" },
+            demo: { manifest: { id: "demo" }, source: "local", status: "enabled" },
+          },
+        },
+      })
+    )
+
+    activatePluginAccountStorage("acct_a")
+
+    expect(usePluginStore.getState().rememberedPermissions).toEqual({})
+    expect(usePluginStore.getState().plugins.builtin.status).toBe("installed")
+    expect(usePluginStore.getState().plugins.demo.status).toBe("disabled")
+    expect(window.localStorage.getItem("cognia-plugins")).toBeNull()
   })
 })
 

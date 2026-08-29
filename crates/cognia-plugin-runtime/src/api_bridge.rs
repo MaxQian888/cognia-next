@@ -1912,6 +1912,7 @@ mod tests {
 
     fn seeded_state(tmp: &TempDir) -> PluginRuntimeState {
         let state = PluginRuntimeState::new(PathBuf::from(tmp.path()));
+        state.activate_account("acct_test").unwrap();
         std::fs::create_dir_all(state.plugin_dir("demo")).unwrap();
         state.plugins.write().insert(
             "demo".into(),
