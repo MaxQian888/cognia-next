@@ -1375,6 +1375,13 @@ mod tests {
                 serde_json::to_value(Vec::<HostSessionInfo>::new()).unwrap(),
             ),
             ("terminal_exec", serde_json::to_value(exec_ok).unwrap()),
+            // Head-word completion: a bare array of executable names, and the
+            // empty array a host with no match returns.
+            (
+                "terminal_list_path_executables",
+                json!(["git", "git-lfs", "gitk"]),
+            ),
+            ("terminal_list_path_executables", json!([])),
             ("terminal_exec", serde_json::to_value(exec_timeout).unwrap()),
             (
                 "terminal_complete_paths",
@@ -1443,6 +1450,14 @@ mod tests {
                 json!({ "stdout": "", "stderr": "", "exitCode": "0", "timedOut": false }),
             ),
             ("terminal_complete_paths", json!([{ "name": "src" }])),
+            // Executable names are a bare string array. An object wrapper and a
+            // non-string element are the two ways a hand-written arm gets this
+            // wrong, and neither fails locally — only here.
+            (
+                "terminal_list_path_executables",
+                json!({ "names": ["git"] }),
+            ),
+            ("terminal_list_path_executables", json!([1, 2])),
             ("terminal_kill_port", json!(["4242"])),
         ];
 

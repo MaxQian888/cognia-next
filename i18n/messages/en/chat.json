@@ -77,6 +77,9 @@
     "textPlaceholder": "Type your answer…",
     "title": "The agent has a question"
   },
+  "backgroundRuns": {
+    "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
+  },
   "backlinks": {
     "chipLabel": "{count, plural, one {Referenced by # conversation} other {Referenced by # conversations}}",
     "empty": "No conversation has referenced this yet.",
@@ -558,6 +561,22 @@
       "searchPlaceholder": "Search commands…",
       "searching": "Searching…",
       "searchingShort": "searching…",
+      "shell": {
+        "argumentKind": "argument",
+        "builtinKind": "builtin",
+        "commandKind": "command",
+        "commandNotFound": "Command not found: {name}",
+        "diagnosticsLabel": "Shell command problems",
+        "directoryKind": "directory",
+        "incompleteSyntax": "Unclosed quote — the command is incomplete.",
+        "noHost": "Connect a Host to inspect files or run commands.",
+        "noMatches": "No completions for “{query}”.",
+        "optionKind": "option",
+        "pathKind": "file",
+        "runsUnder": "Runs under {shell}",
+        "shellUnavailable": "{shell} isn’t available on the connected Host — commands can’t run.",
+        "unsupportedShell": "Running commands with {shell} isn’t supported."
+      },
       "skillTitle": "Enable a skill",
       "slashTitle": "Slash command",
       "suggestionCount": "{count, plural, one {# option} other {# options}}",
@@ -620,10 +639,14 @@
     "sendSteerTooltip": "Send as a follow-up to the running turn",
     "sendTooltip": "Send",
     "shell": {
+      "consentRequired": "`$ {cmd}` didn’t run — the Host needs someone to approve remote command execution on it first.",
       "failed": "`$ {cmd}` failed: {error}",
       "interactiveRoutedToTerminal": "`$ {cmd}` needs a terminal — opened it in the integrated terminal.",
       "needsCwd": "Set a working directory before running shell commands.",
-      "runningHint": "Running `$ {cmd}` in `{cwd}`…"
+      "noHost": "`$ {cmd}` didn’t run — connect a Host to run shell commands.",
+      "runningHint": "Running `$ {cmd}` in `{cwd}`…",
+      "shellUnavailable": "`$ {cmd}` didn’t run — {shell} isn’t available on the connected Host.",
+      "unsupportedShell": "`$ {cmd}` didn’t run — running commands with {shell} isn’t supported."
     },
     "skills": {
       "enabled": "Enabled skill \"{name}\"."
@@ -2021,8 +2044,5 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
-  },
-  "backgroundRuns": {
-    "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
   }
 }

@@ -16,12 +16,19 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Serialize;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 /// Default wall-clock budget for a one-shot exec when the caller omits one.
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 /// Hard ceiling so a remote caller cannot pin a worker indefinitely.
 const MAX_TIMEOUT_MS: u64 = 600_000;
+/// The renderer displays at most 64 KiB from each stream. Capture one extra
+/// byte so older clients can detect truncation without changing the wire
+/// response shape.
+const CAPTURE_OUTPUT_BYTES: usize = 64 * 1024 + 1;
 
 /// Result of a one-shot command execution.
 #[derive(Debug, Serialize)]
@@ -33,6 +40,48 @@ pub struct TerminalExecResult {
     /// or killed on timeout.
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+}
+
+async fn read_capped<R>(
+    mut reader: R,
+    stream: &'static str,
+    limit_reached: mpsc::Sender<()>,
+) -> Result<Vec<u8>, String>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::with_capacity(CAPTURE_OUTPUT_BYTES);
+    let mut chunk = [0_u8; 8 * 1024];
+
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .await
+            .map_err(|error| format!("read {stream}: {error}"))?;
+        if read == 0 {
+            break;
+        }
+
+        let remaining = CAPTURE_OUTPUT_BYTES - output.len();
+        output.extend_from_slice(&chunk[..read.min(remaining)]);
+        if output.len() == CAPTURE_OUTPUT_BYTES {
+            // Stop reading and notify the owner immediately. Dropping this
+            // pipe plus killing the child prevents a producer such as `yes`
+            // from continuing to consume CPU or filling an unbounded buffer.
+            let _ = limit_reached.try_send(());
+            break;
+        }
+    }
+
+    Ok(output)
+}
+
+async fn finish_capture(
+    task: JoinHandle<Result<Vec<u8>, String>>,
+    stream: &'static str,
+) -> Result<Vec<u8>, String> {
+    task.await
+        .map_err(|error| format!("capture {stream} task: {error}"))?
 }
 
 /// Wrap a full shell command line in the platform shell so `terminal_exec`
@@ -120,20 +169,74 @@ pub async fn terminal_exec_inner(
         }
     }
 
-    match tokio::time::timeout(Duration::from_millis(budget), child.wait_with_output()).await {
-        Ok(Ok(output)) => Ok(TerminalExecResult {
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            exit_code: output.status.code(),
-            timed_out: false,
-        }),
-        Ok(Err(e)) => Err(format!("exec '{command}': {e}")),
-        Err(_) => Ok(TerminalExecResult {
-            stdout: String::new(),
-            stderr: format!("command timed out after {budget}ms"),
-            exit_code: None,
-            timed_out: true,
-        }),
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("exec '{command}': stdout pipe unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("exec '{command}': stderr pipe unavailable"))?;
+    let (limit_tx, mut limit_rx) = mpsc::channel(1);
+    let stdout_task = tokio::spawn(read_capped(stdout, "stdout", limit_tx.clone()));
+    let stderr_task = tokio::spawn(read_capped(stderr, "stderr", limit_tx.clone()));
+    drop(limit_tx);
+
+    enum ExecutionStop {
+        Exited(std::process::ExitStatus),
+        OutputLimit,
+    }
+
+    let stop = tokio::time::timeout(Duration::from_millis(budget), async {
+        tokio::select! {
+            status = child.wait() => status
+                .map(ExecutionStop::Exited)
+                .map_err(|error| format!("exec '{command}': {error}")),
+            Some(()) = limit_rx.recv() => Ok(ExecutionStop::OutputLimit),
+        }
+    })
+    .await;
+
+    match stop {
+        Ok(Ok(stop)) => {
+            let status = match stop {
+                ExecutionStop::Exited(status) => status,
+                ExecutionStop::OutputLimit => {
+                    let _ = child.start_kill();
+                    child
+                        .wait()
+                        .await
+                        .map_err(|error| format!("stop '{command}' after output limit: {error}"))?
+                }
+            };
+            let stdout = finish_capture(stdout_task, "stdout").await?;
+            let stderr = finish_capture(stderr_task, "stderr").await?;
+            Ok(TerminalExecResult {
+                stdout: String::from_utf8_lossy(&stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                exit_code: status.code(),
+                timed_out: false,
+            })
+        }
+        Ok(Err(error)) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            stdout_task.abort();
+            stderr_task.abort();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            stdout_task.abort();
+            stderr_task.abort();
+            Ok(TerminalExecResult {
+                stdout: String::new(),
+                stderr: format!("command timed out after {budget}ms"),
+                exit_code: None,
+                timed_out: true,
+            })
+        }
     }
 }
 
@@ -295,5 +398,23 @@ mod tests {
             .expect("exec ok");
         assert!(res.stdout.contains("ping-pong"));
         assert_eq!(res.exit_code, Some(0));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn caps_output_while_the_child_is_running() {
+        let res = terminal_exec_inner(
+            None,
+            "/bin/sh".to_string(),
+            vec!["-c".into(), "yes x | head -c 70000; sleep 10".into()],
+            None,
+            Some(500),
+            None,
+        )
+        .await
+        .expect("exec ok");
+
+        assert!(!res.timed_out);
+        assert_eq!(res.stdout.len(), 64 * 1024 + 1);
     }
 }

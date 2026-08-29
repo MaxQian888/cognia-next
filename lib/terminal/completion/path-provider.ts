@@ -50,7 +50,7 @@ function splitFragment(fragment: string): { dirPart: string; prefix: string } {
 }
 
 /** Separator to append after a completed directory. */
-function dirSeparator(fragment: string, shell: ShellKind): string {
+export function dirSeparator(fragment: string, shell: ShellKind): string {
   if (fragment.includes("\\") && !shellUsesBackslashEscapes(shell)) return "\\"
   if (fragment.includes("/")) return "/"
   switch (shell) {

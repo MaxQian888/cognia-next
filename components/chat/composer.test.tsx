@@ -17,6 +17,23 @@ jest.mock("@/lib/shell/exec", () => ({
   executeShell: jest.fn(),
   formatShellResult: jest.fn(),
 }))
+// `!` lines run through the transport-routed one-shot exec now, under the
+// user's configured shell — not `shell_exec`'s hard-coded `sh -c` (ADR-0039).
+jest.mock("@/lib/terminal/remote-api", () => ({
+  ...jest.requireActual("@/lib/terminal/remote-api"),
+  execTerminalCommand: jest.fn(async () => ({
+    stdout: "ok",
+    stderr: "",
+    exitCode: 0,
+    timedOut: false,
+  })),
+}))
+// A Host has to be reachable for a `!` line to run at all; these cases are
+// about WHERE it runs, so the transport is present throughout.
+jest.mock("@/lib/terminal/pick-transport", () => ({
+  ...jest.requireActual("@/lib/terminal/pick-transport"),
+  terminalAvailable: jest.fn(() => true),
+}))
 // Interactive `!command` routing: control the desktop gate and stub the dock
 // spawn so a routed command doesn't hit the real terminal orchestrator.
 jest.mock("@/lib/tauri", () => ({
@@ -117,7 +134,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
-import { executeShell } from "@/lib/shell/exec"
+import { execTerminalCommand } from "@/lib/terminal/remote-api"
 import { isTauri } from "@/lib/tauri"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -799,8 +816,8 @@ describe("Composer — effective cwd (workspace fallback)", () => {
 
   it("runs a ! shell command in the active workspace root instead of erroring", async () => {
     seedActiveWorkspace("/ws/root")
-    const executeShellMock = executeShell as jest.Mock
-    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
     const ta = renderComposer()
     await act(async () => {
       fireEvent.change(ta, { target: { value: "!echo hi" } })
@@ -809,14 +826,18 @@ describe("Composer — effective cwd (workspace fallback)", () => {
       fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
       await Promise.resolve()
     })
-    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/ws/root"))
+    await waitFor(() =>
+      expect(execMock).toHaveBeenCalledWith(
+        expect.objectContaining({ args: expect.arrayContaining(["echo hi"]), cwd: "/ws/root" })
+      )
+    )
   })
 
   it("routes an interactive ! command to the integrated terminal (not capture) on desktop", async () => {
     seedActiveWorkspace("/ws/root")
     ;(isTauri as jest.Mock).mockReturnValue(true)
-    const executeShellMock = executeShell as jest.Mock
-    executeShellMock.mockClear()
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
     const routeMock = runInTerminalDock as jest.Mock
     routeMock.mockClear()
     const ta = renderComposer()
@@ -830,14 +851,14 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     await waitFor(() =>
       expect(routeMock).toHaveBeenCalledWith("ssh example.com", "/ws/root", expect.any(String))
     )
-    expect(executeShellMock).not.toHaveBeenCalled()
+    expect(execMock).not.toHaveBeenCalled()
   })
 
   it("keeps a non-interactive ! command on the capture path even on desktop", async () => {
     seedActiveWorkspace("/ws/root")
     ;(isTauri as jest.Mock).mockReturnValue(true)
-    const executeShellMock = executeShell as jest.Mock
-    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
     const routeMock = runInTerminalDock as jest.Mock
     routeMock.mockClear()
     const ta = renderComposer()
@@ -848,7 +869,11 @@ describe("Composer — effective cwd (workspace fallback)", () => {
       fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
       await Promise.resolve()
     })
-    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/ws/root"))
+    await waitFor(() =>
+      expect(execMock).toHaveBeenCalledWith(
+        expect.objectContaining({ args: expect.arrayContaining(["echo hi"]), cwd: "/ws/root" })
+      )
+    )
     expect(routeMock).not.toHaveBeenCalled()
   })
 
@@ -858,8 +883,8 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     const routeMock = runInTerminalDock as jest.Mock
     routeMock.mockClear()
     routeMock.mockRejectedValueOnce(new Error("dock boom"))
-    const executeShellMock = executeShell as jest.Mock
-    executeShellMock.mockClear()
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
     const ta = renderComposer()
     await act(async () => {
       fireEvent.change(ta, { target: { value: "!ssh example.com" } })
@@ -871,7 +896,7 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     await waitFor(() => expect(routeMock).toHaveBeenCalled())
     // The catch handled it: no fall-through to capture, and a system message
     // was appended.
-    expect(executeShellMock).not.toHaveBeenCalled()
+    expect(execMock).not.toHaveBeenCalled()
     // Appended to THIS composer's conversation (`appendMessageToSession`), not
     // to whichever one has focus — an unfocused pane echoing its shell result
     // into the pane beside it is the bug that keying fixed.
@@ -886,8 +911,8 @@ describe("Composer — effective cwd (workspace fallback)", () => {
 
   it("still prefers a per-session workingDir over the workspace root", async () => {
     seedActiveWorkspace("/ws/root")
-    const executeShellMock = executeShell as jest.Mock
-    executeShellMock.mockResolvedValue({ stdout: "ok", stderr: "", code: 0 })
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -908,7 +933,11 @@ describe("Composer — effective cwd (workspace fallback)", () => {
       fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
       await Promise.resolve()
     })
-    await waitFor(() => expect(executeShellMock).toHaveBeenCalledWith("echo hi", "/session/dir"))
+    await waitFor(() =>
+      expect(execMock).toHaveBeenCalledWith(
+        expect.objectContaining({ args: expect.arrayContaining(["echo hi"]), cwd: "/session/dir" })
+      )
+    )
   })
 })
 

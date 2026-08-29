@@ -210,10 +210,13 @@ import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
-import { executeShell, formatShellResult } from "@/lib/shell/exec"
+import { formatShellResult } from "@/lib/shell/exec"
+import { useShellContext, useShellIntelligence } from "@/hooks/chat/use-shell-intelligence"
+import { applyShellCompletion } from "@/lib/shell-intelligence/apply"
+import { runShellLine } from "@/lib/shell-intelligence/execute"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
+import { terminalAvailable } from "@/lib/terminal/pick-transport"
 import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
-import { isTauri } from "@/lib/tauri"
 import { appendMemory } from "@/lib/files/memory"
 // `rememberFact` is imported lazily at its call site, not here: it pulls in the
 // Dexie session schema and the redaction package, which every composer test
@@ -531,6 +534,7 @@ function ComposerInner(props: InnerProps) {
   const [isSending, setIsSending] = useState(false)
   const isSendingRef = useRef(false)
   const chipOverlayRef = useRef<HTMLDivElement>(null)
+  const shellDiagnosticOverlayRef = useRef<HTMLDivElement>(null)
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
   // Measured composer height — feeds the mobile @-mention popover so it floats
@@ -1154,6 +1158,69 @@ function ComposerInner(props: InnerProps) {
     [trigger, slashCommands]
   )
 
+  // ── `!` mode shell intelligence ──────────────────────────────────────
+  // The line is `value` minus the leading `!`, up to the first newline — the
+  // exact span `detectTrigger` and the submit path already agree the mode owns.
+  // Every offset below is therefore `textareaOffset - 1`, which is what lets
+  // completion spans and diagnostic ranges map back with a single addition.
+  const shellLine = useMemo(() => {
+    if (trigger?.kind !== "bash") return null
+    const value = controller.textInput.value
+    const newline = value.indexOf("\n")
+    return value.slice(1, newline === -1 ? value.length : newline)
+  }, [trigger?.kind, controller.textInput.value])
+
+  const tShellUi = useTranslations("chat.composer.popover")
+  const shellMessages = useMemo(
+    () => ({
+      commandNotFound: (name: string) => tShellUi("shell.commandNotFound", { name }),
+      incompleteSyntax: () => tShellUi("shell.incompleteSyntax"),
+      shellUnavailable: (shellPath: string) =>
+        tShellUi("shell.shellUnavailable", { shell: shellPath }),
+      unsupportedShell: (shellPath: string) =>
+        tShellUi("shell.unsupportedShell", { shell: shellPath }),
+    }),
+    [tShellUi]
+  )
+
+  const shell = useShellIntelligence({
+    line: shellLine,
+    cursor: shellLine === null ? 0 : Math.max(0, Math.min(caret - 1, shellLine.length)),
+    cwd,
+    messages: shellMessages,
+  })
+
+  // Pulled out so the key handler can depend on the callback rather than on the
+  // whole (freshly built each render) intelligence object.
+  const markShellSubmitted = shell.markSubmitted
+  const dismissShell = shell.dismiss
+
+  // Diagnostics are computed over the LINE; the textarea holds `!` + the line,
+  // so every span shifts by one. Mapping here (rather than inside the overlay)
+  // keeps the overlay a pure painter of ranges it is handed.
+  const shellDiagnosticsForOverlay = useMemo(
+    () => shell.diagnostics.map((d) => ({ ...d, from: d.from + 1, to: d.to + 1 })),
+    [shell.diagnostics]
+  )
+
+  // "Nothing matched" and "this client cannot look" are different answers, and
+  // an empty list looks identical for both. Without a Host the panel says so
+  // and names the fix, instead of reading as a broken feature.
+  //
+  // With the master switch off there is a THIRD answer, and it is neither of
+  // those: nothing was looked up. `terminal.autocomplete.enabled` ships false,
+  // so reporting "No completions for “ls”" would be the default experience and
+  // it would be a lie. An empty string tells the popover to render the hint
+  // alone — `!` mode exactly as it was before this feature.
+  const shellEmptyMessage = useMemo(() => {
+    if (!shell.enabled) return ""
+    if (shell.availability === "static-only") return tShellUi("shell.noHost")
+    // `shell.query` is the TOKEN under the cursor, not the line: in
+    // `cat foo | gre` the panel is completing `gre`, and naming the whole line
+    // reads as "all of this is wrong" for a miss on one word.
+    return tShellUi("shell.noMatches", { query: shell.query })
+  }, [shell.enabled, shell.availability, shell.query, tShellUi])
+
   useEffect(() => {
     if (!popoverDismissed) return
     const tg = detectTrigger(controller.textInput.value, caret, {
@@ -1205,8 +1272,13 @@ function ComposerInner(props: InnerProps) {
         kind: trigger.kind,
         tokenStart: trigger.tokenStart,
       })
+      // `!` mode keeps a scheduler and a host query behind the panel, and
+      // neither is torn down by hiding it. Without this, Escape left a query in
+      // flight to deliver into a closed list, and the stale candidates were
+      // still in state to flash on the next `!`.
+      if (trigger.kind === "bash") dismissShell()
     }
-  }, [trigger])
+  }, [trigger, dismissShell])
 
   const insertReplacement = useCallback(
     (replacement: string, opts?: { closeAfter?: boolean }) => {
@@ -1285,6 +1357,32 @@ function ComposerInner(props: InnerProps) {
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
+      if (item.kind === "shell") {
+        // Completion spans are LINE coordinates; the textarea's are one further
+        // along, because the `!` is not part of the line. Everything else about
+        // the splice — the trailing space, the caret — belongs to the shared
+        // `applyShellCompletion` so the popup and any future surface agree.
+        const currentValue = controller.textInput.value
+        const newline = currentValue.indexOf("\n")
+        const lineEnd = newline === -1 ? currentValue.length : newline
+        const line = currentValue.slice(1, lineEnd)
+        const applied = applyShellCompletion(line, item.completion)
+        const nextValue = `!${applied.line}${currentValue.slice(lineEnd)}`
+        const nextCaret = applied.cursor + 1
+        controller.textInput.setInput(nextValue)
+        setCaret(nextCaret)
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current
+          if (textarea) {
+            textarea.setSelectionRange(nextCaret, nextCaret)
+            textarea.focus()
+          }
+        })
+        // Deliberately NOT dismissed: a directory completion is meant to be
+        // followed straight away by the next path segment, and re-opening the
+        // panel would cost a keystroke.
+        return
+      }
       if (item.kind === "slashArgument") {
         const currentValue = controller.textInput.value
         const result = spliceToken(currentValue, item.replaceStart, item.replaceEnd, item.value)
@@ -1888,17 +1986,29 @@ function ComposerInner(props: InnerProps) {
           popoverRef.current?.navigate(-1)
           return
         }
-        // Tab selects the highlighted item. Bash mode has no list to confirm,
-        // so Tab falls through there to default textarea behavior.
-        if (e.key === "Tab" && !e.shiftKey && completionTrigger.kind !== "bash") {
-          e.preventDefault()
-          popoverRef.current?.confirm()
-          return
+        // Tab selects the highlighted item — in `!` mode as well, now that it
+        // has a list to confirm.
+        //
+        // `!` is the only kind whose panel can legitimately be EMPTY (no Host
+        // to ask, or nothing matched), and there Tab has to fall through to the
+        // textarea as it always did. Every other kind has a list by
+        // construction, so Tab stays unconditionally theirs — letting a
+        // mid-search empty frame leak a literal tab into the message would be a
+        // regression in the pickers this feature never touched.
+        if (e.key === "Tab" && !e.shiftKey) {
+          const confirmed = popoverRef.current?.confirm()
+          if (confirmed || completionTrigger.kind !== "bash") {
+            e.preventDefault()
+            return
+          }
         }
         if (e.key === "Enter" && !e.shiftKey) {
-          // Bash mode: Enter should fall through to submit (bash run).
+          // Bash mode: Enter runs the line, whatever the panel is showing.
+          // Diagnostics are advisory — an underline must never be the reason a
+          // command the checker was wrong about cannot be run.
           if (completionTrigger.kind === "bash") {
             e.preventDefault()
+            markShellSubmitted()
             void submit()
             return
           }
@@ -2083,6 +2193,7 @@ function ComposerInner(props: InnerProps) {
       sendOnEnter,
       turnStatus,
       onStopTurn,
+      markShellSubmitted,
       props,
     ]
   )
@@ -2601,6 +2712,9 @@ function ComposerInner(props: InnerProps) {
           textInput={controller.textInput}
           textareaRef={textareaRef}
           chipOverlayRef={chipOverlayRef}
+          shellDiagnosticOverlayRef={shellDiagnosticOverlayRef}
+          shellDiagnostics={shellDiagnosticsForOverlay}
+          shellDiagnosticsLabel={tShellUi("shell.diagnosticsLabel")}
           ghostOverlayRef={ghostOverlayRef}
           overlaySegments={overlaySegments}
           maxHeightRem={COMPOSER_MAX_HEIGHT_REM}
@@ -2752,6 +2866,8 @@ function ComposerInner(props: InnerProps) {
           onTogglePin={togglePinnedCommand}
           onPick={onPickPopoverItem}
           onDismiss={dismissPopover}
+          shellCompletions={shell.completions}
+          shellEmptyMessage={shellEmptyMessage}
         />
 
         {mobileMentionEnabled ? (
@@ -2908,6 +3024,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 ) {
   const tCommands = useTranslations("chat.composer.commands")
   const tShell = useTranslations("chat.composer.shell")
+  // The shell the `!` line will run under, and whether it can run at all. The
+  // completion panel resolves the identical verdict in `ComposerInner`; both go
+  // through `useShellContext` so a line can never be completed for one shell
+  // and executed under another.
+  const shell = useShellContext()
   const tMemory = useTranslations("chat.composer.memory")
   const tAttach = useTranslations("chat.composer.attachments")
   // ADR-0131 relay failures (no paired host / host predates the relay) are
@@ -3073,9 +3194,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       // An interactive command (ssh, a REPL, a login flow, `git rebase -i`, …)
       // needs a TTY the capture path lacks — it would hang or read EOF. Route it
-      // to the real integrated terminal instead (desktop only; on web the
-      // capture path below already surfaces the desktop-only error).
-      if (isTauri() && detectInteractiveCommand(cmd).interactive) {
+      // to the real integrated terminal instead.
+      //
+      // Gated on the DOCK being reachable, not on `isTauri()`. The old gate was
+      // safe only because `executeShell` threw "desktop app only" underneath it;
+      // `runShellLine` runs anywhere a Host is, so an `isTauri()` gate would
+      // send `!ssh host` from a paired browser down the capture path to block
+      // for the full 30s timeout. `terminalAvailable()` is the same predicate
+      // `useShellContext` resolves `hostReachable` from, so the two branches
+      // cannot disagree: no dock means no Host either, and the run below then
+      // refuses immediately with `noHost` instead of hanging.
+      if (terminalAvailable() && detectInteractiveCommand(cmd).interactive) {
         try {
           await runInTerminalDock(cmd, cwd, session?.id ?? "")
           pushSystemMessage(tShell("interactiveRoutedToTerminal", { cmd }))
@@ -3091,21 +3220,41 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         return true
       }
       pushSystemMessage(tShell("runningHint", { cmd, cwd }))
-      try {
-        const result = await executeShell(cmd, cwd)
-        pushSystemMessage(formatShellResult(cmd, result))
-      } catch (err) {
-        loggers.chat.error("shell command failed", err, { cmd, cwd })
-        pushSystemMessage(
-          tShell("failed", {
-            cmd,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        )
+      // Through the routed `terminal_exec`, under the user's configured shell —
+      // so a `!` line works from a paired browser or phone, and `fish` users
+      // stop silently getting `sh`. See `lib/shell-intelligence/execute.ts`.
+      const outcome = await runShellLine({
+        line: cmd,
+        cwd,
+        shell: shell.shell,
+        availability: shell.availability,
+      })
+      if (outcome.ok) {
+        pushSystemMessage(formatShellResult(cmd, outcome))
+        return true
+      }
+      loggers.chat.error("shell command failed", outcome.detail, {
+        cmd,
+        cwd,
+        reason: outcome.reason,
+        shell: shell.shell.path,
+      })
+      if (outcome.reason === "no-host") {
+        pushSystemMessage(tShell("noHost", { cmd }))
+      } else if (outcome.reason === "consent-required") {
+        // The host wants a human to approve remote execution. Telling the user
+        // that names an action; the generic "failed" sentence names none.
+        pushSystemMessage(tShell("consentRequired", { cmd }))
+      } else if (outcome.reason === "shell-unavailable") {
+        pushSystemMessage(tShell("shellUnavailable", { cmd, shell: shell.shell.path }))
+      } else if (outcome.reason === "unsupported-shell") {
+        pushSystemMessage(tShell("unsupportedShell", { cmd, shell: shell.shell.path }))
+      } else {
+        pushSystemMessage(tShell("failed", { cmd, error: outcome.detail }))
       }
       return true
     },
-    [cwd, pushSystemMessage, tShell, session]
+    [cwd, pushSystemMessage, tShell, session, shell.shell, shell.availability]
   )
 
   const handleMemorySubmit = useCallback(

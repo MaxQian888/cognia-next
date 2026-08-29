@@ -880,9 +880,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "terminal_list_for_project",
     "terminal_kill",
     "terminal_exec",
-    // Path completion for a remote client's terminal autocomplete, and the
-    // "free a busy port" quick fix — both mirror the local Tauri commands.
+    // Path completion for a remote client's terminal autocomplete, the head-word
+    // half of the same feature, and the "free a busy port" quick fix — all three
+    // mirror the local Tauri commands.
     "terminal_complete_paths",
+    "terminal_list_path_executables",
     "terminal_kill_port",
     // Terminal-host administration. The desktop drives these through the local
     // `terminal_host_service` command, which no remote client can reach — so a
@@ -1331,6 +1333,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // candidates). Like `read_text_file` it is simultaneously read-only
     // (idempotency axis) and control-gated (capability axis) — see below.
     "terminal_complete_paths",
+    // Same on both axes: a prefix-filtered read of the host's `$PATH`, served
+    // from a 15-second scan cache.
+    "terminal_list_path_executables",
     "codeserver_supported",
     "codeserver_status",
     "codeserver_list_proxies",
@@ -1594,6 +1599,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     // that need it (remote terminal autocomplete) already hold the
     // remote-control capability required to open the PTY itself.
     "terminal_complete_paths",
+    // The host's installed-software inventory, in effect. Nothing needs it
+    // except a client that is about to RUN one of those executables, and such a
+    // client holds remote-control already — so gating costs nothing and keeps a
+    // chat-only paired device from enumerating what is on the machine.
+    "terminal_list_path_executables",
     "codeserver_ensure",
     "codeserver_stop",
     "codeserver_stop_all",

@@ -109,6 +109,9 @@ import {
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
+import type { ShellCompletion } from "@/lib/shell-intelligence/types"
+import { ShellCompletionRow } from "./composer/shell-completion-row"
+
 import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
 import type { OfferedChatTemplate } from "@/lib/chat/template/template"
 import type { EntitySelectionKind } from "@/types/artifact/artifact"
@@ -163,6 +166,13 @@ export type PopoverItem =
    * pick, not on every keystroke of the search.
    */
   | { kind: "entity"; candidate: EntityMentionCandidate }
+  /**
+   * A `!`-mode shell completion. Carries the whole candidate (including the
+   * span it replaces) rather than a label, because acceptance rewrites a
+   * specific range of the line — which is not always the token the popover
+   * anchored on, once a pipeline is involved.
+   */
+  | { kind: "shell"; completion: ShellCompletion }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -235,6 +245,18 @@ interface Props {
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
   onDismiss: () => void
+  /**
+   * `!`-mode completions for the shell line, already ranked. The popover only
+   * renders them: what to offer, and whether the client can offer anything at
+   * all, is decided by `useShellIntelligence`.
+   */
+  shellCompletions?: readonly ShellCompletion[]
+  /**
+   * What to say when there are no completions — "no match" and "this client
+   * has no Host to ask" are different answers and the empty list looks
+   * identical for both.
+   */
+  shellEmptyMessage?: string
 }
 
 interface ItemList {
@@ -263,6 +285,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     onTogglePin,
     onPick,
     onDismiss,
+    shellCompletions,
+    shellEmptyMessage,
   },
   ref
 ) {
@@ -472,7 +496,15 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       }
     }
     if (trigger.kind === "bash") {
-      return { items: [], loading: false, error: null, emptyMessage: "" }
+      return {
+        items: (shellCompletions ?? []).map((completion) => ({
+          kind: "shell" as const,
+          completion,
+        })),
+        loading: false,
+        error: null,
+        emptyMessage: shellEmptyMessage ?? "",
+      }
     }
     if (trigger.kind === "agent") {
       const list = mentionables ?? []
@@ -654,6 +686,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     docSearch,
     entitySearch,
     tDocs,
+    shellCompletions,
+    shellEmptyMessage,
   ])
 
   // A changed search result set should always start from its most relevant
@@ -717,6 +751,13 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     () => triggerTitle(trigger?.kind, t, tAgent, tDocs),
     [trigger?.kind, t, tAgent, tDocs]
   )
+  // `!` mode with nothing to say. The composer sends a blank `shellEmptyMessage`
+  // when shell intelligence is switched off — no completions were looked up, so
+  // "no completions" would be untrue — and the empty-state block would then
+  // render a 7rem box holding an empty string. The `BashHint` below is the
+  // whole panel in that case, which is what `!` mode was before this feature.
+  const bashHintIsTheWholePanel =
+    trigger?.kind === "bash" && !displayList.loading && !displayList.emptyMessage
   const argumentCommand =
     trigger?.kind === "slash" && trigger.argumentQuery !== undefined
       ? slashCommands.find((command) => command.name === trigger.query)
@@ -818,11 +859,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             {displayList.loading ? <span>{t("searchingShort")}</span> : null}
           </div>
         )}
-        {trigger?.kind === "bash" ? (
-          <BashHint query={trigger.query} />
-        ) : displayList.error ? (
+        {displayList.error ? (
           <div className="px-3 py-3 text-sm text-destructive">{displayList.error}</div>
-        ) : displayList.items.length === 0 ? (
+        ) : displayList.items.length === 0 && !bashHintIsTheWholePanel ? (
           <div className="flex min-h-28 flex-col items-center justify-center gap-2 px-6 py-7 text-center text-sm text-muted-foreground">
             {!displayList.loading && trigger?.kind === "slash" ? (
               <span className="rounded-full bg-muted p-2">
@@ -878,6 +917,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             })}
           </ul>
         )}
+        {trigger?.kind === "bash" ? <BashHint query={trigger.query} /> : null}
         {trigger?.kind === "doc" && docSearch.hostSupported && docSearch.accounts?.length ? (
           <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
             <span className="shrink-0">{tDocs("picker.accountLabel")}</span>
@@ -1095,6 +1135,11 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
   if (item.kind === "doc") return `doc-${item.providerId}-${item.doc.kind}-${item.doc.id}`
   if (item.kind === "entity") return `entity-${item.candidate.entityKind}-${item.candidate.id}`
+  if (item.kind === "shell") {
+    // Two candidates may write the same text over different spans; the span is
+    // what makes the key identify one row.
+    return `shell-${item.completion.from}-${item.completion.to}-${item.completion.insertText}`
+  }
   return `idx-${idx}`
 }
 
@@ -1266,6 +1311,9 @@ const ItemRow = memo(function ItemRow({
       </>
     )
   }
+  if (item.kind === "shell") {
+    return <ShellCompletionRow completion={item.completion} />
+  }
   if (item.kind === "agent") {
     return <AgentMentionRow target={item.target} />
   }
@@ -1350,8 +1398,8 @@ const ItemRow = memo(function ItemRow({
 function BashHint({ query }: { query: string }) {
   const t = useTranslations("chat.composer.popover")
   return (
-    <div className="px-3 py-3 text-sm text-muted-foreground">
-      <p className="mb-1">
+    <div className="border-t bg-muted/15 px-3 py-2 text-sm text-muted-foreground">
+      <p className="mb-1 text-[11px] leading-4">
         {/* i18n-exempt: keyboard key cap, locale-invariant */}
         {t("bashHintPrefix")} <kbd>Enter</kbd> {t("bashHintSuffix")}
       </p>

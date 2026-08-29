@@ -83,6 +83,117 @@ All green; `pnpm lint:i18n` green. The only `tsc` errors in the tree are pre-exi
 
 **Extended**: `lib/terminal/shell-detect.ts` (+`ShellKind`/`detectShellKind`), `components/terminal/terminal-instance.tsx`, `components/settings/terminal/terminal-card.tsx`, `lib/plugin/api/terminal-api.ts`, `lib/plugin/contracts/module-bridge-map.ts`, `lib/plugin/core/validation.ts`, `lib/plugin/security/permission-guard.ts`, `types/plugin/plugin.ts`, `lib/claude/types.ts`, `crates/cognia-cli/src/cmd_lint.rs`, both i18n message files.
 
+## Amendment (2026-08-28) — the composer's `!` line
+
+`!` mode in the chat composer (`components/chat/composer.tsx`) is a shell
+prompt that had none of the above. It had a `textarea`, an echo of the line
+you typed, and `shell_exec`. This amendment gives it completion, validation,
+and an honest answer about whether the line can run at all — reusing the
+Phase-4 engine's DATA and replacing only the parts that assumed a PTY.
+
+### D7 — One intelligence layer, in `lib/shell-intelligence/`
+
+The composer is not a terminal: it has no PTY, no OSC 633 stream, no line
+buffer, and its "line" is a slice of a `textarea` that also holds `/commands`
+and `@mentions`. So the Phase-4 `controller` / `line-buffer` do not apply. What
+does apply is everything underneath them — `shell-builtins`, the `spec/` CLI
+set, `terminal_complete_paths`, `terminal_list_path_executables` — and those are
+reused verbatim.
+
+What is new is the part Phase 4 never needed: **position**. The ghost-text
+providers all assume the head word is token 0, which is true at a prompt and
+false the moment a line has a pipe in it. `lex.ts` + `segments.ts` add an
+operator-aware lexer (`|`, `&&`, `||`, `;`, `&`, redirects with fd prefixes,
+`$(…)`, backticks, subshells, env assignments) and a segmenter that answers one
+question: *what is the token under the cursor, and what role does it play in its
+own command?* `cat foo | gre` completes `grep`, not a file for `cat`.
+
+Deliberately not a shell grammar: no parse tree, no expansion, no evaluation.
+Anything it cannot classify degrades to a plain word, which costs a suggestion,
+never a wrong execution.
+
+### D8 — The Host is the capability boundary, and it is stated, not hidden
+
+Three states, because collapsing them is what makes a feature look broken:
+
+| State | Completion | Execution |
+| --- | --- | --- |
+| `full` — a Host is reachable | builtins, CLI specs, `$PATH`, filesystem | yes |
+| `static-only` — no Host | builtins, CLI specs | no, and the panel says why |
+| `shell-unavailable` — Host present, shell absent | everything except execution | no |
+
+A standalone browser keeps `git`/`kubectl`/flag completion, because those are
+static data, and is told to connect a Host rather than being shown an empty
+panel. `terminal_list_path_executables` is promoted from a client-local Tauri
+command to a companion RPC (`READ_ONLY` + control-gated, exactly like
+`terminal_complete_paths` — it reports the host's installed executables, and
+only a client that can already RUN them has any use for it).
+
+### D9 — The shell is the user's, and its argv lives in one place
+
+Precedence: `terminal.defaultShell` → the Host's reported default → the platform
+guess. A configured shell the Host does not have surfaces as `shell-unavailable`
+with execution disabled, rather than silently running under a different shell.
+
+`shell-argv.ts` is the single place that knows how to hand a line to a shell —
+`-lc` for sh/bash/zsh, `-l -c` for fish (which rejects the bundled form),
+`--login -c` for nu, `-NoLogo -Command` for both PowerShells, `/D /S /C` for
+cmd — and an unknown family is reported `unsupported`, never guessed at.
+
+This is why execution moves off `shell_exec` (desktop-only, hard-coded
+`sh -c` / `cmd /C`) and onto the transport-routed `terminal_exec`: it is the
+only way `terminal.defaultShell` can mean anything, and it is what lets a
+paired browser or phone run a `!` line at all. `shell_exec`'s 64 KB output cap
+and 30 s default timeout are re-applied in `execute.ts`, because `terminal_exec`
+has neither.
+
+### D10 — Diagnostics are advisory, and timing is the hard part
+
+`command-not-found`, `incomplete-syntax` and `shell-unavailable` underline; none
+of them blocks Enter. The user's shell is the authority, and an underline that
+blocked execution would make the one command the checker is wrong about
+unrunnable.
+
+Detection is easy; TIMING is the design. `k` on the way to `kubectl` is not an
+error. A command is judged only once it is COMMITTED — by whitespace, an
+operator, or Enter — or, failing that, once the input has been idle for 200 ms
+AND is at least two characters long. A name whose host lookup has not returned
+is `pending`, which is not `unknown`: an unanswered probe must not underline
+every command for as long as it takes.
+
+### D11 — No live PTY state, deliberately
+
+V1 shares the selected Host, the effective cwd, the configured shell and the
+Host's `$PATH`. It does NOT inspect aliases, functions, exports, or `cd`s inside
+an already-running PTY — there is no PTY here to inspect. A command that only
+exists as a shell alias therefore reads as unknown; that is the honest cost of
+the boundary, and it is why the diagnostic is advisory rather than a gate.
+
+Also out of scope for V1, and unchanged from the Phase-4 non-goals: CodeMirror,
+tree-sitter, dynamic zsh/fish completion sidecars, downloaded third-party
+completion specs, and AI completion on this surface.
+
+### Composer surface notes
+
+The `textarea` stays the only input state. Up/Down move the highlight, Tab
+accepts, Escape closes, Enter still runs the line — and none of those fire
+during an IME composition. Candidates ride the existing `ComposerPopover` item
+model (a new `shell` kind), so keyboard navigation, scroll-into-view and the
+pick path are the ones every other picker already uses. Diagnostics are painted
+by a third overlay layer sharing the `TEXTAREA_TYPOGRAPHY` + `padEndClass` +
+scroll-mirror contract with the chip and ghost layers, with a polite
+`role="status"` region carrying the same messages for assistive tech.
+
+`terminal.autocomplete.enabled` is the master switch for both surfaces: with it
+off, `!` mode behaves exactly as it did before this amendment.
+
+**Affects (amendment)**: `lib/shell-intelligence/*`, `hooks/chat/use-shell-intelligence.ts`,
+`components/chat/composer/{shell-completion-row,shell-diagnostic-overlay,composer-box}.tsx`,
+`components/chat/{composer,composer-popover}.tsx`, `lib/terminal/remote-api.ts`,
+`lib/terminal/completion/path-provider.ts`, `src-tauri/src/companion_api/rpc{,/terminal}.rs`,
+`protocol/companion-{commands,request-schemas,response-schemas}.json`,
+`protocol/headless-command-dispositions.json`, `i18n/messages/{en,zh-CN}/chat.json`.
+
 ## Follow-ups explicitly scoped out
 
 1. **Ghost-text pixel alignment** — `cursorPixelPosition` reads xterm's (internal) render-service cell dimensions; in the DOM renderer or before first paint it returns null and the overlay is simply not shown. A public-API measurement path would harden this.

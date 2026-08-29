@@ -43,6 +43,7 @@ function props(overrides: Partial<ComposerBoxProps> = {}): ComposerBoxProps {
     textareaRef: createRef<HTMLTextAreaElement>(),
     chipOverlayRef: createRef<HTMLDivElement>(),
     ghostOverlayRef: createRef<HTMLDivElement>(),
+    shellDiagnosticOverlayRef: createRef<HTMLDivElement>(),
     overlaySegments: [],
     maxHeightRem: 12,
     onChange: jest.fn(),

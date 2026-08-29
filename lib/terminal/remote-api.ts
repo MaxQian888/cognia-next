@@ -51,6 +51,8 @@ export interface RemoteExecRequest {
    * work — what replaying a history command needs.
    */
   shell?: boolean
+  /** Short-lived Host approval used by paired clients for interactive execution. */
+  adminLease?: string
 }
 
 // Listing and killing are deliberately NOT re-exported here.
@@ -77,6 +79,7 @@ export async function execTerminalCommand(request: RemoteExecRequest): Promise<R
     env: request.env,
     timeoutMs: request.timeoutMs,
     shell: request.shell,
+    adminLease: request.adminLease,
   })
 }
 
@@ -94,6 +97,25 @@ export async function completeTerminalPaths(options: {
     cwd: options.cwd,
     fragment: options.fragment,
     showHidden: options.showHidden,
+    limit: options.limit,
+  })
+}
+
+/**
+ * Host-side `$PATH` executable names matching `prefix`, for head-word
+ * completion. The host keeps a 15-second scan cache, so repeated keystrokes
+ * cost one directory walk, not one per character.
+ *
+ * A blank prefix returns nothing by design — completion needs a typed head, and
+ * dumping the whole PATH over the companion transport is not a useful answer.
+ */
+export async function listTerminalPathExecutables(options: {
+  prefix: string
+  limit?: number
+}): Promise<string[]> {
+  if (options.prefix.trim().length === 0) return []
+  return transport.call<string[]>("terminal_list_path_executables", {
+    prefix: options.prefix,
     limit: options.limit,
   })
 }

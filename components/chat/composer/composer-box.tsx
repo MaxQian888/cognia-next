@@ -42,7 +42,9 @@ import {
   type ParamPillState,
 } from "../composer-chip-overlay"
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
+import type { ShellDiagnostic } from "@/lib/shell-intelligence/types"
 import { ComposerGhostText } from "./composer-ghost-text"
+import { ShellDiagnosticOverlay } from "./shell-diagnostic-overlay"
 import { CharCounter } from "./char-counter"
 import { DragOverlay } from "./drag-overlay"
 import { MobileGhostAccept } from "./mobile-ghost-accept"
@@ -90,6 +92,15 @@ export interface ComposerBoxProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>
   chipOverlayRef: RefObject<HTMLDivElement | null>
   ghostOverlayRef: RefObject<HTMLDivElement | null>
+  /** Scroll mirror for the `!`-mode diagnostic underlines. */
+  shellDiagnosticOverlayRef: RefObject<HTMLDivElement | null>
+  /**
+   * `!`-mode problems, with offsets already mapped into the TEXTAREA's
+   * coordinates. Empty (the overwhelmingly common case) paints nothing.
+   */
+  shellDiagnostics?: readonly ShellDiagnostic[]
+  /** Accessible name for the diagnostics status region. */
+  shellDiagnosticsLabel?: string
   overlaySegments: RichSegment[]
   maxHeightRem: number
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void
@@ -203,6 +214,9 @@ export function ComposerBox({
   textareaRef,
   chipOverlayRef,
   ghostOverlayRef,
+  shellDiagnosticOverlayRef,
+  shellDiagnostics,
+  shellDiagnosticsLabel,
   overlaySegments,
   maxHeightRem,
   onChange,
@@ -265,7 +279,22 @@ export function ComposerBox({
     if (chip) chip.style.transform = offset
     const ghostEl = ghostOverlayRef.current
     if (ghostEl) ghostEl.style.transform = offset
-  }, [textInput.value, textareaRef, chipOverlayRef, ghostOverlayRef])
+    const diagnosticEl = shellDiagnosticOverlayRef.current
+    if (diagnosticEl) diagnosticEl.style.transform = offset
+    // `shellDiagnostics` is a dependency because the diagnostic layer MOUNTS on
+    // it, and it turns non-empty on the idle timer — 200ms after the last
+    // keystroke, with `textInput.value` unchanged. Keying this effect on the
+    // value alone left that first paint with no offset at all, so on a `!` line
+    // long enough to scroll, every underline sat `scrollTop` px above its word
+    // until the next character was typed.
+  }, [
+    textInput.value,
+    shellDiagnostics,
+    textareaRef,
+    chipOverlayRef,
+    ghostOverlayRef,
+    shellDiagnosticOverlayRef,
+  ])
 
   // The floating corner controls fill right-to-left from the text's trailing
   // edge: preview toggle, then the bookmark, then the wand. Each is 24px in a
@@ -425,6 +454,20 @@ export function ComposerBox({
           // that preview mode showed.
           hidden={isComposing || preview?.on === true}
         />
+        {shellDiagnostics && shellDiagnostics.length > 0 ? (
+          <ShellDiagnosticOverlay
+            ref={shellDiagnosticOverlayRef}
+            value={textInput.value}
+            diagnostics={shellDiagnostics}
+            statusLabel={shellDiagnosticsLabel ?? ""}
+            // Same family and trailing inset as the textarea, for the same
+            // reason the chip layer takes them: a different wrap width puts
+            // every underline under the wrong word.
+            mono={skin.mono}
+            padEndClass={padEndClass}
+            hidden={isComposing || preview?.on === true}
+          />
+        ) : null}
         <ComposerGhostText
           ref={ghostOverlayRef}
           value={textInput.value}
@@ -507,6 +550,8 @@ export function ComposerBox({
             if (el) el.style.transform = offset
             const ghostEl = ghostOverlayRef.current
             if (ghostEl) ghostEl.style.transform = offset
+            const diagnosticEl = shellDiagnosticOverlayRef.current
+            if (diagnosticEl) diagnosticEl.style.transform = offset
           }}
           onMouseUp={onMouseUp}
           onSelect={onSelect}

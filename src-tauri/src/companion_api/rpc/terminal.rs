@@ -6,6 +6,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "terminal_kill",
     "terminal_exec",
     "terminal_complete_paths",
+    "terminal_list_path_executables",
     "terminal_kill_port",
     "terminal_host_status",
     "terminal_host_configure",
@@ -89,6 +90,25 @@ pub(super) async fn dispatch(
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
             .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "terminal_list_path_executables" => {
+            // The head-word half of remote terminal autocomplete. The scan
+            // walks every `$PATH` directory, so it stays off the async runtime;
+            // the 15-second cache inside means a burst of keystrokes costs one
+            // walk, not one per character.
+            let prefix: String = required(&args, "prefix")?;
+            let limit: Option<usize> = optional(&args, "limit")?;
+            tokio::task::spawn_blocking(move || {
+                let path_value = std::env::var("PATH").unwrap_or_default();
+                crate::terminal::path_scan::list_path_executables_inner(
+                    &path_value,
+                    &prefix,
+                    limit.unwrap_or(50),
+                )
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))
             .and_then(to_json)
         }
         "terminal_kill_port" => {

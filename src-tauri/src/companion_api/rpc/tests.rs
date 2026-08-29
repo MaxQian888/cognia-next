@@ -3847,6 +3847,20 @@ fn wave41_reads_are_read_only_and_writes_are_not() {
 }
 
 #[test]
+fn path_executable_listing_is_classified_like_path_completion() {
+    // The two halves of terminal autocomplete: head words and file paths. They
+    // are the same feature reached from the same client, so a classification
+    // that differs between them is a bug in one of them.
+    //
+    // Read-only on the idempotency axis (same prefix, same `$PATH`, same
+    // answer) and control-gated on the capability axis (it reports the host's
+    // installed executables to whoever asks).
+    assert!(KNOWN_COMMANDS.contains(&"terminal_list_path_executables"));
+    assert!(READ_ONLY_COMMANDS.contains(&"terminal_list_path_executables"));
+    assert!(is_control_command("terminal_list_path_executables"));
+}
+
+#[test]
 fn git_identity_read_is_not_idempotency_cached_as_a_mutation() {
     assert!(KNOWN_COMMANDS.contains(&"git_identity"));
     assert!(READ_ONLY_COMMANDS.contains(&"git_identity"));

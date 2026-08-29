@@ -80,6 +80,98 @@ ADR-0031/0033 发布了完整的集成终端（xterm.js 底座、`portable-pty`�
 
 **扩展**：`lib/terminal/shell-detect.ts`（+`ShellKind`/`detectShellKind`）、`components/terminal/terminal-instance.tsx`、`components/settings/terminal/terminal-card.tsx`、`lib/plugin/api/terminal-api.ts`、`lib/plugin/contracts/module-bridge-map.ts`、`lib/plugin/core/validation.ts`、`lib/plugin/security/permission-guard.ts`、`types/plugin/plugin.ts`、`lib/claude/types.ts`、`crates/cognia-cli/src/cmd_lint.rs`，都是i18n消息文件。
 
+## 修订（2026-08-28）—— 聊天输入框的 `!` 行
+
+聊天输入框（`components/chat/composer.tsx`）的 `!` 模式本身就是一个 shell
+提示符，却没有以上任何能力：一个 `textarea`、一行回显、以及 `shell_exec`。本次
+修订为它补上补全、校验，以及"这行到底能不能跑"的诚实回答——复用 Phase 4 引擎的
+**数据**，只替换其中假设存在 PTY 的部分。
+
+### D7 —— 统一的智能层 `lib/shell-intelligence/`
+
+输入框不是终端：没有 PTY、没有 OSC 633 事件流、没有行缓冲，它的"一行"只是
+`textarea` 的一段切片，而这个 `textarea` 同时还装着 `/命令` 与 `@提及`。因此
+Phase 4 的 `controller` / `line-buffer` 不适用；适用的是它们下面的一切——
+`shell-builtins`、`spec/` 命令集、`terminal_complete_paths`、
+`terminal_list_path_executables`——这些被原样复用。
+
+新增的是 Phase 4 从未需要的东西：**位置**。ghost-text 的各个 provider 都假设首词
+就是 token 0——在提示符下成立，一旦行里出现管道就不成立。`lex.ts` + `segments.ts`
+增加了一个感知操作符的词法器（`|`、`&&`、`||`、`;`、`&`、带文件描述符前缀的重定向、
+`$(…)`、反引号、子 shell、环境变量赋值）和一个分段器，只回答一个问题：*光标下的
+token 是什么，它在自己那条命令里扮演什么角色？* 于是 `cat foo | gre` 补出 `grep`，
+而不是给 `cat` 补一个文件。
+
+刻意不做完整 shell 文法：没有语法树、没有展开、没有求值。无法分类的一律降级为普通
+词——代价是少一条建议，而不是一次错误的执行。
+
+### D8 —— 主机就是能力边界，而且要说出来，不是藏起来
+
+三种状态，因为把它们混作一谈正是"功能看起来坏了"的成因：
+
+| 状态 | 补全 | 执行 |
+| --- | --- | --- |
+| `full` —— 主机可达 | 内建命令、CLI 规格、`$PATH`、文件系统 | 可以 |
+| `static-only` —— 没有主机 | 内建命令、CLI 规格 | 不可以，并说明原因 |
+| `shell-unavailable` —— 有主机但没有该 shell | 除执行外全部可用 | 不可以 |
+
+独立浏览器仍然保有 `git`/`kubectl`/参数补全（它们是静态数据），并被告知去连接主机，
+而不是看到一个空面板。`terminal_list_path_executables` 从本机 Tauri 命令提升为
+companion RPC（`READ_ONLY` + 受控能力门，与 `terminal_complete_paths` 完全一致——
+它报告的是主机已安装的可执行文件，而只有已经能**运行**它们的客户端才用得上）。
+
+### D9 —— shell 归用户所有，其 argv 只有一处知道
+
+优先级：`terminal.defaultShell` → 主机上报的默认值 → 平台猜测。配置了主机上不存在
+的 shell 时呈现为 `shell-unavailable` 并禁用执行，而不是悄悄换一个 shell 去跑。
+
+`shell-argv.ts` 是唯一知道"如何把一行交给 shell"的地方——sh/bash/zsh 用 `-lc`，
+fish 用 `-l -c`（它不接受合并写法），nu 用 `--login -c`，两个 PowerShell 用
+`-NoLogo -Command`，cmd 用 `/D /S /C`——未知家族一律报告 `unsupported`，绝不瞎猜。
+
+这也是执行从 `shell_exec`（仅桌面、硬编码 `sh -c` / `cmd /C`）迁到经传输层路由的
+`terminal_exec` 的原因：只有这样 `terminal.defaultShell` 才有意义，也只有这样配对的
+浏览器或手机才跑得动一条 `!` 行。`shell_exec` 的 64 KB 输出上限与 30 秒默认超时在
+`execute.ts` 中重新施加，因为 `terminal_exec` 两者都没有。
+
+### D10 —— 诊断只是提示，难点在时机
+
+`command-not-found`、`incomplete-syntax`、`shell-unavailable` 会画下划线；三者都不
+拦截 Enter。用户的 shell 才是权威，一个会拦截执行的下划线，只会让"检查器判断错了的
+那条命令"变得无法运行。
+
+检测很容易，**时机**才是设计。通往 `kubectl` 路上的 `k` 不是错误。一条命令只有在被
+**确认结束**后才被判定——由空白、操作符或 Enter 确认；否则需要输入静止 200 ms 且长度
+至少两个字符。主机查询尚未返回的名字是 `pending` 而非 `unknown`：一次未完成的探测
+不该让每条命令在等待期间都挂上下划线。
+
+### D11 —— 刻意不读运行中的 PTY 状态
+
+V1 共享所选主机、有效工作目录、配置的 shell 以及主机的 `$PATH`；不读取已在运行的
+PTY 内部的别名、函数、导出变量或 `cd`——这里根本没有 PTY 可读。因此只以别名形式存在
+的命令会被判为未知；这是边界带来的诚实代价，也正是诊断只做提示而非闸门的理由。
+
+同样不在 V1 范围内（与 Phase 4 的非目标一致）：CodeMirror、tree-sitter、动态
+zsh/fish 补全 sidecar、下载第三方补全规格，以及本界面上的 AI 补全。
+
+### 输入框侧的实现要点
+
+`textarea` 仍是唯一的输入状态。上/下移动高亮，Tab 接受，Escape 关闭，Enter 照旧执行
+——且这些都不会在 IME 组字期间触发。候选项复用既有 `ComposerPopover` 的条目模型（新增
+一种 `shell` 类型），因此键盘导航、滚动定位与选取路径与其他所有选择器完全一致。诊断由
+第三层浮层绘制，与 chip、ghost 两层共享 `TEXTAREA_TYPOGRAPHY` + `padEndClass` + 滚动
+镜像契约，并配一个 `role="status"` 的礼貌播报区承载同样的文案供辅助技术读取。
+
+`terminal.autocomplete.enabled` 是两个界面共同的总开关：关闭时，`!` 模式与本次修订之前
+完全一致。
+
+**影响范围（本次修订）**：`lib/shell-intelligence/*`、`hooks/chat/use-shell-intelligence.ts`、
+`components/chat/composer/{shell-completion-row,shell-diagnostic-overlay,composer-box}.tsx`、
+`components/chat/{composer,composer-popover}.tsx`、`lib/terminal/remote-api.ts`、
+`lib/terminal/completion/path-provider.ts`、`src-tauri/src/companion_api/rpc{,/terminal}.rs`、
+`protocol/companion-{commands,request-schemas,response-schemas}.json`、
+`protocol/headless-command-dispositions.json`、`i18n/messages/{en,zh-CN}/chat.json`。
+
 ## 明确规划的后续
 
 1. **幽灵文本像素对齐**——`cursorPixelPosition`读取xterm（内部）渲染服务单元的尺寸;在DOM渲染器或首次绘画之前返回空值，叠加层根本不显示。采用public-API测量路径会加重这一问题。
