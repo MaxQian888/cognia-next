@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,
+  useFormatter: () => ({ relativeTime: () => "3 minutes ago" }),
+  useNow: () => new Date(1_700_000_000_000),
 }))
 jest.mock("@/components/browser/browser-preview-pane", () => ({
   BrowserPreviewPane: ({ initialUrl }: { initialUrl: string }) => (
@@ -105,7 +107,9 @@ function renderTab(props: Partial<React.ComponentProps<typeof SitePublishTab>> =
 
 it("renders six steps with the manifest between connecting and the environment", () => {
   renderTab()
-  const titles = screen.getAllByText(/^steps\./).map((node) => node.textContent)
+  const titles = screen
+    .getAllByText(/^steps\.[a-z]+\.(title|description)/)
+    .map((node) => node.textContent)
   expect(titles).toEqual([
     "steps.connect.title",
     "steps.connect.description",
@@ -238,4 +242,58 @@ it("carries the gate reason on every host-privileged control", () => {
   renderTab({ buildGate: blocked, previewGate: blocked })
   expect(screen.getByTestId("site-build")).toHaveAttribute("title", "Desktop only")
   expect(screen.getByTestId("site-start-preview")).toHaveAttribute("title", "Desktop only")
+})
+
+describe("provider token standing", () => {
+  it("says a verified token is connected instead of leaving the step blank", () => {
+    // The connect step used to derive its state from "does a provider resource
+    // exist", so a Site whose token was saved and verified read as not started
+    // until the first provision.
+    renderTab({
+      site: {
+        ...site(),
+        providerTokenState: {
+          executionTargetKey: "local",
+          status: "verified",
+          verifiedAt: 1_699_999_000_000,
+        },
+      },
+    })
+    expect(screen.getByTestId("site-token-standing")).toHaveTextContent(
+      "steps.connectState.verified"
+    )
+  })
+
+  it("distinguishes a token saved on another machine from no token at all", () => {
+    // The credential is real, it is just not here — a different instruction
+    // from "you never saved one".
+    renderTab({
+      site: {
+        ...site(),
+        providerTokenState: { executionTargetKey: "other-host", status: "verified" },
+      },
+    })
+    expect(screen.getByTestId("site-token-standing")).toHaveTextContent(
+      "steps.connectState.other-host"
+    )
+  })
+
+  it("says the provider rejected the stored token", () => {
+    renderTab({
+      site: {
+        ...site(),
+        providerTokenState: { executionTargetKey: "local", status: "rejected" },
+      },
+    })
+    expect(screen.getByTestId("site-token-standing")).toHaveTextContent(
+      "steps.connectState.rejected"
+    )
+  })
+
+  it("says there is none yet", () => {
+    renderTab()
+    expect(screen.getByTestId("site-token-standing")).toHaveTextContent(
+      "steps.connectState.missing"
+    )
+  })
 })

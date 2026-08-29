@@ -27,6 +27,7 @@ import {
   recordSiteResource,
   resolveSiteOperationFromReconcile,
   setSiteLifecycle,
+  setSiteProviderTokenState,
   setSiteResourceStatus,
   siteResourceCanBePurged,
   updateSiteVisitorPolicy,
@@ -281,9 +282,34 @@ export class CloudflareSitesService {
     assertSiteAuthoringCapability(site.authoringPolicy, this.deps.actorAccountId, "manage")
     if (!token.trim()) throw new Error("Cloudflare provider token is required")
     const client = this.deps.createClient({ token })
-    const verification = await client.verifyToken()
-    if (verification.status !== "active") throw new Error("Cloudflare provider token is not active")
+    let verification: { status: string }
+    try {
+      verification = await client.verifyToken()
+    } catch (error) {
+      await setSiteProviderTokenState(site.id, {
+        executionTargetKey: site.executionTargetKey,
+        status: "rejected",
+        lastFailureAt: this.deps.now(),
+      })
+      throw error
+    }
+    if (verification.status !== "active") {
+      await setSiteProviderTokenState(site.id, {
+        executionTargetKey: site.executionTargetKey,
+        status: "rejected",
+        lastFailureAt: this.deps.now(),
+      })
+      throw new Error("Cloudflare provider token is not active")
+    }
     await this.deps.keyring.save(providerTokenKey(site.id), token)
+    // The console has no other way to ask "is a credential configured on this
+    // host" — the keyring cannot be enumerated and the token must never come
+    // back out for a UI check.
+    await setSiteProviderTokenState(site.id, {
+      executionTargetKey: site.executionTargetKey,
+      status: "verified",
+      verifiedAt: this.deps.now(),
+    })
   }
 
   /**

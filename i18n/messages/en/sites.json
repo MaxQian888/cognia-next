@@ -64,8 +64,19 @@
   },
   "authoring": {
     "accountsPlaceholder": "One Cognia account ID per line",
+    "addDeployer": "Add deployer",
+    "addEditor": "Add editor",
+    "capabilities": "Can: {list}",
     "deployers": "Deployer account IDs",
-    "editors": "Editor account IDs"
+    "description": "Who may edit this Site's configuration, publish it, or change access. Enforced on every mutation; the owner cannot be removed.",
+    "editors": "Editor account IDs",
+    "empty": "No one but the owner.",
+    "noCapabilities": "Read-only — every action on this Site is disabled for you.",
+    "owner": "Owner",
+    "remove": "Remove {account}",
+    "title": "Collaborators",
+    "you": "you",
+    "yourRole": "Your role: {role}"
   },
   "build": {
     "buildNetworkHosts": "Approved build hosts (optional)",
@@ -97,6 +108,12 @@
     "timedOut": "timed out",
     "title": "Build output",
     "truncated": "Output was trimmed — the first and last part are kept."
+  },
+  "capability": {
+    "deploy": "Publish",
+    "edit": "Edit configuration",
+    "manage": "Manage access and lifecycle",
+    "view": "View"
   },
   "confirm": {
     "deleteMetadata": {
@@ -403,6 +420,12 @@
       "description": "Verify and store the API token for this Site.",
       "title": "Connect Cloudflare"
     },
+    "connectState": {
+      "missing": "No provider token on this machine yet.",
+      "other-host": "A token is stored, but on a different machine. Save one here to publish from this host.",
+      "rejected": "Cloudflare rejected the stored token. Save a new one.",
+      "verified": "Connected — token verified on this machine {when}"
+    },
     "environment": {
       "description": "Save the variables and secrets the build needs.",
       "title": "Environment"
@@ -435,6 +458,7 @@
     "sites": "{count, plural, one {# Site} other {# Sites}}"
   },
   "tabs": {
+    "access": "Access",
     "domains": "Domains & access",
     "environment": "Environment",
     "operations": "Operations",

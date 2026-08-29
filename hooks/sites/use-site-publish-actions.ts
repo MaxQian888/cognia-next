@@ -19,7 +19,7 @@ import { uploadSiteVersion } from "@/lib/sites/publish-version"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
 import type { WranglerDetection } from "@/lib/sites/wrangler-detect"
-import { latestEnvironmentRevision } from "@/lib/sites/console-model"
+import { latestEnvironmentRevision, siteTokenStanding } from "@/lib/sites/console-model"
 import type { SiteScaffoldFile } from "@/lib/sites/manifest-scaffold"
 import type {
   SiteProjectRow,
@@ -135,7 +135,13 @@ export function useSitePublishActions({
       .catch(() => undefined)
   }, [siteId, isOwner])
 
-  const connectDone = live.resources.some((row) => row.status === "active")
+  // A verified credential on this host is the honest answer to "is the provider
+  // connected". The old predicate — "does a provider resource exist" — left a
+  // Site whose token was saved and verified reading as not started until the
+  // first provision.
+  const connectDone =
+    (site ? siteTokenStanding(site) === "verified" : false) ||
+    live.resources.some((row) => row.status === "active")
   const stepStates = useMemo(
     () =>
       deriveStepStates({

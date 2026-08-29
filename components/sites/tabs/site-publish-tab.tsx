@@ -12,7 +12,7 @@
  * and the running operation's newest event streams into the owning step.
  */
 import { useState } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useFormatter, useNow } from "next-intl"
 import { PlayIcon, RocketIcon, SquareIcon } from "lucide-react"
 
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
@@ -28,6 +28,8 @@ import {
   type SiteStepState,
 } from "@/hooks/sites/use-site-live-data"
 import { useSiteOperationEvents } from "@/hooks/sites/use-site-operation-events"
+import { siteTokenStanding } from "@/lib/sites/console-model"
+import { cn } from "@/lib/utils"
 import type { SiteHostingManifestController } from "@/hooks/sites/use-site-hosting-manifest"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type { SiteScaffoldFile } from "@/lib/sites/manifest-scaffold"
@@ -105,12 +107,15 @@ export function SitePublishTab({
   onGoToEnvironment,
 }: SitePublishTabProps) {
   const t = useTranslations("sites")
+  const format = useFormatter()
+  const now = useNow()
   const [token, setToken] = useState("")
   const [runtime, setRuntime] = useState("node@24")
   const [packageManager, setPackageManager] = useState("pnpm@10")
   const [installHosts, setInstallHosts] = useState("registry.npmjs.org")
   const [buildHosts, setBuildHosts] = useState("")
 
+  const tokenStanding = siteTokenStanding(site)
   const runningOperation = pickRunningOperation(operations)
   const runningStep = stepOfOperation(runningOperation)
   // Scoped to the one operation in flight, so the publish flow's live sub-status
@@ -137,28 +142,43 @@ export function SitePublishTab({
         subStatus={subStatusFor("connect")}
         hint={providerGate.title}
       >
-        <div className="flex flex-wrap gap-2">
-          <Input
-            type="password"
-            className="max-w-xs"
-            value={token}
-            aria-label={t("provider.token")}
-            placeholder={t("provider.token")}
-            onChange={(event) => setToken(event.target.value)}
-          />
-          <Button
-            type="button"
-            size="sm"
-            disabled={isBusy("token") || !providerGate.allowed || !token}
-            title={providerGate.title}
-            onClick={() => {
-              onSaveToken(token)
-              setToken("")
-            }}
-            data-testid="site-save-token"
+        <div className="space-y-2">
+          <p
+            className={cn(
+              "text-xs",
+              tokenStanding === "verified" ? "text-muted-foreground" : "text-warning"
+            )}
+            data-testid="site-token-standing"
           >
-            {t("actions.saveToken")}
-          </Button>
+            {t(`steps.connectState.${tokenStanding}`, {
+              when: site.providerTokenState?.verifiedAt
+                ? format.relativeTime(new Date(site.providerTokenState.verifiedAt), now)
+                : "",
+            })}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              type="password"
+              className="max-w-xs"
+              value={token}
+              aria-label={t("provider.token")}
+              placeholder={t("provider.token")}
+              onChange={(event) => setToken(event.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={isBusy("token") || !providerGate.allowed || !token}
+              title={providerGate.title}
+              onClick={() => {
+                onSaveToken(token)
+                setToken("")
+              }}
+              data-testid="site-save-token"
+            >
+              {t("actions.saveToken")}
+            </Button>
+          </div>
         </div>
       </SitePublishStep>
 

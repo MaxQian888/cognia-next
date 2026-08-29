@@ -10,6 +10,7 @@ import type {
   SiteOperationEventType,
   SiteOperationRow,
   SiteProjectRow,
+  SiteProviderTokenState,
   SiteResourceRow,
   SiteVersionRow,
 } from "@/types/sites"
@@ -1009,6 +1010,23 @@ export async function updateSiteVisitorPolicy(
   const updated = { ...site, visitorPolicy, updatedAt: now }
   await db.siteProjects.put(updated)
   return updated
+}
+
+/**
+ * Record what this host knows about the provider credential.
+ *
+ * Deliberately does not bump `updatedAt`: every other writer does, and
+ * `listSiteProjects` orders the rail by it — a token verification is not a
+ * change to the Site that should reorder the list.
+ */
+export async function setSiteProviderTokenState(
+  siteId: string,
+  state: SiteProviderTokenState
+): Promise<void> {
+  const db = getDb()
+  const site = await db.siteProjects.get(siteId)
+  if (!site) return
+  await db.siteProjects.put({ ...site, providerTokenState: state })
 }
 
 export async function updateSiteAuthoringPolicy(

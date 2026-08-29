@@ -38,7 +38,11 @@ import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import { useSitePreviewSession } from "@/hooks/sites/use-site-preview-session"
 import { usePlatform } from "@/hooks/use-platform"
-import { deleteSiteProjectMetadata, updateSiteProviderConfig } from "@/lib/db/sites"
+import {
+  deleteSiteProjectMetadata,
+  updateSiteAuthoringPolicy,
+  updateSiteProviderConfig,
+} from "@/lib/db/sites"
 import { purgeRetentionReport } from "@/lib/sites/console-model"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -46,6 +50,7 @@ import { NewSiteDialog } from "./new-site-dialog"
 import { SiteListRail } from "./site-list-rail"
 import { SiteOverviewHeader } from "./site-overview-header"
 import { useSitePublishActions } from "@/hooks/sites/use-site-publish-actions"
+import { SiteAccessTab } from "./tabs/site-access-tab"
 import { SiteDomainsTab } from "./tabs/site-domains-tab"
 import { SiteEnvironmentTab } from "./tabs/site-environment-tab"
 import { SiteOperationsTab, type SiteObservabilityQuery } from "./tabs/site-operations-tab"
@@ -53,7 +58,15 @@ import { SitePublishTab } from "./tabs/site-publish-tab"
 import { SiteResourcesTab } from "./tabs/site-resources-tab"
 import { SiteVersionsTab } from "./tabs/site-versions-tab"
 
-const TABS = ["publish", "versions", "environment", "domains", "resources", "operations"] as const
+const TABS = [
+  "publish",
+  "versions",
+  "environment",
+  "domains",
+  "access",
+  "resources",
+  "operations",
+] as const
 type TabKey = (typeof TABS)[number]
 
 type Confirmation = "purge" | "delete-metadata" | null
@@ -335,6 +348,22 @@ export function SitesConsole() {
                     )
                   }
                   onApplyAccess={publish.applyAccess}
+                />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="access" className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-4xl p-4">
+                <SiteAccessTab
+                  site={site}
+                  actorAccountId={actorAccountId}
+                  gate={metadataGate}
+                  isBusy={isBusy}
+                  onSave={(policy) =>
+                    void run("authoring", () =>
+                      updateSiteAuthoringPolicy(site.id, actorAccountId, policy)
+                    )
+                  }
                 />
               </div>
             </TabsContent>

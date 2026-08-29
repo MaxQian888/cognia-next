@@ -48,6 +48,33 @@ export const SITE_VERSION_STATUS_ORDER: readonly SiteVersionStatus[] = [
   "failed",
 ]
 
+/* --------------------------------------------------------------- provider */
+
+export type SiteTokenStanding = "verified" | "rejected" | "missing" | "other-host"
+
+/**
+ * Whether this machine holds a working provider credential for the Site.
+ *
+ * The connect step used to derive its state from "does a provider resource
+ * exist", so a Site whose token had been saved and verified still read as not
+ * started until the first provision. The keyring cannot be enumerated and the
+ * token must never come back out for a UI check, so the answer comes from the
+ * state `saveProviderToken` records.
+ *
+ * `other-host` is its own answer rather than folding into `missing`: the
+ * credential is real, it is just not on this machine, and telling someone to
+ * paste a token they already saved elsewhere is a different instruction from
+ * telling them they never saved one.
+ */
+export function siteTokenStanding(
+  site: Pick<SiteProjectRow, "providerTokenState" | "executionTargetKey">
+): SiteTokenStanding {
+  const state = site.providerTokenState
+  if (!state) return "missing"
+  if (state.executionTargetKey !== site.executionTargetKey) return "other-host"
+  return state.status
+}
+
 /* ------------------------------------------------------------------ header */
 
 /** Newest deployment currently serving traffic, if any. */

@@ -22,6 +22,7 @@ import {
   siteRoleCapabilities,
   secretDiffIsEmpty,
   secretRevisionDiff,
+  siteTokenStanding,
   siteViewerRole,
   sortEnvironmentRevisions,
 } from "./console-model"
@@ -506,5 +507,40 @@ describe("secretRevisionDiff", () => {
       added: ["NEW"],
       removed: [],
     })
+  })
+})
+
+describe("siteTokenStanding", () => {
+  const base = { executionTargetKey: "local" }
+
+  it("reports a verified credential on this host", () => {
+    expect(
+      siteTokenStanding({
+        ...base,
+        providerTokenState: { executionTargetKey: "local", status: "verified" },
+      })
+    ).toBe("verified")
+  })
+
+  it("separates a credential stored on another host from having none", () => {
+    // The keyring is per machine. Telling someone to paste a token they already
+    // saved elsewhere is a different instruction from telling them they never
+    // saved one.
+    expect(
+      siteTokenStanding({
+        ...base,
+        providerTokenState: { executionTargetKey: "other", status: "verified" },
+      })
+    ).toBe("other-host")
+    expect(siteTokenStanding({ ...base, providerTokenState: undefined })).toBe("missing")
+  })
+
+  it("reports a rejection", () => {
+    expect(
+      siteTokenStanding({
+        ...base,
+        providerTokenState: { executionTargetKey: "local", status: "rejected" },
+      })
+    ).toBe("rejected")
   })
 })

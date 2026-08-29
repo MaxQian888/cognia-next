@@ -35653,8 +35653,19 @@
     },
     "authoring": {
       "accountsPlaceholder": "每行填写一个 Cognia 账户 ID",
+      "addDeployer": "添加部署者",
+      "addEditor": "添加编辑者",
+      "capabilities": "可以：{list}",
       "deployers": "部署者账户 ID",
-      "editors": "编辑者账户 ID"
+      "description": "谁可以编辑本站点的配置、发布它、或更改访问策略。每次写操作都会校验；所有者不可移除。",
+      "editors": "编辑者账户 ID",
+      "empty": "除所有者外没有其他人。",
+      "noCapabilities": "只读——本站点的所有操作对你都不可用。",
+      "owner": "所有者",
+      "remove": "移除 {account}",
+      "title": "协作者",
+      "you": "你",
+      "yourRole": "你的角色：{role}"
     },
     "build": {
       "buildNetworkHosts": "构建阶段已批准的网络主机（可选）",
@@ -35676,8 +35687,8 @@
       "noStdout": "标准输出没有任何内容。",
       "open": "构建日志",
       "phase": {
-        "build": "构建",
         "install": "安装",
+        "build": "构建",
         "package": "打包"
       },
       "stderr": "标准错误",
@@ -35686,6 +35697,12 @@
       "timedOut": "已超时",
       "title": "构建输出",
       "truncated": "输出已被截断——保留了开头与结尾部分。"
+    },
+    "capability": {
+      "deploy": "发布",
+      "edit": "编辑配置",
+      "manage": "管理访问与生命周期",
+      "view": "查看"
     },
     "confirm": {
       "deleteMetadata": {
@@ -35992,6 +36009,12 @@
         "description": "验证并保存该站点的 API 令牌。",
         "title": "连接 Cloudflare"
       },
+      "connectState": {
+        "missing": "本机尚未保存 provider 令牌。",
+        "other-host": "已保存过令牌，但在另一台机器上。要从本机发布，请在此处再保存一次。",
+        "rejected": "Cloudflare 拒绝了已保存的令牌，请重新保存。",
+        "verified": "已连接——令牌已在本机验证（{when}）"
+      },
       "environment": {
         "description": "保存构建所需的变量与密钥。",
         "title": "环境变量"
@@ -36024,6 +36047,7 @@
       "sites": "{count} 个站点"
     },
     "tabs": {
+      "access": "访问",
       "domains": "域名与访问",
       "environment": "环境",
       "operations": "操作日志",

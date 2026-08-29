@@ -24,6 +24,25 @@ export interface CloudflareSiteProviderConfig {
   accessTeamName?: string
 }
 
+/**
+ * What this host knows about the Site's provider credential.
+ *
+ * Never any part of the token. The console previously had no way to ask "is a
+ * credential configured here", so the connect step derived its state from
+ * whether a provider resource existed — and a Site with a verified token but
+ * nothing provisioned yet read as "not started".
+ *
+ * `executionTargetKey` is load-bearing: the token lives in this machine's
+ * keyring, so a state recorded on another host must not read as configured
+ * here.
+ */
+export interface SiteProviderTokenState {
+  executionTargetKey: string
+  status: "verified" | "rejected"
+  verifiedAt?: number
+  lastFailureAt?: number
+}
+
 export interface SiteProjectRow {
   id: string
   name: string
@@ -36,6 +55,8 @@ export interface SiteProjectRow {
   providerConfig: CloudflareSiteProviderConfig
   authoringPolicy: SiteAuthoringPolicy
   visitorPolicy: SiteVisitorPolicy
+  /** Set by `saveProviderToken` and by a rejected provider call. Non-indexed. */
+  providerTokenState?: SiteProviderTokenState
   lifecycle: SiteLifecycle
   createdAt: number
   updatedAt: number
