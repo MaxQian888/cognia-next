@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use super::{
     command_manifest::{
-        CommandApproval, CommandDescriptor, CommandIdempotency, CommandTarget, CommandTransport,
+        CommandApproval, CommandDescriptor, CommandIdempotency, CommandOperation, CommandTarget,
+        CommandTransport,
     },
     middleware::DeviceContext,
     security_store::{security_store, IdempotencyDecision, SecurityStoreError},
@@ -233,6 +234,19 @@ pub async fn execute(
     result
 }
 
+/// Which rate-limit bucket a command is charged to.
+///
+/// The manifest's `operation` is the single authority — a `read` cannot change
+/// anything, so a client burst of reads is a throughput question and belongs on
+/// the wide bucket; `write` and `side-effect` stay on the strict one.
+pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_limit::RequestClass {
+    if descriptor.operation == CommandOperation::Read {
+        super::rate_limit::RequestClass::ReadOnly
+    } else {
+        super::rate_limit::RequestClass::Mutating
+    }
+}
+
 async fn execute_inner(
     state: &SharedState,
     request: ExecutionRequest,
@@ -270,8 +284,22 @@ async fn execute_inner(
     )?;
 
     if request.principal.scope != "service" {
-        if let super::rate_limit::RateLimitDecision::Reject { retry_after } =
-            state.rate_limiter.check(&request.principal.device_id)
+        // Which bucket this call is charged to is the same question as whether
+        // it can change anything, and the manifest already answers it. Reads go
+        // to the wide bucket (`RateLimitConfig::read_only_default`), which was
+        // sized for exactly one burst: a freshly paired client's `runSyncDown`,
+        // 25 handlers back to back, each paging while the Host sets `has_more`.
+        //
+        // Charging that burst to the strict 10-token bucket — as this call site
+        // did while it went through the unclassified `check()` — refused every
+        // pull past the tenth. `runSyncDown` records the refusal per table and
+        // moves on, so the tail tables ended up silently EMPTY, and the
+        // `host_feature_manifest` refresh that follows was refused too, leaving
+        // a correctly-paired client stuck on "the Host didn't come online".
+        let class = rate_limit_class(descriptor);
+        if let super::rate_limit::RateLimitDecision::Reject { retry_after } = state
+            .rate_limiter
+            .check_class(&request.principal.device_id, class)
         {
             let mut error = ExecutionError::new(
                 &request.request_id,
@@ -960,6 +988,65 @@ mod tests {
             ExecutionTransport::Http,
             None,
         )
+    }
+
+    /// The bootstrap burst must land on the wide bucket.
+    ///
+    /// `runSyncDown` walks every companion-sync handler back to back and each
+    /// pages while the Host sets `has_more`. Charged to the strict 10-token
+    /// bucket, everything past the tenth pull is refused and the tail tables
+    /// stay silently empty — the failure this classification exists to prevent.
+    #[test]
+    fn sync_bootstrap_reads_are_charged_to_the_read_only_bucket() {
+        for command in [
+            "sync_pull",
+            "host_feature_manifest",
+            "session_list",
+            "message_get_by_session",
+        ] {
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+            assert_eq!(
+                rate_limit_class(descriptor),
+                super::super::rate_limit::RequestClass::ReadOnly,
+                "{command} is a read and must not spend the strict bucket"
+            );
+        }
+    }
+
+    #[test]
+    fn writes_and_side_effects_stay_on_the_strict_bucket() {
+        for command in ["claude_send", "app_settings_update"] {
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+            assert_eq!(
+                rate_limit_class(descriptor),
+                super::super::rate_limit::RequestClass::Mutating,
+                "{command} can change state and must stay strictly limited"
+            );
+        }
+    }
+
+    /// Every command the manifest calls a `read` must be classified as such —
+    /// a guard against the classification silently regressing to `check()`.
+    #[test]
+    fn manifest_read_operations_all_map_to_the_read_only_class() {
+        let mut reads = 0usize;
+        for descriptor in super::super::command_manifest::commands() {
+            let expected = if descriptor.operation == CommandOperation::Read {
+                reads += 1;
+                super::super::rate_limit::RequestClass::ReadOnly
+            } else {
+                super::super::rate_limit::RequestClass::Mutating
+            };
+            assert_eq!(
+                rate_limit_class(descriptor),
+                expected,
+                "{} classified against its manifest operation",
+                descriptor.name
+            );
+        }
+        assert!(reads > 0, "the manifest must declare read commands");
     }
 
     #[test]
