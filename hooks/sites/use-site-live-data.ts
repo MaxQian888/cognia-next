@@ -4,12 +4,26 @@
  * Live, reactive view of a Cognia Site's durable state.
  *
  * The Sites dashboard historically read its tables once into `useState` and
- * re-pulled them with a manual `refresh()`. This hook instead drives a single
- * Dexie `useLiveQuery` over the existing `lib/db/sites` list functions — Dexie
- * tracks the tables those reads touch, so every `appendOperationEvent` /
- * version / deployment write (see `lib/db/sites.ts`) re-renders the progressive
- * publish flow with no polling. The pure step derivations are exported for unit
- * testing without React or Dexie.
+ * re-pulled them with a manual `refresh()`. This hook instead drives Dexie
+ * `useLiveQuery` over the existing `lib/db/sites` list functions — Dexie tracks
+ * the tables those reads touch, so every version / deployment / operation write
+ * re-renders the progressive publish flow with no polling. The pure step
+ * derivations are exported for unit testing without React or Dexie.
+ *
+ * **Two queries, not one, and no events in either.** A single query over all
+ * nine tables meant that every `appendOperationEvent` — which fires on every
+ * operation transition, several times per build — re-ran the whole thing,
+ * including one `listSiteOperationEvents` per operation of the selected Site,
+ * flattened into one array. Events are now scoped to the one operation that
+ * needs them ({@link useSiteOperationEvents}); nothing else reads them, because
+ * `failSiteOperation` and `markSiteOperationForReconcile` both write
+ * `errorMessage` onto the operation row, so the events fallback that
+ * `operationFailureText` used to carry was unreachable in production.
+ *
+ * The index query (every Site, plus the cross-Site rail signals) and the detail
+ * query (the selected Site's own tables) are separate so that a write to one
+ * Site's versions does not re-read the rail, and so that switching selection
+ * does not re-read the Site list.
  */
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 
@@ -17,7 +31,6 @@ import {
   listActiveSiteDeployments,
   listSiteDeployments,
   listSiteEnvironmentRevisions,
-  listSiteOperationEvents,
   listSiteOperationSignals,
   listSiteOperations,
   listSiteProjects,
@@ -85,26 +98,44 @@ export interface SiteLiveData {
   environments: SiteEnvironmentRevisionRow[]
   resources: SiteResourceRow[]
   operations: SiteOperationRow[]
-  events: SiteOperationEventRow[]
   /** True until the first live snapshot resolves. */
   loading: boolean
 }
 
-type SiteSnapshot = Omit<SiteLiveData, "loading">
-
-const EMPTY_TABLES = {
-  activeDeployments: [] as SiteDeploymentRow[],
-  operationSignals: [] as SiteOperationRow[],
-  versions: [] as SiteVersionRow[],
-  deployments: [] as SiteDeploymentRow[],
-  environments: [] as SiteEnvironmentRevisionRow[],
-  resources: [] as SiteResourceRow[],
-  operations: [] as SiteOperationRow[],
-  events: [] as SiteOperationEventRow[],
+interface SiteIndexSnapshot {
+  sites: SiteProjectRow[]
+  activeDeployments: SiteDeploymentRow[]
+  operationSignals: SiteOperationRow[]
 }
 
-/** Newest durable operation belonging to a given step, if any. */
-const EMPTY_SNAPSHOT: SiteSnapshot = { sites: [], selectedId: null, ...EMPTY_TABLES }
+interface SiteDetailSnapshot {
+  versions: SiteVersionRow[]
+  deployments: SiteDeploymentRow[]
+  environments: SiteEnvironmentRevisionRow[]
+  resources: SiteResourceRow[]
+  operations: SiteOperationRow[]
+}
+
+const EMPTY_SITES: SiteProjectRow[] = []
+const EMPTY_DEPLOYMENTS: SiteDeploymentRow[] = []
+const EMPTY_OPERATIONS: SiteOperationRow[] = []
+const EMPTY_VERSIONS: SiteVersionRow[] = []
+const EMPTY_ENVIRONMENTS: SiteEnvironmentRevisionRow[] = []
+const EMPTY_RESOURCES: SiteResourceRow[] = []
+
+const EMPTY_INDEX: SiteIndexSnapshot = {
+  sites: EMPTY_SITES,
+  activeDeployments: EMPTY_DEPLOYMENTS,
+  operationSignals: EMPTY_OPERATIONS,
+}
+
+const EMPTY_DETAIL: SiteDetailSnapshot = {
+  versions: EMPTY_VERSIONS,
+  deployments: EMPTY_DEPLOYMENTS,
+  environments: EMPTY_ENVIRONMENTS,
+  resources: EMPTY_RESOURCES,
+  operations: EMPTY_OPERATIONS,
+}
 
 function newestOperationForStep(
   operations: readonly SiteOperationRow[],
@@ -178,14 +209,16 @@ export function pickRunningOperation(
     )
 }
 
-/** Message of the highest-sequence event for an operation, if any. */
-export function latestEventMessage(
-  events: readonly SiteOperationEventRow[],
-  operationId: string
-): string | undefined {
-  const forOperation = events.filter((event) => event.operationId === operationId)
-  if (forOperation.length === 0) return undefined
-  return forOperation.reduce((newest, event) => (event.sequence > newest.sequence ? event : newest))
+/**
+ * Message of the highest-sequence event in a list, if any.
+ *
+ * The list arrives already scoped to one operation (see
+ * {@link useSiteOperationEvents}); this used to filter a flat array of every
+ * operation's events, which is the read the split removed.
+ */
+export function newestEventMessage(events: readonly SiteOperationEventRow[]): string | undefined {
+  if (events.length === 0) return undefined
+  return events.reduce((newest, event) => (event.sequence > newest.sequence ? event : newest))
     .message
 }
 
@@ -195,22 +228,30 @@ export function stepOfOperation(operation: SiteOperationRow | undefined): SiteSt
 }
 
 /**
- * @param siteId the pinned selection, or null to auto-select the first site.
+ * Every Site, plus the cross-Site signals the rail needs to answer "is this one
+ * live, busy, or broken" without selecting it. Deps are empty: this does not
+ * re-read when the selection changes.
  */
-export function useSiteLiveData(siteId: string | null): SiteLiveData {
-  // `useClientLiveQuery` short-circuits on the server so the console can be
-  // rendered by every shell without reaching for IndexedDB during prerender.
-  const snapshot = useClientLiveQuery<SiteSnapshot>(
+function useSiteIndex(): SiteIndexSnapshot | undefined {
+  return useClientLiveQuery<SiteIndexSnapshot>(
     async () => {
       const [sites, activeDeployments, operationSignals] = await Promise.all([
         listSiteProjects(),
         listActiveSiteDeployments(),
         listSiteOperationSignals(),
       ])
-      const selectedId = siteId ?? sites[0]?.id ?? null
-      if (!selectedId) {
-        return { ...EMPTY_TABLES, sites, selectedId: null, activeDeployments, operationSignals }
-      }
+      return { sites, activeDeployments, operationSignals }
+    },
+    [],
+    EMPTY_INDEX
+  )
+}
+
+/** The selected Site's own tables. Re-reads only when the selection changes. */
+function useSiteDetail(selectedId: string | null): SiteDetailSnapshot | undefined {
+  return useClientLiveQuery<SiteDetailSnapshot>(
+    async () => {
+      if (!selectedId) return EMPTY_DETAIL
       const [versions, deployments, environments, resources, operations] = await Promise.all([
         listSiteVersions(selectedId),
         listSiteDeployments(selectedId),
@@ -218,37 +259,35 @@ export function useSiteLiveData(siteId: string | null): SiteLiveData {
         listSiteResources(selectedId),
         listSiteOperations(selectedId),
       ])
-      const events = (
-        await Promise.all(operations.map((operation) => listSiteOperationEvents(operation.id)))
-      ).flat()
-      return {
-        sites,
-        selectedId,
-        activeDeployments,
-        operationSignals,
-        versions,
-        deployments,
-        environments,
-        resources,
-        operations,
-        events,
-      }
+      return { versions, deployments, environments, resources, operations }
     },
-    [siteId],
-    EMPTY_SNAPSHOT
+    [selectedId],
+    EMPTY_DETAIL
   )
+}
+
+/**
+ * @param siteId the pinned selection, or null to auto-select the first site.
+ */
+export function useSiteLiveData(siteId: string | null): SiteLiveData {
+  // `useClientLiveQuery` short-circuits on the server so the console can be
+  // rendered by every shell without reaching for IndexedDB during prerender.
+  const index = useSiteIndex()
+  const selectedId = siteId ?? index?.sites[0]?.id ?? null
+  const detail = useSiteDetail(selectedId)
 
   return {
-    sites: snapshot?.sites ?? [],
-    selectedId: snapshot?.selectedId ?? null,
-    activeDeployments: snapshot?.activeDeployments ?? EMPTY_TABLES.activeDeployments,
-    operationSignals: snapshot?.operationSignals ?? EMPTY_TABLES.operationSignals,
-    versions: snapshot?.versions ?? EMPTY_TABLES.versions,
-    deployments: snapshot?.deployments ?? EMPTY_TABLES.deployments,
-    environments: snapshot?.environments ?? EMPTY_TABLES.environments,
-    resources: snapshot?.resources ?? EMPTY_TABLES.resources,
-    operations: snapshot?.operations ?? EMPTY_TABLES.operations,
-    events: snapshot?.events ?? EMPTY_TABLES.events,
-    loading: snapshot === undefined,
+    sites: index?.sites ?? EMPTY_SITES,
+    selectedId,
+    activeDeployments: index?.activeDeployments ?? EMPTY_DEPLOYMENTS,
+    operationSignals: index?.operationSignals ?? EMPTY_OPERATIONS,
+    versions: detail?.versions ?? EMPTY_VERSIONS,
+    deployments: detail?.deployments ?? EMPTY_DEPLOYMENTS,
+    environments: detail?.environments ?? EMPTY_ENVIRONMENTS,
+    resources: detail?.resources ?? EMPTY_RESOURCES,
+    operations: detail?.operations ?? EMPTY_OPERATIONS,
+    // The rail and the empty state key off this; the detail query resolving
+    // later must not make an already-listed Site look like it is still loading.
+    loading: index === undefined,
   }
 }

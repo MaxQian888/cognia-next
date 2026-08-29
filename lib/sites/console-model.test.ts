@@ -5,7 +5,6 @@ import {
   currentVersion,
   environmentDiffIsEmpty,
   environmentRevisionDiff,
-  eventsForOperation,
   filterVersionViews,
   groupResourcesByKind,
   joinVersionsWithDeployments,
@@ -28,7 +27,6 @@ import { canAuthorSite } from "./authoring-policy"
 import type {
   SiteDeploymentRow,
   SiteEnvironmentRevisionRow,
-  SiteOperationEventRow,
   SiteOperationRow,
   SiteResourceRow,
   SiteVersionRow,
@@ -100,12 +98,6 @@ function operation(
     updatedAt: 1,
     ...overrides,
   }
-}
-
-function event(
-  overrides: Partial<SiteOperationEventRow> & Pick<SiteOperationEventRow, "id" | "operationId">
-): SiteOperationEventRow {
-  return { sequence: 1, type: "queued", createdAt: 1, ...overrides }
 }
 
 function revision(
@@ -181,36 +173,29 @@ describe("siteViewerRole", () => {
 })
 
 describe("failures", () => {
-  it("orders events for one operation by sequence", () => {
-    const events = [
-      event({ id: "e2", operationId: "op1", sequence: 2 }),
-      event({ id: "e1", operationId: "op1", sequence: 1 }),
-      event({ id: "e9", operationId: "op2", sequence: 1 }),
-    ]
-    expect(eventsForOperation(events, "op1").map((row) => row.id)).toEqual(["e1", "e2"])
+  it("reports the failure message the operation row carries", () => {
+    expect(
+      operationFailureText(operation({ id: "op1", status: "failed", errorMessage: "exit 1" }))
+    ).toBe("exit 1")
+    expect(
+      operationFailureText(
+        operation({ id: "op2", status: "waiting-reconcile", errorMessage: "provider timeout" })
+      )
+    ).toBe("provider timeout")
   })
 
-  it("prefers the operation's own message and falls back to the newest failing event", () => {
-    const failed = operation({ id: "op1", status: "failed", errorMessage: "exit 1" })
-    expect(operationFailureText(failed, [])).toBe("exit 1")
-
-    const uncertain = operation({ id: "op2", status: "waiting-reconcile" })
-    const events = [
-      event({ id: "e1", operationId: "op2", sequence: 1, type: "queued" }),
-      event({
-        id: "e2",
-        operationId: "op2",
-        sequence: 2,
-        type: "waiting-reconcile",
-        message: "provider timeout",
-      }),
-    ]
-    expect(operationFailureText(uncertain, events)).toBe("provider timeout")
+  it("does not reach for events — both writers of these statuses set errorMessage", () => {
+    // `failSiteOperation` and `markSiteOperationForReconcile` (lib/db/sites.ts)
+    // are the only writers of `failed` / `waiting-reconcile`, and both set
+    // `errorMessage` in the same transaction that appends the event. The old
+    // events fallback was therefore unreachable, and reading it cost the
+    // console every operation's events on every live-query re-run.
+    expect(operationFailureText(operation({ id: "op3", status: "failed" }))).toBeUndefined()
   })
 
   it("stays silent for operations that did not fail", () => {
-    expect(operationFailureText(operation({ id: "ok" }), [])).toBeUndefined()
-    expect(operationFailureText(operation({ id: "run", status: "running" }), [])).toBeUndefined()
+    expect(operationFailureText(operation({ id: "ok" }))).toBeUndefined()
+    expect(operationFailureText(operation({ id: "run", status: "running" }))).toBeUndefined()
   })
 
   it("collects version, deployment, and operation failures newest first", () => {

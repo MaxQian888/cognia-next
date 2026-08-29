@@ -25,7 +25,7 @@ import * as db from "@/lib/db/sites"
 import {
   SITE_STEP_ORDER,
   deriveStepStates,
-  latestEventMessage,
+  newestEventMessage,
   pickRunningOperation,
   stepOfOperation,
   useSiteLiveData,
@@ -195,7 +195,7 @@ describe("pickRunningOperation", () => {
   })
 })
 
-describe("latestEventMessage", () => {
+describe("newestEventMessage", () => {
   const events: SiteOperationEventRow[] = [
     { id: "e1", operationId: "op-1", sequence: 1, type: "claimed", message: "start", createdAt: 1 },
     {
@@ -206,15 +206,14 @@ describe("latestEventMessage", () => {
       message: "done",
       createdAt: 2,
     },
-    { id: "e3", operationId: "op-2", sequence: 1, type: "queued", message: "other", createdAt: 1 },
   ]
 
-  it("returns the highest-sequence event message for the operation", () => {
-    expect(latestEventMessage(events, "op-1")).toBe("done")
+  it("returns the highest-sequence message", () => {
+    expect(newestEventMessage(events)).toBe("done")
   })
 
-  it("returns undefined when the operation has no events", () => {
-    expect(latestEventMessage(events, "op-missing")).toBeUndefined()
+  it("returns undefined for an empty stream", () => {
+    expect(newestEventMessage([])).toBeUndefined()
   })
 })
 
@@ -228,28 +227,48 @@ describe("stepOfOperation", () => {
 })
 
 describe("useSiteLiveData", () => {
+  /**
+   * The hook drives two live queries — the Site index (deps `[]`) and the
+   * selected Site's detail (deps `[selectedId]`). The mock records both so a
+   * test can run either querier and assert which tables it touched.
+   */
+  function captureQueries() {
+    const calls: Array<{
+      run: () => Promise<Record<string, unknown>>
+      deps: unknown[]
+    }> = []
+    useLiveQueryMock.mockImplementation(
+      (run: () => Promise<Record<string, unknown>>, deps: unknown[]) => {
+        calls.push({ run, deps })
+        return undefined
+      }
+    )
+    return calls
+  }
+
   it("reports loading with empty tables and no selection before the first snapshot", () => {
     useLiveQueryMock.mockReturnValue(undefined)
-    const { result } = renderHook(() => useSiteLiveData("site-1"))
+    const { result } = renderHook(() => useSiteLiveData(null))
     expect(result.current.loading).toBe(true)
     expect(result.current.sites).toEqual([])
     expect(result.current.selectedId).toBeNull()
     expect(result.current.operations).toEqual([])
   })
 
-  it("maps a resolved snapshot onto the live-data shape", () => {
-    useLiveQueryMock.mockReturnValue({
-      sites: [{ id: "site-1" }],
-      selectedId: "site-1",
-      activeDeployments: [ACTIVE_DEPLOYMENT],
-      operationSignals: [],
-      versions: [READY_VERSION],
-      deployments: [ACTIVE_DEPLOYMENT],
-      environments: ONE_ENVIRONMENT,
-      resources: [],
-      operations: [operation({ id: "op-1" })],
-      events: [],
-    })
+  it("maps resolved index + detail snapshots onto the live-data shape", () => {
+    useLiveQueryMock
+      .mockReturnValueOnce({
+        sites: [{ id: "site-1" }],
+        activeDeployments: [ACTIVE_DEPLOYMENT],
+        operationSignals: [],
+      })
+      .mockReturnValueOnce({
+        versions: [READY_VERSION],
+        deployments: [ACTIVE_DEPLOYMENT],
+        environments: ONE_ENVIRONMENT,
+        resources: [],
+        operations: [operation({ id: "op-1" })],
+      })
     const { result } = renderHook(() => useSiteLiveData("site-1"))
     expect(result.current.loading).toBe(false)
     expect(result.current.sites).toHaveLength(1)
@@ -259,27 +278,41 @@ describe("useSiteLiveData", () => {
     expect(result.current.activeDeployments).toHaveLength(1)
   })
 
-  it("composes sites + per-site tables in its live query for a selected site", async () => {
-    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([{ id: "site-1" }])
-    ;(db.listSiteOperations as jest.Mock).mockResolvedValue([operation({ id: "op-1" })])
-    ;(db.listSiteOperationEvents as jest.Mock).mockResolvedValue([
-      { id: "e1", operationId: "op-1", sequence: 1, type: "queued", createdAt: 1 },
-    ])
-    let captured: (() => Promise<Record<string, unknown>>) | undefined
-    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
-      captured = fn
-      return undefined
-    })
-    renderHook(() => useSiteLiveData("site-1"))
-    const snapshot = await captured!()
-    expect(db.listSiteVersions).toHaveBeenCalledWith("site-1")
-    expect(db.listSiteOperationEvents).toHaveBeenCalledWith("op-1")
-    expect(snapshot.sites).toHaveLength(1)
-    expect(snapshot.selectedId).toBe("site-1")
-    expect(snapshot.events).toHaveLength(1)
+  it("does not stay in loading while only the detail query is outstanding", () => {
+    // The rail and the empty state key off `loading`; a Site list that has
+    // already resolved must not read as still loading because its detail has
+    // not.
+    useLiveQueryMock
+      .mockReturnValueOnce({
+        sites: [{ id: "site-1" }],
+        activeDeployments: [],
+        operationSignals: [],
+      })
+      .mockReturnValueOnce(undefined)
+    const { result } = renderHook(() => useSiteLiveData("site-1"))
+    expect(result.current.loading).toBe(false)
+    expect(result.current.versions).toEqual([])
   })
 
-  it("loads the cross-Site rail signals alongside the selection", async () => {
+  it("never reads operation events — those are scoped per operation now", async () => {
+    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([{ id: "site-1" }])
+    ;(db.listSiteOperations as jest.Mock).mockResolvedValue([operation({ id: "op-1" })])
+    const calls = captureQueries()
+    renderHook(() => useSiteLiveData("site-1"))
+    await Promise.all(calls.map((call) => call.run()))
+    expect(db.listSiteOperationEvents).not.toHaveBeenCalled()
+  })
+
+  it("keeps the Site index independent of the selection", async () => {
+    // Deps `[]`: a write to one Site's versions must not re-read the rail, and
+    // switching selection must not re-read the Site list.
+    const calls = captureQueries()
+    renderHook(() => useSiteLiveData("site-1"))
+    expect(calls[0]?.deps).toEqual([])
+    expect(calls[1]?.deps).toEqual(["site-1"])
+  })
+
+  it("loads the cross-Site rail signals in the index query", async () => {
     // Without these the rail can only label the selected row; every other Site
     // would show a bare name with no idea whether it is live, busy, or broken.
     ;(db.listSiteProjects as jest.Mock).mockResolvedValue([{ id: "site-1" }, { id: "site-2" }])
@@ -289,57 +322,38 @@ describe("useSiteLiveData", () => {
     ;(db.listSiteOperationSignals as jest.Mock).mockResolvedValue([
       { id: "op", siteId: "site-2", status: "running" },
     ])
-    let captured: (() => Promise<Record<string, unknown>>) | undefined
-    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
-      captured = fn
-      return undefined
-    })
+    const calls = captureQueries()
     renderHook(() => useSiteLiveData("site-1"))
-    const snapshot = await captured!()
-    expect(snapshot.activeDeployments).toHaveLength(1)
-    expect(snapshot.operationSignals).toHaveLength(1)
+    const index = await calls[0]!.run()
+    expect(index.activeDeployments).toHaveLength(1)
+    expect(index.operationSignals).toHaveLength(1)
   })
 
-  it("still loads the rail signals when there is no Site to select", async () => {
-    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([])
-    ;(db.listActiveSiteDeployments as jest.Mock).mockResolvedValue([])
-    ;(db.listSiteOperationSignals as jest.Mock).mockResolvedValue([])
-    let captured: (() => Promise<Record<string, unknown>>) | undefined
-    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
-      captured = fn
-      return undefined
-    })
-    renderHook(() => useSiteLiveData(null))
-    const snapshot = await captured!()
-    expect(snapshot.selectedId).toBeNull()
-    expect(db.listActiveSiteDeployments).toHaveBeenCalled()
-    expect(db.listSiteOperationSignals).toHaveBeenCalled()
+  it("reads the selected Site's own tables in the detail query", async () => {
+    const calls = captureQueries()
+    renderHook(() => useSiteLiveData("site-1"))
+    await calls[1]!.run()
+    expect(db.listSiteVersions).toHaveBeenCalledWith("site-1")
+    expect(db.listSiteDeployments).toHaveBeenCalledWith("site-1")
+    expect(db.listSiteOperations).toHaveBeenCalledWith("site-1")
   })
 
-  it("auto-selects the first site and loads its data when none is pinned", async () => {
-    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([{ id: "site-a" }, { id: "site-b" }])
-    let captured: (() => Promise<Record<string, unknown>>) | undefined
-    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
-      captured = fn
-      return undefined
+  it("auto-selects the first site once the index resolves", () => {
+    useLiveQueryMock.mockReturnValue({
+      sites: [{ id: "site-a" }, { id: "site-b" }],
+      activeDeployments: [],
+      operationSignals: [],
     })
-    renderHook(() => useSiteLiveData(null))
-    const snapshot = await captured!()
-    expect(snapshot.selectedId).toBe("site-a")
-    expect(db.listSiteVersions).toHaveBeenCalledWith("site-a")
+    const { result } = renderHook(() => useSiteLiveData(null))
+    expect(result.current.selectedId).toBe("site-a")
   })
 
-  it("returns an empty selection when there are no sites", async () => {
-    ;(db.listSiteProjects as jest.Mock).mockResolvedValue([])
-    let captured: (() => Promise<Record<string, unknown>>) | undefined
-    useLiveQueryMock.mockImplementation((fn: () => Promise<Record<string, unknown>>) => {
-      captured = fn
-      return undefined
-    })
+  it("reads no per-Site tables when there is nothing to select", async () => {
+    useLiveQueryMock.mockReturnValue(undefined)
+    const calls = captureQueries()
     renderHook(() => useSiteLiveData(null))
-    const snapshot = await captured!()
-    expect(snapshot.selectedId).toBeNull()
-    expect(snapshot.versions).toEqual([])
+    const detail = await calls[1]!.run()
+    expect(detail.versions).toEqual([])
     expect(db.listSiteVersions).not.toHaveBeenCalled()
   })
 })

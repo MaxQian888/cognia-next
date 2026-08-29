@@ -30,7 +30,6 @@ import { siteAnalyticsIsZoneScoped, siteObservabilityHostname } from "@/lib/site
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type {
   SiteDeploymentRow,
-  SiteOperationEventRow,
   SiteOperationRow,
   SiteProjectRow,
   SiteResourceRow,
@@ -50,7 +49,6 @@ export interface SiteObservabilityQuery {
 export interface SiteOperationsTabProps {
   site: SiteProjectRow
   operations: readonly SiteOperationRow[]
-  events: readonly SiteOperationEventRow[]
   resources: readonly SiteResourceRow[]
   deployments: readonly SiteDeploymentRow[]
   gate: SiteGate
@@ -66,7 +64,6 @@ export interface SiteOperationsTabProps {
 export function SiteOperationsTab({
   site,
   operations,
-  events,
   resources,
   deployments,
   gate,
@@ -159,7 +156,6 @@ export function SiteOperationsTab({
       {segment === "operations" ? (
         <SiteOperationJournal
           operations={operations}
-          events={events}
           onRefresh={onRefreshOperation}
           onCancel={onCancelOperation}
           refreshDisabled={busy || !gate.allowed}

@@ -71,7 +71,6 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteOperationsTab>
     <SiteOperationsTab
       site={site()}
       operations={[operation]}
-      events={[]}
       resources={[]}
       deployments={[]}
       gate={allowed}

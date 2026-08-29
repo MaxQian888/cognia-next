@@ -234,7 +234,6 @@ export function SitesConsole() {
               versions={live.versions}
               deployments={live.deployments}
               operations={live.operations}
-              events={live.events}
               actorAccountId={actorAccountId}
               gate={providerGate}
               metadataGate={metadataGate}
@@ -251,7 +250,6 @@ export function SitesConsole() {
                   site={site}
                   stepStates={publish.stepStates}
                   operations={live.operations}
-                  events={live.events}
                   readyVersions={publish.readyVersions}
                   manifest={manifest}
                   wrangler={publish.wrangler}
@@ -337,7 +335,6 @@ export function SitesConsole() {
                 <SiteOperationsTab
                   site={site}
                   operations={live.operations}
-                  events={live.events}
                   resources={live.resources}
                   deployments={live.deployments}
                   gate={providerGate}

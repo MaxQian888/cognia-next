@@ -21,21 +21,17 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import {
   SITE_STEP_ORDER,
-  latestEventMessage,
+  newestEventMessage,
   pickRunningOperation,
   stepOfOperation,
   type SiteStepKey,
   type SiteStepState,
 } from "@/hooks/sites/use-site-live-data"
+import { useSiteOperationEvents } from "@/hooks/sites/use-site-operation-events"
 import type { SiteHostingManifestController } from "@/hooks/sites/use-site-hosting-manifest"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type { SiteScaffoldFile } from "@/lib/sites/manifest-scaffold"
-import type {
-  SiteOperationEventRow,
-  SiteOperationRow,
-  SiteProjectRow,
-  SiteVersionRow,
-} from "@/types/sites"
+import type { SiteOperationRow, SiteProjectRow, SiteVersionRow } from "@/types/sites"
 import type { WranglerDetection } from "@/lib/sites/wrangler-detect"
 import { SitePublishStep } from "../site-publish-step"
 import { SiteManifestEditor } from "../site-manifest-editor"
@@ -58,7 +54,6 @@ export interface SitePublishTabProps {
   site: SiteProjectRow
   stepStates: Record<SiteStepKey, SiteStepState>
   operations: readonly SiteOperationRow[]
-  events: readonly SiteOperationEventRow[]
   readyVersions: readonly SiteVersionRow[]
   manifest: SiteHostingManifestController
   wrangler: WranglerDetection | null
@@ -84,7 +79,6 @@ export function SitePublishTab({
   site,
   stepStates,
   operations,
-  events,
   readyVersions,
   manifest,
   wrangler,
@@ -114,10 +108,12 @@ export function SitePublishTab({
 
   const runningOperation = pickRunningOperation(operations)
   const runningStep = stepOfOperation(runningOperation)
+  // Scoped to the one operation in flight, so the publish flow's live sub-status
+  // costs a single-operation query rather than every operation's events.
+  const runningEvents = useSiteOperationEvents(runningOperation?.id ?? null)
+  const runningMessage = newestEventMessage(runningEvents)
   const subStatusFor = (step: SiteStepKey): string | undefined =>
-    runningOperation && runningStep === step
-      ? latestEventMessage(events, runningOperation.id)
-      : undefined
+    runningOperation && runningStep === step ? runningMessage : undefined
 
   const index = (step: SiteStepKey) => SITE_STEP_ORDER.indexOf(step) + 1
   const manifestBlocked = !manifest.ready ? t("errors.manifestMissing") : undefined

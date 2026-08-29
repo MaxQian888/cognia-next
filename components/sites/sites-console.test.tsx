@@ -129,7 +129,6 @@ function liveData(overrides: Record<string, unknown> = {}) {
     environments: [],
     resources: [],
     operations: [],
-    events: [],
     loading: false,
     ...overrides,
   }

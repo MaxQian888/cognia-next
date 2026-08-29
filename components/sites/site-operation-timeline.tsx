@@ -10,6 +10,7 @@
  * message were all dropped. When an upload failed there was nowhere to read
  * why. This shows the whole row and expands into the event stream.
  */
+import { useMemo } from "react"
 import { useTranslations, useFormatter, useNow } from "next-intl"
 import { ChevronDownIcon, CopyIcon, RefreshCwIcon, XCircleIcon } from "lucide-react"
 
@@ -18,7 +19,8 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useCopy } from "@/hooks/ui"
-import { eventsForOperation, operationFailureText } from "@/lib/sites/console-model"
+import { useSiteOperationEvents } from "@/hooks/sites/use-site-operation-events"
+import { operationFailureText } from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type { SiteOperationEventRow, SiteOperationRow } from "@/types/sites"
 import {
@@ -93,7 +95,6 @@ export function SiteOperationTimeline({ events }: SiteOperationTimelineProps) {
 
 export interface SiteOperationJournalProps {
   operations: readonly SiteOperationRow[]
-  events: readonly SiteOperationEventRow[]
   /** Re-read one operation on demand — useful for a stuck `waiting-reconcile`. */
   onRefresh?: (operationId: string) => void
   /** Abandon an operation that will never finish. Only offered while non-terminal. */
@@ -102,9 +103,20 @@ export interface SiteOperationJournalProps {
   refreshTitle?: string
 }
 
+/**
+ * The event rail for one operation, loaded on demand.
+ *
+ * Mounted inside `CollapsibleContent`, which Radix unmounts while closed — so a
+ * journal nobody has expanded issues zero event queries, and expanding one row
+ * reads exactly that row's events instead of every operation's.
+ */
+function SiteOperationTimelineLoader({ operationId }: { operationId: string }) {
+  const events = useSiteOperationEvents(operationId)
+  return <SiteOperationTimeline events={events} />
+}
+
 export function SiteOperationJournal({
   operations,
-  events,
   onRefresh,
   onCancel,
   refreshDisabled,
@@ -114,6 +126,12 @@ export function SiteOperationJournal({
   const format = useFormatter()
   const now = useNow()
   const { copy, copied } = useCopy()
+  // Newest first: the thing that just failed is the thing being looked for.
+  // Above the empty-state return — a hook cannot sit behind a conditional.
+  const ordered = useMemo(
+    () => [...operations].sort((left, right) => right.updatedAt - left.updatedAt),
+    [operations]
+  )
 
   if (operations.length === 0) {
     return (
@@ -131,14 +149,10 @@ export function SiteOperationJournal({
     )
   }
 
-  // Newest first: the thing that just failed is the thing being looked for.
-  const ordered = [...operations].sort((left, right) => right.updatedAt - left.updatedAt)
-
   return (
     <div className="overflow-hidden rounded-xl border" data-testid="site-operation-journal">
       {ordered.map((operation) => {
-        const failure = operationFailureText(operation, events)
-        const operationEvents = eventsForOperation(events, operation.id)
+        const failure = operationFailureText(operation)
         return (
           <Collapsible key={operation.id} className="border-b last:border-b-0">
             <CollapsibleTrigger
@@ -220,7 +234,7 @@ export function SiteOperationJournal({
                   ) : null}
                 </span>
               </div>
-              <SiteOperationTimeline events={operationEvents} />
+              <SiteOperationTimelineLoader operationId={operation.id} />
             </CollapsibleContent>
           </Collapsible>
         )

@@ -21,7 +21,6 @@ import type {
   SiteDeploymentRow,
   SiteEnvironmentRevisionRow,
   SiteOperationRow,
-  SiteOperationEventRow,
   SiteResourceKind,
   SiteProjectRow,
   SiteResourceRow,
@@ -163,31 +162,21 @@ export interface SiteFailure {
   at: number
 }
 
-/** Events belonging to one operation, oldest first. */
-export function eventsForOperation(
-  events: readonly SiteOperationEventRow[],
-  operationId: string
-): SiteOperationEventRow[] {
-  return events
-    .filter((event) => event.operationId === operationId)
-    .sort((left, right) => left.sequence - right.sequence)
-}
-
 /**
- * Best available failure text for an operation: its own message, else the
- * newest failing event's message. `waiting-reconcile` counts — an uncertain
- * provider outcome is something the user must act on.
+ * Failure text for an operation, or undefined when it has not failed.
+ * `waiting-reconcile` counts — an uncertain provider outcome is something the
+ * user must act on.
+ *
+ * This used to fall back to the newest failing *event*'s message, which cost
+ * the console a flat array of every operation's events on every live-query
+ * re-run. The fallback was unreachable: `failSiteOperation` and
+ * `markSiteOperationForReconcile` (`lib/db/sites.ts`) are the only two writers
+ * of those statuses and both set `errorMessage` on the row in the same
+ * transaction that appends the event.
  */
-export function operationFailureText(
-  operation: SiteOperationRow,
-  events: readonly SiteOperationEventRow[]
-): string | undefined {
+export function operationFailureText(operation: SiteOperationRow): string | undefined {
   if (operation.status !== "failed" && operation.status !== "waiting-reconcile") return undefined
-  if (operation.errorMessage) return operation.errorMessage
-  const failing = eventsForOperation(events, operation.id)
-    .filter((event) => event.type === "failed" || event.type === "waiting-reconcile")
-    .at(-1)
-  return failing?.message
+  return operation.errorMessage
 }
 
 /**
@@ -198,8 +187,7 @@ export function operationFailureText(
 export function collectSiteFailures(
   versions: readonly SiteVersionRow[],
   deployments: readonly SiteDeploymentRow[],
-  operations: readonly SiteOperationRow[],
-  events: readonly SiteOperationEventRow[]
+  operations: readonly SiteOperationRow[]
 ): SiteFailure[] {
   const failures: SiteFailure[] = []
   for (const version of versions) {
@@ -225,7 +213,7 @@ export function collectSiteFailures(
     }
   }
   for (const operation of operations) {
-    const message = operationFailureText(operation, events)
+    const message = operationFailureText(operation)
     if (message) {
       failures.push({
         scope: "operation",

@@ -13,6 +13,12 @@ jest.mock("@/components/browser/browser-preview-pane", () => ({
 jest.mock("../site-manifest-editor", () => ({
   SiteManifestEditor: () => <div data-testid="manifest-editor" />,
 }))
+// The sub-status now reads a live query scoped to the one running operation,
+// instead of filtering a flat array of every operation's events.
+const operationEvents = jest.fn(() => [] as Array<Record<string, unknown>>)
+jest.mock("@/hooks/sites/use-site-operation-events", () => ({
+  useSiteOperationEvents: (operationId: string | null) => operationEvents(operationId),
+}))
 
 import type { SiteHostingManifestController } from "@/hooks/sites/use-site-hosting-manifest"
 import type { SiteStepKey, SiteStepState } from "@/hooks/sites/use-site-live-data"
@@ -80,7 +86,6 @@ function renderTab(props: Partial<React.ComponentProps<typeof SitePublishTab>> =
       site={site()}
       stepStates={IDLE}
       operations={[]}
-      events={[]}
       readyVersions={[]}
       manifest={manifest(true)}
       wrangler={{ path: "/usr/bin/wrangler", version: "3.90.0", ready: true }}
@@ -212,21 +217,20 @@ it("streams the running operation's newest event into the owning step", () => {
     createdAt: 1,
     updatedAt: 1,
   }
-  renderTab({
-    stepStates: { ...IDLE, build: "running" },
-    operations: [operation],
-    events: [
-      { id: "e1", operationId: "op1", sequence: 1, type: "queued", createdAt: 1 },
-      {
-        id: "e2",
-        operationId: "op1",
-        sequence: 2,
-        type: "claimed",
-        message: "installing dependencies",
-        createdAt: 2,
-      },
-    ],
-  })
+  operationEvents.mockReturnValue([
+    { id: "e1", operationId: "op1", sequence: 1, type: "queued", createdAt: 1 },
+    {
+      id: "e2",
+      operationId: "op1",
+      sequence: 2,
+      type: "claimed",
+      message: "installing dependencies",
+      createdAt: 2,
+    },
+  ])
+  renderTab({ stepStates: { ...IDLE, build: "running" }, operations: [operation] })
+  // Scoped to the operation actually in flight.
+  expect(operationEvents).toHaveBeenCalledWith("op1")
   expect(screen.getByRole("status")).toHaveTextContent("installing dependencies")
 })
 

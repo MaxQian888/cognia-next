@@ -14,6 +14,13 @@ jest.mock("next-intl", () => ({
 const copy = jest.fn(async () => true)
 jest.mock("@/hooks/ui", () => ({ useCopy: () => ({ copy, copied: false, isCopying: false }) }))
 
+// The journal no longer receives a flat array of every operation's events; an
+// expanded row runs its own single-operation live query.
+const operationEvents = jest.fn(() => [] as SiteOperationEventRow[])
+jest.mock("@/hooks/sites/use-site-operation-events", () => ({
+  useSiteOperationEvents: (operationId: string | null) => operationEvents(operationId),
+}))
+
 import type { SiteOperationEventRow, SiteOperationRow } from "@/types/sites"
 import { SiteOperationJournal, SiteOperationTimeline } from "./site-operation-timeline"
 
@@ -85,7 +92,6 @@ describe("SiteOperationJournal", () => {
           operation({ id: "old", type: "build", updatedAt: 10 }),
           operation({ id: "new", type: "deploy", updatedAt: 90, attemptCount: 3 }),
         ]}
-        events={[]}
       />
     )
     const rows = screen.getAllByRole("button")
@@ -98,23 +104,23 @@ describe("SiteOperationJournal", () => {
     render(
       <SiteOperationJournal
         operations={[operation({ id: "op1", status: "failed", errorMessage: "install failed" })]}
-        events={[]}
       />
     )
     expect(screen.getByText("install failed")).toBeInTheDocument()
   })
 
-  it("falls back to the newest failing event when the operation carries no message", () => {
+  it("shows the failure message the operation row carries", () => {
+    // The old events fallback is gone: `failSiteOperation` and
+    // `markSiteOperationForReconcile` both write `errorMessage` in the same
+    // transaction that appends the event, so reading events for this cost the
+    // console every operation's stream for a value already on the row.
     render(
       <SiteOperationJournal
-        operations={[operation({ id: "op1", status: "waiting-reconcile" })]}
-        events={[
-          event({
-            id: "e1",
-            operationId: "op1",
-            sequence: 1,
-            type: "waiting-reconcile",
-            message: "provider timeout",
+        operations={[
+          operation({
+            id: "op1",
+            status: "waiting-reconcile",
+            errorMessage: "provider timeout",
           }),
         ]}
       />
@@ -127,12 +133,16 @@ describe("SiteOperationJournal", () => {
     render(
       <SiteOperationJournal
         operations={[operation({ id: "op1", providerRequestId: "cf-req-7" })]}
-        events={[event({ id: "e1", operationId: "op1", message: "queued it" })]}
       />
     )
     expect(screen.queryByTestId("site-operation-events")).not.toBeInTheDocument()
+    // Collapsed: Radix has not mounted the rail, so no event query ran at all.
+    expect(operationEvents).not.toHaveBeenCalled()
 
+    operationEvents.mockReturnValue([event({ id: "e1", operationId: "op1", message: "queued it" })])
     await user.click(screen.getByTestId("site-operation-op1"))
+
+    expect(operationEvents).toHaveBeenCalledWith("op1")
 
     expect(screen.getByText("cf-req-7")).toBeInTheDocument()
     expect(screen.getByTestId("site-operation-events")).toBeInTheDocument()
@@ -144,7 +154,6 @@ describe("SiteOperationJournal", () => {
     render(
       <SiteOperationJournal
         operations={[operation({ id: "op1", providerRequestId: "cf-req-7" })]}
-        events={[]}
       />
     )
     await user.click(screen.getByTestId("site-operation-op1"))
@@ -156,10 +165,7 @@ describe("SiteOperationJournal", () => {
     const user = userEvent.setup()
     const onRefresh = jest.fn()
     const { rerender } = render(
-      <SiteOperationJournal
-        operations={[operation({ id: "op1", status: "waiting-reconcile" })]}
-        events={[]}
-      />
+      <SiteOperationJournal operations={[operation({ id: "op1", status: "waiting-reconcile" })]} />
     )
     await user.click(screen.getByTestId("site-operation-op1"))
     expect(screen.queryByText("actions.refreshOperation")).not.toBeInTheDocument()
@@ -167,7 +173,6 @@ describe("SiteOperationJournal", () => {
     rerender(
       <SiteOperationJournal
         operations={[operation({ id: "op1", status: "waiting-reconcile" })]}
-        events={[]}
         onRefresh={onRefresh}
         refreshDisabled
         refreshTitle="needs desktop"
@@ -180,7 +185,6 @@ describe("SiteOperationJournal", () => {
     rerender(
       <SiteOperationJournal
         operations={[operation({ id: "op1", status: "waiting-reconcile" })]}
-        events={[]}
         onRefresh={onRefresh}
       />
     )
@@ -196,7 +200,6 @@ describe("abandoning a wedged operation", () => {
     render(
       <SiteOperationJournal
         operations={[operation({ id: "stuck", status: "waiting-reconcile" })]}
-        events={[]}
         onCancel={onCancel}
       />
     )
@@ -212,7 +215,6 @@ describe("abandoning a wedged operation", () => {
       render(
         <SiteOperationJournal
           operations={[operation({ id: "done", status })]}
-          events={[]}
           onCancel={jest.fn()}
         />
       )
@@ -223,12 +225,7 @@ describe("abandoning a wedged operation", () => {
 
   it("shows nothing when the caller offers no cancel", async () => {
     const user = userEvent.setup()
-    render(
-      <SiteOperationJournal
-        operations={[operation({ id: "stuck", status: "queued" })]}
-        events={[]}
-      />
-    )
+    render(<SiteOperationJournal operations={[operation({ id: "stuck", status: "queued" })]} />)
     await user.click(screen.getByTestId("site-operation-stuck"))
     expect(screen.queryByTestId("site-operation-cancel-stuck")).not.toBeInTheDocument()
   })

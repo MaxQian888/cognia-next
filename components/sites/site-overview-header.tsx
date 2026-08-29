@@ -40,7 +40,6 @@ import {
 import { cn } from "@/lib/utils"
 import type {
   SiteDeploymentRow,
-  SiteOperationEventRow,
   SiteOperationRow,
   SiteProjectRow,
   SiteVersionRow,
@@ -53,7 +52,6 @@ export interface SiteOverviewHeaderProps {
   versions: readonly SiteVersionRow[]
   deployments: readonly SiteDeploymentRow[]
   operations: readonly SiteOperationRow[]
-  events: readonly SiteOperationEventRow[]
   actorAccountId: string
   gate: SiteGate
   metadataGate: SiteGate
@@ -69,7 +67,6 @@ export function SiteOverviewHeader({
   versions,
   deployments,
   operations,
-  events,
   actorAccountId,
   gate,
   metadataGate,
@@ -87,7 +84,7 @@ export function SiteOverviewHeader({
   const productionUrl = siteProductionUrl(deployments)
   const activeDeployment = pickActiveDeployment(deployments)
   const version = currentVersion(versions, deployments)
-  const failures = collectSiteFailures(versions, deployments, operations, events)
+  const failures = collectSiteFailures(versions, deployments, operations)
   const role = siteViewerRole(site.authoringPolicy, actorAccountId)
   const sourcePath = site.sourceSubpath
     ? `${site.sourceRoot}/${site.sourceSubpath}`
