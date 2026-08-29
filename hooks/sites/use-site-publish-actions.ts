@@ -10,9 +10,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { createDir } from "@/lib/file/file-operations"
-import { cancelSiteOperation, getSiteArtifact, getSiteOperation } from "@/lib/db/sites"
-import { materializeSiteArtifact } from "@/lib/sites/artifact-package"
+import { cancelSiteOperation, getSiteOperation } from "@/lib/db/sites"
+import { uploadSiteVersion } from "@/lib/sites/publish-version"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
 import {
@@ -239,32 +238,15 @@ export function useSitePublishActions({
 
   const upload = useCallback(
     (version: SiteVersionRow) => {
-      void run(`upload:${version.id}`, async () => {
-        const current = requireSite()
-        const wranglerPath = wrangler?.path
-        if (!wranglerPath) throw new Error("wrangler binary required")
-        if (!version.artifactDigest) throw new Error("version artifact required")
-        const artifact = await getSiteArtifact(version.artifactDigest)
-        if (!artifact) throw new Error("version artifact required")
-        const path = await import("@tauri-apps/api/path")
-        const cacheRoot = await path.join(
-          await path.appCacheDir(),
-          "cognia-sites",
-          current.id,
-          version.id
-        )
-        await createDir(cacheRoot, { recursive: true })
-        const materialized = await materializeSiteArtifact(artifact.bytes, cacheRoot)
-        await service().uploadVersion(current.id, version.id, {
-          wranglerBinaryPath: wranglerPath,
-          stagingRoot: cacheRoot,
-          configPath: await path.join(cacheRoot, "wrangler.json"),
-          entryPath: materialized.entryPath,
-          assetsPath: materialized.assetsPath,
+      void run(`upload:${version.id}`, () =>
+        uploadSiteVersion({
+          siteId: requireSite().id,
+          versionId: version.id,
+          actorAccountId,
         })
-      })
+      )
     },
-    [run, requireSite, service, wrangler]
+    [run, requireSite, actorAccountId]
   )
 
   const deploy = useCallback(
