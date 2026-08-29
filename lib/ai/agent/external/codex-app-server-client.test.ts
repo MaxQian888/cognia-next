@@ -687,6 +687,23 @@ describe("CodexAppServerAdapter", () => {
       expect(lastWritten((m) => m.method === "thread/start")).toBeUndefined()
     })
 
+    it("does not let the first request outrun the requirements read", async () => {
+      // Connect fires `configRequirements/read` without awaiting it, so a
+      // `thread/start` issued immediately used to read `undefined` requirements
+      // — which the checker treats as unconstrained — and sail past the gate
+      // this module exists for. No `await Promise.resolve()` here on purpose:
+      // that tick is the race.
+      responders["configRequirements/read"] = () => ({
+        requirements: { allowedSandboxModes: ["read-only", "workspace-write"] },
+      })
+      const adapter = await connectedAdapter()
+
+      await expect(
+        adapter.createSession({ permissionMode: "bypassPermissions" })
+      ).rejects.toMatchObject({ code: "managed_policy_refused" })
+      expect(lastWritten((m) => m.method === "thread/start")).toBeUndefined()
+    })
+
     it("sends normally when the managed config permits the request", async () => {
       responders["configRequirements/read"] = () => ({
         requirements: { allowedSandboxModes: ["danger-full-access"] },

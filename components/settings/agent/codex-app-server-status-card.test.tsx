@@ -32,6 +32,14 @@ const messages = {
         usedPercent: "{percent}% used",
         resetsAt: "Resets {time}",
         rateLimitReached: "Rate limit reached",
+        managedPolicy: "Managed policy",
+        managedPolicySandbox: "sandbox: {value}",
+        managedPolicyApproval: "approval: {value}",
+        managedPolicyProfile: "profile: {value}",
+        managedPolicyNone: "This Codex declares no managed limits.",
+        managedPolicyUnsupported: "This Codex has no managed-policy surface.",
+        managedPolicyUnread: "The managed limits have not been read yet.",
+        managedPolicyForbidsAll: "This Codex's managed configuration permits nothing.",
       },
     },
   },
@@ -198,6 +206,33 @@ describe("CodexAppServerStatusCard", () => {
       expect(screen.queryByTestId("codex-requirements-unsupported")).not.toBeInTheDocument()
       expect(screen.queryByTestId("codex-managed-policy")).not.toBeInTheDocument()
       expect(screen.getByText(/declares no managed limits/i)).toBeInTheDocument()
+    })
+
+    it("does not claim there are no limits before the read has landed", () => {
+      // `undefined` is "not read" — the connect-time read is still in flight,
+      // or it threw and was only logged. Both used to render "declares no
+      // managed limits", which is the one claim this card must not make about a
+      // Codex nobody has actually asked.
+      hookValue.status = { mcpServers: [], skills: [] }
+      renderCard()
+      expect(screen.getByTestId("codex-requirements-unread")).toBeInTheDocument()
+      expect(screen.queryByText(/declares no managed limits/i)).not.toBeInTheDocument()
+    })
+
+    it("says an all-empty allowlist forbids everything, rather than showing nothing", () => {
+      // The fail-closed extreme: a limit that was read and permits nothing.
+      // Rendering an empty badge row for it reads on screen as unrestricted —
+      // the exact opposite of what it means.
+      hookValue.status = {
+        mcpServers: [],
+        skills: [],
+        configRequirements: { allowedSandboxModes: [], allowedApprovalPolicies: [] },
+        configRequirementsUnsupported: false,
+      }
+      renderCard()
+      expect(screen.getByTestId("codex-managed-policy-empty")).toBeInTheDocument()
+      expect(screen.queryByTestId("codex-managed-policy")).not.toBeInTheDocument()
+      expect(screen.queryByText(/declares no managed limits/i)).not.toBeInTheDocument()
     })
   })
 })

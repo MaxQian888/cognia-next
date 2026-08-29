@@ -23,6 +23,24 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
   const format = useFormatter()
   const { status, loading, available, refresh } = useCodexAppServerStatus(agentId, connected)
 
+  // Flattened first so "the policy permits nothing" is a state the render can
+  // branch on. Counting the badges after emitting them cannot distinguish an
+  // empty row from an absent one, and the empty row is the fail-closed case.
+  const requirements = status.configRequirements
+  const managedPolicyBadges: { key: string; label: string }[] = [
+    ...(requirements?.allowedSandboxModes ?? []).map((mode) => ({
+      key: `sandbox-${mode}`,
+      label: t("managedPolicySandbox", { value: mode }),
+    })),
+    ...(requirements?.allowedApprovalPolicies ?? []).map((policy) => ({
+      key: `approval-${policy}`,
+      label: t("managedPolicyApproval", { value: policy }),
+    })),
+    ...Object.entries(requirements?.allowedPermissionProfiles ?? {})
+      .filter(([, allowed]) => allowed)
+      .map(([id]) => ({ key: `profile-${id}`, label: t("managedPolicyProfile", { value: id }) })),
+  ]
+
   if (!connected || !available) {
     return (
       <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
@@ -122,27 +140,32 @@ export function CodexAppServerStatusCard({ agentId, connected }: CodexAppServerS
           <p className="text-xs text-muted-foreground" data-testid="codex-requirements-unsupported">
             {t("managedPolicyUnsupported")}
           </p>
-        ) : !status.configRequirements ? (
+        ) : status.configRequirements === undefined ? (
+          // `undefined` is "not read": either the connect-time read has not
+          // landed yet, or it threw and `refreshConfigRequirements` logged and
+          // moved on. Both used to fall through to "declares no managed limits",
+          // which is the one claim this card exists not to make on a Codex
+          // nobody has actually asked.
+          <p className="text-xs text-muted-foreground" data-testid="codex-requirements-unread">
+            {t("managedPolicyUnread")}
+          </p>
+        ) : status.configRequirements === null ? (
           <p className="text-xs text-muted-foreground">{t("managedPolicyNone")}</p>
+        ) : managedPolicyBadges.length === 0 ? (
+          // A requirements object whose every allowlist is empty is the
+          // fail-closed extreme: nothing is permitted, so every request is
+          // refused before it is sent. Rendering an empty badge row for that
+          // read on screen as "unrestricted" — the exact opposite.
+          <p className="text-xs text-muted-foreground" data-testid="codex-managed-policy-empty">
+            {t("managedPolicyForbidsAll")}
+          </p>
         ) : (
           <div className="flex flex-wrap gap-1" data-testid="codex-managed-policy">
-            {status.configRequirements.allowedSandboxModes?.map((mode) => (
-              <Badge key={`sandbox-${mode}`} variant="outline" className="text-[10px]">
-                {t("managedPolicySandbox", { value: mode })}
+            {managedPolicyBadges.map(({ key, label }) => (
+              <Badge key={key} variant="outline" className="text-[10px]">
+                {label}
               </Badge>
             ))}
-            {status.configRequirements.allowedApprovalPolicies?.map((policy) => (
-              <Badge key={`approval-${policy}`} variant="outline" className="text-[10px]">
-                {t("managedPolicyApproval", { value: policy })}
-              </Badge>
-            ))}
-            {Object.entries(status.configRequirements.allowedPermissionProfiles ?? {})
-              .filter(([, allowed]) => allowed)
-              .map(([id]) => (
-                <Badge key={`profile-${id}`} variant="outline" className="text-[10px]">
-                  {t("managedPolicyProfile", { value: id })}
-                </Badge>
-              ))}
           </div>
         )}
       </div>

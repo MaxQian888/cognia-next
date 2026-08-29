@@ -394,6 +394,7 @@
     "checkCommandAndArgs": "Check the agent's command and startup arguments.",
     "checkDiagnosticsAndRetry": "Check the run diagnostics, then retry with a narrower request.",
     "completeSetupThenRetry": "Finish this agent's setup, then retry the connection.",
+    "contactAdministrator": "The limit is set by whoever deployed this Codex; ask them to widen it.",
     "createNewSession": "Start a new session when resume and fork aren't available.",
     "inspectHealthEndpoint": "Check the agent's health endpoint and logs.",
     "reconnectAndRetry": "Reconnect, then retry.",
@@ -402,6 +403,7 @@
     "retryAfterReconnect": "Retry after reconnecting.",
     "selectLocalSurface": "Pick a locally executable surface to connect to directly.",
     "switchToAcp": "Switch the agent's protocol to ACP.",
+    "useAllowedSandboxOrApproval": "Choose a sandbox mode or approval policy this Codex's managed configuration permits.",
     "useDesktopRuntime": "Run Cognia as the desktop app — stdio transport needs it.",
     "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
     "useSupportedOperations": "Stick to the operations this endpoint supports."

@@ -25,6 +25,7 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import { activeHostFeatureManifest } from "@/stores/remote-host/remote-host-store"
 import { hasCapability } from "@/lib/platform/capabilities"
 import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
@@ -109,6 +110,7 @@ export interface RemoteHostConfigDeps {
   getRuntimeSnapshot: typeof getRuntimeSnapshot
   activeHostFeatureManifest: () => HostFeatureManifest | null
   call: <T>(command: string, payload?: Record<string, unknown>) => Promise<T>
+  issueAdminLease: typeof issueHostAdminLease
 }
 
 const defaultDeps: RemoteHostConfigDeps = {
@@ -122,6 +124,7 @@ const defaultDeps: RemoteHostConfigDeps = {
   getRuntimeSnapshot,
   activeHostFeatureManifest,
   call: (command, payload) => transport.call(command, payload ?? {}),
+  issueAdminLease: issueHostAdminLease,
 }
 
 let deps: RemoteHostConfigDeps = defaultDeps
@@ -191,6 +194,25 @@ export async function callHostConfigCommand<T>(
 
 const call = callHostConfigCommand
 
+/**
+ * Mutating the host-owned configuration is always a direct user action. Mint
+ * the short-lived approval at that boundary and use it immediately; a lease
+ * must never be parked in a durable queue where it can expire before dispatch.
+ * Local authority goes through the service plane and does not need a device
+ * lease.
+ */
+async function callHostConfigWriteCommand<T>(
+  operation: HostConfigCommand,
+  payload: Record<string, unknown> = {}
+): Promise<T> {
+  const availability = hostConfigsAvailability(operation)
+  if (!availability.ok) throw new HostConfigsUnsupportedError(availability.reason, operation)
+  const localAuthority = deps.hasLocalAuthority() && !deps.isRemoteHostActive()
+  if (localAuthority) return deps.call<T>(operation, payload)
+  const lease = await deps.issueAdminLease([operation])
+  return deps.call<T>(operation, { ...payload, adminLease: lease.token })
+}
+
 export async function listRemoteHostConfigs(): Promise<ExternalAgentConfigRecord[]> {
   const result = await call<{ configs: ExternalAgentConfigRecord[] }>(HOST_CONFIG_COMMANDS.list)
   return result.configs ?? []
@@ -218,10 +240,13 @@ export async function createRemoteHostConfig(
   config: Partial<StoredExternalAgentConfig>,
   options: { fromImport?: boolean } = {}
 ): Promise<ExternalAgentConfigRecord> {
-  const result = await call<{ config: ExternalAgentConfigRecord }>(HOST_CONFIG_COMMANDS.create, {
-    config,
-    ...(options.fromImport ? { fromImport: true } : {}),
-  })
+  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
+    HOST_CONFIG_COMMANDS.create,
+    {
+      config,
+      ...(options.fromImport ? { fromImport: true } : {}),
+    }
+  )
   return result.config
 }
 
@@ -230,7 +255,7 @@ export async function updateRemoteHostConfig(input: {
   expectedRevision: string
   patch: Partial<StoredExternalAgentConfig>
 }): Promise<ExternalAgentConfigRecord> {
-  const result = await call<{ config: ExternalAgentConfigRecord }>(
+  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.update,
     input as unknown as Record<string, unknown>
   )
@@ -238,9 +263,10 @@ export async function updateRemoteHostConfig(input: {
 }
 
 export async function deleteRemoteHostConfig(configId: string): Promise<ExternalAgentConfigRecord> {
-  const result = await call<{ config: ExternalAgentConfigRecord }>(HOST_CONFIG_COMMANDS.delete, {
-    configId,
-  })
+  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
+    HOST_CONFIG_COMMANDS.delete,
+    { configId }
+  )
   return result.config
 }
 
@@ -252,7 +278,9 @@ export interface RemoteReconcileOutcome {
 }
 
 export async function reconcileRemoteHostConfigs(): Promise<RemoteReconcileOutcome[]> {
-  const result = await call<{ outcomes: RemoteReconcileOutcome[] }>(HOST_CONFIG_COMMANDS.reconcile)
+  const result = await callHostConfigWriteCommand<{ outcomes: RemoteReconcileOutcome[] }>(
+    HOST_CONFIG_COMMANDS.reconcile
+  )
   return result.outcomes ?? []
 }
 

@@ -438,6 +438,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   // Status surfaced to the read-only UI panel.
   private status: CodexAppServerStatus = { mcpServers: [], skills: [] }
+  /**
+   * The in-flight `configRequirements/read`, so the managed-policy gate can
+   * wait for it instead of racing it.
+   *
+   * `assertCodexRequestAllowed` reads `undefined` requirements as
+   * unconstrained, which is right for a Codex that declares none and wrong for
+   * a read that has not landed — and connect kicks the read off with `void`, so
+   * the first `thread/start` after connect used to sail straight past the gate
+   * the module exists for. Cleared once resolved so later calls cost nothing.
+   */
+  private configRequirementsRead?: Promise<void>
   private statusListeners = new Set<(status: CodexAppServerStatus) => void>()
 
   private serverInfo?: { userAgent?: string; codexHome?: string; platformOs?: string }
@@ -508,8 +519,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       // CLIs without the account surface degrade silently via callOptional.
       void this.refreshAccount()
       // Managed/enterprise limits, so a request they forbid is refused before it
-      // is sent — Codex has no typed refusal to recognise afterwards.
-      void this.refreshConfigRequirements()
+      // is sent — Codex has no typed refusal to recognise afterwards. Not
+      // awaited here (connect must not block on a best-effort read), but the
+      // promise is kept so `awaitConfigRequirements` can join it before any
+      // request the limits would bear on.
+      this.configRequirementsRead = this.refreshConfigRequirements()
+      void this.configRequirementsRead
       // Re-register configured extra skill folders — the app-server never
       // persists them across restarts, so every connect must re-apply.
       void this.applyConfiguredExtraSkillRoots()
@@ -788,6 +803,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     // request carries. Checked HERE rather than on the way back: 0.150.1 has no
     // typed refusal (`CodexErrorInfo` offers only `badRequest`/`sandboxError`),
     // so once the rejection arrives the reason no longer exists.
+    // Guarded rather than awaited unconditionally: an `await` on an
+    // already-settled read still costs a microtask, which reorders the send
+    // relative to callers that drive this synchronously.
+    if (this.configRequirementsRead) await this.awaitConfigRequirements()
     assertCodexRequestAllowed(
       {
         sandbox: readString(params.sandbox),
@@ -1307,6 +1326,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     // Same managed-policy gate as `thread/start`. The sandbox arrives here as
     // the tagged `SandboxPolicy` union, so compare on its wire mode.
+    // Guarded rather than awaited unconditionally: an `await` on an
+    // already-settled read still costs a microtask, which reorders the send
+    // relative to callers that drive this synchronously.
+    if (this.configRequirementsRead) await this.awaitConfigRequirements()
     assertCodexRequestAllowed(
       {
         sandbox: toWireSandboxMode(sandboxPolicy?.type),
@@ -2809,6 +2832,25 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * *unconstrained* — the two look identical from outside and only one of them
    * means the administrator allowed everything.
    */
+  /**
+   * Join the connect-time managed-limits read, if it is still in flight.
+   *
+   * The gate is only proactive if it runs after the answer arrives. `undefined`
+   * requirements mean "unconstrained" to `assertCodexRequestAllowed`, and an
+   * unfinished read looks exactly like that, so a request issued in the window
+   * between connect and the read's reply skipped the check entirely.
+   *
+   * Never throws and never retries: `refreshConfigRequirements` already
+   * swallows its own failure, and a Codex that cannot answer is reported as
+   * *unsupported* rather than blocking every request behind a read that will
+   * not come.
+   */
+  private async awaitConfigRequirements(): Promise<void> {
+    if (!this.configRequirementsRead) return
+    await this.configRequirementsRead.catch(() => undefined)
+    this.configRequirementsRead = undefined
+  }
+
   async refreshConfigRequirements(): Promise<void> {
     try {
       const raw = await this.callOptional<Record<string, unknown>>("configRequirements/read")

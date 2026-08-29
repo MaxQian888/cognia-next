@@ -31,9 +31,11 @@ function snapshot(host: unknown) {
 
 let restore: (() => void) | undefined
 const calls: Array<{ command: string; payload?: Record<string, unknown> }> = []
+const leaseOperations: string[][] = []
 
 function setup(over: Partial<RemoteHostConfigDeps> = {}, reply: unknown = {}) {
   calls.length = 0
+  leaseOperations.length = 0
   restore?.()
   restore = __setRemoteHostConfigDepsForTests({
     isRemoteHostActive: () => false,
@@ -43,6 +45,10 @@ function setup(over: Partial<RemoteHostConfigDeps> = {}, reply: unknown = {}) {
     call: async (command, payload) => {
       calls.push({ command, payload })
       return reply as never
+    },
+    issueAdminLease: async (operations) => {
+      leaseOperations.push(operations)
+      return { token: "lease-1", operations, expiresAt: Date.now() + 60_000 }
     },
     ...over,
   })
@@ -137,6 +143,7 @@ describe("the refusal is structured and never a fallback", () => {
       feature: "external-agent.host-configs",
       operation: HOST_CONFIG_COMMANDS.reconcile,
     })
+    expect(leaseOperations).toEqual([])
   })
 
   it("distinguishes an unpaired client from an outdated host in its message", () => {
@@ -202,6 +209,30 @@ describe("commands", () => {
     expect(calls[0]).toEqual({
       command: HOST_CONFIG_COMMANDS.delete,
       payload: { configId: "eac_1" },
+    })
+  })
+
+  it("uses a fresh approval lease for a remote write", async () => {
+    setup(
+      {
+        hasLocalAuthority: () => false,
+        getRuntimeSnapshot: snapshot({ compatible: true, operations: ALL_OPS }),
+      },
+      { config: { configId: "eac_1" } }
+    )
+
+    await updateRemoteHostConfig({
+      configId: "eac_1",
+      expectedRevision: "eacr_1",
+      patch: { enabled: false },
+    })
+
+    expect(leaseOperations).toEqual([[HOST_CONFIG_COMMANDS.update]])
+    expect(calls[0].payload).toEqual({
+      configId: "eac_1",
+      expectedRevision: "eacr_1",
+      patch: { enabled: false },
+      adminLease: "lease-1",
     })
   })
 })

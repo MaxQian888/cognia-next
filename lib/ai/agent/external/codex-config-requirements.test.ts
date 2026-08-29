@@ -142,6 +142,10 @@ describe("assertCodexRequestAllowed", () => {
     expect(isCodexManagedPolicyError(caught)).toBe(true)
     expect((caught as CodexManagedPolicyError).code).toBe("managed_policy_refused")
     expect((caught as CodexManagedPolicyError).refusals).toHaveLength(1)
+    // `reasonCode`, not just `code`: the branch classifier reads that field off
+    // a thrown error, so declaring only `code` left `managed_policy_refused` a
+    // reason nothing could ever produce.
+    expect((caught as CodexManagedPolicyError).reasonCode).toBe("managed_policy_refused")
     expect((caught as Error).message).toContain("read-only")
   })
 

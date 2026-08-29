@@ -13,7 +13,8 @@
  * `cognia-external-agents` Zustand/localStorage store — NOT a synced Dexie
  * table — so there is no sync mirror. The list is fetched on-demand through the
  * read-only `external_agent_list` companion RPC (mirrors `twin_profile_get`),
- * and edits round-trip through the `external_agent_update` outbound-queue RPC.
+ * and edits round-trip through an immediately approved `external_agent_update`
+ * RPC. Approval leases are deliberately never stored in the outbound queue.
  * The permission mode is clamped per-protocol both here (display) and on the
  * desktop (authority) so the phone can never set a mode the backend can't run.
  */
@@ -43,7 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { transport } from "@/lib/tauri"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
@@ -99,10 +100,10 @@ function ExternalAgentsBody() {
     }
   }, [])
 
-  // Optimistically patch local state and queue the remote write. The list is a
-  // read-only projection (no live query), so we reflect the edit immediately
-  // and let the outbound queue carry it to the desktop.
-  const queueUpdate = useCallback(
+  // Optimistically patch local state, then perform the approved write while
+  // this direct user action is still in flight. The short-lived lease must not
+  // be persisted in the durable outbound queue.
+  const writeUpdate = useCallback(
     async (
       agent: ExternalAgentSummary,
       patch: Partial<Pick<ExternalAgentSummary, "enabled" | "defaultPermissionMode">>
@@ -112,10 +113,11 @@ function ExternalAgentsBody() {
         current ? current.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)) : current
       )
       try {
-        await enqueue({
-          command: "external_agent_update",
-          payload: { id: agent.id, patch },
-          label: t("title"),
+        const lease = await issueHostAdminLease(["external_agent_update"])
+        await transport.call("external_agent_update", {
+          id: agent.id,
+          patch,
+          adminLease: lease.token,
         })
         toast.success(t("updateQueued"))
       } catch (err) {
@@ -177,7 +179,7 @@ function ExternalAgentsBody() {
                   <Select
                     value={currentMode}
                     onValueChange={(v) =>
-                      void queueUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
+                      void writeUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
                     }
                   >
                     <SelectTrigger
@@ -197,7 +199,7 @@ function ExternalAgentsBody() {
                   </Select>
                   <Switch
                     checked={agent.enabled}
-                    onCheckedChange={(next) => void queueUpdate(agent, { enabled: next })}
+                    onCheckedChange={(next) => void writeUpdate(agent, { enabled: next })}
                     aria-label={t("enabledAria", { name: agent.name })}
                     data-testid={`external-agent-switch-${agent.id}`}
                   />

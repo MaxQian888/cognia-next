@@ -262,6 +262,9 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
     ["session_resolution_failed", "resumeWithSessionIdOrAllowNew"],
     ["permission_denied", "adjustPermissionMode"],
     ["execution_failed", "checkDiagnosticsAndRetry"],
+    // The administrator's standing limit. Distinct from `permission_denied`,
+    // which a person can answer during the turn.
+    ["managed_policy_refused", "useAllowedSandboxOrApproval"],
   ]
 
   for (const [reason, hint] of cases) {
@@ -291,6 +294,7 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
       "session_resolution_failed",
       "permission_denied",
       "execution_failed",
+      "managed_policy_refused",
     ]
     const emitted = reasons.flatMap(
       (reason) =>

@@ -21,6 +21,8 @@
  * even when it is empty.
  */
 
+import type { ExternalAgentBranchReasonCode } from "@/types/agent/external-agent"
+
 import type { CodexSandboxModeWire } from "@/lib/ai/agent/external/codex-app-server-client"
 
 /** The subset of `ConfigRequirements` that bears on what Cognia sends. */
@@ -88,6 +90,16 @@ export interface CodexRequirementRefusal {
 /** A request Cognia declined to send because the local Codex's admin config forbids it. */
 export class CodexManagedPolicyError extends Error {
   readonly code = "managed_policy_refused" as const
+  /**
+   * The branch reason this refusal classifies as.
+   *
+   * The field name matters: `canonical-contract.ts` and the ACP client read
+   * `reasonCode` off a thrown error to pick an `ExternalAgentBranchReasonCode`,
+   * so declaring only `code` left `managed_policy_refused` a variant nothing
+   * could ever produce — the error surfaced as a generic execution failure
+   * carrying an English sentence built inside `lib/`.
+   */
+  readonly reasonCode: ExternalAgentBranchReasonCode = "managed_policy_refused"
   readonly refusals: CodexRequirementRefusal[]
 
   constructor(refusals: CodexRequirementRefusal[]) {

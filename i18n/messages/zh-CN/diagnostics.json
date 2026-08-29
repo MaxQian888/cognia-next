@@ -394,6 +394,7 @@
     "checkCommandAndArgs": "检查智能体的启动命令和参数。",
     "checkDiagnosticsAndRetry": "查看运行诊断，然后缩小请求范围后重试。",
     "completeSetupThenRetry": "完成该智能体的配置，然后重试连接。",
+    "contactAdministrator": "该限制由部署此 Codex 的人设定，请联系他们放宽。",
     "createNewSession": "当恢复和分叉不可用时，请新建一个会话。",
     "inspectHealthEndpoint": "检查智能体的健康检查接口和日志。",
     "reconnectAndRetry": "重新连接后再试。",
@@ -402,6 +403,7 @@
     "retryAfterReconnect": "重新连接后重试。",
     "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
     "switchToAcp": "将该智能体的协议切换为 ACP。",
+    "useAllowedSandboxOrApproval": "改用此 Codex 受管配置允许的沙盒模式或审批策略。",
     "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
     "useOfficialWorkflow": "请使用该产品自身的官方流程。",
     "useSupportedOperations": "请仅使用该端点支持的操作。"

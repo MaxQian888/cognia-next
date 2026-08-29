@@ -6,15 +6,15 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import MobileExternalAgentsPage from "./page"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { transport } from "@/lib/tauri"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 
 jest.mock("@/hooks/companion/use-companion-config")
 jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
-jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: jest.fn() }))
+jest.mock("@/lib/tauri/admin-lease", () => ({ issueHostAdminLease: jest.fn() }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 const callMock = transport.call as jest.Mock
-const enqueueMock = enqueue as jest.Mock
+const issueLeaseMock = issueHostAdminLease as jest.Mock
 
 const AGENTS = [
   {
@@ -48,7 +48,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockPaired(true)
   callMock.mockResolvedValue({ agents: AGENTS })
-  enqueueMock.mockResolvedValue({ id: "q1" })
+  issueLeaseMock.mockResolvedValue({ token: "lease-1" })
 })
 
 describe("MobileExternalAgentsPage", () => {
@@ -82,17 +82,15 @@ describe("MobileExternalAgentsPage", () => {
     await waitFor(() => expect(screen.getByTestId("external-agents-error")).toBeInTheDocument())
   })
 
-  it("queues an enable/disable toggle through external_agent_update", async () => {
+  it("sends an enable/disable toggle with a fresh approval lease", async () => {
     render(<MobileExternalAgentsPage />)
     await waitFor(() => expect(screen.getByTestId("external-agent-switch-a1")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("external-agent-switch-a1"))
-    await waitFor(() => expect(enqueueMock).toHaveBeenCalled())
-    const arg = enqueueMock.mock.calls[0][0] as {
-      command: string
-      payload: { id: string; patch: Record<string, unknown> }
-    }
-    expect(arg.command).toBe("external_agent_update")
-    expect(arg.payload.id).toBe("a1")
-    expect(arg.payload.patch).toEqual({ enabled: false })
+    await waitFor(() => expect(issueLeaseMock).toHaveBeenCalledWith(["external_agent_update"]))
+    expect(callMock).toHaveBeenLastCalledWith("external_agent_update", {
+      id: "a1",
+      patch: { enabled: false },
+      adminLease: "lease-1",
+    })
   })
 })

@@ -168,6 +168,11 @@ function resolveRecoveryHints(reasonCode: ExternalAgentBranchReasonCode): string
       return ["resumeWithSessionIdOrAllowNew"]
     case "permission_denied":
       return ["adjustPermissionMode"]
+    case "managed_policy_refused":
+      // An administrator's standing limit, not a per-turn decision: no amount
+      // of in-turn approval lifts it, so the advice is to pick something the
+      // managed config permits or take it up with whoever set it.
+      return ["useAllowedSandboxOrApproval", "contactAdministrator"]
     case "execution_failed":
       return ["checkDiagnosticsAndRetry"]
     default:
