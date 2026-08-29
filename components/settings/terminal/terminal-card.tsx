@@ -1018,10 +1018,14 @@ export function TerminalCard() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              {/* One per row below sm: each cell pairs a label ("Command names",
+                  "File paths") with a ~32px switch, and a third of a phone-width
+                  settings pane leaves the label about 50px — not enough to
+                  shrink into, so the row overflowed its border. */}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
                 {(["path", "exe", "spec"] as const).map((key) => (
                   <div key={key} className="flex items-center justify-between rounded border p-2">
-                    <Label className="text-xs">
+                    <Label className="min-w-0 text-xs">
                       {t(`settings.terminal.autocomplete.${key}.label` as never)}
                     </Label>
                     <Switch

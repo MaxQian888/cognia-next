@@ -106,9 +106,13 @@ export function SearchUsagePanel() {
                 </div>
                 <div className="text-base font-bold">{avgResponseTime}ms</div>
               </div>
-              <div className="rounded-lg border p-2 text-center">
+              <div className="min-w-0 rounded-lg border p-2 text-center">
                 <div className="text-[10px] text-muted-foreground uppercase">{tu("mostUsed")}</div>
-                <div className="text-base font-bold">
+                {/* The only stat that is a name rather than a number. A third of
+                    a phone-width pane is ~80px, so "Google Custom Search" has to
+                    be allowed to wrap inside its box — a grid cell defaults to
+                    `min-width: auto` and would otherwise widen the whole row. */}
+                <div className="text-base font-bold break-words">
                   {mostUsedProvider ? SEARCH_PROVIDERS[mostUsedProvider]?.name : "-"}
                 </div>
               </div>

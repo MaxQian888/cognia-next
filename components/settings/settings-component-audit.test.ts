@@ -201,4 +201,25 @@ describe("settings responsive layout", () => {
     ]
     expect(violations.filter((v) => !BASELINE.includes(v))).toEqual([])
   })
+
+  it("never pairs a label with a control inside a 3-up grid that has no single-column base", () => {
+    // A third of a phone-width settings pane is ~80-100px. A `justify-between`
+    // row spends ~32px of that on the switch and neither child shrinks below
+    // its longest word, so the cell overflows its own border. The fix is a
+    // `grid-cols-1` base, not a smaller font.
+    const violations: string[] = []
+    for (const { file, lines } of sources) {
+      lines.forEach((line, i) => {
+        const cls = line.match(/className=\{?"([^"]*)"/)?.[1] ?? ""
+        if (!/(?:^|\s)grid-cols-[3-9](?:\s|$)/.test(cls)) return
+        if (/grid-cols-1\b/.test(cls)) return
+        const block = lines.slice(i, i + 20).join("\n")
+        if (!/justify-between/.test(block)) return
+        if (!/<Label\b/.test(block)) return
+        if (!/<Switch|<Checkbox|<Select|<Input/.test(block)) return
+        violations.push(`${file}:${i + 1}`)
+      })
+    }
+    expect(violations).toEqual([])
+  })
 })
