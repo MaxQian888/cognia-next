@@ -94,6 +94,13 @@ import {
 
 interface TaskFormProps {
   initialValues?: Partial<CreateScheduledTaskInput>
+  /**
+   * Settings → Scheduled Tasks → Defaults → "Default timezone". Used only when
+   * `initialValues` names none, which is the blank-create case: a blank sheet
+   * has no `trigger` object for `seedTaskDefaults` to attach the timezone to,
+   * so it arrives as its own prop rather than as a synthesised half-trigger.
+   */
+  defaultTimezone?: string
   onSubmit: (input: CreateScheduledTaskInput) => Promise<void>
   onCancel: () => void
   isSubmitting?: boolean
@@ -412,7 +419,10 @@ function parseIntoDraftUpdates(
   }
 }
 
-function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): TaskFormState {
+function createInitialState(
+  initialValues?: Partial<CreateScheduledTaskInput>,
+  defaultTimezone?: string
+): TaskFormState {
   const initialType: ScheduledTaskType = initialValues?.type || "chat"
   const startInStructured = isStructuredEditableTaskType(initialType)
   return {
@@ -427,7 +437,7 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
     runAtDate: "",
     runAtTime: "",
     eventType: "",
-    timezone: initialValues?.trigger?.timezone || "UTC",
+    timezone: initialValues?.trigger?.timezone || defaultTimezone || "UTC",
     payloadJson: initialValues?.payload ? JSON.stringify(initialValues.payload, null, 2) : "{}",
     chatLikeDraft: isChatLikeTaskType(initialType)
       ? payloadToChatLikeDraft(initialType, initialValues?.payload)
@@ -499,6 +509,7 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
 
 export function TaskForm({
   initialValues,
+  defaultTimezone,
   onSubmit,
   onCancel,
   isSubmitting,
@@ -509,7 +520,9 @@ export function TaskForm({
   const tCron = useTranslations("scheduler.cronDescribe")
   const locale = useLocale()
   const isZh = locale.startsWith("zh")
-  const [f, updateForm] = useReducer(formReducer, initialValues, createInitialState)
+  const [f, updateForm] = useReducer(formReducer, { initialValues, defaultTimezone }, (init) =>
+    createInitialState(init.initialValues, init.defaultTimezone)
+  )
   // The host whose schedule is being edited (this device or the paired host):
   // task types the host cannot run are shown disabled with the reason —
   // never hidden (Working Rule 7).

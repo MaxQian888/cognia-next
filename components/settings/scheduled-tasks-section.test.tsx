@@ -14,6 +14,16 @@ jest.mock("@/lib/scheduler/notification-integration", () => ({
   testNotificationChannel: jest.fn().mockResolvedValue({ success: true }),
 }))
 
+// The ops-channel field is the only consumer of AppSettings in this section.
+const appSettingsRef: {
+  value: { schedulerNotifications?: { fallbackConversationKey?: string } } | null
+} = { value: null }
+const saveAppSettings = jest.fn(async (_patch: unknown) => {})
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown; save: unknown }) => T): T =>
+    selector({ settings: appSettingsRef.value, save: saveAppSettings }),
+}))
+
 jest.mock("@/lib/scheduler/webhook-outbound-config", () => ({
   useWebhookSigningState: jest.fn(() => ({ enabled: false, loading: false })),
 }))
@@ -64,6 +74,7 @@ const { testNotificationChannel: mockedTestChannel } = jest.requireMock(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  appSettingsRef.value = null
   mockedIsTauri.mockReturnValue(false)
   mockedSigningHook.mockReturnValue({ enabled: false, loading: false })
   mockedSystemHook.mockReturnValue({
@@ -241,7 +252,11 @@ describe("ScheduledTasksSection — defaults card", () => {
     render(<ScheduledTasksSection />)
     const button = screen.getByTestId("test-channel-toast")
     fireEvent.click(button)
-    await waitFor(() => expect(mockedTestChannel).toHaveBeenCalledWith("toast", undefined))
+    await waitFor(() =>
+      // 3rd arg is the global ops channel — passed so the test reflects the
+      // value in the box rather than racing the settings write.
+      expect(mockedTestChannel).toHaveBeenCalledWith("toast", undefined, undefined)
+    )
   })
 
   it("toasts on test failure (channel returns success=false)", async () => {
@@ -569,5 +584,56 @@ describe("ScheduledTasksSection — existing permission cards", () => {
     expect(useSchedulerStore.getState().permissionPolicy.confirmationRequired).not.toContain(
       "external-agent"
     )
+  })
+})
+
+describe("ScheduledTasksSection — chat channel + global ops channel", () => {
+  // `im` delivery, its two-layer target resolution, and the channel test all
+  // existed; the settings defaults card was the one surface that could neither
+  // pick the channel nor set the ops chat it falls back to, so the fallback
+  // resolved to undefined on every delivery.
+
+  it("offers the chat channel among the default channels", () => {
+    render(<ScheduledTasksSection />)
+    expect(screen.getByTestId("test-channel-im")).toBeInTheDocument()
+  })
+
+  it("writes the ops channel to AppSettings.schedulerNotifications", () => {
+    render(<ScheduledTasksSection />)
+    fireEvent.change(screen.getByTestId("default-ops-channel"), {
+      target: { value: " telegram:-100123 " },
+    })
+    expect(saveAppSettings).toHaveBeenCalledWith({
+      schedulerNotifications: { fallbackConversationKey: "telegram:-100123" },
+    })
+  })
+
+  it("clears the ops channel back to undefined rather than storing an empty string", () => {
+    appSettingsRef.value = { schedulerNotifications: { fallbackConversationKey: "x" } }
+    render(<ScheduledTasksSection />)
+    fireEvent.change(screen.getByTestId("default-ops-channel"), { target: { value: "  " } })
+    expect(saveAppSettings).toHaveBeenCalledWith({
+      schedulerNotifications: { fallbackConversationKey: undefined },
+    })
+  })
+
+  it("reflects a stored ops channel", () => {
+    appSettingsRef.value = { schedulerNotifications: { fallbackConversationKey: "slack:C1" } }
+    render(<ScheduledTasksSection />)
+    expect(screen.getByTestId("default-ops-channel")).toHaveValue("slack:C1")
+  })
+
+  it("keeps the chat test button disabled until an ops channel exists", () => {
+    render(<ScheduledTasksSection />)
+    fireEvent.click(document.getElementById("channel-im") as HTMLInputElement)
+    expect(screen.getByTestId("test-channel-im")).toBeDisabled()
+  })
+
+  it("passes the ops channel to the channel test", async () => {
+    appSettingsRef.value = { schedulerNotifications: { fallbackConversationKey: "slack:C1" } }
+    render(<ScheduledTasksSection />)
+    fireEvent.click(document.getElementById("channel-im") as HTMLInputElement)
+    fireEvent.click(screen.getByTestId("test-channel-im"))
+    await waitFor(() => expect(mockedTestChannel).toHaveBeenCalledWith("im", undefined, "slack:C1"))
   })
 })

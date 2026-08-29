@@ -83,6 +83,8 @@ jest.mock("@/components/scheduler/timezone-select", () => ({
     >
       <option value="UTC">UTC</option>
       <option value="America/Los_Angeles">LA</option>
+      <option value="Asia/Shanghai">Shanghai</option>
+      <option value="Europe/Berlin">Berlin</option>
     </select>
   ),
 }))
@@ -389,5 +391,32 @@ describe("TaskForm", () => {
     await screen.findByText("lifecycle.endAtInPast")
 
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+describe("TaskForm — default timezone from Settings", () => {
+  const noop = { onSubmit: jest.fn(async () => undefined), onCancel: jest.fn() }
+
+  it("starts a blank create on the configured default timezone", () => {
+    // The blank create sheet has no `trigger` for `seedTaskDefaults` to write
+    // the timezone onto, so it arrives as its own prop.
+    render(<TaskForm {...noop} defaultTimezone="Asia/Shanghai" />)
+    expect(screen.getByTestId("tz-stub")).toHaveValue("Asia/Shanghai")
+  })
+
+  it("lets an explicit trigger timezone win over the default", () => {
+    render(
+      <TaskForm
+        {...noop}
+        defaultTimezone="Asia/Shanghai"
+        initialValues={{ trigger: { type: "cron", timezone: "Europe/Berlin" } }}
+      />
+    )
+    expect(screen.getByTestId("tz-stub")).toHaveValue("Europe/Berlin")
+  })
+
+  it("still falls back to UTC when neither is set", () => {
+    render(<TaskForm {...noop} />)
+    expect(screen.getByTestId("tz-stub")).toHaveValue("UTC")
   })
 })

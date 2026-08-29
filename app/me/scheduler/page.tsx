@@ -50,6 +50,7 @@ import { SchedulerHostBar } from "@/components/scheduler/scheduler-host-bar"
 import { FilterChips, SchedulerMobileDetailView, TaskForm } from "@/components/scheduler"
 import { KindFilterChips } from "@/components/scheduler/kind-filter-chips"
 import { filterUnifiedItems, isUnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
+import { defaultTaskTimezone, seedTaskDefaults } from "@/lib/scheduler/task-defaults"
 import { UnifiedTaskSidebarItem } from "@/components/scheduler/unified-task-sidebar-item"
 import { useScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
@@ -57,6 +58,7 @@ import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { usePlatform } from "@/hooks/use-platform"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { cn } from "@/lib/utils"
 import {
   SCHEDULED_ITEM_KINDS,
@@ -119,6 +121,9 @@ export default function MobileSchedulerPage() {
   const [selectedKinds, setSelectedKinds] = useState<Set<ScheduledItemKind>>(new Set())
   const [selectedUnifiedItem, setSelectedUnifiedItem] = useState<UnifiedScheduledItem | null>(null)
   const [showCreateSheet, setShowCreateSheet] = useState(false)
+  // Settings → Scheduled Tasks → "Defaults for new tasks" (mirrors the desktop
+  // create sheet in `components/scheduler/scheduler-dialogs.tsx`).
+  const taskDefaults = useSchedulerStore((s) => s.permissionPolicy.taskDefaults)
   const [showEditSheet, setShowEditSheet] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   /**
@@ -439,6 +444,12 @@ export default function MobileSchedulerPage() {
           </SheetHeader>
           <div className="mt-4">
             <TaskForm
+              // Settings → Scheduled Tasks → "Defaults for new tasks", same as
+              // the desktop create sheet. Create only — the edit sheet below
+              // must keep the task's own stored config.
+              key={JSON.stringify(taskDefaults ?? "no-defaults")}
+              initialValues={seedTaskDefaults(taskDefaults)}
+              defaultTimezone={defaultTaskTimezone(taskDefaults)}
               onSubmit={handleCreate}
               onCancel={() => setShowCreateSheet(false)}
               isSubmitting={isSubmitting}

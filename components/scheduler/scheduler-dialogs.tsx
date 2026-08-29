@@ -20,6 +20,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Surface } from "@/components/surface/surface"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
+import { defaultTaskTimezone, seedTaskDefaults } from "@/lib/scheduler/task-defaults"
 import { TaskForm } from "./task-form"
 import { SystemTaskForm } from "./system-task-form"
 import { AdminElevationDialog, TaskConfirmationDialog } from "./task-confirmation-dialog"
@@ -122,6 +124,13 @@ export function SchedulerDialogs({
   existingTasks,
 }: SchedulerDialogsProps) {
   const t = useTranslations("scheduler")
+  // Settings → Scheduled Tasks → "Defaults for new tasks". Read here rather
+  // than threaded in as a prop so every host that renders this dialog picks
+  // them up. Applied ONLY to the create sheet: the edit sheet's task already
+  // carries its own config, and re-seeding it would rewrite settings the user
+  // chose when the task was made.
+  const taskDefaults = useSchedulerStore((s) => s.permissionPolicy.taskDefaults)
+  const seededCreateValues = seedTaskDefaults(taskDefaults, createInitialValues)
 
   return (
     <>
@@ -152,10 +161,12 @@ export function SchedulerDialogs({
               </Surface>
             )}
             <TaskForm
-              // Remount on a new draft: TaskForm seeds its state once, so a
-              // second hand-off into an already-open sheet would be ignored.
-              key={createInitialValues ? JSON.stringify(createInitialValues) : "blank"}
-              initialValues={createInitialValues}
+              // Remount on a new draft OR on a change to the user's defaults:
+              // TaskForm seeds its state once, so a second hand-off into an
+              // already-open sheet would be ignored.
+              key={JSON.stringify([createInitialValues ?? "blank", taskDefaults ?? "no-defaults"])}
+              initialValues={seededCreateValues}
+              defaultTimezone={defaultTaskTimezone(taskDefaults)}
               onSubmit={onCreateTask}
               onCancel={() => onShowCreateSheetChange(false)}
               isSubmitting={isSubmitting}

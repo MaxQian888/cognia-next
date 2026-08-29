@@ -56,6 +56,7 @@ import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { isTauri } from "@/lib/tauri"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
+import { useSettingsStore } from "@/stores/settings"
 import { useSystemScheduler } from "@/hooks/scheduler/use-system-scheduler"
 import { useWebhookSigningState } from "@/lib/scheduler/webhook-outbound-config"
 import { testNotificationChannel } from "@/lib/scheduler/notification-integration"
@@ -82,7 +83,11 @@ const SUPPORTED_TASK_TYPES: ScheduledTaskType[] = [
   "plugin",
 ]
 
-const NOTIFICATION_CHANNELS: NotificationChannel[] = ["desktop", "toast", "webhook"]
+// Every channel `lib/scheduler/notification-integration.ts` can actually
+// deliver on. `im` used to be missing here while the per-task form, the
+// channel test, and the delivery path all supported it — so the ONE surface
+// that sets the default for new tasks was the only one that could not pick it.
+const NOTIFICATION_CHANNELS: NotificationChannel[] = ["desktop", "toast", "im", "webhook"]
 
 export function ScheduledTasksSection() {
   const t = useTranslations("scheduler")
@@ -391,6 +396,27 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
   const [testingChannel, setTestingChannel] = useState<NotificationChannel | null>(null)
   const isWebMode = !isTauri()
 
+  // Layer 2 of the `im` channel — the ops chat a task notification falls back
+  // to when the task names no `imTarget`. It lives on AppSettings rather than
+  // on the scheduler's own defaults because it is a single app-wide address,
+  // and `resolveFallbackConversationKey()` reads it straight from there.
+  //
+  // Nothing wrote it before this field existed, so the fallback resolved to
+  // undefined every time and the `im` test button reported "no global ops
+  // channel is set" with no place in the app to set one.
+  const appSettings = useSettingsStore((s) => s.settings)
+  const saveAppSettings = useSettingsStore((s) => s.save)
+  const opsChannel = appSettings?.schedulerNotifications?.fallbackConversationKey ?? ""
+  const setOpsChannel = (next: string) => {
+    const trimmed = next.trim()
+    void saveAppSettings({
+      schedulerNotifications: {
+        ...appSettings?.schedulerNotifications,
+        fallbackConversationKey: trimmed || undefined,
+      },
+    })
+  }
+
   const channels: NotificationChannel[] =
     ndef.channels && ndef.channels.length > 0
       ? ndef.channels
@@ -421,7 +447,13 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
   const handleTest = async (channel: NotificationChannel) => {
     setTestingChannel(channel)
     try {
-      const result = await testNotificationChannel(channel, ndef.webhookUrl)
+      // Pass the ops channel explicitly so the test reflects what is in the
+      // box right now rather than racing the settings write.
+      const result = await testNotificationChannel(
+        channel,
+        ndef.webhookUrl,
+        opsChannel || undefined
+      )
       const channelLabel = tNotification(
         `channel${channel.charAt(0).toUpperCase() + channel.slice(1)}`
       )
@@ -542,7 +574,11 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
                       disabled={
                         !isChecked ||
                         testingChannel === channel ||
-                        (channel === "webhook" && !ndef.webhookUrl)
+                        (channel === "webhook" && !ndef.webhookUrl) ||
+                        // An `im` test with no ops channel can only ever report
+                        // "no global ops channel is set" — say that with the
+                        // control's state instead of with a failed test.
+                        (channel === "im" && !opsChannel)
                       }
                       onClick={() => void handleTest(channel)}
                     >
@@ -559,6 +595,20 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
             {channels.includes("desktop") && isWebMode && (
               <p className="text-xs text-muted-foreground">{tNotification("desktopOnlyHint")}</p>
             )}
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="default-ops-channel">{tNotification("opsChannel")}</Label>
+            <Input
+              id="default-ops-channel"
+              value={opsChannel}
+              onChange={(e) => setOpsChannel(e.target.value)}
+              placeholder={tNotification("opsChannelPlaceholder")}
+              data-testid="default-ops-channel"
+            />
+            <p className="text-xs text-pretty text-muted-foreground">
+              {tNotification("opsChannelHint")}
+            </p>
           </div>
 
           <div className="space-y-1">

@@ -8,6 +8,14 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// Settings → Scheduled Tasks → "Defaults for new tasks". The dialog reads them
+// straight from the scheduler store rather than taking a prop.
+const taskDefaultsRef: { value: unknown } = { value: undefined }
+jest.mock("@/stores/scheduler/scheduler-store", () => ({
+  useSchedulerStore: <T,>(selector: (s: { permissionPolicy: { taskDefaults: unknown } }) => T): T =>
+    selector({ permissionPolicy: { taskDefaults: taskDefaultsRef.value } }),
+}))
+
 // Stub the sub-forms with harnesses that surface their callbacks via test buttons.
 jest.mock("./task-form", () => ({
   __esModule: true,
@@ -15,13 +23,17 @@ jest.mock("./task-form", () => ({
     onSubmit,
     onCancel,
     initialValues,
+    defaultTimezone,
   }: {
     onSubmit: (input: { name: string }) => Promise<void>
     onCancel: () => void
-    initialValues?: { name?: string }
+    initialValues?: { name?: string; notification?: unknown; config?: unknown }
+    defaultTimezone?: string
   }) => (
     <div data-testid="task-form-stub">
       <span data-testid="task-form-initial">{initialValues?.name ?? "_new"}</span>
+      <span data-testid="task-form-seeded">{JSON.stringify(initialValues ?? null)}</span>
+      <span data-testid="task-form-default-tz">{defaultTimezone ?? "_none"}</span>
       <button
         type="button"
         onClick={() => void onSubmit({ name: "submitted" })}
@@ -390,5 +402,51 @@ describe("SchedulerDialogs", () => {
       />
     )
     expect(screen.getByTestId("task-form-stub")).toBeInTheDocument()
+  })
+})
+
+describe("SchedulerDialogs — Settings task defaults", () => {
+  // `SchedulerPermissionPolicy.taskDefaults` was written by the settings card
+  // and read by nothing, so every value in "Defaults for new tasks" was
+  // persisted and then ignored when a task was actually created.
+  afterEach(() => {
+    taskDefaultsRef.value = undefined
+  })
+
+  function renderCreateSheet(extra: Partial<DialogProps> = {}) {
+    return render(<SchedulerDialogs {...buildProps({ showCreateSheet: true, ...extra })} />)
+  }
+
+  it("seeds the create form with the configured notification + execution defaults", () => {
+    taskDefaultsRef.value = {
+      notification: { onStart: true, channels: ["desktop"] },
+      execution: { timeout: 120_000 },
+    }
+    renderCreateSheet()
+    const seeded = JSON.parse(screen.getByTestId("task-form-seeded").textContent || "null")
+    expect(seeded.notification).toMatchObject({ onStart: true, channels: ["desktop"] })
+    expect(seeded.config).toMatchObject({ timeout: 120_000 })
+  })
+
+  it("hands the default timezone to the blank create form", () => {
+    taskDefaultsRef.value = { timezone: "Asia/Shanghai" }
+    renderCreateSheet()
+    expect(screen.getByTestId("task-form-default-tz")).toHaveTextContent("Asia/Shanghai")
+  })
+
+  it("passes nothing when no defaults are configured", () => {
+    renderCreateSheet()
+    expect(screen.getByTestId("task-form-seeded")).toHaveTextContent("null")
+    expect(screen.getByTestId("task-form-default-tz")).toHaveTextContent("_none")
+  })
+
+  it("lets a handed-over draft outrank the defaults", () => {
+    taskDefaultsRef.value = { notification: { channels: ["desktop"] } }
+    renderCreateSheet({
+      createInitialValues: { name: "from-composer", notification: { channels: ["toast"] } },
+    })
+    const seeded = JSON.parse(screen.getByTestId("task-form-seeded").textContent || "null")
+    expect(seeded.name).toBe("from-composer")
+    expect(seeded.notification.channels).toEqual(["toast"])
   })
 })
