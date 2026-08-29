@@ -29,6 +29,7 @@ type ArtifactSettingsShape = {
   persistAcrossSessions: boolean
   reviewBeforeApply: boolean
   agentAuthoring: boolean
+  interactiveHtml: boolean
 }
 
 const DEFAULTS: ArtifactSettingsShape = {
@@ -40,6 +41,9 @@ const DEFAULTS: ArtifactSettingsShape = {
   persistAcrossSessions: true,
   reviewBeforeApply: true,
   agentAuthoring: true,
+  // Off by default: turning it on is what lets a preview run author-written
+  // scripts at all, and even then each artifact is authorised on its own.
+  interactiveHtml: false,
 }
 
 export function ArtifactsSection() {
@@ -57,6 +61,7 @@ export function ArtifactsSection() {
   const persistAcrossSessions = cfg.persistAcrossSessions ?? DEFAULTS.persistAcrossSessions
   const reviewBeforeApply = cfg.reviewBeforeApply ?? DEFAULTS.reviewBeforeApply
   const agentAuthoring = cfg.agentAuthoring ?? DEFAULTS.agentAuthoring
+  const interactiveHtml = cfg.interactiveHtml ?? DEFAULTS.interactiveHtml
 
   const update = (patch: Partial<ArtifactSettingsShape>) => {
     void save({
@@ -68,6 +73,11 @@ export function ArtifactsSection() {
         defaultPanelMode,
         persistAcrossSessions,
         reviewBeforeApply,
+        // Every field the section owns has to be listed: `save` replaces the
+        // whole `artifacts` object, so an omitted key is a silent reset of
+        // that setting on the next unrelated toggle.
+        agentAuthoring,
+        interactiveHtml,
         ...patch,
       },
     })
@@ -199,6 +209,18 @@ export function ArtifactsSection() {
           data-testid="artifacts-agent-authoring"
           checked={agentAuthoring}
           onCheckedChange={(checked) => update({ agentAuthoring: checked })}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 border-t pt-4">
+        <div className="space-y-1">
+          <Label className="text-sm">{t("interactiveHtmlLabel")}</Label>
+          <p className="text-xs text-muted-foreground">{t("interactiveHtmlHint")}</p>
+        </div>
+        <Switch
+          data-testid="artifacts-interactive-html"
+          checked={interactiveHtml}
+          onCheckedChange={(checked) => update({ interactiveHtml: checked })}
         />
       </div>
 

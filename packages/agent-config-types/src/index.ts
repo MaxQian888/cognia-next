@@ -4594,6 +4594,14 @@ export interface AppSettings {
      * {@link SendOptions.planTools}.
      */
     agentAuthoring?: boolean
+    /**
+     * When true, an HTML artifact may be re-rendered with its scripts and form
+     * controls intact, inside an opaque-origin `srcdoc` sandbox. Default
+     * `false`: the static, DOMPurify-sanitised render stays the default view,
+     * and this only unlocks a per-artifact "run the interactive version"
+     * button — it never runs anything on its own.
+     */
+    interactiveHtml?: boolean
   }
 
   // ---- Agent evaluation ----

@@ -27722,6 +27722,8 @@
       "description": "调整助手如何把长段生成内容提升为可寻址、可预览的 Artifact。改动对新的回复立即生效。",
       "enabledTypesHint": "关闭某个类型即可在自动检测时跳过。",
       "enabledTypesLabel": "允许的类型",
+      "interactiveHtmlHint": "默认关闭。开启后，HTML artifact 会多出一个“运行交互版”按钮，在一个无法访问应用、Cookie 与本地存储的沙箱里连同脚本和表单控件一起重新渲染。每个 artifact 需要单独授权；默认仍然是消毒过的静态渲染。",
+      "interactiveHtmlLabel": "允许交互式 HTML 预览",
       "minLinesHint": "始终创建的类型（HTML、React、SVG、Mermaid、图表、Jupyter）只需 3 行。",
       "minLinesLabel": "代码 / 文档的最小行数",
       "persistAcrossSessionsHint": "开启后 Artifact 通过 localStorage 持久化；关闭则随会话清理。",

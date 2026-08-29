@@ -25,7 +25,7 @@ beforeEach(() => {
 })
 
 describe("ArtifactsSection", () => {
-  it("renders all 8 control rows", () => {
+  it("renders all 9 control rows", () => {
     render(<ArtifactsSection />)
     expect(screen.getByText("autoCreateLabel")).toBeInTheDocument()
     expect(screen.getByText("minLinesLabel")).toBeInTheDocument()
@@ -34,6 +34,7 @@ describe("ArtifactsSection", () => {
     expect(screen.getByText("defaultPanelModeLabel")).toBeInTheDocument()
     expect(screen.getByText("persistAcrossSessionsLabel")).toBeInTheDocument()
     expect(screen.getByText("reviewBeforeApplyLabel")).toBeInTheDocument()
+    expect(screen.getByText("interactiveHtmlLabel")).toBeInTheDocument()
     expect(screen.getByText("resetDefaults")).toBeInTheDocument()
   })
 
@@ -50,6 +51,25 @@ describe("ArtifactsSection", () => {
     render(<ArtifactsSection />)
     fireEvent.click(screen.getByTestId("artifacts-agent-authoring"))
     expect(saveMock.mock.calls[0][0].artifacts.agentAuthoring).toBe(false)
+  })
+
+  it("interactive HTML is off until it is switched on", () => {
+    render(<ArtifactsSection />)
+    const toggle = screen.getByTestId("artifacts-interactive-html")
+    expect(toggle).toHaveAttribute("data-state", "unchecked")
+    fireEvent.click(toggle)
+    expect(saveMock.mock.calls[0][0].artifacts.interactiveHtml).toBe(true)
+  })
+
+  it("an unrelated toggle carries every other field through", () => {
+    // `save` REPLACES the artifacts block, so a field the writer forgets to
+    // spread is silently reset. agentAuthoring was dropped that way.
+    mockedSettings = { artifacts: { agentAuthoring: false, interactiveHtml: true } }
+    render(<ArtifactsSection />)
+    fireEvent.click(screen.getByTestId("artifacts-review-before-apply"))
+    const patch = saveMock.mock.calls[0][0].artifacts
+    expect(patch.agentAuthoring).toBe(false)
+    expect(patch.interactiveHtml).toBe(true)
   })
 
   it("toggling auto-create persists the patch", () => {
@@ -70,6 +90,7 @@ describe("ArtifactsSection", () => {
     expect(patch.artifacts.autoCreate).toBe(true)
     expect(patch.artifacts.minLines).toBe(10)
     expect(patch.artifacts.enabledTypes).toHaveLength(9)
+    expect(patch.artifacts.interactiveHtml).toBe(false)
   })
 
   it("toggling a type turns it off and persists the reduced list", () => {
