@@ -28,6 +28,8 @@ import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
+import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
+import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { inboxConversationHref } from "@/lib/inbox/conversation-href"
 import { isTauri } from "@/lib/tauri"
@@ -137,6 +139,13 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
             warning for a frozen import — the badge `lib/data/import-merge.ts`
             promised while nothing in the app read `importFrozen` at all. */}
         <ImportedOriginChip session={session} />
+        {/* Self-hides unless another conversation has referenced this one with
+            `@chat:`. The fourth provenance question in this row: where did this
+            come from, what came out of it, and who else reached for it. */}
+        <MentionBacklinksChip
+          target={sessionBacklinkTarget(session.id)}
+          excludeSessionId={session.id}
+        />
         <SessionEnvironmentChip
           executionContext={session.executionContext}
           onManage={() => setSettingsOpen(true)}

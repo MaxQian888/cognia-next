@@ -63,6 +63,28 @@ export function buildMessagePermalink(
 }
 
 /**
+ * An in-app link to a conversation, landing on one turn when we know which.
+ *
+ * The half-known case is real and was being hand-written: a memory records
+ * `sourceSessionId` always and `sourceMessageId` only since v122, so its "jump
+ * to source" has to degrade to the conversation rather than lose the link.
+ * Both `/memory` link sites built `/?session=…` by hand and therefore never
+ * used the message id even when it was there — the route format lives here, so
+ * the choice between the two should too.
+ *
+ * NOT a {@link MessagePermalinkTarget}: that type stays strict because
+ * {@link parseMessagePermalink} requires both halves, and a session-only query
+ * is not a permalink — it is "open this conversation", which the session store
+ * already handles.
+ */
+export function buildSessionHref(sessionId: string, messageId?: string | null): string {
+  if (messageId) return messagePermalinkQuery({ sessionId, messageId })
+  const params = new URLSearchParams()
+  params.set(PERMALINK_SESSION_PARAM, sessionId)
+  return `?${params.toString()}`
+}
+
+/**
  * Read a permalink target out of the current query, or null when this is an
  * ordinary visit. Both params are required: a session without a message is just
  * "open this conversation" (which the session store already handles), and a

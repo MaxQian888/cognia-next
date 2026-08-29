@@ -21,6 +21,7 @@ import {
   type ChatSearchTextRow,
 } from "./chat-search-text"
 import { getChatResultIndexState, loadNewestChatResults } from "./chat-result-index"
+import { countMentionLinksFor, getMentionLinkState } from "./mention-links"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 
@@ -518,5 +519,57 @@ describe("the result index rides the same walk", () => {
     await reprojectSession("s-res")
     await deleteChatSearchTextForSession("s-res")
     expect(await loadNewestChatResults(10)).toEqual([])
+  })
+})
+
+describe("the backlink index rides the same walk", () => {
+  const cited = { mentions: [{ kind: "entity", id: "memory:mem_1", label: "Prefers pnpm" }] }
+
+  it("emits link rows when a session is re-projected", async () => {
+    await seedMessages([message({ id: "L1", sessionId: "s-links", metadata: cited })])
+    await reprojectSession("s-links")
+    expect(await countMentionLinksFor("entity", "memory:mem_1")).toBe(1)
+  })
+
+  it("emits link rows from a backfill batch too", async () => {
+    await seedMessages([message({ id: "L2", sessionId: "s-links", metadata: cited })])
+    await backfillChatSearchTextStep({ batchSize: 10 })
+    expect(await countMentionLinksFor("entity", "memory:mem_1")).toBe(1)
+  })
+
+  it("advances all three watermarks together", async () => {
+    await seedMessages([message({ id: "L3", sessionId: "s-links" })])
+    await backfillChatSearchTextStep({ batchSize: 10 })
+    const [search, results, links] = await Promise.all([
+      getChatSearchState(),
+      getChatResultIndexState(),
+      getMentionLinkState(),
+    ])
+    expect(links.oldestProjectedAt).toBe(search.oldestProjectedAt)
+    expect(links.oldestProjectedAt).toBe(results.oldestProjectedAt)
+  })
+
+  // An edited turn REMOVES citations; a surviving row would keep claiming the
+  // record is referenced by a message that no longer mentions it.
+  it("drops a citation the turn no longer makes", async () => {
+    await seedMessages([message({ id: "L4", sessionId: "s-links", metadata: cited })])
+    await reprojectSession("s-links")
+    await getDb().messages.update("L4", { metadata: {} })
+    await reprojectSession("s-links")
+    expect(await countMentionLinksFor("entity", "memory:mem_1")).toBe(0)
+  })
+
+  it("drops link rows when the message projections are dropped", async () => {
+    await seedMessages([message({ id: "L5", sessionId: "s-links", metadata: cited })])
+    await reprojectSession("s-links")
+    await deleteChatSearchTextForMessages(["L5"])
+    expect(await countMentionLinksFor("entity", "memory:mem_1")).toBe(0)
+  })
+
+  it("drops link rows when a whole session's projections are dropped", async () => {
+    await seedMessages([message({ id: "L6", sessionId: "s-links", metadata: cited })])
+    await reprojectSession("s-links")
+    await deleteChatSearchTextForSession("s-links")
+    expect(await countMentionLinksFor("entity", "memory:mem_1")).toBe(0)
   })
 })

@@ -4862,8 +4862,47 @@ export class CogniaDB extends Dexie {
           updatedAt: Date.now(),
         })
       })
+
+    // v205 — backlink index: which turns cited which record. See
+    // `lib/db/mention-links.ts`.
+    //
+    // `metadata.mentions` has been written on every user message since the
+    // ContextRef layer landed, and read only in one direction — the search
+    // projection folds citation labels in so a chip-style pick is findable.
+    // The reverse question, "what referenced this record", had no answer at
+    // all. This is that answer, and it is derived from data that was already
+    // there: no new write path, and the same descending walk fills it.
+    //
+    // `[refKind+refId]` is the lookup; `[refKind+refId+createdAt]` orders one
+    // record's citations without sorting the set in memory. The primary key is
+    // NUL-joined because a `refId` is opaque — a relPath, an agent handle,
+    // `session:s_1` — and any separator that can occur inside one would let two
+    // citations collide.
+    //
+    // Rewinds `chatSearchState` for the reason v204 did: one walk, one cursor,
+    // and an install whose backfill already finished would otherwise never
+    // build this.
+    this.version(205)
+      .stores({
+        mentionLinks:
+          "&linkId, messageId, sessionId, [refKind+refId], [refKind+refId+createdAt], projectId, createdAt",
+        mentionLinkState: "id",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("chatSearchState").put({
+          id: "singleton",
+          oldestProjectedAt: null,
+          oldestProjectedId: null,
+          complete: false,
+          updatedAt: Date.now(),
+        })
+      })
   }
 
+  // v205 — backlink index (which turns cited which record) + its watermark.
+  // Rebuildable derived data; see `lib/db/mention-links.ts`.
+  mentionLinks!: Table<import("./mention-links").MentionLinkRow, string>
+  mentionLinkState!: Table<import("./mention-links").MentionLinkStateRow, "singleton">
   // v204 — chat result index (what a turn produced) + its backfill watermark.
   // Rebuildable derived data; see `lib/db/chat-result-index.ts`.
   chatResultIndex!: Table<import("./chat-result-index").ChatResultIndexRow, string>

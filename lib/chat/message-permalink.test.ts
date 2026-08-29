@@ -2,6 +2,7 @@ import {
   PERMALINK_MESSAGE_PARAM,
   PERMALINK_SESSION_PARAM,
   buildMessagePermalink,
+  buildSessionHref,
   messagePermalinkQuery,
   parseMessagePermalink,
 } from "./message-permalink"
@@ -69,5 +70,25 @@ describe("parseMessagePermalink", () => {
   it("treats an empty value as absent rather than as a real id", () => {
     expect(parseMessagePermalink(new URLSearchParams("?session=&message=m"))).toBeNull()
     expect(parseMessagePermalink(new URLSearchParams("?session=s&message="))).toBeNull()
+  })
+})
+
+describe("buildSessionHref", () => {
+  // A memory records `sourceSessionId` always and `sourceMessageId` only since
+  // v122, so "jump to source" has to degrade to the conversation rather than
+  // lose the link. Both `/memory` sites hand-wrote `/?session=…` and therefore
+  // never used the message id even when it was there.
+  it("lands on the turn when one is known", () => {
+    expect(buildSessionHref("s1", "m1")).toBe("?session=s1&message=m1")
+  })
+
+  it("opens the conversation when it is not", () => {
+    expect(buildSessionHref("s1")).toBe("?session=s1")
+    expect(buildSessionHref("s1", null)).toBe("?session=s1")
+    expect(buildSessionHref("s1", "")).toBe("?session=s1")
+  })
+
+  it("escapes both halves", () => {
+    expect(buildSessionHref("s 1", "m&2")).toBe("?session=s+1&message=m%262")
   })
 })

@@ -77,6 +77,13 @@
     "textPlaceholder": "Type your answer…",
     "title": "The agent has a question"
   },
+  "backlinks": {
+    "chipLabel": "{count, plural, one {Referenced by # conversation} other {Referenced by # conversations}}",
+    "empty": "No conversation has referenced this yet.",
+    "listLabel": "Referenced in",
+    "panelTitle": "Referenced in",
+    "timesInConversation": "{count, plural, one {# time} other {# times}}"
+  },
   "branch": {
     "ariaLineage": "Go to the message this branch was created from, in {title}",
     "cancel": "Cancel",

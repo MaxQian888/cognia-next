@@ -77,6 +77,13 @@
     "textPlaceholder": "输入你的回答…",
     "title": "智能体有个问题"
   },
+  "backlinks": {
+    "chipLabel": "被 {count} 个对话引用",
+    "empty": "还没有对话引用过它。",
+    "listLabel": "被这些对话引用",
+    "panelTitle": "被引用",
+    "timesInConversation": "{count} 次"
+  },
   "branch": {
     "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
     "cancel": "取消",

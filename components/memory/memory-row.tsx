@@ -22,6 +22,7 @@
 import { memo, useState, type KeyboardEvent, type MouseEvent } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import Link from "next/link"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 import {
   ArchiveIcon,
   CheckIcon,
@@ -237,7 +238,11 @@ function MemoryRowImpl({
           </span>
           {memory.sourceSessionId ? (
             <Link
-              href={`/?session=${encodeURIComponent(memory.sourceSessionId)}`}
+              // `sourceMessageId` has been indexed since v122 and is written by
+              // the consolidator — but both link sites built the session-only
+              // href by hand, so "jump to source" landed on the conversation
+              // rather than on the turn that taught this.
+              href={buildSessionHref(memory.sourceSessionId, memory.sourceMessageId)}
               onClick={stop}
               className="inline-flex items-center gap-0.5 underline-offset-2 hover:text-foreground hover:underline"
             >

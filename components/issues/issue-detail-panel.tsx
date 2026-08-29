@@ -64,6 +64,8 @@ import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeb
 import { LinkGithubIssueDialog } from "./link-github-issue-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
+import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
+import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 
 export interface IssueDetailPanelProps {
   item: UnifiedIssueItem
@@ -378,6 +380,10 @@ export function IssueDetailPanel({
             </section>
           </>
         ) : null}
+
+        {/* Which conversations have cited this issue with `@issue:`. Self-hides
+            when none have. */}
+        {localId ? <MentionBacklinksPanel target={entityBacklinkTarget("issue", localId)} /> : null}
 
         {/*
           A local issue with no `githubRef` cannot be run by the GitHub loop —

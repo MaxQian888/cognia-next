@@ -16,6 +16,9 @@
 import { useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import Link from "next/link"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
+import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
+import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import {
   ArchiveIcon,
   ArrowUpRightIcon,
@@ -344,12 +347,16 @@ export function MemoryInspector({
             </FieldGrid>
             {memory.sourceSessionId ? (
               <Button size="sm" variant="ghost" className="mt-1.5 h-7 px-2" asChild>
-                <Link href={`/?session=${encodeURIComponent(memory.sourceSessionId)}`}>
+                {/* The message, not just the conversation — see memory-row. */}
+                <Link href={buildSessionHref(memory.sourceSessionId, memory.sourceMessageId)}>
                   <ArrowUpRightIcon className="size-3.5" />
                   {t("source")}
                 </Link>
               </Button>
             ) : null}
+            {/* Which conversations have actually reached for this memory —
+                the question that decides whether it still earns its place. */}
+            <MentionBacklinksPanel target={entityBacklinkTarget("memory", memory.id)} />
             {memory.supersededById ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {t("replacedBy")}:{" "}
