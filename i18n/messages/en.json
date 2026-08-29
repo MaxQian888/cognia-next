@@ -30752,6 +30752,11 @@
           "label": "Default for new chats"
         },
         "description": "Defaults for the composer's reasoning-depth control.",
+        "importedDefault": {
+          "clear": "Clear",
+          "hint": "Applies to a turn whose conversation has no thinking level of its own. It came from an assistant config you imported, not from the control above — clear it to fall back to the model's own default.",
+          "label": "Imported default effort: {effort}"
+        },
         "title": "Thinking level",
         "visibleTiers": {
           "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth.",

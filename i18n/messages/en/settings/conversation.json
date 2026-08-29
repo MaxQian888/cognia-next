@@ -48,7 +48,70 @@
     },
     "title": "Composer behavior"
   },
+  "composerSkin": {
+    "adjustHint": "Fine-tune the chosen style. Mobile keeps its minimum touch targets whatever you set here.",
+    "adjustLabel": "Adjust",
+    "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
+    "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
+    "followsPack": "Following the active style pack. Pick a style to pin your own.",
+    "monoHint": "Type in the code font instead of the interface font.",
+    "monoLabel": "Monospace input",
+    "paddingLabel": "Padding",
+    "radiusLabel": "Corner radius",
+    "reachabilityNote": "No style removes a control. A quieter style folds them behind the “⋯” button on the status row.",
+    "resetOverrides": "Reset {skin} to its defaults",
+    "sendShapeLabel": "Send button",
+    "sendShapes": {
+      "circle": "Circle",
+      "rounded": "Rounded square"
+    },
+    "skinLabel": "Style",
+    "skins": {
+      "airy": {
+        "hint": "Roomy and rounded, with the status row inside the box under the text.",
+        "label": "Airy"
+      },
+      "classic": {
+        "hint": "The composer as it was before styles existed. It takes no adjustments.",
+        "label": "Classic"
+      },
+      "dense": {
+        "hint": "Tight and squared, with a quiet monospace status line inside the box.",
+        "label": "Dense"
+      },
+      "focus": {
+        "hint": "Just the text and the model. Everything else folds behind “⋯”.",
+        "label": "Minimal"
+      },
+      "full": {
+        "hint": "Every control spelled out inline, with cost and context on their own rail.",
+        "label": "Detailed"
+      },
+      "sharp": {
+        "hint": "Square box, square send button, monospace input. Default under the Sharp style pack.",
+        "label": "Sharp"
+      }
+    },
+    "title": "Composer style"
+  },
   "description": "Auto-generate titles and configure the timeline minimap.",
+  "effortPreferences": {
+    "defaultLevel": {
+      "hint": "The depth every new conversation starts on. \"Auto\" leaves each model at its own default.",
+      "label": "Default for new chats"
+    },
+    "description": "Defaults for the composer's reasoning-depth control.",
+    "importedDefault": {
+      "clear": "Clear",
+      "hint": "Applies to a turn whose conversation has no thinking level of its own. It came from an assistant config you imported, not from the control above — clear it to fall back to the model's own default.",
+      "label": "Imported default effort: {effort}"
+    },
+    "title": "Thinking level",
+    "visibleTiers": {
+      "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth.",
+      "label": "Tiers to offer"
+    }
+  },
   "inputSend": {
     "description": "Keyboard, sending, and AI assistance for the message composer.",
     "title": "Input & sending"
@@ -180,63 +243,5 @@
     "description": "Background model used to generate titles. Defaults to the chat model.",
     "heading": "Title model"
   },
-  "useDefault": "Use chat default",
-  "effortPreferences": {
-    "title": "Thinking level",
-    "description": "Defaults for the composer's reasoning-depth control.",
-    "defaultLevel": {
-      "label": "Default for new chats",
-      "hint": "The depth every new conversation starts on. \"Auto\" leaves each model at its own default."
-    },
-    "visibleTiers": {
-      "label": "Tiers to offer",
-      "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth."
-    }
-  },
-  "composerSkin": {
-    "title": "Composer style",
-    "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
-    "skinLabel": "Style",
-    "followsPack": "Following the active style pack. Pick a style to pin your own.",
-    "adjustLabel": "Adjust",
-    "adjustHint": "Fine-tune the chosen style. Mobile keeps its minimum touch targets whatever you set here.",
-    "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
-    "radiusLabel": "Corner radius",
-    "paddingLabel": "Padding",
-    "sendShapeLabel": "Send button",
-    "monoLabel": "Monospace input",
-    "monoHint": "Type in the code font instead of the interface font.",
-    "reachabilityNote": "No style removes a control. A quieter style folds them behind the “⋯” button on the status row.",
-    "resetOverrides": "Reset {skin} to its defaults",
-    "sendShapes": {
-      "circle": "Circle",
-      "rounded": "Rounded square"
-    },
-    "skins": {
-      "classic": {
-        "label": "Classic",
-        "hint": "The composer as it was before styles existed. It takes no adjustments."
-      },
-      "airy": {
-        "label": "Airy",
-        "hint": "Roomy and rounded, with the status row inside the box under the text."
-      },
-      "dense": {
-        "label": "Dense",
-        "hint": "Tight and squared, with a quiet monospace status line inside the box."
-      },
-      "full": {
-        "label": "Detailed",
-        "hint": "Every control spelled out inline, with cost and context on their own rail."
-      },
-      "focus": {
-        "label": "Minimal",
-        "hint": "Just the text and the model. Everything else folds behind “⋯”."
-      },
-      "sharp": {
-        "hint": "Square box, square send button, monospace input. Default under the Sharp style pack.",
-        "label": "Sharp"
-      }
-    }
-  }
+  "useDefault": "Use chat default"
 }

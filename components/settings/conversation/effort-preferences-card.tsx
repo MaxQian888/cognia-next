@@ -20,12 +20,22 @@
 // its DISPLAY to the nearest visible tier. That is why this card can be a
 // preference rather than a migration.
 //
+// A third thing can end up here without the user ever choosing it:
+// `AppSettings.defaultEffort`. That is the SEND-TIME fallback consulted at the
+// end of the effort chain, so it never lands on a session row and the
+// composer's control cannot show it — and the only writers are the settings
+// importers (Codex / Claude Code / pi). Importing one of those configs
+// therefore left an effort applied to every turn with no surface anywhere that
+// named it, let alone cleared it. It is read-only here (the tier above is the
+// preference people should set) but visible and clearable.
+//
 // The presentation switch (slider vs list) stays in `./composer-behavior-card`
 // with the other composer toggles: it describes the widget, not the ladder.
 
 import { useTranslations } from "next-intl"
 import { CheckIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -58,6 +68,13 @@ export function EffortPreferencesCard() {
   // the `off` tier already names — so the two collapse onto one choice rather
   // than making the user distinguish "unset" from "explicitly auto".
   const defaultLevel: ThinkingLevel = settings?.defaultThinkingLevel ?? "off"
+
+  // `undefined` is the normal state — nothing to explain unless an import set it.
+  const importedEffort = settings?.defaultEffort
+
+  const clearImportedEffort = () => {
+    void save({ defaultEffort: undefined })
+  }
 
   const setDefaultLevel = (level: ThinkingLevel) => {
     // `off` round-trips as a stored value, not as `undefined`: a user who
@@ -107,6 +124,30 @@ export function EffortPreferencesCard() {
           </SelectContent>
         </Select>
       </div>
+
+      {importedEffort ? (
+        <div
+          className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 rounded-md border border-dashed p-3"
+          data-testid="effort-imported-default"
+        >
+          <div className="min-w-0 flex-1 basis-64 space-y-0.5">
+            <Label className="text-sm">
+              {t("importedDefault.label", { effort: tLevel(importedEffort as "off") })}
+            </Label>
+            <p className="text-xs text-pretty text-muted-foreground">{t("importedDefault.hint")}</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={clearImportedEffort}
+            data-testid="effort-imported-default-clear"
+          >
+            {t("importedDefault.clear")}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         <div className="space-y-0.5">

@@ -48,7 +48,70 @@
     },
     "title": "输入框行为"
   },
+  "composerSkin": {
+    "adjustHint": "微调所选风格。无论这里怎么设，移动端都会保留最小触控区域。",
+    "adjustLabel": "微调",
+    "adjustLockedHint": "“经典”保持与现在完全一致，因此不接受微调。需要自定义请先换一种风格。",
+    "description": "选择输入框的排布方式。每种风格都能触及全部控件，区别只在于哪些直接摆在行上、哪些收起来。",
+    "followsPack": "当前跟随所选风格包。选一种风格即可固定为你自己的选择。",
+    "monoHint": "用代码字体而非界面字体输入。",
+    "monoLabel": "等宽输入",
+    "paddingLabel": "内边距",
+    "radiusLabel": "圆角半径",
+    "reachabilityNote": "任何风格都不会删控件。更简洁的风格只是把它们收进状态行的“⋯”里。",
+    "resetOverrides": "将{skin}恢复为默认值",
+    "sendShapeLabel": "发送按钮",
+    "sendShapes": {
+      "circle": "圆形",
+      "rounded": "圆角方形"
+    },
+    "skinLabel": "风格",
+    "skins": {
+      "airy": {
+        "hint": "圆润宽敞，状态行放在框内、文字下方。",
+        "label": "宽松"
+      },
+      "classic": {
+        "hint": "风格功能出现之前的输入框。不接受微调。",
+        "label": "经典"
+      },
+      "dense": {
+        "hint": "方正紧凑，框内带一条安静的等宽状态行。",
+        "label": "紧凑"
+      },
+      "focus": {
+        "hint": "只留文字和模型，其余全部收进“⋯”。",
+        "label": "极简"
+      },
+      "full": {
+        "hint": "所有控件都展开写明，花费与上下文单独占一行。",
+        "label": "详细"
+      },
+      "sharp": {
+        "hint": "方形输入框与发送键，等宽字体。硬朗风格包下的默认皮肤。",
+        "label": "硬朗"
+      }
+    },
+    "title": "输入框风格"
+  },
   "description": "自动生成标题并配置时间线缩略图。",
+  "effortPreferences": {
+    "defaultLevel": {
+      "hint": "每个新会话的起始思考强度。选择「自动」则由模型自行决定。",
+      "label": "新会话默认档"
+    },
+    "description": "输入框推理深度控件的默认设置。",
+    "importedDefault": {
+      "clear": "清除",
+      "hint": "当某个对话本身没有设置思考等级时，这个值会生效。它来自你导入的助手配置，而不是上面的控件 —— 清除后将回落到模型自身的默认值。",
+      "label": "导入的默认思考强度：{effort}"
+    },
+    "title": "思考强度",
+    "visibleTiers": {
+      "hint": "隐藏用不到的档位可以缩短滑轨。已经在使用隐藏档位的会话仍按原深度运行。",
+      "label": "可选档位"
+    }
+  },
   "inputSend": {
     "description": "消息输入框的键盘、发送与 AI 辅助设置。",
     "title": "输入与发送"
@@ -180,63 +243,5 @@
     "description": "用于生成标题的后台模型，默认使用对话模型。",
     "heading": "标题模型"
   },
-  "useDefault": "使用对话默认",
-  "effortPreferences": {
-    "title": "思考强度",
-    "description": "输入框推理深度控件的默认设置。",
-    "defaultLevel": {
-      "label": "新会话默认档",
-      "hint": "每个新会话的起始思考强度。选择「自动」则由模型自行决定。"
-    },
-    "visibleTiers": {
-      "label": "可选档位",
-      "hint": "隐藏用不到的档位可以缩短滑轨。已经在使用隐藏档位的会话仍按原深度运行。"
-    }
-  },
-  "composerSkin": {
-    "title": "输入框风格",
-    "description": "选择输入框的排布方式。每种风格都能触及全部控件，区别只在于哪些直接摆在行上、哪些收起来。",
-    "skinLabel": "风格",
-    "followsPack": "当前跟随所选风格包。选一种风格即可固定为你自己的选择。",
-    "adjustLabel": "微调",
-    "adjustHint": "微调所选风格。无论这里怎么设，移动端都会保留最小触控区域。",
-    "adjustLockedHint": "“经典”保持与现在完全一致，因此不接受微调。需要自定义请先换一种风格。",
-    "radiusLabel": "圆角半径",
-    "paddingLabel": "内边距",
-    "sendShapeLabel": "发送按钮",
-    "monoLabel": "等宽输入",
-    "monoHint": "用代码字体而非界面字体输入。",
-    "reachabilityNote": "任何风格都不会删控件。更简洁的风格只是把它们收进状态行的“⋯”里。",
-    "resetOverrides": "将{skin}恢复为默认值",
-    "sendShapes": {
-      "circle": "圆形",
-      "rounded": "圆角方形"
-    },
-    "skins": {
-      "classic": {
-        "label": "经典",
-        "hint": "风格功能出现之前的输入框。不接受微调。"
-      },
-      "airy": {
-        "label": "宽松",
-        "hint": "圆润宽敞，状态行放在框内、文字下方。"
-      },
-      "dense": {
-        "label": "紧凑",
-        "hint": "方正紧凑，框内带一条安静的等宽状态行。"
-      },
-      "full": {
-        "label": "详细",
-        "hint": "所有控件都展开写明，花费与上下文单独占一行。"
-      },
-      "focus": {
-        "label": "极简",
-        "hint": "只留文字和模型，其余全部收进“⋯”。"
-      },
-      "sharp": {
-        "hint": "方形输入框与发送键，等宽字体。硬朗风格包下的默认皮肤。",
-        "label": "硬朗"
-      }
-    }
-  }
+  "useDefault": "使用对话默认"
 }

@@ -107,3 +107,33 @@ describe("tier visibility", () => {
     expect(save).not.toHaveBeenCalled()
   })
 })
+
+describe("imported send-time default (AppSettings.defaultEffort)", () => {
+  // Only the settings importers write this field, and it is consulted at the
+  // END of the effort chain — so it never reaches a session row and the
+  // composer's control cannot show it. Importing a Codex / Claude Code config
+  // used to leave an effort applied to every turn that no surface named.
+  it("says nothing when no import set one", () => {
+    mount()
+    expect(screen.queryByTestId("effort-imported-default")).not.toBeInTheDocument()
+  })
+
+  it("names the imported effort by its display name", () => {
+    mount({ defaultEffort: "high" })
+    expect(screen.getByTestId("effort-imported-default")).toHaveTextContent("High")
+  })
+
+  it("clears it back to the model's own default", () => {
+    mount({ defaultEffort: "high" })
+    fireEvent.click(screen.getByTestId("effort-imported-default-clear"))
+    expect(save).toHaveBeenCalledWith({ defaultEffort: undefined })
+  })
+
+  it("does not confuse it with the per-chat tier", () => {
+    // The two are different mechanisms; showing one as the other would be
+    // worse than showing neither.
+    mount({ defaultEffort: "max", defaultThinkingLevel: "low" })
+    expect(screen.getByLabelText("Default for new chats")).toHaveTextContent("Low")
+    expect(screen.getByTestId("effort-imported-default")).toHaveTextContent("Max")
+  })
+})
