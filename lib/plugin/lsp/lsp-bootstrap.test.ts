@@ -45,7 +45,12 @@ jest.mock("@/lib/workspace/roots", () => ({
   primaryRootOf: jest.fn(() => undefined),
 }))
 
-const settingsState: { settings: { lsp?: { servers?: unknown[] } } | null } = {
+const settingsState: {
+  settings: {
+    lsp?: { servers?: unknown[]; enabled?: boolean }
+    builtinTools?: { lsp?: boolean }
+  } | null
+} = {
   settings: { lsp: {} },
 }
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -129,6 +134,57 @@ describe("bootstrapLspRegistry", () => {
     listener!()
     await flush()
     expect(syncMock).toHaveBeenCalledTimes(3)
+  })
+
+  describe("master toggle (settings.lsp.enabled) — default resolver", () => {
+    // Exercises `defaultResolveEditorServers`, which every other test in this
+    // file bypasses via the `resolveEditorServers` seam. The editor plane used
+    // to ignore `lsp.enabled` entirely, so switching the subsystem off in
+    // Settings → Language Servers left every editor server running.
+    const resolveLspServersMock = jest.requireMock("@/lib/lsp/resolve-config")
+      .resolveLspServers as jest.Mock
+
+    const oneServer: LspServerConfig[] = [
+      { id: "eslint", name: "ESLint", languages: ["typescript"], command: "/x" },
+    ]
+
+    beforeEach(() => {
+      resolveLspServersMock.mockClear()
+      resolveLspServersMock.mockResolvedValue(oneServer)
+    })
+
+    it("runs the editor servers when lsp.enabled is unset (long-standing default)", async () => {
+      settingsState.settings = { lsp: { servers: [] } }
+      bootstrapLspRegistry({ subscribeChanges: () => () => {} })
+      await flush()
+      expect(resolveLspServersMock).toHaveBeenCalledTimes(1)
+      expect(syncMock).toHaveBeenCalledWith([expect.objectContaining({ id: "eslint" })])
+    })
+
+    it("does NOT borrow the agent's builtinTools.lsp default", async () => {
+      // The agent ladder is `lsp.enabled ?? builtinTools.lsp ?? false`, and
+      // that category ships off. Reusing it here would have silently killed
+      // editor completion + diagnostics for every existing user.
+      settingsState.settings = { lsp: { servers: [] }, builtinTools: { lsp: false } }
+      bootstrapLspRegistry({ subscribeChanges: () => () => {} })
+      await flush()
+      expect(syncMock).toHaveBeenCalledWith([expect.objectContaining({ id: "eslint" })])
+    })
+
+    it("stops every editor server on an explicit lsp.enabled:false", async () => {
+      settingsState.settings = { lsp: { servers: [], enabled: false } }
+      bootstrapLspRegistry({ subscribeChanges: () => () => {} })
+      await flush()
+      expect(resolveLspServersMock).not.toHaveBeenCalled()
+      expect(syncMock).toHaveBeenCalledWith([])
+    })
+
+    it("runs them again on an explicit lsp.enabled:true", async () => {
+      settingsState.settings = { lsp: { servers: [], enabled: true }, builtinTools: { lsp: false } }
+      bootstrapLspRegistry({ subscribeChanges: () => () => {} })
+      await flush()
+      expect(syncMock).toHaveBeenCalledWith([expect.objectContaining({ id: "eslint" })])
+    })
   })
 
   it("swallows a rejected resolution without throwing", async () => {

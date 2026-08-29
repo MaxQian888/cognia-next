@@ -1,4 +1,21 @@
 import type { ApprovedBinaryRow, AutomationAuditLogRow } from "@/lib/db/schema"
+
+// Only `defaultIsUnsignedLspAllowed` reaches the database in this file — every
+// other default dep is overridden per-test. The stub lets the untouched
+// default read path be exercised directly.
+const storedSettings: {
+  value: {
+    lsp?: { unsignedAllowed?: boolean }
+    developer?: { unsignedLspAllowed?: boolean }
+  } | null
+} = { value: null }
+
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    settings: { get: async () => storedSettings.value },
+  }),
+}))
+
 import {
   __resetLspBinaryPolicyForTesting,
   configureLspBinaryPolicy,
@@ -342,7 +359,56 @@ describe("lsp-binary-policy", () => {
     expect(audit[0]!.processName).toBe("server.exe")
   })
 
-  describe("dev-mode override (settings.developer.unsignedLspAllowed)", () => {
+  describe("dev-mode override default read path", () => {
+    // The default `isUnsignedLspAllowed` used to read
+    // `settings.developer.unsignedLspAllowed`, which
+    // `lib/lsp/migrate-settings.ts` moves to `lsp.unsignedAllowed` and then
+    // clears at app start — so the settings toggle could never reach the
+    // policy. Every other test in this file injects the flag, so nothing
+    // caught it.
+    beforeEach(() => {
+      __resetLspBinaryPolicyForTesting()
+      storedSettings.value = null
+      configureLspBinaryPolicy({
+        findApprovedBinary: async () => undefined,
+        hashBinary: async () => null,
+        appendAudit: async (row) => {
+          audit.push(row)
+        },
+        now: () => 1_700_000_000_000,
+      })
+    })
+
+    async function verdict() {
+      return evaluateLspBinary({
+        pluginId: "p1",
+        pluginPath: "/plugins/p1",
+        binaryPath: "/plugins/p1/bin/server",
+      })
+    }
+
+    it("reads lsp.unsignedAllowed — the field Settings → Language Servers writes", async () => {
+      storedSettings.value = { lsp: { unsignedAllowed: true } }
+      expect((await verdict()).allowed).toBe(true)
+    })
+
+    it("still honours the pre-migration developer.unsignedLspAllowed", async () => {
+      storedSettings.value = { developer: { unsignedLspAllowed: true } }
+      expect((await verdict()).allowed).toBe(true)
+    })
+
+    it("denies when neither field is set", async () => {
+      storedSettings.value = { lsp: {}, developer: {} }
+      expect((await verdict()).allowed).toBe(false)
+    })
+
+    it("denies when there are no settings at all", async () => {
+      storedSettings.value = null
+      expect((await verdict()).allowed).toBe(false)
+    })
+  })
+
+  describe("dev-mode override (settings.lsp.unsignedAllowed)", () => {
     it("relaxes an unapproved-binary decision to allow + prompt when toggle is on", async () => {
       devModeFlag = true
       onDisk("/plugins/p/bin", APPROVED_HASH)

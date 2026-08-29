@@ -18,18 +18,28 @@
  *
  * Plugin-contributed LSP servers (`manifest.lspServers`) are NOT shown here —
  * their lifecycle is owned by the plugin manager under Settings → Plugins.
+ *
+ * Above the two groups sits the runtime block, which owns the rest of the
+ * `AppSettings.lsp` slice. Those three fields were declared and read but had no
+ * control anywhere in the app: `lsp.enabled` gates the agent runtime in
+ * `lib/claude/build-options.ts` (and now the editor plane in
+ * `lib/plugin/lsp/lsp-bootstrap.ts`), `lsp.autoInstall` gates the sidecar's
+ * npm install ladder, and `lsp.unsignedAllowed` is what the VS Code binary
+ * policy consults. Adding servers here while none of the three was reachable
+ * meant the section could not actually turn the subsystem on.
  */
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Plus, Trash2, Pencil, RotateCcw, Download, ScrollText } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { LspServerConfig } from "@/types/lsp/config"
+import type { LspServerConfig, LspSettings } from "@/types/lsp/config"
 import { BUILTIN_LSP_SERVERS, BUILTIN_LSP_SERVER_IDS } from "@/lib/lsp/builtin-defaults"
 import { useLspStatusStore } from "@/lib/lsp/lsp-status-store"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
@@ -38,6 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { LspDevToggle } from "../developer/lsp-dev-toggle"
 import { LspEditDialog } from "./lsp-edit-dialog"
 import { LspEffectivePreview } from "./lsp-effective-preview"
 import { LspServerStatusBadge } from "./lsp-server-status-badge"
@@ -72,8 +83,19 @@ export function LspServersSection() {
     [userServers]
   )
 
+  // `enabled` is tri-state on disk: `undefined` means "legacy default", which
+  // differs per plane (the agent falls back to the `builtinTools.lsp` category,
+  // the editor stays on). The switch shows the agent-side resolution because
+  // that is the one a user can otherwise only reach through Settings → Tools.
+  const masterEnabled = settings?.lsp?.enabled ?? settings?.builtinTools?.lsp ?? false
+  const autoInstall = settings?.lsp?.autoInstall !== false
+
+  const writeLsp = (patch: Partial<LspSettings>) => {
+    void save({ lsp: { ...settings?.lsp, servers: settings?.lsp?.servers ?? [], ...patch } })
+  }
+
   const writeServers = (next: LspServerConfig[]) => {
-    void save({ lsp: { ...settings?.lsp, servers: next } })
+    writeLsp({ servers: next })
   }
 
   const upsertServer = (entry: LspServerConfig) => {
@@ -128,6 +150,48 @@ export function LspServersSection() {
         </div>
       </header>
 
+      {/* Runtime — the rest of the `AppSettings.lsp` slice */}
+      <div className="space-y-3" data-testid="lsp-runtime-block">
+        <h3 className="text-sm font-medium">{t("runtime.title")}</h3>
+        <div className="divide-y divide-border/60 rounded-md border">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4">
+            <div className="min-w-0 flex-1 basis-64 space-y-1">
+              <Label htmlFor="lsp-master-enabled" className="font-medium">
+                {t("runtime.enabledLabel")}
+              </Label>
+              <p className="text-xs text-pretty text-muted-foreground">
+                {t("runtime.enabledDescription")}
+              </p>
+            </div>
+            <Switch
+              id="lsp-master-enabled"
+              checked={masterEnabled}
+              onCheckedChange={(next) => writeLsp({ enabled: next })}
+              aria-label={t("runtime.enabledLabel")}
+              data-testid="lsp-master-enabled"
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4">
+            <div className="min-w-0 flex-1 basis-64 space-y-1">
+              <Label htmlFor="lsp-auto-install" className="font-medium">
+                {t("runtime.autoInstallLabel")}
+              </Label>
+              <p className="text-xs text-pretty text-muted-foreground">
+                {t("runtime.autoInstallDescription")}
+              </p>
+            </div>
+            <Switch
+              id="lsp-auto-install"
+              checked={autoInstall}
+              onCheckedChange={(next) => writeLsp({ autoInstall: next })}
+              aria-label={t("runtime.autoInstallLabel")}
+              data-testid="lsp-auto-install"
+            />
+          </div>
+        </div>
+        <LspDevToggle />
+      </div>
+
       {/* Builtin defaults */}
       <div className="space-y-2">
         <h3 className="text-sm font-medium">{t("builtinGroup")}</h3>
@@ -156,7 +220,7 @@ export function LspServersSection() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {effective.languages.join(", ")}
+                    {(effective.languages ?? []).join(", ")}
                   </TableCell>
                   <TableCell className="text-right">
                     <Switch
@@ -242,7 +306,7 @@ export function LspServersSection() {
                     <div className="font-mono text-xs text-muted-foreground">{entry.command}</div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {entry.languages.join(", ")}
+                    {(entry.languages ?? []).join(", ")}
                   </TableCell>
                   <TableCell className="text-right">
                     <Switch

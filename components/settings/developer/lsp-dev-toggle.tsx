@@ -1,17 +1,23 @@
 "use client"
 
 /**
- * Settings → Developer → "Allow unsigned LSP binaries"
+ * Settings → Language Servers → "Allow unsigned LSP binaries"
  *
- * Controls `AppSettings.developer.unsignedLspAllowed`. When `true`, the
- * VS Code LSP binary policy
- * (`lib/plugin/vscode-shim/lsp-binary-policy.ts`) lets unsigned LSP
- * binaries spawn after one in-session consent prompt instead of refusing
+ * Controls `AppSettings.lsp.unsignedAllowed`. When `true`, the VS Code LSP
+ * binary policy (`lib/plugin/vscode-shim/lsp-binary-policy.ts`) lets unsigned
+ * LSP binaries spawn after one in-session consent prompt instead of refusing
  * them outright. Every spawn is still audit-logged.
+ *
+ * It previously read and wrote the pre-unification
+ * `developer.unsignedLspAllowed`, which `lib/lsp/migrate-settings.ts` moves to
+ * `lsp.unsignedAllowed` and then clears at app start — so the toggle wrote a
+ * field the migration deleted and the policy read a field nothing set. Both
+ * ends now name `lsp.unsignedAllowed`.
  *
  * Hidden in production builds (returns `null`) so the toggle never
  * appears in shipped binaries. Gate is `process.env.NODE_ENV !==
- * "production"`.
+ * "production"`. `defaultIsUnsignedLspAllowed` in the policy short-circuits on
+ * the same condition, so the dormancy holds on both axes.
  */
 
 import { useTranslations } from "next-intl"
@@ -33,13 +39,14 @@ export function LspDevToggle({ isDevBuild }: LspDevToggleProps = {}) {
     isDevBuild ?? (typeof process !== "undefined" && process.env.NODE_ENV !== "production")
   if (!showInDev) return null
 
-  const current = Boolean(settings?.developer?.unsignedLspAllowed)
+  const current = Boolean(settings?.lsp?.unsignedAllowed)
 
   const onToggle = (next: boolean) => {
     void save({
-      developer: {
-        ...settings?.developer,
-        unsignedLspAllowed: next,
+      lsp: {
+        ...settings?.lsp,
+        servers: settings?.lsp?.servers ?? [],
+        unsignedAllowed: next,
       },
     })
   }

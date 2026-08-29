@@ -6,7 +6,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react"
 
 const saveMock = jest.fn(async (_patch: unknown) => {})
 const settingsRef: {
-  settings: { lsp?: { servers?: unknown[] } } | null
+  settings: {
+    lsp?: { servers?: unknown[]; enabled?: boolean; autoInstall?: boolean }
+    builtinTools?: { lsp?: boolean }
+  } | null
 } = { settings: { lsp: {} } }
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -55,6 +58,73 @@ import { LspServersSection } from "./lsp-servers-section"
 beforeEach(() => {
   saveMock.mockClear()
   settingsRef.settings = { lsp: {} }
+})
+
+describe("LspServersSection runtime block", () => {
+  // These three fields are read by `lib/claude/build-options.ts`,
+  // `lib/plugin/lsp/lsp-bootstrap.ts` and
+  // `lib/plugin/vscode-shim/lsp-binary-policy.ts`, but had no control anywhere
+  // in the app — the section could add servers without ever switching the
+  // subsystem on. Pin that they are reachable and write the read field.
+
+  it("shows the master toggle off when neither lsp.enabled nor builtinTools.lsp is set", () => {
+    render(<LspServersSection />)
+    expect(screen.getByTestId("lsp-master-enabled")).toHaveAttribute("data-state", "unchecked")
+  })
+
+  it("falls back to the legacy builtinTools.lsp category when lsp.enabled is unset", () => {
+    settingsRef.settings = { lsp: {}, builtinTools: { lsp: true } }
+    render(<LspServersSection />)
+    expect(screen.getByTestId("lsp-master-enabled")).toHaveAttribute("data-state", "checked")
+  })
+
+  it("lets an explicit lsp.enabled:false win over the legacy category", () => {
+    settingsRef.settings = { lsp: { enabled: false }, builtinTools: { lsp: true } }
+    render(<LspServersSection />)
+    expect(screen.getByTestId("lsp-master-enabled")).toHaveAttribute("data-state", "unchecked")
+  })
+
+  it("persists the master toggle to lsp.enabled without dropping the server list", () => {
+    const clangd = {
+      id: "clangd",
+      name: "clangd",
+      languages: ["cpp"],
+      command: "/x/clangd",
+      enabled: true,
+    }
+    settingsRef.settings = { lsp: { servers: [clangd] } }
+    render(<LspServersSection />)
+    fireEvent.click(screen.getByTestId("lsp-master-enabled"))
+    expect(saveMock).toHaveBeenCalledWith({
+      lsp: { servers: [clangd], enabled: true },
+    })
+  })
+
+  it("defaults auto-install on and persists an explicit opt-out", () => {
+    render(<LspServersSection />)
+    const autoInstall = screen.getByTestId("lsp-auto-install")
+    expect(autoInstall).toHaveAttribute("data-state", "checked")
+    fireEvent.click(autoInstall)
+    expect(saveMock).toHaveBeenCalledWith({ lsp: { servers: [], autoInstall: false } })
+  })
+
+  it("reflects an existing auto-install opt-out", () => {
+    settingsRef.settings = { lsp: { autoInstall: false } }
+    render(<LspServersSection />)
+    expect(screen.getByTestId("lsp-auto-install")).toHaveAttribute("data-state", "unchecked")
+  })
+
+  it("renders a stored server that is missing its languages instead of crashing", () => {
+    // Entries can arrive from a settings import or the legacy
+    // `developer.userLspServers` migration, neither of which runs the add
+    // dialog's validation. `languages.join()` on an absent array took the whole
+    // settings page down with it.
+    settingsRef.settings = {
+      lsp: { servers: [{ id: "clangd", name: "clangd", command: "/x/clangd" }] },
+    }
+    render(<LspServersSection />)
+    expect(screen.getByTestId("lsp-row-clangd")).toBeInTheDocument()
+  })
 })
 
 describe("LspServersSection", () => {

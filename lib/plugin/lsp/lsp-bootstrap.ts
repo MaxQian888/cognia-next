@@ -165,6 +165,18 @@ function activeProjectRootDir(): string | undefined {
 /** Production resolver: layer builtin ← settings.lsp ← project `.cognia/lsp.json`. */
 async function defaultResolveEditorServers(): Promise<LspServerConfig[]> {
   const settings = useSettingsStore.getState().settings
+  // `settings.lsp.enabled` is the master toggle for the WHOLE subsystem (agent
+  // tools + editor). `lib/claude/build-options.ts` already gates the agent
+  // runtime on it; the editor plane used to ignore it, so switching the
+  // subsystem off in Settings → Language Servers still left every editor
+  // server running.
+  //
+  // Only an EXPLICIT `false` stops the editor. `undefined` keeps the editor's
+  // long-standing default (servers run for Skills / Canvas / Artifact editors)
+  // — the agent's `?? builtinTools.lsp ?? false` ladder is about handing LSP
+  // *tools to the model*, and borrowing that default here would have silently
+  // switched editor completion and diagnostics off for every existing user.
+  if (settings?.lsp?.enabled === false) return []
   const resolved = await resolveLspServers({
     rootDir: activeProjectRootDir(),
     userServers: settings?.lsp?.servers,
