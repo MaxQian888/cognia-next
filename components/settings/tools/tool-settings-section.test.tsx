@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { ToolSettingsSection } from "./tool-settings-section"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
@@ -84,6 +84,7 @@ describe("ToolSettingsSection", () => {
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
     settingsState.settings.webTools = { enabled: true }
+    settingsState.settings.builtinTools = { ...DEFAULT_BUILTIN_TOOLS }
   })
 
   it("renders all built-in tool categories", () => {
@@ -95,6 +96,22 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByText("shellExecution")).toBeInTheDocument()
     expect(screen.getByText("terminalRepl")).toBeInTheDocument()
     expect(screen.getByText("lspIntelligence")).toBeInTheDocument()
+  })
+
+  it("offers the Anthropic-channel modifier under the core file tools", () => {
+    // `coreFilesOnAnthropic` is a switch on BuiltinToolsConfig but not a
+    // category, so the category walk never rendered it — while the CLI's
+    // settings panel has always offered it.
+    render(<ToolSettingsSection />)
+    const row = screen.getByTestId("builtin-core-files-on-anthropic")
+    fireEvent.click(within(row).getByRole("switch"))
+    expect(setBuiltinToolEnabled).toHaveBeenCalledWith("coreFilesOnAnthropic", true)
+  })
+
+  it("hides the Anthropic-channel modifier while core file tools are off", () => {
+    settingsState.settings.builtinTools = { ...DEFAULT_BUILTIN_TOOLS, coreFiles: false }
+    render(<ToolSettingsSection />)
+    expect(screen.queryByTestId("builtin-core-files-on-anthropic")).toBeNull()
   })
 
   it("calls setBuiltinToolEnabled when a category switch is toggled", () => {

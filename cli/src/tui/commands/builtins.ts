@@ -19,6 +19,10 @@ const TOOL_LABELS: Record<string, string> = {
   shellAdvanced: "advanced shell",
   terminalRepl: "terminal REPL",
   lsp: "LSP",
+  codeGraph: "code graph",
+  astGrep: "AST search & rewrite",
+  dependencyResearch: "dependency source",
+  webclone: "web page snapshot",
 }
 
 /**
@@ -110,6 +114,43 @@ export const BUILTIN_TOOL_CATALOG: BuiltinToolCategory[] = [
     label: "LSP",
     description: "Code-intelligence tools plus the diagnostics-after-edit loop (desktop only).",
     tools: ["goto_definition", "find_references", "hover", "document_symbols", "diagnostics"],
+  },
+  {
+    key: "codeGraph",
+    label: "code graph",
+    description:
+      "Structural code intelligence over a tree-sitter symbol graph — where a symbol is defined, who calls it, blast radius. Read-only, desktop only.",
+    tools: [
+      "codegraph_status",
+      "codegraph_search",
+      "codegraph_node",
+      "codegraph_callers",
+      "codegraph_callees",
+      "codegraph_impact",
+      "codegraph_context",
+      "codegraph_explore",
+      "codegraph_files",
+    ],
+  },
+  {
+    key: "astGrep",
+    label: "AST search & rewrite",
+    description: "Structural search and rewrite over the syntax tree. Rewrites are approval-gated.",
+    tools: ["ast_grep_search", "ast_grep_replace"],
+  },
+  {
+    key: "dependencyResearch",
+    label: "dependency source",
+    description:
+      "Clone a dependency's source repository into an ignored workspace so the agent can read library internals. HTTPS only, no build scripts run.",
+    tools: ["clone_dep_source", "list_cloned_deps"],
+  },
+  {
+    key: "webclone",
+    label: "web page snapshot",
+    description:
+      "Snapshot a live page with its CSS/JS/image/font assets into a self-contained file or bundle. Private/loopback targets blocked unless opted in.",
+    tools: ["web_clone", "web_clone_convert"],
   },
 ]
 

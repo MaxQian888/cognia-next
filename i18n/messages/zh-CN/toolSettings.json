@@ -9,6 +9,10 @@
   "codeGraphDesc": "基于 tree-sitter 符号图谱的结构化代码智能（codegraph_search / node / callers / callees / impact / context / explore / files）。提供 grep 无法回答的亚毫秒级查询：符号定义位置、谁在调用它、影响范围。只读；仅桌面端。",
   "coreFiles": "核心文件工具",
   "coreFilesDesc": "面向非 Anthropic 模型的完整编码 Agent 工具集：搜索、读取、补丁、Shell、可等待的后台命令，以及带依赖关系的结构化会话任务。只读工具自由运行；文件系统和 Shell 变更需逐次审批。",
+  "coreFilesOnAnthropic": {
+    "description": "在 Anthropic 通道同时注册核心文件工具集。默认关闭——Claude Agent SDK 自带 Grep / Read / Edit / Bash，重复注册同形工具会让模型难以取舍。",
+    "label": "在 Anthropic 通道启用核心文件工具"
+  },
   "dependencyResearch": "依赖源码",
   "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
   "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",

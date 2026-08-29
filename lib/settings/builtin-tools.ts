@@ -82,6 +82,30 @@ export const BUILTIN_SERVER_VERSION = TYPED_DATA.serverVersion
 /** All built-in tool categories, in display order. */
 export const BUILTIN_TOOL_CATEGORIES: readonly BuiltinToolCategory[] = TYPED_DATA.categories
 
+/**
+ * `BuiltinToolsConfig` keys that are switches but NOT categories of their own —
+ * modifiers on a category that already has a card. They have no entry in
+ * `builtin-tools-data.json`, so anything that walks the categories alone will
+ * silently omit them.
+ */
+export const BUILTIN_TOOL_MODIFIER_KEYS = ["coreFilesOnAnthropic"] as const
+
+/**
+ * Every switchable `BuiltinToolsConfig` key: the categories plus the modifiers.
+ *
+ * Four categories (`codeGraph`, `astGrep`, `dependencyResearch`, `webclone`)
+ * used to exist only here — the CLI's config schema is `.strict()` and did not
+ * list them, its `/settings` panel had no rows for them, and the CLI↔App bridge
+ * dropped them on the way across. They worked at runtime (the CLI's tool host
+ * gates on `enabled[category]` generically), so the only thing missing was a
+ * way to switch them on. Deriving the CLI surfaces from this list is what stops
+ * a new category reaching one surface and not the other.
+ */
+export const BUILTIN_TOOL_CONFIG_KEYS: readonly string[] = [
+  ...BUILTIN_TOOL_CATEGORIES.map((category) => category.id),
+  ...BUILTIN_TOOL_MODIFIER_KEYS,
+]
+
 /** Look up a category by id. Returns undefined if the id isn't recognised. */
 export function getBuiltinToolCategory(id: string): BuiltinToolCategory | undefined {
   return BUILTIN_TOOL_CATEGORIES.find((c) => c.id === id)

@@ -8,6 +8,7 @@ import {
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
+import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 const base: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
@@ -102,5 +103,22 @@ describe("aboutLine", () => {
       providers: {},
     }
     expect(aboutLine(cfg, "1.0.0")).toContain("default")
+  })
+})
+
+describe("the /tools catalog covers the whole builtin-tool surface", () => {
+  it("documents every switchable builtin-tool key", () => {
+    const documented = BUILTIN_TOOL_CATALOG.map((entry) => entry.key as string)
+    expect(BUILTIN_TOOL_CONFIG_KEYS.filter((key) => !documented.includes(key))).toEqual([])
+  })
+
+  it("gives every key a human label in describeBuiltinTools", () => {
+    // A key with no label entry falls through to the raw camelCase id, which
+    // is how "codeGraph" and "dependencyResearch" used to read in /tools.
+    const unlabelled = BUILTIN_TOOL_CATALOG.filter((entry) => {
+      const line = describeBuiltinTools({ [entry.key]: true } as unknown as BuiltinToolsConfig)
+      return !line.includes(entry.label)
+    }).map((entry) => entry.key)
+    expect(unlabelled).toEqual([])
   })
 })

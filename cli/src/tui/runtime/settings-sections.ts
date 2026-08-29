@@ -195,6 +195,26 @@ const BUILTIN_TOOL_ROWS: { key: keyof BuiltinToolsConfig; label: string; desc: s
     label: "LSP code intelligence",
     desc: "Language-server hover / definitions / diagnostics.",
   },
+  {
+    key: "codeGraph",
+    label: "Code graph",
+    desc: "Symbol graph queries: definitions, callers, callees, blast radius.",
+  },
+  {
+    key: "astGrep",
+    label: "AST search & rewrite",
+    desc: "Structural search and rewrite over the syntax tree.",
+  },
+  {
+    key: "dependencyResearch",
+    label: "Dependency source",
+    desc: "Clone a dependency's repository so the agent can read library internals.",
+  },
+  {
+    key: "webclone",
+    label: "Web page snapshot",
+    desc: "Snapshot a live page with its assets into a self-contained bundle.",
+  },
 ]
 
 /**

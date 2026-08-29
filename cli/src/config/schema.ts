@@ -20,6 +20,7 @@ import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
 
 import { EFFORT_SLIDER_LEVELS, THINKING_LEVELS, type ThinkingLevel } from "@/lib/ai/thinking-level"
+import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 /** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
  *  BUILTIN_PROTOCOL_NAMES in sidecar/dispatch/protocol-adapters/provider-protocol.mjs. */
@@ -557,19 +558,20 @@ function stripUndefinedShallow<T extends Record<string, unknown>>(obj: T): Parti
   return out
 }
 
+/**
+ * Derived from the shared catalog rather than hand-listed. The hand-written
+ * version was missing `codeGraph`, `astGrep`, `dependencyResearch` and
+ * `webclone` — and because this object is `.strict()`, a config that named one
+ * of them was rejected outright, even though the CLI's tool host serves all
+ * four. Deriving keeps the schema honest as categories are added.
+ */
 export const builtinToolsSchema: z.ZodType<Partial<BuiltinToolsConfig>> = z
-  .object({
-    fileExtras: z.boolean().optional(),
-    coreFiles: z.boolean().optional(),
-    coreFilesOnAnthropic: z.boolean().optional(),
-    git: z.boolean().optional(),
-    process: z.boolean().optional(),
-    environment: z.boolean().optional(),
-    shellAdvanced: z.boolean().optional(),
-    terminalRepl: z.boolean().optional(),
-    lsp: z.boolean().optional(),
-  })
-  .strict()
+  .object(
+    Object.fromEntries(
+      BUILTIN_TOOL_CONFIG_KEYS.map((key) => [key, z.boolean().optional()])
+    ) as Record<string, z.ZodOptional<z.ZodBoolean>>
+  )
+  .strict() as z.ZodType<Partial<BuiltinToolsConfig>>
 
 export const providerConfigSchema = z
   .object({

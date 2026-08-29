@@ -14,6 +14,7 @@
 
 import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { readTextFile } from "@/lib/claude/ipc"
+import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 import { resolveCliHome, writeCliHomeFile } from "./home"
 
@@ -30,18 +31,15 @@ const PERMISSION_MODES = [
 ] as const
 /** CLI output styles (mirror of `cli/src/config/schema.ts:OUTPUT_STYLES`). */
 const OUTPUT_STYLES = ["default", "concise", "explanatory", "learning"] as const
-/** The exact builtin-tool keys the CLI's strict schema accepts. */
-const BUILTIN_TOOL_KEYS: ReadonlyArray<keyof BuiltinToolsConfig> = [
-  "fileExtras",
-  "coreFiles",
-  "coreFilesOnAnthropic",
-  "git",
-  "process",
-  "environment",
-  "shellAdvanced",
-  "terminalRepl",
-  "lsp",
-]
+/**
+ * The builtin-tool keys the CLI's strict schema accepts — derived from the
+ * shared catalog, which is also what builds that schema. Hand-listing them here
+ * meant `codeGraph`, `astGrep`, `dependencyResearch` and `webclone` were
+ * dropped on the way across: a user switched them on in Settings → Tools, the
+ * push reported success, and the CLI never saw them.
+ */
+const BUILTIN_TOOL_KEYS: ReadonlyArray<keyof BuiltinToolsConfig> =
+  BUILTIN_TOOL_CONFIG_KEYS as ReadonlyArray<keyof BuiltinToolsConfig>
 
 /** The subset of CLI `config.json` keys the desktop owns. */
 export interface CliConfigSubset {

@@ -302,6 +302,20 @@ export function ToolSettingsSection() {
             enabled={builtinTools[cat.id] ?? false}
             disabled={!desktop}
             onToggle={(next) => setBuiltinToolEnabled(cat.id, next)}
+            // `coreFilesOnAnthropic` is a modifier on this category rather than
+            // a category of its own, so it has no entry in
+            // `BUILTIN_TOOL_CATEGORIES` and had no control here — while the CLI
+            // settings panel has always offered it and the CLI↔App bridge
+            // pushes it across. It belongs with the switch it modifies.
+            subOption={
+              cat.id === "coreFiles"
+                ? {
+                    testid: "builtin-core-files-on-anthropic",
+                    checked: builtinTools.coreFilesOnAnthropic === true,
+                    onToggle: (next) => setBuiltinToolEnabled("coreFilesOnAnthropic", next),
+                  }
+                : undefined
+            }
           />
         ))}
       </div>
@@ -318,9 +332,15 @@ interface CategoryCardProps {
   enabled: boolean
   disabled: boolean
   onToggle: (next: boolean) => void
+  /** An extra switch that only makes sense while this category is on. */
+  subOption?: {
+    testid: string
+    checked: boolean
+    onToggle: (next: boolean) => void
+  }
 }
 
-function CategoryCard({ category, enabled, disabled, onToggle }: CategoryCardProps) {
+function CategoryCard({ category, enabled, disabled, onToggle, subOption }: CategoryCardProps) {
   const t = useTranslations("toolSettings")
   const [expanded, setExpanded] = useState(false)
 
@@ -358,6 +378,27 @@ function CategoryCard({ category, enabled, disabled, onToggle }: CategoryCardPro
 
       {enabled && (
         <CardContent className="pt-0 pb-3 px-4">
+          {subOption && (
+            <div
+              className="mb-2 flex items-start justify-between gap-2 rounded border px-2 py-1.5"
+              data-testid={subOption.testid}
+            >
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-[11px] leading-snug font-medium">
+                  {t("coreFilesOnAnthropic.label")}
+                </p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("coreFilesOnAnthropic.description")}
+                </p>
+              </div>
+              <Switch
+                checked={subOption.checked}
+                disabled={disabled}
+                onCheckedChange={subOption.onToggle}
+                aria-label={t("coreFilesOnAnthropic.label")}
+              />
+            </div>
+          )}
           <Button
             type="button"
             size="sm"

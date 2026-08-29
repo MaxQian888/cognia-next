@@ -1,7 +1,10 @@
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import {
   BUILTIN_SERVER_NAME,
   BUILTIN_SERVER_VERSION,
   BUILTIN_TOOL_CATEGORIES,
+  BUILTIN_TOOL_CONFIG_KEYS,
+  BUILTIN_TOOL_MODIFIER_KEYS,
   getBuiltinToolCategory,
   listBuiltinTools,
   listNamespacedToolsInCategory,
@@ -238,4 +241,29 @@ describe("builtin-tools metadata", () => {
       })
     }
   )
+})
+
+describe("BUILTIN_TOOL_CONFIG_KEYS", () => {
+  it("covers every switchable BuiltinToolsConfig key", () => {
+    // The shipped defaults are the runtime shape of the interface. A key that
+    // is defaulted but not listed here would be invisible to every surface
+    // that derives from this list — which is how `codeGraph`, `astGrep`,
+    // `dependencyResearch` and `webclone` reached the app's Tools page but not
+    // the CLI's config schema or its /settings panel.
+    for (const key of Object.keys(DEFAULT_BUILTIN_TOOLS)) {
+      expect(BUILTIN_TOOL_CONFIG_KEYS).toContain(key)
+    }
+  })
+
+  it("is exactly the categories plus the non-category modifiers", () => {
+    expect(BUILTIN_TOOL_CONFIG_KEYS).toEqual([
+      ...BUILTIN_TOOL_CATEGORIES.map((c) => c.id),
+      ...BUILTIN_TOOL_MODIFIER_KEYS,
+    ])
+  })
+
+  it("lists no modifier that is already a category", () => {
+    const categoryIds = new Set(BUILTIN_TOOL_CATEGORIES.map((c) => c.id))
+    expect(BUILTIN_TOOL_MODIFIER_KEYS.filter((k) => categoryIds.has(k))).toEqual([])
+  })
 })

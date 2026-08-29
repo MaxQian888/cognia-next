@@ -7,6 +7,7 @@ import {
 import type { ResolvedConfig } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
+import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 import { externalCapabilities } from "./backend-capabilities"
 
 type CfgOver = Partial<Omit<ResolvedConfig, "builtinTools">> & {
@@ -550,5 +551,16 @@ describe("logging section", () => {
     expect(applyTargetDefault({ kind: "logging", key: "fileLevel" })).toBe("info")
     expect(applyTargetDefault({ kind: "logging", key: "mcpLogMaxKb" })).toBe("2048")
     expect(applyTargetDefault({ kind: "logging", key: "crashLogMaxKb" })).toBe("1024")
+  })
+})
+
+describe("built-in tool rows cover the whole catalog", () => {
+  it("offers a row for every switchable builtin-tool key", () => {
+    // Four categories worked at runtime (the tool host gates on
+    // `enabled[category]` generically) but had no row here and no entry in the
+    // strict config schema, so there was no way to switch them on from the CLI.
+    const rows = settingsSections(cfg()).flatMap((section) => section.rows.map((r) => r.id))
+    const missing = BUILTIN_TOOL_CONFIG_KEYS.filter((key) => !rows.includes(`tool:${key}`))
+    expect(missing).toEqual([])
   })
 })
