@@ -1,4 +1,6 @@
 {
+  "agentAuthoringHint": "Gives the assistant tools to create and revise artifacts and canvas documents by name, instead of relying on detection of fenced code blocks. Revisions still follow the review setting above.",
+  "agentAuthoringLabel": "Let the assistant create artifacts",
   "autoCreateHint": "When on, qualifying code blocks in assistant replies are converted into artifacts and the side panel slides in.",
   "autoCreateLabel": "Enable auto-detection",
   "defaultPanelMode": {

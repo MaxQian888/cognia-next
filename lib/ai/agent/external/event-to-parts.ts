@@ -33,7 +33,7 @@ import type {
   ExternalAgentToolUseEndEvent,
   ExternalAgentToolUseStartEvent,
 } from "@/types/agent/external-agent"
-import type { ArtifactPart } from "@/lib/claude/parts-extensions"
+import { artifactPartFromToolResult } from "@/lib/artifacts/tool-part"
 
 type Part = UIMessage["parts"][number]
 
@@ -198,10 +198,9 @@ function applyToolUseStart(parts: readonly Part[], event: ExternalAgentToolUseSt
     ]
   }
 
-  const artifact = artifactPartFromToolUse(event.toolName, event.rawInput ?? {})
-  if (artifact) {
-    return [...parts, artifact as unknown as Part]
-  }
+  // No artifact part here: a tool_use is seen before the call runs, so the id
+  // in it is the model's guess rather than the one the host wrote. The part is
+  // emitted from the result in `applyToolResult`.
   const fresh: MutablePart = {
     type: `tool-${event.toolName}`,
     toolCallId: event.toolUseId,
@@ -257,6 +256,20 @@ function applyToolResult(parts: readonly Part[], event: ExternalAgentToolResultE
     ...(event.kind ? { kind: event.kind } : {}),
     ...(event.locations ? { locations: event.locations } : {}),
   }
+  // A successful artifact/canvas tool replaces its tool card with the artifact
+  // card — this is the first point where the host-written id is known.
+  const artifactPart = event.isError
+    ? null
+    : artifactPartFromToolResult(
+        // The result event carries no tool name; the part it is patching does.
+        typeof cur.type === "string" ? cur.type.replace(/^tool-/, "") : "",
+        event.result,
+        { toolCallId: event.toolUseId }
+      )
+  if (artifactPart) {
+    return [...parts.slice(0, idx), artifactPart as unknown as Part, ...parts.slice(idx + 1)]
+  }
+
   const updated: MutablePart = {
     ...cur,
     state: event.isError ? "output-error" : "output-available",
@@ -287,37 +300,3 @@ function errorTextOf(result: string | Record<string, unknown>): string {
 }
 
 // ---- artifact detection --------------------------------------------------
-
-const ARTIFACT_KIND_ALLOWED = new Set([
-  "code",
-  "react",
-  "html",
-  "svg",
-  "mermaid",
-  "document",
-  "chart",
-  "math",
-])
-
-function artifactPartFromToolUse(
-  toolName: string,
-  rawInput: Record<string, unknown>
-): ArtifactPart | null {
-  if (toolName !== "artifact_create" && toolName !== "artifact_update") return null
-  const artifactId =
-    typeof rawInput.id === "string"
-      ? rawInput.id
-      : typeof rawInput.artifactId === "string"
-        ? (rawInput.artifactId as string)
-        : null
-  const title = typeof rawInput.title === "string" ? rawInput.title : null
-  if (!artifactId || !title) return null
-  const kindRaw =
-    typeof rawInput.type === "string"
-      ? rawInput.type
-      : typeof rawInput.kind === "string"
-        ? rawInput.kind
-        : "code"
-  const kind = (ARTIFACT_KIND_ALLOWED.has(kindRaw) ? kindRaw : "code") as ArtifactPart["kind"]
-  return { type: "artifact", artifactId, title, kind }
-}

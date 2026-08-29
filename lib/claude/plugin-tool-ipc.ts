@@ -52,6 +52,11 @@ import {
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
 import { isWorkingSetTool, runWorkingSetTool } from "./working-set-tool"
 import {
+  isArtifactBuiltinTool,
+  resolveArtifactToolDeps,
+  runArtifactBuiltinTool,
+} from "./artifact-builtin-tools"
+import {
   isSpawnTaskBuiltinTool,
   runSpawnTaskBuiltinTool,
   type SpawnTaskToolRunDeps,
@@ -565,6 +570,20 @@ export async function handlePluginToolExec(
     // the shared Dexie CAS service through this existing tool round trip.
     if (isWorkingSetTool(request.name)) {
       const result = await runWorkingSetTool(request.args, { sessionId: request.sessionId })
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Agent-authored artifacts and canvas documents ─────────────────────
+    // Host-routed for the same reason as the working set: the artifact store is
+    // a renderer singleton the .mjs sidecar cannot import. Before this the
+    // declared `artifact_create` / `canvas_create` tools had a consumer on the
+    // message-conversion side and no producer anywhere.
+    if (isArtifactBuiltinTool(request.name)) {
+      const result = await runArtifactBuiltinTool(
+        request.name,
+        request.args,
+        resolveArtifactToolDeps(),
+        { sessionId: request.sessionId }
+      )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted vector built-ins — project-scoped vector memory ───────────

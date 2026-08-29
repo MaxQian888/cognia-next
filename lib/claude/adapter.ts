@@ -20,7 +20,6 @@ import type {
 } from "@cognia/agent-config-types"
 import type {
   A2UIPart,
-  ArtifactPart,
   McpResultBlock,
   SourcesPart,
   SourcesPartItem,
@@ -40,34 +39,7 @@ import {
   type TwinRetrievedChunk,
 } from "./citations"
 import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
-
-/**
- * Map a `tool_use` block's name + input to an ArtifactPart when the call
- * matches the `artifact_create` / `artifact_update` contract. Pure function —
- * does not write to `useArtifactStore`; callers that need the row created
- * (Tauri sidecar bridge, plugin API) handle the store side themselves.
- */
-export function extractArtifactPartFromToolUse(block: BetaToolUseBlock): ArtifactPart | null {
-  if (block.name !== "artifact_create" && block.name !== "artifact_update") return null
-  const input = (block.input ?? {}) as Record<string, unknown>
-  const artifactId =
-    typeof input.id === "string"
-      ? input.id
-      : typeof input.artifactId === "string"
-        ? input.artifactId
-        : null
-  const title = typeof input.title === "string" ? input.title : null
-  if (!artifactId || !title) return null
-  const kindRaw =
-    typeof input.type === "string"
-      ? input.type
-      : typeof input.kind === "string"
-        ? input.kind
-        : "code"
-  const allowed = new Set(["code", "react", "html", "svg", "mermaid", "document", "chart", "math"])
-  const kind = (allowed.has(kindRaw) ? kindRaw : "code") as ArtifactPart["kind"]
-  return { type: "artifact", artifactId, title, kind }
-}
+import { artifactPartFromToolResult } from "@/lib/artifacts/tool-part"
 
 type Parts = UIMessage["parts"]
 type Part = Parts[number]
@@ -284,10 +256,9 @@ function blockToPart(block: BetaContentBlock): Part | null {
     }
     case "tool_use": {
       const b = block as BetaToolUseBlock
-      const artifactPart = extractArtifactPartFromToolUse(b)
-      if (artifactPart) {
-        return artifactPart as unknown as Part
-      }
+      // Deliberately NOT the place an artifact part is emitted: the call has
+      // not run yet, so any id here is the model's guess and the card would
+      // point at a row that does not exist. See `updateToolPart` below.
       const state =
         b.state === "input-streaming" || b.state === "approval-requested"
           ? b.state
@@ -1300,6 +1271,15 @@ function applyToolResults(messages: UIMessage[], evt: SDKUserMessage): UIMessage
   return mutated ? next : messages
 }
 
+/** Tool results arrive flattened to text; the artifact tools return JSON. */
+function parseToolResultJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
 function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessage[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
@@ -1320,12 +1300,26 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
     }
     const outputText = flattenToolResultContent(tr.content)
     const mcpContent = tr.is_error ? undefined : extractMcpContentBlocks(tr.content)
-    const newPart = {
+
+    // An artifact/canvas tool that succeeded replaces its tool card with the
+    // artifact card. This is the only point where the host-written id is
+    // known — `createArtifact` mints it, so the model's `tool_use` input never
+    // carried it.
+    const artifactPart = tr.is_error
+      ? null
+      : artifactPartFromToolResult(
+          oldPart.type.slice("tool-".length),
+          parseToolResultJson(outputText),
+          {
+            toolCallId: oldPart.toolCallId,
+          }
+        )
+    const newPart = (artifactPart ?? {
       ...oldPart,
       state: tr.is_error ? "output-error" : "output-available",
       ...(tr.is_error ? { errorText: outputText } : { output: outputText }),
       ...(mcpContent ? { mcpContent } : {}),
-    } as unknown as Part
+    }) as unknown as Part
 
     const newParts = msg.parts.slice()
     newParts[partIdx] = newPart

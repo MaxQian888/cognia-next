@@ -127,18 +127,27 @@ export type BuiltInToolName =
   | "display_step_guide"
   | "display_concept_map"
   | "display_animation"
-  // Canvas tools
+  // Canvas tools — implemented in `lib/claude/artifact-builtin-tools.ts`,
+  // routed host-side through `lib/claude/plugin-tool-ipc.ts`.
   | "canvas_create"
   | "canvas_update"
   | "canvas_read"
   | "canvas_open"
-  // Artifact tools
+  // Artifact tools — same module. Three earlier names are deliberately gone:
+  //   `artifact_search` — folded into `artifact_read`'s optional `query`. One
+  //     optional field beats a whole extra schema in a manifest the model pays
+  //     for on every turn.
+  //   `artifact_render`  — nothing to ask for. The dock renders whatever is in
+  //     the store the moment it lands.
+  //   `artifact_export`  — a model-initiated write into the user's Downloads is
+  //     a consent surface, and the payoff is a button the user is already
+  //     looking at. `lib/artifacts/export/` is the human path.
+  // `types/agent/tool.test.ts` pins this arm against the shipped manifest, so
+  // adding a name here without implementing it fails a test rather than
+  // becoming another entry nobody notices.
   | "artifact_create"
   | "artifact_update"
   | "artifact_read"
-  | "artifact_search"
-  | "artifact_render"
-  | "artifact_export"
   | "artifact_delete"
   // Memory tools
   | "memory_store"

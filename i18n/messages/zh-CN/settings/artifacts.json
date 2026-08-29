@@ -1,4 +1,6 @@
 {
+  "agentAuthoringHint": "给助手一组工具，让它按名字直接创建与修订 artifact 和画布文档，而不是依赖对围栏代码块的识别。修订仍然遵循上面的审阅设置。",
+  "agentAuthoringLabel": "允许助手创建 artifact",
   "autoCreateHint": "开启后，符合条件的代码块会被自动转换为 Artifact，并自动滑出侧边面板。",
   "autoCreateLabel": "启用自动检测",
   "defaultPanelMode": {

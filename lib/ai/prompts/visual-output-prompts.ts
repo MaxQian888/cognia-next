@@ -50,11 +50,13 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
   if (channels.artifacts) {
     lines.push(
       "- **Quantitative** — a trend, a comparison, a share of a total, a correlation:",
-      '  a fenced `json` chart artifact (`{"type": …, "data": [{"name": …}]}`), which',
-      "  opens in the dock themed, hoverable, versioned and exportable. Load the",
-      "  `chart-design` skill for the exact contract before emitting one.",
+      '  call `artifact_create` with `type: "chart"`. It opens in the dock themed,',
+      "  hoverable, versioned and exportable as PNG or PDF. Load the `chart-design`",
+      "  skill for the data contract before the first one.",
       "- **Something the reader will keep editing** — a document, a spec, a draft they",
-      "  will iterate on with you: a canvas.",
+      "  will iterate on with you: `canvas_create`. Revise with `canvas_update`.",
+      "- Use `artifact_update` to revise an artifact rather than re-emitting it, so the",
+      "  reader keeps its history and reviews your change as a diff.",
       "- Never hand-draw a chart as SVG while the dock is available. A drawing is a",
       "  picture of a chart; the artifact is the chart."
     )

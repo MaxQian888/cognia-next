@@ -24,10 +24,18 @@ describe("buildVisualOutputSection", () => {
   })
 
   it("offers canvas only where a dock exists", () => {
-    expect(buildVisualOutputSection(inApp)).toContain("a canvas.")
+    expect(buildVisualOutputSection(inApp)).toContain("canvas_create")
     // The IM branch still NAMES canvas — to say it will not work there.
-    expect(buildVisualOutputSection(imThread)).not.toContain("a canvas.")
+    expect(buildVisualOutputSection(imThread)).not.toContain("canvas_create")
     expect(buildVisualOutputSection(imThread)).toContain("canvas artifact arrives as raw")
+  })
+
+  it("names the tools it expects, not a fence the detector has to notice", () => {
+    // The fence route depended on the heuristic detector lifting a code block
+    // at turn end, which cannot name the artifact or set a chart's shape.
+    const section = buildVisualOutputSection(inApp)!
+    expect(section).toContain("artifact_create")
+    expect(section).toContain("artifact_update")
   })
 
   it("names A2UI only when A2UI is enabled for the send", () => {

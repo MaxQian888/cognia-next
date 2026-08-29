@@ -38,14 +38,18 @@ describe("ArtifactsSection", () => {
   })
 
   it("toggling review-before-apply persists the patch", () => {
+    // Addressed by testid, not by position: this used to be "the last switch",
+    // which silently pointed at a different control the moment one was added.
     render(<ArtifactsSection />)
-    // reviewBeforeApply is the last switch (after auto-create, 9 type toggles,
-    // show-notification, and persist-across-sessions).
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[switches.length - 1])
+    fireEvent.click(screen.getByTestId("artifacts-review-before-apply"))
     expect(saveMock).toHaveBeenCalled()
-    const patch = saveMock.mock.calls[0][0]
-    expect(patch.artifacts.reviewBeforeApply).toBe(false)
+    expect(saveMock.mock.calls[0][0].artifacts.reviewBeforeApply).toBe(false)
+  })
+
+  it("toggling agent authoring persists the patch", () => {
+    render(<ArtifactsSection />)
+    fireEvent.click(screen.getByTestId("artifacts-agent-authoring"))
+    expect(saveMock.mock.calls[0][0].artifacts.agentAuthoring).toBe(false)
   })
 
   it("toggling auto-create persists the patch", () => {

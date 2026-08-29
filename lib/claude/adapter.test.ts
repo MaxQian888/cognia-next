@@ -171,7 +171,9 @@ describe("applySdkEvent — assistant", () => {
     expect(part.approval).toEqual({ id: "approval-1", signature: "sig-1" })
   })
 
-  it("converts artifact_create tool_use into an ArtifactPart", () => {
+  it("does NOT build an artifact part from the tool_use — the row does not exist yet", () => {
+    // The model's `input.id` is a guess; `createArtifact` mints its own. A part
+    // built here would point at nothing and render the "cleared" placeholder.
     const evt = asAssistant({
       id: "asst-art-1",
       content: [
@@ -179,26 +181,12 @@ describe("applySdkEvent — assistant", () => {
           type: "tool_use",
           id: "art-tool-1",
           name: "artifact_create",
-          input: {
-            id: "art-1",
-            title: "demo.md",
-            type: "document",
-            content: "# Hello",
-          },
+          input: { title: "demo.md", type: "document", content: "# Hello" },
         },
       ],
     } as unknown as BetaMessage)
     const { messages } = applySdkEvent([], evt)
-    const part = messages[0].parts[0] as {
-      type: string
-      artifactId: string
-      title: string
-      kind: string
-    }
-    expect(part.type).toBe("artifact")
-    expect(part.artifactId).toBe("art-1")
-    expect(part.title).toBe("demo.md")
-    expect(part.kind).toBe("document")
+    expect((messages[0].parts[0] as { type: string }).type).toBe("tool-artifact_create")
   })
 
   it("converts assistant file blocks into UI file parts", () => {
@@ -722,6 +710,81 @@ describe("applySdkEvent — user (tool results)", () => {
     const part = result.messages[0].parts[0] as { state: string; errorText?: string }
     expect(part.state).toBe("output-error")
     expect(part.errorText).toBe("boom")
+  })
+
+  it("replaces the tool card with an artifact card once the tool result lands", () => {
+    // The result carries the id the HOST wrote, which is the only id that can
+    // resolve in the artifact store.
+    const assistant: UIMessage = {
+      id: "asst-art",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-artifact_create",
+          toolCallId: "t-art",
+          state: "input-available",
+          input: { title: "demo.md", type: "document" },
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-art",
+          content: JSON.stringify({
+            ok: true,
+            artifactId: "host-minted-id",
+            title: "demo.md",
+            type: "document",
+            version: 1,
+          }),
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as {
+      type: string
+      artifactId: string
+      title: string
+      kind: string
+      toolCallId?: string
+    }
+    expect(part.type).toBe("artifact")
+    expect(part.artifactId).toBe("host-minted-id")
+    expect(part.title).toBe("demo.md")
+    expect(part.kind).toBe("document")
+    expect(part.toolCallId).toBe("t-art")
+  })
+
+  it("leaves the tool card alone when the artifact tool failed", () => {
+    // An artifact card pointing at a row that was never written is exactly the
+    // failure this path exists to prevent; the tool card shows the error.
+    const assistant: UIMessage = {
+      id: "asst-art-err",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-artifact_create",
+          toolCallId: "t-err",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-err",
+          content: JSON.stringify({ ok: false, code: "invalid_arguments" }),
+          is_error: false,
+        },
+      ])
+    )
+    expect((result.messages[0].parts[0] as { type: string }).type).toBe("tool-artifact_create")
   })
 
   it("flattens array-of-text-blocks tool_result content", () => {

@@ -4563,6 +4563,14 @@ export interface AppSettings {
      * overwriting the artifact directly.
      */
     reviewBeforeApply?: boolean
+    /**
+     * When not `false` (default on), the agent is given the
+     * `artifact_create` / `artifact_update` / `canvas_*` tools so it can author
+     * an artifact by name instead of hoping the fence detector lifts a code
+     * block. Rides the send spec as an opt-OUT only, like
+     * {@link SendOptions.planTools}.
+     */
+    agentAuthoring?: boolean
   }
 
   // ---- Agent evaluation ----

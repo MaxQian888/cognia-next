@@ -226,6 +226,12 @@ export interface ArtifactPart {
   kind: "code" | "react" | "html" | "svg" | "mermaid" | "document" | "chart" | "math"
   /** Whether the inline panel should default to expanded. Defaults to true. */
   defaultOpen?: boolean
+  /**
+   * The tool call this part was emitted from, when it came from one. A
+   * `tool_result` can be re-delivered (retry, reconnect, replay), and the id
+   * lets a consumer recognise the second delivery as the same part.
+   */
+  toolCallId?: string
 }
 
 export function isArtifactPart(part: unknown): part is ArtifactPart {
@@ -363,6 +369,8 @@ export interface CanvasInlinePart {
   readonly?: boolean
   /** Max body height in px. Defaults to 320. */
   maxHeight?: number
+  /** The tool call this part was emitted from, when it came from one. */
+  toolCallId?: string
 }
 
 export function isCanvasInlinePart(part: unknown): part is CanvasInlinePart {

@@ -28,6 +28,7 @@ type ArtifactSettingsShape = {
   defaultPanelMode: "code" | "preview"
   persistAcrossSessions: boolean
   reviewBeforeApply: boolean
+  agentAuthoring: boolean
 }
 
 const DEFAULTS: ArtifactSettingsShape = {
@@ -38,6 +39,7 @@ const DEFAULTS: ArtifactSettingsShape = {
   defaultPanelMode: "code",
   persistAcrossSessions: true,
   reviewBeforeApply: true,
+  agentAuthoring: true,
 }
 
 export function ArtifactsSection() {
@@ -54,6 +56,7 @@ export function ArtifactsSection() {
   const defaultPanelMode = cfg.defaultPanelMode ?? DEFAULTS.defaultPanelMode
   const persistAcrossSessions = cfg.persistAcrossSessions ?? DEFAULTS.persistAcrossSessions
   const reviewBeforeApply = cfg.reviewBeforeApply ?? DEFAULTS.reviewBeforeApply
+  const agentAuthoring = cfg.agentAuthoring ?? DEFAULTS.agentAuthoring
 
   const update = (patch: Partial<ArtifactSettingsShape>) => {
     void save({
@@ -181,8 +184,21 @@ export function ArtifactsSection() {
           <p className="text-xs text-muted-foreground">{t("reviewBeforeApplyHint")}</p>
         </div>
         <Switch
+          data-testid="artifacts-review-before-apply"
           checked={reviewBeforeApply}
           onCheckedChange={(checked) => update({ reviewBeforeApply: checked })}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 border-t pt-4">
+        <div className="space-y-1">
+          <Label className="text-sm">{t("agentAuthoringLabel")}</Label>
+          <p className="text-xs text-muted-foreground">{t("agentAuthoringHint")}</p>
+        </div>
+        <Switch
+          data-testid="artifacts-agent-authoring"
+          checked={agentAuthoring}
+          onCheckedChange={(checked) => update({ agentAuthoring: checked })}
         />
       </div>
 

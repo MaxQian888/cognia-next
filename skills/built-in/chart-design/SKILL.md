@@ -22,10 +22,28 @@ and makes it hoverable. That is the whole point: a chart artifact stays live and
 re-themeable, keeps its own version history, and can be exported. An SVG you drew
 by hand is a picture of a chart.
 
-## Required output contract
+## How to emit one
 
-Return the chart as **exactly one fenced `json` block**. Nothing else in the
-fence — no prose, no comments, no trailing text.
+**Call `artifact_create`.** It is the direct route: you name the chart, you pick
+its shape, and the tool returns the id you can pass to `artifact_update` later.
+
+```
+artifact_create({
+  type: "chart",
+  title: "Revenue vs cost by quarter",
+  chartType: "bar",
+  content: "{\n  \"type\": \"bar\",\n  \"data\": [ … ]\n}"
+})
+```
+
+`content` is the chart JSON described below. To revise a chart you already made,
+call `artifact_update` with its `artifactId` — the reader keeps the version
+history and reviews your change as a diff, instead of getting a second chart.
+
+If the tool is not available to you (the user turned agent authoring off, or
+this conversation is bound to a messaging platform with no dock), fall back to
+**exactly one fenced `json` block** with nothing else in the fence — a detector
+lifts it into the dock at the end of your turn.
 
 ````
 ```json
@@ -41,6 +59,8 @@ fence — no prose, no comments, no trailing text.
 ```
 ````
 
+## The data contract
+
 Hard requirements, each of which the renderer or the detector actually enforces:
 
 - **`type`** is one of `line` · `bar` · `area` · `pie` · `doughnut` · `scatter` ·
@@ -53,9 +73,11 @@ Hard requirements, each of which the renderer or the detector actually enforces:
   from the **first row only**, so every series must appear in `data[0]`. A series
   that starts at row two will not be drawn at all. Use `0` rather than omitting a
   key, and never `null`.
-- **Pretty-print it across at least three lines.** The artifact is lifted out of
-  your reply by a detector with a line-count floor; a single-line JSON blob is
-  not picked up and the user sees raw JSON in the transcript instead of a chart.
+- **Pretty-print it across at least three lines.** On the fence fallback the
+  artifact is lifted out of your reply by a detector with a line-count floor; a
+  single-line JSON blob is not picked up and the user sees raw JSON in the
+  transcript instead of a chart. Keep the same shape when passing it to
+  `artifact_create` so the two routes cannot drift.
 - **Do not specify colours, axis titles, widths or margins.** The renderer owns
   the palette so every chart in the app matches the user's theme in both light
   and dark. A `colors` or `options` key is ignored; hand-picked hex is how a

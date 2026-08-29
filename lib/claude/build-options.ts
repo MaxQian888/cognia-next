@@ -20,7 +20,7 @@ import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
-import { resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
+import { resolveSandboxEnabled, resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   deriveExternalSessionPermission,
@@ -1961,12 +1961,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // unconditionally would also break the "no rules configured → no ruleset at
   // all" invariant that keeps SendOptions byte-identical across turns for the
   // provider prompt cache.
+  // Whether this send has an artifact dock on the other end. An IM-bound
+  // session does not: a chart or canvas artifact would arrive as raw JSON.
+  // Hoisted here because the SAME answer gates three things — the routing
+  // prompt (ADR-0139), the artifact tool manifest, and the consent tier below.
+  // The routing prompt advertising a chart artifact while the tool that makes
+  // one is absent is the exact mismatch this file used to ship.
+  const artifactsChannelAvailable = !session?.platformBinding?.adapterId
+  const artifactAuthoringEnabled =
+    artifactsChannelAvailable && appSettings?.artifacts?.agentAuthoring !== false
+
   const editorWriteToolsSurfaced = await proIdeWriteToolsAvailable(ctx)
   const commandRules = appSettings?.agentPermissions?.commandRules
   const toolRules = appSettings?.agentPermissions?.toolRules
   const { buildEditorToolRuleset } = await import("@/lib/claude/permissions/editor-tool-rules")
+  const { buildArtifactToolRuleset } = await import("@/lib/claude/permissions/artifact-tool-rules")
   const mergedRuleset = mergeRulesets(
     editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
+    artifactAuthoringEnabled ? buildArtifactToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
@@ -2251,8 +2263,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   //
   // `artifacts` is false for an IM-bound session: there is no dock there, so a
   // fenced chart or canvas artifact would reach the reader as raw JSON.
+  //
+  // Hoisted because the SAME answer has to gate the artifact tool manifest
+  // below. The routing prompt advertising a chart artifact while the tool that
+  // makes one is absent is the exact mismatch this file used to ship.
   const visualOutputSection = buildVisualOutputSection({
-    artifacts: !session?.platformBinding?.adapterId,
+    artifacts: artifactsChannelAvailable,
     a2ui: a2uiEnabled,
   })
   if (visualOutputSection) {
@@ -2818,6 +2834,33 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       loggers.app.warn("failed to append Skill built-in tool", { error: String(err) })
     }
   }
+
+  // Artifact / Canvas authoring. On by default — the routing prompt above
+  // already tells the model to reach for a chart artifact, and before these
+  // tools existed the only way to make one was to hope the fence detector
+  // lifted a code block at turn end.
+  //
+  // Withheld for an IM-bound session for the same reason the routing prompt
+  // withholds the option: there is no dock on the other end.
+  if (artifactAuthoringEnabled) {
+    try {
+      const { buildArtifactManifestEntries, buildCanvasManifestEntries } =
+        await import("@/lib/claude/artifact-builtin-tools")
+      const { isNativeMobile } = await import("@/lib/platform/detect")
+      const entries = [...buildArtifactManifestEntries()]
+      // Canvas is a desktop/web surface: the mobile shell has no editor guild
+      // to open a document in, so offering `canvas_open` there would advertise a
+      // destination that does not exist.
+      if (!isNativeMobile()) entries.push(...buildCanvasManifestEntries())
+      const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...entries.filter((entry) => !existing.has(entry.name)),
+      ]
+    } catch (err) {
+      loggers.app.warn("failed to append artifact built-in tools", { error: String(err) })
+    }
+  }
   if (appSettings?.selfInvokeTools?.slashCommand === true) {
     try {
       const { buildSlashCommandManifestEntries } = await import("@/lib/claude/slash-builtin-tools")
@@ -2985,11 +3028,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // anthropic models do follow disallowedTools strictly, but the prompt
   // hint reduces "I notice Bash is disabled, can you tell me why?"
   // back-and-forth.
-  const sandboxEnabled =
-    session?.sandboxEnabled ??
-    character?.sandboxEnabled ??
-    appSettings?.sandboxDefaultEnabled ??
-    false
+  const sandboxEnabled = resolveSandboxEnabled({
+    session: { sandboxEnabled: session?.sandboxEnabled },
+    character: { sandboxEnabled: character?.sandboxEnabled },
+    appSettings: { sandboxDefaultEnabled: appSettings?.sandboxDefaultEnabled },
+  })
   const sandboxBinding = resolveSandboxSessionBinding({
     session: {
       sandboxTier: session?.sandboxTier,

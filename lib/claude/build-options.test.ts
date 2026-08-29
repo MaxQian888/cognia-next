@@ -2857,9 +2857,16 @@ describe("resolveSendOptions — workspace Restricted Mode (coreFiles)", () => {
 })
 
 describe("resolveSendOptions — permission ruleset merge", () => {
+  // These cases are about how `agentPermissions` merge, so they switch the
+  // artifact consent tier off. It is on by default (the artifact tools ship by
+  // default and would otherwise prompt on every call) and has its own coverage
+  // in "artifact authoring tools" below; leaving it on here would mean every
+  // expectation restating eight rules that are not what is under test.
+  const noArtifactTier = { artifacts: { agentAuthoring: false } }
   it("wraps legacy commandRules under Bash (unchanged behavior)", async () => {
     const opts = await resolveSendOptions({
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: { commandRules: { "git *": "allow" } },
       } as unknown as AppSettings,
     })
@@ -2869,6 +2876,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
   it("merges toolRules with commandRules; toolRules wins on conflicts", async () => {
     const opts = await resolveSendOptions({
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: {
           commandRules: { "git *": "allow", "rm *": "deny" },
           toolRules: {
@@ -2889,11 +2897,13 @@ describe("resolveSendOptions — permission ruleset merge", () => {
   it("serializes the merged ruleset byte-identically regardless of key order", async () => {
     const a = await resolveSendOptions({
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: { toolRules: { b: { z: "ask", a: "allow" }, a: "deny" } },
       } as unknown as AppSettings,
     })
     const b = await resolveSendOptions({
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: { toolRules: { a: "deny", b: { a: "allow", z: "ask" } } },
       } as unknown as AppSettings,
     })
@@ -2908,6 +2918,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     const opts = await resolveSendOptions({
       session: { id: "sess-deny" } as never,
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: { commandRules: { "git *": "allow" } },
       } as unknown as AppSettings,
     })
@@ -2924,7 +2935,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     rememberDenial("sess-deny-2", "Bash", { command: "rm -rf /tmp/x" })
     const opts = await resolveSendOptions({
       session: { id: "sess-deny-2" } as never,
-      appSettings: { alwaysAllowTools: ["Bash"] } as unknown as AppSettings,
+      appSettings: { alwaysAllowTools: ["Bash"], ...noArtifactTier } as unknown as AppSettings,
     })
     // Both are sent; `canUseTool` returns on the deny before it reads the list.
     expect(opts.alwaysAllowTools).toEqual(["Bash"])
@@ -2939,6 +2950,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     const opts = await resolveSendOptions({
       session: { id: "sess-clean" } as never,
       appSettings: {
+        ...noArtifactTier,
         agentPermissions: { commandRules: { "git *": "allow" } },
         alwaysAllowTools: ["Read"],
       } as unknown as AppSettings,
@@ -2949,7 +2961,7 @@ describe("resolveSendOptions — permission ruleset merge", () => {
 
   it("omits permissionRuleset entirely when no rules are configured", async () => {
     const opts = await resolveSendOptions({
-      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+      appSettings: { agentPermissions: {}, ...noArtifactTier } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toBeUndefined()
   })
@@ -3000,12 +3012,17 @@ describe("resolveSendOptions — Pro IDE editor write tools (ADR-0088 Phase 3)",
     })
   })
 
-  it("still omits the ruleset entirely where the tools are not surfaced", async () => {
+  it("still omits the EDITOR tier where the tools are not surfaced", async () => {
     // Rules for tools this turn never offers are inert payload, and emitting
     // them would break the byte-identical SendOptions the prompt cache needs.
+    // The artifact tier is switched off here so the assertion is about the
+    // editor tools and nothing else.
     const opts = await resolveSendOptions({
       ...withProject,
-      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+      appSettings: {
+        agentPermissions: {},
+        artifacts: { agentAuthoring: false },
+      } as unknown as AppSettings,
     })
     expect(opts.permissionRuleset).toBeUndefined()
   })
@@ -3024,7 +3041,10 @@ describe("resolveSendOptions — Pro IDE editor write tools (ADR-0088 Phase 3)",
   it("withholds both tools and tier when the session has no project", async () => {
     onProIdeDesktop()
     const opts = await resolveSendOptions({
-      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+      appSettings: {
+        agentPermissions: {},
+        artifacts: { agentAuthoring: false },
+      } as unknown as AppSettings,
     })
     const names = (opts.pluginTools ?? []).map((t) => (t as { name: string }).name)
     expect(names).not.toContain("open_in_editor")
@@ -3393,6 +3413,58 @@ describe("resolveSendOptions — plan mode prompt", () => {
   })
 })
 
+describe("resolveSendOptions — artifact authoring tools", () => {
+  const toolNames = (opts: { pluginTools?: { name: string }[] }) =>
+    (opts.pluginTools ?? []).map((t) => t.name)
+
+  it("gives the agent the artifact and canvas tools by default", async () => {
+    // Before these existed the declared `artifact_create` had a consumer on the
+    // message-conversion side and no producer anywhere, so an artifact could
+    // only be born from the heuristic fence detector.
+    const opts = await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+    const names = toolNames(opts)
+    expect(names).toEqual(expect.arrayContaining(["artifact_create", "artifact_update"]))
+    expect(names).toEqual(expect.arrayContaining(["canvas_create", "canvas_open"]))
+  })
+
+  it("withholds them when the user turns agent authoring off", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", artifacts: { agentAuthoring: false } } as AppSettings,
+    })
+    expect(toolNames(opts)).not.toContain("artifact_create")
+  })
+
+  it("withholds them on an IM-bound session, which has no dock", async () => {
+    // The routing prompt withholds the option for the same reason; the two must
+    // agree, or the model is told to make a chart with a tool it does not have.
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "lark", conversationKey: "c1" },
+      }),
+    })
+    expect(toolNames(opts)).not.toContain("artifact_create")
+    expect(opts.appendSystemPrompt ?? "").not.toContain("artifact_create")
+  })
+
+  it("keeps the routing prompt and the tool manifest in agreement", async () => {
+    const opts = await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+    const prompt = opts.appendSystemPrompt ?? ""
+    for (const tool of ["artifact_create", "artifact_update", "canvas_create"]) {
+      if (prompt.includes(tool)) expect(toolNames(opts)).toContain(tool)
+    }
+  })
+
+  it("bakes in the consent tier, asking only before a delete", async () => {
+    const opts = (await resolveSendOptions({ session: makeSession({ id: "s1" }) })) as {
+      permissionRuleset?: Record<string, unknown>
+    }
+    expect(opts.permissionRuleset?.artifact_create).toBe("allow")
+    expect(opts.permissionRuleset?.artifact_delete).toBe("ask")
+  })
+})
+
 describe("resolveSendOptions — brief mode", () => {
   it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({
@@ -3639,10 +3711,23 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     mReadOverride.mockReset()
   })
 
-  // The first-class web tools (web_search / web_fetch) are appended to every
-  // manifest by default and are orthogonal to Computer Use gating, so these
-  // assertions exclude them to stay focused.
-  const notWeb = (n: string) => n !== "web_search" && n !== "web_fetch"
+  // The first-class web tools (web_search / web_fetch) and the artifact /
+  // canvas authoring tools are appended to every manifest by default and are
+  // orthogonal to Computer Use gating, so these assertions exclude them to stay
+  // focused. Both have their own coverage elsewhere in this file.
+  const ALWAYS_ON = new Set([
+    "web_search",
+    "web_fetch",
+    "artifact_create",
+    "artifact_update",
+    "artifact_read",
+    "artifact_delete",
+    "canvas_create",
+    "canvas_update",
+    "canvas_read",
+    "canvas_open",
+  ])
+  const notWeb = (n: string) => !ALWAYS_ON.has(n)
 
   it("includes computer-use plugin tools when character.enableComputerUse=true", async () => {
     const opts = await resolveSendOptions({
@@ -3824,11 +3909,21 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       character: makeChar({ enableComputerUse: true, disablePluginTools: true }),
       appSettings: COGNIA_WEB_SETTINGS,
     })
-    // web_search / web_fetch are first-class built-ins (ungated by the plugin
-    // toggle); every other plugin tool is gone.
+    // web_search / web_fetch and the artifact / canvas authoring tools are
+    // first-class built-ins, ungated by the plugin toggle — that toggle is
+    // about third-party plugin tools, and artifact authoring has its own switch
+    // (`artifacts.agentAuthoring`). Every actual plugin tool is gone.
     expect((opts.pluginTools ?? []).map((t) => t.name)).toEqual([
       "web_search",
       "web_fetch",
+      "artifact_create",
+      "artifact_update",
+      "artifact_read",
+      "artifact_delete",
+      "canvas_create",
+      "canvas_update",
+      "canvas_read",
+      "canvas_open",
       "working_set",
     ])
   })
@@ -5085,14 +5180,26 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
     })
     expect(toolNames(opts)).toContain("spawn_task")
 
+    // `mockReturnValueOnce` is wrong here now: more than one gate asks whether
+    // this is native mobile in a single resolve, so the "once" is consumed by
+    // whichever runs first and the rest see `false`.
     const mobile = isNativeMobile as jest.Mock
-    mobile.mockReturnValueOnce(true)
-    const mobileOpts = await resolveSendOptions({
-      session: makeSession({ id: "s1", characterId: "c1" }),
-      character: makeChar({ id: "c1" }),
-      appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
-    })
-    expect(toolNames(mobileOpts)).not.toContain("spawn_task")
+    mobile.mockReturnValue(true)
+    try {
+      const mobileOpts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { spawnTask: true } } as AppSettings,
+      })
+      expect(toolNames(mobileOpts)).not.toContain("spawn_task")
+      // Canvas has no editor guild on the mobile shell, so its tools are
+      // withheld too — but the mobile shell DOES mount an artifact dock, so the
+      // artifact tools stay.
+      expect(toolNames(mobileOpts)).not.toContain("canvas_open")
+      expect(toolNames(mobileOpts)).toContain("artifact_create")
+    } finally {
+      mobile.mockReturnValue(false)
+    }
   })
 
   it("appends independent-session discovery and messaging only when opted in", async () => {

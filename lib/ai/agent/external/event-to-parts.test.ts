@@ -267,48 +267,99 @@ describe("applyExternalAgentEventToParts — tool calls", () => {
 })
 
 describe("applyExternalAgentEventToParts — artifacts", () => {
-  it("emits an ArtifactPart instead of a tool part for artifact_create", () => {
-    const parts = applyExternalAgentEventToParts(
+  /** Start a call, then land its result — the only order that can produce a card. */
+  function runArtifactTool(toolName: string, result: unknown) {
+    const started = applyExternalAgentEventToParts(
       [],
-      ev({
-        type: "tool_use_start",
-        toolUseId: "t1",
-        toolName: "artifact_create",
-        rawInput: { id: "art-1", title: "demo", type: "document" },
-      })
+      ev({ type: "tool_use_start", toolUseId: "t1", toolName, rawInput: { title: "demo" } })
     )
-    expect(parts[0]).toMatchObject({
-      type: "artifact",
-      artifactId: "art-1",
-      title: "demo",
-      kind: "document",
-    })
-  })
+    return applyExternalAgentEventToParts(
+      started,
+      ev({ type: "tool_result", toolUseId: "t1", result, isError: false })
+    )
+  }
 
-  it("falls back to tool-artifact_create when input is missing required fields", () => {
+  it("leaves a tool card on tool_use_start — the row does not exist yet", () => {
+    // Whatever id the model put in its input is a guess; the host mints its own.
     const parts = applyExternalAgentEventToParts(
       [],
       ev({
         type: "tool_use_start",
         toolUseId: "t1",
         toolName: "artifact_create",
-        rawInput: { title: "no-id" },
+        rawInput: { id: "model-guess", title: "demo", type: "document" },
       })
     )
     expect(parts[0]).toMatchObject({ type: "tool-artifact_create" })
   })
 
-  it("normalises unknown artifact kinds to `code`", () => {
-    const parts = applyExternalAgentEventToParts(
+  it("replaces the tool card with an artifact card once the result lands", () => {
+    const parts = runArtifactTool("artifact_create", {
+      ok: true,
+      artifactId: "host-minted",
+      title: "demo",
+      type: "document",
+    })
+    expect(parts[0]).toMatchObject({
+      type: "artifact",
+      artifactId: "host-minted",
+      title: "demo",
+      kind: "document",
+      toolCallId: "t1",
+    })
+  })
+
+  it("emits a canvas part for a canvas tool", () => {
+    const parts = runArtifactTool("canvas_create", {
+      ok: true,
+      documentId: "doc-9",
+      title: "Draft",
+      language: "markdown",
+      type: "text",
+    })
+    expect(parts[0]).toMatchObject({ type: "canvas", canvasId: "doc-9", title: "Draft" })
+  })
+
+  it("keeps the tool card when the result is missing required fields", () => {
+    const parts = runArtifactTool("artifact_create", { ok: true, title: "no-id" })
+    expect(parts[0]).toMatchObject({ type: "tool-artifact_create" })
+  })
+
+  it("keeps the tool card when the tool reported a failure", () => {
+    const parts = runArtifactTool("artifact_create", { ok: false, code: "invalid_arguments" })
+    expect(parts[0]).toMatchObject({ type: "tool-artifact_create" })
+  })
+
+  it("normalises an unknown artifact kind to `code`", () => {
+    const parts = runArtifactTool("artifact_update", {
+      ok: true,
+      artifactId: "x",
+      title: "y",
+      type: "totally-new-kind",
+    })
+    expect((parts[0] as unknown as { kind: string }).kind).toBe("code")
+  })
+
+  it("matches a namespaced tool name from the AI-SDK path", () => {
+    const started = applyExternalAgentEventToParts(
       [],
       ev({
         type: "tool_use_start",
         toolUseId: "t1",
-        toolName: "artifact_update",
-        rawInput: { id: "x", title: "y", kind: "totally-new-kind" },
+        toolName: "mcp__cognia-plugin-tools__artifact_create",
+        rawInput: {},
       })
     )
-    expect((parts[0] as unknown as { kind: string }).kind).toBe("code")
+    const parts = applyExternalAgentEventToParts(
+      started,
+      ev({
+        type: "tool_result",
+        toolUseId: "t1",
+        result: { ok: true, artifactId: "ns-1", title: "demo", type: "chart" },
+        isError: false,
+      })
+    )
+    expect(parts[0]).toMatchObject({ type: "artifact", artifactId: "ns-1", kind: "chart" })
   })
 })
 
