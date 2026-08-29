@@ -265,6 +265,14 @@ export function EmptyChatState({
     }))
   const showStarters = !hideSamples && !hiddenSections?.tryPrompt && starters.length > 0
 
+  // Where the "New chat" action lives. The fullscreen welcome has no session,
+  // so a live composer already creates one on first send — a second, louder
+  // button for the same outcome is redundant (and throws away a draft). It is
+  // demoted to a ghost under the composer there, and stays the hero's primary
+  // action only on surfaces that render no composer at all.
+  const showHeroAction = variant === "fullscreen" && !composerSlot
+  const showDemotedActions = variant === "fullscreen" && !!composerSlot
+
   return (
     <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 @2xl:py-10">
       {/* Inline rich/minimal switch (desktop only — the pane omits the handler
@@ -301,103 +309,147 @@ export function EmptyChatState({
           </motion.div>
         ) : null}
 
-        {/* Calm, single-focus welcome hero — card-less by design: the copy sits
-            directly on the page and only an ambient glow anchors the
-            illustration. Rich mode adds the generated workspace artwork;
-            minimal mode keeps the same hierarchy without decorative media. */}
-        <motion.section
-          className={cn(
-            "w-full",
-            rich
-              ? "grid items-center gap-8 @3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] @3xl:gap-12"
-              : "flex flex-col items-center text-center"
-          )}
-          variants={STAGGER_CHILD}
-          data-testid="welcome-hero"
-        >
-          <div
+        {/* Greeting + composer are ONE block, not two sections: the copy is a
+            label for the box, so they sit at reading distance from each other
+            while the outer container's larger gap keeps the rhythm between
+            this block and the sections below it. */}
+        <motion.div className="flex w-full flex-col gap-4 @2xl:gap-5" variants={STAGGER_CONTAINER}>
+          {/* Calm, single-focus welcome hero — card-less by design: the copy sits
+              directly on the page. Rich mode floats the generated workspace
+              artwork BEHIND the copy rather than beside it, so the greeting and
+              the composer below share one left edge instead of stepping from a
+              60%-wide column to a full-width box. Minimal mode keeps the same
+              hierarchy without decorative media. */}
+          <motion.section
             className={cn(
-              "flex flex-col gap-4",
-              rich ? "items-start text-left" : "items-center text-center"
+              "relative w-full",
+              // Floor the height so the backdrop artwork has a band to live in
+              // even when the copy is short (an `override` title with no
+              // action line); the artwork sizes off this box, never past it.
+              rich ? "@xl:min-h-[11rem]" : "flex flex-col items-center text-center"
             )}
+            variants={STAGGER_CHILD}
+            data-testid="welcome-hero"
           >
-            <div className="flex items-center gap-2.5">
-              <Image
-                src="/icons/icon-512.png"
-                alt=""
-                width={28}
-                height={28}
-                className="size-7 rounded-lg"
-              />
-              <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                {t("brandAlt")}
-              </span>
-            </div>
-            <div className="flex flex-col gap-2">
-              <h2
-                className={cn(
-                  "font-semibold leading-[1.1] tracking-tight text-balance",
-                  rich ? "text-3xl @lg:text-4xl @3xl:text-5xl" : "text-2xl @lg:text-3xl"
-                )}
-              >
-                {heading}
-              </h2>
-              {rich && !override?.title ? (
-                <p className="text-lg font-medium text-foreground/80 text-balance">{t("title")}</p>
-              ) : null}
-              <p
-                className={cn(
-                  "max-w-md text-sm leading-relaxed text-muted-foreground text-pretty",
-                  rich ? "" : "mx-auto"
-                )}
-              >
-                {subheading}
-              </p>
-            </div>
-
-            {variant === "fullscreen" ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {executionControlsSlot}
-                <Button onClick={onCreate} variant={rich ? "default" : "outline"} className="gap-2">
-                  <PlusIcon className="size-4" aria-hidden />
-                  {t("newChat")}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-
-          {rich ? (
-            <div
-              className="relative mx-auto aspect-[3/2] w-full max-w-sm"
-              data-testid="welcome-illustration"
-            >
-              {/* Ambient glow replaces the former framed tile — it grounds the
-                  artwork without drawing a box around it. */}
+            {/* Ambient artwork. Decorative, so `alt=""` + aria-hidden: it repeats
+                nothing the copy does not already say, and at 40% behind a
+                left-fading mask it is texture, not an image to describe. Bleeds
+                past the reading column on purpose — the scroller clips it at the
+                pane edge. Hidden below @xl, where there is no room to bleed. */}
+            {rich ? (
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-8 rounded-full bg-primary/10 blur-3xl"
-              />
-              <Image
-                src="/illustrations/cognia-workspace-hero.png"
-                alt={t("illustrationAlt")}
-                width={1536}
-                height={1024}
-                sizes="(max-width: 767px) 82vw, 360px"
-                loading="eager"
-                className="relative size-full object-contain drop-shadow-[0_16px_36px_rgba(0,0,0,0.16)]"
-              />
-            </div>
-          ) : null}
-        </motion.section>
+                data-testid="welcome-illustration"
+                className="pointer-events-none absolute inset-y-0 right-0 hidden aspect-[3/2] h-full translate-x-10 @xl:block @3xl:translate-x-14"
+              >
+                <div className="absolute inset-10 rounded-full bg-primary/10 blur-3xl" />
+                <Image
+                  src="/illustrations/cognia-workspace-hero.png"
+                  alt=""
+                  width={1536}
+                  height={1024}
+                  sizes="(max-width: 767px) 0px, 336px"
+                  loading="eager"
+                  className="relative size-full object-contain opacity-40 [mask-image:linear-gradient(to_right,transparent,black_45%)]"
+                />
+              </div>
+            ) : null}
 
-        {/* The composer, directly under the greeting. Sits above every other
-            section because it is what the page is FOR — the starters and recent
-            sessions below are shortcuts into the same box. */}
-        {composerSlot ? (
-          <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="welcome-composer">
-            {composerSlot}
-          </motion.div>
-        ) : null}
+            <div
+              className={cn(
+                "relative flex flex-col gap-4",
+                rich ? "items-start text-left @xl:max-w-[32rem]" : "items-center text-center"
+              )}
+            >
+              <div className="flex items-center gap-2.5">
+                <Image
+                  src="/icons/icon-512.png"
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="size-7 rounded-lg"
+                />
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  {t("brandAlt")}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                <h2
+                  className={cn(
+                    "font-semibold leading-[1.1] tracking-tight text-balance",
+                    rich ? "text-3xl @lg:text-4xl @3xl:text-5xl" : "text-2xl @lg:text-3xl"
+                  )}
+                >
+                  {heading}
+                </h2>
+                {rich && !override?.title ? (
+                  <p className="text-lg font-medium text-foreground/80 text-balance">
+                    {t("title")}
+                  </p>
+                ) : null}
+                <p
+                  className={cn(
+                    "max-w-md text-sm leading-relaxed text-muted-foreground text-pretty",
+                    rich ? "" : "mx-auto"
+                  )}
+                >
+                  {subheading}
+                </p>
+              </div>
+
+              {/* Only surfaces WITHOUT a composer keep the creation button up
+                  here as their primary action (the workflow-editor chat tab).
+                  When the composer is present it is demoted below it — see
+                  `showDemotedActions`. */}
+              {showHeroAction ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {executionControlsSlot}
+                  <Button
+                    onClick={onCreate}
+                    variant={rich ? "default" : "outline"}
+                    className="gap-2"
+                  >
+                    <PlusIcon className="size-4" aria-hidden />
+                    {t("newChat")}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          </motion.section>
+
+          {/* The composer, directly under the greeting. Sits above every other
+              section because it is what the page is FOR — the starters and recent
+              sessions below are shortcuts into the same box. */}
+          {composerSlot ? (
+            <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="welcome-composer">
+              {composerSlot}
+            </motion.div>
+          ) : null}
+
+          {/* Secondary actions, under the composer instead of above it. On this
+              surface there is no session, so the composer IS "new chat" — the
+              first send creates one. Keeping a filled button that does the same
+              thing (and discards whatever was typed) above the real affordance
+              made the redundant control the loudest one on the page. */}
+          {showDemotedActions ? (
+            <motion.div
+              className="flex w-full flex-wrap items-center gap-2 pt-0.5"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-actions"
+            >
+              {executionControlsSlot}
+              <Button
+                onClick={onCreate}
+                variant="ghost"
+                size="sm"
+                className="ms-auto h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <PlusIcon className="size-3.5" aria-hidden />
+                {t("newChat")}
+              </Button>
+            </motion.div>
+          ) : null}
+        </motion.div>
 
         {/* Mobile home customizable quick-action grid. */}
         {quickActionsSlot ? (

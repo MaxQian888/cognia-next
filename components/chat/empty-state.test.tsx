@@ -60,23 +60,40 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Welcome style (rich vs minimal) ───────────────────────────────────
-  it("renders the workspace illustration in the rich style", () => {
+  it("renders the workspace illustration in the rich style, as decoration", () => {
     render(<EmptyChatState {...baseProps()} />)
-    expect(screen.getByTestId("welcome-illustration")).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "illustrationAlt" })).toHaveAttribute("loading", "eager")
+    const art = screen.getByTestId("welcome-illustration")
+    expect(art).toBeInTheDocument()
+    // The artwork sits BEHIND the copy at low opacity — it repeats nothing the
+    // greeting does not already say, so it is decoration: aria-hidden, empty
+    // alt, and absent from the accessibility tree entirely.
+    expect(art).toHaveAttribute("aria-hidden", "true")
+    expect(art.querySelector("img")).toHaveAttribute("loading", "eager")
+    expect(screen.queryByRole("img", { name: "illustrationAlt" })).not.toBeInTheDocument()
   })
 
   it("adapts the rich hero to its pane width instead of the viewport width", () => {
     const { container } = render(<EmptyChatState {...baseProps()} />)
     const scroller = container.firstElementChild
-    const hero = screen.getByTestId("welcome-hero")
+    const art = screen.getByTestId("welcome-illustration")
 
     // Split view keeps the browser viewport wide while each ChatPane is narrow.
-    // The hero must therefore switch columns from its own container width;
-    // viewport `md:` classes collapse the copy to one CJK character per line.
+    // The artwork must therefore appear/resize from its own container width;
+    // a viewport `md:` class would bleed it across a narrow pane's copy.
     expect(scroller).toHaveClass("@container")
-    expect(hero).toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
-    expect(hero).not.toHaveClass("md:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+    expect(art).toHaveClass("@xl:block")
+    expect(art).not.toHaveClass("md:block")
+  })
+
+  it("keeps the greeting and the composer on one left edge (no two-column hero)", () => {
+    render(<EmptyChatState {...baseProps()} />)
+    const hero = screen.getByTestId("welcome-hero")
+    // The copy used to live in the 1fr track of a two-column grid, so it ended
+    // at ~60% width while the composer below spanned the full reading column —
+    // a visible step between two stacked elements. The artwork is positioned
+    // out of flow now, so there is only one column and one edge.
+    expect(hero).not.toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+    expect(hero.className).not.toMatch(/\bgrid\b/)
   })
 
   it("drops the workspace illustration in the minimal style", () => {
@@ -307,17 +324,83 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── New chat button ───────────────────────────────────────────────────
-  it("shows the New chat button on the fullscreen welcome and fires onCreate", async () => {
+  it("keeps New chat in the hero when the surface has no composer", async () => {
     const props = baseProps()
     const user = userEvent.setup()
     render(<EmptyChatState {...props} variant="fullscreen" />)
-    await user.click(screen.getByRole("button", { name: /newChat/ }))
+    // No composer (the workflow-editor chat tab) — creating a session is the
+    // only way in, so the button stays the hero's primary action.
+    const button = screen.getByRole("button", { name: /newChat/ })
+    expect(screen.getByTestId("welcome-hero")).toContainElement(button)
+    expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
+    await user.click(button)
     expect(props.onCreate).toHaveBeenCalled()
+  })
+
+  it("demotes New chat below the composer when one is present, and still fires onCreate", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    render(
+      <EmptyChatState
+        {...props}
+        variant="fullscreen"
+        composerSlot={<div data-testid="hero-composer" />}
+      />
+    )
+    // The composer already creates a session on its first send, so a filled
+    // button doing the same thing must not outrank it. It moves out of the
+    // hero, below the box.
+    const button = screen.getByRole("button", { name: /newChat/ })
+    const actions = screen.getByTestId("welcome-actions")
+    expect(actions).toContainElement(button)
+    expect(screen.getByTestId("welcome-hero")).not.toContainElement(button)
+    expect(screen.getByTestId("welcome-composer").compareDocumentPosition(actions)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    await user.click(button)
+    expect(props.onCreate).toHaveBeenCalled()
+  })
+
+  it("moves the execution controls down with it, beside the composer they configure", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="fullscreen"
+        composerSlot={<div data-testid="hero-composer" />}
+        executionControlsSlot={<div data-testid="exec-controls" />}
+      />
+    )
+    expect(screen.getByTestId("welcome-actions")).toContainElement(
+      screen.getByTestId("exec-controls")
+    )
+  })
+
+  it("keeps the execution controls in the hero when there is no composer", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="fullscreen"
+        executionControlsSlot={<div data-testid="exec-controls" />}
+      />
+    )
+    expect(screen.getByTestId("welcome-hero")).toContainElement(screen.getByTestId("exec-controls"))
   })
 
   it("hides the New chat button in the inline variant", () => {
     render(<EmptyChatState {...baseProps()} variant="inline" />)
     expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+  })
+
+  it("hides it in the inline variant even when a composer is present", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="inline"
+        composerSlot={<div data-testid="hero-composer" />}
+      />
+    )
+    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
   })
 
   // ── Mobile home slots (hideSamples / header / quick actions) ──────────
