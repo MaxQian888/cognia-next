@@ -14,7 +14,8 @@
  * until the sync table, delta reader, and tombstones exist, and nothing here
  * pretends otherwise.
  */
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { CloudIcon, GlobeIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
 
@@ -45,6 +46,12 @@ import {
 } from "@/lib/db/sites"
 import { purgeRetentionReport } from "@/lib/sites/console-model"
 import { useAccountStore } from "@/stores/account/account-store"
+import {
+  SITE_CONSOLE_TABS,
+  isSiteConsoleTab,
+  useSiteConsoleStore,
+  type SiteConsoleTab,
+} from "@/stores/sites/site-console-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { NewSiteDialog } from "./new-site-dialog"
 import { SiteListRail } from "./site-list-rail"
@@ -58,17 +65,6 @@ import { SitePublishTab } from "./tabs/site-publish-tab"
 import { SiteResourcesTab } from "./tabs/site-resources-tab"
 import { SiteVersionsTab } from "./tabs/site-versions-tab"
 
-const TABS = [
-  "publish",
-  "versions",
-  "environment",
-  "domains",
-  "access",
-  "resources",
-  "operations",
-] as const
-type TabKey = (typeof TABS)[number]
-
 type Confirmation = "purge" | "delete-metadata" | null
 
 export function SitesConsole() {
@@ -80,8 +76,11 @@ export function SitesConsole() {
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const actorAccountId = unlockedAccountId ?? "local-user"
 
-  const [pinnedId, setPinnedId] = useState<string | null>(null)
-  const [tab, setTab] = useState<TabKey>("publish")
+  const searchParams = useSearchParams()
+  const pinnedId = useSiteConsoleStore((state) => state.selectedId)
+  const tab = useSiteConsoleStore((state) => state.tab)
+  const setPinnedId = useSiteConsoleStore((state) => state.select)
+  const setTab = useSiteConsoleStore((state) => state.setTab)
   const [confirmation, setConfirmation] = useState<Confirmation>(null)
   const [observabilityResult, setObservabilityResult] = useState<unknown>(undefined)
 
@@ -106,6 +105,40 @@ export function SitesConsole() {
   })
 
   const retention = useMemo(() => purgeRetentionReport(live.resources), [live.resources])
+
+  // A `?site=` deep link wins over whatever was last selected — it is what ⌘K
+  // and Site notifications hand us, and landing on the previous selection would
+  // silently ignore what the user asked for. Guarded on membership because the
+  // live query resolves asynchronously; selecting before the rows land would
+  // make the link look broken.
+  const deepLinkId = searchParams.get("site")
+  const deepLinkTab = searchParams.get("tab")
+  useEffect(() => {
+    if (!deepLinkId || deepLinkId === pinnedId) return
+    if (live.sites.some((row) => row.id === deepLinkId)) setPinnedId(deepLinkId)
+  }, [deepLinkId, live.sites, pinnedId, setPinnedId])
+
+  useEffect(() => {
+    // `select` resets the tab, so this has to run after it settles. An
+    // unrecognized value is ignored rather than reset — a stale link should not
+    // move someone off the tab they are on.
+    if (!isSiteConsoleTab(deepLinkTab) || !deepLinkId || deepLinkId !== pinnedId) return
+    setTab(deepLinkTab)
+  }, [deepLinkTab, deepLinkId, pinnedId, setTab])
+
+  // Mirror the selection back into the URL so the page can be linked to and
+  // reloaded. `history.replaceState`, never `router.replace`: this is a static
+  // export, and a route push re-evaluates the page.
+  useEffect(() => {
+    if (typeof window === "undefined" || !live.selectedId) return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get("site") === live.selectedId && url.searchParams.get("tab") === tab) {
+      return
+    }
+    url.searchParams.set("site", live.selectedId)
+    url.searchParams.set("tab", tab)
+    window.history.replaceState(window.history.state, "", url)
+  }, [live.selectedId, tab])
 
   const deployGate = gate("provider", "deploy")
   // Upload and deploy are not the same permission-and-host question. Deploy is
@@ -181,7 +214,7 @@ export function SitesConsole() {
   return (
     <Tabs
       value={tab}
-      onValueChange={(value) => setTab(value as TabKey)}
+      onValueChange={(value) => setTab(value as SiteConsoleTab)}
       className="contents"
       data-testid="sites-console"
     >
@@ -197,7 +230,7 @@ export function SitesConsole() {
             summary={t("summary.sites", { count: live.sites.length })}
             navigation={
               <TabsList variant="line" className="h-8 gap-1 bg-transparent p-0">
-                {TABS.map((key) => (
+                {SITE_CONSOLE_TABS.map((key) => (
                   <TabsTrigger
                     key={key}
                     value={key}

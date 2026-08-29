@@ -63,6 +63,14 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
   "builtin.characters": { scoping: "global", why: "Characters are defined machine-wide." },
   "builtin.teams": { scoping: "global", why: "Teams are defined machine-wide." },
   "builtin.devices": { scoping: "global", why: "The device fleet is not per-workspace." },
+  "builtin.sites": {
+    scoping: "global",
+    why:
+      "A Site carries a projectId, but /sites lists every Site on the machine and a deployed " +
+      "Site is a long-lived production asset rather than a workspace artifact. Filtering would " +
+      "hide myapp.example.com from someone who happens to be in another workspace — the " +
+      "scheduled-tasks case, not the memories case.",
+  },
   "builtin.workbench-panels": { scoping: "global", why: "Panels of the shell in front." },
   "builtin.inbox": {
     scoping: "global",

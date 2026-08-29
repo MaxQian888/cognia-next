@@ -48,6 +48,8 @@ export type GlobalSearchKind =
   | "issue"
   /** A paired device, remote host or execution worker (`/devices`). */
   | "device"
+  /** A Cognia Site — a deployable project on the `/sites` console. */
+  | "site"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -91,6 +93,7 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   "pi-package": ["library"],
   issue: ["library"],
   device: ["library"],
+  site: ["library"],
 }
 
 /**
@@ -123,6 +126,7 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   "pi-package": 19,
   issue: 20,
   device: 21,
+  site: 22,
 }
 
 /** What the dialog does when an item is chosen. */

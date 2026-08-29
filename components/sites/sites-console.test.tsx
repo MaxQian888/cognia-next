@@ -9,6 +9,15 @@ const render = (ui: React.ReactElement) => baseRender(<TooltipProvider>{ui}</Too
 
 // The journal and versions list virtualize; jsdom reports zero height, so the
 // real virtualizer renders nothing.
+// The global `next/navigation` mock in jest.setup returns plain functions, so
+// a deep-link test cannot vary the query string through it.
+const searchParams = jest.fn(() => new URLSearchParams())
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => searchParams(),
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  usePathname: () => "/sites",
+}))
+
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
     getVirtualItems: () =>
@@ -112,6 +121,7 @@ jest.mock("./new-site-dialog", () => ({
 import { usePlatform } from "@/hooks/use-platform"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import type { SiteProjectRow } from "@/types/sites"
+import { useSiteConsoleStore } from "@/stores/sites/site-console-store"
 import { SitesConsole } from "./sites-console"
 
 const usePlatformMock = usePlatform as jest.Mock
@@ -308,5 +318,62 @@ describe("upload vs deploy gating", () => {
     render(<SitesConsole />)
     fireEvent.mouseDown(screen.getByTestId("sites-tab-versions"))
     expect(screen.getByTestId("site-version-upload-ver_1")).toBeEnabled()
+  })
+})
+
+describe("deep links", () => {
+  beforeEach(() => {
+    useSiteConsoleStore.getState().reset()
+    searchParams.mockReturnValue(new URLSearchParams())
+    window.history.replaceState({}, "", "/sites")
+  })
+
+  it("selects the Site a `?site=` link names", () => {
+    useSiteLiveDataMock.mockReturnValue(
+      liveData({ sites: [site(), site({ id: "site_2", name: "Marketing" })], selectedId: "site_1" })
+    )
+    searchParams.mockReturnValue(new URLSearchParams("site=site_2"))
+    render(<SitesConsole />)
+    expect(useSiteConsoleStore.getState().selectedId).toBe("site_2")
+  })
+
+  it("ignores a link naming a Site this profile does not have", () => {
+    // The live query resolves asynchronously; selecting before the rows land
+    // would make the link look broken.
+    searchParams.mockReturnValue(new URLSearchParams("site=ghost"))
+    render(<SitesConsole />)
+    expect(useSiteConsoleStore.getState().selectedId).toBeNull()
+  })
+
+  it("opens the tab a link names", () => {
+    searchParams.mockReturnValue(new URLSearchParams("site=site_1&tab=operations"))
+    render(<SitesConsole />)
+    expect(useSiteConsoleStore.getState().tab).toBe("operations")
+    expect(screen.getByTestId("site-operations-tab")).toBeInTheDocument()
+  })
+
+  it("ignores an unrecognized tab rather than resetting the one you are on", () => {
+    // Same Site as the link, so the selection effect no-ops and only the tab
+    // half is under test — a stale or hand-edited value must not move you.
+    useSiteConsoleStore.getState().select("site_1")
+    useSiteConsoleStore.getState().setTab("versions")
+    searchParams.mockReturnValue(new URLSearchParams("site=site_1&tab=nonsense"))
+    render(<SitesConsole />)
+    expect(useSiteConsoleStore.getState().tab).toBe("versions")
+  })
+
+  it("mirrors the selection into the URL so the page can be linked to", () => {
+    // `history.replaceState`, never `router.replace`: this is a static export
+    // and a route push re-evaluates the page.
+    render(<SitesConsole />)
+    const url = new URL(window.location.href)
+    expect(url.searchParams.get("site")).toBe("site_1")
+    expect(url.searchParams.get("tab")).toBe("publish")
+  })
+
+  it("moves the URL when the tab changes", () => {
+    render(<SitesConsole />)
+    fireEvent.mouseDown(screen.getByTestId("sites-tab-versions"))
+    expect(new URL(window.location.href).searchParams.get("tab")).toBe("versions")
   })
 })

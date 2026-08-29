@@ -8,6 +8,7 @@ import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { devicesProvider } from "./devices"
+import { sitesProvider } from "./sites"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
 import { inboxContactsProvider, inboxProvider } from "./inbox"
 import { issuesProvider } from "./issues"
@@ -55,6 +56,10 @@ export function builtinGlobalSearchProviders(
     piPackagesProvider,
     issuesProvider,
     devicesProvider,
+    // Rows exist in every shell — the console renders over whichever local
+    // database that shell owns (ADR-0084). Only the privileged actions on
+    // `/sites` are host-gated, and the palette does not offer those.
+    sitesProvider,
   ]
 }
 
