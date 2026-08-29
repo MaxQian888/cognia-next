@@ -11,7 +11,7 @@
  * `components/canvas/canvas-side-panels.tsx`.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
@@ -45,6 +45,12 @@ import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
+import {
+  useCanvasDocumentSummaries,
+  type CanvasDocumentSummary,
+} from "@/hooks/canvas/use-canvas-document-summaries"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
 import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
@@ -92,11 +98,12 @@ function EditorLoading() {
 
 export function CanvasPanel({ className }: CanvasPanelProps) {
   const t = useTranslations("canvas")
-  const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
-  const documents = useMemo(
-    () => Object.values(canvasDocuments) as CanvasDocument[],
-    [canvasDocuments]
-  )
+  // Two narrow reads instead of one wide one. `s.canvasDocuments` changes
+  // identity on every keystroke, so subscribing to the map re-rendered this
+  // whole subtree — Monaco wrapper, side panels, outline, review view — once per
+  // character. The rail and tabs only need identity + label; the editor needs
+  // exactly one document.
+  const documents = useCanvasDocumentSummaries()
   const activeId = useArtifactStore((s) => s.activeCanvasId)
   const setActive = useArtifactStore((s) => s.setActiveCanvas)
   const updateDoc = useArtifactStore((s) => s.updateCanvasDocument)
@@ -109,10 +116,83 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     activeId ? (s.pendingReviews[activeId] ?? null) : null
   )
 
-  const activeDoc = useMemo(
-    () => documents.find((d) => d.id === activeId) ?? null,
-    [documents, activeId]
+  const activeDoc = useArtifactStore((s) =>
+    activeId ? ((s.canvasDocuments[activeId] as CanvasDocument | undefined) ?? null) : null
   )
+  // The last content this component put INTO the store. Anything else arriving
+  // on `activeDoc.content` came from outside (AI action, review accept, version
+  // restore) and must cancel a pending keystroke batch rather than race it.
+  const lastCommittedRef = useRef<string | null>(activeDoc?.content ?? null)
+  /** The newest value the editor has produced, committed or not. */
+  const pendingValueRef = useRef<string | null>(null)
+
+  // Committing straight from Monaco's onChange put four things on the critical
+  // path of every keystroke: a store write, a whole-panel re-render, a
+  // synchronous full-state localStorage write, and an IndexedDB transaction
+  // that re-put the entire canvas corpus. The buffer Monaco holds is already
+  // authoritative between commits, so the write can wait for a typing pause.
+  const updateDocRef = useRef(updateDoc)
+  useEffect(() => {
+    updateDocRef.current = updateDoc
+  }, [updateDoc])
+
+  const commitEditorContent = useCallback(
+    (value: string) => {
+      if (!activeId) return
+      pendingValueRef.current = null
+      lastCommittedRef.current = value
+      updateDoc(activeId, { content: value, updatedAt: new Date() })
+    },
+    [activeId, updateDoc]
+  )
+  // `call` / `flush` / `cancel` are stable across renders (the hook holds `fn`
+  // in a ref), so they can be used directly in effects and dependency arrays.
+  const {
+    call: commitEdit,
+    flush: flushCommit,
+    cancel: cancelCommit,
+  } = useDebouncedCallback(commitEditorContent, CANVAS_EDIT_COMMIT_DEBOUNCE_MS)
+
+  const handleEditorChange = useCallback(
+    (value: string | undefined) => {
+      if (!activeId) return
+      pendingValueRef.current = value ?? ""
+      commitEdit(value ?? "")
+    },
+    [activeId, commitEdit]
+  )
+
+  // Flush on document switch and on unmount.
+  //
+  // This does NOT call the hook's `flush()`: the hook registers its own unmount
+  // cleanup, which CANCELS, and React runs cleanups in effect-declaration order
+  // — the hook's is declared first, so by the time this one runs there is
+  // nothing left to flush. Writing the captured value directly is what actually
+  // saves the last characters typed before the panel closes.
+  useEffect(() => {
+    const idAtMount = activeId
+    return () => {
+      const pending = pendingValueRef.current
+      pendingValueRef.current = null
+      if (!idAtMount || pending === null || pending === lastCommittedRef.current) return
+      cancelCommit()
+      lastCommittedRef.current = pending
+      updateDocRef.current(idAtMount, { content: pending, updatedAt: new Date() })
+    }
+  }, [activeId, cancelCommit])
+
+  // Cancel — not flush — when the content changes from outside: an AI action, a
+  // review being accepted, a version restore. Monaco is controlled on
+  // `activeDoc.content`, so a pending keystroke batch landing after one of
+  // those would overwrite it with the pre-action buffer.
+  useEffect(() => {
+    const incoming = activeDoc?.content
+    if (incoming === undefined) return
+    if (incoming === lastCommittedRef.current) return
+    lastCommittedRef.current = incoming
+    pendingValueRef.current = null
+    cancelCommit()
+  }, [activeDoc?.content, cancelCommit])
 
   const monacoSetup = useCanvasMonacoSetup({
     documentId: activeId ?? undefined,
@@ -253,13 +333,16 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     const handler = (ev: Event) => {
       if (!activeId) return
       const mode = (ev as CustomEvent<{ mode?: string }>).detail?.mode
+      // Flush first so the pending debounce cannot land after this write and
+      // re-commit the same content a beat later.
+      flushCommit()
       const content = editorRef.current?.getValue()
       if (typeof content === "string") updateDoc(activeId, { content, updatedAt: new Date() })
       if (mode === "version") saveVersion(activeId, "manual")
     }
     window.addEventListener("canvas-save", handler as EventListener)
     return () => window.removeEventListener("canvas-save", handler as EventListener)
-  }, [activeId, updateDoc, saveVersion])
+  }, [activeId, updateDoc, saveVersion, flushCommit])
 
   // Lightweight auto-save: every `autoSaveInterval` seconds, push the
   // editor's current value into the artifact store and write a snapshot
@@ -272,6 +355,9 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       () => {
         // Monaco exposes the live buffer; the light editor (mobile) pushes
         // every edit into the store, so the store copy is authoritative there.
+        // The interval reads the live buffer, so a pending commit is redundant
+        // work at best and a duplicate write at worst.
+        flushCommit()
         const content =
           editorRef.current?.getValue() ??
           (useArtifactStore.getState().canvasDocuments[activeId] as CanvasDocument | undefined)
@@ -283,7 +369,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       Math.max(10, autoSaveSeconds) * 1000
     )
     return () => clearInterval(timer)
-  }, [activeId, autoSaveSeconds, saveVersion, updateDoc])
+  }, [activeId, autoSaveSeconds, saveVersion, updateDoc, flushCommit])
 
   // Monaco flex-shrink fix: Monaco's internal div sets a fixed pixel width
   // via JS that prevents the flex container from shrinking (microsoft/monaco-editor#3393).
@@ -309,14 +395,6 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       observer.disconnect()
     }
   }, [])
-
-  const handleEditorChange = useCallback(
-    (value: string | undefined) => {
-      if (!activeId) return
-      updateDoc(activeId, { content: value ?? "", updatedAt: new Date() })
-    },
-    [activeId, updateDoc]
-  )
 
   const insertAtSelection = useCallback((text: string) => {
     const editor = editorRef.current
@@ -375,6 +453,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       opts: { targetLanguage?: string; prompt?: string; proposalFirst?: boolean } = {}
     ) => {
       if (!activeDoc) return
+      // An AI action reads `activeDoc.content`, which is the STORE's copy. Flush
+      // so it sees what the user actually typed rather than the state as of the
+      // last pause.
+      flushCommit()
       const editor = editorRef.current
       const sel = editor?.getSelection()
       const selectionText =
@@ -408,7 +490,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         })
       }
     },
-    [actions, activeDoc, proposeCanvasReview]
+    [actions, activeDoc, proposeCanvasReview, flushCommit]
   )
 
   // Keep the keyboard-action ref pointing at the freshest runAction so
@@ -604,7 +686,9 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         onCreateDocument={onCreate}
         onRenameDocument={(id, title) => updateDoc(id, { title, updatedAt: new Date() })}
         onDuplicateDocument={(id) => {
-          const src = documents.find((d) => d.id === id)
+          // Read the full row from the store: the list this component holds is
+          // a summary and deliberately carries no content.
+          const src = useArtifactStore.getState().canvasDocuments[id]
           if (!src) return
           const dupId = create({
             title: `${src.title} ${t("copySuffix")}`,
@@ -676,7 +760,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
 }
 
 interface CanvasToolbarProps {
-  documents: CanvasDocument[]
+  documents: CanvasDocumentSummary[]
   activeDocumentId: string | null
   running: boolean
   onSelectDocument: (id: string) => void
@@ -714,7 +798,7 @@ function CanvasToolbar({
 
   const showTabs = documents.length > 1
 
-  const handleStartRename = (doc: CanvasDocument) => {
+  const handleStartRename = (doc: CanvasDocumentSummary) => {
     setRenameDocId(doc.id)
     setRenameValue(doc.title)
     setRenameDialogOpen(true)

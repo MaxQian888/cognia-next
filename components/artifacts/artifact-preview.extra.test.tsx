@@ -323,3 +323,68 @@ describe("ArtifactPreview — extra coverage", () => {
     consoleSpy.mockRestore()
   })
 })
+
+describe("ArtifactPreview — re-render gating", () => {
+  const html = (content: string) =>
+    ({
+      id: "a1",
+      sessionId: "s",
+      messageId: "m",
+      type: "html" as const,
+      title: "Page",
+      content,
+      version: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    }) as never
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  function countWrites(frame: HTMLIFrameElement) {
+    const doc = frame.contentDocument as Document
+    const spy = jest.spyOn(doc, "write")
+    return spy
+  }
+
+  it("does not rewrite the document when nothing about the artifact changed", async () => {
+    // The Canvas split view drives this from the live buffer, so an ungated
+    // effect re-parsed and rewrote the whole document per commit.
+    const { rerender, container } = render(<ArtifactPreview artifact={html("<p>a</p>")} />)
+    await act(async () => {
+      jest.advanceTimersByTime(200)
+    })
+    const frame = container.querySelector("iframe") as HTMLIFrameElement
+    const write = countWrites(frame)
+
+    rerender(<ArtifactPreview artifact={html("<p>a</p>")} />)
+    await act(async () => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(write).not.toHaveBeenCalled()
+
+    rerender(<ArtifactPreview artifact={html("<p>b</p>")} />)
+    await act(async () => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(write).toHaveBeenCalled()
+  })
+
+  it("does not raise the loading curtain for a content update on a live frame", async () => {
+    // Raising it made every keystroke in a Canvas split view flash a full-cover
+    // backdrop blur.
+    const { rerender, container } = render(<ArtifactPreview artifact={html("<p>a</p>")} />)
+    await act(async () => {
+      jest.advanceTimersByTime(200)
+    })
+    expect(container.querySelector(".backdrop-blur-sm")).toBeNull()
+
+    rerender(<ArtifactPreview artifact={html("<p>b</p>")} />)
+    // No timers advanced: if a curtain were raised it would be on screen now.
+    expect(container.querySelector(".backdrop-blur-sm")).toBeNull()
+  })
+})

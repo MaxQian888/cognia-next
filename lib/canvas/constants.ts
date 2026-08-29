@@ -138,3 +138,14 @@ export const KEYBINDING_CATEGORIES: Record<string, string[]> = {
   edit: ["edit.selectAll", "edit.copy", "edit.cut", "edit.paste", "edit.duplicate", "edit.comment"],
   fold: ["fold.foldAll", "fold.unfoldAll", "fold.foldLevel1", "fold.foldLevel2"],
 }
+
+/**
+ * How long Monaco's buffer is allowed to run ahead of the store.
+ *
+ * A commit is not free: it re-renders the panel, runs the artifact store's
+ * partialize + a synchronous `localStorage` write, and wakes the Dexie
+ * write-through bridge. Monaco's own buffer is authoritative between commits,
+ * so nothing is lost by waiting for a typing pause — and every path that reads
+ * the buffer (Ctrl+S, auto-save, an AI action) flushes first.
+ */
+export const CANVAS_EDIT_COMMIT_DEBOUNCE_MS = 250

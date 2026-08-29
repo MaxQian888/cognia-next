@@ -4,6 +4,7 @@
  */
 
 import DOMPurify from "dompurify"
+import { LruCache } from "@cognia/primitives"
 import type { ArtifactRendererProfile } from "@/types"
 
 export const DIAGRAM_DESIGN_THEME_KEYS = [
@@ -107,6 +108,22 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Sanitising is a full DOM parse of the whole document, and it runs on every
+ * preview render — including the ones a live-typing Canvas produces. Bounded so
+ * a long session cannot accumulate megabytes of sanitised HTML; the same shape
+ * `lib/shiki/highlight-cache.ts` and `packages/mermaid/src/render-cache.ts` use.
+ */
+const SANITIZE_CACHE_SIZE = 40
+const sanitizeCache = new LruCache<string, string>(SANITIZE_CACHE_SIZE)
+const svgSanitizeCache = new LruCache<string, string>(SANITIZE_CACHE_SIZE)
+
+/** Test seam — drops both caches. */
+export function clearArtifactSanitizeCaches(): void {
+  sanitizeCache.clear()
+  svgSanitizeCache.clear()
+}
+
+/**
  * Sanitize an HTML document for passive iframe previews.
  *
  * Scripts, event handlers and executable form controls are removed while
@@ -116,6 +133,9 @@ export function sanitizeHTML(
   content: string,
   { wholeDocument = true, rendererProfile }: SanitizeHTMLOptions = {}
 ): string {
+  const cacheKey = `${wholeDocument ? "1" : "0"}|${rendererProfile ?? ""}|${content}`
+  const cached = sanitizeCache.get(cacheKey)
+  if (cached !== undefined) return cached
   const isDiagramDesign = rendererProfile === "diagram-design-v1"
   const sanitized = DOMPurify.sanitize(
     isDiagramDesign ? prepareDiagramHTMLForSanitization(content) : content,
@@ -139,7 +159,9 @@ export function sanitizeHTML(
     }
   )
 
-  return isDiagramDesign ? enforceDiagramNoNetworkPolicy(sanitized, wholeDocument) : sanitized
+  const out = isDiagramDesign ? enforceDiagramNoNetworkPolicy(sanitized, wholeDocument) : sanitized
+  sanitizeCache.set(cacheKey, out)
+  return out
 }
 
 export function applyArtifactThemeVariables(
@@ -169,10 +191,14 @@ export function renderHTML(doc: Document, content: string, options: RenderHTMLOp
  * Render sanitized SVG content into an iframe document
  */
 export function renderSVG(doc: Document, content: string): void {
-  const sanitized = DOMPurify.sanitize(content, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-    ADD_TAGS: ["style"],
-  })
+  let sanitized = svgSanitizeCache.get(content)
+  if (sanitized === undefined) {
+    sanitized = DOMPurify.sanitize(content, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      ADD_TAGS: ["style"],
+    })
+    svgSanitizeCache.set(content, sanitized)
+  }
   doc.open()
   doc.write(`
     <!DOCTYPE html>

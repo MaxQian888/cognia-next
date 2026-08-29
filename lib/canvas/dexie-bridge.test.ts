@@ -136,6 +136,9 @@ beforeEach(() => {
   commentStore._clearSubscribers()
 })
 
+/** The bridge debounces its mirror by 500ms; wait past it. */
+const DOCUMENT_SYNC_WAIT_MS = 700
+
 describe("startCanvasDexieBridge", () => {
   it("starts subscriptions, hydrates, and returns a disposer", async () => {
     const { startCanvasDexieBridge } = await import("./dexie-bridge")
@@ -217,7 +220,10 @@ describe("startCanvasDexieBridge", () => {
       },
     })
 
-    await Promise.resolve()
+    // The mirror is debounced: Dexie is a backup of an authoritative
+    // Zustand+localStorage copy, so a typing burst coalesces into one
+    // transaction instead of one per keystroke.
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
     await Promise.resolve()
     await Promise.resolve()
 
@@ -288,6 +294,138 @@ describe("startCanvasDexieBridge", () => {
   // The outside-the-browser branch lives in `dexie-bridge.ssr.test.ts` —
   // jsdom's `window` is non-configurable from Node 26 on.
 
+  it("writes only the document that changed, not the whole corpus", async () => {
+    // This was the single heaviest per-keystroke cost in the editor: the sync
+    // pushed EVERY document and EVERY version unconditionally, which made the
+    // early-return unreachable whenever one document existed — so one character
+    // ran an IndexedDB transaction over the entire canvas library.
+    artifactStore._resetTo({
+      canvasDocuments: {
+        a: {
+          id: "a",
+          sessionId: "",
+          title: "A",
+          content: "a",
+          language: "md",
+          type: "doc",
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+          versions: [{ id: "va", content: "a", title: "A", createdAt: new Date(1) }],
+        },
+        b: {
+          id: "b",
+          sessionId: "",
+          title: "B",
+          content: "b",
+          language: "md",
+          type: "doc",
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+          versions: [{ id: "vb", content: "b", title: "B", createdAt: new Date(1) }],
+        },
+      },
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    canvasDocumentsTable.bulkPut.mockClear()
+    canvasVersionsTable.bulkPut.mockClear()
+
+    const prev = artifactStore.getState().canvasDocuments
+    artifactStore.setState({
+      canvasDocuments: { ...prev, b: { ...prev.b, content: "b typed" } },
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    expect(canvasDocumentsTable.bulkPut).toHaveBeenCalledTimes(1)
+    expect(canvasDocumentsTable.bulkPut.mock.calls[0][0].map((r: { id: string }) => r.id)).toEqual([
+      "b",
+    ])
+    // Versions are immutable once written; neither document's needs a rewrite.
+    expect(canvasVersionsTable.bulkPut).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it("does nothing at all for a store write that touches no canvas document", async () => {
+    // The subscription is unselected, so it fires on every artifact-store
+    // write — including ones that only touch artifacts.
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    canvasDocumentsTable.bulkPut.mockClear()
+
+    artifactStore.setState({ panelOpen: true } as never)
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    expect(canvasDocumentsTable.bulkPut).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it("coalesces a burst of edits into one transaction", async () => {
+    artifactStore._resetTo({
+      canvasDocuments: {
+        a: {
+          id: "a",
+          sessionId: "",
+          title: "A",
+          content: "",
+          language: "md",
+          type: "doc",
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+          versions: [],
+        },
+      },
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    canvasDocumentsTable.bulkPut.mockClear()
+
+    for (let i = 1; i <= 5; i += 1) {
+      const prev = artifactStore.getState().canvasDocuments
+      artifactStore.setState({
+        canvasDocuments: { ...prev, a: { ...prev.a, content: "x".repeat(i) } },
+      })
+    }
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    expect(canvasDocumentsTable.bulkPut).toHaveBeenCalledTimes(1)
+    expect(canvasDocumentsTable.bulkPut.mock.calls[0][0][0].content).toBe("xxxxx")
+    dispose()
+  })
+
+  it("flushes a pending mirror when the bridge is disposed", async () => {
+    artifactStore._resetTo({ canvasDocuments: {} })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    canvasDocumentsTable.bulkPut.mockClear()
+
+    artifactStore.setState({
+      canvasDocuments: {
+        late: {
+          id: "late",
+          sessionId: "",
+          title: "Late",
+          content: "x",
+          language: "md",
+          type: "doc",
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+          versions: [],
+        },
+      },
+    })
+    // No wait: the debounce is still pending. Tearing down must not drop it.
+    dispose()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(canvasDocumentsTable.bulkPut).toHaveBeenCalled()
+  })
+
   it("removes documents from Dexie when artifact-store drops them", async () => {
     // Seed memory with one doc, then start bridge.
     artifactStore._resetTo({
@@ -307,11 +445,11 @@ describe("startCanvasDexieBridge", () => {
     })
     const { startCanvasDexieBridge } = await import("./dexie-bridge")
     const dispose = startCanvasDexieBridge()
-    await new Promise((r) => setTimeout(r, 30))
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
 
     // Drop the doc; the bridge should issue a delete.
     artifactStore.setState({ canvasDocuments: {} })
-    await new Promise((r) => setTimeout(r, 30))
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
     // The where().equals().delete() chain on canvasVersions / Comments / Sessions
     // is invoked, plus `canvasDocuments.delete("to-remove")`.
     expect(canvasDocumentsTable.delete).toHaveBeenCalledWith("to-remove")

@@ -12,6 +12,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 
 // Capture the most recent ResizeObserver callback so we can fire ticks at will.
@@ -272,14 +273,136 @@ describe("CanvasPanel", () => {
     renderWithProviders(<CanvasPanel />)
     expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
     expect(screen.queryByTestId("monaco-editor-mock")).not.toBeInTheDocument()
-    act(() => {
-      fireEvent.change(screen.getByTestId("light-code-editor"), {
-        target: { value: "hello world" },
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        fireEvent.change(screen.getByTestId("light-code-editor"), {
+          target: { value: "hello world" },
+        })
       })
+      // The commit is debounced: Monaco (or CodeMirror) holds the authoritative
+      // buffer between commits, so the store lags by one typing pause.
+      expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+        "hello"
+      )
+      act(() => {
+        jest.advanceTimersByTime(CANVAS_EDIT_COMMIT_DEBOUNCE_MS)
+      })
+      expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+        "hello world"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("coalesces a burst of keystrokes into a single store write", () => {
+    // Every commit costs a panel re-render, a synchronous whole-store
+    // localStorage write, and a Dexie transaction. Ten characters must not buy
+    // ten of each.
+    mobileRef.current = true
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title: "Burst",
+        content: "",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
     })
-    expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
-      "hello world"
-    )
+    renderWithProviders(<CanvasPanel />)
+
+    jest.useFakeTimers()
+    try {
+      const editor = screen.getByTestId("light-code-editor")
+      const updates: string[] = []
+      const unsubscribe = useArtifactStore.subscribe((state) => {
+        const doc = state.canvasDocuments[id] as { content: string } | undefined
+        if (doc) updates.push(doc.content)
+      })
+      act(() => {
+        for (let i = 1; i <= 10; i += 1) {
+          fireEvent.change(editor, { target: { value: "x".repeat(i) } })
+        }
+      })
+      act(() => {
+        jest.advanceTimersByTime(CANVAS_EDIT_COMMIT_DEBOUNCE_MS)
+      })
+      unsubscribe()
+
+      expect(updates.filter((c) => c.startsWith("x"))).toEqual(["xxxxxxxxxx"])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("flushes the pending commit when the document is switched away", () => {
+    // The debounce hook cancels on unmount by design, which would drop the last
+    // characters typed before closing the panel.
+    mobileRef.current = true
+    let first = ""
+    act(() => {
+      first = useArtifactStore.getState().createCanvasDocument({
+        title: "First",
+        content: "a",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(first)
+    })
+    const { unmount } = renderWithProviders(<CanvasPanel />)
+
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        fireEvent.change(screen.getByTestId("light-code-editor"), { target: { value: "ab" } })
+      })
+      act(() => {
+        unmount()
+      })
+      expect(
+        (useArtifactStore.getState().canvasDocuments[first] as { content: string }).content
+      ).toBe("ab")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops a pending keystroke batch when the content changes from outside", () => {
+    // An AI action / review accept / version restore replaces the buffer. A
+    // pending batch landing afterwards would overwrite it with the pre-action
+    // text.
+    mobileRef.current = true
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title: "Race",
+        content: "original",
+        language: "markdown",
+        type: "text",
+      })
+      useArtifactStore.getState().setActiveCanvas(id)
+    })
+    renderWithProviders(<CanvasPanel />)
+
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        fireEvent.change(screen.getByTestId("light-code-editor"), { target: { value: "typed" } })
+      })
+      act(() => {
+        useArtifactStore.getState().updateCanvasDocument(id, { content: "from-ai" })
+      })
+      act(() => {
+        jest.advanceTimersByTime(CANVAS_EDIT_COMMIT_DEBOUNCE_MS * 4)
+      })
+      expect((useArtifactStore.getState().canvasDocuments[id] as { content: string }).content).toBe(
+        "from-ai"
+      )
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   describe("accessibility wiring", () => {

@@ -143,6 +143,8 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const diagramThemeVariablesRef = useRef(diagramThemeVariables)
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState(0)
+  /** Which `key` generation `lastRenderedRef` describes. */
+  const lastRenderedKeyRef = useRef(0)
   const adapter = getArtifactRuntimeAdapter(artifact.type)
   const renderPlan = resolveArtifactRenderPlan(artifact)
   const needsIframe = adapter.transport === "iframe"
@@ -200,13 +202,43 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     )
   }, [artifact.metadata?.hostStrategy, widgetMetadata])
 
+  // What is currently painted in the iframe. The render effect keys on
+  // `artifact.content`, and a Canvas split view drives that from the live
+  // buffer — so without this every commit re-parsed and rewrote the whole
+  // document even when nothing about it had changed.
+  const lastRenderedRef = useRef<{
+    id: string
+    type: string
+    rendererProfile: string | undefined
+    content: string
+  } | null>(null)
+
   useEffect(() => {
     if (!needsIframe) return
 
-    const rafId = requestAnimationFrame(() => {
-      setError(null)
-      setIsLoading(true)
-    })
+    const last = lastRenderedRef.current
+    const unchanged =
+      last !== null &&
+      last.id === artifact.id &&
+      last.type === artifact.type &&
+      last.rendererProfile === artifact.metadata?.rendererProfile &&
+      last.content === artifact.content
+    // `key` is the manual-refresh counter; a refresh must re-render even when
+    // the content is byte-identical, which is the whole point of the button.
+    if (unchanged && lastRenderedKeyRef.current === key) return
+    lastRenderedKeyRef.current = key
+
+    // Re-rendering INTO a live document does not need the loading curtain: the
+    // frame already has something on screen, and raising it made every
+    // keystroke in a Canvas split view flash a full-cover backdrop blur.
+    const isFreshFrame = last === null || last.id !== artifact.id || last.type !== artifact.type
+
+    const rafId = isFreshFrame
+      ? requestAnimationFrame(() => {
+          setError(null)
+          setIsLoading(true)
+        })
+      : null
 
     const doRenderPreview = () => {
       if (!iframeRef.current) return
@@ -253,13 +285,27 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       }
     }
 
-    const timer = setTimeout(() => {
+    const commit = () => {
       doRenderPreview()
+      lastRenderedRef.current = {
+        id: artifact.id,
+        type: artifact.type,
+        rendererProfile: artifact.metadata?.rendererProfile,
+        content: artifact.content,
+      }
       setIsLoading(false)
-    }, 100)
+    }
+
+    // The 100ms delay exists to let a freshly-keyed iframe attach its document.
+    // An already-live frame needs no such wait.
+    if (!isFreshFrame) {
+      commit()
+      return
+    }
+    const timer = setTimeout(commit, 100)
 
     return () => {
-      cancelAnimationFrame(rafId)
+      if (rafId !== null) cancelAnimationFrame(rafId)
       clearTimeout(timer)
     }
   }, [

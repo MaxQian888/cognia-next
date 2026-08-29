@@ -35,7 +35,15 @@ import type { ContextCommentRow } from "@/types/context-comment"
 import { canvasCommentRowFromContext, contextCommentRowFromCanvas } from "@/lib/db/context-comments"
 import { loggers } from "@cognia/logging"
 
+/**
+ * How long a burst of edits may accumulate before it reaches Dexie. Dexie is a
+ * BACKUP mirror here — Zustand + localStorage is the authoritative copy — so a
+ * short lag costs nothing, while a transaction per keystroke costs a real one.
+ */
+const DOCUMENT_SYNC_DEBOUNCE_MS = 500
+
 let started = false
+let flushDocumentSync: (() => void) | null = null
 let mirroredDocs: Record<string, CanvasDocument> = {}
 let mirroredVersionIds = new Set<string>()
 let mirroredCommentIds = new Set<string>()
@@ -98,20 +106,30 @@ async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): P
   const removedDocs: string[] = []
   for (const id of prevIds) if (!nextIds.has(id)) removedDocs.push(id)
 
-  // Always upsert documents we still have — title, content, suggestions
-  // and editor-context can change without the row reference flipping.
+  // Upsert only the documents whose object identity actually changed.
+  //
+  // This used to push EVERY document unconditionally, which made the early
+  // return below unreachable whenever at least one document existed — so a
+  // single keystroke ran an IndexedDB transaction that re-put the entire canvas
+  // corpus plus its whole version history. The store replaces a document's
+  // object on every mutation, so identity is a sound "did this change" test.
   const docUpserts: CanvasDocumentRow[] = []
-  for (const id of nextIds) docUpserts.push(docToRow(next[id]))
+  for (const id of nextIds) {
+    if (mirroredDocs[id] === next[id]) continue
+    docUpserts.push(docToRow(next[id]))
+  }
 
   // Reconcile versions: collect every (documentId, version) pair from
   // memory; everything we used to mirror but isn't in this list gets
-  // removed; everything new or updated gets bulk-put.
+  // removed; everything NEW gets bulk-put. A version is immutable once
+  // written, so an id we have already mirrored needs no rewrite.
   const seenVersionIds = new Set<string>()
   const versionUpserts: CanvasVersionRow[] = []
   for (const id of nextIds) {
     const doc = next[id]
     for (const v of doc.versions ?? []) {
       seenVersionIds.add(v.id)
+      if (mirroredVersionIds.has(v.id)) continue
       versionUpserts.push(versionToRow(id, v))
     }
   }
@@ -285,21 +303,39 @@ export function startCanvasDexieBridge(): () => void {
   void hydrateFromDexie()
     .catch((err) => loggers.canvas.warn("dexie-bridge hydration failed", { err: String(err) }))
     .then(() => {
-      const initial = useArtifactStore.getState()
-      mirroredDocs = { ...initial.canvasDocuments }
-      void syncDocumentsAndVersions(initial.canvasDocuments).catch((err) =>
-        loggers.canvas.warn("dexie-bridge initial document sync failed", {
-          err: String(err),
+      const initialDocs = useArtifactStore.getState().canvasDocuments
+      // `mirroredDocs` is set only AFTER the first sync lands. Priming it from
+      // the same snapshot the sync is about to write would make the identity
+      // diff below see everything as already-mirrored, and the initial pass —
+      // the one that carries a localStorage-only document into Dexie — would
+      // do nothing at all.
+      void syncDocumentsAndVersions(initialDocs)
+        .then(() => {
+          mirroredDocs = { ...initialDocs }
         })
-      )
+        .catch((err) =>
+          loggers.canvas.warn("dexie-bridge initial document sync failed", {
+            err: String(err),
+          })
+        )
       void syncComments(useCommentStore.getState().comments).catch((err) =>
         loggers.canvas.warn("dexie-bridge initial comment sync failed", {
           err: String(err),
         })
       )
 
-      unsubDocs = useArtifactStore.subscribe((state) => {
-        const docs = state.canvasDocuments
+      // The subscription is unselected — it fires on EVERY artifact-store write,
+      // including the ones that only touch artifacts. Bail on identity before
+      // doing any work, and coalesce a typing burst into one transaction.
+      let lastSeenDocs = initialDocs
+      let pendingSync: ReturnType<typeof setTimeout> | null = null
+      let queuedDocs: Record<string, CanvasDocument> | null = null
+
+      const runSync = () => {
+        pendingSync = null
+        const docs = queuedDocs
+        queuedDocs = null
+        if (!docs) return
         void syncDocumentsAndVersions(docs)
           .then(() => {
             mirroredDocs = { ...docs }
@@ -307,7 +343,27 @@ export function startCanvasDexieBridge(): () => void {
           .catch((err) =>
             loggers.canvas.warn("dexie-bridge document sync failed", { err: String(err) })
           )
+      }
+
+      flushDocumentSync = () => {
+        if (pendingSync !== null) {
+          clearTimeout(pendingSync)
+          runSync()
+        }
+      }
+
+      unsubDocs = useArtifactStore.subscribe((state) => {
+        const docs = state.canvasDocuments
+        if (docs === lastSeenDocs) return
+        lastSeenDocs = docs
+        queuedDocs = docs
+        if (pendingSync !== null) clearTimeout(pendingSync)
+        pendingSync = setTimeout(runSync, DOCUMENT_SYNC_DEBOUNCE_MS)
       })
+
+      if (typeof window !== "undefined") {
+        window.addEventListener("pagehide", flushDocumentSync)
+      }
 
       unsubComments = useCommentStore.subscribe((state) => {
         void syncComments(state.comments).catch((err) =>
@@ -317,6 +373,12 @@ export function startCanvasDexieBridge(): () => void {
     })
 
   return () => {
+    // A pending mirror must not be lost when the bridge is torn down.
+    flushDocumentSync?.()
+    if (typeof window !== "undefined" && flushDocumentSync) {
+      window.removeEventListener("pagehide", flushDocumentSync)
+    }
+    flushDocumentSync = null
     unsubDocs()
     unsubComments()
     started = false
