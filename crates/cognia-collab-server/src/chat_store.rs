@@ -75,6 +75,16 @@ pub trait ChatStore: Send + Sync {
         user_id: &str,
         workspace_id: Option<&str>,
     ) -> Result<Vec<SharedSession>, StoreError>;
+    async fn patch_session(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        title: Option<&str>,
+        status: Option<SessionStatus>,
+        operation_id: &str,
+        base_revision: i64,
+        now: i64,
+    ) -> Result<SharedSession, StoreError>;
     async fn visible_session(
         &self,
         org_id: &str,
@@ -223,6 +233,48 @@ impl ChatStore for InMemoryChatStore {
             .collect();
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         Ok(sessions)
+    }
+
+    async fn patch_session(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        title: Option<&str>,
+        status: Option<SessionStatus>,
+        operation_id: &str,
+        base_revision: i64,
+        now: i64,
+    ) -> Result<SharedSession, StoreError> {
+        let mut tables = self.tables.write();
+        if let Some(id) = tables
+            .operations
+            .get(&(org_id.to_owned(), operation_id.to_owned()))
+        {
+            return tables.sessions.get(id).cloned().ok_or(StoreError::NotFound);
+        }
+        let session = tables
+            .sessions
+            .get_mut(session_id)
+            .filter(|session| session.org_id == org_id)
+            .ok_or(StoreError::NotFound)?;
+        if session.revision != base_revision {
+            return Err(conflict(session.clone()));
+        }
+        if let Some(title) = title {
+            session.title = title.to_owned();
+        }
+        if let Some(status) = status {
+            session.status = status;
+        }
+        session.revision += 1;
+        session.policy_revision += 1;
+        session.updated_at = now;
+        let updated = session.clone();
+        tables.operations.insert(
+            (org_id.to_owned(), operation_id.to_owned()),
+            session_id.to_owned(),
+        );
+        Ok(updated)
     }
 
     async fn visible_session(
@@ -606,6 +658,47 @@ impl ChatStore for PgStore {
         rows.iter().map(session_from_row).collect()
     }
 
+    async fn patch_session(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        title: Option<&str>,
+        status: Option<SessionStatus>,
+        operation_id: &str,
+        base_revision: i64,
+        now: i64,
+    ) -> Result<SharedSession, StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org_id).await?;
+        let existing = tx
+            .query_opt(
+                &format!("SELECT {SESSION_COLUMNS}, last_operation_id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE"),
+                &[&org_id, &session_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::NotFound)?;
+        if existing.get::<_, String>("last_operation_id") == operation_id {
+            return session_from_row(&existing);
+        }
+        let current = session_from_row(&existing)?;
+        if current.revision != base_revision {
+            return Err(conflict(current));
+        }
+        let status_text = status.map(|value| format!("{value:?}").to_lowercase());
+        let row = tx
+            .query_one(
+                &format!("UPDATE chat_sessions SET title=COALESCE($3,title),status=COALESCE($4,status),updated_at=$5,revision=revision+1,policy_revision=policy_revision+1,last_operation_id=$6 WHERE org_id=$1 AND id=$2 RETURNING {SESSION_COLUMNS}"),
+                &[&org_id, &session_id, &title, &status_text, &now, &operation_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        session_from_row(&row)
+    }
+
     async fn visible_session(
         &self,
         org_id: &str,
@@ -811,6 +904,48 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_patch_is_revision_checked_idempotent_and_advances_policy() {
+        let store = InMemoryChatStore::new();
+        store.create_session(session("op_1")).await.unwrap();
+        let active = store
+            .patch_session(
+                "org_1",
+                "ses_1",
+                None,
+                Some(SessionStatus::Archived),
+                "op_patch",
+                1,
+                2,
+            )
+            .await
+            .unwrap();
+        assert_eq!(active.status, SessionStatus::Archived);
+        assert_eq!(active.revision, 2);
+        assert_eq!(active.policy_revision, 2);
+        assert_eq!(
+            store
+                .patch_session(
+                    "org_1",
+                    "ses_1",
+                    None,
+                    Some(SessionStatus::Archived),
+                    "op_patch",
+                    1,
+                    3,
+                )
+                .await
+                .unwrap(),
+            active
+        );
+        assert!(matches!(
+            store
+                .patch_session("org_1", "ses_1", Some("stale"), None, "op_stale", 1, 3)
+                .await,
+            Err(StoreError::Conflict(_))
+        ));
     }
 
     #[tokio::test]

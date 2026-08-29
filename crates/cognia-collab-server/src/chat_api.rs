@@ -73,7 +73,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}",
-            get(get_session),
+            get(get_session).patch(patch_session),
         )
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/members",
@@ -278,6 +278,53 @@ async fn get_session(
         visible(&state, &headers, &org_id, &session_id, SessionAction::Read)
             .await?
             .0,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PatchSessionBody {
+    title: Option<String>,
+    status: Option<SessionStatus>,
+    operation_id: String,
+    base_revision: i64,
+}
+
+async fn patch_session(
+    State(state): State<AppState>,
+    Path((org_id, session_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PatchSessionBody>,
+) -> Result<Json<crate::chat::SharedSession>, ChatFailure> {
+    visible(
+        &state,
+        &headers,
+        &org_id,
+        &session_id,
+        SessionAction::ManageSettings,
+    )
+    .await?;
+    if body
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(ChatFailure::BadRequest("title must not be blank".into()));
+    }
+    Ok(Json(
+        state
+            .chat_store
+            .patch_session(
+                &org_id,
+                &session_id,
+                body.title.as_deref().map(str::trim),
+                body.status,
+                &body.operation_id,
+                body.base_revision,
+                (state.now)(),
+            )
+            .await
+            .map_err(ChatFailure::Store)?,
     ))
 }
 async fn list_members(
