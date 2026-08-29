@@ -29,12 +29,11 @@ jest.mock("@cognia/logging", () => {
   return {
     createLogger: () => ({ ...child, child: () => child }),
     logger: { ...child, child: () => child },
-    loggers: {
-      agent: { ...child, child: () => child },
-      plugin: { ...child, child: () => child },
-      workflow: { ...child, child: () => child },
-      db: { ...child, child: () => child },
-    },
+    // A Proxy, not a hand-listed set: this card pulls in the agent-team store,
+    // whose import closure reaches `lib/db/mcp-servers.ts`. The moment that file
+    // took an `mcp` logger, a fixed list here failed the whole suite at module
+    // load with "Cannot read properties of undefined (reading 'child')".
+    loggers: new Proxy({}, { get: () => ({ ...child, child: () => child }) }),
   }
 })
 

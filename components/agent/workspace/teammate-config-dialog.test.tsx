@@ -37,6 +37,10 @@ jest.mock("@/lib/claude/agents/subagents", () => ({
 }))
 jest.mock("@/lib/ai/agent/external/presets", () => ({
   getAvailablePresets: () => [],
+  // `ExternalPresetSection` (inside the dialog) builds its picker from this.
+  // Omitting it made every render in this file throw "getRunnablePresets is
+  // not a function" the moment that section joined the tree.
+  getRunnablePresets: () => [],
   getPresetDisplayInfo: () => null,
   // The runtime Select derives its options from the real preset catalog (via
   // `runtime-options`). Keep that export REAL — a hand-listed copy here would
