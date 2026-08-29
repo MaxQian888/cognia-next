@@ -163,15 +163,23 @@ export function diffArtifactMirror(
   }
 }
 
+/**
+ * Push the store's artifacts into Dexie.
+ *
+ * Answers whether the mirror may now be advanced to `next`. `false` means the
+ * write was refused, so the caller must NOT record `next` as the new baseline —
+ * doing so would claim rows were persisted that never were, and the next diff
+ * against that baseline would skip them.
+ */
 async function syncArtifacts(
   next: Record<string, Artifact>,
   nextVersions: Record<string, ArtifactVersion[]>
-): Promise<void> {
+): Promise<boolean> {
   const db = getDb()
   // Rule 1 — see the module docstring. The mirror describes one database; a
   // different one means the account changed under us and the provider is about
   // to restart the bridge.
-  if (mirroredDbName !== null && db.name !== mirroredDbName) return
+  if (mirroredDbName !== null && db.name !== mirroredDbName) return false
 
   const diff = diffArtifactMirror(mirroredArtifacts, mirroredVersionIds, next, nextVersions)
   if (
@@ -180,7 +188,9 @@ async function syncArtifacts(
     diff.removedVersionIds.length === 0 &&
     diff.versionUpserts.length === 0
   ) {
-    return
+    // Nothing to write, and the mirror already describes this database — so
+    // `next` is a legitimate baseline.
+    return true
   }
 
   await db.transaction("rw", db.artifacts, db.artifactVersions, async () => {
@@ -196,6 +206,7 @@ async function syncArtifacts(
   })
 
   mirroredVersionIds = diff.seenVersionIds
+  return true
 }
 
 /**
@@ -290,8 +301,11 @@ export function startArtifactDexieBridge(): () => void {
       if (disposed) return
       const initial = useArtifactStore.getState()
       void syncArtifacts(initial.artifacts, initial.artifactVersions)
-        .then(() => {
-          if (disposed) return
+        .then((applied) => {
+          // `disposed` because the disposer clears the mirror synchronously and
+          // a late landing would repopulate it with THIS account's artifacts;
+          // `applied` because a write the db-name guard refused never happened.
+          if (disposed || !applied) return
           mirroredArtifacts = { ...initial.artifacts }
           completeArtifactDexieMigration()
           // The rows are in Dexie now, so the parked copy has done its job.
@@ -320,7 +334,8 @@ export function startArtifactDexieBridge(): () => void {
         queued = null
         if (!snapshot) return
         void syncArtifacts(snapshot.artifacts, snapshot.versions)
-          .then(() => {
+          .then((applied) => {
+            if (disposed || !applied) return
             mirroredArtifacts = { ...snapshot.artifacts }
           })
           .catch((err) =>
