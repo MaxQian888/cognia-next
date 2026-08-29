@@ -156,6 +156,7 @@
     "0154-browser-companion",
     "0155-plugins-reach-the-host-through-one-door",
     "0156-every-in-tree-plugin-is-a-third-party-plugin",
-    "0157-references-and-result-reuse"
+    "0157-references-and-result-reuse",
+    "0158-artifacts-and-canvas"
   ]
 }

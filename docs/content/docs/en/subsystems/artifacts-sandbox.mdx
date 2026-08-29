@@ -141,6 +141,33 @@ jupyter: [/"cells"\s*:\s*\[/, /"cell_type"\s*:\s*"(code|markdown)"/, /"nbformat"
 
 When a chat message arrives, `useChatStore` routes code blocks and inline content to `useArtifactStore`. A detection hit creates an artifact automatically. `ALWAYS_CREATE_TYPES` forces creation (e.g. mermaid, chart) regardless of line count; other types have a minimum line threshold.
 
+### The model can also just ask (ADR-0158)
+
+Detection is the fallback, not the only path. Eight tools —
+`artifact_{create,update,read,delete}` and `canvas_{create,update,read,open}` —
+are published through the host-routed builtin-tool relay
+(`lib/claude/artifact-builtin-tools.ts`, executed by `lib/claude/plugin-tool-ipc.ts`),
+which is what lets a chart artifact carry its `chartType` and a real title:
+neither is recoverable from a fenced block by regex.
+
+Three rules worth knowing before touching this:
+
+- **The `ArtifactPart` is emitted from `tool_result`, never `tool_use`.** A
+  `tool_use` block arrives before the row exists, so a part built from it points
+  at an id that does not resolve — which is what rendered the "content cleared"
+  placeholder. `lib/artifacts/tool-part.ts` is the single converter both message
+  paths call.
+- **`types/agent/tool.ts` is a pinned contract.** A test asserts the union equals
+  what `buildArtifactManifestEntries()` + `buildCanvasManifestEntries()` publish,
+  so a declared-but-unimplemented name is a red test rather than a wish list.
+- **The manifest and ADR-0139's routing prompt share one gate.** Both are hoisted
+  off the same predicate in `lib/claude/build-options.ts`, so the resident prompt
+  can never advertise a surface whose tools are absent. IM-bound sessions get
+  neither; `settings.artifacts.agentAuthoring: false` opts out.
+
+`artifact_update` passes through the same "Review before apply" gate a heuristic
+revision does, and `artifact_delete` is the one name registered as `ask`.
+
 ### Diagram Design renderer profile
 
 HTML fences containing `<meta name="cognia-renderer" content="diagram-design-v1">` remain normal `html` artifacts, but detection persists `metadata.rendererProfile = "diagram-design-v1"`. The field is additive, so existing and unmarked HTML artifacts need no migration; unknown markers receive no special behavior.
@@ -187,6 +214,15 @@ Key points:
 ## React Preview (CSP + postMessage)
 
 React artifacts are the trickiest — they need to run JSX while remaining isolated. The solution is to pass code **through postMessage**, never string-interpolating it into HTML:
+
+<Callout type="warn">
+  **This is currently broken in every shell.** React 19 publishes no UMD build, so
+  the `unpkg.com/react@19/umd/…` tags below 404 and every React preview falls
+  through to the 15-second timeout message. Serving the runtime locally is blocked
+  on measuring, in a `pnpm tauri build`, whether an `about:srcdoc` subframe
+  inherits the packaged shell's CSP — see the "Open" section of
+  [ADR-0158](../adr/0158-artifacts-and-canvas).
+</Callout>
 
 ```ts title="lib/artifacts/preview-utils.ts:getReactShellHtml (core)"
 <meta http-equiv="Content-Security-Policy" content="
@@ -316,7 +352,7 @@ interface ArtifactStoreState {
 - **Code tab** — Monaco editor (lazy-loaded), infers `getMonacoLanguage()` from artifact type, uses `vs-dark` in dark mode.
 - **Preview tab** — `<ArtifactPreview artifact={...} />` dispatches to the correct renderer.
 - **Runtime health badge** — iframe loading / error / ready states shown in the top-right corner for easy debugging.
-- **Copy / Download / Show in file manager** — limited by `runtime-adapters.ts:exportFormats` (html can "download as html", code can only do "raw").
+- **Copy / Download / Export as** — driven by `runtime-adapters.ts:exportFormats`. `raw` is always offered; `html`/`svg` add their own source form; `png` and `pdf` are real since ADR-0158 (`lib/artifacts/export/`). `react` offers `raw` only — an off-screen capture of unexecuted JSX is a blank rectangle. Rasterising a `chart`/`mermaid`/`math` artifact needs its preview mounted, and says `ArtifactPreviewNotMountedError` when it is not, rather than returning an empty image. Everything downloads through `exportArtifact`, replacing the three paths that disagreed (one of which named a chart `chart.chart`).
 - **Plugin extension slot** — `PluginExtensionSlot` lets plugins append custom action buttons.
 
 ## Tests

@@ -181,6 +181,9 @@ The single-page doc this section replaces drifted from the implementation. Concr
 | Ambiguous `useCanvasStore` ownership | There is **no** `useCanvasStore`; documents + versions live in `useArtifactStore` | `stores/artifact/artifact-store.ts:361` |
 | (implied) context-analyzer feeds the prompts | It now does, for **suggestions only** — `buildScopeBlock` appends a 400-char scope summary. Actions still send the document alone, deliberately | `lib/canvas/ai/context-analyzer.ts`, `hooks/canvas/use-canvas-suggestions.ts` |
 | Python result fields | Result struct is `{ stdout, stderr, exit_code, duration_ms }`; timeout returns `exit_code: 124` | `src-tauri/src/canvas/python_exec.rs:15`, `:81` |
+| "Open in Canvas" navigates to `/canvas/<id>` | That route never existed — the app is a static export with no dynamic segments. The inline card reveals the document through the store instead | `lib/artifacts/reveal.ts:revealCanvasDocument`, `components/chat/message-parts/canvas-inline-part.tsx` |
+| Documents are persisted to localStorage, Dexie is a mirror | Inverted at persist v7: Dexie owns documents and versions, and the blob keeps only the dock's preferences | [ADR-0158](../../adr/0158-artifacts-and-canvas), `lib/canvas/dexie-bridge.ts` |
+| `lib/sandbox/web/` is the web execution path | It never had a caller and has been deleted; the real path is `lib/native/code-execution-strategy.ts` | ADR-0158 |
 
 ## Sandbox & Trust Boundaries
 
@@ -189,8 +192,9 @@ The single-page doc this section replaces drifted from the implementation. Concr
   trusted local machine; the only hard bound is the 30 s timeout. See [Execution & comments](./execution-comments).
 - **Collaboration** never auto-connects: even with `canvas.collaboration.v1` on (default), the
   WebSocket client connects only when the user has configured a server URL in settings.
-- **Web mode** (no Tauri) has no Python channel — execution falls back through
-  `lib/native/code-execution-strategy` to a browser/simulation path.
+- **Web mode** (no Tauri) has no Python channel. JS/TS/JSX/HTML/CSS still run for real, in a
+  `sandbox="allow-scripts"` srcdoc iframe (`lib/native/code-execution-strategy.ts:135`) — a genuine
+  sandbox, not a simulation. Only Python is desktop-only, and correctly so.
 
 ## Next
 

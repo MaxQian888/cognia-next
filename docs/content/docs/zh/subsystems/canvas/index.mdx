@@ -177,6 +177,9 @@ flowchart TB
 | `useCanvasStore` 归属含糊 | **不存在** `useCanvasStore`；文档与版本都在 `useArtifactStore` | `stores/artifact/artifact-store.ts:361` |
 | （暗示）context-analyzer 喂给 prompt | 现在确实喂了，但**只喂建议** —— `buildScopeBlock` 附上一段 400 字符的作用域摘要。动作仍然只发文档，这是刻意的 | `lib/canvas/ai/context-analyzer.ts`、`hooks/canvas/use-canvas-suggestions.ts` |
 | Python 结果字段 | 结果结构体为 `{ stdout, stderr, exit_code, duration_ms }`；超时返回 `exit_code: 124` | `src-tauri/src/canvas/python_exec.rs:15`、`:81` |
+| 「在 Canvas 中打开」跳转到 `/canvas/<id>` | 该路由从未存在——本应用是静态导出，没有动态段。内联卡片改为通过 store 揭示文档 | `lib/artifacts/reveal.ts:revealCanvasDocument`、`components/chat/message-parts/canvas-inline-part.tsx` |
+| 文档持久化到 localStorage，Dexie 只是镜像 | 自 persist v7 起反过来了：Dexie 拥有文档与版本，blob 只留 dock 的偏好 | [ADR-0158](../../adr/0158-artifacts-and-canvas)、`lib/canvas/dexie-bridge.ts` |
+| `lib/sandbox/web/` 是 Web 端执行路径 | 它从来没有调用方，已删除；真实路径是 `lib/native/code-execution-strategy.ts` | ADR-0158 |
 
 ## 沙箱与信任边界
 
@@ -185,8 +188,9 @@ flowchart TB
   是 30 秒超时。见 [执行与评论](./execution-comments)。
 - **协作**从不自动连接：即便 `canvas.collaboration.v1` 开启（默认），WebSocket 客户端也只在用户已在设置中
   配置了服务器 URL 时才连接。
-- **Web 模式**（无 Tauri）没有 Python 通道 —— 执行会经 `lib/native/code-execution-strategy` 回退到
-  浏览器/模拟路径。
+- **Web 模式**（无 Tauri）没有 Python 通道。JS/TS/JSX/HTML/CSS 仍然是真的在跑，跑在
+  `sandbox="allow-scripts"` 的 srcdoc iframe 里（`lib/native/code-execution-strategy.ts:135`）——
+  那是真正的沙箱，不是模拟。只有 Python 是桌面独占，而这是对的。
 
 ## 下一步
 

@@ -123,6 +123,30 @@ jupyter: [/"cells"\s*:\s*\[/, /"cell_type"\s*:\s*"(code|markdown)"/, /"nbformat"
 检测命中 → 自动建 artifact。`ALWAYS_CREATE_TYPES` 强制创建（如 mermaid、chart）
 不论行数；其他类型有最小行阈值。
 
+### 模型也可以直接开口（ADR-0158）
+
+检测是兜底，不是唯一路径。8 个工具——`artifact_{create,update,read,delete}` 与
+`canvas_{create,update,read,open}`——通过 host-routed builtin-tool 中继发布
+（`lib/claude/artifact-builtin-tools.ts`，由 `lib/claude/plugin-tool-ipc.ts` 执行）。
+这正是 chart artifact 能带上 `chartType` 和一个真正标题的原因：两者都不可能靠正则
+从一个 fence 里恢复出来。
+
+动这块之前需要知道的三条规则：
+
+- **`ArtifactPart` 从 `tool_result` 发出，绝不从 `tool_use`。** `tool_use` 块早于行的
+  创建，据此构造的 part 只能指向一个解析不出来的 id——这就是「内容已清除」占位符的
+  由来。`lib/artifacts/tool-part.ts` 是两条消息路径共用的唯一转换器。
+- **`types/agent/tool.ts` 是钉死的契约。** 有测试断言该联合恰好等于
+  `buildArtifactManifestEntries()` + `buildCanvasManifestEntries()` 发布的集合，
+  于是「声明了但没实现」是一个红测试，而不是一张许愿单。
+- **manifest 与 ADR-0139 的路由提示共用一道门。** 两者都从
+  `lib/claude/build-options.ts` 里同一个判定式提取出来，常驻提示因此不可能宣传一个
+  工具缺席的界面。IM 绑定的会话两者都拿不到；
+  `settings.artifacts.agentAuthoring: false` 可以关闭。
+
+`artifact_update` 会经过与启发式修订同一道「应用前先审阅」的门，而
+`artifact_delete` 是唯一登记为 `ask` 的名字。
+
 ### Diagram Design renderer profile
 
 当 HTML fence 包含 `<meta name="cognia-renderer" content="diagram-design-v1">` 时，它仍然是普通 `html` artifact，但检测器会持久化 `metadata.rendererProfile = "diagram-design-v1"`。这是纯增量字段：历史 HTML 和无 marker 的 HTML 不需要迁移，未知 marker 也不会触发特殊行为。
@@ -173,6 +197,14 @@ export function renderSVG(doc: Document, content: string): void {
 
 React artifact 最棘手——既要跑 JSX 又要隔离。方案是把代码**通过 postMessage 传
 进去**，绝不拼字符串进 HTML：
+
+<Callout type="warn">
+  **目前在每个壳里都是坏的。** React 19 不再发布 UMD 构建，下面那些
+  `unpkg.com/react@19/umd/…` 标签都是 404，每次 React 预览都落到 15 秒超时提示。
+  把运行时改成本地提供，卡在一次实测上：需要在 `pnpm tauri build` 里确认
+  `about:srcdoc` 子框架是否继承打包壳的 CSP——见
+  [ADR-0158](../adr/0158-artifacts-and-canvas) 的「未决」一节。
+</Callout>
 
 ```ts title="lib/artifacts/preview-utils.ts:getReactShellHtml (核心)"
 <meta http-equiv="Content-Security-Policy" content="
@@ -320,8 +352,12 @@ interface ArtifactStoreState {
   `getMonacoLanguage()`，dark mode 时用 `vs-dark`。
 - **Preview tab** —— `<ArtifactPreview artifact={...} />` 派发到正确的 renderer。
 - **运行时健康徽章** —— iframe 加载中 / 出错 / 就绪三态显示在右上角，方便调试。
-- **复制 / 下载 / 在文件管理器中显示** —— 通过 `runtime-adapters.ts:exportFormats`
-  限制可选格式（html 可以"下载为 html"，code 只能 "raw"）。
+- **复制 / 下载 / 导出为** —— 由 `runtime-adapters.ts:exportFormats` 驱动。`raw`
+  永远提供；`html`/`svg` 另加自身的源码形式；`png` 与 `pdf` 自 ADR-0158 起是真的
+  （`lib/artifacts/export/`）。`react` 只提供 `raw`——对未执行的 JSX 做离屏截图就是
+  一个空白矩形。栅格化 `chart`/`mermaid`/`math` 需要其预览已挂载，取不到时抛
+  `ArtifactPreviewNotMountedError`，而不是返回空图。所有下载都走 `exportArtifact`，
+  取代了此前三条互相矛盾的路径（其中一条把 chart 存成 `chart.chart`）。
 - **Plugin 扩展槽** —— `PluginExtensionSlot` 让插件追加自定义操作按钮。
 
 ## 测试
