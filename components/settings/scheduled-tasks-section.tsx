@@ -121,15 +121,17 @@ export function ScheduledTasksSection() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      {/* Stacks below `sm`: the actions keep their intrinsic width there and
+          would squeeze the description into a narrow column. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
           <h3 className="text-lg font-medium flex items-center gap-2">
             <ClockIcon className="h-5 w-5" />
             {t("permissions.title")}
           </h3>
           <p className="text-sm text-muted-foreground">{t("permissions.description")}</p>
         </div>
-        <Button asChild variant="outline" size="sm">
+        <Button asChild variant="outline" size="sm" className="shrink-0 self-start">
           <Link href="/scheduler">
             {t("openScheduler")}
             <ExternalLinkIcon className="ml-1.5 h-3.5 w-3.5" />

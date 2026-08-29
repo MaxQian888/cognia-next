@@ -5,6 +5,14 @@
  * `CanvasSettings` shape: Editor / AI / Versioning / Collaboration /
  * Execution / Accessibility / Keybindings / Theme. Every field on
  * `@/types/canvas/settings` has a control here — no omissions.
+ *
+ * Three of those fields have no runtime consumer yet
+ * (`ai.streamingResponses`, `ai.enableInlineCompletion`,
+ * `version.compressOldVersions`) and their rows are rendered INERT with the
+ * reason in place of the description, rather than as switches that store a
+ * value nothing reads. Wiring one up means deleting its `disabledReason` —
+ * `canvas-section.test.tsx` pins the set so a row cannot quietly go back to
+ * pretending.
  */
 
 import { useTranslations } from "next-intl"
@@ -31,6 +39,7 @@ import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { CanvasSettings } from "@/types/canvas/settings"
 import { isTauri } from "@/lib/tauri"
 import { KeybindingSettings } from "@/components/canvas/keybinding-settings"
+import { cn } from "@/lib/utils"
 
 export function CanvasSection() {
   const t = useTranslations("settings.canvas")
@@ -40,8 +49,10 @@ export function CanvasSection() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
+      {/* Stacks below `sm`: the actions keep their intrinsic width there and
+          would squeeze the description into a narrow column. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-1">
           <Label className="flex items-center gap-2 text-base font-semibold">
             <PencilRuler className="size-4" />
             {t("title", { default: "Canvas" })}
@@ -53,24 +64,47 @@ export function CanvasSection() {
             })}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => resetAll()} className="gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => resetAll()}
+          className="shrink-0 gap-1 self-start"
+        >
           <RotateCcw className="size-3.5" />
           {t("resetAll", { default: "Reset all" })}
         </Button>
       </div>
 
       <Tabs defaultValue="editor" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-          <TabsTrigger value="editor">{t("tabs.editor", { default: "Editor" })}</TabsTrigger>
-          <TabsTrigger value="ai">{t("tabs.ai", { default: "AI" })}</TabsTrigger>
-          <TabsTrigger value="version">{t("tabs.version", { default: "Versioning" })}</TabsTrigger>
-          <TabsTrigger value="collab">{t("tabs.collab", { default: "Collab" })}</TabsTrigger>
-          <TabsTrigger value="execution">
+        {/* A fixed 4-column grid gave each tab ~93px on a phone, which clips
+            "Collaboration", "Accessibility" and "Keybindings". Scroll the strip
+            instead — the same shape `adapter-detail-panel` and
+            `ocr-detail-panel` already use. */}
+        <TabsList className="w-full justify-start overflow-x-auto lg:grid lg:grid-cols-8">
+          <TabsTrigger value="editor" className="shrink-0">
+            {t("tabs.editor", { default: "Editor" })}
+          </TabsTrigger>
+          <TabsTrigger value="ai" className="shrink-0">
+            {t("tabs.ai", { default: "AI" })}
+          </TabsTrigger>
+          <TabsTrigger value="version" className="shrink-0">
+            {t("tabs.version", { default: "Versioning" })}
+          </TabsTrigger>
+          <TabsTrigger value="collab" className="shrink-0">
+            {t("tabs.collab", { default: "Collab" })}
+          </TabsTrigger>
+          <TabsTrigger value="execution" className="shrink-0">
             {t("tabs.execution", { default: "Execution" })}
           </TabsTrigger>
-          <TabsTrigger value="a11y">{t("tabs.a11y", { default: "Accessibility" })}</TabsTrigger>
-          <TabsTrigger value="keys">{t("tabs.keys", { default: "Keybindings" })}</TabsTrigger>
-          <TabsTrigger value="theme">{t("tabs.theme", { default: "Theme" })}</TabsTrigger>
+          <TabsTrigger value="a11y" className="shrink-0">
+            {t("tabs.a11y", { default: "Accessibility" })}
+          </TabsTrigger>
+          <TabsTrigger value="keys" className="shrink-0">
+            {t("tabs.keys", { default: "Keybindings" })}
+          </TabsTrigger>
+          <TabsTrigger value="theme" className="shrink-0">
+            {t("tabs.theme", { default: "Theme" })}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="editor" className="m-0">
@@ -441,6 +475,7 @@ function EditorTab({ settings }: SectionProps) {
 
 function AITab({ settings }: SectionProps) {
   const t = useTranslations("settings.canvas.ai")
+  const tDormant = useTranslations("settings.canvas.dormant")
   const update = useCanvasSettingsStore((s) => s.updateAISettings)
   const a = settings.ai
   return (
@@ -471,6 +506,8 @@ function AITab({ settings }: SectionProps) {
         label={t("streamingResponses")}
         checked={a.streamingResponses}
         onChange={(v) => update({ streamingResponses: v })}
+        disabledReason={tDormant("streamingResponses")}
+        testid="canvas-ai-streaming-responses"
       />
       <SliderRow
         label={t("contextLines")}
@@ -508,6 +545,8 @@ function AITab({ settings }: SectionProps) {
         label={t("enableInlineCompletion")}
         checked={a.enableInlineCompletion}
         onChange={(v) => update({ enableInlineCompletion: v })}
+        disabledReason={tDormant("enableInlineCompletion")}
+        testid="canvas-ai-inline-completion"
       />
       <Toggle
         label={t("showConfidence")}
@@ -522,6 +561,7 @@ function AITab({ settings }: SectionProps) {
 
 function VersionTab({ settings }: SectionProps) {
   const t = useTranslations("settings.canvas.version")
+  const tDormant = useTranslations("settings.canvas.dormant")
   const update = useCanvasSettingsStore((s) => s.updateVersionSettings)
   const v = settings.version
   return (
@@ -547,6 +587,8 @@ function VersionTab({ settings }: SectionProps) {
         label={t("compressOldVersions")}
         checked={v.compressOldVersions}
         onChange={(b) => update({ compressOldVersions: b })}
+        disabledReason={tDormant("compressOldVersions")}
+        testid="canvas-version-compress"
       />
       <Toggle
         label={t("keepNamedVersions")}
@@ -593,6 +635,7 @@ function CollaborationTab({ settings }: SectionProps) {
       <Row label={t("signallingServerUrl")}>
         <Input
           value={c.serverUrl}
+          // i18n-exempt: a literal websocket URL example, not prose
           placeholder="ws://localhost:8787"
           className="max-w-md text-xs"
           onChange={(e) => set({ collaboration: { ...c, serverUrl: e.target.value } })}
@@ -812,7 +855,7 @@ function ThemeTab({ settings }: SectionProps) {
             "Custom Monaco themes registered through the canvas plugin API will appear in this list at runtime.",
         })}
         <Badge variant="outline" className="ml-2 text-[10px]">
-          experimental
+          {t("experimentalBadge")}
         </Badge>
       </p>
     </div>
@@ -835,19 +878,45 @@ function Toggle({
   description,
   checked,
   onChange,
+  disabledReason,
+  testid,
 }: {
   label: string
   description?: string
   checked: boolean
   onChange: (v: boolean) => void
+  /**
+   * Rendered inert with this reason in place of the description (the
+   * `ToggleRow` shape in `settings/conversation/composer-behavior-card.tsx`).
+   * A field whose value nothing reads must not present as a working switch.
+   */
+  disabledReason?: string
+  testid?: string
 }) {
+  const inert = Boolean(disabledReason)
   return (
-    <div className="flex items-start justify-between gap-4 rounded-md border bg-muted/10 p-3">
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4 rounded-md border bg-muted/10 p-3",
+        inert && "opacity-60"
+      )}
+      data-testid={testid}
+    >
       <div className="min-w-0 space-y-0.5">
         <Label className="text-xs">{label}</Label>
-        {description && <p className="text-[11px] text-muted-foreground">{description}</p>}
+        {(disabledReason ?? description) && (
+          <p className="text-[11px] text-pretty text-muted-foreground">
+            {disabledReason ?? description}
+          </p>
+        )}
       </div>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
+        disabled={inert}
+        aria-label={label}
+        className="shrink-0"
+      />
     </div>
   )
 }

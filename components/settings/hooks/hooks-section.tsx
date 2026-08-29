@@ -451,8 +451,8 @@ export function HooksSection({ cwd, runtimeCapabilities = DEFAULT_RUNTIME_CAPABI
               </p>
             ) : null}
 
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-0.5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 basis-56 space-y-0.5">
                 <h3 className="text-sm font-medium" data-testid="hooks-active-event">
                   {tc(`events.${activeEvent}.label`)}
                 </h3>

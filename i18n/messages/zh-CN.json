@@ -27994,6 +27994,11 @@
       },
       "description": "配置基于 Monaco 的代码/文档编辑器——字体、AI 建议、版本管理、协作、沙盒执行、无障碍与快捷键。",
       "domainLabel": "画布文档",
+      "dormant": {
+        "compressOldVersions": "尚未接线 —— 版本内容以未压缩形式保存。这个开关保存的值没有任何代码读取。",
+        "enableInlineCompletion": "尚未接线 —— Canvas 编辑器还没有可启用的行内补全提供方。这个开关保存的值没有任何代码读取。",
+        "streamingResponses": "尚未接线 —— Canvas 建议是一次性解析的 JSON 回复，没有流式输出。这个开关保存的值没有任何代码读取。"
+      },
       "editor": {
         "autoClosingBrackets": "自动闭合括号",
         "autoClosingQuotes": "自动闭合引号",
@@ -28107,6 +28112,7 @@
         "version": "版本"
       },
       "theme": {
+        "experimentalBadge": "实验性",
         "followSystem": "跟随系统主题",
         "hint": "通过画布插件 API 注册的自定义 Monaco 主题将在运行时出现在此列表中。",
         "monacoTheme": "Monaco 主题",

@@ -129,12 +129,15 @@ export function LspServersSection() {
 
   return (
     <section className="space-y-6" data-testid="lsp-servers-section">
-      <header className="flex items-start justify-between gap-4">
-        <div>
+      {/* Stacks below `sm`: side-by-side, the two buttons keep their full width
+          and squeeze the prose into a ~200px column that wrapped the
+          description over fifteen lines on a phone. */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">{t("title")}</h2>
-          <p className="text-sm text-muted-foreground">{t("description")}</p>
+          <p className="text-sm text-pretty text-muted-foreground">{t("description")}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
             onClick={() => setLogsOpen(true)}

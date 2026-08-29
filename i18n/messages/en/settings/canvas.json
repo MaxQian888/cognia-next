@@ -38,6 +38,11 @@
   },
   "description": "Configure the Monaco-based code/document editor — fonts, AI suggestions, versioning, collaboration, sandbox execution, accessibility and keybindings.",
   "domainLabel": "Canvas documents",
+  "dormant": {
+    "compressOldVersions": "Not wired yet — version content is stored uncompressed. This switch stores a value no code reads.",
+    "enableInlineCompletion": "Not wired yet — the canvas editor has no inline completion provider to switch on. This switch stores a value no code reads.",
+    "streamingResponses": "Not wired yet — canvas suggestions are parsed as one JSON reply, so nothing streams. This switch stores a value no code reads."
+  },
   "editor": {
     "autoClosingBrackets": "Auto-close brackets",
     "autoClosingQuotes": "Auto-close quotes",
@@ -151,6 +156,7 @@
     "version": "Versioning"
   },
   "theme": {
+    "experimentalBadge": "experimental",
     "followSystem": "Follow system theme",
     "hint": "Custom Monaco themes registered through the canvas plugin API will appear in this list at runtime.",
     "monacoTheme": "Monaco theme",

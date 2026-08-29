@@ -72,7 +72,6 @@
     "components/settings/automation/automation-section.tsx",
     "components/settings/automation/whitelist-tab.tsx",
     "components/settings/built-in-skills/index.tsx",
-    "components/settings/canvas-section.tsx",
     "components/settings/ccswitch/tabs/index.ts",
     "components/settings/data/data-section.tsx",
     "components/settings/data/tabs/backup-restore-tab.tsx",
