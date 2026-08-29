@@ -24,6 +24,11 @@
     "whyTitle": "Why this action"
   },
   "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+  "revealGate": {
+    "description": "Settings → Security requires verification before an API key or token is shown.",
+    "reason": "Confirm to show this secret",
+    "title": "Reveal secret"
+  },
   "rows": {
     "deletePairing": {
       "help": "Re-prompt biometric before revoking a paired device or signing out.",

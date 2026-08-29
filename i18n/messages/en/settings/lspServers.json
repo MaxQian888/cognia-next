@@ -106,6 +106,13 @@
   "overrideAriaLabel": "Override {name}",
   "removeAriaLabel": "Remove {name}",
   "resetAriaLabel": "Reset {name} to default",
+  "runtime": {
+    "autoInstallDescription": "Let cognia npm-install a built-in server into its managed directory the first time the agent needs one. Off, a missing server is reported instead, and you install it yourself with the Install button below.",
+    "autoInstallLabel": "Install missing servers automatically",
+    "enabledDescription": "Master switch for the whole subsystem. On, the agent gets LSP tools (hover, diagnostics, go-to-definition) and the Skills, Canvas and Artifact editors run their servers. Off, both stop — no server is spawned.",
+    "enabledLabel": "Enable language servers",
+    "title": "Runtime"
+  },
   "status": {
     "installed": "Installed",
     "managed": "Managed",

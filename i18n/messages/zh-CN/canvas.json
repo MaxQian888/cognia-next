@@ -85,6 +85,8 @@
   "commentsCount": "{count, plural, other {# 条评论}}",
   "compare": "对比",
   "compareInstructions": "选择两个版本以进行对比。",
+  "confidence": "把握 {percent}%",
+  "confidenceHint": "模型自评「这个改动是正确且需要的」的把握程度，不是实测值。",
   "conflictWarning": "此快捷键与其他操作冲突",
   "connected": "已连接",
   "connecting": "连接中…",

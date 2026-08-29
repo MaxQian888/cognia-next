@@ -830,6 +830,7 @@
       },
       "notification": {
         "channelDesktop": "Desktop",
+        "channelIm": "Chat",
         "channelToast": "Toast",
         "channelWebhook": "Webhook",
         "channels": "Default channels",
@@ -837,6 +838,9 @@
         "onComplete": "Notify on success",
         "onError": "Notify on failure",
         "onStart": "Notify on task start",
+        "opsChannel": "Global ops channel",
+        "opsChannelHint": "Where a task's chat notification lands when the task itself names no conversation. Without it, such a notification has nowhere to go — including one about the failure of a task whose original conversation was deleted.",
+        "opsChannelPlaceholder": "e.g. telegram:-1001234567890",
         "testCta": "Test {channel}",
         "testFailure": "{channel} test failed: {error}",
         "testSuccess": "{channel} test succeeded",

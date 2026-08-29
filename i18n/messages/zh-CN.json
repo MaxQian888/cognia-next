@@ -4430,6 +4430,8 @@
     "commentsCount": "{count, plural, other {# 条评论}}",
     "compare": "对比",
     "compareInstructions": "选择两个版本以进行对比。",
+    "confidence": "把握 {percent}%",
+    "confidenceHint": "模型自评「这个改动是正确且需要的」的把握程度，不是实测值。",
     "conflictWarning": "此快捷键与其他操作冲突",
     "connected": "已连接",
     "connecting": "连接中…",
@@ -10567,6 +10569,9 @@
       "saved": "已保存",
       "saving": "保存中…",
       "scorersSelectedSummary": "已选 {count} / {total} 个评分器",
+      "storedOutputDescription": "每条用例结果行上保留的回答字符数，让失败用例可以回看原文，而不是只有一个分数。设得越大，一次大规模运行在 IndexedDB 中占用越多。",
+      "storedOutputDisabledDescription": "0 —— 不保存回答。失败用例只会显示分数，没有可回看的内容。",
+      "storedOutputLabel": "保留回答长度",
       "title": "评估设置"
     },
     "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",
@@ -25162,6 +25167,7 @@
         },
         "notification": {
           "channelDesktop": "桌面",
+          "channelIm": "聊天",
           "channelToast": "Toast",
           "channelWebhook": "Webhook",
           "channels": "默认通道",
@@ -25169,6 +25175,9 @@
           "onComplete": "成功时通知",
           "onError": "失败时通知",
           "onStart": "开始时通知",
+          "opsChannel": "全局运维会话",
+          "opsChannelHint": "当任务本身没有指定会话时，任务的聊天通知会送到这里。没有设置时这类通知无处可去 —— 包括原会话已被删除的任务失败通知。",
+          "opsChannelPlaceholder": "例如 telegram:-1001234567890",
           "testCta": "测试 {channel}",
           "testFailure": "{channel} 测试失败：{error}",
           "testSuccess": "{channel} 测试成功",
@@ -32907,6 +32916,13 @@
       "overrideAriaLabel": "覆盖 {name}",
       "removeAriaLabel": "删除 {name}",
       "resetAriaLabel": "重置 {name} 为默认",
+      "runtime": {
+        "autoInstallDescription": "允许 cognia 在 agent 首次需要某个内置服务器时，将其 npm 安装到托管目录。关闭后只会报告缺失，由你用下方的「安装」按钮自行安装。",
+        "autoInstallLabel": "自动安装缺失的服务器",
+        "enabledDescription": "整个子系统的总开关。开启后，agent 获得 LSP 工具（悬停、诊断、跳转到定义），Skills、Canvas 与 Artifact 编辑器也会运行各自的服务器。关闭后两者都停止，不再启动任何服务器。",
+        "enabledLabel": "启用语言服务器",
+        "title": "运行时"
+      },
       "status": {
         "installed": "已安装",
         "managed": "托管安装",
@@ -34223,6 +34239,11 @@
         "whyTitle": "为何执行此行动"
       },
       "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
+      "revealGate": {
+        "description": "「设置 → 安全」要求先验证身份，才会显示 API 密钥或令牌。",
+        "reason": "确认后显示该密钥",
+        "title": "显示密钥"
+      },
       "rows": {
         "deletePairing": {
           "help": "在吊销已配对设备或退出登录前，重新进行生物识别校验。",

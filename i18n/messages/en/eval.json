@@ -718,6 +718,9 @@
     "saved": "Saved",
     "saving": "Saving…",
     "scorersSelectedSummary": "{count} of {total} scorers selected",
+    "storedOutputDescription": "Characters of each answer kept on the per-case result row, so a failed case can be read back instead of showing only a score. Longer keeps more of a big run in IndexedDB.",
+    "storedOutputDisabledDescription": "0 — answers are not stored. A failed case shows its scores only; there is nothing to read back.",
+    "storedOutputLabel": "Stored answer length",
     "title": "Eval settings"
   },
   "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",

@@ -718,6 +718,9 @@
     "saved": "已保存",
     "saving": "保存中…",
     "scorersSelectedSummary": "已选 {count} / {total} 个评分器",
+    "storedOutputDescription": "每条用例结果行上保留的回答字符数，让失败用例可以回看原文，而不是只有一个分数。设得越大，一次大规模运行在 IndexedDB 中占用越多。",
+    "storedOutputDisabledDescription": "0 —— 不保存回答。失败用例只会显示分数，没有可回看的内容。",
+    "storedOutputLabel": "保留回答长度",
     "title": "评估设置"
   },
   "subtitle": "为内置 Agent 提供评测集、评分器与 pass^k 可靠性。",

@@ -4430,6 +4430,8 @@
     "commentsCount": "{count, plural, =1 {# comment} other {# comments}}",
     "compare": "Compare",
     "compareInstructions": "Select two versions to compare them.",
+    "confidence": "{percent}% confident",
+    "confidenceHint": "The model's own estimate that this change is correct and wanted. Not a measurement.",
     "conflictWarning": "This keybinding conflicts with another action",
     "connected": "Connected",
     "connecting": "Connecting…",
@@ -10567,6 +10569,9 @@
       "saved": "Saved",
       "saving": "Saving…",
       "scorersSelectedSummary": "{count} of {total} scorers selected",
+      "storedOutputDescription": "Characters of each answer kept on the per-case result row, so a failed case can be read back instead of showing only a score. Longer keeps more of a big run in IndexedDB.",
+      "storedOutputDisabledDescription": "0 — answers are not stored. A failed case shows its scores only; there is nothing to read back.",
+      "storedOutputLabel": "Stored answer length",
       "title": "Eval settings"
     },
     "subtitle": "Datasets, scorers, and pass^k reliability for your built-in agents.",
@@ -25162,6 +25167,7 @@
         },
         "notification": {
           "channelDesktop": "Desktop",
+          "channelIm": "Chat",
           "channelToast": "Toast",
           "channelWebhook": "Webhook",
           "channels": "Default channels",
@@ -25169,6 +25175,9 @@
           "onComplete": "Notify on success",
           "onError": "Notify on failure",
           "onStart": "Notify on task start",
+          "opsChannel": "Global ops channel",
+          "opsChannelHint": "Where a task's chat notification lands when the task itself names no conversation. Without it, such a notification has nowhere to go — including one about the failure of a task whose original conversation was deleted.",
+          "opsChannelPlaceholder": "e.g. telegram:-1001234567890",
           "testCta": "Test {channel}",
           "testFailure": "{channel} test failed: {error}",
           "testSuccess": "{channel} test succeeded",
@@ -32907,6 +32916,13 @@
       "overrideAriaLabel": "Override {name}",
       "removeAriaLabel": "Remove {name}",
       "resetAriaLabel": "Reset {name} to default",
+      "runtime": {
+        "autoInstallDescription": "Let cognia npm-install a built-in server into its managed directory the first time the agent needs one. Off, a missing server is reported instead, and you install it yourself with the Install button below.",
+        "autoInstallLabel": "Install missing servers automatically",
+        "enabledDescription": "Master switch for the whole subsystem. On, the agent gets LSP tools (hover, diagnostics, go-to-definition) and the Skills, Canvas and Artifact editors run their servers. Off, both stop — no server is spawned.",
+        "enabledLabel": "Enable language servers",
+        "title": "Runtime"
+      },
       "status": {
         "installed": "Installed",
         "managed": "Managed",
@@ -34223,6 +34239,11 @@
         "whyTitle": "Why this action"
       },
       "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+      "revealGate": {
+        "description": "Settings → Security requires verification before an API key or token is shown.",
+        "reason": "Confirm to show this secret",
+        "title": "Reveal secret"
+      },
       "rows": {
         "deletePairing": {
           "help": "Re-prompt biometric before revoking a paired device or signing out.",

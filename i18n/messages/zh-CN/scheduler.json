@@ -830,6 +830,7 @@
       },
       "notification": {
         "channelDesktop": "桌面",
+        "channelIm": "聊天",
         "channelToast": "Toast",
         "channelWebhook": "Webhook",
         "channels": "默认通道",
@@ -837,6 +838,9 @@
         "onComplete": "成功时通知",
         "onError": "失败时通知",
         "onStart": "开始时通知",
+        "opsChannel": "全局运维会话",
+        "opsChannelHint": "当任务本身没有指定会话时，任务的聊天通知会送到这里。没有设置时这类通知无处可去 —— 包括原会话已被删除的任务失败通知。",
+        "opsChannelPlaceholder": "例如 telegram:-1001234567890",
         "testCta": "测试 {channel}",
         "testFailure": "{channel} 测试失败：{error}",
         "testSuccess": "{channel} 测试成功",
