@@ -10,7 +10,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import {
   AdapterInstancePicker,
   CharacterPicker,
@@ -463,7 +471,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <WebhookUrlBanner />
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("method.label")} htmlFor="wh-method" name="method">
           <Select value={method} onValueChange={(v) => onChange(patchParam(params, "method", v))}>
             <SelectTrigger id="wh-method">
@@ -493,7 +501,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
             className="font-mono text-xs"
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("hmacSecret.label")}
         htmlFor="wh-hmac"
@@ -507,7 +515,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "hmacSecret", e.target.value))}
         />
       </Field>
-      <div className="grid grid-cols-3 gap-3">
+      <FieldRow columns={3}>
         <Field
           label={t("responseStatus.label")}
           htmlFor="wh-status"
@@ -540,7 +548,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
             className="font-mono text-xs"
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }

@@ -11,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { CharacterPicker } from "./shared/entity-picker"
 import { GoalTemplateIdField, clampNumberInput, parseObjectJson } from "./form-support"
 import type { ConfigProps } from "./form-support"
@@ -304,7 +312,7 @@ export function GoalAnalyticsConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("limit.label")}
           htmlFor="goal-analytics-limit"
@@ -341,7 +349,7 @@ export function GoalAnalyticsConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
@@ -499,7 +507,7 @@ export function GoalTemplateUpsertConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("isFavorite.label")}
           htmlFor="goal-template-favorite"
@@ -529,7 +537,7 @@ export function GoalTemplateUpsertConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }

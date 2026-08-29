@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readNumber, readString, patchParam } from "./shared"
+import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { ConditionBuilder } from "./shared/condition-builder"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
@@ -306,7 +306,7 @@ export function AiExplicitProviderFields({
   const headersJson = readStringRecordJsonParam(params, "headersJson", "headers")
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("provider.label")}
           htmlFor={`${idPrefix}-provider`}
@@ -333,7 +333,7 @@ export function AiExplicitProviderFields({
             placeholder={t("model.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("apiKey.label")}
         htmlFor={`${idPrefix}-key`}
@@ -641,7 +641,7 @@ export function BranchConfigV1({
           placeholder={t("condition.placeholder")}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("truthyLabel.label")} htmlFor="br-tlabel" name="truthyLabel">
           <Input
             id="br-tlabel"
@@ -656,7 +656,7 @@ export function BranchConfigV1({
             onChange={(e) => onChange(patchParam(params, "falsyLabel", e.target.value))}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
@@ -720,7 +720,7 @@ export function MobileRoutingFields({ params, onChange }: ConfigProps) {
   const deviceId = readString(params, "deviceId")
   const timeoutMs = readNumber(params, "timeoutMs", 120_000)
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <FieldRow>
       <Field
         label={t("deviceId.label")}
         htmlFor="mob-device"
@@ -744,7 +744,7 @@ export function MobileRoutingFields({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-    </div>
+    </FieldRow>
   )
 }
 
@@ -1152,9 +1152,7 @@ export function LoopConfigV2({ params, onChange }: { params: Params; onChange: C
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="fail">{t("onItemError.fail")}</SelectItem>
-            <SelectItem value="continue-with-null">
-              {t("onItemError.continueWithNull")}
-            </SelectItem>
+            <SelectItem value="continue-with-null">{t("onItemError.continueWithNull")}</SelectItem>
             <SelectItem value="remove-failed">{t("onItemError.removeFailed")}</SelectItem>
             <SelectItem value="break">{t("onItemError.break")}</SelectItem>
           </SelectContent>

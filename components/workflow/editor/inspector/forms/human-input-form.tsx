@@ -20,7 +20,7 @@ import type {
   HumanInputField,
   HumanInputFieldType,
 } from "@/types/workflow/human-input"
-import { Field, FieldGroup, patchParam, readNumber, readString } from "./shared"
+import { Field, FieldGroup, patchParam, readNumber, readString, FieldRow } from "./shared"
 import type { ConfigProps } from "./form-support"
 
 const FIELD_TYPES: HumanInputFieldType[] = [
@@ -104,7 +104,7 @@ export function HumanInputRequestConfig({ params, onChange }: ConfigProps) {
         </div>
         {fields.map((field, index) => (
           <div key={`${field.id}:${index}`} className="space-y-2 rounded-md border p-2">
-            <div className="grid grid-cols-2 gap-2">
+            <FieldRow className="gap-2">
               <Input
                 aria-label={t("fields.id")}
                 value={field.id}
@@ -123,7 +123,7 @@ export function HumanInputRequestConfig({ params, onChange }: ConfigProps) {
                   setFields(next)
                 }}
               />
-            </div>
+            </FieldRow>
             <div className="flex items-center gap-2">
               <Select
                 value={field.type}
@@ -311,7 +311,7 @@ export function HumanInputRequestConfig({ params, onChange }: ConfigProps) {
         ))}
       </section>
 
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field label={t("completion.label")} htmlFor="hir-completion" name="completionPolicy">
           <Select
             value={completionPolicy.mode}
@@ -353,7 +353,7 @@ export function HumanInputRequestConfig({ params, onChange }: ConfigProps) {
             />
           </Field>
         )}
-      </div>
+      </FieldRow>
       <Field label={t("timeout")} htmlFor="hir-timeout" name="timeoutMs">
         <Input
           id="hir-timeout"

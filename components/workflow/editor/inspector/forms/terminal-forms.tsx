@@ -11,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { TerminalUnattendedFields } from "./form-support"
 import type { ConfigProps } from "./form-support"
 
@@ -46,7 +54,7 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field label={t("cwd.label")} htmlFor="term-cwd" hint={t("cwd.hint")} name="cwd">
           <Input
             id="term-cwd"
@@ -63,7 +71,7 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
             placeholder={t("shell.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field label={t("tabId.label")} htmlFor="term-tab" hint={t("tabId.hint")} name="tabId">
         <Input
           id="term-tab"
@@ -72,7 +80,7 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
           placeholder={t("tabId.placeholder")}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field
           label={t("timeoutSec.label")}
           htmlFor="term-timeout"
@@ -115,7 +123,7 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <TerminalUnattendedFields
         params={params}
         onChange={onChange}
@@ -135,7 +143,7 @@ export function TerminalSessionOpenConfig({ params, onChange }: ConfigProps) {
   const unattended = readBoolean(params, "unattended", false)
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field label={t("cwd.label")} htmlFor="tsopen-cwd" hint={t("cwd.hint")} name="cwd">
           <Input
             id="tsopen-cwd"
@@ -152,7 +160,7 @@ export function TerminalSessionOpenConfig({ params, onChange }: ConfigProps) {
             placeholder={t("shell.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
       <div className="flex items-center justify-between gap-3">
         <Field
           label={t("unattended.label")}
@@ -211,7 +219,7 @@ export function TerminalSessionRunConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field
           label={t("timeoutSec.label")}
           htmlFor="tsrun-timeout"
@@ -254,7 +262,7 @@ export function TerminalSessionRunConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("onAskVerdict.label")}
         htmlFor="tsrun-askverdict"
@@ -330,7 +338,7 @@ export function TerminalScriptConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field
           label={t("interpreter.label")}
           htmlFor="tscript-interp"
@@ -352,8 +360,8 @@ export function TerminalScriptConfig({ params, onChange }: ConfigProps) {
             placeholder={t("cwd.placeholder")}
           />
         </Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
+      </FieldRow>
+      <FieldRow className="gap-2">
         <Field
           label={t("timeoutSec.label")}
           htmlFor="tscript-timeout"
@@ -396,7 +404,7 @@ export function TerminalScriptConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <TerminalUnattendedFields
         params={params}
         onChange={onChange}
@@ -480,7 +488,7 @@ export function TerminalWaitForExitConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field
           label={t("timeoutSec.label")}
           htmlFor="twait-timeout"
@@ -523,7 +531,7 @@ export function TerminalWaitForExitConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
@@ -537,7 +545,7 @@ export function TerminalCommandTriggerConfig({ params, onChange }: ConfigProps) 
   const commandContains = readString(params, "commandContains")
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-2">
+      <FieldRow className="gap-2">
         <Field
           label={t("sessionId.label")}
           htmlFor="ttrig-session"
@@ -565,7 +573,7 @@ export function TerminalCommandTriggerConfig({ params, onChange }: ConfigProps) 
             placeholder={t("projectId.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field label={t("status.label")} htmlFor="ttrig-status" hint={t("status.hint")} name="status">
         <Select
           value={status === "" ? "any" : status}

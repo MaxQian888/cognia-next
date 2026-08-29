@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readNumber, readString, patchParam } from "./shared"
+import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
 import { CharacterPicker } from "./shared/entity-picker"
 import {
   PLAN_EXECUTION_MODES,
@@ -80,7 +80,7 @@ export function PlanCreateConfig({ params, onChange }: ConfigProps) {
           onChange={(v) => onChange(patchParam(params, "characterId", v))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("source.label")} htmlFor="plan-create-source" name="source">
           <Select value={source} onValueChange={(v) => onChange(patchParam(params, "source", v))}>
             <SelectTrigger id="plan-create-source">
@@ -116,7 +116,7 @@ export function PlanCreateConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("stepsJson.label")}
         htmlFor="plan-create-steps"
@@ -444,7 +444,7 @@ export function PlanRefineConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <PlanIdField params={params} onChange={onChange} id="plan-refine-id" />
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("refinementType.label")} htmlFor="plan-refine-type" name="refinementType">
           <Select
             value={refinementType}
@@ -476,7 +476,7 @@ export function PlanRefineConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("failedStepId.label")}
         htmlFor="plan-refine-failed-step"

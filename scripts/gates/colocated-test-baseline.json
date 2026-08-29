@@ -109,7 +109,6 @@
     "components/workflow/editor/inspector/data/data-schema-view.tsx",
     "components/workflow/editor/inspector/data/data-table-view.tsx",
     "components/workflow/editor/inspector/data/drag-props.ts",
-    "components/workflow/editor/inspector/forms/shared.tsx",
     "components/workflow/editor/inspector/forms/shared/inspector-context.tsx",
     "components/workflow/editor/shortcuts-cheatsheet.tsx",
     "components/workflow/library/library-stat-bar.tsx",

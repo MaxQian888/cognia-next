@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readNumber, readString, patchParam } from "./shared"
+import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
 import {
   SCHEDULER_STATUSES,
   SCHEDULER_TASK_TYPES,
@@ -58,7 +58,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
           rows={2}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("type.label")} htmlFor="scheduler-create-type" name="type" required>
           <Select value={type} onValueChange={(v) => onChange(patchParam(params, "type", v))}>
             <SelectTrigger id="scheduler-create-type">
@@ -95,7 +95,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("cronExpression.label")}
         htmlFor="scheduler-create-cron"
@@ -108,7 +108,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "cronExpression", e.target.value))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("intervalMs.label")}
           htmlFor="scheduler-create-interval"
@@ -149,7 +149,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("runAt.label")}
         htmlFor="scheduler-create-run-at"
@@ -162,7 +162,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "runAt", e.target.value))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("eventType.label")}
           htmlFor="scheduler-create-event-type"
@@ -187,7 +187,7 @@ export function SchedulerTaskCreateConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "timezone", e.target.value))}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("dependsOnRaw.label")}
         htmlFor="scheduler-create-depends"
@@ -318,7 +318,7 @@ export function SchedulerTaskUpdateConfig({ params, onChange }: ConfigProps) {
           rows={2}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("status.label")} htmlFor="scheduler-update-status" name="status">
           <Select
             value={status}
@@ -359,7 +359,7 @@ export function SchedulerTaskUpdateConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("cronExpression.label")}
         htmlFor="scheduler-update-cron"
@@ -372,7 +372,7 @@ export function SchedulerTaskUpdateConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "cronExpression", e.target.value))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("intervalMs.label")}
           htmlFor="scheduler-update-interval"
@@ -413,7 +413,7 @@ export function SchedulerTaskUpdateConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("runAt.label")}
         htmlFor="scheduler-update-run-at"
@@ -512,7 +512,7 @@ export function SchedulerTaskBackfillConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <SchedulerTaskIdField params={params} onChange={onChange} id="scheduler-backfill-id" />
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("start.label")}
           htmlFor="scheduler-backfill-start"
@@ -539,7 +539,7 @@ export function SchedulerTaskBackfillConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "end", e.target.value))}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }

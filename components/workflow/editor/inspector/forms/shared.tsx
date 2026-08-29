@@ -104,8 +104,49 @@ export function Field({
   )
 }
 
+/**
+ * Form root. Declares `@container/inspector-form` so every row inside sizes
+ * off the *panel*, not the viewport: the inspector lives in the context
+ * workbench, which the user can drag anywhere between
+ * `CONTEXT_WORKBENCH_MIN_WIDTH` (240px) and 960px, and is re-hosted full-bleed
+ * inside a Sheet on mobile. A viewport breakpoint cannot see any of that.
+ */
 export function FieldGroup({ children }: { children: ReactNode }) {
-  return <div className="space-y-3">{children}</div>
+  return <div className="@container/inspector-form space-y-3">{children}</div>
+}
+
+/**
+ * Multi-column row of {@link Field}s. Stacks to one column while the form
+ * container is narrower than `@xs` (20rem) — below that, two columns leave
+ * ~85px per control inside the 240px-minimum panel, which truncates every
+ * `<Select>` label and clips number steppers. Three-column rows earn their
+ * third column only at `@sm` (24rem).
+ *
+ * Always prefer this over a hand-written multi-column grid: the pinned test
+ * in `shared.test.tsx` keeps inspector forms free of unconditional column
+ * grids, and it scans this file too.
+ */
+export function FieldRow({
+  children,
+  columns = 2,
+  className,
+}: {
+  children: ReactNode
+  /** Column count once the container is wide enough. Defaults to 2. */
+  columns?: 2 | 3
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-1 gap-3 @xs/inspector-form:grid-cols-2",
+        columns === 3 && "@sm/inspector-form:grid-cols-3",
+        className
+      )}
+    >
+      {children}
+    </div>
+  )
 }
 
 /**

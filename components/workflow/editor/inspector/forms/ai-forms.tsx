@@ -11,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { SubworkflowPicker } from "./shared/entity-picker"
 import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
@@ -242,7 +250,7 @@ export function AiCouncilConfig({ params, onChange }: ConfigProps) {
           rows={3}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("executionMode.label")} htmlFor="council-mode" name="executionMode">
           <Select
             value={executionMode}
@@ -276,7 +284,7 @@ export function AiCouncilConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("timeoutMs.label")}
         htmlFor="council-timeout"
@@ -402,7 +410,7 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
         </Field>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("n.label")} htmlFor="en-n" hint={t("n.hint")} name="n">
           <Input
             id="en-n"
@@ -430,7 +438,7 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
 
       <Field label={t("lens.label")} htmlFor="en-lens" hint={t("lens.hint")} name="lens">
         <Textarea
@@ -693,7 +701,7 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
   const apiKey = readString(params, "apiKey")
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("provider.label")} htmlFor="aem-provider" name="provider">
           <Select
             value={provider || undefined}
@@ -724,7 +732,7 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
             placeholder={t("model.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field label={t("apiKey.label")} htmlFor="aem-key" hint={t("apiKey.hint")} name="apiKey">
         <Input
           id="aem-key"
@@ -873,7 +881,7 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
       )}
       {needsModel && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <FieldRow>
             <Field label={t("device.label")} htmlFor="abm-device" name="device">
               <Select
                 value={readString(params, "device", capabilities.recommendedDevice)}
@@ -907,7 +915,7 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
                 </SelectContent>
               </Select>
             </Field>
-          </div>
+          </FieldRow>
           <Field label={t("cacheEnabled.label")} htmlFor="abm-cache" name="cacheEnabled">
             <Switch
               id="abm-cache"
@@ -915,7 +923,7 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
               onCheckedChange={(checked) => onChange(patchParam(params, "cacheEnabled", checked))}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <FieldRow>
             <Field
               label={t("maxCachedModels.label")}
               htmlFor="abm-max-cached"
@@ -956,12 +964,12 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
                 }
               />
             </Field>
-          </div>
+          </FieldRow>
         </>
       )}
       {operation === "infer" && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <FieldRow>
             <Field label={t("topK.label")} htmlFor="abm-top-k" name="topK">
               <Input
                 id="abm-top-k"
@@ -994,8 +1002,8 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
                 }
               />
             </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+          </FieldRow>
+          <FieldRow>
             <Field label={t("temperature.label")} htmlFor="abm-temperature" name="temperature">
               <Input
                 id="abm-temperature"
@@ -1033,8 +1041,8 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
                 }
               />
             </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+          </FieldRow>
+          <FieldRow>
             <Field label={t("language.label")} htmlFor="abm-language" name="language">
               <Input
                 id="abm-language"
@@ -1070,7 +1078,7 @@ export function BrowserModelConfig({ params, onChange }: ConfigProps) {
                 </SelectContent>
               </Select>
             </Field>
-          </div>
+          </FieldRow>
           <Field label={t("candidateLabels.label")} htmlFor="abm-candidates" name="candidateLabels">
             <Input
               id="abm-candidates"

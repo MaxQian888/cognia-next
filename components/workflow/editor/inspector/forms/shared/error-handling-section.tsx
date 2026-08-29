@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { WorkflowNodeErrorHandling } from "@/types/workflow/visual"
-import { Field } from "../shared"
+import { Field, FieldRow } from "../shared"
 
 export interface ErrorHandlingSectionProps {
   errorHandling: WorkflowNodeErrorHandling | undefined
@@ -79,11 +79,16 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
     }
   }
 
+  // `@container/inspector-form` below: this section renders ABOVE the per-kind
+  // form (see `inspector-panel.tsx`), so it sits outside the `FieldGroup` that
+  // normally declares the container. Without its own, the `FieldRow`s inside
+  // would have no container to query and would stay single-column at every
+  // panel width.
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="rounded-md border bg-muted/30"
+      className="@container/inspector-form rounded-md border bg-muted/30"
       data-testid="error-handling-section"
     >
       <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left">
@@ -131,6 +136,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
               onChange={(e) => handleDefaultValueChange(e.target.value)}
               rows={4}
               className={cn("font-mono text-xs", jsonError && "border-destructive")}
+              // i18n-exempt: a JSON literal example, not prose
               placeholder='{ "completion": "fallback" }'
             />
             {jsonError ? (
@@ -160,7 +166,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
         </div>
 
         {retry ? (
-          <div className="grid grid-cols-2 gap-3">
+          <FieldRow>
             <Field label={t("retry.maxRetries")} htmlFor="eh-retries" hint={t("retry.maxHint")}>
               <Input
                 id="eh-retries"
@@ -225,7 +231,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
                 />
               </Field>
             ) : null}
-          </div>
+          </FieldRow>
         ) : null}
 
         <div className="flex items-center justify-between gap-2 border-t pt-3">
@@ -243,7 +249,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
         </div>
 
         {breaker ? (
-          <div className="grid grid-cols-2 gap-3">
+          <FieldRow>
             <Field
               label={t("circuitBreaker.threshold")}
               htmlFor="eh-cb-threshold"
@@ -285,7 +291,7 @@ export function ErrorHandlingSection({ errorHandling, onChange }: ErrorHandlingS
                 }
               />
             </Field>
-          </div>
+          </FieldRow>
         ) : null}
       </CollapsibleContent>
     </Collapsible>

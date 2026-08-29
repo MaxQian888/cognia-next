@@ -23,7 +23,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { SubworkflowPicker } from "./shared/entity-picker"
 import { DurationField } from "./shared/duration-field"
@@ -358,7 +366,7 @@ export function AggregateConfig({ params, onChange }: ConfigProps) {
         </Field>
       ) : null}
       {op === "numeric" ? (
-        <div className="grid grid-cols-2 gap-3">
+        <FieldRow>
           <Field label={t("numericOp.label")} htmlFor="agg-nop" name="numericOp">
             <Select
               value={numericOp}
@@ -390,7 +398,7 @@ export function AggregateConfig({ params, onChange }: ConfigProps) {
               rows={2}
             />
           </Field>
-        </div>
+        </FieldRow>
       ) : null}
       {op === "custom" ? (
         <Field
@@ -750,7 +758,7 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <p className="text-[11px] text-wf-status-running">{t("desktopOnly")}</p>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("status.label")} htmlFor="wr-status" name="status">
           <Input
             id="wr-status"
@@ -789,7 +797,7 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
             className="font-mono text-xs"
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field label={t("body.label")} htmlFor="wr-body" hint={t("body.hint")} name="body">
         <Textarea
           id="wr-body"
@@ -886,7 +894,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
           </SelectContent>
         </Select>
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("width.label")} htmlFor="grp-w" name="width">
           <Input
             id="grp-w"
@@ -905,7 +913,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "height", Number(e.target.value) || 320))}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }

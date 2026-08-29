@@ -11,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { MobileRoutingFields } from "./form-support"
 import type { ConfigProps } from "./form-support"
 
@@ -39,7 +47,7 @@ export function ApprovalRequestConfig({ params, onChange }: ConfigProps) {
           rows={3}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("timeoutMs.label")}
           htmlFor="apr-timeout"
@@ -70,7 +78,7 @@ export function ApprovalRequestConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
@@ -81,7 +89,7 @@ export function MobileCameraConfig({ params, onChange }: ConfigProps) {
   const width = readNumber(params, "width", 1280)
   return (
     <FieldGroup>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("quality.label")} htmlFor="mc-quality" name="quality">
           <Input
             id="mc-quality"
@@ -101,7 +109,7 @@ export function MobileCameraConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "width", Number(e.target.value) || 1280))}
           />
         </Field>
-      </div>
+      </FieldRow>
       <MobileRoutingFields params={params} onChange={onChange} />
     </FieldGroup>
   )

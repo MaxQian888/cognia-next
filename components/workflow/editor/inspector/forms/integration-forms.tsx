@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readNumber, readString, patchParam } from "./shared"
+import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import {
   CharacterPicker,
@@ -189,7 +189,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
           onChange={(v) => onChange(patchParam(params, "twinId", v))}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("sourceMode.label")} htmlFor="ti-mode" name="sourceMode">
           <Select
             value={sourceMode}
@@ -217,7 +217,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FieldRow>
       <Field label={t("title.label")} htmlFor="ti-title" name="title">
         <Input
           id="ti-title"
@@ -277,7 +277,7 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
           rows={2}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("scope.label")} htmlFor="mr-scope" name="scope">
           <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
             <SelectTrigger id="mr-scope">
@@ -301,7 +301,7 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "topK", Number(e.target.value) || 1))}
           />
         </Field>
-      </div>
+      </FieldRow>
       {scope === "character" ? (
         <Field label={t("characterId.label")} htmlFor="mr-char" name="characterId" required>
           <CharacterPicker
@@ -311,7 +311,7 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("projectId.label")}
           htmlFor="mr-project"
@@ -350,7 +350,7 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
             onChange={(v) => onChange(patchParam(params, "path", v))}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
@@ -378,7 +378,7 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
           rows={3}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("scope.label")} htmlFor="ms-scope" name="scope">
           <Select value={scope} onValueChange={(v) => onChange(patchParam(params, "scope", v))}>
             <SelectTrigger id="ms-scope">
@@ -409,7 +409,7 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
             }
           />
         </Field>
-      </div>
+      </FieldRow>
       {scope === "character" ? (
         <Field label={t("characterId.label")} htmlFor="ms-char" name="characterId" required>
           <CharacterPicker
@@ -419,7 +419,7 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("projectId.label")}
           htmlFor="ms-project"
@@ -458,7 +458,7 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
             onChange={(v) => onChange(patchParam(params, "pathPattern", v))}
           />
         </Field>
-      </div>
+      </FieldRow>
       <PiiGateField id="ms-pii" value={piiGate} params={params} onChange={onChange} t={t} />
     </FieldGroup>
   )

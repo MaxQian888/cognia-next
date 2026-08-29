@@ -11,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { CharacterPicker, TeamPicker, TwinPicker } from "./shared/entity-picker"
 import { TypedOutputFields } from "./output-schema-field"
@@ -531,7 +539,7 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
           </Field>
         </>
       ) : null}
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field
           label={t("maxTurns.label")}
           htmlFor="at-max"
@@ -554,7 +562,7 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "cwd", e.target.value))}
           />
         </Field>
-      </div>
+      </FieldRow>
       <Field
         label={t("toolsEnabled.label")}
         htmlFor="at-tools-on"
@@ -628,7 +636,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
           rows={2}
         />
       </Field>
-      <div className="grid grid-cols-3 gap-3">
+      <FieldRow columns={3}>
         <Field label={t("avatarColor.label")} htmlFor="cc-color" name="avatarColor">
           <Input
             id="cc-color"
@@ -653,7 +661,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
             placeholder={t("model.placeholder")}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }

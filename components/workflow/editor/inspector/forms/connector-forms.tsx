@@ -12,7 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { AdapterInstancePicker } from "./shared/entity-picker"
 import { PiiGateField, clampNumberInput } from "./form-support"
 import type { ConfigProps } from "./form-support"
@@ -445,7 +453,7 @@ export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
           rows={4}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <FieldRow>
         <Field label={t("sourceMessageId.label")} htmlFor="cd-src" name="sourceMessageId">
           <Input
             id="cd-src"
@@ -462,7 +470,7 @@ export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "ttlMs", Number(e.target.value) || 0))}
           />
         </Field>
-      </div>
+      </FieldRow>
     </FieldGroup>
   )
 }
