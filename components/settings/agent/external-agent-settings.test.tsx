@@ -311,6 +311,36 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
   })
 
+  it("opens a plugin-registered preset whose process config carries no args", async () => {
+    // `ExternalAgentProcessConfig.args` is optional and a plugin can register a
+    // preset at runtime. Reading `preset.process.args.join(" ")` threw on such
+    // a preset and blanked the section instead of opening its editor.
+    const { registerPreset, unregisterPreset } = jest.requireActual(
+      "@/lib/ai/agent/external/presets"
+    ) as {
+      registerPreset: (id: string, config: unknown) => unknown
+      unregisterPreset: (id: string) => boolean
+    }
+    registerPreset("argless-preset", {
+      id: "argless-preset",
+      name: "Argless",
+      protocol: "acp",
+      transport: "process",
+      process: { command: "argless" },
+      defaultPermissionMode: "default",
+    })
+    try {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await act(async () => {
+        await user.click(screen.getByTestId("preset-pick-argless-preset"))
+      })
+      expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+    } finally {
+      unregisterPreset("argless-preset")
+    }
+  })
+
   it("the editor dialog hides the preset picker when editing an existing agent", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)

@@ -4,6 +4,7 @@ const listMock = jest.fn()
 const putMock = jest.fn()
 const deleteMock = jest.fn()
 jest.mock("@/lib/db/project-environments", () => ({
+  ...jest.requireActual("@/lib/db/project-environments"),
   listProjectEnvironments: (...args: unknown[]) => listMock(...args),
   putProjectEnvironment: (...args: unknown[]) => putMock(...args),
   deleteProjectEnvironment: (...args: unknown[]) => deleteMock(...args),
@@ -70,4 +71,17 @@ it("creates a project environment with plain variables and keyring references", 
     expect.objectContaining({ defaultEnvironmentId: expect.any(String) })
   )
   expect(onSelected).toHaveBeenCalled()
+})
+
+it("renders a stored row that predates the variables / keyring fields", async () => {
+  // Dexie rows are not schema-validated on read. A row written before either
+  // array existed used to throw inside the selection handler and blank the
+  // whole settings panel.
+  listMock.mockResolvedValue([
+    { id: "env-legacy", projectId: "project-1", name: "Legacy", updatedAt: 1 },
+  ])
+  render(<ProjectEnvironmentManager projectId="project-1" executionRoot="/repo" scope="local" />)
+
+  await waitFor(() => expect(listMock).toHaveBeenCalled())
+  expect(await screen.findByDisplayValue("Legacy")).toBeInTheDocument()
 })

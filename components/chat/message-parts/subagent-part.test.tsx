@@ -194,8 +194,15 @@ describe("SubagentPart", () => {
       status: "completed",
     }
     render(<SubagentPart part={partCompleted} />)
-    // durationMs i18n: durationMs:{"ms":1500}
-    expect(screen.getByText(/durationMs:.*1500/)).toBeInTheDocument()
+    // Rendered through `formatDurationShort`, not raw ms: a five-minute run
+    // used to print "301274ms" into a row that already competes for width.
+    expect(screen.getByText("1.5s")).toBeInTheDocument()
+  })
+
+  it("keeps a long run readable instead of printing raw milliseconds", () => {
+    render(<SubagentPart part={{ ...basePart, startedAt: 0, completedAt: 301_274 }} />)
+    expect(screen.getByText("5m 1s")).toBeInTheDocument()
+    expect(screen.queryByText(/301274/)).not.toBeInTheDocument()
   })
 
   it("toggle button is keyboard activatable (clickable)", () => {

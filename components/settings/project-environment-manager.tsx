@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   deleteProjectEnvironment,
+  hydrateProjectEnvironment,
   listProjectEnvironments,
   putProjectEnvironment,
 } from "@/lib/db/project-environments"
@@ -120,13 +121,18 @@ export function ProjectEnvironmentManager({
 
   const selectDraft = useCallback(
     (environment: ProjectEnvironment | null) => {
-      setDraft(environment ? structuredClone(environment) : null)
+      // A stored row can be missing collections the type declares as always
+      // present (see `hydrateProjectEnvironment`). The panel reads
+      // `draft.actions`, `variables` and `keyringReferences` during render, so
+      // one missing array used to throw and blank the page rather than showing
+      // an environment with an empty list. Normalise once, here, rather than
+      // guarding at each of the eight read sites.
+      const hydrated = environment ? hydrateProjectEnvironment(structuredClone(environment)) : null
+      setDraft(hydrated)
       setVariables(
-        environment
-          ? Object.entries(environment.variables).map(([name, value]) => ({ name, value }))
-          : []
+        Object.entries(hydrated?.variables ?? {}).map(([name, value]) => ({ name, value }))
       )
-      setSecrets(environment?.keyringReferences.map((reference) => ({ ...reference })) ?? [])
+      setSecrets((hydrated?.keyringReferences ?? []).map((reference) => ({ ...reference })))
       setIsDefault(Boolean(environment && environment.id === defaultEnvironmentId))
     },
     [defaultEnvironmentId]

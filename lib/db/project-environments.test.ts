@@ -159,6 +159,33 @@ describe("project environments persistence", () => {
     })
     expect((await getProjectEnvironmentVersion(second.id))?.setupScript.default).toBe("pnpm ci")
   })
+
+  it("hydrates them on read so a reader cannot throw on an absent array", async () => {
+    // The type itself notes that legacy desktop definitions omit fields, and
+    // rows come back from Dexie unvalidated. `Object.keys(undefined)` and
+    // `undefined.map` both throw — in the settings panel, during render.
+    await getDb().projectEnvironments.put({
+      id: "env-legacy",
+      projectId: "project-legacy",
+      name: "Legacy",
+      isEnabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    } as unknown as ProjectEnvironment)
+
+    const one = await getProjectEnvironment("env-legacy")
+    expect(one?.variables).toEqual({})
+    expect(one?.keyringReferences).toEqual([])
+    expect(one?.actions).toEqual([])
+    expect(one?.setupScript).toEqual({ default: "" })
+
+    const [listed] = await listProjectEnvironments("project-legacy")
+    expect(Object.keys(listed.variables)).toEqual([])
+    expect(listed.actions).toEqual([])
+
+    // And the hydrated row survives a re-save, which validates both fields.
+    await expect(putProjectEnvironment(listed)).resolves.toBeUndefined()
+  })
 })
 
 describe("device-local by construction", () => {

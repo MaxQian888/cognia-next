@@ -57,7 +57,7 @@ import { toToolActivityEntries } from "@/lib/claude/subagent-tool-parts"
 import { jobExecutionRunId } from "@/lib/execution/job-bridge"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
-import { cn } from "@/lib/utils"
+import { cn, formatDurationShort } from "@/lib/utils"
 
 /** Status → concrete glyph for the simplified row + card header. */
 const STATUS_GLYPH: Record<string, { Icon: LucideIcon; className: string }> = {
@@ -325,6 +325,9 @@ export const SubagentPart = memo(function SubagentPart({
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [isRunning])
+  // Rendered through `formatDurationShort` ("2.4s", "1m 12s"), not raw
+  // milliseconds. A five-minute run used to print "301274ms": unreadable, and
+  // an unbounded-width cell in a row that already competes for space.
   const durationMs =
     part.completedAt != null ? part.completedAt - part.startedAt : now - part.startedAt
 
@@ -379,7 +382,12 @@ export const SubagentPart = memo(function SubagentPart({
               )}
             />
             <BotIcon className="size-3.5 shrink-0" />
-            <span className="min-w-0 truncate font-medium text-foreground/80">{part.name}</span>
+            {/* Below ~384px the name is the cell that absorbs the free space
+                (the log preview is gone); above it the log takes over and the
+                name falls back to content width, still shrinkable. */}
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground/80 @sm/subagent:flex-initial">
+              {part.name}
+            </span>
             {typeof depth === "number" ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
                 {t("depthBadge", { n: depth })}
@@ -403,13 +411,11 @@ export const SubagentPart = memo(function SubagentPart({
                 {t("retrying", { n: retryCount })}
               </Badge>
             ) : null}
-            {/* Lowest-priority cell: below ~384px it becomes a bare spacer so
-                the status glyph stays pinned right instead of the log text
-                shoving it off the row. */}
+            {/* Lowest-priority cell: it is simply dropped below ~384px, and
+                the name above claims the width it was using. */}
             <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground @sm/subagent:block">
               {lastLog?.message ?? ""}
             </span>
-            <span className="flex-1 @sm/subagent:hidden" aria-hidden />
             {typeof tokenTotal === "number" && tokenTotal > 0 ? (
               <Badge
                 variant="outline"
@@ -428,7 +434,7 @@ export const SubagentPart = memo(function SubagentPart({
               </span>
             ) : null}
             <span className="shrink-0 text-[11px] text-muted-foreground">
-              {t("durationMs", { ms: durationMs })}
+              {formatDurationShort(durationMs)}
             </span>
             <MotionStatusSwap swapKey={status} className="shrink-0">
               <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
@@ -539,7 +545,7 @@ export const SubagentPart = memo(function SubagentPart({
                 !(isRunning && toolUses > 0) && "ml-auto"
               )}
             >
-              {t("durationMs", { ms: durationMs })}
+              {formatDurationShort(durationMs)}
             </span>
           </CollapsibleTrigger>
           <BackgroundedRunControls

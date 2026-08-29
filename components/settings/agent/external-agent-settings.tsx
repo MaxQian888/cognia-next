@@ -383,7 +383,7 @@ function AgentEditorDialog({
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
-          processArgs: preset.process?.args.join(" ") ?? "",
+          processArgs: preset.process?.args?.join(" ") ?? "",
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
           description:
@@ -619,7 +619,7 @@ function AgentEditorDialog({
         protocol: preset.protocol,
         transport: preset.transport,
         processCommand: preset.process?.command || current.processCommand,
-        processArgs: preset.process?.args.join(" ") || current.processArgs,
+        processArgs: preset.process?.args?.join(" ") || current.processArgs,
         networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
         defaultPermissionMode: preset.defaultPermissionMode,
         description:
@@ -662,9 +662,9 @@ function AgentEditorDialog({
                               ? t("opencodeV2PresetName")
                               : preset.name}
                           </span>
-                          {preset.tags.length > 0 && (
+                          {(preset.tags?.length ?? 0) > 0 && (
                             <span className="text-xs text-muted-foreground">
-                              ({preset.tags.slice(0, 3).join(", ")})
+                              ({preset.tags!.slice(0, 3).join(", ")})
                             </span>
                           )}
                         </div>
@@ -1408,9 +1408,12 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                     ? t("opencodeV2PresetDescription")
                     : config.description}
                 </p>
-                {config.tags.length > 0 && (
+                {/* `tags` is optional on the preset type and a plugin can register
+                    a preset at runtime, so the gallery must not assume the array
+                    exists — reading through it blanked the whole section. */}
+                {(config.tags?.length ?? 0) > 0 && (
                   <div className="flex flex-wrap gap-1">
-                    {config.tags.slice(0, 3).map((tag) => (
+                    {config.tags!.slice(0, 3).map((tag) => (
                       <Badge key={tag} variant="outline" className="text-[10px]">
                         {tag}
                       </Badge>

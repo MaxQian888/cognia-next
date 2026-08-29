@@ -5,6 +5,29 @@ import type {
 } from "@/types/project-environment"
 import { getDb } from "./schema"
 
+/**
+ * Fill in the collections a stored row can be missing.
+ *
+ * Rows are read straight off Dexie with no schema validation, and the type
+ * itself records that legacy definitions omit fields ("Legacy desktop
+ * definitions omit this field" on `policy`). Every reader then indexed into
+ * `variables` / `keyringReferences` / `actions` as if they were always there —
+ * `Object.keys(undefined)` and `undefined.map` both throw, and in the settings
+ * panel that threw during render and blanked the whole page.
+ *
+ * Hydrating on the way out means one fix covers the panel, the executor, the
+ * resolver, and `assertEnvironmentBoundary` on the next save.
+ */
+export function hydrateProjectEnvironment(environment: ProjectEnvironment): ProjectEnvironment {
+  return {
+    ...environment,
+    setupScript: environment.setupScript ?? { default: "" },
+    actions: environment.actions ?? [],
+    variables: environment.variables ?? {},
+    keyringReferences: environment.keyringReferences ?? [],
+  }
+}
+
 function assertEnvironmentBoundary(environment: ProjectEnvironment): void {
   if (!environment.id || !environment.projectId || !environment.name.trim()) {
     throw new Error("Project environment requires id, projectId, and name")
@@ -34,12 +57,15 @@ export async function putProjectEnvironment(environment: ProjectEnvironment): Pr
 }
 
 export async function getProjectEnvironment(id: string): Promise<ProjectEnvironment | undefined> {
-  return getDb().projectEnvironments.get(id)
+  const row = await getDb().projectEnvironments.get(id)
+  return row ? hydrateProjectEnvironment(row) : undefined
 }
 
 export async function listProjectEnvironments(projectId: string): Promise<ProjectEnvironment[]> {
   const rows = await getDb().projectEnvironments.where("projectId").equals(projectId).toArray()
-  return rows.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name))
+  return rows
+    .map(hydrateProjectEnvironment)
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name))
 }
 
 export async function deleteProjectEnvironment(id: string): Promise<void> {

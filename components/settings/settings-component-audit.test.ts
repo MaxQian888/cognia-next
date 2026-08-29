@@ -123,6 +123,36 @@ describe("settings component primitives", () => {
     )
     expect(violations).toEqual([])
   })
+
+  it("never reaches through an optional value into an array it assumes exists", () => {
+    // `a?.b.map(...)` says "b may be missing" and then indexes into it anyway.
+    // TypeScript accepts it whenever the inner field is declared required, but
+    // settings data is read back from Dexie rows and plugin-registered configs
+    // that were never schema-validated — and a throw during render blanks the
+    // whole page rather than showing one empty list.
+    const violations: string[] = []
+    for (const { file, source } of sources) {
+      source.split("\n").forEach((line, i) => {
+        const hit = line.match(
+          /\?\.\w+\.(?:map|join|filter|forEach|some|every|find|slice|reduce|sort)\(/
+        )
+        if (hit) violations.push(`${file}:${i + 1}`)
+      })
+    }
+    // Sites already in this shape whose inner array is filled in by code in the
+    // same component (not read back from storage), so a missing value is not
+    // reachable today. The list may only shrink.
+    const BASELINE = [
+      "components/settings/agent-runtime/tool-permission-rules-card.tsx:45",
+      "components/settings/ccswitch/provider-switch-dialog.tsx:116",
+      "components/settings/characters-section.tsx:808",
+      "components/settings/mcp/mcp-health-tab.tsx:269",
+      "components/settings/mcp/mcp-health-tab.tsx:326",
+      "components/settings/provider/diagnostics/balance-section.tsx:130",
+      "components/settings/provider/diagnostics/balance-section.tsx:210",
+    ]
+    expect(violations.filter((v) => !BASELINE.includes(v))).toEqual([])
+  })
 })
 
 /**
