@@ -81,6 +81,10 @@ pub struct AutomationState {
     plugin_facts: std::sync::Arc<
         parking_lot::Mutex<std::sync::Arc<dyn super::record::plugin_facts::PluginFactsSource>>,
     >,
+    /// Last frame each app session showed a model, so `get_app_state` can
+    /// withhold a byte-identical repeat when the operator asked it to
+    /// (Settings → Automation → Behavior → "Skip unchanged screenshots").
+    pub screenshot_dedup: super::screenshot_dedup::ScreenshotDedup,
 }
 
 impl AutomationState {
@@ -106,6 +110,7 @@ impl AutomationState {
             plugin_facts: std::sync::Arc::new(parking_lot::Mutex::new(std::sync::Arc::new(
                 super::record::plugin_facts::NoPluginFacts,
             ))),
+            screenshot_dedup: super::screenshot_dedup::ScreenshotDedup::default(),
         }
     }
 
@@ -464,6 +469,11 @@ pub async fn desktop_get_app_state(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let redact_enabled = state.gate.settings().redact_screenshots;
+    // Settings → Automation → Behavior → "Skip unchanged screenshots". Read
+    // here (not inside the closure) for the same reason as redaction: the
+    // macro body borrows `state` and the setting must be sampled once per call.
+    let dedup_enabled = state.gate.settings().screenshot_dedup;
+    let dedup_surface = ctx.surface();
     command_body!(
         app,
         state,
@@ -487,6 +497,12 @@ pub async fn desktop_get_app_state(
                     .map(super::platform::shared::screenshot::redact_screenshot)
                     .transpose()?;
             }
+            // AFTER redaction, so a redacted frame is compared as the model
+            // will actually see it — two consecutive redacted captures are one
+            // black image and dedupe correctly.
+            state
+                .screenshot_dedup
+                .apply(&mut revision, dedup_enabled, dedup_surface);
             Ok(revision)
         }
         .await

@@ -30,6 +30,7 @@ pub mod persist;
 pub mod platform;
 pub mod policy;
 pub mod record;
+pub mod screenshot_dedup;
 pub mod selection;
 pub mod selection_events;
 pub mod session;

@@ -85,13 +85,17 @@ pub fn engage<R: tauri::Runtime>(
         .recorder
         .interrupt_blocking(InterruptReason::KillSwitch)
         .map(|id| id.as_str().to_string());
+    // 6. Forget every remembered frame. Whatever runs after a kill switch
+    //    starts from a screen it has not seen, so the first `get_app_state`
+    //    must carry a real image rather than "unchanged since revision N".
+    state.screenshot_dedup.clear();
 
     let event = KillSwitchEvent {
         cause,
         at: super::commands::now_ms(),
         interrupted_recording_id,
     };
-    // 6. One event, one payload, whichever trigger fired.
+    // 7. One event, one payload, whichever trigger fired.
     let _ = app.emit(KILL_SWITCH_EVENT, &event);
     event
 }

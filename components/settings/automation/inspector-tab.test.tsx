@@ -205,4 +205,21 @@ describe("InspectorTab canonical app sessions", () => {
     await waitFor(() => expect(mockedDesktop.getAppState).toHaveBeenCalledTimes(2))
     expect(await screen.findByText(/stale handle/i)).toBeInTheDocument()
   })
+
+  it("shows the empty state rather than a broken image when the frame has no bytes", async () => {
+    // A revision can arrive with an empty payload — a capture the platform
+    // refused, or (on a model-facing surface, which this one is not) a frame
+    // `screenshotDedup` withheld. `data:image/png;base64,` is a broken image,
+    // not an absent one.
+    const withoutBytes = state()
+    withoutBytes.screenshot = { ...withoutBytes.screenshot!, bytes: "" }
+    mockedDesktop.getAppState.mockResolvedValue(withoutBytes)
+    mount()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole("button", { name: /capture state/i }))
+
+    expect(await screen.findByText("Save")).toBeInTheDocument()
+    expect(screen.queryByRole("img", { name: /captured application window/i })).toBeNull()
+  })
 })

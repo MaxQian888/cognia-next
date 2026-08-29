@@ -231,6 +231,17 @@ export interface UiStateRevision {
   truncation: TruncationDescriptor[]
   instructionPack: InstructionPack | null
   capturedAt: number
+  /**
+   * Set when `AutomationSettings.screenshotDedup` withheld a frame that was
+   * byte-identical to the one this app session last showed the model.
+   * `screenshot` is still present and still carries the dimensions a pixel
+   * target needs — only `bytes` is empty. Absent means the frame is whole.
+   * Applied by the Rust `automation::screenshot_dedup` module, and only for
+   * model-facing surfaces (`computerUse` / `mcp` / `plugin`).
+   */
+  screenshotUnchanged?: boolean
+  /** Short text the model reads in place of a withheld frame. */
+  screenshotNote?: string
 }
 
 export interface ExpandedElements {

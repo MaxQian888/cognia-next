@@ -302,7 +302,12 @@ export function InspectorTab() {
     selected.handle.lineageId === state.lineageId &&
     selected.handle.revision === state.revision
   )
-  const screenshot = state?.screenshot
+  // A frame with no bytes is not a frame: `<img src="data:image/png;base64,">`
+  // renders as a broken image rather than as "no screenshot". An app-state read
+  // can legitimately come back empty — a capture the platform refused, or (on a
+  // model-facing surface, which the Inspector is not) a frame `screenshotDedup`
+  // withheld as unchanged.
+  const screenshot = state?.screenshot?.bytes ? state.screenshot : null
   const overlay = state && selected ? overlayStyle(state, selected) : undefined
 
   return (

@@ -192,6 +192,19 @@ pub struct UiStateRevision {
     pub truncation: Vec<TruncationDescriptor>,
     pub instruction_pack: Option<InstructionPack>,
     pub captured_at: i64,
+    /// Set when `AutomationSettings::screenshot_dedup` withheld a frame that
+    /// was byte-identical to the one this session last showed. `screenshot`
+    /// still carries the dimensions so a pixel target stays addressable; only
+    /// `bytes` is cleared. See `automation::screenshot_dedup`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub screenshot_unchanged: bool,
+    /// Short text the model reads in place of a withheld frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screenshot_note: Option<String>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -491,6 +504,10 @@ impl UiSessionManager {
             truncation,
             instruction_pack,
             captured_at: capture.captured_at,
+            // Filled in by `screenshot_dedup` at the command boundary, which
+            // is where the operator setting and the calling surface are known.
+            screenshot_unchanged: false,
+            screenshot_note: None,
         };
         self.tokens
             .retain(|_, record| record.session_id != capture.session_id);

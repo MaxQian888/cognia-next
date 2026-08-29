@@ -629,9 +629,16 @@ export interface AutomationSettings {
   redactScreenshots: boolean
   screenshotScaling: ScreenshotScalingSettings
   /**
-   * The action mapper returns "screen unchanged" text instead of a
-   * duplicate image when consecutive screenshots hash identically.
-   * Default ON.
+   * `get_app_state` withholds a frame that is byte-identical to the one the
+   * same app session last showed, sending `screenshotUnchanged` + a short
+   * `screenshotNote` in its place. Default ON — a computer-use turn re-reads
+   * state before and after every action, so a still window would otherwise
+   * inline the same image twice per step.
+   *
+   * Applied in Rust (`automation::screenshot_dedup`) beside redaction and
+   * scaling, and only for model-facing surfaces: the Settings → Automation
+   * Inspector reads app state over `surface: "workflow"` and renders the frame
+   * to a person, who must keep seeing it.
    */
   screenshotDedup: boolean
   /** Suppress the thread-scoped Computer Use picture-in-picture surface. */
