@@ -273,11 +273,17 @@ export async function completeSiteVersion(input: {
       if (!version) throw new Error("site version not found")
       if (version.status !== "building") throw new Error("completed site versions are immutable")
       const digest = assertDigest(input.artifactDigest)
-      if (!(await db.siteArtifacts.get(digest))) throw new Error("site artifact not found")
+      const artifact = await db.siteArtifacts.get(digest)
+      if (!artifact) throw new Error("site artifact not found")
+      // Denormalized here because this transaction already holds the artifact
+      // row. Reading it later to recover two integers costs a structured clone
+      // of the whole archive — Dexie cannot project columns.
       const ready: SiteVersionRow = {
         ...version,
         status: "ready",
         artifactDigest: digest,
+        artifactSize: artifact.size,
+        artifactFileCount: artifact.fileCount,
         completedAt: input.now ?? Date.now(),
       }
       await db.siteVersions.put(ready)

@@ -24,10 +24,10 @@ import {
   filterVersionViews,
   joinVersionsWithDeployments,
 } from "@/lib/sites/console-model"
+import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type {
-  SiteArtifactRow,
   SiteDeploymentRow,
   SiteResourceRow,
   SiteVersionRow,
@@ -37,18 +37,10 @@ import { SITE_DEPLOYMENT_FACE, SITE_VERSION_FACE, SiteStatusPill } from "../site
 
 type VersionFilter = SiteVersionStatus | "all"
 
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
 export interface SiteVersionsTabProps {
   versions: readonly SiteVersionRow[]
   deployments: readonly SiteDeploymentRow[]
   resources: readonly SiteResourceRow[]
-  /** Artifact metadata by digest, for size and file count. */
-  artifacts: ReadonlyMap<string, Pick<SiteArtifactRow, "size" | "fileCount">>
   uploadGate: SiteGate
   deployGate: SiteGate
   /**
@@ -65,7 +57,6 @@ export function SiteVersionsTab({
   versions,
   deployments,
   resources,
-  artifacts,
   uploadGate,
   deployGate,
   isBusy,
@@ -121,9 +112,12 @@ export function SiteVersionsTab({
 
       <div className="overflow-hidden rounded-xl border">
         {visible.map(({ version, deployment, uploaded, live }) => {
-          const artifact = version.artifactDigest
-            ? artifacts.get(version.artifactDigest)
-            : undefined
+          // Read straight off the version row (Dexie v202). This used to load
+          // the whole archive out of `siteArtifacts` to recover two integers.
+          const artifact =
+            version.artifactSize !== undefined && version.artifactFileCount !== undefined
+              ? { size: version.artifactSize, fileCount: version.artifactFileCount }
+              : undefined
           return (
             <div
               key={version.id}
@@ -175,7 +169,7 @@ export function SiteVersionsTab({
               <span className="truncate font-mono text-xs tabular-nums text-muted-foreground">
                 {artifact
                   ? t("versions.artifact", {
-                      size: formatBytes(artifact.size),
+                      size: formatBytesCompact(artifact.size),
                       count: artifact.fileCount,
                     })
                   : t("versions.noArtifact")}

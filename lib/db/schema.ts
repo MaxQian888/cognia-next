@@ -4769,6 +4769,43 @@ export class CogniaDB extends Dexie {
       externalAgentConfigHeads: "&configId, tombstonedAt, updatedAt",
       externalAgentConfigRevisions: "&revisionId, configId, [configId+seq], createdAt, *leaseRuns",
     })
+
+    // v202 — denormalize the Sites artifact summary onto the version row.
+    //
+    // `siteVersions` rows carried only a digest, so the versions tab read the
+    // `siteArtifacts` row to render a size and a file count. Dexie has no
+    // column projection: that read structured-clones the whole zip, which is
+    // megabytes per version for two integers. `completeSiteVersion` now writes
+    // both at completion (it already holds the artifact row in the same
+    // transaction); this backfills rows written before that.
+    //
+    // No `.stores()` change — neither field is indexed. Each unique digest is
+    // read once, not once per version, and a row that already has the numbers
+    // is skipped so a re-entrant upgrade is free.
+    this.version(202)
+      .stores({})
+      .upgrade(async (tx) => {
+        const versions = tx.table<SiteVersionRow, string>("siteVersions")
+        const artifacts = tx.table<SiteArtifactRow, string>("siteArtifacts")
+        const summaries = new Map<string, { size: number; fileCount: number }>()
+        for (const version of await versions.toArray()) {
+          if (!version.artifactDigest || version.artifactSize !== undefined) continue
+          let summary = summaries.get(version.artifactDigest)
+          if (!summary) {
+            const artifact = await artifacts.get(version.artifactDigest)
+            // A digest with no row is a version whose artifact is already gone;
+            // leaving the fields absent keeps "no artifact" the honest answer.
+            if (!artifact) continue
+            summary = { size: artifact.size, fileCount: artifact.fileCount }
+            summaries.set(version.artifactDigest, summary)
+          }
+          await versions.put({
+            ...version,
+            artifactSize: summary.size,
+            artifactFileCount: summary.fileCount,
+          })
+        }
+      })
   }
 
   // v201 — host-owned external-agent configurations. See

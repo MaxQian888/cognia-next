@@ -73,7 +73,6 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteVersionsTab>> 
       versions={[version({ id: "v1" })]}
       deployments={[]}
       resources={[]}
-      artifacts={new Map()}
       uploadGate={allowed}
       deployGate={allowed}
       isBusy={() => false}
@@ -158,12 +157,21 @@ it("gates the publish actions with their reason", () => {
   expect(button).toHaveAttribute("title", "Desktop only")
 })
 
-it("shows artifact size and file count when the digest resolves", () => {
+it("shows artifact size and file count straight off the version row", () => {
   renderTab({
-    versions: [version({ id: "v1", artifactDigest: "abc" })],
-    artifacts: new Map([["abc", { size: 4_194_304, fileCount: 128 }]]),
+    versions: [
+      version({ id: "v1", artifactDigest: "abc", artifactSize: 4_194_304, artifactFileCount: 128 }),
+    ],
   })
-  expect(screen.getByText('versions.artifact:{"size":"4.0 MB","count":128}')).toBeInTheDocument()
+  expect(screen.getByText('versions.artifact:{"size":"4.0MB","count":128}')).toBeInTheDocument()
+})
+
+it("says there is no artifact when the row predates the denormalized summary", () => {
+  // Rows written before Dexie v202 carry only a digest. The backfill covers
+  // the ones whose archive still exists; a version whose artifact is already
+  // gone honestly has no size to show.
+  renderTab({ versions: [version({ id: "v1", artifactDigest: "abc" })] })
+  expect(screen.getByText("versions.noArtifact")).toBeInTheDocument()
 })
 
 it("filters by status", async () => {

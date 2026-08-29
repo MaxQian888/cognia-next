@@ -198,6 +198,11 @@ describe("immutable artifacts, environment revisions, and versions", () => {
       now: 140,
     })
     expect(ready).toMatchObject({ status: "ready", completedAt: 140 })
+    // Denormalized in the same transaction that already holds the artifact row.
+    // Reading it back later to recover these two integers structured-clones the
+    // whole archive, which is what the versions tab used to do per version.
+    expect(ready.artifactSize).toBe(2)
+    expect(ready.artifactFileCount).toBe(2)
 
     await expect(
       completeSiteVersion({

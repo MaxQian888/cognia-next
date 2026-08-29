@@ -33,7 +33,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSiteActionGate, type SiteGate } from "@/hooks/sites/use-site-action-gate"
-import { useSiteArtifactSummaries } from "@/hooks/sites/use-site-artifact-summaries"
 import { useSiteActions } from "@/hooks/sites/use-site-actions"
 import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
@@ -79,9 +78,6 @@ export function SitesConsole() {
   const gate = useSiteActionGate(site, actorAccountId)
   const manifest = useSiteHostingManifest(site)
   const preview = useSitePreviewSession(site?.id ?? null)
-  // Only paid for while the versions tab is showing: each read pulls the whole
-  // archive out of Dexie to recover two numbers.
-  const artifacts = useSiteArtifactSummaries(live.versions, tab === "versions")
 
   const publish = useSitePublishActions({
     site,
@@ -300,7 +296,6 @@ export function SitesConsole() {
                   versions={live.versions}
                   deployments={live.deployments}
                   resources={live.resources}
-                  artifacts={artifacts}
                   uploadGate={uploadGate}
                   deployGate={deployGate}
                   isBusy={isBusy}

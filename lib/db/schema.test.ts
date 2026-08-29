@@ -87,6 +87,83 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  fullSchemaIt("v202 backfills the Sites artifact summary onto version rows", async () => {
+    const name = `cognia-site-artifact-summary-v202-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(201).stores({
+      siteVersions: "&id, siteId, status, createdAt, artifactDigest",
+      siteArtifacts: "&digest, createdAt",
+    })
+    await legacy.open()
+    await legacy.table("siteArtifacts").put({
+      digest: "a".repeat(64),
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: "application/zip",
+      size: 3,
+      fileCount: 7,
+      createdAt: 1,
+    })
+    // Two versions share one digest — the backfill must read the archive once,
+    // not once per version.
+    for (const id of ["ver_1", "ver_2"]) {
+      await legacy.table("siteVersions").put({
+        id,
+        siteId: "site_1",
+        sequence: id === "ver_1" ? 1 : 2,
+        status: "ready",
+        environmentRevisionId: "env_1",
+        source: { commitSha: "abc", dirty: false, lockfileDigest: "l", inputDigest: "i" },
+        build: {
+          command: "[]",
+          runtime: "node@24",
+          packageManager: "pnpm@10",
+          compatibilityDate: "2026-01-01",
+          compatibilityFlags: [],
+          routes: [],
+          bindings: [],
+        },
+        artifactDigest: "a".repeat(64),
+        createdAt: 1,
+      })
+    }
+    // A version whose archive is already gone must stay honestly summary-less
+    // rather than gaining a fabricated zero.
+    await legacy.table("siteVersions").put({
+      id: "ver_pruned",
+      siteId: "site_1",
+      sequence: 3,
+      status: "ready",
+      environmentRevisionId: "env_1",
+      source: { commitSha: "abc", dirty: false, lockfileDigest: "l", inputDigest: "i" },
+      build: {
+        command: "[]",
+        runtime: "node@24",
+        packageManager: "pnpm@10",
+        compatibilityDate: "2026-01-01",
+        compatibilityFlags: [],
+        routes: [],
+        bindings: [],
+      },
+      artifactDigest: "b".repeat(64),
+      createdAt: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(202)
+
+    for (const id of ["ver_1", "ver_2"]) {
+      const row = await upgraded.siteVersions.get(id)
+      expect(row?.artifactSize).toBe(3)
+      expect(row?.artifactFileCount).toBe(7)
+    }
+    const pruned = await upgraded.siteVersions.get("ver_pruned")
+    expect(pruned?.artifactSize).toBeUndefined()
+    expect(pruned?.artifactFileCount).toBeUndefined()
+    upgraded.close()
+  })
+
   fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
     const name = `cognia-external-agent-configs-v201-${Date.now()}`
     const legacy = new Dexie(name)

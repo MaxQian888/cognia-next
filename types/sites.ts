@@ -90,6 +90,18 @@ export interface SiteVersionRow {
   source: SiteSourceSnapshot
   build: SiteBuildSnapshot
   artifactDigest?: string
+  /**
+   * Byte size of the archive at {@link artifactDigest}, denormalized at
+   * completion.
+   *
+   * The size and file count live on the `siteArtifacts` row next to the archive
+   * bytes, and Dexie has no column projection — reading that row structured-
+   * clones the whole zip. The versions tab was pulling megabytes per version to
+   * render two integers. Absent on rows written before v202.
+   */
+  artifactSize?: number
+  /** File count of the archive at {@link artifactDigest}. See {@link artifactSize}. */
+  artifactFileCount?: number
   failureMessage?: string
   createdAt: number
   completedAt?: number
