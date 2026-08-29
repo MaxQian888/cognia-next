@@ -191,26 +191,68 @@ suggestions a scope block — after being made to delegate to the already-wired
 - Because manifest changes cross the IPC boundary, a green Jest run does not
   prove the shell works; `tauri-smoke` is the gate that does.
 
-## Open
+## Resolved — the srcdoc CSP measurement
 
-**React artifact previews are still broken, and the fix is blocked on a
-measurement.** Serving the runtime from `public/artifact-runtime/` requires
-knowing whether an `about:srcdoc` subframe inherits the packaged shell's CSP
-(`src-tauri/tauri.conf.json`), and — if it does — whether `'self'` matches inside
-a sandboxed opaque-origin frame. Two research passes reached opposite conclusions
-from the specification. It has to be measured in a `pnpm tauri build`, not in
-`pnpm dev` (no CSP at all) and not in `pnpm tauri dev` (served from
-`localhost:3000`); that ambiguity is exactly what hid
-[ADR-0076](./0076-local-provider-management-transport)'s failure for months.
+**Answered.** Measured on macOS / WKWebView against a Tauri shell built WITHOUT
+`cfg(dev)`, carrying `src-tauri/tauri.conf.json`'s `csp` verbatim and serving its
+dist through the asset protocol at `tauri://localhost`. The enforced policy was
+read back from a real `securitypolicyviolation` event's `originalPolicy`, so this
+is what the shell delivers, not what the config claims.
 
-Three architectures follow from the answer, and the same question decides whether
-seven other srcdoc-and-inline-script features are affected: the MCP Apps sandbox,
-plugin webviews, the VS Code extension panel, `plan-html-view`, the share page's
-`chat-animated`, `code-execution-strategy`, and `task-resources-panel`. That
-measurement, and interactive HTML artifacts behind a per-artifact opt-in, are
-tracked separately.
+| Question | Answer |
+| --- | --- |
+| Does an `about:srcdoc` child inherit the shell CSP? | **Yes** — verbatim, including the five script hashes tauri injects |
+| Does `'self'` match inside a sandboxed, opaque-origin child? | **Yes** — a same-origin `<script src>` loads while inline is refused |
+| Does a `blob:` document escape it? | **No** — sandboxed or not, it inherits too |
 
-Also unfixed here: `scripts/gates/check-network-egress.mjs` cannot see a
+The two policies **intersect**. That is what makes the shape shipped today fatal:
+a frame whose meta says `script-src 'unsafe-inline'` under an inherited
+`script-src 'self' 'wasm-unsafe-eval' blob:` can run *nothing at all* — inline is
+struck out by the inherited policy, and the same-origin URL by its own. Measured
+directly: that frame executed zero of its three scripts.
+
+So the second architecture applies, and the shell CSP is untouched. Two things
+still run in such a frame, and the preview is built out of exactly those two:
+
+- a **same-origin `<script src>`** — `/artifact-runtime/react-runtime.js` (React
+  19 + `react-dom/client`, production build) and
+  `/artifact-runtime/artifact-shell.js` (the in-frame bootstrap);
+- a **`blob:` script** — how the artifact's own code arrives, after the host has
+  transformed it. `blob:` is in both policies, so it needs no new permission.
+
+JSX is compiled in the **host**, in a Worker (`worker-src 'self' blob:` already
+allowed), so `@babel/standalone` never enters the frame and `'unsafe-eval'` is
+needed nowhere. The frame keeps one `ReactDOM.createRoot` for its lifetime, so an
+edit re-renders in place instead of re-navigating the iframe.
+
+Verified end to end inside that shell, driving the production modules: a React
+artifact — including one written as ESM, which the old shell could not parse —
+renders with **zero external requests**, and a second version renders into the
+same live frame with **zero iframe navigations**.
+
+**Interactive HTML artifacts** (`artifacts.interactiveHtml`, default off, and
+then authorised per artifact) follow from the same measurement rather than from
+`srcdoc` + `'unsafe-inline'`, which would have run nothing here.
+`lib/artifacts/interactive-html.ts` lifts every executable byte out of the
+markup — inline `<script>` bodies in document order, and `on*` attributes
+rewritten into `addEventListener` calls whose bodies are still *source*, never a
+string handed to `new Function`. They come back as ordered `blob:` scripts. A
+third-party `<script src>` is dropped and reported, because the frame's policy
+names no external origin. The frame drops `allow-same-origin`, so the artifact
+runs with an opaque origin: no host, no cookies, no storage, no network.
+
+### The other seven srcdoc features
+
+All seven use the same shape the measurement condemns — `sandbox="allow-scripts"`
++ `srcdoc` + a meta CSP whose `script-src` is `'unsafe-inline'`. In the packaged
+desktop shell **none of their scripts can run**: the MCP Apps sandbox, plugin
+webviews, the VS Code extension panel, `plan-html-view`, the share page's
+`chat-animated`, `code-execution-strategy`, and `task-resources-panel`. Each has
+the same fix available — serve the frame's code from `'self'` or a `blob:`
+script — and each is a separate change, tracked on its own ticket. Nothing in
+this batch touches them.
+
+Still unfixed: `scripts/gates/check-network-egress.mjs` cannot see a
 `<script src="https://…">` inside a template literal — it only scans `fetch`,
-`new WebSocket` and `new EventSource`. This change removes the only such site in
+`new WebSocket` and `new EventSource`. This change removes the last such site in
 the app, but the blind spot remains.

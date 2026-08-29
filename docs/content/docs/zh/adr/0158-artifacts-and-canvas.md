@@ -163,21 +163,60 @@ manifest 与 ADR-0139 的路由提示由**同一个**判定式把门（已提取
   在 localStorage 快照里的包，仍然可以导入。
 - manifest 变更跨 IPC 边界，所以 Jest 全绿不代表壳可用；`tauri-smoke` 才是那道门。
 
-## 未决
+## 已解决 —— srcdoc CSP 实测
 
-**React artifact 预览仍然是坏的，修法卡在一次实测上。** 把运行时放到
-`public/artifact-runtime/` 提供，前提是知道 `about:srcdoc` 子框架是否继承打包壳的
-CSP（`src-tauri/tauri.conf.json`）；**若继承**，还要知道沙箱（opaque origin）框架
-里的 `'self'` 是否匹配。两份调研从规范出发得出了相反结论。这必须在
-`pnpm tauri build` 里量，不能在 `pnpm dev`（完全没有 CSP），也不能在
-`pnpm tauri dev`（页面来自 `localhost:3000`）——正是这个歧义把
-[ADR-0076](./0076-local-provider-management-transport) 的失败藏了好几个月。
+**已有答案。** 在 macOS / WKWebView 上，针对一个**不带 `cfg(dev)`** 编译的 Tauri
+壳实测：它逐字携带 `src-tauri/tauri.conf.json` 的 `csp`，并通过 asset 协议在
+`tauri://localhost` 提供页面。所执行的策略是从真实
+`securitypolicyviolation` 事件的 `originalPolicy` 读回来的——所以这是壳**实际下发**
+的策略，不是配置文件的说法。
 
-结论会导向三种不同架构；同一个问题还决定另外七个「srcdoc + 内联脚本」功能是否
-受影响：MCP Apps 沙箱、插件 webview、VS Code 扩展面板、`plan-html-view`、分享页的
-`chat-animated`、`code-execution-strategy`、`task-resources-panel`。该实测，以及
-按 artifact 单独授权的交互式 HTML，另行跟踪。
+| 问题 | 答案 |
+| --- | --- |
+| `about:srcdoc` 子框架是否继承壳 CSP？ | **继承** —— 逐字继承，连 tauri 注入的 5 个脚本哈希都在 |
+| 沙箱（opaque origin）框架里 `'self'` 是否匹配？ | **匹配** —— 同源 `<script src>` 能加载，内联被拒 |
+| `blob:` 文档能绕过吗？ | **不能** —— 无论是否沙箱，同样继承 |
 
-本次也未修复：`scripts/gates/check-network-egress.mjs` 看不见模板字符串里的
+两份策略是**取交集**的。这正是今天这套写法致命的原因：一个 meta 写着
+`script-src 'unsafe-inline'` 的框架，在继承的 `script-src 'self' 'wasm-unsafe-eval'
+blob:` 之下，**什么都跑不了**——内联被继承的那份划掉，同源 URL 被自己那份划掉。
+实测该框架的三个脚本一个都没执行。
+
+因此采用表中第二种架构，**壳 CSP 零改动**。这样的框架里仍能跑的只有两样东西，
+预览就只用这两样搭：
+
+- **同源 `<script src>`** —— `/artifact-runtime/react-runtime.js`（React 19 +
+  `react-dom/client`，production 构建）与 `/artifact-runtime/artifact-shell.js`
+  （框架内引导器）；
+- **`blob:` 脚本** —— artifact 自身的代码经宿主转换后由此进入。`blob:` 在两份
+  策略里都在，不需要新增任何许可。
+
+JSX 在**宿主**侧、在 Worker 里编译（`worker-src 'self' blob:` 本就允许），所以
+`@babel/standalone` 不进框架，任何一处都不需要 `'unsafe-eval'`。框架终其一生只有
+一个 `ReactDOM.createRoot`，因此内容更新是就地重渲染，而不是整帧重导航。
+
+在该壳内以生产模块端到端复核过：一个 React artifact——包括用 ESM 写的那种（旧壳
+根本解析不了）——**零外部请求**渲染成功；第二个版本渲染进同一个存活的框架，
+**0 次 iframe 导航**。
+
+**交互式 HTML artifact**（`artifacts.interactiveHtml`，默认关闭，开启后仍按
+artifact 单独授权）同样由这次实测决定，而不是 `srcdoc` + `'unsafe-inline'`——后者
+在这里一行都跑不了。`lib/artifacts/interactive-html.ts` 把所有可执行字节从标记里
+提出来：按文档顺序的内联 `<script>` 正文，以及被改写成 `addEventListener` 的 `on*`
+属性——处理函数体仍然是**源码**，绝不交给 `new Function`。它们作为有序的 `blob:`
+脚本回到框架。第三方 `<script src>` 被丢弃并如实告知，因为框架的策略里没有任何
+外部源。框架不带 `allow-same-origin`，artifact 以 opaque origin 运行：拿不到宿主、
+拿不到 Cookie、拿不到存储、也上不了网。
+
+### 另外七个 srcdoc 功能
+
+这七个用的正是实测判死的那套写法——`sandbox="allow-scripts"` + `srcdoc` + meta
+CSP 的 `script-src` 只写 `'unsafe-inline'`。在打包桌面壳里**它们的脚本一律跑不了**：
+MCP Apps 沙箱、插件 webview、VS Code 扩展面板、`plan-html-view`、分享页的
+`chat-animated`、`code-execution-strategy`、`task-resources-panel`。每一个的修法都
+相同——把框架内代码改成从 `'self'` 或 `blob:` 脚本供给——但每一个都是独立改动，
+各自开单跟踪。本批不动它们。
+
+仍未修复：`scripts/gates/check-network-egress.mjs` 看不见模板字符串里的
 `<script src="https://…">`——它只扫 `fetch`、`new WebSocket` 与 `new EventSource`。
-本次改动移除了应用里唯一一处，但盲区本身还在。
+本次改动移除了应用里最后一处，但盲区本身还在。

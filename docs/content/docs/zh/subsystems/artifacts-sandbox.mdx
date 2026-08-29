@@ -198,31 +198,31 @@ export function renderSVG(doc: Document, content: string): void {
 React artifact 最棘手——既要跑 JSX 又要隔离。方案是把代码**通过 postMessage 传
 进去**，绝不拼字符串进 HTML：
 
-<Callout type="warn">
-  **目前在每个壳里都是坏的。** React 19 不再发布 UMD 构建，下面那些
-  `unpkg.com/react@19/umd/…` 标签都是 404，每次 React 预览都落到 15 秒超时提示。
-  把运行时改成本地提供，卡在一次实测上：需要在 `pnpm tauri build` 里确认
-  `about:srcdoc` 子框架是否继承打包壳的 CSP——见
-  [ADR-0158](../adr/0158-artifacts-and-canvas) 的「未决」一节。
+<Callout>
+  **框架里跑的每一样东西都是本地的。** 沙箱化的 `about:srcdoc` 子框架会继承打包壳
+  的 CSP（已实测——见 [ADR-0158](../adr/0158-artifacts-and-canvas)），那份策略既没有
+  `'unsafe-inline'` 也没有 `'unsafe-eval'`，更没有任何第三方源。在那里能跑的只有
+  同源 `<script src>` 与 `blob:` 脚本，所以这套 shell 就只用这两样搭。产物由
+  `scripts/build/build-artifact-runtime.mjs` 写进 `public/artifact-runtime/` 并随仓库
+  提交，做法与 `public/monaco` 一致。
 </Callout>
 
 ```ts title="lib/artifacts/preview-utils.ts:getReactShellHtml (核心)"
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'none';
-  script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com;
-  style-src 'unsafe-inline' https://cdn.tailwindcss.com;
+  script-src <壳 origin> blob:;   // 与继承来的策略取交集
+  style-src 'unsafe-inline';
   img-src data: blob:;
   font-src data:;
+  connect-src 'none';
 ">
-<script src="https://unpkg.com/react@19/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@19/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="<壳 origin>/artifact-runtime/react-runtime.js"></script>
+<script src="<壳 origin>/artifact-runtime/artifact-shell.js"></script>
 
+// 宿主在 Worker 里编译 JSX，把纯 JS 发进来；引导器把它作为 blob: 脚本执行，
+// 并对**同一个**长期存活的 root 调 render()。
 window.addEventListener("message", (event) => {
   if (event.data?.type !== "render-component") return
-  const code = event.data.code
-  // 把 code 作为 <script type="text/babel"> 注入，Babel 转译后 ReactDOM.render
 })
 ```
 
@@ -230,13 +230,13 @@ window.addEventListener("message", (event) => {
 
 1. **`allow-scripts` 但**不**`allow-same-origin`** —— iframe 不能读父页 DOM、
    不能 cookies、不能 localStorage。
-2. **CSP `default-src 'none'`** —— 阻止 iframe 内的任何代码 `fetch()` 别的源；只
-   有显式列出的 unpkg + tailwindcss CDN 能加载。
+2. **CSP `default-src 'none'` + `connect-src 'none'`** —— iframe 内的代码完全上不了
+   网；能加载的脚本只有两个同源产物，以及引导器自己造的那个 `blob:`。
 3. **postMessage code injection** —— 代码不通过 template literal 进 HTML（杜绝
    通过模板字符串注入新 `<script>` 的可能）。父页用 JSON.stringify + `</`
    转义构造 messages，避免任何「闭合 script 标签」式攻击。
-4. **CDN load watchdog** —— 15 秒拿不到 React 就显示一条"CDN load failed"提示，
-   方便离线 / 受限网络下排查。
+4. **运行时缺失即刻报错** —— 本地运行时取不到就立刻显示「运行时初始化失败」并给出
+   `pnpm artifact-runtime:build`，而不是等 15 秒 CDN 超时。
 
 错误冒泡：iframe 内部出错 → `postMessage({type: "artifact-preview-error", message})`
 → 父页 `setError` → 红色 Alert + retry 按钮。
@@ -380,7 +380,8 @@ interface ArtifactStoreState {
 | 目标                             | 文件                                                                                                             |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | 加一个新的 artifact 类型         | `types/artifact/artifact.ts:ArtifactType` → `lib/artifacts/constants.ts` → `runtime-adapters.ts` → 实现 renderer |
-| 调整 React iframe CSP            | `lib/artifacts/preview-utils.ts:getReactShellHtml` 的 `meta http-equiv`                                          |
+| 调整脚本化框架的 CSP             | `lib/artifacts/preview-utils.ts:buildArtifactFrameCsp`（React 与交互式 HTML 共用）                               |
+| 重建离线 React 运行时            | `scripts/build/build-artifact-runtime.mjs` → `pnpm artifact-runtime:build`                                       |
 | 把 HTML/SVG 改成 `allow-scripts` | `runtime-adapters.ts`（强烈不推荐——会拆掉一道防线）                                                              |
 | 加新的 Mermaid 图类              | `lib/artifacts/constants.ts:MERMAID_TYPE_NAMES` + `MERMAID_TYPE_I18N_KEYS`                                       |
 | 让插件注册自定义 renderer        | `lib/artifacts/renderer-registry.ts` + 插件 API（[plugin-system](./plugin-system)）                              |

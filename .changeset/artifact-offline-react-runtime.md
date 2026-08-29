@@ -1,0 +1,11 @@
+---
+"cognia-next": minor
+---
+
+React artifact previews render again, offline, in every shell. React 19 stopped publishing UMD builds, so the `unpkg.com/react@19/umd/*` tags the preview shell carried had been a permanent 404 and every React preview ended in a 15-second "CDN loading failed" notice. The runtime now ships with the app: `pnpm artifact-runtime:build` bundles React + `react-dom/client` (production build, not the development one the CDN tags pulled), the JSX transformer, and the in-frame bootstrap into `public/artifact-runtime/`, committed the way `public/monaco` is, so a fresh clone works with the network unplugged. JSX is compiled in a host-side Worker, so the preview frame needs neither Babel nor `'unsafe-eval'`, and the frame now keeps one React root for its lifetime — editing an artifact re-renders it in place instead of reloading the whole iframe. Artifacts written as ES modules (`import React from "react"`) now work too; they were a syntax error before.
+
+New setting, off by default: **Allow interactive HTML previews** (Settings → Artifacts). With it on, an HTML artifact gains a "Run interactive version" button — authorised per artifact, never globally — that re-renders it with its scripts and form controls working, inside a sandbox with an opaque origin: no access to the app, your cookies, your storage, or the network. A script the artifact tried to load from another site is dropped, and the preview says so. The default stays the sanitised static render.
+
+Deferred deliberately: Tailwind is not yet available inside a React artifact preview. The old shell loaded `cdn.tailwindcss.com`, which is Tailwind v3's Play CDN (this app is on v4), is a runtime JIT compiler that evals, and is unsupported for production use. Restoring those styles means generating a static utility stylesheet at build time, and is tracked separately — until then a React artifact that relies on Tailwind classes renders unstyled.
+
+Also deferred: there is no CDN fallback when the local runtime is missing. React 19 has no UMD build to fall back to, and the packaged desktop shell's CSP names no third-party script origin, so the fallback could not work where it would matter. The preview instead says the runtime failed to initialize and names `pnpm artifact-runtime:build`.

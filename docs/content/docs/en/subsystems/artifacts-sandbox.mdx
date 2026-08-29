@@ -215,41 +215,42 @@ Key points:
 
 React artifacts are the trickiest — they need to run JSX while remaining isolated. The solution is to pass code **through postMessage**, never string-interpolating it into HTML:
 
-<Callout type="warn">
-  **This is currently broken in every shell.** React 19 publishes no UMD build, so
-  the `unpkg.com/react@19/umd/…` tags below 404 and every React preview falls
-  through to the 15-second timeout message. Serving the runtime locally is blocked
-  on measuring, in a `pnpm tauri build`, whether an `about:srcdoc` subframe
-  inherits the packaged shell's CSP — see the "Open" section of
-  [ADR-0158](../adr/0158-artifacts-and-canvas).
+<Callout>
+  **Everything the frame runs is local.** A sandboxed `about:srcdoc` child
+  inherits the packaged shell's CSP (measured — see
+  [ADR-0158](../adr/0158-artifacts-and-canvas)), which grants neither
+  `'unsafe-inline'` nor `'unsafe-eval'` and names no third-party origin. Only a
+  same-origin `<script src>` and a `blob:` script run there, so the shell is
+  built out of exactly those two. The bundles are committed under
+  `public/artifact-runtime/` by `scripts/build/build-artifact-runtime.mjs`, the
+  way `public/monaco` is.
 </Callout>
 
 ```ts title="lib/artifacts/preview-utils.ts:getReactShellHtml (core)"
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'none';
-  script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com;
-  style-src 'unsafe-inline' https://cdn.tailwindcss.com;
+  script-src <shell-origin> blob:;   // intersects with the inherited policy
+  style-src 'unsafe-inline';
   img-src data: blob:;
   font-src data:;
+  connect-src 'none';
 ">
-<script src="https://unpkg.com/react@19/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@19/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="<shell-origin>/artifact-runtime/react-runtime.js"></script>
+<script src="<shell-origin>/artifact-runtime/artifact-shell.js"></script>
 
+// The host compiles JSX in a Worker and posts plain JS in; the bootstrap runs it
+// as a blob: script and calls render() on ONE long-lived root.
 window.addEventListener("message", (event) => {
   if (event.data?.type !== "render-component") return
-  const code = event.data.code
-  // Inject code as <script type="text/babel">, Babel transpiles, then ReactDOM.render
 })
 ```
 
 Four layers of defense:
 
 1. **`allow-scripts` but NOT `allow-same-origin`** — the iframe cannot read the parent DOM, access cookies, or touch localStorage.
-2. **CSP `default-src 'none'`** — prevents any code inside the iframe from `fetch()`ing other origins; only the explicitly listed unpkg + tailwindcss CDNs can load.
+2. **CSP `default-src 'none'` with `connect-src 'none'`** — no code inside the iframe can reach the network at all; the only loadable scripts are the two same-origin bundles and the `blob:` the bootstrap creates.
 3. **postMessage code injection** — code never enters HTML through template literals (eliminating the possibility of injecting a new `<script>` via template strings). The parent constructs messages with JSON.stringify + `</` escaping, preventing any "close script tag" attack.
-4. **CDN load watchdog** — if React fails to load within 15 seconds, a "CDN load failed" message is shown, making it easy to diagnose offline / restricted-network scenarios.
+4. **Immediate failure when the runtime is missing** — if the local runtime cannot be fetched the preview says "the artifact runtime failed to initialize" and names `pnpm artifact-runtime:build`, instead of waiting out a 15-second CDN timeout.
 
 Error bubbling: iframe internal error → `postMessage({type: "artifact-preview-error", message})` → parent `setError` → red Alert + retry button.
 
@@ -375,7 +376,8 @@ interface ArtifactStoreState {
 | Goal                                  | Files                                                                                                                 |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Add a new artifact type               | `types/artifact/artifact.ts:ArtifactType` → `lib/artifacts/constants.ts` → `runtime-adapters.ts` → implement renderer |
-| Adjust React iframe CSP               | `lib/artifacts/preview-utils.ts:getReactShellHtml` `meta http-equiv`                                                  |
+| Adjust the scripted-frame CSP         | `lib/artifacts/preview-utils.ts:buildArtifactFrameCsp` (shared by React and interactive HTML)                          |
+| Rebuild the offline React runtime     | `scripts/build/build-artifact-runtime.mjs` → `pnpm artifact-runtime:build`                                            |
 | Change HTML/SVG to `allow-scripts`    | `runtime-adapters.ts` (strongly discouraged — removes a security layer)                                               |
 | Add new Mermaid diagram types         | `lib/artifacts/constants.ts:MERMAID_TYPE_NAMES` + `MERMAID_TYPE_I18N_KEYS`                                            |
 | Let plugins register custom renderers | `lib/artifacts/renderer-registry.ts` + plugin API ([plugin-system](./plugin-system))                                  |
