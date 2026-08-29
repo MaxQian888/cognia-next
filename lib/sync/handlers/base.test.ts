@@ -260,6 +260,58 @@ describe("runSyncHandler", () => {
     expect(fake.table.bulkPut).not.toHaveBeenCalled()
   })
 
+  it("writes a large page in slices so no single job holds the main thread", async () => {
+    const fake = makeFakeTable()
+    const rows = Array.from({ length: 450 }, (_, i) => ({ id: `m${i}`, name: "m" }))
+    const out = await runSyncHandler<FakeRow>(
+      { table: "messages", getTable: () => fake.table },
+      makeTransport({ rows, deleted_ids: [], next_since: 9 }),
+      { since: 0 }
+    )
+
+    expect(out.ok).toBe(true)
+    // 450 rows at the 200-row slice size — three writes, not one.
+    expect(fake.table.bulkPut).toHaveBeenCalledTimes(3)
+    expect(fake.store.size).toBe(450)
+  })
+
+  it("slices tombstone deletes too", async () => {
+    const fake = makeFakeTable()
+    const ids = Array.from({ length: 250 }, (_, i) => `gone-${i}`)
+    for (const id of ids) fake.store.set(id, { id, name: "x" })
+
+    await runSyncHandler<FakeRow>(
+      { table: "messages", getTable: () => fake.table, applySliceSize: 100 },
+      makeTransport({ rows: [], deleted_ids: ids, next_since: 3 }),
+      { since: 0 }
+    )
+
+    expect(fake.table.bulkDelete).toHaveBeenCalledTimes(3)
+    expect(fake.store.size).toBe(0)
+  })
+
+  it("calls an applyRows override once per slice, over disjoint rows", async () => {
+    const fake = makeFakeTable()
+    const seen: string[][] = []
+    const rows = Array.from({ length: 5 }, (_, i) => ({ id: `r${i}`, name: "r" }))
+
+    await runSyncHandler<FakeRow>(
+      {
+        table: "memories",
+        getTable: () => fake.table,
+        applySliceSize: 2,
+        applyRows: async (slice) => {
+          seen.push(slice.map((row) => row.id))
+        },
+      },
+      makeTransport({ rows, deleted_ids: [], next_since: 1 }),
+      { since: 0 }
+    )
+
+    expect(seen).toEqual([["r0", "r1"], ["r2", "r3"], ["r4"]])
+    expect(fake.table.bulkPut).not.toHaveBeenCalled()
+  })
+
   it("bails out after MAX_PAGES if the server never clears has_more", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     const fake = makeFakeTable()

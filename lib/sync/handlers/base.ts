@@ -9,6 +9,7 @@
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { Table } from "dexie"
 
+import { applyInSlices, yieldToMain } from "../scheduling"
 import type { SyncCursor, SyncDelta, SyncFailure, SyncOutcome, SyncableTable } from "../types"
 
 export interface SyncHandlerOptions<TRow extends { id: string }> {
@@ -23,9 +24,28 @@ export interface SyncHandlerOptions<TRow extends { id: string }> {
    * cross-platform fields onto the local row instead of clobbering it
    * (`handlers/app-settings.ts`). Deletes always go through
    * `getTable().bulkDelete`.
+   *
+   * Called once per slice (see {@link SYNC_APPLY_SLICE_SIZE}), never once per
+   * page, so an override must be safe to run repeatedly over disjoint row sets
+   * — every current one is (they write the rows they are handed, plus
+   * idempotent housekeeping).
    */
   applyRows?: (rows: TRow[]) => Promise<void>
+  /** Override the write slice size (tests). */
+  applySliceSize?: number
 }
+
+/**
+ * Rows written to Dexie per uninterruptible job.
+ *
+ * A page can be 500 rows of message JSON, and `bulkPut` serialises and
+ * structured-clones the whole array in one go — a job the browser cannot
+ * interrupt, and the shape of the freeze a first pairing used to produce.
+ * Sliced, the same write becomes several jobs with a paint opportunity
+ * between each; 200 keeps the per-slice transaction overhead negligible
+ * against the work it lets the browser interleave.
+ */
+export const SYNC_APPLY_SLICE_SIZE = 200
 
 const SYNC_RPC = "sync_pull"
 export const RETRIEVAL_CONTENT_PROTOCOL_VERSION = 1
@@ -74,13 +94,12 @@ export async function runSyncHandler<TRow extends { id: string }>(
 
     try {
       const t = opts.getTable()
-      if (filtered.length > 0) {
-        if (opts.applyRows) await opts.applyRows(filtered)
-        else await t.bulkPut(filtered)
-      }
-      if (delta.deleted_ids.length > 0) {
-        await t.bulkDelete(delta.deleted_ids)
-      }
+      const sliceSize = opts.applySliceSize ?? SYNC_APPLY_SLICE_SIZE
+      const applySlice = opts.applyRows ?? ((rows: TRow[]) => t.bulkPut(rows).then(() => undefined))
+      await applyInSlices(filtered, sliceSize, (slice) => applySlice(slice as TRow[]))
+      await applyInSlices(delta.deleted_ids, sliceSize, async (slice) => {
+        await t.bulkDelete(slice as string[])
+      })
     } catch (err: unknown) {
       return {
         ok: false,
@@ -99,6 +118,12 @@ export async function runSyncHandler<TRow extends { id: string }>(
     if (!delta.has_more) {
       return { ok: true, result: { table: opts.table, applied, nextSince: since } }
     }
+
+    // A paged table drains as fast as the Host answers. Between pages is the
+    // one point where the loop is guaranteed to hold nothing, so it is where
+    // the thread goes back — otherwise a deep history is one unbroken run of
+    // parse → write → request with no gap for a frame.
+    await yieldToMain()
   }
 
   // Drained MAX_PAGES without the server clearing `has_more` — bail out with
