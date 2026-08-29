@@ -120,13 +120,17 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
           <DialogTitle data-testid="approval-gate-title">
             {props.title || t(`${i18nKey}.title`)}
           </DialogTitle>
-          {/* Identity line. The title above may be the producer's (which does
-              not say which KIND of gate this is), and the scope id is the only
-              thing distinguishing two simultaneous gates of the same kind. */}
+          {/* Identity line. The scope id is the only thing distinguishing two
+              simultaneous gates of the same kind. The kind badge is added only
+              when a producer title has taken the heading — otherwise the
+              heading already IS the kind, and repeating it reads as two
+              different facts about the gate when it is one. */}
           <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Badge variant="outline" className="text-[10px]">
-              {t(`${i18nKey}.title`)}
-            </Badge>
+            {props.title ? (
+              <Badge variant="outline" className="text-[10px]" data-testid="approval-gate-kind">
+                {t(`${i18nKey}.title`)}
+              </Badge>
+            ) : null}
             <span
               className="min-w-0 break-all font-mono text-[11px]"
               data-testid="approval-gate-scope"
