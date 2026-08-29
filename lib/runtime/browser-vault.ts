@@ -1,9 +1,26 @@
 import Dexie, { type Table } from "dexie"
+import { argon2idAsync } from "@noble/hashes/argon2.js"
 
 import { assertAccountId } from "@/lib/accounts/account-types"
+import { AccountContentCipher } from "@/lib/accounts/content-cipher"
 
 export const BROWSER_VAULT_DB_NAME = "cognia-browser-vault"
 export const BROWSER_VAULT_PBKDF2_ITERATIONS = 600_000
+export const BROWSER_VAULT_ARGON2_MEMORY_KIB = 19_456
+export const BROWSER_VAULT_ARGON2_TIME_COST = 2
+export const BROWSER_VAULT_ARGON2_PARALLELISM = 1
+
+interface Argon2Parameters {
+  memoryKiB: number
+  timeCost: number
+  parallelism: number
+}
+
+let activeArgon2Parameters: Argon2Parameters = {
+  memoryKiB: BROWSER_VAULT_ARGON2_MEMORY_KIB,
+  timeCost: BROWSER_VAULT_ARGON2_TIME_COST,
+  parallelism: BROWSER_VAULT_ARGON2_PARALLELISM,
+}
 
 interface WrappedVaultKey {
   iv: string
@@ -12,13 +29,23 @@ interface WrappedVaultKey {
 
 export interface BrowserVaultRecord {
   accountId: string
-  version: 1
-  passwordKdf: {
-    algorithm: "PBKDF2"
-    hash: "SHA-256"
-    iterations: number
-    salt: string
-  }
+  version: 1 | 2
+  passwordKdf:
+    | {
+        algorithm: "PBKDF2"
+        hash: "SHA-256"
+        iterations: number
+        salt: string
+      }
+    | {
+        algorithm: "Argon2id"
+        version: 0x13
+        memoryKiB: number
+        timeCost: number
+        parallelism: number
+        outputLength: 32
+        salt: string
+      }
   passwordWrap: WrappedVaultKey
   recoveryWrap: WrappedVaultKey
   createdAt: number
@@ -120,7 +147,7 @@ export class BrowserVaultSession {
     const passwordSalt = randomBytes(16)
     try {
       const [passwordKek, recoveryKek] = await Promise.all([
-        derivePasswordKey(password, passwordSalt),
+        deriveArgon2PasswordKey(password, passwordSalt),
         importAesKey(recoveryBytes, ["encrypt", "decrypt"]),
       ])
       const [passwordWrap, recoveryWrap, masterKey] = await Promise.all([
@@ -130,11 +157,14 @@ export class BrowserVaultSession {
       ])
       const record: BrowserVaultRecord = {
         accountId,
-        version: 1,
+        version: 2,
         passwordKdf: {
-          algorithm: "PBKDF2",
-          hash: "SHA-256",
-          iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
+          algorithm: "Argon2id",
+          version: 0x13,
+          memoryKiB: activeArgon2Parameters.memoryKiB,
+          timeCost: activeArgon2Parameters.timeCost,
+          parallelism: activeArgon2Parameters.parallelism,
+          outputLength: 32,
           salt: encodeBase64Url(passwordSalt),
         },
         passwordWrap,
@@ -160,11 +190,7 @@ export class BrowserVaultSession {
   ): Promise<BrowserVaultSession> {
     validateRecord(record)
     assertPassword(password)
-    const passwordKey = await derivePasswordKey(
-      password,
-      decodeBase64Url(record.passwordKdf.salt),
-      record.passwordKdf.iterations
-    )
+    const passwordKey = await derivePasswordKeyForRecord(record, password)
     const masterBytes = await unwrapMasterKey(
       record.passwordWrap,
       passwordKey,
@@ -211,6 +237,10 @@ export class BrowserVaultSession {
 
   isUnlocked(): boolean {
     return this.masterKey !== null
+  }
+
+  createContentCipher(databaseName: string): AccountContentCipher {
+    return new AccountContentCipher(this.accountId, databaseName, this.requireMasterKey())
   }
 
   lock(): void {
@@ -279,12 +309,24 @@ export class BrowserVaultSession {
 let activeBrowserVaultSession: BrowserVaultSession | null = null
 let browserVaultRepository: BrowserVaultRepository | null = null
 
-export async function provisionBrowserVault(accountId: string, password: string): Promise<string> {
+export async function provisionBrowserVault(
+  accountId: string,
+  password: string,
+  activate = true
+): Promise<string> {
   const created = await BrowserVaultSession.create(accountId, password)
   await repository().put(created.record)
-  activeBrowserVaultSession?.lock()
-  activeBrowserVaultSession = created.session
+  if (activate) {
+    activeBrowserVaultSession?.lock()
+    activeBrowserVaultSession = created.session
+  } else {
+    created.session.lock()
+  }
   return created.recoveryKey
+}
+
+export async function browserVaultExists(accountId: string): Promise<boolean> {
+  return (await repository().get(accountId)) !== undefined
 }
 
 export async function unlockBrowserVault(accountId: string, password: string): Promise<void> {
@@ -318,11 +360,7 @@ export async function changeBrowserVaultPassword(
 ): Promise<void> {
   const current = await repository().get(accountId)
   if (!current) throw new Error("Browser Vault is not provisioned for this account.")
-  const currentPasswordKey = await derivePasswordKey(
-    currentPassword,
-    decodeBase64Url(current.passwordKdf.salt),
-    current.passwordKdf.iterations
-  )
+  const currentPasswordKey = await derivePasswordKeyForRecord(current, currentPassword)
   const masterBytes = await unwrapMasterKey(
     current.passwordWrap,
     currentPasswordKey,
@@ -330,7 +368,7 @@ export async function changeBrowserVaultPassword(
   )
   const nextSalt = randomBytes(16)
   try {
-    const nextPasswordKey = await derivePasswordKey(newPassword, nextSalt)
+    const nextPasswordKey = await deriveArgon2PasswordKey(newPassword, nextSalt)
     const passwordWrap = await wrapMasterKey(
       masterBytes,
       nextPasswordKey,
@@ -343,10 +381,15 @@ export async function changeBrowserVaultPassword(
     try {
       await repository().put({
         ...current,
+        version: 2,
         passwordKdf: {
-          ...current.passwordKdf,
+          algorithm: "Argon2id",
+          version: 0x13,
+          memoryKiB: activeArgon2Parameters.memoryKiB,
+          timeCost: activeArgon2Parameters.timeCost,
+          parallelism: activeArgon2Parameters.parallelism,
+          outputLength: 32,
           salt: encodeBase64Url(nextSalt),
-          iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
         },
         passwordWrap,
         updatedAt: now,
@@ -400,7 +443,7 @@ export async function resetBrowserVaultPasswordWithRecoveryKey(
       wrapAad(accountId, "recovery")
     )
     try {
-      const nextPasswordKey = await derivePasswordKey(newPassword, nextSalt)
+      const nextPasswordKey = await deriveArgon2PasswordKey(newPassword, nextSalt)
       const passwordWrap = await wrapMasterKey(
         masterBytes,
         nextPasswordKey,
@@ -408,10 +451,15 @@ export async function resetBrowserVaultPasswordWithRecoveryKey(
       )
       await repository().put({
         ...current,
+        version: 2,
         passwordKdf: {
-          ...current.passwordKdf,
+          algorithm: "Argon2id",
+          version: 0x13,
+          memoryKiB: activeArgon2Parameters.memoryKiB,
+          timeCost: activeArgon2Parameters.timeCost,
+          parallelism: activeArgon2Parameters.parallelism,
+          outputLength: 32,
           salt: encodeBase64Url(nextSalt),
-          iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
         },
         passwordWrap,
         updatedAt: now,
@@ -453,6 +501,67 @@ export function __resetBrowserVaultForTesting(): void {
   lockBrowserVault()
   browserVaultRepository?.close()
   browserVaultRepository = null
+  activeArgon2Parameters = {
+    memoryKiB: BROWSER_VAULT_ARGON2_MEMORY_KIB,
+    timeCost: BROWSER_VAULT_ARGON2_TIME_COST,
+    parallelism: BROWSER_VAULT_ARGON2_PARALLELISM,
+  }
+}
+
+/**
+ * Test-only: mint a v1 (PBKDF2) record the way the pre-Argon2 build did.
+ *
+ * There is no other way to obtain one — `create` mints v2 — so without this the
+ * legacy unlock path had no coverage at all, which is exactly how a wiped salt
+ * on that branch shipped: every Argon2 test passed while every existing vault
+ * became unopenable. Any change to `derivePasswordKeyForRecord` must keep this
+ * green.
+ */
+export async function __createLegacyPbkdf2VaultRecordForTesting(
+  accountId: string,
+  password: string,
+  now = Date.now()
+): Promise<BrowserVaultRecord> {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("Legacy vault record minting is test-only.")
+  }
+  assertAccountId(accountId)
+  const masterBytes = randomBytes(32)
+  const recoveryBytes = randomBytes(32)
+  const passwordSalt = randomBytes(16)
+  try {
+    const passwordKek = await derivePasswordKey(password, passwordSalt)
+    const recoveryKek = await importAesKey(recoveryBytes, ["encrypt", "decrypt"])
+    return {
+      accountId,
+      version: 1,
+      passwordKdf: {
+        algorithm: "PBKDF2",
+        hash: "SHA-256",
+        iterations: BROWSER_VAULT_PBKDF2_ITERATIONS,
+        salt: encodeBase64Url(passwordSalt),
+      },
+      passwordWrap: await wrapMasterKey(masterBytes, passwordKek, wrapAad(accountId, "password")),
+      recoveryWrap: await wrapMasterKey(masterBytes, recoveryKek, wrapAad(accountId, "recovery")),
+      createdAt: now,
+      updatedAt: now,
+    }
+  } finally {
+    zeroBytes(masterBytes)
+    zeroBytes(recoveryBytes)
+    zeroBytes(passwordSalt)
+  }
+}
+
+export function __setBrowserVaultArgon2ParametersForTesting(memoryKiB: number): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("Argon2 parameter overrides are test-only.")
+  }
+  activeArgon2Parameters = {
+    memoryKiB,
+    timeCost: 1,
+    parallelism: 1,
+  }
 }
 
 async function derivePasswordKey(
@@ -479,6 +588,68 @@ async function derivePasswordKey(
     false,
     ["encrypt", "decrypt"]
   )
+}
+
+/**
+ * Derive the password KEK.
+ *
+ * `parameters` defaults to today's settings — that is the MINT path. Reading an
+ * existing record must pass the parameters that record was written with: a
+ * record minted under different cost settings derives a different key, so
+ * deriving with the current globals would silently produce the wrong KEK the
+ * moment those globals change.
+ */
+async function deriveArgon2PasswordKey(
+  password: string,
+  salt: Uint8Array,
+  parameters: Argon2Parameters = activeArgon2Parameters
+): Promise<CryptoKey> {
+  const passwordBytes = new TextEncoder().encode(password)
+  try {
+    const derived = await argon2idAsync(passwordBytes, salt, {
+      t: parameters.timeCost,
+      m: parameters.memoryKiB,
+      p: parameters.parallelism,
+      version: 0x13,
+      dkLen: 32,
+      asyncTick: 8,
+      maxmem: parameters.memoryKiB * 1024 + 1024 * 1024,
+    })
+    try {
+      return await importAesKey(derived, ["encrypt", "decrypt"])
+    } finally {
+      zeroBytes(derived)
+    }
+  } finally {
+    zeroBytes(passwordBytes)
+  }
+}
+
+async function derivePasswordKeyForRecord(
+  record: BrowserVaultRecord,
+  password: string
+): Promise<CryptoKey> {
+  const salt = decodeBase64Url(record.passwordKdf.salt)
+  try {
+    // AWAIT before the `finally` wipes the salt. `derivePasswordKey` suspends
+    // on `importKey` BEFORE it reads `salt`, so `return derivePasswordKey(...)`
+    // handed PBKDF2 an all-zero salt and made every legacy v1 record
+    // permanently unopenable. Argon2 happened to survive because `argon2Init`
+    // consumes the salt synchronously — a difference no reader should have to
+    // know about, so both branches await here.
+    if (record.passwordKdf.algorithm === "PBKDF2") {
+      return await derivePasswordKey(password, salt, record.passwordKdf.iterations)
+    }
+    // The RECORD's parameters, not the current globals — see
+    // `deriveArgon2PasswordKey`.
+    return await deriveArgon2PasswordKey(password, salt, {
+      memoryKiB: record.passwordKdf.memoryKiB,
+      timeCost: record.passwordKdf.timeCost,
+      parallelism: record.passwordKdf.parallelism,
+    })
+  } finally {
+    zeroBytes(salt)
+  }
 }
 
 async function importAesKey(bytes: Uint8Array, usages: KeyUsage[]): Promise<CryptoKey> {
@@ -546,14 +717,35 @@ function assertSecretName(name: string): string {
 
 function validateRecord(record: BrowserVaultRecord): void {
   assertAccountId(record.accountId)
-  if (
-    record.version !== 1 ||
-    record.passwordKdf.algorithm !== "PBKDF2" ||
-    record.passwordKdf.hash !== "SHA-256" ||
-    record.passwordKdf.iterations !== BROWSER_VAULT_PBKDF2_ITERATIONS
-  ) {
+  const compatibleLegacy =
+    record.version === 1 &&
+    record.passwordKdf.algorithm === "PBKDF2" &&
+    record.passwordKdf.hash === "SHA-256" &&
+    record.passwordKdf.iterations === BROWSER_VAULT_PBKDF2_ITERATIONS
+  // Validate the record's Argon2 parameters STRUCTURALLY, never against the
+  // current `activeArgon2Parameters`. The KDF runs with whatever the record
+  // itself stores (`derivePasswordKeyForRecord`), so an equality check bought
+  // nothing and turned any future hardening bump — the entire point of a
+  // tunable KDF — into a lockout for every vault minted before it. Current
+  // strength is pinned where it belongs: on the mint path
+  // (`BrowserVaultSession.create`, `changeBrowserVaultPassword`,
+  // `resetBrowserVaultPasswordWithRecoveryKey`), which always writes today's
+  // parameters. A record cannot be silently weakened either: rewriting the
+  // parameters without the password only breaks the AES-GCM unwrap.
+  const compatibleArgon2 =
+    record.version === 2 &&
+    record.passwordKdf.algorithm === "Argon2id" &&
+    record.passwordKdf.version === 0x13 &&
+    isPositiveInteger(record.passwordKdf.memoryKiB) &&
+    isPositiveInteger(record.passwordKdf.timeCost) &&
+    isPositiveInteger(record.passwordKdf.parallelism) &&
+    record.passwordKdf.outputLength === 32
+  if (!compatibleLegacy && !compatibleArgon2)
     throw new Error("Browser Vault record is incompatible.")
-  }
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0
 }
 
 function assertPassword(password: string): void {

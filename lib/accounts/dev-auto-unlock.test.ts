@@ -54,9 +54,9 @@ afterEach(() => {
 })
 
 describe("dev-auto-unlock", () => {
-  it("is enabled in a non-production build running in a webview", () => {
+  it("is disabled in an ordinary development build", () => {
     setNodeEnv("development")
-    expect(isDevAutoUnlockEnabled()).toBe(true)
+    expect(isDevAutoUnlockEnabled()).toBe(false)
   })
 
   it("is disabled in production builds", () => {
@@ -83,9 +83,10 @@ describe("dev-auto-unlock", () => {
     expect(isDevAutoUnlockEnabled()).toBe(false)
   })
 
-  it("ignores other values of the force-gate env", () => {
+  it("ignores other force-gate values when the E2E artifact is enabled", () => {
     setNodeEnv("development")
     setForceGate("0")
+    setE2E("1")
     expect(isDevAutoUnlockEnabled()).toBe(true)
   })
 

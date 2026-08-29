@@ -4,6 +4,7 @@ import Dexie from "dexie"
 
 import {
   DEFAULT_STANDALONE_TARGET_ID,
+  encryptedRuntimeTargetDatabaseName,
   RUNTIME_TARGET_REGISTRY_DB_NAME,
   RuntimeTargetRegistry,
   runtimeTargetDatabaseName,
@@ -74,6 +75,9 @@ it("uses a distinct physical database name for every account and target", () => 
   )
   expect(runtimeTargetDatabaseName("acct_alpha", "desktop-studio")).not.toBe(
     runtimeTargetDatabaseName("acct_beta", "desktop-studio")
+  )
+  expect(encryptedRuntimeTargetDatabaseName("acct_alpha", "web-standalone")).toBe(
+    "cognia-account-acct_alpha-target-web-standalone-encrypted-v1"
   )
 })
 

@@ -109,8 +109,9 @@ export async function waitForPluginRuntimeReady(page: Page, timeoutMs = 30_000):
  * We sidestep Tauri entirely by writing an account straight through
  * `LocalAccountRegistry.createAccount` (which takes the password verifier as
  * input and never touches Tauri) with a stub verifier and pointing the registry
- * at it. Dev builds then auto-unlock that active account on the next load (see
- * `lib/accounts/dev-auto-unlock.ts`), so `AccountGate` never prompts.
+ * at it. The dedicated `NEXT_PUBLIC_E2E=1` browser artifact then provisions
+ * its disposable Browser Vault and unlocks that active account on the next
+ * load (see `lib/accounts/dev-auto-unlock.ts`), so `AccountGate` never prompts.
  * Test-infra only — no product code changes, and `isTauri()` is left false so
  * the app stays in web/mobile mode.
  */

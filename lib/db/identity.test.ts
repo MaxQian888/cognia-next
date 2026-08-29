@@ -258,7 +258,7 @@ describe("resolveWorkspaceAccessFor", () => {
     ).toMatchObject({ via: "membership", role: "member", guest: true })
   })
 
-  it("lets an explicit workspace role win over org-admin traversal", async () => {
+  it("keeps org-admin management as the workspace permission floor", async () => {
     await putOrgMembership({ orgId: "org_acme", userId: "usr_ada", role: "admin" })
     await putWorkspaceMembership({
       workspaceId: "proj_1",
@@ -272,7 +272,7 @@ describe("resolveWorkspaceAccessFor", () => {
         orgId: "org_acme",
         workspaceId: "proj_1",
       })
-    ).toMatchObject({ via: "membership", role: "viewer", capability: "read" })
+    ).toMatchObject({ via: "org-admin", role: "maintainer", capability: "manage" })
   })
 
   it("gives a stranger nothing", async () => {

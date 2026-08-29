@@ -1,7 +1,12 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
+use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Manager;
 
 const ALGORITHM: &str = "argon2id-v1";
 const SALT_LEN: usize = 16;
@@ -15,6 +20,161 @@ const MAX_PASSWORD_BYTES: usize = 4096;
 /// Minimum length enforced only when MINTING a new verifier. The verify path
 /// deliberately skips this so accounts created before the policy still unlock.
 const MIN_PASSWORD_LENGTH: usize = 8;
+const FAILURE_RESET_SECS: i64 = 30 * 60;
+const INITIAL_BACKOFF_SECS: i64 = 30;
+const MAX_BACKOFF_SECS: i64 = 15 * 60;
+
+#[derive(Debug, Clone)]
+struct ActiveAccountSecuritySession {
+    account_id: String,
+    verifier_digest: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordThrottleRecord {
+    failures: u32,
+    last_failure_at: i64,
+    blocked_until: i64,
+}
+
+/// Rust-owned proof that one LocalProfile is currently unlocked.
+///
+/// The renderer can request an unlock, but every sensitive native command
+/// reads the principal from this state rather than trusting an IPC account id.
+pub struct AccountSecuritySession {
+    active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
+    throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
+    throttle_path: Option<PathBuf>,
+}
+
+impl AccountSecuritySession {
+    pub fn new(data_dir: Option<PathBuf>) -> Self {
+        let throttle_path = data_dir.map(|dir| dir.join("cognia").join("account-throttle.json"));
+        let throttle = throttle_path
+            .as_ref()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Self {
+            active: parking_lot::RwLock::new(None),
+            throttle: parking_lot::Mutex::new(throttle),
+            throttle_path,
+        }
+    }
+
+    fn activate(&self, account_id: &str, verifier_digest: String) {
+        *self.active.write() = Some(ActiveAccountSecuritySession {
+            account_id: account_id.to_owned(),
+            verifier_digest,
+        });
+    }
+
+    fn clear(&self) {
+        *self.active.write() = None;
+    }
+
+    fn require_active(&self) -> Result<ActiveAccountSecuritySession, String> {
+        self.active
+            .read()
+            .clone()
+            .ok_or_else(|| "the local account is locked".to_owned())
+    }
+
+    fn require_account(&self, account_id: &str) -> Result<ActiveAccountSecuritySession, String> {
+        let active = self.require_active()?;
+        if active.account_id != account_id {
+            return Err("the requested account is not the unlocked account".into());
+        }
+        Ok(active)
+    }
+
+    fn assert_unlock_target(&self, account_id: &str) -> Result<(), String> {
+        if self
+            .active
+            .read()
+            .as_ref()
+            .is_some_and(|active| active.account_id != account_id)
+        {
+            return Err(
+                "the current account must be locked before another account can be unlocked".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn before_password_attempt(&self, account_id: &str, now: i64) -> Result<(), String> {
+        let mut throttle = self.throttle.lock();
+        if throttle
+            .get(account_id)
+            .is_some_and(|record| now.saturating_sub(record.last_failure_at) >= FAILURE_RESET_SECS)
+        {
+            throttle.remove(account_id);
+            self.persist_throttle(&throttle)?;
+        }
+        if let Some(record) = throttle.get(account_id) {
+            if record.blocked_until > now {
+                return Err(format!(
+                    "too many password attempts; retry in {} seconds",
+                    record.blocked_until - now
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn record_password_failure(&self, account_id: &str, now: i64) -> Result<(), String> {
+        let mut throttle = self.throttle.lock();
+        let record = throttle.entry(account_id.to_owned()).or_default();
+        if now.saturating_sub(record.last_failure_at) >= FAILURE_RESET_SECS {
+            *record = PasswordThrottleRecord::default();
+        }
+        record.failures = record.failures.saturating_add(1);
+        record.last_failure_at = now;
+        if record.failures > 5 {
+            let exponent = record.failures.saturating_sub(6).min(31);
+            let delay = INITIAL_BACKOFF_SECS
+                .saturating_mul(1_i64.checked_shl(exponent).unwrap_or(i64::MAX))
+                .min(MAX_BACKOFF_SECS);
+            record.blocked_until = now.saturating_add(delay);
+        }
+        self.persist_throttle(&throttle)
+    }
+
+    fn record_password_success(&self, account_id: &str) -> Result<(), String> {
+        let mut throttle = self.throttle.lock();
+        throttle.remove(account_id);
+        self.persist_throttle(&throttle)
+    }
+
+    fn persist_throttle(
+        &self,
+        throttle: &HashMap<String, PasswordThrottleRecord>,
+    ) -> Result<(), String> {
+        let Some(path) = self.throttle_path.as_ref() else {
+            return Ok(());
+        };
+        let parent = path
+            .parent()
+            .ok_or_else(|| "account throttle path has no parent".to_owned())?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create account security directory: {error}"))?;
+        let temporary = path.with_extension("json.tmp");
+        let bytes = serde_json::to_vec(throttle)
+            .map_err(|error| format!("could not encode account throttle state: {error}"))?;
+        std::fs::write(&temporary, bytes)
+            .map_err(|error| format!("could not persist account throttle state: {error}"))?;
+        std::fs::rename(&temporary, path)
+            .map_err(|error| format!("could not commit account throttle state: {error}"))
+    }
+}
+
+fn unix_time_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,21 +226,77 @@ pub fn account_password_create_verifier(
 /// host to bind, keep working unchanged.
 #[tauri::command]
 pub fn account_password_verify(
+    app: tauri::AppHandle,
+    security_session: tauri::State<'_, AccountSecuritySession>,
     password: String,
     verifier: AccountPasswordVerifier,
     account_id: Option<String>,
 ) -> Result<bool, String> {
+    let plugin_state = app.state::<cognia_plugin_runtime::PluginRuntimeState>();
+    account_password_verify_inner(
+        password,
+        verifier,
+        account_id,
+        Some(&plugin_state),
+        Some(&security_session),
+        unix_time_secs(),
+    )
+}
+
+fn account_password_verify_inner(
+    password: String,
+    verifier: AccountPasswordVerifier,
+    account_id: Option<String>,
+    plugin_state: Option<&cognia_plugin_runtime::PluginRuntimeState>,
+    security_session: Option<&AccountSecuritySession>,
+    now: i64,
+) -> Result<bool, String> {
     validate_password(&password)?;
     validate_verifier_metadata(&verifier)?;
+    // Throttle EVERY attempt, not just the ones that name an account.
+    // `account_id` is optional on the wire, so gating the backoff on it meant a
+    // caller could simply omit it and get an unlimited, unthrottled oracle
+    // against the very same verifier. When it is absent the verifier's own
+    // digest is the stable stand-in key: it identifies the credential being
+    // guessed just as well, and cannot be varied by the caller without
+    // changing which verifier they are attacking.
+    let throttle_key = match account_id.as_deref() {
+        Some(account_id) => account_id.to_owned(),
+        None => format!("verifier:{}", verifier_digest_of(&verifier)),
+    };
+    if let Some(security_session) = security_session {
+        if let Some(account_id) = account_id.as_deref() {
+            security_session.assert_unlock_target(account_id)?;
+        }
+        security_session.before_password_attempt(&throttle_key, now)?;
+    }
     let salt = decode_base64_field("salt", &verifier.salt, SALT_B64_LEN, SALT_LEN)?;
     let expected = decode_base64_field("hash", &verifier.hash, HASH_B64_LEN, OUTPUT_LEN)?;
     let actual = derive_hash(&password, &salt, &verifier.params)?;
     let matched = constant_time_eq(&actual, &expected);
 
     if matched {
+        // Persist the successful authentication outcome before exposing
+        // any account-scoped native authority. If the throttle file cannot
+        // be committed, fail while the host and plugin runtime are still
+        // locked rather than leaving a partially activated session.
+        if let Some(security_session) = security_session {
+            security_session.record_password_success(&throttle_key)?;
+        }
         if let Some(account_id) = account_id.as_deref() {
             bind_host_to_account(account_id, &verifier)?;
+            if let Some(plugin_state) = plugin_state {
+                if let Err(error) = plugin_state.activate_account(account_id) {
+                    crate::companion_api::host_identity::unbind_local_account();
+                    return Err(error.to_string());
+                }
+            }
+            if let Some(security_session) = security_session {
+                security_session.activate(account_id, verifier_digest_of(&verifier));
+            }
         }
+    } else if let Some(security_session) = security_session {
+        security_session.record_password_failure(&throttle_key, now)?;
     }
     Ok(matched)
 }
@@ -88,29 +304,85 @@ pub fn account_password_verify(
 /// Drop this host's in-process account binding. Called when an account locks or
 /// the app switches away from it; the recorded tenant is left untouched.
 #[tauri::command]
-pub fn account_unbind_local() {
-    crate::companion_api::host_identity::unbind_local_account();
-}
-
-/// Re-pin the host binding after a password rotation.
-///
-/// Rotating a password changes the verifier, so without this the new one would
-/// be refused as a mismatch forever. Callers must already have verified the
-/// *current* password.
-#[tauri::command]
-pub fn account_rebind_verifier(
-    account_id: String,
-    verifier: AccountPasswordVerifier,
+pub async fn account_unbind_local(
+    app: tauri::AppHandle,
+    security_session: tauri::State<'_, AccountSecuritySession>,
 ) -> Result<(), String> {
-    validate_verifier_metadata(&verifier)?;
-    crate::companion_api::host_identity::rebind_verifier(
-        &account_id,
-        &verifier_digest_of(&verifier),
+    security_session.clear();
+    crate::companion_api::host_identity::unbind_local_account();
+    let plugin_state = app.state::<cognia_plugin_runtime::PluginRuntimeState>();
+    let python_state = app.state::<cognia_plugin_runtime::python::PythonRuntimeState>();
+    let wasm_state = app.state::<cognia_plugin_runtime::wasm::WasmPluginState>();
+    let vscode_state = app.state::<cognia_plugin_runtime::vscode::VscodeExtensionState>();
+    cognia_plugin_runtime::teardown_account_runtimes(
+        &plugin_state,
+        &python_state,
+        &wasm_state,
+        &vscode_state,
     )
+    .await
     .map_err(|error| error.to_string())
 }
 
-/// Record which person this profile belongs to, after a completed sign-in.
+/// Re-authenticate and rotate the native verifier pin as one sensitive command.
+///
+/// `new_verifier` is accepted for compensating rollback: the renderer can
+/// restore the exact old registry value if its IndexedDB commit fails. It is
+/// still recomputed against `new_password` here before the host trusts it.
+#[tauri::command]
+pub fn account_password_rotate(
+    security_session: tauri::State<'_, AccountSecuritySession>,
+    account_id: String,
+    current_password: String,
+    current_verifier: AccountPasswordVerifier,
+    new_password: String,
+    new_verifier: Option<AccountPasswordVerifier>,
+) -> Result<AccountPasswordVerifier, String> {
+    account_password_rotate_inner(
+        &security_session,
+        account_id,
+        current_password,
+        current_verifier,
+        new_password,
+        new_verifier,
+        unix_time_secs(),
+    )
+}
+
+fn account_password_rotate_inner(
+    security_session: &AccountSecuritySession,
+    account_id: String,
+    current_password: String,
+    current_verifier: AccountPasswordVerifier,
+    new_password: String,
+    new_verifier: Option<AccountPasswordVerifier>,
+    now: i64,
+) -> Result<AccountPasswordVerifier, String> {
+    let active = security_session.require_account(&account_id)?;
+    if active.verifier_digest != verifier_digest_of(&current_verifier) {
+        return Err("the current verifier does not match the unlocked session".into());
+    }
+    security_session.before_password_attempt(&account_id, now)?;
+    if !verify_password_material(&current_password, &current_verifier)? {
+        security_session.record_password_failure(&account_id, now)?;
+        return Err("current password is invalid".into());
+    }
+    let verifier = match new_verifier {
+        Some(verifier) => {
+            if !verify_password_material(&new_password, &verifier)? {
+                return Err("new verifier does not match the new password".into());
+            }
+            verifier
+        }
+        None => account_password_create_verifier(new_password)?,
+    };
+    rebind_host_verifier(&account_id, &verifier)?;
+    security_session.record_password_success(&account_id)?;
+    security_session.activate(&account_id, verifier_digest_of(&verifier));
+    Ok(verifier)
+}
+
+/// Record which person this profile belongs to, after a verified Logto sign-in.
 ///
 /// ADR-0149 §9. Deliberately a separate command from the unlock path: an unlock
 /// proves a profile, a sign-in asserts a person, and the renderer supplies the
@@ -120,8 +392,9 @@ pub fn account_rebind_verifier(
 /// a normal desktop state, so it is reported as success with nothing recorded,
 /// exactly as `bind_host_to_account` treats it.
 #[tauri::command]
-pub fn account_bind_person(
-    local_account_id: String,
+pub async fn account_bind_person(
+    security_session: tauri::State<'_, AccountSecuritySession>,
+    access_token: String,
     user_id: String,
     org_id: Option<String>,
 ) -> Result<(), String> {
@@ -129,16 +402,50 @@ pub fn account_bind_person(
         adopt_unowned_devices, bind_person, HostIdentityError,
     };
 
-    match bind_person(&local_account_id, &user_id, org_id.as_deref()) {
+    let active = security_session.require_active()?;
+    // The trust anchor is HOST configuration, never an IPC argument.
+    //
+    // Taking `issuer`/`audience` from the renderer let the caller pick which
+    // key set validated its own token: point `issuer` at an attacker-controlled
+    // OIDC discovery endpoint, mint a token there, and it verified. The
+    // `expected_user_id`/`expected_org_id` comparison below could not catch it
+    // either, because those ids were derived from the SAME caller-supplied
+    // issuer, so the check compared an attacker's value against itself. It was
+    // also an SSRF primitive: the host fetched any URL named over IPC.
+    //
+    // `from_env()` reads COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_AUDIENCE and is
+    // `None` on a host with no identity provider configured — an unconfigured
+    // host must refuse to bind a person, not accept one on the caller's word.
+    let verifier = crate::companion_api::oidc::OidcAuthenticator::from_env().ok_or_else(|| {
+        "this host is not configured for Logto sign-in (COGNIA_LOGTO_ISSUER / \
+         COGNIA_LOGTO_AUDIENCE are unset)"
+            .to_owned()
+    })?;
+    let issuer = verifier.issuer().to_owned();
+    let claims = verifier
+        .authenticate(&access_token)
+        .await
+        .map_err(|error| format!("Logto access token was rejected: {error}"))?;
+    let expected_user_id = derive_identity_id("usr_", "user", &issuer, &claims.sub);
+    let expected_org_id = claims
+        .organization_id
+        .as_deref()
+        .map(|organization| derive_identity_id("org_", "org", &issuer, organization));
+    if user_id != expected_user_id || org_id != expected_org_id {
+        return Err("the requested person does not match the verified Logto token".into());
+    }
+
+    match bind_person(&active.account_id, &user_id, org_id.as_deref()) {
         Ok(()) => {
             // ADR-0149 §5 step one: the devices on this profile that nobody has
             // claimed belong to whoever just proved they hold it. Best-effort —
             // a failure here leaves the binding standing, because the person is
             // the fact that matters and the attribution can be redone.
-            if let Err(error) = adopt_unowned_devices(&local_account_id) {
-                tracing::warn!(%error, "could not attribute unowned devices after sign-in");
-            }
-            Ok(())
+            adopt_unowned_devices(&active.account_id)
+                .map(|_| ())
+                .map_err(|error| {
+                    format!("person bound but device adoption must be retried: {error}")
+                })
         }
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
@@ -148,10 +455,13 @@ pub fn account_bind_person(
 /// Forget the person on this profile (sign-out). The profile binding and every
 /// device paired to it survive.
 #[tauri::command]
-pub fn account_unbind_person(local_account_id: String) -> Result<(), String> {
+pub fn account_unbind_person(
+    security_session: tauri::State<'_, AccountSecuritySession>,
+) -> Result<(), String> {
     use crate::companion_api::host_identity::{unbind_person, HostIdentityError};
 
-    match unbind_person(&local_account_id) {
+    let active = security_session.require_active()?;
+    match unbind_person(&active.account_id) {
         Ok(()) => Ok(()),
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
@@ -162,11 +472,12 @@ pub fn account_unbind_person(local_account_id: String) -> Result<(), String> {
 /// disagreement between its own binding and the host's.
 #[tauri::command]
 pub fn account_person(
-    local_account_id: String,
+    security_session: tauri::State<'_, AccountSecuritySession>,
 ) -> Result<Option<crate::companion_api::host_identity::HostPerson>, String> {
     use crate::companion_api::host_identity::{person, HostIdentityError};
 
-    match person(&local_account_id) {
+    let active = security_session.require_active()?;
+    match person(&active.account_id) {
         Ok(found) => Ok(Some(found)),
         // No security database, or a profile this host has never seen unlocked:
         // both mean "nothing recorded", which is an answer, not a failure.
@@ -194,12 +505,41 @@ fn bind_host_to_account(
     }
 }
 
+fn rebind_host_verifier(
+    account_id: &str,
+    verifier: &AccountPasswordVerifier,
+) -> Result<(), String> {
+    use crate::companion_api::host_identity::{rebind_verifier, HostIdentityError};
+
+    match rebind_verifier(account_id, &verifier_digest_of(verifier)) {
+        Ok(()) | Err(HostIdentityError::StoreUnavailable) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn verify_password_material(
+    password: &str,
+    verifier: &AccountPasswordVerifier,
+) -> Result<bool, String> {
+    validate_password(password)?;
+    validate_verifier_metadata(verifier)?;
+    let salt = decode_base64_field("salt", &verifier.salt, SALT_B64_LEN, SALT_LEN)?;
+    let expected = decode_base64_field("hash", &verifier.hash, HASH_B64_LEN, OUTPUT_LEN)?;
+    let actual = derive_hash(password, &salt, &verifier.params)?;
+    Ok(constant_time_eq(&actual, &expected))
+}
+
 fn verifier_digest_of(verifier: &AccountPasswordVerifier) -> String {
     crate::companion_api::host_identity::verifier_digest(
         &verifier.algorithm,
         &verifier.salt,
         &verifier.hash,
     )
+}
+
+fn derive_identity_id(prefix: &str, kind: &str, issuer: &str, subject: &str) -> String {
+    let digest = sha2::Sha256::digest(format!("{kind}\n{issuer}\n{subject}").as_bytes());
+    format!("{prefix}{}", hex::encode(digest)[..24].to_owned())
 }
 
 fn create_password_verifier_with_salt(
@@ -326,6 +666,14 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn account_password_verify(
+        password: String,
+        verifier: AccountPasswordVerifier,
+        account_id: Option<String>,
+    ) -> Result<bool, String> {
+        account_password_verify_inner(password, verifier, account_id, None, None, 0)
+    }
 
     #[test]
     fn creates_and_verifies_argon2id_password_verifiers() {
@@ -497,12 +845,29 @@ mod tests {
         install_security_store(Some(SecurityStore::in_memory().unwrap()));
         unbind_local_account();
 
+        let session = AccountSecuritySession::new(None);
         let first = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
-        account_password_verify("correct horse".into(), first, Some("acct_one".into())).unwrap();
+        account_password_verify_inner(
+            "correct horse".into(),
+            first.clone(),
+            Some("acct_one".into()),
+            None,
+            Some(&session),
+            1,
+        )
+        .unwrap();
 
         let rotated = create_password_verifier_with_salt("battery staple", &[8_u8; 16]).unwrap();
-        // Without the rebind the new verifier would be refused forever.
-        account_rebind_verifier("acct_one".into(), rotated.clone()).unwrap();
+        let rotated = account_password_rotate_inner(
+            &session,
+            "acct_one".into(),
+            "correct horse".into(),
+            first,
+            "battery staple".into(),
+            Some(rotated),
+            2,
+        )
+        .unwrap();
         assert!(
             account_password_verify("battery staple".into(), rotated, Some("acct_one".into()))
                 .unwrap()
@@ -527,6 +892,111 @@ mod tests {
         assert_eq!(
             current().unwrap().local_account_namespace,
             LOCAL_NAMESPACE_UNBOUND
+        );
+    }
+
+    /// Omitting the optional `account_id` must not buy an unthrottled oracle.
+    ///
+    /// The backoff used to be gated on `account_id` being present, so a caller
+    /// could drop one field and guess against the same Argon2id verifier
+    /// forever. Without an account id the verifier's own digest is the key.
+    #[test]
+    fn password_attempts_are_throttled_even_without_an_account_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = AccountSecuritySession::new(Some(dir.path().to_path_buf()));
+        let verifier = create_password_verifier_with_salt("correct horse", &[7_u8; 16]).unwrap();
+
+        for attempt in 1..=6 {
+            assert!(!account_password_verify_inner(
+                "wrong password".into(),
+                verifier.clone(),
+                None,
+                None,
+                Some(&session),
+                attempt,
+            )
+            .unwrap());
+        }
+
+        // The 7th attempt is refused before any derivation runs — and the
+        // CORRECT password is refused too, which is what a real lockout means.
+        let blocked = account_password_verify_inner(
+            "correct horse".into(),
+            verifier.clone(),
+            None,
+            None,
+            Some(&session),
+            6,
+        )
+        .unwrap_err();
+        assert!(blocked.contains("too many password attempts"), "{blocked}");
+
+        // A different verifier is a different credential, so it is unaffected.
+        let other = create_password_verifier_with_salt("other secret", &[9_u8; 16]).unwrap();
+        assert!(account_password_verify_inner(
+            "other secret".into(),
+            other,
+            None,
+            None,
+            Some(&session),
+            6
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn password_backoff_is_persistent_and_resets_after_thirty_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = AccountSecuritySession::new(Some(dir.path().to_path_buf()));
+        for failure in 1..=5 {
+            session
+                .before_password_attempt("acct_one", failure)
+                .unwrap();
+            session
+                .record_password_failure("acct_one", failure)
+                .unwrap();
+        }
+        session.before_password_attempt("acct_one", 6).unwrap();
+        session.record_password_failure("acct_one", 6).unwrap();
+        assert!(session
+            .before_password_attempt("acct_one", 6)
+            .unwrap_err()
+            .contains("30 seconds"));
+
+        let reloaded = AccountSecuritySession::new(Some(dir.path().to_path_buf()));
+        assert!(reloaded.before_password_attempt("acct_one", 20).is_err());
+        reloaded
+            .before_password_attempt("acct_one", 6 + FAILURE_RESET_SECS)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_active_security_session_cannot_be_retargeted_by_ipc_input() {
+        let session = AccountSecuritySession::new(None);
+        session.activate("acct_one", "digest".into());
+        assert_eq!(
+            session.require_account("acct_one").unwrap().account_id,
+            "acct_one"
+        );
+        assert!(session.require_account("acct_two").is_err());
+        assert!(session.assert_unlock_target("acct_one").is_ok());
+        assert!(session
+            .assert_unlock_target("acct_two")
+            .unwrap_err()
+            .contains("must be locked"));
+        session.clear();
+        assert!(session.require_active().unwrap_err().contains("locked"));
+    }
+
+    #[test]
+    fn native_logto_identity_derivation_matches_the_renderer_contract() {
+        assert_eq!(
+            derive_identity_id("usr_", "user", "https://logto.test/oidc", "subject-1"),
+            "usr_d066005448858a8ba6bb2f96"
+        );
+        assert_eq!(
+            derive_identity_id("org_", "org", "https://logto.test/oidc", "tenant-1"),
+            "org_b6f56214a98891636d36e8c5"
         );
     }
 

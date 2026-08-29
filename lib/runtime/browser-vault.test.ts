@@ -4,10 +4,12 @@ import Dexie from "dexie"
 
 import {
   BROWSER_VAULT_DB_NAME,
-  BROWSER_VAULT_PBKDF2_ITERATIONS,
+  BROWSER_VAULT_ARGON2_MEMORY_KIB,
   BrowserVaultRepository,
   BrowserVaultSession,
+  __createLegacyPbkdf2VaultRecordForTesting,
   __resetBrowserVaultForTesting,
+  __setBrowserVaultArgon2ParametersForTesting,
   changeBrowserVaultPassword,
   deleteBrowserVault,
   getActiveBrowserVault,
@@ -22,6 +24,7 @@ const ACCOUNT_ID = "acct_vault"
 
 beforeEach(async () => {
   __resetBrowserVaultForTesting()
+  __setBrowserVaultArgon2ParametersForTesting(32)
   await Dexie.delete(BROWSER_VAULT_DB_NAME)
 })
 
@@ -30,10 +33,65 @@ afterAll(async () => {
   await Dexie.delete(BROWSER_VAULT_DB_NAME)
 })
 
+describe("legacy PBKDF2 (v1) vaults", () => {
+  // The migration to Argon2 must not strand anybody. A v1 record is the state
+  // EVERY existing browser account is in until its password is next rotated,
+  // so if this path breaks, those accounts are unopenable — with only the
+  // one-time recovery key, which most people will not have kept, as a way back.
+  it("still unlocks with the correct password", async () => {
+    const record = await __createLegacyPbkdf2VaultRecordForTesting(ACCOUNT_ID, "correct horse")
+
+    const session = await BrowserVaultSession.unlockWithPassword(record, "correct horse")
+
+    expect(session.accountId).toBe(ACCOUNT_ID)
+    expect(session.isUnlocked()).toBe(true)
+  })
+
+  it("still refuses the wrong password", async () => {
+    const record = await __createLegacyPbkdf2VaultRecordForTesting(ACCOUNT_ID, "correct horse")
+
+    await expect(BrowserVaultSession.unlockWithPassword(record, "wrong horse")).rejects.toThrow()
+  })
+
+  it("unlocks and rotates onto Argon2 through the repository", async () => {
+    await new BrowserVaultRepository().put(
+      await __createLegacyPbkdf2VaultRecordForTesting(ACCOUNT_ID, "correct horse")
+    )
+
+    await expect(unlockBrowserVault(ACCOUNT_ID, "correct horse")).resolves.toBeUndefined()
+    expect(getActiveBrowserVault()?.accountId).toBe(ACCOUNT_ID)
+
+    await changeBrowserVaultPassword(ACCOUNT_ID, "correct horse", "next horse")
+    const rotated = await new BrowserVaultRepository().get(ACCOUNT_ID)
+    expect(rotated?.version).toBe(2)
+    expect(rotated?.passwordKdf.algorithm).toBe("Argon2id")
+    await expect(unlockBrowserVault(ACCOUNT_ID, "next horse")).resolves.toBeUndefined()
+  })
+})
+
+// A record's OWN parameters drive its derivation, so a record minted under
+// different (e.g. older, or later-hardened) settings must still validate —
+// otherwise raising the cost parameters locks every existing vault out.
+it("accepts an Argon2 record whose parameters differ from the current ones", async () => {
+  const created = await BrowserVaultSession.create(ACCOUNT_ID, "correct horse", 10)
+  __setBrowserVaultArgon2ParametersForTesting(64)
+
+  await expect(
+    BrowserVaultSession.unlockWithPassword(created.record, "correct horse")
+  ).resolves.toBeDefined()
+})
+
 it("wraps the master key with both the password and one-time recovery key", async () => {
   const created = await BrowserVaultSession.create(ACCOUNT_ID, "correct horse", 10)
 
-  expect(created.record.passwordKdf.iterations).toBe(BROWSER_VAULT_PBKDF2_ITERATIONS)
+  expect(created.record.version).toBe(2)
+  expect(created.record.passwordKdf).toMatchObject({
+    algorithm: "Argon2id",
+    memoryKiB: 32,
+    timeCost: 1,
+    parallelism: 1,
+  })
+  expect(BROWSER_VAULT_ARGON2_MEMORY_KIB).toBe(19_456)
   expect(created.record.passwordWrap.ciphertext).not.toBe(created.record.recoveryWrap.ciphertext)
   expect(created.recoveryKey).toMatch(/^[A-Za-z0-9_-]+$/)
 
@@ -128,6 +186,15 @@ it("keeps only the active account master key in the process singleton", async ()
 
   await unlockBrowserVault(ACCOUNT_ID, "correct horse")
   expect(getActiveBrowserVault()?.isUnlocked()).toBe(true)
+})
+
+it("can provision a secondary account without replacing the active account key", async () => {
+  await provisionBrowserVault(ACCOUNT_ID, "correct horse")
+
+  await provisionBrowserVault("acct_secondary", "other password", false)
+
+  expect(getActiveBrowserVault()?.accountId).toBe(ACCOUNT_ID)
+  await expect(unlockBrowserVault("acct_secondary", "other password")).resolves.toBeUndefined()
 })
 
 it("verifies a password without replacing or locking the active Vault session", async () => {

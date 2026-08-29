@@ -1,5 +1,6 @@
 import type {
   ApprovalRequest,
+  ChatAttachment,
   SessionEvent,
   SessionInvite,
   SessionMembership,
@@ -26,6 +27,11 @@ export interface CollabChatInviteMirrorRow extends SessionInvite {
 }
 
 export interface CollabChatApprovalMirrorRow extends ApprovalRequest {
+  orgId: string
+  fetchedAt: number
+}
+
+export interface CollabChatAttachmentMirrorRow extends ChatAttachment {
   orgId: string
   fetchedAt: number
 }

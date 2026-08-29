@@ -50,6 +50,55 @@ const standalone: RuntimeTargetRecord = {
   lastUsedAt: 1,
 }
 
+describe("an already-active target", () => {
+  const activeRegistry = () => ({
+    getActiveTarget: jest.fn(async () => standalone),
+    ensureStandaloneTarget: jest.fn(),
+    activateTarget: jest.fn(),
+    listTargets: jest.fn(),
+    deleteTarget: jest.fn(),
+    deleteAccountTargets: jest.fn(),
+  })
+
+  // Migration is a ONE-TIME fold of a plaintext database into its encrypted
+  // replacement. Re-running it on every unlock opened three databases and wrote
+  // a full journal cycle to copy nothing — on the stage the lock screen already
+  // calls the long pole — and made an unlocked Vault a hard precondition for a
+  // path that previously needed none.
+  it("skips the migration when no plaintext database is left", async () => {
+    const registry = activeRegistry()
+    const migrate = jest.fn()
+    const markCompleted = jest.fn()
+
+    const target = await prepareAccountRuntimeTarget("acct_runtime", {
+      registry,
+      migrate,
+      markCompleted,
+      hasPendingMigration: async () => false,
+    })
+
+    expect(target).toBe(standalone)
+    expect(migrate).not.toHaveBeenCalled()
+    expect(markCompleted).not.toHaveBeenCalled()
+  })
+
+  it("still migrates when a plaintext database is waiting", async () => {
+    const registry = activeRegistry()
+    const migrate = jest.fn(async () => ({ stage: "verified" as const, tables: [] }))
+    const markCompleted = jest.fn(async () => undefined)
+
+    await prepareAccountRuntimeTarget("acct_runtime", {
+      registry,
+      migrate,
+      markCompleted,
+      hasPendingMigration: async () => true,
+    })
+
+    expect(migrate).toHaveBeenCalledWith({ accountId: "acct_runtime", targetId: standalone.id })
+    expect(markCompleted).toHaveBeenCalledWith("acct_runtime", standalone.id)
+  })
+})
+
 it("does not activate a new target until its database copy is verified", async () => {
   const events: string[] = []
   const registry = {
@@ -130,7 +179,9 @@ it("deletes every physical target database before removing registry metadata", a
 
   expect(events).toEqual([
     "cognia-account-acct_runtime-target-web-standalone",
+    "cognia-account-acct_runtime-target-web-standalone-encrypted-v1",
     "cognia-account-acct_runtime-target-desktop-studio",
+    "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1",
     "metadata",
   ])
   expect(result).toEqual({
@@ -138,7 +189,9 @@ it("deletes every physical target database before removing registry metadata", a
     targetIds: ["web-standalone", "desktop-studio"],
     deletedDatabases: [
       "cognia-account-acct_runtime-target-web-standalone",
+      "cognia-account-acct_runtime-target-web-standalone-encrypted-v1",
       "cognia-account-acct_runtime-target-desktop-studio",
+      "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1",
     ],
     registryRowsDeleted: 2,
   })

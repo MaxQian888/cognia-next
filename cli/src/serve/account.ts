@@ -11,7 +11,7 @@
  */
 import { LocalAccountRegistry } from "@/lib/accounts/account-db"
 import type { PasswordVerifierRecord } from "@/lib/accounts/account-types"
-import { unlockAccountForHost } from "@/stores/account/account-store"
+import { unlockAccountForHost, useAccountStore } from "@/stores/account/account-store"
 
 /** Must stay in lockstep with `HEADLESS_LOCAL_ACCOUNT_ID` in cognia-server.rs. */
 export const HEADLESS_LOCAL_ACCOUNT_ID = "local_acct_a"
@@ -37,6 +37,8 @@ function hostOwnedVerifier(): PasswordVerifierRecord {
 export interface EnsureHeadlessAccountOptions {
   /** Injected registry (tests). */
   registry?: LocalAccountRegistry
+  /** Injected raw key (tests/embedding); defaults to the supervisor env. */
+  accountContentKey?: Uint8Array
 }
 
 /**
@@ -59,6 +61,23 @@ export async function ensureHeadlessAccount(
   } else {
     await registry.setActiveAccountId(accountId)
   }
-  await unlockAccountForHost(accountId)
+  const accountState = useAccountStore.getState()
+  if (!accountState.locked && accountState.unlockedAccountId === accountId) return accountId
+  const ownsAccountContentKey = opts.accountContentKey === undefined
+  const accountContentKey = opts.accountContentKey ?? decodeHeadlessAccountContentKey()
+  try {
+    await unlockAccountForHost(accountId, accountContentKey)
+  } finally {
+    if (ownsAccountContentKey) accountContentKey.fill(0)
+  }
   return accountId
+}
+
+function decodeHeadlessAccountContentKey(): Uint8Array {
+  const raw = process.env.COGNIA_ACCOUNT_CONTENT_KEY
+  delete process.env.COGNIA_ACCOUNT_CONTENT_KEY
+  if (!raw || !/^[0-9a-fA-F]{64}$/.test(raw)) {
+    throw new Error("COGNIA_ACCOUNT_CONTENT_KEY must contain exactly 32 bytes as hexadecimal.")
+  }
+  return Uint8Array.from(raw.match(/.{2}/g)!, (pair) => Number.parseInt(pair, 16))
 }

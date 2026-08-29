@@ -1,5 +1,7 @@
 import Dexie from "dexie"
 
+import { accountDatabaseName } from "@/lib/accounts/account-db"
+import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { activateAccountDatabase } from "@/lib/db/schema"
 import { getExecutionBroker } from "@/lib/execution/broker"
@@ -20,6 +22,7 @@ import {
 } from "./runtime-target-lifecycle"
 import {
   RuntimeTargetRegistry,
+  encryptedRuntimeTargetDatabaseName,
   runtimeTargetDatabaseName,
   type RuntimeTargetRecord,
 } from "./target-registry"
@@ -40,6 +43,11 @@ interface PrepareDependencies {
     targetId: string
   }): Promise<{ stage: "verified"; tables: unknown[] }>
   markCompleted(accountId: string, targetId: string): Promise<void>
+  /**
+   * Is there still a plaintext database left to fold into the encrypted
+   * target? Injected so the steady-state skip is testable without Dexie.
+   */
+  hasPendingMigration?(input: { accountId: string; targetId: string }): Promise<boolean>
 }
 
 interface RemoveDependencies {
@@ -85,6 +93,55 @@ interface RegisterDependencies {
 
 const runtimeTargetRegistry = new RuntimeTargetRegistry()
 
+async function migrateEncryptedRuntimeTarget(input: {
+  accountId: string
+  targetId: string
+}): Promise<{ stage: "verified"; tables: unknown[] }> {
+  const vault = getActiveBrowserVault()
+  if (!vault || vault.accountId !== input.accountId) {
+    throw new Error("Browser Vault must be unlocked before account content migration.")
+  }
+  const targetDbName = encryptedRuntimeTargetDatabaseName(input.accountId, input.targetId)
+  activateAccountContentCipher(vault.createContentCipher(targetDbName))
+  const legacyTargetDbName = runtimeTargetDatabaseName(input.accountId, input.targetId)
+  const sourceDbName = (await Dexie.exists(legacyTargetDbName))
+    ? legacyTargetDbName
+    : accountDatabaseName(input.accountId)
+  const result = await migrateAccountDatabaseToTarget({
+    ...input,
+    sourceDbName,
+    targetDbName,
+  })
+  if (await Dexie.exists(sourceDbName)) {
+    await Dexie.delete(sourceDbName)
+    if (await Dexie.exists(sourceDbName)) {
+      throw new Error(`Plaintext account database deletion could not be verified: ${sourceDbName}`)
+    }
+  }
+  return result
+}
+
+/**
+ * Cheap steady-state probe: two `Dexie.exists` calls, no database is opened.
+ *
+ * Migration is a ONE-TIME fold of a plaintext database into its encrypted
+ * replacement, but it sat on the unlock path with no guard — so every unlock
+ * of an already-migrated account re-activated the cipher, opened the journal
+ * plus both databases and wrote a full `copying`→`verified` cycle to copy
+ * nothing, during the stage the lock screen already calls the long pole. It
+ * also made an unlocked Vault a hard precondition for a path that previously
+ * needed none.
+ */
+async function plaintextSourceExists(input: {
+  accountId: string
+  targetId: string
+}): Promise<boolean> {
+  return (
+    (await Dexie.exists(runtimeTargetDatabaseName(input.accountId, input.targetId))) ||
+    (await Dexie.exists(accountDatabaseName(input.accountId)))
+  )
+}
+
 export interface CompanionRuntimeConfigMetadata {
   baseUrl: string
   deviceId: string
@@ -99,12 +156,22 @@ export async function prepareAccountRuntimeTarget(
   accountId: string,
   dependencies: PrepareDependencies = {
     registry: runtimeTargetRegistry,
-    migrate: migrateAccountDatabaseToTarget,
+    migrate: migrateEncryptedRuntimeTarget,
     markCompleted: markTargetDatabaseMigrationCompleted,
   }
 ): Promise<RuntimeTargetRecord> {
   const active = await dependencies.registry.getActiveTarget(accountId)
-  if (active) return active
+  if (active) {
+    const pending = await (dependencies.hasPendingMigration ?? plaintextSourceExists)({
+      accountId,
+      targetId: active.id,
+    })
+    if (pending) {
+      await dependencies.migrate({ accountId, targetId: active.id })
+      await dependencies.markCompleted(accountId, active.id)
+    }
+    return active
+  }
 
   const target = await dependencies.registry.ensureStandaloneTarget(accountId)
   await dependencies.migrate({ accountId, targetId: target.id })
@@ -123,13 +190,17 @@ export async function removeAccountRuntimeTargets(
   const targets = await dependencies.registry.listTargets(accountId)
   const deletedDatabases: string[] = []
   for (const target of targets) {
-    const databaseName = runtimeTargetDatabaseName(accountId, target.id)
-    await dependencies.deleteDatabase(databaseName)
     const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
-    if (await databaseExists(databaseName)) {
-      throw new Error(`Runtime target database deletion could not be verified: ${databaseName}`)
+    for (const databaseName of [
+      runtimeTargetDatabaseName(accountId, target.id),
+      encryptedRuntimeTargetDatabaseName(accountId, target.id),
+    ]) {
+      await dependencies.deleteDatabase(databaseName)
+      if (await databaseExists(databaseName)) {
+        throw new Error(`Runtime target database deletion could not be verified: ${databaseName}`)
+      }
+      deletedDatabases.push(databaseName)
     }
-    deletedDatabases.push(databaseName)
   }
   await dependencies.registry.deleteAccountTargets(accountId)
   const remainingTargets = await dependencies.registry.listTargets(accountId)

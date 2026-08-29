@@ -331,6 +331,7 @@ pub fn close_reason(tenant_id: &str, device_id: &str) -> &'static str {
     match security_store().and_then(|store| store.device_state(tenant_id, device_id).ok().flatten())
     {
         Some(DeviceLifecycleState::Suspended) => "device_suspended",
+        Some(DeviceLifecycleState::Quarantined) => "device_quarantined",
         _ => "device_revoked",
     }
 }

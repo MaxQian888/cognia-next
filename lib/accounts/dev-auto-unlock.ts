@@ -1,28 +1,25 @@
 /**
- * Dev-only bypass of the local account password prompt.
+ * E2E-artifact-only bypass of the local account password prompt.
  *
  * In production the account lock is intentionally in-memory only: every launch
  * — and every reload — resets `unlockedAccountId` to null, so the AccountGate
  * asks for the password again. During local development (`pnpm dev` /
  * `pnpm tauri dev`) the webview restarts constantly (Rust rebuilds, HMR, manual
- * refreshes) and re-typing the password each time is pure friction, so dev
- * builds unlock the active account at boot instead of prompting.
+ * refreshes). Ordinary development builds must still exercise the real
+ * password path because it activates the Browser Vault and native plugin
+ * account session together.
  *
  * Scope is deliberately narrow:
- *  - Disabled when `NODE_ENV === "production"`, except in a dedicated
- *    `NEXT_PUBLIC_E2E=1` static test artifact. Shipped desktop/mobile builds do
- *    not set that flag, so real users are never affected.
+ *  - Enabled only in a dedicated `NEXT_PUBLIC_E2E=1` static browser artifact.
+ *    Shipped desktop/mobile builds do not set that flag.
  *  - Disabled server-side; the gate only exists inside a webview.
- *  - Opt out with `NEXT_PUBLIC_ACCOUNT_GATE=1` to exercise the real unlock flow
- *    from a dev build.
+ *  - `NEXT_PUBLIC_ACCOUNT_GATE=1` forces the real unlock flow in that artifact.
  *  - Only unlocks an account that ALREADY exists. First-run account creation
  *    still asks for a password: the account id scopes the Dexie database
  *    (`cognia-account-<id>`), so it must stay a deliberate choice.
- *  - Never on the web. The caller (`resolveDevAutoUnlockTarget`) refuses on any
- *    browser-vault platform, because there the password IS the vault key and an
- *    unlock without one leaves the app claiming to be signed in over a locked
- *    vault. Desktop and mobile reach their secrets through the OS keyring, so
- *    the relaxation is real there and only there.
+ *  - The caller provisions/unlocks a disposable Browser Vault before reporting
+ *    the account unlocked. It never runs in Tauri, where native reauthentication
+ *    is part of the security boundary.
  *  - Locking at runtime (`lock()`, idle auto-lock) still locks. Only the boot
  *    path is relaxed, so the gate itself stays reachable in dev.
  */
@@ -31,14 +28,11 @@
 export const FORCE_ACCOUNT_GATE_ENV = "NEXT_PUBLIC_ACCOUNT_GATE"
 
 /**
- * True when this build should unlock the active local account without a
- * password. False in production, on the server, and whenever
- * `NEXT_PUBLIC_ACCOUNT_GATE=1` asks for the real gate.
+ * True only for the dedicated browser E2E artifact.
  */
 export function isDevAutoUnlockEnabled(): boolean {
   if (typeof window === "undefined") return false
   // Written out literally so Next's build-time env inlining can see it.
   if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return false
-  if (process.env.NEXT_PUBLIC_E2E === "1") return true
-  return process.env.NODE_ENV !== "production"
+  return process.env.NEXT_PUBLIC_E2E === "1"
 }

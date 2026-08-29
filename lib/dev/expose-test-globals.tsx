@@ -331,9 +331,9 @@ export function ExposeTestGlobals(): null {
         await db.skills.clear().catch(() => undefined)
         await db.connectorDrafts.clear().catch(() => undefined)
         // Safe to wipe wholesale: the unlocked-account state the gate reads is
-        // never stored here. Dev builds re-derive it from the account registry
-        // (a separate DB, untouched by this reset) on every load — see
-        // `lib/accounts/dev-auto-unlock.ts`.
+        // never stored here. The dedicated E2E browser artifact re-derives it
+        // from the account registry (a separate DB, untouched by this reset)
+        // on every load — see `lib/accounts/dev-auto-unlock.ts`.
         window.localStorage.clear()
         window.sessionStorage.clear()
         // Mock base URLs survive a reset by design — specs configure them

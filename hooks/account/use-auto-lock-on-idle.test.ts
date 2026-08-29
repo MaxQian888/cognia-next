@@ -23,7 +23,15 @@ jest.mock("@/stores/settings", () => ({
 
 let mockSessions: Record<string, { status: string }> = {}
 jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: (selector: (s: unknown) => unknown) => selector({ sessions: mockSessions }),
+  useChatStore: Object.assign(
+    (selector: (s: unknown) => unknown) => selector({ sessions: mockSessions }),
+    { getState: () => ({ sessions: mockSessions }) }
+  ),
+}))
+
+const interruptSessionMock = jest.fn<Promise<void>, [string]>()
+jest.mock("@/lib/claude/ipc", () => ({
+  interruptSession: (sessionId: string) => interruptSessionMock(sessionId),
 }))
 
 const lockMock = jest.fn()
@@ -47,6 +55,7 @@ beforeEach(() => {
   mockUnlockedAccountId = "acct_1"
   mockSessions = {}
   lockMock.mockResolvedValue(undefined)
+  interruptSessionMock.mockResolvedValue()
 })
 
 afterEach(() => {
@@ -137,26 +146,35 @@ describe("useAutoLockOnIdle", () => {
     expect(lockMock).not.toHaveBeenCalled()
   })
 
-  it("never locks while a local turn is streaming", () => {
+  it("defers a streaming turn for at most one extra lock cycle, then interrupts and locks", async () => {
     mockSessions = { s1: { status: "streaming" } }
     renderHook(() => useAutoLockOnIdle())
 
     act(() => {
-      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+      jest.advanceTimersByTime(FIVE_MINUTES)
     })
-
     expect(lockMock).not.toHaveBeenCalled()
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
+    })
+    await act(async () => Promise.resolve())
+
+    expect(interruptSessionMock).toHaveBeenCalledWith("s1")
+    expect(lockMock).toHaveBeenCalledTimes(1)
   })
 
-  it("never locks while a local turn is waiting for approval", () => {
+  it("defers an approval for at most one extra lock cycle, then interrupts and locks", async () => {
     mockSessions = { s1: { status: "awaiting_approval" } }
     renderHook(() => useAutoLockOnIdle())
 
     act(() => {
-      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+      jest.advanceTimersByTime(FIVE_MINUTES * 2)
     })
+    await act(async () => Promise.resolve())
 
-    expect(lockMock).not.toHaveBeenCalled()
+    expect(interruptSessionMock).toHaveBeenCalledWith("s1")
+    expect(lockMock).toHaveBeenCalledTimes(1)
   })
 
   it("does not run on an overlay window, which cannot see the main window's activity", () => {

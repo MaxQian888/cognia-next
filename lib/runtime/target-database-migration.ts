@@ -2,7 +2,7 @@ import Dexie, { type Table } from "dexie"
 
 import { accountDatabaseName } from "@/lib/accounts/account-db"
 import { CogniaDB } from "@/lib/db/schema"
-import { runtimeTargetDatabaseName } from "./target-registry"
+import { encryptedRuntimeTargetDatabaseName } from "./target-registry"
 
 export const TARGET_MIGRATION_JOURNAL_DB_NAME = "cognia-runtime-target-migration-journal"
 export const DEFAULT_TARGET_MIGRATION_BATCH_SIZE = 500
@@ -80,7 +80,7 @@ export async function migrateAccountDatabaseToTarget(
 ): Promise<TargetDatabaseMigrationResult> {
   const sourceDbName = input.sourceDbName ?? accountDatabaseName(input.accountId)
   const targetDbName =
-    input.targetDbName ?? runtimeTargetDatabaseName(input.accountId, input.targetId)
+    input.targetDbName ?? encryptedRuntimeTargetDatabaseName(input.accountId, input.targetId)
   const now = input.now ?? Date.now()
   const journal = input.journal ?? new TargetDatabaseMigrationJournal()
   const ownsJournal = input.journal === undefined
@@ -113,21 +113,68 @@ export async function migrateAccountDatabaseToTarget(
       return result
     }
 
-    const source = new CogniaDB(sourceDbName, "target-migration:source")
+    // Schema-discovery mode intentionally bypasses the account middleware: an
+    // old database is plaintext by definition and must remain readable only by
+    // this locked migration path. The destination is a CogniaDB and therefore
+    // encrypts every classified payload before persistence.
+    const source = new Dexie(sourceDbName)
     const target = new CogniaDB(targetDbName, "target-migration:target")
     try {
       await source.open()
       await target.open()
       const targetTables = new Set(target.tables.map((table) => table.name))
       const tables: TargetMigrationTableSummary[] = []
+      const existingProgress = await target.accountContentMigrations.get("singleton")
+      const completedTables =
+        existingProgress?.accountId === input.accountId &&
+        ["migrating", "failed", "verified"].includes(existingProgress.status)
+          ? [...existingProgress.completedTables]
+          : []
+      await target.accountContentMigrations.put({
+        id: "singleton",
+        accountId: input.accountId,
+        status: "migrating",
+        completedTables,
+        updatedAt: now,
+      })
 
       for (const sourceTable of source.tables) {
-        if (!targetTables.has(sourceTable.name)) continue
+        if (sourceTable.name === "accountContentMigrations") continue
+        if (!targetTables.has(sourceTable.name)) {
+          if ((await sourceTable.count()) > 0) {
+            throw new Error(
+              `Account content migration cannot copy unknown table ${sourceTable.name}.`
+            )
+          }
+          continue
+        }
         const targetTable = target.table(sourceTable.name)
+        if (completedTables.includes(sourceTable.name)) {
+          const sourceCount = await sourceTable.count()
+          const verifiedCount = await verifyRows(sourceTable, targetTable, batchSize)
+          tables.push({ name: sourceTable.name, sourceCount, verifiedCount })
+          continue
+        }
         const sourceCount = await copyRows(sourceTable, targetTable, batchSize)
         const verifiedCount = await verifyRows(sourceTable, targetTable, batchSize)
         tables.push({ name: sourceTable.name, sourceCount, verifiedCount })
+        completedTables.push(sourceTable.name)
+        await target.accountContentMigrations.put({
+          id: "singleton",
+          accountId: input.accountId,
+          status: "migrating",
+          completedTables: [...completedTables],
+          updatedAt: Date.now(),
+        })
       }
+
+      await target.accountContentMigrations.put({
+        id: "singleton",
+        accountId: input.accountId,
+        status: "verified",
+        completedTables,
+        updatedAt: Date.now(),
+      })
 
       const result: TargetDatabaseMigrationResult = {
         stage: "verified",

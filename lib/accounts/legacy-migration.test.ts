@@ -3,7 +3,16 @@ import "fake-indexeddb/auto"
 
 import Dexie from "dexie"
 
-import { CogniaAccountRegistryDB, LocalAccountRegistry, accountDatabaseName } from "./account-db"
+import {
+  CogniaAccountRegistryDB,
+  LocalAccountRegistry,
+  encryptedAccountDatabaseName,
+} from "./account-db"
+import {
+  AccountContentCipher,
+  __resetAccountContentCipherForTesting,
+  activateAccountContentCipher,
+} from "./content-cipher"
 import { legacyDatabaseExists, migrateLegacyDatabaseToAccount } from "./legacy-migration"
 import { CogniaDB, LEGACY_COGNIA_DB_NAME } from "@/lib/db/schema"
 import type { PasswordVerifierRecord } from "./account-types"
@@ -44,6 +53,12 @@ async function createRegistry(testName: string) {
 async function deleteCogniaDb(name: string) {
   const db = new CogniaDB(name)
   await db.delete()
+}
+
+async function activateTestCipher(accountId: string): Promise<void> {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting(accountId, encryptedAccountDatabaseName(accountId))
+  )
 }
 
 async function seedLegacyV86(dbName: string) {
@@ -168,6 +183,14 @@ async function seedLegacyQueueV135(dbName: string) {
 }
 
 describe("migrateLegacyDatabaseToAccount", () => {
+  beforeEach(() => {
+    __resetAccountContentCipherForTesting()
+  })
+
+  afterEach(() => {
+    __resetAccountContentCipherForTesting()
+  })
+
   it("reports whether a legacy database exists without opening the account target", async () => {
     const sourceDbName = "cognia-legacy-exists-test"
     await deleteCogniaDb(sourceDbName)
@@ -176,15 +199,16 @@ describe("migrateLegacyDatabaseToAccount", () => {
     await seedLegacyV86(sourceDbName)
 
     await expect(legacyDatabaseExists(sourceDbName)).resolves.toBe(true)
-  }, 30000)
+  }, 120000)
 
   it("copies representative v86 legacy data into account #1 and leaves account #2 invisible", async () => {
     const sourceDbName = "cognia-legacy-v86-migration-test"
     await deleteCogniaDb(sourceDbName)
-    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
-    await deleteCogniaDb(accountDatabaseName("acct_second"))
+    await deleteCogniaDb(encryptedAccountDatabaseName("acct_legacy"))
+    await deleteCogniaDb(encryptedAccountDatabaseName("acct_second"))
     await seedLegacyV86(sourceDbName)
     const { db: registryDb, registry } = await createRegistry("legacy-v86")
+    await activateTestCipher("acct_legacy")
 
     const result = await migrateLegacyDatabaseToAccount({
       registry,
@@ -194,7 +218,7 @@ describe("migrateLegacyDatabaseToAccount", () => {
       batchSize: 2,
     })
 
-    expect(result.targetDbName).toBe(accountDatabaseName("acct_legacy"))
+    expect(result.targetDbName).toBe(encryptedAccountDatabaseName("acct_legacy"))
     expect(result.tables.find((table) => table.name === "sessions")).toMatchObject({ copied: 1 })
     await expect(registry.getState()).resolves.toMatchObject({
       legacyMigration: {
@@ -205,7 +229,7 @@ describe("migrateLegacyDatabaseToAccount", () => {
       },
     })
 
-    const accountOne = new CogniaDB(accountDatabaseName("acct_legacy"))
+    const accountOne = new CogniaDB(encryptedAccountDatabaseName("acct_legacy"))
     await accountOne.open()
     await expect(accountOne.settings.get("singleton")).resolves.toMatchObject({
       activeProjectId: "proj-A",
@@ -232,7 +256,8 @@ describe("migrateLegacyDatabaseToAccount", () => {
     await expect(accountOne.hostSyncCursors.count()).resolves.toBe(0)
     accountOne.close()
 
-    const accountTwo = new CogniaDB(accountDatabaseName("acct_second"))
+    await activateTestCipher("acct_second")
+    const accountTwo = new CogniaDB(encryptedAccountDatabaseName("acct_second"))
     await accountTwo.open()
     await expect(accountTwo.sessions.count()).resolves.toBe(0)
     await expect(accountTwo.messages.count()).resolves.toBe(0)
@@ -247,14 +272,15 @@ describe("migrateLegacyDatabaseToAccount", () => {
     })
     source.close()
     registryDb.close()
-  }, 30000)
+  }, 120000)
 
   it("uses the legacy database name and Date.now defaults when optional inputs are omitted", async () => {
     await deleteCogniaDb(LEGACY_COGNIA_DB_NAME)
-    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
+    await deleteCogniaDb(encryptedAccountDatabaseName("acct_legacy"))
     await seedLegacyV86(LEGACY_COGNIA_DB_NAME)
     const { db: registryDb, registry } = await createRegistry("legacy-defaults")
     const nowSpy = jest.spyOn(Date, "now").mockReturnValue(9000)
+    await activateTestCipher("acct_legacy")
 
     const result = await migrateLegacyDatabaseToAccount({
       registry,
@@ -272,14 +298,15 @@ describe("migrateLegacyDatabaseToAccount", () => {
 
     nowSpy.mockRestore()
     registryDb.close()
-  }, 30000)
+  }, 120000)
 
   it("attributes quarantined legacy queue rows to the account receiving the migration", async () => {
     const sourceDbName = "cognia-legacy-v135-queue-migration-test"
     await deleteCogniaDb(sourceDbName)
-    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
+    await deleteCogniaDb(encryptedAccountDatabaseName("acct_legacy"))
     await seedLegacyQueueV135(sourceDbName)
     const { db: registryDb, registry } = await createRegistry("legacy-v135-queue")
+    await activateTestCipher("acct_legacy")
 
     await migrateLegacyDatabaseToAccount({
       registry,
@@ -287,7 +314,7 @@ describe("migrateLegacyDatabaseToAccount", () => {
       targetAccountId: "acct_legacy",
     })
 
-    const accountDb = new CogniaDB(accountDatabaseName("acct_legacy"))
+    const accountDb = new CogniaDB(encryptedAccountDatabaseName("acct_legacy"))
     await accountDb.open()
     await expect(accountDb.mobileOutboundQueue.get("legacy-action")).resolves.toMatchObject({
       accountId: "acct_legacy",
@@ -296,18 +323,19 @@ describe("migrateLegacyDatabaseToAccount", () => {
     })
     accountDb.close()
     registryDb.close()
-  }, 30000)
+  }, 120000)
 
   it("refuses to mark migration complete when a non-empty unknown table cannot be copied", async () => {
     const sourceDbName = "cognia-legacy-unknown-table-test"
     await Dexie.delete(sourceDbName)
-    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
+    await deleteCogniaDb(encryptedAccountDatabaseName("acct_legacy"))
     const source = new Dexie(sourceDbName)
     source.version(1).stores({ unknownLegacyRows: "&id" })
     await source.open()
     await source.table("unknownLegacyRows").put({ id: "unknown-1" })
     source.close()
     const { db: registryDb, registry } = await createRegistry("legacy-unknown-table")
+    await activateTestCipher("acct_legacy")
 
     await expect(
       migrateLegacyDatabaseToAccount({ registry, sourceDbName, targetAccountId: "acct_legacy" })
@@ -315,7 +343,7 @@ describe("migrateLegacyDatabaseToAccount", () => {
     await expect(registry.getState()).resolves.not.toHaveProperty("legacyMigration")
 
     registryDb.close()
-  }, 30000)
+  }, 120000)
 
   it("rejects invalid migration inputs before writing the success marker", async () => {
     const { db: registryDb, registry } = await createRegistry("legacy-inputs")

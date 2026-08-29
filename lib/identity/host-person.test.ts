@@ -9,13 +9,16 @@ import {
 
 const desktop = () => true
 const web = () => false
+// No issuer/audience: the host validates the token against its OWN configured
+// Logto issuer. A renderer that supplies the trust anchor verifies nothing.
+const hostAuth = { accessToken: "token" }
 
 describe("off the desktop there is no host to tell", () => {
   it("no-ops without invoking anything, and says so", async () => {
     const invokeFn = jest.fn()
     expect(
       await bindHostPerson(
-        { localAccountId: "acct_a", userId: "usr_ada" },
+        { localAccountId: "acct_a", userId: "usr_ada", ...hostAuth },
         { invokeFn, isDesktop: web }
       )
     ).toBe(false)
@@ -29,21 +32,24 @@ describe("off the desktop there is no host to tell", () => {
     // otherwise this module only works in tests that stub it.
     const invokeFn = jest.fn()
     expect(
-      await bindHostPerson({ localAccountId: "acct_a", userId: "usr_ada" }, { invokeFn })
+      await bindHostPerson(
+        { localAccountId: "acct_a", userId: "usr_ada", ...hostAuth },
+        { invokeFn }
+      )
     ).toBe(false)
     expect(invokeFn).not.toHaveBeenCalled()
   })
 })
 
 describe("on the desktop", () => {
-  it("sends the account id under the name the Rust command expects", async () => {
+  it("sends verified Logto material and lets Rust choose the active account", async () => {
     const invokeFn = jest.fn().mockResolvedValue(undefined)
     await bindHostPerson(
-      { localAccountId: "acct_a", userId: "usr_ada", orgId: "org_acme" },
+      { localAccountId: "acct_a", userId: "usr_ada", orgId: "org_acme", ...hostAuth },
       { invokeFn, isDesktop: desktop }
     )
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      localAccountId: "acct_a",
+      accessToken: "token",
       userId: "usr_ada",
       orgId: "org_acme",
     })
@@ -54,11 +60,11 @@ describe("on the desktop", () => {
     // some serde configurations; an explicit null is unambiguous either way.
     const invokeFn = jest.fn().mockResolvedValue(undefined)
     await bindHostPerson(
-      { localAccountId: "acct_a", userId: "usr_ada" },
+      { localAccountId: "acct_a", userId: "usr_ada", ...hostAuth },
       { invokeFn, isDesktop: desktop }
     )
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      localAccountId: "acct_a",
+      accessToken: "token",
       userId: "usr_ada",
       orgId: null,
     })
@@ -71,18 +77,14 @@ describe("on the desktop", () => {
       .mockResolvedValueOnce({ localAccountNamespace: "acct_a", userId: "usr_ada", orgId: null })
 
     expect(await unbindHostPerson("acct_a", { invokeFn, isDesktop: desktop })).toBe(true)
-    expect(invokeFn).toHaveBeenNthCalledWith(1, ACCOUNT_UNBIND_PERSON_COMMAND, {
-      localAccountId: "acct_a",
-    })
+    expect(invokeFn).toHaveBeenNthCalledWith(1, ACCOUNT_UNBIND_PERSON_COMMAND)
 
     expect(await readHostPerson("acct_a", { invokeFn, isDesktop: desktop })).toEqual({
       localAccountNamespace: "acct_a",
       userId: "usr_ada",
       orgId: null,
     })
-    expect(invokeFn).toHaveBeenNthCalledWith(2, ACCOUNT_PERSON_COMMAND, {
-      localAccountId: "acct_a",
-    })
+    expect(invokeFn).toHaveBeenNthCalledWith(2, ACCOUNT_PERSON_COMMAND)
   })
 
   it("treats a host that recorded nothing as an answer, not a failure", async () => {
@@ -94,7 +96,7 @@ describe("on the desktop", () => {
     const invokeFn = jest.fn().mockRejectedValue(new Error("store is locked"))
     await expect(
       bindHostPerson(
-        { localAccountId: "acct_a", userId: "usr_ada" },
+        { localAccountId: "acct_a", userId: "usr_ada", ...hostAuth },
         { invokeFn, isDesktop: desktop }
       )
     ).rejects.toThrow("store is locked")

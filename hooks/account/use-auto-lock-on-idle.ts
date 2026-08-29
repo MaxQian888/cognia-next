@@ -21,8 +21,10 @@
  *   remainder when it finds fresh activity, so continuous use never churns
  *   timers.
  *
- * - **Never locks mid-run.** A streaming or approval-waiting local turn holds
- *   the timer off entirely; the countdown restarts once the run settles.
+ * - **Bounded run deferral.** A streaming or approval-waiting local turn may
+ *   delay the first idle deadline by one additional lock window. At the second
+ *   deadline the turn is interrupted and the account locks; background work
+ *   can never keep the DEK resident forever.
  *
  * - **Not on overlay windows.** The desktop pet / fleet-island windows load the
  *   same layout and pass straight through `AccountGate`, so they would each run
@@ -39,6 +41,7 @@
 
 import { useEffect, useRef } from "react"
 
+import { interruptSession } from "@/lib/claude/ipc"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useChatStore } from "@/stores/chat/chat-store"
@@ -49,17 +52,12 @@ const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touc
 export function useAutoLockOnIdle(): void {
   const minutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
   const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
-  const localTurnRunning = useChatStore((state) =>
-    Object.values(state.sessions).some(
-      (session) => session.status === "streaming" || session.status === "awaiting_approval"
-    )
-  )
   const lastActivityRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    if (minutes <= 0 || !unlockedAccountId || localTurnRunning) return
+    if (minutes <= 0 || !unlockedAccountId) return
     if (isSecondaryOverlayRole(getPetWindowRole())) return
 
     const windowMs = minutes * 60_000
@@ -71,8 +69,21 @@ export function useAutoLockOnIdle(): void {
       }
     }
 
-    const lockNow = () => {
-      void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
+    const blockingSessionIds = () =>
+      Object.entries(useChatStore.getState().sessions)
+        .filter(
+          ([, session]) => session.status === "streaming" || session.status === "awaiting_approval"
+        )
+        .map(([sessionId]) => sessionId)
+
+    const lockNow = (sessionIds: string[] = []) => {
+      if (sessionIds.length === 0) {
+        void Promise.resolve(useAccountStore.getState().lock()).catch(() => undefined)
+        return
+      }
+      void Promise.allSettled(sessionIds.map((sessionId) => interruptSession(sessionId)))
+        .then(() => useAccountStore.getState().lock())
+        .catch(() => undefined)
     }
 
     const arm = () => {
@@ -88,9 +99,20 @@ export function useAutoLockOnIdle(): void {
     const onExpire = () => {
       timerRef.current = null
       // Fresh activity since we armed? Wait out the remainder instead of locking.
-      const remaining = windowMs - (Date.now() - lastActivityRef.current)
-      if (remaining <= 0) lockNow()
-      else arm()
+      const idleFor = Date.now() - lastActivityRef.current
+      const remaining = windowMs - idleFor
+      if (remaining > 0) {
+        arm()
+        return
+      }
+
+      const blockers = blockingSessionIds()
+      const maximumDeferralRemaining = windowMs * 2 - idleFor
+      if (blockers.length > 0 && maximumDeferralRemaining > 0) {
+        timerRef.current = setTimeout(onExpire, maximumDeferralRemaining)
+        return
+      }
+      lockNow(blockers)
     }
 
     const bump = () => {
@@ -118,5 +140,5 @@ export function useAutoLockOnIdle(): void {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("focus", onVisibility)
     }
-  }, [minutes, unlockedAccountId, localTurnRunning])
+  }, [minutes, unlockedAccountId])
 }

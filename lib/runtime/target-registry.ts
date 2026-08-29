@@ -256,6 +256,10 @@ export function runtimeTargetDatabaseName(accountId: string, targetId: string): 
   return `cognia-account-${assertAccountId(accountId)}-target-${assertTargetId(targetId)}`
 }
 
+export function encryptedRuntimeTargetDatabaseName(accountId: string, targetId: string): string {
+  return `${runtimeTargetDatabaseName(accountId, targetId)}-encrypted-v1`
+}
+
 function assertTargetId(targetId: string): string {
   if (!TARGET_ID_PATTERN.test(targetId)) {
     throw new Error(

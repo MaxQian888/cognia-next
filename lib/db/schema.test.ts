@@ -436,12 +436,12 @@ describe("getDb", () => {
   it("opens the selected account database and closes the previous handle on switch", () => {
     activateAccountDatabase("acct_one")
     const first = getDb()
-    expect(first.name).toBe("cognia-account-acct_one")
+    expect(first.name).toBe("cognia-account-acct_one-encrypted-v1")
 
     activateAccountDatabase("acct_two")
     const second = getDb()
 
-    expect(second.name).toBe("cognia-account-acct_two")
+    expect(second.name).toBe("cognia-account-acct_two-encrypted-v1")
     expect(second).not.toBe(first)
     expect(first.isOpen()).toBe(false)
   })
@@ -449,7 +449,7 @@ describe("getDb", () => {
   it("opens a physically isolated database for an account runtime target", () => {
     activateAccountDatabase("acct_one", "web-standalone")
 
-    expect(getDb().name).toBe("cognia-account-acct_one-target-web-standalone")
+    expect(getDb().name).toBe("cognia-account-acct_one-target-web-standalone-encrypted-v1")
   })
 
   it("leaves the cached handle untouched when account selection does not change", () => {
@@ -463,7 +463,7 @@ describe("getDb", () => {
 
   it("can clear account database selection back to the legacy database for migration tests", () => {
     activateAccountDatabase("acct_one")
-    expect(getDb().name).toBe("cognia-account-acct_one")
+    expect(getDb().name).toBe("cognia-account-acct_one-encrypted-v1")
 
     clearAccountDatabaseSelection()
     const legacy = getDb()
@@ -790,6 +790,31 @@ describe("getDb", () => {
       expect.arrayContaining(["sessionId", "[sessionId+sequence]"])
     )
     expect(db.collabChatSyncStates.schema.primKey.name).toBe("sessionId")
+  })
+
+  it("v209 opens the shared-chat attachment metadata mirror", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(209)
+    expect(db.collabChatAttachments.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sessionId", "orgId", "status"])
+    )
+  })
+
+  it("v208 opens the resumable account-content encryption journal", async () => {
+    const db = new CogniaDB("cognia-schema-v208-content-encryption")
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(208)
+    expect(db.accountContentMigrations.schema.primKey.name).toBe("id")
+    expect(db.accountContentMigrations.schema.indexes.map((index) => index.name)).toEqual([
+      "accountId",
+      "status",
+      "updatedAt",
+    ])
+    db.close()
+    await Dexie.delete("cognia-schema-v208-content-encryption")
   })
 
   it("v196 indexes the external subject the IM plane resolves people by", async () => {

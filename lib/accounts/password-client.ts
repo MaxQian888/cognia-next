@@ -8,7 +8,7 @@ import { assertPasswordMeetsPolicy } from "./password-policy"
 export const ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND = "account_password_create_verifier"
 export const ACCOUNT_PASSWORD_VERIFY_COMMAND = "account_password_verify"
 export const ACCOUNT_UNBIND_LOCAL_COMMAND = "account_unbind_local"
-export const ACCOUNT_REBIND_VERIFIER_COMMAND = "account_rebind_verifier"
+export const ACCOUNT_PASSWORD_ROTATE_COMMAND = "account_password_rotate"
 
 type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
@@ -74,9 +74,10 @@ export async function unbindLocalAccount(): Promise<void> {
   try {
     await (invoke as InvokeFn)<unknown>(ACCOUNT_UNBIND_LOCAL_COMMAND)
   } catch (error) {
-    // Never let this fail a lock: the worst case is a stale in-process binding
-    // that the next unlock overwrites anyway.
-    console.warn("account: could not unbind the host account binding", error)
+    throw new Error(
+      "The native account security session could not be destroyed. Keep the account locked and restart the app before unlocking another account.",
+      { cause: toError(error) }
+    )
   }
 }
 
@@ -86,13 +87,25 @@ export async function unbindLocalAccount(): Promise<void> {
  * The binding is pinned to the verifier it was first seen with, so without this
  * a rotated password would be refused as a mismatch on every later unlock.
  */
-export async function rebindPasswordVerifier(
+export async function rotateNativePassword(
   accountId: string,
-  verifier: PasswordVerifierRecord
-): Promise<void> {
-  if (!isTauri()) return
+  currentPassword: string,
+  currentVerifier: PasswordVerifierRecord,
+  newPassword: string,
+  newVerifier?: PasswordVerifierRecord
+): Promise<PasswordVerifierRecord> {
+  if (!isTauri()) {
+    throw new Error("Native password rotation is only available in the desktop runtime.")
+  }
   try {
-    await (invoke as InvokeFn)<unknown>(ACCOUNT_REBIND_VERIFIER_COMMAND, { accountId, verifier })
+    const result = await (invoke as InvokeFn)<unknown>(ACCOUNT_PASSWORD_ROTATE_COMMAND, {
+      accountId,
+      currentPassword,
+      currentVerifier,
+      newPassword,
+      newVerifier: newVerifier ?? null,
+    })
+    return normalizePasswordVerifier(result)
   } catch (error) {
     throw toError(error)
   }

@@ -12,21 +12,50 @@ import {
   policyForTable,
   tableNamesForCategory,
 } from "./table-catalog"
+import CONTENT_PROTECTION_BASELINE from "./content-protection-baseline.json"
 
 describe("DataTableCatalog", () => {
+  /**
+   * Whether a table's rows are encrypted at rest must be a DECLARED answer.
+   *
+   * `contentProtection` is derived, and the last step of that derivation is a
+   * substring match over the table name — so a new table holding user content
+   * whose name misses the pattern would inherit `metadata-only` and ship in the
+   * clear with every other gate green. Pinning the full map is what makes that
+   * impossible: a new table fails here until someone writes down what it is,
+   * and the classification shows up in the diff as a line a reviewer can see.
+   *
+   * Adding a table: run the catalog, add the entry to
+   * `content-protection-baseline.json`. Changing an existing one from
+   * `encrypted-content` to `metadata-only` is a data-exposure change — say why
+   * in the commit.
+   */
+  it("pins the at-rest content protection of every table", () => {
+    const actual = Object.fromEntries(
+      [...DATA_TABLE_CATALOG]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((entry) => [entry.name, entry.contentProtection])
+    )
+
+    expect(actual).toEqual(CONTENT_PROTECTION_BASELINE)
+  })
+
   it("covers every static CogniaDB table exactly once", () => {
     const db = new CogniaDB("catalog-completeness", "catalog-test")
     const actual = db.tables.map((table) => table.name).sort()
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(318)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(332)
     db.close()
   })
 
   it("declares complete lifecycle and performance policy for every table", () => {
     for (const entry of DATA_TABLE_CATALOG) {
       expect(entry.owner).not.toBe("")
+      expect(["encrypted-content", "metadata-only", "secret-externalized"]).toContain(
+        entry.contentProtection
+      )
       expect(entry.backupPolicy.reason).not.toBe("")
       expect(entry.syncPolicy.reason).not.toBe("")
       expect(entry.retentionPolicy.reason).not.toBe("")

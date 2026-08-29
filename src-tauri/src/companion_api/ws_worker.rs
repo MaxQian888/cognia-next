@@ -716,6 +716,9 @@ async fn handle_worker_socket(
                         Some(super::security_store::DeviceLifecycleState::Suspended) => {
                             ("device_suspended", "this device is suspended")
                         }
+                        Some(super::security_store::DeviceLifecycleState::Quarantined) => {
+                            ("device_quarantined", "this device must be claimed again")
+                        }
                         Some(super::security_store::DeviceLifecycleState::Active) => {
                             ("grant_revoked", "agent.worker capability revoked")
                         }

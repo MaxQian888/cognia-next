@@ -2,11 +2,11 @@ import { invoke } from "@tauri-apps/api/core"
 
 import {
   ACCOUNT_PASSWORD_CREATE_VERIFIER_COMMAND,
+  ACCOUNT_PASSWORD_ROTATE_COMMAND,
   ACCOUNT_PASSWORD_VERIFY_COMMAND,
-  ACCOUNT_REBIND_VERIFIER_COMMAND,
   ACCOUNT_UNBIND_LOCAL_COMMAND,
   createPasswordVerifier,
-  rebindPasswordVerifier,
+  rotateNativePassword,
   unbindLocalAccount,
   verifyPassword,
 } from "./password-client"
@@ -75,38 +75,45 @@ describe("password-client", () => {
     })
   })
 
-  it("unbinds the host account binding without failing a lock", async () => {
+  it("unbinds the host account binding and surfaces a native teardown failure", async () => {
     invokeMock.mockResolvedValueOnce(undefined)
     await expect(unbindLocalAccount()).resolves.toBeUndefined()
     expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_UNBIND_LOCAL_COMMAND)
 
-    // A failing unbind must never block locking — the stale in-process binding
-    // is overwritten by the next unlock anyway.
     invokeMock.mockRejectedValueOnce(new Error("native error"))
-    await expect(unbindLocalAccount()).resolves.toBeUndefined()
+    await expect(unbindLocalAccount()).rejects.toThrow(/restart the app/i)
   })
 
-  it("re-pins the host binding after a password rotation", async () => {
-    invokeMock.mockResolvedValueOnce(undefined)
+  it("re-authenticates and rotates the host verifier in one native command", async () => {
+    invokeMock.mockResolvedValueOnce(verifier)
 
-    await expect(rebindPasswordVerifier("acct_alpha", verifier)).resolves.toBeUndefined()
+    await expect(
+      rotateNativePassword("acct_alpha", "old-password", verifier, "new-password")
+    ).resolves.toEqual(verifier)
 
-    expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_REBIND_VERIFIER_COMMAND, {
+    expect(invokeMock).toHaveBeenCalledWith(ACCOUNT_PASSWORD_ROTATE_COMMAND, {
       accountId: "acct_alpha",
-      verifier,
+      currentPassword: "old-password",
+      currentVerifier: verifier,
+      newPassword: "new-password",
+      newVerifier: null,
     })
 
     // Unlike the unbind, this one surfaces: silently skipping it would leave
     // the host pinned to a verifier the account no longer has.
     invokeMock.mockRejectedValueOnce(new Error("native error"))
-    await expect(rebindPasswordVerifier("acct_alpha", verifier)).rejects.toThrow("native error")
+    await expect(
+      rotateNativePassword("acct_alpha", "old-password", verifier, "new-password")
+    ).rejects.toThrow("native error")
   })
 
   it("does not reach the host outside Tauri", async () => {
     tauriRuntime = false
 
     await expect(unbindLocalAccount()).resolves.toBeUndefined()
-    await expect(rebindPasswordVerifier("acct_alpha", verifier)).resolves.toBeUndefined()
+    await expect(
+      rotateNativePassword("acct_alpha", "old-password", verifier, "new-password")
+    ).rejects.toThrow(/desktop runtime/)
 
     expect(invokeMock).not.toHaveBeenCalled()
   })

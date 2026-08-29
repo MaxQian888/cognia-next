@@ -8,6 +8,7 @@ export type DataSyncMode = "none" | "companion-readonly"
 export type DataCleanupPolicy = "protected" | "quick" | "deep"
 export type DataExpectedScale = "small" | "medium" | "large" | "very-large"
 export type DataRetentionEnforcement = "central" | "domain" | "explicit-delete"
+export type DataContentProtection = "encrypted-content" | "metadata-only" | "secret-externalized"
 
 export interface DataRetentionPolicy {
   mode: "permanent" | "ttl" | "cap"
@@ -24,6 +25,7 @@ export interface DataTableCatalogEntry {
   owner: string
   role: DataTableRole
   sensitivity: DataSensitivity
+  contentProtection: DataContentProtection
   accountScope: DataAccountScope
   backupPolicy: { mode: DataBackupMode; reason: string; rebuild?: string }
   syncPolicy: { mode: DataSyncMode; reason: string }
@@ -48,6 +50,7 @@ export const CORE_TABLE_NAMES = [
   "a2uiSurfaces",
   "a2uiTemplates",
   "actionReviewReceipts",
+  "accountContentMigrations",
   "adapterInstances",
   "agentCanonicalSessions",
   "agentCompatibilityRecords",
@@ -96,6 +99,8 @@ export const CORE_TABLE_NAMES = [
   "chatGoalEvents",
   "chatGoals",
   "chatInputHistory",
+  "chatResultIndex",
+  "chatResultIndexState",
   "chatSearchState",
   "chatSearchText",
   "chatTemplates",
@@ -103,6 +108,13 @@ export const CORE_TABLE_NAMES = [
   "chatTurnSummaries",
   "codeAdoptionTurns",
   "collabIssues",
+  "collabChatApprovals",
+  "collabChatAttachments",
+  "collabChatEvents",
+  "collabChatInvites",
+  "collabChatMemberships",
+  "collabChatSessions",
+  "collabChatSyncStates",
   "collabWorkspaces",
   "collabPlans",
   "collabRuns",
@@ -194,6 +206,8 @@ export const CORE_TABLE_NAMES = [
   "mcpServerSummaries",
   "mcpSyncJobs",
   "memories",
+  "mentionLinks",
+  "mentionLinkState",
   "memoryAuditEvents",
   "memoryEvidence",
   "memoryJobs",
@@ -636,6 +650,69 @@ QUEUE_TABLES.add("workSubmissions")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 
+const SECRET_EXTERNALIZED_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
+
+const AUTO_INCREMENT_METADATA_TABLES = new Set<CoreTableName>([
+  "chatInputHistory",
+  "petActivityLog",
+  "petConversation",
+  "providerLimits",
+  "subscriptionBalance",
+  "subscriptionUsage",
+])
+
+const USER_CONTENT_TABLES = new Set<CoreTableName>([
+  "sessions",
+  "sessionState",
+  "chatDrafts",
+  "messages",
+  "promptPresets",
+  "artifacts",
+  "artifactVersions",
+  "canvasComments",
+  "canvasDocuments",
+  "canvasSessions",
+  "canvasVersions",
+  "contextComments",
+  "twins",
+  "twinSources",
+  "twinChunks",
+  "twinProfile",
+  "twinDrafts",
+  "memories",
+  "memoryEvidence",
+  "knowledgeBases",
+  "knowledgeBaseSources",
+  "knowledgeBaseChunks",
+  "retrievalEncryptedContent",
+  "retrievalTraces",
+  "connectorAttachments",
+  "connectorConversationStates",
+  "connectorDrafts",
+  "connectorInboundJobs",
+  "inboundLedger",
+  "outboundQueue",
+  "ocrResults",
+  "agentTraces",
+  "wikiArticles",
+  "wikiArticlesStaging",
+  "wikiCorpora",
+  "wikiSections",
+  "wikiSectionsStaging",
+  "workflows",
+  "workflowVersions",
+  "workflowRuns",
+  "workflowRunEvents",
+  "workflowInvocations",
+  "workflowHumanInputFiles",
+  "workflowHumanInputRequests",
+  "workflowHumanInputSubmissions",
+  "workflowKnowledgeArtifacts",
+  "workflowConversations",
+  "workflowConversationMessages",
+  "workflowConversationSummaries",
+])
+
 /** Stores whose rows hold encrypted user content rather than ids and metadata. */
 const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "collabIssues",
@@ -992,8 +1069,63 @@ function retentionFor(name: CoreTableName, role: DataTableRole): DataRetentionPo
   }
 }
 
+/**
+ * Explicit content-protection decisions, checked BEFORE the derivation below.
+ *
+ * The derivation ends in a substring match over the table NAME, which is both
+ * over- and under-inclusive: it is the home for tables the heuristic gets
+ * wrong, and for any table whose classification deserves to be stated rather
+ * than inferred.
+ */
+const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentProtection>> = {
+  // Bookkeeping for the encryption migration itself: an id, an account id, a
+  // status, a table-name list and a timestamp. It matches `/Content/` purely by
+  // spelling. Encrypting it would also mean the resume path could not read its
+  // own journal without the cipher it is in the middle of installing.
+  accountContentMigrations: "metadata-only",
+}
+
+/**
+ * Decide whether a table's rows are encrypted at rest.
+ *
+ * The tail of this is a heuristic — a substring match over the table name —
+ * and a heuristic must not be the last word on whether user content is stored
+ * in the clear. Two things keep it honest: {@link CONTENT_PROTECTION_OVERRIDES}
+ * for stating a decision outright, and the baseline in
+ * `content-protection-baseline.json`, which pins the answer for every existing
+ * table so a NEW one cannot inherit `metadata-only` by accident — the gate in
+ * `table-catalog.test.ts` fails until its classification is declared.
+ */
+function contentProtectionFor(
+  name: CoreTableName,
+  sensitivity: DataSensitivity,
+  accountScope: DataAccountScope
+): DataContentProtection {
+  const override = CONTENT_PROTECTION_OVERRIDES[name]
+  if (override) return override
+  if (SECRET_EXTERNALIZED_TABLES.has(name)) return "secret-externalized"
+  if (AUTO_INCREMENT_METADATA_TABLES.has(name) || accountScope === "global") {
+    return "metadata-only"
+  }
+  if (
+    USER_CONTENT_TABLES.has(name) ||
+    sensitivity === "confidential" ||
+    /Content|Artifact|Canvas|Wiki|Trace|Log/.test(name)
+  ) {
+    return "encrypted-content"
+  }
+  return "metadata-only"
+}
+
 function createEntry(name: CoreTableName): DataTableCatalogEntry {
   const role = roleFor(name)
+  const sensitivity: DataSensitivity = SECRET_TABLES.has(name)
+    ? "secret"
+    : CONFIDENTIAL_TABLES.has(name) || USER_CONTENT_TABLES.has(name)
+      ? "confidential"
+      : /messages|Drafts|Sources|Evidence|ContentObjects/.test(name)
+        ? "confidential"
+        : "internal"
   const accountScope: DataAccountScope = GLOBAL_TABLES.has(name)
     ? "global"
     : RUNTIME_TARGET_TABLES.has(name)
@@ -1003,13 +1135,8 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
     name,
     owner: ownerFor(name),
     role,
-    sensitivity: SECRET_TABLES.has(name)
-      ? "secret"
-      : CONFIDENTIAL_TABLES.has(name)
-        ? "confidential"
-        : /messages|Drafts|Sources|Evidence|ContentObjects/.test(name)
-          ? "confidential"
-          : "internal",
+    sensitivity,
+    contentProtection: contentProtectionFor(name, sensitivity, accountScope),
     accountScope,
     backupPolicy: backupFor(name, role),
     syncPolicy: COMPANION_SYNC_TABLES.has(name)
@@ -1058,6 +1185,7 @@ export function policyForTable(name: string): DataTableCatalogEntry | undefined 
     owner: name.slice(0, name.indexOf(":")),
     role: "authoritative",
     sensitivity: "confidential",
+    contentProtection: "encrypted-content",
     accountScope: "plugin",
     backupPolicy: {
       mode: "device-local",

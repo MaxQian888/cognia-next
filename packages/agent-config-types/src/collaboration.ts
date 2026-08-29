@@ -120,6 +120,16 @@ export interface RunLease {
   updatedAt: number
 }
 
+export interface RunQueueItem {
+  id: string
+  sessionId: string
+  requestedByUserId: string
+  payload: Record<string, unknown>
+  status: "queued" | "claimed" | "cancelled"
+  position: number
+  createdAt: number
+}
+
 export type ApprovalRisk = "ordinary" | "high"
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled"
 
@@ -136,6 +146,22 @@ export interface ApprovalRequest {
   expiresAt: number
   createdAt: number
   revision: number
+}
+
+export type ChatAttachmentStatus = "pending" | "available" | "deleted"
+
+export interface ChatAttachment {
+  id: string
+  sessionId: string
+  eventId?: string
+  fileName: string
+  mediaType: string
+  byteLength: number
+  sha256: string
+  status: ChatAttachmentStatus
+  createdByUserId: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface BreakGlassGrant {

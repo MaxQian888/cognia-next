@@ -46,13 +46,21 @@ function resolve(deps: HostPersonDeps) {
  * ask what shell it is running in.
  */
 export async function bindHostPerson(
-  input: { localAccountId: string; userId: string; orgId?: string },
+  input: {
+    localAccountId: string
+    userId: string
+    orgId?: string
+    accessToken: string
+  },
   deps: HostPersonDeps = {}
 ): Promise<boolean> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return false
+  // No `issuer`/`audience`: the host validates the token against its OWN
+  // configured Logto issuer. A renderer that supplies the trust anchor is
+  // verifying the token against itself.
   await call<void>(ACCOUNT_BIND_PERSON_COMMAND, {
-    localAccountId: input.localAccountId,
+    accessToken: input.accessToken,
     userId: input.userId,
     orgId: input.orgId ?? null,
   })
@@ -65,7 +73,8 @@ export async function unbindHostPerson(
 ): Promise<boolean> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return false
-  await call<void>(ACCOUNT_UNBIND_PERSON_COMMAND, { localAccountId })
+  void localAccountId
+  await call<void>(ACCOUNT_UNBIND_PERSON_COMMAND)
   return true
 }
 
@@ -80,6 +89,7 @@ export async function readHostPerson(
 ): Promise<HostPerson | null> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return null
-  const result = await call<HostPerson | null>(ACCOUNT_PERSON_COMMAND, { localAccountId })
+  void localAccountId
+  const result = await call<HostPerson | null>(ACCOUNT_PERSON_COMMAND)
   return result ?? null
 }

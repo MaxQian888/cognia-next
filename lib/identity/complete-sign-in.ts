@@ -69,6 +69,10 @@ export async function completeSignIn(
       {
         localAccountId,
         userId: identity.user.id,
+        // The token travels; the issuer/audience it is validated against do
+        // NOT. The host reads those from its own configuration, because a
+        // caller that picks its own trust anchor is not being verified at all.
+        accessToken: session.accessToken,
         ...(identity.org ? { orgId: identity.org.id } : {}),
       },
       deps.host ?? {}

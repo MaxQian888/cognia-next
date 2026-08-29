@@ -1388,17 +1388,23 @@ async fn run_serve(
         serde_json::to_string(&remote_browser)
             .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
     );
-    install_headless_services(Some(
-        HeadlessServices::new_with_exec(
-            sidecar_host,
-            api_keys,
-            Arc::clone(&shared.event_bus),
-            SpawnPolicy::from_env(&data_dir),
-            exec,
-            plugin_storage_dir(&data_dir),
-        )
-        .map_err(|error| format!("headless services: {error}"))?,
-    ));
+    let local_account_id = app_lib::companion_api::host_identity::current()
+        .map(|context| context.local_account_namespace)
+        .map_err(|error| format!("resolve headless local account: {error}"))?;
+    let services = HeadlessServices::new_with_exec(
+        sidecar_host,
+        api_keys,
+        Arc::clone(&shared.event_bus),
+        SpawnPolicy::from_env(&data_dir),
+        exec,
+        plugin_storage_dir(&data_dir),
+    )
+    .map_err(|error| format!("headless services: {error}"))?;
+    services
+        .plugin_runtime
+        .activate_account(&local_account_id)
+        .map_err(|error| format!("activate headless plugin account: {error}"))?;
+    install_headless_services(Some(services));
     if let Some(services) = headless_services() {
         spawn_sidecar(Arc::clone(&services.sidecar_host), services.sidecar.clone())
             .await
@@ -1541,6 +1547,10 @@ async fn run_serve(
     let mut brain_supervisor: Option<Arc<brain::BrainSupervisor>> = None;
     match resolve_brain_entry() {
         Some(entry) => {
+            let account_id = local_account_id.clone();
+            let account_content_key =
+                app_lib::headless::get_or_create_account_content_key(&account_id)
+                    .map_err(|error| format!("account content key: {error}"))?;
             let config = brain::BrainConfig::for_port(
                 entry,
                 handle.bound_port,
@@ -1550,9 +1560,8 @@ async fn run_serve(
                 // *namespace* — deliberately not the tenant. Read back from the
                 // binding rather than threaded through, so there is one answer
                 // to "which account does this host serve".
-                app_lib::companion_api::host_identity::current()
-                    .map(|context| context.local_account_namespace)
-                    .unwrap_or_else(|_| HEADLESS_LOCAL_ACCOUNT_ID.to_string()),
+                account_id,
+                account_content_key,
                 headless_services()
                     .map(|services| services.code_server.host_id().to_string())
                     .unwrap_or_else(|| "headless".to_string()),
@@ -1585,6 +1594,16 @@ async fn run_serve(
         supervisor.shutdown();
     }
     if let Some(services) = headless_services() {
+        if let Err(error) = cognia_plugin_runtime::teardown_account_runtimes(
+            &services.plugin_runtime,
+            &services.python_plugins,
+            &services.wasm_plugins,
+            &services.vscode_plugins,
+        )
+        .await
+        {
+            log::warn!("headless plugin teardown failed: {error}");
+        }
         services.code_server.stop_all().await;
         let _ = services.gateway.stop();
         kill_sidecar(services.sidecar.clone()).await;

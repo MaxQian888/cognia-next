@@ -6,6 +6,7 @@ import {
   CogniaAccountRegistryDB,
   LocalAccountRegistry,
   accountDatabaseName,
+  encryptedAccountDatabaseName,
   generateAccountId,
 } from "./account-db"
 import type { PasswordVerifierRecord } from "./account-types"
@@ -71,6 +72,7 @@ describe("LocalAccountRegistry", () => {
     await expect(registry.listAccounts()).resolves.toEqual([account])
     await expect(registry.getActiveAccountId()).resolves.toBe("acct_legacy")
     expect(accountDatabaseName(account.id)).toBe("cognia-account-acct_legacy")
+    expect(encryptedAccountDatabaseName(account.id)).toBe("cognia-account-acct_legacy-encrypted-v1")
 
     db.close()
   })

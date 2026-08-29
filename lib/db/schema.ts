@@ -148,6 +148,7 @@ import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
 import type { CollabRunMirrorRow } from "./collab-run-mirror-types"
 import type {
   CollabChatApprovalMirrorRow,
+  CollabChatAttachmentMirrorRow,
   CollabChatEventMirrorRow,
   CollabChatInviteMirrorRow,
   CollabChatMembershipMirrorRow,
@@ -321,13 +322,19 @@ import type {
   PetConversationRow,
   PetInventoryRow,
 } from "@/types/pet"
-import { accountDatabaseName } from "@/lib/accounts/account-db"
-import { LEGACY_MIXED_TARGET_ID, runtimeTargetDatabaseName } from "@/lib/runtime/target-registry"
+import { encryptedAccountDatabaseName } from "@/lib/accounts/account-db"
+import {
+  encryptedRuntimeTargetDatabaseName,
+  LEGACY_MIXED_TARGET_ID,
+} from "@/lib/runtime/target-registry"
 import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 import { backfillSessionLineageV131 } from "./session-lineage-backfill"
+import { createEncryptedContentMiddleware } from "./encrypted-content-middleware"
+import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
+import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import type { ChatTemplateRow } from "./chat-templates"
 import type {
   ExternalAgentConfigHeadRow,
@@ -991,6 +998,9 @@ export class CogniaDB extends Dexie {
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
+    if (name.startsWith("cognia-account-")) {
+      this.use(createEncryptedContentMiddleware(name))
+    }
     this.connectionOwner = connectionOwner
     this.connectionId = `db-${++databaseConnectionSequence}`
     this.connectionCreatedAt = Date.now()
@@ -4943,7 +4953,32 @@ export class CogniaDB extends Dexie {
       collabChatApprovals: "&id, sessionId, orgId, runId, status, expiresAt, fetchedAt",
       collabChatSyncStates: "&sessionId, orgId, updatedAt",
     })
+
+    // v208 — resumable account-content encryption journal. The encrypted
+    // database migration updates this metadata-only row after each table and
+    // switches the registry pointer only after every table verifies.
+    this.version(208).stores({
+      accountContentMigrations: "&id, accountId, status, updatedAt",
+    })
+
+    // v209 — attachment metadata mirror. The bytes remain server-side and
+    // require a fresh, one-time authorization ticket for every transfer.
+    this.version(209).stores({
+      collabChatAttachments: "&id, sessionId, orgId, status, updatedAt, fetchedAt",
+    })
   }
+
+  accountContentMigrations!: Table<
+    {
+      id: "singleton"
+      accountId: string
+      status: "pending" | "migrating" | "verified" | "failed"
+      completedTables: string[]
+      updatedAt: number
+      error?: string
+    },
+    "singleton"
+  >
 
   // v206 — artifacts + their version history (ADR-0158). Authoritative; the
   // Zustand store is the in-memory view. See `lib/db/artifacts.ts`.
@@ -4987,6 +5022,7 @@ export class CogniaDB extends Dexie {
   collabChatInvites!: Table<CollabChatInviteMirrorRow, string>
   collabChatApprovals!: Table<CollabChatApprovalMirrorRow, string>
   collabChatSyncStates!: Table<CollabChatSyncStateRow, string>
+  collabChatAttachments!: Table<CollabChatAttachmentMirrorRow, string>
   // v199 — Browser Companion submission side-notes. See
   // `lib/db/browser-submissions.ts`.
   browserSubmissions!: Table<BrowserSubmissionRow, string>
@@ -5561,8 +5597,12 @@ export async function withDbReopenRetry<T>(
 
 export function activateAccountDatabase(accountId: string, targetId?: string): void {
   const nextName = targetId
-    ? runtimeTargetDatabaseName(accountId, targetId)
-    : accountDatabaseName(accountId)
+    ? encryptedRuntimeTargetDatabaseName(accountId, targetId)
+    : encryptedAccountDatabaseName(accountId)
+  const vault = getActiveBrowserVault()
+  if (vault?.accountId === accountId) {
+    activateAccountContentCipher(vault.createContentCipher(nextName))
+  }
   if (_activeDatabaseName === nextName && _db?.name === nextName) return
   _activeDatabaseName = nextName
   closeCachedDb()

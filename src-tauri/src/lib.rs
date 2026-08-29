@@ -465,6 +465,7 @@ pub fn run() {
         // `subscription_set_active`; readers (sidecar spawn, external-agent
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
+        .manage(account_auth::AccountSecuritySession::new(dirs::data_dir()))
         .manage(WindowBehavior::new())
         .manage(selection_toolbar::SelectionToolbarState::default())
         // Runtime white-screen watchdog state (ADR window-recovery). Written by
@@ -661,7 +662,7 @@ pub fn run() {
             jobs::background_monitor_register_scheduled,
             account_auth::account_password_create_verifier,
             account_auth::account_password_verify,
-            account_auth::account_rebind_verifier,
+            account_auth::account_password_rotate,
             account_auth::account_unbind_local,
             account_auth::account_bind_person,
             account_auth::account_unbind_person,
@@ -716,6 +717,7 @@ pub fn run() {
             // ADR-0062 — external-agent session-history import. Reads OpenCode's
             // local SQLite store read-only for the session importer.
             session_import::opencode_sessions_read,
+            session_import::external_agent_sessions_read,
             session_import_watch::session_import_watch_start,
             session_import_watch::session_import_watch_stop,
             ccswitch::commands::ccswitch_status,

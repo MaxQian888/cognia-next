@@ -3,7 +3,7 @@ import Dexie from "dexie"
 import { CogniaDB, LEGACY_COGNIA_DB_NAME } from "@/lib/db/schema"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
-import { accountDatabaseName, type LocalAccountRegistry } from "./account-db"
+import { encryptedAccountDatabaseName, type LocalAccountRegistry } from "./account-db"
 
 export const DEFAULT_LEGACY_MIGRATION_BATCH_SIZE = 500
 const RETIRED_LEGACY_TABLES = new Set(["syncCursors"])
@@ -37,7 +37,7 @@ export async function migrateLegacyDatabaseToAccount(
   input: MigrateLegacyDatabaseToAccountInput
 ): Promise<LegacyMigrationResult> {
   const sourceDbName = input.sourceDbName ?? LEGACY_COGNIA_DB_NAME
-  const targetDbName = accountDatabaseName(input.targetAccountId)
+  const targetDbName = encryptedAccountDatabaseName(input.targetAccountId)
   const batchSize = normalizeBatchSize(input.batchSize)
   const completedAt = input.completedAt ?? Date.now()
 

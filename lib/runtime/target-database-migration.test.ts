@@ -7,6 +7,11 @@ import "fake-indexeddb/auto"
 import Dexie from "dexie"
 
 import { accountDatabaseName } from "@/lib/accounts/account-db"
+import {
+  AccountContentCipher,
+  __resetAccountContentCipherForTesting,
+  activateAccountContentCipher,
+} from "@/lib/accounts/content-cipher"
 import { CogniaDB } from "@/lib/db/schema"
 import {
   TARGET_MIGRATION_JOURNAL_DB_NAME,
@@ -14,14 +19,15 @@ import {
   markTargetDatabaseMigrationCompleted,
   migrateAccountDatabaseToTarget,
 } from "./target-database-migration"
-import { runtimeTargetDatabaseName } from "./target-registry"
+import { encryptedRuntimeTargetDatabaseName } from "./target-registry"
 
 const accountId = "acct_target_migration"
 const targetId = "web-standalone"
 const sourceName = accountDatabaseName(accountId)
-const targetName = runtimeTargetDatabaseName(accountId, targetId)
+const targetName = encryptedRuntimeTargetDatabaseName(accountId, targetId)
 
 beforeEach(async () => {
+  __resetAccountContentCipherForTesting()
   await Promise.all([
     Dexie.delete(sourceName),
     Dexie.delete(targetName),
@@ -30,6 +36,7 @@ beforeEach(async () => {
 })
 
 afterAll(async () => {
+  __resetAccountContentCipherForTesting()
   await Promise.all([
     Dexie.delete(sourceName),
     Dexie.delete(targetName),
@@ -38,9 +45,10 @@ afterAll(async () => {
 })
 
 it("copies and verifies source rows before reporting the migration as verified", async () => {
-  const source = new CogniaDB(sourceName)
+  const source = new Dexie(sourceName)
+  source.version(1).stores({ sessions: "&id, createdAt, updatedAt" })
   await source.open()
-  await source.sessions.put({
+  await source.table("sessions").put({
     id: "session-1",
     title: "Keep me",
     kind: "direct",
@@ -48,6 +56,8 @@ it("copies and verifies source rows before reporting the migration as verified",
     updatedAt: 2,
   } as never)
   source.close()
+
+  activateAccountContentCipher(await AccountContentCipher.createForTesting(accountId, targetName))
 
   const result = await migrateAccountDatabaseToTarget({ accountId, targetId })
 
@@ -62,9 +72,18 @@ it("copies and verifies source rows before reporting the migration as verified",
     title: "Keep me",
   })
   target.close()
+
+  const rawTarget = new Dexie(targetName)
+  await rawTarget.open()
+  const rawRow = await rawTarget.table("sessions").get("session-1")
+  expect(rawRow.title).toBeUndefined()
+  expect(JSON.stringify(rawRow)).not.toContain("Keep me")
+  expect(rawRow.__cogniaEncryptedContent).toBeDefined()
+  rawTarget.close()
 })
 
 it("records completion separately so activation can happen between verify and commit", async () => {
+  activateAccountContentCipher(await AccountContentCipher.createForTesting(accountId, targetName))
   await migrateAccountDatabaseToTarget({ accountId, targetId })
 
   await markTargetDatabaseMigrationCompleted(accountId, targetId, 99)

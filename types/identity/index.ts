@@ -255,10 +255,8 @@ export function capabilityRank(capability: WorkspaceCapability): number {
  * collapse into an answer, in the shape `lib/workspace/capability-overlay.ts`
  * already uses for stacked capability state.
  *
- * The order is load-bearing. A direct Workspace membership wins even when the
- * person is also an Org admin, because their explicit role is what an audit log
- * should show, and because a maintainer who was deliberately made a `viewer`
- * somewhere should stay one.
+ * The order is load-bearing. Org owner/admin is a management floor across the
+ * organization, so a direct Workspace role cannot suppress audit or offboarding.
  *
  * `null` means no access. Org membership alone never grants Workspace access.
  */
@@ -268,21 +266,21 @@ export function resolveWorkspaceAccess(input: {
 }): EffectiveWorkspaceAccess | null {
   const { orgMembership, workspaceMembership } = input
 
-  if (workspaceMembership) {
-    return {
-      role: workspaceMembership.role,
-      capability: capabilityForRole(workspaceMembership.role),
-      via: "membership",
-      guest: !orgMembership,
-    }
-  }
-
   if (orgMembership && canTraverseWorkspaces(orgMembership.role)) {
     return {
       role: "maintainer",
       capability: "manage",
       via: "org-admin",
       guest: false,
+    }
+  }
+
+  if (workspaceMembership) {
+    return {
+      role: workspaceMembership.role,
+      capability: capabilityForRole(workspaceMembership.role),
+      via: "membership",
+      guest: !orgMembership,
     }
   }
 

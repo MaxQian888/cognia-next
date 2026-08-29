@@ -117,6 +117,10 @@ export function accountDatabaseName(accountId: string): string {
   return `${ACCOUNT_DB_PREFIX}${assertAccountId(accountId)}`
 }
 
+export function encryptedAccountDatabaseName(accountId: string): string {
+  return `${accountDatabaseName(accountId)}-encrypted-v1`
+}
+
 export class LocalAccountRegistry {
   constructor(private readonly db: CogniaAccountRegistryDB = new CogniaAccountRegistryDB()) {}
 

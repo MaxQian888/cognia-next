@@ -98,14 +98,14 @@ describe("resolveWorkspaceAccess — the two-tier collapse", () => {
     expect(resolveWorkspaceAccess({ orgMembership: org("owner") })?.via).toBe("org-admin")
   })
 
-  it("lets a direct membership win over org-admin traversal, downgrade included", () => {
+  it("keeps org-admin management as the workspace permission floor", () => {
     // Deliberately made a viewer here: the explicit role is what an audit log
     // must show, and an admin who was narrowed stays narrowed.
     const access = resolveWorkspaceAccess({
       orgMembership: org("admin"),
       workspaceMembership: member("viewer"),
     })
-    expect(access).toMatchObject({ role: "viewer", capability: "read", via: "membership" })
+    expect(access).toMatchObject({ role: "maintainer", capability: "manage", via: "org-admin" })
   })
 
   it("derives guest from the absence of Org membership, never from a flag", () => {

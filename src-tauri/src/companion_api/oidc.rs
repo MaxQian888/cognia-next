@@ -406,6 +406,13 @@ impl OidcAuthenticator {
         &self.config.required_scopes
     }
 
+    /// The issuer this authenticator validates against. Callers that derive
+    /// issuer-scoped identity ids need the value the HOST configured, not one
+    /// they were handed alongside the token.
+    pub fn issuer(&self) -> &str {
+        &self.config.issuer
+    }
+
     /// Fetch (cached) JWKS and verify `token` against the configured issuer,
     /// audience, and required scopes.
     pub async fn authenticate(&self, token: &str) -> Result<OidcClaims, OidcError> {

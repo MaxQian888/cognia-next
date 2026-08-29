@@ -111,6 +111,27 @@ pub use crate::secret_store::{
     resolve_master_key_from_env, rotate_master_key, MASTER_KEY_ENV, MASTER_KEY_FILE_ENV,
 };
 
+const ACCOUNT_CONTENT_KEY_SERVICE: &str = "com.cognia.account-content";
+
+/// Resolve the stable DEK injected into the headless brain. The value lives in
+/// the server's encrypted secret store, so rotating the store master key
+/// re-wraps this key without changing the content-encryption identity.
+pub fn get_or_create_account_content_key(account_id: &str) -> Result<String, String> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Err("account content key requires a non-empty account id".to_string());
+    }
+    if let Some(stored) = crate::secret_store::get(ACCOUNT_CONTENT_KEY_SERVICE, account_id)? {
+        parse_master_key(&stored)
+            .map_err(|error| format!("stored account content key is invalid: {error}"))?;
+        return Ok(stored);
+    }
+
+    let encoded = hex::encode(generate_master_key());
+    crate::secret_store::set(ACCOUNT_CONTENT_KEY_SERVICE, account_id, &encoded)?;
+    Ok(encoded)
+}
+
 /// Service container for the headless (no-Tauri) host. The `cognia-server`
 /// binary constructs one at boot (R8) and installs it process-wide; the
 /// dispatch arms reach it through `DispatchHost::Headless`.
@@ -410,6 +431,18 @@ pub fn headless_services() -> Option<Arc<HeadlessServices>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_content_key_is_stable_and_account_scoped() {
+        let first = get_or_create_account_content_key("headless-content-test-a").unwrap();
+        let repeated = get_or_create_account_content_key("headless-content-test-a").unwrap();
+        let other = get_or_create_account_content_key("headless-content-test-b").unwrap();
+
+        assert_eq!(first.len(), 64);
+        assert_eq!(first, repeated);
+        assert_ne!(first, other);
+        assert!(get_or_create_account_content_key(" ").is_err());
+    }
 
     /// A sidecar host that never resolves its script — enough to construct the
     /// services without spawning anything.

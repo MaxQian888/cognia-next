@@ -4,16 +4,22 @@ import { create, type UseBoundStore, type StoreApi } from "zustand"
 import {
   LocalAccountRegistry,
   accountDatabaseName,
+  encryptedAccountDatabaseName,
   generateAccountId,
 } from "@/lib/accounts/account-db"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
+import {
+  AccountContentCipher,
+  activateAccountContentCipher,
+  lockAccountContentCipher,
+} from "@/lib/accounts/content-cipher"
 import {
   legacyDatabaseExists,
   migrateLegacyDatabaseToAccount,
 } from "@/lib/accounts/legacy-migration"
 import {
   createPasswordVerifier,
-  rebindPasswordVerifier,
+  rotateNativePassword,
   unbindLocalAccount,
   verifyPassword,
 } from "@/lib/accounts/password-client"
@@ -23,7 +29,9 @@ import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import {
   changeBrowserVaultPassword,
+  browserVaultExists,
   deleteBrowserVault,
+  getActiveBrowserVault,
   lockBrowserVault,
   provisionBrowserVault,
   resetBrowserVaultPasswordWithRecoveryKey,
@@ -34,7 +42,14 @@ import {
   prepareAccountRuntimeTarget,
   removeAccountRuntimeTargets,
 } from "@/lib/runtime/account-runtime-target"
-import type { RuntimeTargetRecord } from "@/lib/runtime/target-registry"
+import {
+  encryptedRuntimeTargetDatabaseName,
+  type RuntimeTargetRecord,
+} from "@/lib/runtime/target-registry"
+import {
+  markTargetDatabaseMigrationCompleted,
+  migrateAccountDatabaseToTarget,
+} from "@/lib/runtime/target-database-migration"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -57,6 +72,15 @@ import {
   purgeProjectEditorAccountStorage,
 } from "@/stores/editor/project-editor-session-store"
 import { bumpPerformanceSecurityGeneration } from "@/lib/perf/security-generation"
+import {
+  activatePluginAccountStorage,
+  clearPluginAccountStorage,
+  purgePluginAccountStorage,
+} from "@/stores/plugin-runtime/plugin-store"
+import {
+  activatePluginRuntimeAccount,
+  clearPluginRuntimeAccount,
+} from "@/lib/plugin/security/account-runtime-gate"
 
 export interface CreateLocalAccountInput {
   id?: string
@@ -126,6 +150,12 @@ export interface AccountStoreDependencies {
    * against a database selection that no longer exists.
    */
   stopRuntimeSubscriptions: () => Promise<void>
+  /** Stop and revoke every plugin runtime before the LocalProfile changes. */
+  teardownPluginRuntime: (localAccountId: string) => Promise<void>
+  /** Bind the unlocked account DEK to the exact physical database before open. */
+  activateContentCipher: (accountId: string, databaseName: string) => void
+  /** Copy a legacy desktop profile into its encrypted physical database. */
+  migrateLocalContentDatabase: (accountId: string) => Promise<void>
 }
 
 export interface LocalAccountDeletionResult {
@@ -168,6 +198,22 @@ export function createAccountStore(
     },
     removeRuntimeTargets: removeAccountRuntimeTargets,
     stopRuntimeSubscriptions: stopRuntimeTargetSubscriptions,
+    teardownPluginRuntime: async (localAccountId) => {
+      const { teardownPluginAccountRuntime } =
+        await import("@/lib/plugin/security/account-isolation")
+      await teardownPluginAccountRuntime(localAccountId)
+    },
+    activateContentCipher: (accountId, databaseName) => {
+      const vault = getActiveBrowserVault()
+      if (!vault || vault.accountId !== accountId) {
+        throw new AccountUnlockError(
+          "vault-not-provisioned",
+          "The account content key is not unlocked."
+        )
+      }
+      activateAccountContentCipher(vault.createContentCipher(databaseName))
+    },
+    migrateLocalContentDatabase: migrateLocalAccountContentDatabase,
     clearSubscriptionRuntime: async (localAccountId) => {
       if (!isTauri() && !isCapacitor()) {
         const { hasWebCompanionTarget } = await import("@/lib/platform/web-companion")
@@ -177,6 +223,25 @@ export function createAccountStore(
       await clearSubscriptionRuntime(localAccountId)
     },
     ...dependencyOverrides,
+  }
+
+  const rollbackNativeAccountActivation = async (accountId: string): Promise<unknown[]> => {
+    const failures: unknown[] = []
+    for (const rollback of [
+      () => dependencies.teardownPluginRuntime(accountId),
+      () => unbindLocalAccount(),
+      () => lockAccountContentCipher(),
+      () => lockBrowserVault(),
+      () => clearActiveRuntimeTargetContext(),
+      () => clearAccountDatabaseSelection(),
+    ]) {
+      try {
+        await rollback()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    return failures
   }
 
   return create<AccountStoreState>((set, get) => {
@@ -202,6 +267,13 @@ export function createAccountStore(
     }
 
     const prepareSelectedDatabase = async (accountId: string, targetId?: string) => {
+      const databaseName = targetId
+        ? encryptedRuntimeTargetDatabaseName(accountId, targetId)
+        : encryptedAccountDatabaseName(accountId)
+      dependencies.activateContentCipher(accountId, databaseName)
+      if (!targetId) {
+        await dependencies.migrateLocalContentDatabase(accountId)
+      }
       activateSelectedDatabase(accountId, targetId)
       await dependencies.prepareDatabase()
     }
@@ -209,7 +281,9 @@ export function createAccountStore(
     const activateUnlockedAccount = async (accountId: string): Promise<void> => {
       const previousUnlockedAccountId = get().unlockedAccountId
       if (previousUnlockedAccountId && previousUnlockedAccountId !== accountId) {
+        await dependencies.teardownPluginRuntime(previousUnlockedAccountId)
         await dependencies.clearSubscriptionRuntime(previousUnlockedAccountId)
+        dependencies.clearAccountLocalState()
       }
       await dependencies.registry.setActiveAccountId(accountId)
       let target: RuntimeTargetRecord | null = null
@@ -255,41 +329,28 @@ export function createAccountStore(
             dependencies.registry.listAccounts(),
             dependencies.registry.getState(),
           ])
-          // Dev-only: unlock the active account without a password so
-          // `pnpm dev` / `pnpm tauri dev` never stop at the gate. Production
-          // builds resolve null here and stay locked until the user unlocks.
-          const autoUnlockedAccountId = resolveDevAutoUnlockTarget(
+          const e2eAutoUnlockAccountId = resolveE2EAutoUnlockTarget(
             accounts,
             registryState.activeAccountId
           )
-          const activeAccountId = autoUnlockedAccountId ?? registryState.activeAccountId
-          if (autoUnlockedAccountId) {
-            // The resolver can fall back to an account the registry never
-            // marked active; persist that pick so the next boot agrees.
-            if (autoUnlockedAccountId !== registryState.activeAccountId) {
-              await dependencies.registry.setActiveAccountId(autoUnlockedAccountId)
+          const activeAccountId = e2eAutoUnlockAccountId ?? registryState.activeAccountId
+          if (e2eAutoUnlockAccountId) {
+            if (await browserVaultExists(e2eAutoUnlockAccountId)) {
+              await unlockBrowserVault(e2eAutoUnlockAccountId, E2E_ACCOUNT_PASSWORD)
+            } else {
+              await provisionBrowserVault(e2eAutoUnlockAccountId, E2E_ACCOUNT_PASSWORD)
             }
-            const target = shouldUseBrowserVault()
-              ? await dependencies.prepareRuntimeTarget(autoUnlockedAccountId)
-              : null
-            await prepareSelectedDatabase(autoUnlockedAccountId, target?.id)
-            setActiveRuntimeTargetContext(
-              autoUnlockedAccountId,
-              target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
-            )
-            await dependencies.activateAccountLocalState(autoUnlockedAccountId)
+            await activateUnlockedAccount(e2eAutoUnlockAccountId)
           }
           set((state) => ({
             accounts,
             activeAccountId,
-            unlockedAccountId: autoUnlockedAccountId,
+            unlockedAccountId: e2eAutoUnlockAccountId,
             loaded: true,
             loading: false,
-            locked: computeLocked(accounts, activeAccountId, autoUnlockedAccountId),
+            locked: computeLocked(accounts, activeAccountId, e2eAutoUnlockAccountId),
             error: null,
-            accountRevision: autoUnlockedAccountId
-              ? state.accountRevision + 1
-              : state.accountRevision,
+            accountRevision: state.accountRevision,
           }))
         } catch (error) {
           set({ loaded: true })
@@ -308,9 +369,9 @@ export function createAccountStore(
           const accountId = input.id ?? generateAccountId()
           const passwordVerifier = await createPasswordVerifier(input.password)
           const useBrowserVault = shouldUseBrowserVault()
-          const recoveryKey = useBrowserVault
+          const recoveryKey = shouldActivate
             ? await provisionBrowserVault(accountId, input.password)
-            : null
+            : await provisionBrowserVault(accountId, input.password, false)
           let account: LocalAccountRecord
           try {
             account = await dependencies.registry.createAccount({
@@ -320,13 +381,24 @@ export function createAccountStore(
               activate: shouldActivate,
             })
           } catch (error) {
-            if (useBrowserVault) {
-              await deleteBrowserVault(accountId).catch(() => {})
-            }
+            await deleteBrowserVault(accountId).catch(() => {})
             throw error
           }
 
+          if (!useBrowserVault && shouldActivate) {
+            const verified = await verifyPassword(input.password, passwordVerifier, account.id)
+            if (!verified) {
+              await dependencies.registry.deleteAccount(account.id).catch(() => {})
+              await deleteBrowserVault(account.id).catch(() => {})
+              throw new AccountUnlockError(
+                "invalid-password",
+                "The native account session could not be established."
+              )
+            }
+          }
+
           if (isFirstAccount && (await legacyDatabaseExists())) {
+            dependencies.activateContentCipher(account.id, encryptedAccountDatabaseName(account.id))
             await migrateLegacyDatabaseToAccount({
               registry: dependencies.registry,
               targetAccountId: account.id,
@@ -344,6 +416,12 @@ export function createAccountStore(
                 ? false
                 : computeLocked(accounts, state.activeAccountId, state.unlockedAccountId),
               error: null,
+              // Surface the key on EVERY runtime. `provisionBrowserVault` now
+              // runs everywhere, so the account content DEK sits behind a
+              // recovery wrap on desktop and mobile too — discarding the only
+              // key that opens it left the user with a secret they were never
+              // shown. The unlock path already surfaces it on those runtimes
+              // (see `unlockAccount`), so gating it here was an inconsistency.
               pendingRecoveryKey: recoveryKey,
               accountRevision: shouldActivate ? state.accountRevision + 1 : state.accountRevision,
             }
@@ -369,6 +447,7 @@ export function createAccountStore(
 
       unlockAccount: async (accountId, password) => {
         set({ error: null })
+        let nativeAccountActivated = false
         try {
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
@@ -380,9 +459,25 @@ export function createAccountStore(
             if (!ok) {
               throw new AccountUnlockError("invalid-password", "Invalid local account password.")
             }
+            nativeAccountActivated = true
+            if (await browserVaultExists(account.id)) {
+              await unlockBrowserVault(account.id, password)
+            } else {
+              const recoveryKey = await provisionBrowserVault(account.id, password)
+              set({ pendingRecoveryKey: recoveryKey })
+            }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
+          if (nativeAccountActivated) {
+            const rollbackFailures = await rollbackNativeAccountActivation(accountId)
+            if (rollbackFailures.length > 0) {
+              error = new AggregateError(
+                [error, ...rollbackFailures],
+                "Account unlock failed and native rollback was incomplete."
+              )
+            }
+          }
           publishUnlockStage(accountId, "failed")
           throw setFailure(asUnlockError(error))
         }
@@ -392,12 +487,9 @@ export function createAccountStore(
         set({ error: null })
         try {
           if (!shouldUseBrowserVault()) {
-            // Not dormancy: the desktop host stores no recovery wrap at all, so
-            // there is no key to redeem. The lock screen hides the entry point
-            // on this runtime; this is the backstop for a programmatic caller.
             throw new AccountUnlockError(
               "vault-not-provisioned",
-              "Recovery keys exist only for the Browser Vault runtime."
+              "Desktop recovery requires the native recovery flow."
             )
           }
           if (!recoveryKey.trim()) {
@@ -429,10 +521,19 @@ export function createAccountStore(
 
       switchAccount: async (accountId, password) => {
         set({ error: null })
+        let nativeAccountActivated = false
         try {
           if (get().unlockedAccountId === accountId) {
             await activateUnlockedAccount(accountId)
             return
+          }
+          // Switching begins at the security boundary, not after the target
+          // password succeeds. This prevents a surviving plugin runtime from
+          // observing the target account's native permission ledger during the
+          // verification window. A failed target unlock therefore leaves the
+          // application locked, which is the fail-closed state.
+          if (get().unlockedAccountId) {
+            await get().lock()
           }
           assertPasswordProvided(password)
           const account = await findAccount(accountId)
@@ -444,9 +545,25 @@ export function createAccountStore(
             if (!ok) {
               throw new AccountUnlockError("invalid-password", "Invalid local account password.")
             }
+            nativeAccountActivated = true
+            if (await browserVaultExists(account.id)) {
+              await unlockBrowserVault(account.id, password)
+            } else {
+              const recoveryKey = await provisionBrowserVault(account.id, password)
+              set({ pendingRecoveryKey: recoveryKey })
+            }
           }
           await activateUnlockedAccount(account.id)
         } catch (error) {
+          if (nativeAccountActivated) {
+            const rollbackFailures = await rollbackNativeAccountActivation(accountId)
+            if (rollbackFailures.length > 0) {
+              error = new AggregateError(
+                [error, ...rollbackFailures],
+                "Account switch failed and native rollback was incomplete."
+              )
+            }
+          }
           publishUnlockStage(accountId, "failed")
           throw setFailure(asUnlockError(error))
         }
@@ -477,18 +594,28 @@ export function createAccountStore(
           assertPasswordProvided(newPassword)
           const account = await findAccount(accountId)
           const useBrowserVault = shouldUseBrowserVault()
-          const ok = useBrowserVault
-            ? await verifyBrowserVaultPassword(accountId, currentPassword)
-            : await verifyPassword(currentPassword, account.passwordVerifier, account.id)
-          if (!ok) {
-            throw new AccountUnlockError("invalid-password", "Invalid local account password.")
-          }
-          const passwordVerifier = await createPasswordVerifier(newPassword)
-          const updated = await dependencies.registry.updatePasswordVerifier(
-            accountId,
-            passwordVerifier
-          )
-          if (useBrowserVault) {
+          let passwordVerifier: LocalAccountRecord["passwordVerifier"]
+          let updated: LocalAccountRecord
+          // Only the DESKTOP host owns a native verifier pin, so only it needs
+          // `rotateNativePassword`. Capacitor is `!useBrowserVault` too but has
+          // no native rotation command — routing it down that branch made
+          // `rotateNativePassword` throw "only available in the desktop
+          // runtime" before anything committed, so mobile users could not
+          // change their password at all. Mobile rotates the registry verifier
+          // and the vault exactly like the browser does; the only difference is
+          // which credential store proves the current password.
+          if (useBrowserVault || !isTauri()) {
+            const ok = useBrowserVault
+              ? await verifyBrowserVaultPassword(accountId, currentPassword)
+              : await verifyPassword(currentPassword, account.passwordVerifier, accountId)
+            if (!ok) {
+              throw new AccountUnlockError("invalid-password", "Invalid local account password.")
+            }
+            passwordVerifier = await createPasswordVerifier(newPassword)
+            updated = await dependencies.registry.updatePasswordVerifier(
+              accountId,
+              passwordVerifier
+            )
             try {
               await changeBrowserVaultPassword(accountId, currentPassword, newPassword)
             } catch (vaultError) {
@@ -505,13 +632,63 @@ export function createAccountStore(
               }
               throw vaultError
             }
-          }
-          // The host pins its account binding to the verifier it first saw, so a
-          // rotation has to re-pin or every later unlock is refused as a
-          // mismatch. Runs after the registry write so a failed rotation cannot
-          // leave the host trusting a verifier the account no longer has.
-          if (!useBrowserVault) {
-            await rebindPasswordVerifier(accountId, passwordVerifier)
+          } else {
+            passwordVerifier = await rotateNativePassword(
+              accountId,
+              currentPassword,
+              account.passwordVerifier,
+              newPassword
+            )
+            try {
+              await changeBrowserVaultPassword(accountId, currentPassword, newPassword)
+            } catch (vaultError) {
+              try {
+                await rotateNativePassword(
+                  accountId,
+                  newPassword,
+                  passwordVerifier,
+                  currentPassword,
+                  account.passwordVerifier
+                )
+              } catch (rollbackError) {
+                throw new AggregateError(
+                  [vaultError, rollbackError],
+                  "Content key rewrap failed and the native verifier could not be rolled back."
+                )
+              }
+              throw vaultError
+            }
+            try {
+              updated = await dependencies.registry.updatePasswordVerifier(
+                accountId,
+                passwordVerifier
+              )
+            } catch (registryError) {
+              const rollbackErrors: unknown[] = []
+              try {
+                await changeBrowserVaultPassword(accountId, newPassword, currentPassword)
+              } catch (rollbackError) {
+                rollbackErrors.push(rollbackError)
+              }
+              try {
+                await rotateNativePassword(
+                  accountId,
+                  newPassword,
+                  passwordVerifier,
+                  currentPassword,
+                  account.passwordVerifier
+                )
+              } catch (rollbackError) {
+                rollbackErrors.push(rollbackError)
+              }
+              if (rollbackErrors.length > 0) {
+                throw new AggregateError(
+                  [registryError, ...rollbackErrors],
+                  "Password rotation committed but the registry update and compensating rollback were incomplete."
+                )
+              }
+              throw registryError
+            }
           }
           set((state) => {
             const accounts = upsertAccount(state.accounts, updated)
@@ -551,7 +728,7 @@ export function createAccountStore(
           const wasActive = get().activeAccountId === accountId
           const replacementAccountId = options.replacementAccountId
           if (wasActive && get().unlockedAccountId === accountId) {
-            await dependencies.clearSubscriptionRuntime(accountId)
+            await get().lock()
           }
           await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
           await dependencies.dropAccountDatabase(accountId)
@@ -561,11 +738,8 @@ export function createAccountStore(
             runtimeTargetsDeleted = true
           }
           await dependencies.purgeAccountLocalState(accountId)
-          let browserVaultDeleted = false
-          if (shouldUseBrowserVault()) {
-            await deleteBrowserVault(accountId)
-            browserVaultDeleted = true
-          }
+          await deleteBrowserVault(accountId)
+          const browserVaultDeleted = true
 
           set((state) => {
             const accounts = state.accounts.filter((account) => account.id !== accountId)
@@ -638,9 +812,11 @@ export function createAccountStore(
 
         await attempt(() => dependencies.stopRuntimeSubscriptions())
         if (unlockedAccountId) {
+          await attempt(() => dependencies.teardownPluginRuntime(unlockedAccountId))
           await attempt(() => dependencies.clearSubscriptionRuntime(unlockedAccountId))
         }
         await attempt(() => unbindLocalAccount())
+        await attempt(() => lockAccountContentCipher())
         await attempt(() => lockBrowserVault())
         await attempt(() => clearActiveRuntimeTargetContext())
         await attempt(() => clearAccountDatabaseSelection())
@@ -706,13 +882,30 @@ export const useAccountStore = createAccountStore()
  * marker never exists, so this can never bypass the password unlock there.
  * The guard is unit-tested.
  */
-export async function unlockAccountForHost(accountId: string): Promise<void> {
+export async function unlockAccountForHost(
+  accountId: string,
+  accountContentKey?: Uint8Array
+): Promise<void> {
   const marker = (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
   if (marker !== true) {
     throw new Error(
       "unlockAccountForHost is reserved for headless host processes (__COGNIA_HEADLESS__ not set)"
     )
   }
+  if (accountContentKey?.length !== 32) {
+    throw new Error("Headless account content key must be exactly 32 bytes.")
+  }
+  const databaseName = encryptedAccountDatabaseName(accountId)
+  const contentKey = accountContentKey.slice()
+  try {
+    activateAccountContentCipher(
+      await AccountContentCipher.fromRawKey(accountId, databaseName, contentKey)
+    )
+  } finally {
+    contentKey.fill(0)
+  }
+  activatePluginAccountStorage(accountId)
+  activatePluginRuntimeAccount(accountId)
   activateAccountDatabase(accountId)
   setActiveRuntimeTargetContext(accountId, "local-host")
   useAccountStore.setState((state) => ({
@@ -728,6 +921,19 @@ export function selectActiveAccount(state: AccountStoreState): LocalAccountRecor
   return state.accounts.find((account) => account.id === state.activeAccountId) ?? null
 }
 
+const E2E_ACCOUNT_PASSWORD = "cognia-e2e-local-account"
+
+function resolveE2EAutoUnlockTarget(
+  accounts: LocalAccountRecord[],
+  activeAccountId: string | null
+): string | null {
+  if (isTauri() || !isDevAutoUnlockEnabled()) return null
+  if (activeAccountId && accounts.some((account) => account.id === activeAccountId)) {
+    return activeAccountId
+  }
+  return accounts[0]?.id ?? null
+}
+
 function computeLocked(
   accounts: LocalAccountRecord[],
   activeAccountId: string | null,
@@ -736,44 +942,6 @@ function computeLocked(
   if (accounts.length === 0) return false
   if (!activeAccountId) return true
   return activeAccountId !== unlockedAccountId
-}
-
-/**
- * Resolve which account (if any) a dev build should unlock at boot without a
- * password. Prefers the registry's active account and falls back to the first
- * registered one when that pointer is missing or dangling, so the gate can
- * never appear in dev while any account exists. Never creates an account: with
- * an empty registry the first-run form still runs, because the chosen id scopes
- * the Dexie database. Returns null in production and whenever
- * `NEXT_PUBLIC_ACCOUNT_GATE=1` forces the real gate.
- */
-function resolveDevAutoUnlockTarget(
-  accounts: LocalAccountRecord[],
-  activeAccountId: string | null
-): string | null {
-  if (!isDevAutoUnlockEnabled()) return null
-  // Never on a browser-vault platform. The convenience this function exists for
-  // is "skip re-typing the password", and on desktop/mobile that is harmless:
-  // secrets live in the OS keyring, which needs no password to reach. On the
-  // web they live in the Browser Vault, whose session key is derived from the
-  // password itself (`unlockBrowserVault`) — so an auto-unlock with no password
-  // cannot produce one.
-  //
-  // Returning an id anyway is what made the app lie about itself: `computeLocked`
-  // saw `activeAccountId === unlockedAccountId` and reported unlocked, so
-  // AccountGate never rendered, while `getActiveBrowserVault()` stayed null and
-  // every credential read/write threw `BrowserVaultLockedError`. `/pair` showed
-  // it worst — the Host registered the device, the local save threw, and the
-  // one-shot invitation was already spent, with no route to the lock screen
-  // because the gate believed the user was signed in.
-  //
-  // So on the web the gate always runs in dev. That is not lost convenience:
-  // there is no unlocked-without-a-password state to preserve there.
-  if (shouldUseBrowserVault()) return null
-  if (activeAccountId && accounts.some((account) => account.id === activeAccountId)) {
-    return activeAccountId
-  }
-  return accounts[0]?.id ?? null
 }
 
 function upsertAccount(
@@ -792,10 +960,34 @@ function assertPasswordProvided(password: string | undefined): asserts password 
 }
 
 async function dropDexieAccountDatabase(accountId: string): Promise<void> {
-  const databaseName = accountDatabaseName(accountId)
-  await Dexie.delete(databaseName)
-  if (await Dexie.exists(databaseName)) {
-    throw new Error(`Account database deletion could not be verified: ${databaseName}`)
+  for (const databaseName of [
+    accountDatabaseName(accountId),
+    encryptedAccountDatabaseName(accountId),
+  ]) {
+    await Dexie.delete(databaseName)
+    if (await Dexie.exists(databaseName)) {
+      throw new Error(`Account database deletion could not be verified: ${databaseName}`)
+    }
+  }
+}
+
+async function migrateLocalAccountContentDatabase(accountId: string): Promise<void> {
+  const sourceDbName = accountDatabaseName(accountId)
+  if (!(await Dexie.exists(sourceDbName))) return
+  const targetDbName = encryptedAccountDatabaseName(accountId)
+  const result = await migrateAccountDatabaseToTarget({
+    accountId,
+    targetId: "local-host",
+    sourceDbName,
+    targetDbName,
+  })
+  await markTargetDatabaseMigrationCompleted(accountId, "local-host")
+  if (result.stage !== "verified") {
+    throw new Error("Account content migration did not reach verified state.")
+  }
+  await Dexie.delete(sourceDbName)
+  if (await Dexie.exists(sourceDbName)) {
+    throw new Error(`Plaintext account database deletion could not be verified: ${sourceDbName}`)
   }
 }
 
@@ -803,6 +995,7 @@ async function purgeLocalStorageForAccount(accountId: string): Promise<void> {
   purgeArtifactAccountStorage(accountId)
   purgeAgentTeamAccountStorage(accountId)
   purgeProjectEditorAccountStorage(accountId)
+  purgePluginAccountStorage(accountId)
   if (typeof window === "undefined") return
   const prefixes = [
     `cognia-account-${accountId}:`,
@@ -822,9 +1015,13 @@ async function activateBrowserAccountLocalState(accountId: string): Promise<void
   activateArtifactAccountStorage(accountId)
   activateAgentTeamAccountStorage(accountId)
   activateProjectEditorAccountStorage(accountId)
+  activatePluginAccountStorage(accountId)
+  activatePluginRuntimeAccount(accountId)
 }
 
 function clearBrowserAccountLocalState(): void {
+  clearPluginRuntimeAccount()
+  clearPluginAccountStorage()
   clearArtifactAccountStorage()
   clearAgentTeamAccountStorage()
   clearProjectEditorAccountStorage()

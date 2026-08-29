@@ -179,6 +179,7 @@ fn mint_tenant_id() -> String {
 #[serde(rename_all = "lowercase")]
 pub enum DeviceLifecycleState {
     Active,
+    Quarantined,
     Suspended,
     Revoked,
 }
@@ -187,6 +188,7 @@ impl DeviceLifecycleState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
+            Self::Quarantined => "quarantined",
             Self::Suspended => "suspended",
             Self::Revoked => "revoked",
         }
@@ -195,6 +197,7 @@ impl DeviceLifecycleState {
     fn parse(raw: &str) -> Option<Self> {
         match raw {
             "active" => Some(Self::Active),
+            "quarantined" => Some(Self::Quarantined),
             "suspended" => Some(Self::Suspended),
             "revoked" => Some(Self::Revoked),
             _ => None,
@@ -309,11 +312,17 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 /// mirror eventually lands, only the ceiling gets finer; the rule does not
 /// move.
 ///
+/// What this DOES stop: person A signs out, person B signs in on the same
+/// machine, and A's still-paired phone keeps running agents on B's host. Until
+/// now it could.
+///
 /// # Why both NULLs pass
 ///
 /// `h.user_id IS NULL` — nobody has signed in on this host. That is a
-/// supported state (ADR-0149 §9), and the overwhelmingly common one, so it
-/// cannot mean "deny".
+/// supported state (ADR-0149 §9) and the overwhelmingly common one: identity
+/// is optional, `account_bind_person` needs a Logto issuer this host may not
+/// have configured at all, and a local-only desktop can never fill the column.
+/// It cannot mean "deny".
 ///
 /// `d.user_id IS NULL` — the device was enrolled before ADR-0149, or while
 /// nobody was signed in. Every device that existed before step one is in this
@@ -321,9 +330,9 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 /// Sign-in adopts them (`adopt_unowned_devices`), which is how the column
 /// fills in without a backfill that would have guessed.
 ///
-/// What this DOES stop: person A signs out, person B signs in on the same
-/// machine, and A's still-paired phone keeps running agents on B's host. Until
-/// now it could.
+/// Requiring BOTH ids instead is a strictly larger rule than the attack above
+/// needs — A-signed-out/B-signed-in is already `Some(a) != Some(b)` — and with
+/// no migration behind it, it denied every pre-existing pairing on upgrade.
 pub const OWNER_PREDICATE_SQL: &str =
     "(h.user_id IS NULL OR d.user_id IS NULL OR d.user_id = h.user_id)";
 
@@ -582,11 +591,19 @@ impl SecurityStore {
         // person this host can name is the one bound to the tenant. `None`
         // when nobody has signed in, which is a supported state.
         let owner = host_person_for_tenant(&tx, tenant_id)?;
+        // Enrol ACTIVE even when no person is bound. Quarantining on "nobody
+        // has signed in" is the same fleet-wide lockout `OWNER_PREDICATE_SQL`
+        // documents: identity is optional here, so on a local-only host that
+        // condition is permanent and every new pairing would enrol unusable
+        // with no un-quarantine path. Quarantine stays what it is elsewhere —
+        // a deliberate act (`assign_device_user` clearing or reassigning an
+        // owner), not the default outcome of an unconfigured host.
+        let status = "active";
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'owner', 'active', ?4, ?5, ?5)",
-            params![device_id, tenant_id, display_name, owner, now],
+             VALUES (?1, ?2, ?3, 'owner', ?4, ?5, ?6, ?6)",
+            params![device_id, tenant_id, display_name, status, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -711,11 +728,19 @@ impl SecurityStore {
             return Err(SecurityStoreError::InvalidInvitation);
         }
         let owner = host_person_for_tenant(&tx, tenant_id)?;
+        // Enrol ACTIVE even when no person is bound. Quarantining on "nobody
+        // has signed in" is the same fleet-wide lockout `OWNER_PREDICATE_SQL`
+        // documents: identity is optional here, so on a local-only host that
+        // condition is permanent and every new pairing would enrol unusable
+        // with no un-quarantine path. Quarantine stays what it is elsewhere —
+        // a deliberate act (`assign_device_user` clearing or reassigning an
+        // owner), not the default outcome of an unconfigured host.
+        let status = "active";
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?5, ?5)",
-            params![device_id, tenant_id, display_name, owner, now],
+             VALUES (?1, ?2, ?3, 'member', ?4, ?5, ?6, ?6)",
+            params![device_id, tenant_id, display_name, status, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -844,11 +869,19 @@ impl SecurityStore {
             return Err(SecurityStoreError::InvalidChallenge);
         }
         let owner = host_person_for_tenant(&tx, tenant_id)?;
+        // Enrol ACTIVE even when no person is bound. Quarantining on "nobody
+        // has signed in" is the same fleet-wide lockout `OWNER_PREDICATE_SQL`
+        // documents: identity is optional here, so on a local-only host that
+        // condition is permanent and every new pairing would enrol unusable
+        // with no un-quarantine path. Quarantine stays what it is elsewhere —
+        // a deliberate act (`assign_device_user` clearing or reassigning an
+        // owner), not the default outcome of an unconfigured host.
+        let status = "active";
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?6)",
-            params![device_id, tenant_id, display_name, role, owner, now],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            params![device_id, tenant_id, display_name, role, status, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -878,10 +911,16 @@ impl SecurityStore {
 
     /// Record (or clear) the person a device belongs to — ADR-0149 §5, step one.
     ///
-    /// Pure bookkeeping: nothing consults this column when deciding whether a
-    /// request is allowed. Clearing is offered because adoption can be wrong —
-    /// a shared machine, a device handed on — and a wrong owner that cannot be
-    /// corrected would be worse than no owner at all.
+    /// Assigning a person only activates the device when that same person is
+    /// already bound to this tenant; otherwise it is quarantined until the
+    /// claim path can prove both sides of the relationship.
+    ///
+    /// Clearing RESTORES it. Clearing exists because adoption can be wrong — a
+    /// shared machine, a device handed on — and it is the only un-quarantine
+    /// path a human has, so making it quarantine too turned "correct a wrong
+    /// owner" into "brick the device". An unowned device is exactly the state
+    /// [`OWNER_PREDICATE_SQL`] permits, so there is nothing left to hold it
+    /// back.
     pub fn assign_device_user(
         &self,
         tenant_id: &str,
@@ -890,7 +929,25 @@ impl SecurityStore {
         now: i64,
     ) -> Result<(), SecurityStoreError> {
         let changed = self.conn.lock().execute(
-            "UPDATE devices SET user_id = ?3, updated_at = ?4
+            "UPDATE devices SET user_id = ?3,
+                -- Quarantine only on a PROVEN conflict: a person is bound to
+                -- this tenant and it is not the one being assigned. Anything
+                -- else ('nobody signed in here', 'no owner claimed') is a state
+                -- `OWNER_PREDICATE_SQL` permits, so parking it would deny a
+                -- device the decision query would have allowed — the two must
+                -- not disagree.
+                status = CASE
+                    WHEN status = 'revoked' THEN status
+                    WHEN EXISTS (
+                        SELECT 1 FROM host_bindings h
+                         WHERE h.tenant_id = ?1
+                           AND h.user_id IS NOT NULL
+                           AND ?3 IS NOT NULL
+                           AND h.user_id <> ?3
+                    ) THEN 'quarantined'
+                    ELSE 'active'
+                END,
+                updated_at = ?4
              WHERE tenant_id = ?1 AND id = ?2",
             params![tenant_id, device_id, user_id, now],
         )?;
@@ -918,7 +975,9 @@ impl SecurityStore {
         now: i64,
     ) -> Result<usize, SecurityStoreError> {
         let adopted = self.conn.lock().execute(
-            "UPDATE devices SET user_id = ?2, updated_at = ?3
+            "UPDATE devices SET user_id = ?2,
+                    status = CASE WHEN status = 'quarantined' THEN 'active' ELSE status END,
+                    updated_at = ?3
              WHERE tenant_id = ?1 AND user_id IS NULL",
             params![tenant_id, user_id, now],
         )?;
@@ -2011,7 +2070,7 @@ impl SecurityStore {
             .ok_or(SecurityStoreError::DeviceUnavailable)?;
         match current {
             DeviceLifecycleState::Suspended => return Ok(false),
-            DeviceLifecycleState::Revoked => {
+            DeviceLifecycleState::Revoked | DeviceLifecycleState::Quarantined => {
                 return Err(SecurityStoreError::InvalidDeviceTransition)
             }
             DeviceLifecycleState::Active => {}
@@ -2078,7 +2137,7 @@ impl SecurityStore {
             .ok_or(SecurityStoreError::DeviceUnavailable)?;
         match current {
             DeviceLifecycleState::Active => return Ok(false),
-            DeviceLifecycleState::Revoked => {
+            DeviceLifecycleState::Revoked | DeviceLifecycleState::Quarantined => {
                 return Err(SecurityStoreError::InvalidDeviceTransition)
             }
             DeviceLifecycleState::Suspended => {}
@@ -2503,6 +2562,7 @@ const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
 const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
 const MIGRATION_DEVICE_USER: &str = "device-user-v1";
+const MIGRATION_DEVICE_QUARANTINE: &str = "device-quarantine-v1";
 const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
@@ -2514,7 +2574,7 @@ CREATE TABLE devices_new (
     tenant_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
-    status TEXT NOT NULL CHECK(status IN ('active', 'suspended', 'revoked')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'quarantined', 'suspended', 'revoked')),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, id)
@@ -2522,6 +2582,33 @@ CREATE TABLE devices_new (
 INSERT INTO devices_new
     (id, tenant_id, display_name, role, status, created_at, updated_at)
     SELECT id, tenant_id, display_name, role, status, created_at, updated_at
+    FROM devices;
+DROP TABLE devices;
+ALTER TABLE devices_new RENAME TO devices;
+"#;
+
+const DEVICES_QUARANTINE_REBUILD_SQL: &str = r#"
+CREATE TABLE devices_new (
+    id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'quarantined', 'suspended', 'revoked')),
+    user_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+);
+-- Status is carried across UNCHANGED. This migration widens the CHECK
+-- constraint so `quarantined` becomes expressible; it does not park anybody.
+-- Rewriting every NULL-owned row to 'quarantined' was the fleet-wide lockout
+-- `migrate_device_user` is documented to avoid — `user_id IS NULL` is every
+-- device enrolled before ADR-0149, and on a host where nobody ever signs in it
+-- is every device, permanently.
+INSERT INTO devices_new
+    (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
+    SELECT id, tenant_id, display_name, role, status,
+           user_id, created_at, updated_at
     FROM devices;
 DROP TABLE devices;
 ALTER TABLE devices_new RENAME TO devices;
@@ -2566,6 +2653,7 @@ fn apply_schema_migrations(
     migrate_host_binding_legacy(conn, now)?;
     migrate_host_binding_person(conn, now)?;
     migrate_device_user(conn, now)?;
+    migrate_device_quarantine(conn, now, backup_target)?;
     migrate_client_plane_grants(conn, now)?;
     Ok(())
 }
@@ -2730,9 +2818,11 @@ fn host_person_for_tenant(
 /// The migration itself is still pure bookkeeping: the column is added
 /// nullable and nothing is backfilled, because the host cannot name the person
 /// behind a device that was enrolled before it could ask. Step **two** has
-/// since landed, so [`SecurityStore::has_capability`] does now read the column
-/// — see [`OWNER_PREDICATE_SQL`], which passes a NULL owner precisely so this
-/// migration's un-backfilled rows keep working.
+/// since landed, so [`SecurityStore::has_capability`] does now read the column.
+/// A NULL row keeps working — see [`OWNER_PREDICATE_SQL`] — and is claimed at
+/// the next sign-in by [`SecurityStore::adopt_unowned_devices`], which is the
+/// backfill. Parking those rows instead would be the lockout this very comment
+/// describes.
 ///
 /// The split is not caution for its own sake. `capability_grants` is on the hot
 /// request path — `rpc.rs`, `ws_terminal.rs` and `remote_execution.rs` all reach
@@ -2764,6 +2854,69 @@ fn migrate_device_user(conn: &mut Connection, now: i64) -> Result<(), SecuritySt
         tx.execute("ALTER TABLE devices ADD COLUMN user_id TEXT", [])?;
     }
     mark_migration(&tx, MIGRATION_DEVICE_USER, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn migrate_device_quarantine(
+    conn: &mut Connection,
+    now: i64,
+    backup_target: Option<&Path>,
+) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_DEVICE_QUARANTINE)? {
+        return Ok(());
+    }
+    let already_widened =
+        table_ddl(conn, "devices")?.is_some_and(|ddl| ddl.contains("'quarantined'"));
+    if already_widened {
+        // Nothing to rewrite: the CHECK constraint already admits
+        // `quarantined`, and no existing row is parked (see
+        // `DEVICES_QUARANTINE_REBUILD_SQL`).
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        mark_migration(&tx, MIGRATION_DEVICE_QUARANTINE, now)?;
+        tx.commit()?;
+        return Ok(());
+    }
+
+    let backup = match backup_target {
+        Some(path) => write_pre_migration_backup(conn, path)?,
+        None => None,
+    };
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    conn.pragma_update(None, "legacy_alter_table", true)?;
+    let outcome = rebuild_devices_for_quarantine(conn, now);
+    conn.pragma_update(None, "legacy_alter_table", false)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    outcome?;
+    if let Some(path) = backup {
+        if let Err(error) = std::fs::remove_file(&path) {
+            tracing::warn!(path = %path.display(), %error, "could not remove quarantine migration backup");
+        }
+    }
+    Ok(())
+}
+
+fn rebuild_devices_for_quarantine(
+    conn: &mut Connection,
+    now: i64,
+) -> Result<(), SecurityStoreError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(DEVICES_QUARANTINE_REBUILD_SQL)?;
+    let violations = {
+        let mut statement = tx.prepare("PRAGMA foreign_key_check")?;
+        let mut rows = statement.query([])?;
+        let mut count = 0usize;
+        while rows.next()?.is_some() {
+            count += 1;
+        }
+        count
+    };
+    if violations > 0 {
+        return Err(SecurityStoreError::Migration(format!(
+            "the quarantine migration left {violations} foreign key violation(s)"
+        )));
+    }
+    mark_migration(&tx, MIGRATION_DEVICE_QUARANTINE, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -3324,6 +3477,55 @@ CREATE TABLE devices (
         let store = SecurityStore::in_memory().unwrap();
         let conn = store.conn.lock();
         assert!(migration_applied(&conn, MIGRATION_DEVICE_STATUS_SUSPENDED).unwrap());
+        assert!(migration_applied(&conn, MIGRATION_DEVICE_QUARANTINE).unwrap());
+    }
+
+    /// The migration WIDENS the status vocabulary; it must not park anybody.
+    ///
+    /// Rewriting `user_id IS NULL` rows to `quarantined` denied every device
+    /// enrolled before ADR-0149 the moment the release landed — and on a host
+    /// where nobody signs in, permanently. Adoption at sign-in is the backfill.
+    #[test]
+    fn the_quarantine_migration_preserves_every_device_status() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE security_migrations (key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
+             CREATE TABLE devices (
+                 id TEXT NOT NULL,
+                 tenant_id TEXT NOT NULL,
+                 display_name TEXT NOT NULL,
+                 role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
+                 status TEXT NOT NULL CHECK(status IN ('active', 'suspended', 'revoked')),
+                 user_id TEXT,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (tenant_id, id)
+             );
+             INSERT INTO devices VALUES
+               ('unowned', 'tenant-a', 'Old phone', 'member', 'active', NULL, 1, 1),
+               ('owned', 'tenant-a', 'Known phone', 'member', 'active', 'usr_ada', 1, 1);",
+        )
+        .unwrap();
+
+        migrate_device_quarantine(&mut conn, 200, None).unwrap();
+        let unowned: String = conn
+            .query_row(
+                "SELECT status FROM devices WHERE id = 'unowned'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let owned: String = conn
+            .query_row("SELECT status FROM devices WHERE id = 'owned'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(unowned, "active");
+        assert_eq!(owned, "active");
+        // The point of the migration: `quarantined` is now expressible.
+        assert!(table_ddl(&conn, "devices")
+            .unwrap()
+            .is_some_and(|ddl| ddl.contains("'quarantined'")));
     }
 
     #[test]
@@ -3457,6 +3659,20 @@ CREATE TABLE devices (
     }
 
     fn register(store: &SecurityStore, tenant: &str, device: &str, now: i64) {
+        store
+            .conn
+            .lock()
+            .execute(
+                "INSERT OR IGNORE INTO host_bindings
+                   (local_account_namespace, tenant_id, user_id, bound_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![format!("test:{tenant}"), tenant, ADA, now],
+            )
+            .unwrap();
+        register_unowned(store, tenant, device, now);
+    }
+
+    fn register_unowned(store: &SecurityStore, tenant: &str, device: &str, now: i64) {
         let challenge = store.issue_challenge(tenant, now, 60).unwrap();
         let invitation = store
             .create_owner_invitation(tenant, "local-trust-root", now, 60)
@@ -3868,8 +4084,15 @@ CREATE TABLE devices (
     fn a_device_enrolled_before_anyone_signs_in_has_no_owner() {
         // The supported state the whole two-step split exists to protect.
         let store = SecurityStore::in_memory().unwrap();
-        register(&store, "tenant-a", "device-a", 100);
+        register_unowned(&store, "tenant-a", "device-a", 100);
         assert_eq!(device_user(&store, "tenant-a", "device-a"), None);
+        // Active, not quarantined: nobody has signed in, so there is no person
+        // this enrolment could contradict. `OWNER_PREDICATE_SQL` permits an
+        // unowned device precisely because identity is optional here.
+        assert_eq!(
+            store.device_state("tenant-a", "device-a").unwrap(),
+            Some(DeviceLifecycleState::Active)
+        );
     }
 
     #[test]
@@ -3891,7 +4114,7 @@ CREATE TABLE devices (
         // Signing in must never reassign somebody else's machine — the failure
         // a blanket backfill would cause on a host two people share.
         let store = SecurityStore::in_memory().unwrap();
-        register(&store, "tenant-a", "device-unowned", 100);
+        register_unowned(&store, "tenant-a", "device-unowned", 100);
         register(&store, "tenant-a", "device-bobs", 101);
         store
             .assign_device_user("tenant-a", "device-bobs", Some(BOB), 102)
@@ -3914,8 +4137,8 @@ CREATE TABLE devices (
     #[test]
     fn adoption_is_idempotent_and_scoped_to_one_tenant() {
         let store = SecurityStore::in_memory().unwrap();
-        register(&store, "tenant-a", "device-a", 100);
-        register(&store, "tenant-b", "device-b", 101);
+        register_unowned(&store, "tenant-a", "device-a", 100);
+        register_unowned(&store, "tenant-b", "device-b", 101);
 
         assert_eq!(
             store.adopt_unowned_devices("tenant-a", ADA, 110).unwrap(),
@@ -4026,39 +4249,58 @@ CREATE TABLE devices (
             .unwrap());
     }
 
-    /// The lockout guard, from the other side. Every device that existed before
-    /// step one has a NULL owner, and step two must not deny them — that is the
-    /// fleet-wide lockout the two-release split existed to avoid.
+    /// A historical NULL-owned device keeps working, and sign-in adopts it.
+    ///
+    /// Denying it instead is the fleet-wide lockout `OWNER_PREDICATE_SQL`
+    /// documents: `user_id IS NULL` is every device enrolled before ADR-0149,
+    /// and there is no backfill that could have guessed the person. Adoption
+    /// at sign-in is what fills the column, and only AFTER that is the device
+    /// bound to one person — which the strangers' tests below pin.
     #[test]
-    fn an_unattributed_device_keeps_its_grants() {
+    fn an_unattributed_device_keeps_working_and_is_adopted_at_sign_in() {
         let store = SecurityStore::in_memory().unwrap();
         let tenant = host_with_no_person(&store);
-        register(&store, &tenant, "device-a", 100);
+        register_unowned(&store, &tenant, "device-a", 100);
         // Enrolled before anyone signed in, so it carries no owner...
         assert_eq!(device_user(&store, &tenant, "device-a"), None);
-        // ...and then somebody signs in.
-        store.bind_host_person("acct_a", ADA, None, 110).unwrap();
+        assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
 
-        assert!(
-            store
-                .has_capability(&tenant, "device-a", "host.admin")
-                .unwrap(),
-            "an unattributed device is not a stranger's device"
+        // ...and then somebody signs in, which claims it.
+        store.bind_host_person("acct_a", ADA, None, 110).unwrap();
+        assert_eq!(store.adopt_unowned_devices(&tenant, ADA, 120).unwrap(), 1);
+        assert_eq!(
+            device_user(&store, &tenant, "device-a"),
+            Some(ADA.to_owned())
         );
+        assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
     }
 
-    /// A host nobody has signed in on decides nothing by ownership. This is the
-    /// common state, not a degraded one — ADR-0149 §9.
+    /// A host nobody has signed in on has no person to compare against, so it
+    /// cannot deny on ownership — it denies once a DIFFERENT person is bound.
+    ///
+    /// This is the half of the rule that keeps identity optional: requiring a
+    /// bound person before any device works would lock out every install that
+    /// never configures an identity provider.
     #[test]
-    fn an_unbound_host_ignores_device_ownership() {
+    fn an_unbound_host_defers_ownership_until_a_person_is_bound() {
         let store = SecurityStore::in_memory().unwrap();
         let tenant = host_with_no_person(&store);
-        register(&store, &tenant, "device-a", 100);
+        register_unowned(&store, &tenant, "device-a", 100);
         store
             .assign_device_user(&tenant, "device-a", Some(BOB), 110)
             .unwrap();
 
         assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
+
+        // Ada signs in on this host; Bob's device is now a stranger's.
+        store.bind_host_person("acct_a", ADA, None, 120).unwrap();
+        assert!(!store
             .has_capability(&tenant, "device-a", "host.admin")
             .unwrap());
     }

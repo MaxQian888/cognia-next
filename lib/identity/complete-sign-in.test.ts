@@ -47,8 +47,9 @@ describe("completeSignIn", () => {
     const registry = await freshRegistry("happy")
     const { seen, projection } = collector()
     const invokeFn = jest.fn().mockResolvedValue(undefined)
+    const signedIn = session({ organization_id: "org_tenant_1" })
 
-    const identity = await completeSignIn(session({ organization_id: "org_tenant_1" }), {
+    const identity = await completeSignIn(signedIn, {
       localAccountId: "acct_alpha",
       registry,
       projection,
@@ -58,7 +59,7 @@ describe("completeSignIn", () => {
     expect(await registry.get("acct_alpha")).toMatchObject({ userId: identity.user.id })
     expect(seen).toHaveLength(1)
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      localAccountId: "acct_alpha",
+      accessToken: signedIn.accessToken,
       userId: identity.user.id,
       orgId: identity.org!.id,
     })
@@ -142,9 +143,7 @@ describe("completeSignOut", () => {
     })
 
     expect(await registry.get("acct_alpha")).toBeNull()
-    expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_UNBIND_PERSON_COMMAND, {
-      localAccountId: "acct_alpha",
-    })
+    expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_UNBIND_PERSON_COMMAND)
   })
 
   it("is idempotent and survives a host that cannot be reached", async () => {

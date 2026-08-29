@@ -62,6 +62,9 @@ pub struct BrainConfig {
     pub bridge_url: String,
     pub data_dir: PathBuf,
     pub account_id: String,
+    /// Stable 256-bit DEK from the encrypted server secret store. It is sent
+    /// only through the child environment and never argv or logs.
+    pub account_content_key: String,
     pub host_id: String,
     pub tls_fingerprint: String,
     /// Path to the companion `tls.pem`, exported as `NODE_EXTRA_CA_CERTS`
@@ -79,6 +82,7 @@ impl BrainConfig {
         port: u16,
         data_dir: PathBuf,
         account_id: String,
+        account_content_key: String,
         host_id: String,
         tls_fingerprint: String,
         node_extra_ca_certs: Option<PathBuf>,
@@ -89,6 +93,7 @@ impl BrainConfig {
             bridge_url: format!("wss://127.0.0.1:{port}/internal/bridge"),
             data_dir,
             account_id,
+            account_content_key,
             host_id,
             tls_fingerprint,
             node_extra_ca_certs,
@@ -118,6 +123,10 @@ pub fn build_brain_env(config: &BrainConfig, service_token: &str) -> Vec<(String
         (
             "COGNIA_LOCAL_ACCOUNT_ID".to_string(),
             config.account_id.clone(),
+        ),
+        (
+            "COGNIA_ACCOUNT_CONTENT_KEY".to_string(),
+            config.account_content_key.clone(),
         ),
         ("COGNIA_HOST_ID".to_string(), config.host_id.clone()),
     ];
@@ -527,6 +536,7 @@ mod tests {
             bridge_url: "wss://127.0.0.1:7890/internal/bridge".into(),
             data_dir: PathBuf::from("/data"),
             account_id: "local_acct_a".into(),
+            account_content_key: "11".repeat(32),
             host_id: "host-test".into(),
             tls_fingerprint: "ff00".into(),
             node_extra_ca_certs: Some(PathBuf::from("/data/cognia/companion/tls.pem")),
@@ -548,6 +558,7 @@ mod tests {
     fn build_brain_env_matches_the_canonical_contract() {
         let config = test_config(PathBuf::from("brain.mjs"), Duration::from_secs(90));
         let env = build_brain_env(&config, "tok-123");
+        let expected_content_key = "11".repeat(32);
         let get = |k: &str| {
             env.iter()
                 .find(|(key, _)| key == k)
@@ -561,6 +572,10 @@ mod tests {
         );
         assert_eq!(get("COGNIA_TLS_FINGERPRINT"), Some("ff00"));
         assert_eq!(get("COGNIA_LOCAL_ACCOUNT_ID"), Some("local_acct_a"));
+        assert_eq!(
+            get("COGNIA_ACCOUNT_CONTENT_KEY"),
+            Some(expected_content_key.as_str())
+        );
         assert_eq!(get("COGNIA_HOST_ID"), Some("host-test"));
         assert!(get("COGNIA_DATA_DIR").is_some());
         assert!(get("NODE_EXTRA_CA_CERTS").unwrap().ends_with("tls.pem"));
@@ -573,6 +588,7 @@ mod tests {
             7777,
             PathBuf::from("/d"),
             "a".into(),
+            "22".repeat(32),
             "host-a".into(),
             "fp".into(),
             None,
