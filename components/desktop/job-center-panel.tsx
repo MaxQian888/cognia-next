@@ -69,6 +69,11 @@ const STATUS_VARIANTS: Record<
 
 const EMPTY_RECORDS: BackgroundTaskJournalRecord[] = []
 
+/** Supervisor poll cadence with the sheet open — a list somebody is watching. */
+const SUPERVISOR_POLL_OPEN_MS = 2_000
+/** …and with it shut, where the only consumer is the trigger's badge count. */
+const SUPERVISOR_POLL_CLOSED_MS = 30_000
+
 export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
   const t = useTranslations("desktop.jobCenter")
   const liveRecords =
@@ -78,11 +83,24 @@ export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
   const [now, setNow] = useState(() => Date.now())
   const [jobs, setJobs] = useState<BackgroundJobRecord[]>([])
   const [monitors, setMonitors] = useState<BackgroundMonitorRecord[]>([])
+  // This panel lives in the status bar (and the mobile shell), so it is mounted
+  // for the whole life of the app while its sheet is shut almost all of it.
+  // Both timers below are scoped to that fact.
+  const [open, setOpen] = useState(false)
 
+  const anyRunning =
+    records.some((record) => record.status === "running") ||
+    jobs.some((job) => job.status === "running") ||
+    monitors.some((monitor) => monitor.status === "waiting")
+
+  // The elapsed read-outs only exist inside the sheet, and only move while
+  // something is live. Ticking regardless woke the renderer once a second for
+  // the entire session to recompute text nobody was looking at.
   useEffect(() => {
+    if (!open || !anyRunning) return
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [])
+  }, [open, anyRunning])
 
   const refreshSupervisor = useCallback(async () => {
     try {
@@ -100,14 +118,19 @@ export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
     }
   }, [])
 
+  // The supervisor list is native IPC (two calls per pass). It cannot stop
+  // entirely while the sheet is shut — the trigger's badge counts these rows —
+  // but 2s is a cadence for a list somebody is watching, not for a number in a
+  // status bar, so a closed panel falls back to a slow heartbeat.
   useEffect(() => {
+    const period = open ? SUPERVISOR_POLL_OPEN_MS : SUPERVISOR_POLL_CLOSED_MS
     const initialId = window.setTimeout(() => void refreshSupervisor(), 0)
-    const id = window.setInterval(() => void refreshSupervisor(), 2_000)
+    const id = window.setInterval(() => void refreshSupervisor(), period)
     return () => {
       window.clearTimeout(initialId)
       window.clearInterval(id)
     }
-  }, [refreshSupervisor])
+  }, [refreshSupervisor, open])
 
   // Live cross-subsystem executions (broker legs + workflow steps + scheduler),
   // governed by the ExecutionBroker — the same source the scheduler dashboard
@@ -143,7 +166,16 @@ export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <Sheet>
+    <Sheet
+      open={open}
+      // Reseed the clock on the way in rather than from inside the interval's
+      // effect: `now` can be minutes stale after a long stretch with the sheet
+      // shut, and the first elapsed read-out would be wrong until the next tick.
+      onOpenChange={(next) => {
+        if (next) setNow(Date.now())
+        setOpen(next)
+      }}
+    >
       <SheetTrigger asChild>
         <button
           type="button"

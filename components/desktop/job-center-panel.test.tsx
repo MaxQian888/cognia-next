@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { BackgroundTaskJournalRecord } from "@/lib/background-tasks/registry-core"
@@ -411,4 +411,61 @@ it("deep-links a task into the cockpit under its projected run id", async () => 
   await user.click(screen.getByTestId("status-job-center"))
   await user.click(await screen.findByTestId("job-open-run-run-live"))
   expect(pushMock).toHaveBeenCalledWith("/agent-runs?run=execution%3Ajob%3Arun-live")
+})
+
+/**
+ * This panel is mounted in the status bar and the mobile shell for the whole
+ * life of the app, and its sheet is shut for nearly all of it. The supervisor
+ * refresh is two native IPC calls; at the open-panel cadence it used to fire
+ * every two seconds, forever, for a number in a status bar.
+ */
+describe("polling is scoped to the sheet", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+  afterEach(() => {
+    jest.runOnlyPendingTimers()
+    jest.useRealTimers()
+  })
+
+  it("falls back to a slow heartbeat while the sheet is shut", async () => {
+    render(<JobCenterPanel />)
+    // The mount pass still runs: the trigger's badge counts supervisor rows.
+    await act(async () => {
+      jest.advanceTimersByTime(0)
+    })
+    const afterMount = listBackgroundJobs.mock.calls.length
+    expect(afterMount).toBe(1)
+
+    // Ten seconds of a closed panel — five passes at the old cadence.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000)
+    })
+    expect(listBackgroundJobs.mock.calls.length).toBe(afterMount)
+
+    await act(async () => {
+      jest.advanceTimersByTime(25_000)
+    })
+    expect(listBackgroundJobs.mock.calls.length).toBeGreaterThan(afterMount)
+  })
+
+  it("polls at the watching cadence once the sheet is open", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
+    render(<JobCenterPanel />)
+    await act(async () => {
+      jest.advanceTimersByTime(0)
+    })
+
+    await user.click(screen.getByTestId("status-job-center"))
+    // Opening re-arms the effect, so a pass fires immediately.
+    await act(async () => {
+      jest.advanceTimersByTime(0)
+    })
+    const afterOpen = listBackgroundJobs.mock.calls.length
+
+    await act(async () => {
+      jest.advanceTimersByTime(4_000)
+    })
+    expect(listBackgroundJobs.mock.calls.length).toBeGreaterThanOrEqual(afterOpen + 2)
+  })
 })
