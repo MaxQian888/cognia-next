@@ -4,7 +4,7 @@ import { toWebSocketBase } from "@/lib/network/ws-url"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
-import { getCommandDescriptor } from "./command-descriptors"
+import { getCommandDescriptor, isLocalOnlyCommand } from "./command-descriptors"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type {
   Transport,
@@ -612,6 +612,23 @@ export class CompanionTransport implements Transport {
     args?: Record<string, unknown>,
     options?: TransportCallOptions
   ): Promise<T> {
+    // A `target: "client"` command runs in the client, not on a Host, and no
+    // device-facing adapter will dispatch one — the answer is always a 403
+    // `command_transport_forbidden`. Refusing here rather than after a round
+    // trip is the same rule `RoutingTransport` applies on the desktop; this
+    // shell has no local transport to fall back to, so the refusal is the
+    // whole answer. The Host's own code is reused verbatim so a caller that
+    // recognises the refusal cannot tell the two apart.
+    if (isLocalOnlyCommand(name)) {
+      return Promise.reject(
+        new CompanionError({
+          code: "command_transport_forbidden",
+          message: `"${name}" runs on the local client and cannot be answered by a paired host`,
+          retryable: false,
+        })
+      )
+    }
+
     const config = this.config()
     if (!config) {
       return Promise.reject(

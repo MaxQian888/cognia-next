@@ -330,4 +330,164 @@ mod tests {
         assert_eq!(contract.command_count(), 1);
         assert!(contract.validate_input("missing", &json!({})).is_err());
     }
+
+    /// The embedded catalog must describe what the dispatch arms actually
+    /// return, against the validator that actually runs.
+    ///
+    /// `remote_execution::execute` validates every result and maps a mismatch
+    /// to a 500 `contract_output_violation`, so a schema that disagrees with
+    /// its arm turns a working command into an error response. Twenty-eight
+    /// commands shared one `type: "array"` schema; ten of them return a
+    /// wrapper object, and `background_job_list` / `background_monitor_list`
+    /// were the pair the desktop never noticed because Tauri `invoke` bypasses
+    /// this plane entirely.
+    #[test]
+    fn embedded_catalog_accepts_the_shapes_the_job_arms_return() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+
+        // `crate::jobs::dispatch_host_rpc` answers `json!({ "jobs": rows })`.
+        assert!(contract
+            .validate_output("background_job_list", &json!({ "jobs": [] }))
+            .is_ok());
+        assert!(contract
+            .validate_output("background_monitor_list", &json!({ "monitors": [] }))
+            .is_ok());
+        // A bare array is what the schema used to demand and what no arm sends.
+        assert!(contract
+            .validate_output("background_job_list", &json!([]))
+            .is_err());
+
+        // Every Option on `JobRecord` serialises — there is no
+        // `skip_serializing_if` — so a running job carries four explicit nulls.
+        let running = json!({
+            "jobs": [{
+                "id": "job-a",
+                "command": "pnpm test",
+                "cwd": "/workspace",
+                "owner": { "kind": "session", "sessionId": "session-a" },
+                "status": "running",
+                "exitCode": null,
+                "pid": 4242,
+                "startedAtMs": 1,
+                "endedAtMs": null,
+                "totalOutputBytes": 0,
+                "droppedOutputBytes": 0,
+                "label": null,
+            }]
+        });
+        assert!(contract
+            .validate_output("background_job_list", &running)
+            .is_ok());
+    }
+
+    #[test]
+    fn embedded_catalog_accepts_both_session_list_data_planes() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+
+        assert!(contract
+            .validate_output(
+                "session_list",
+                &json!({
+                    "rows": [{
+                        "id": "session-a",
+                        "title": "Direct",
+                        "kind": "direct",
+                        "createdAt": 1,
+                        "updatedAt": 2,
+                    }],
+                    "total": 1,
+                })
+            )
+            .is_ok());
+        assert!(contract
+            .validate_output(
+                "session_list",
+                &json!({
+                    "rows": [{
+                        "id": "session-b",
+                        "title": "Legacy bridge row",
+                        "projectId": "project-a",
+                        "characterId": "character-a",
+                        "teamId": "team-a",
+                        "lastMessagePreview": "Hello",
+                        "lastMessageAt": 2,
+                        "createdAt": 1,
+                        "updatedAt": 2,
+                    }],
+                    "next_offset": 1,
+                    "has_more": true,
+                })
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn embedded_catalog_accepts_both_message_page_data_planes() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+
+        assert!(contract
+            .validate_output(
+                "message_get_by_session",
+                &json!({
+                    "rows": [{
+                        "id": "message-a",
+                        "sessionId": "session-a",
+                        "role": "user",
+                        "content": "Hello",
+                        "createdAt": 1,
+                    }],
+                    "total": 1,
+                })
+            )
+            .is_ok());
+        assert!(contract
+            .validate_output(
+                "message_get_by_session",
+                &json!({
+                    "rows": [{
+                        "id": "message-b",
+                        "sessionId": "session-a",
+                        "turnKey": "turn-a",
+                        "projectId": "project-a",
+                        "role": "assistant",
+                        "parts": [{ "type": "text", "text": "Hello" }],
+                        "senderId": "character-a",
+                        "senderKind": "assistant",
+                        "platformMessageId": "platform-a",
+                        "metadata": { "minimapLabel": "Greeting" },
+                        "createdAt": 2,
+                    }],
+                    "next_offset": 1,
+                })
+            )
+            .is_ok());
+    }
+
+    /// `JobOwner` and `MonitorCondition` are `#[serde(tag = "kind")]`, so the
+    /// wire form is internally tagged. The request contract described the
+    /// externally-tagged shape serde neither emits nor parses, which would have
+    /// made any owner-filtered call a 422 before dispatch.
+    #[test]
+    fn embedded_catalog_matches_the_internally_tagged_job_owner() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+
+        for owner in [
+            json!({ "kind": "app" }),
+            json!({ "kind": "session", "sessionId": "session-a" }),
+            json!({ "kind": "scheduledTask", "taskId": "task-a" }),
+        ] {
+            assert!(
+                contract
+                    .validate_input("background_job_list", &json!({ "owner": owner }))
+                    .is_ok(),
+                "{owner} is what serde emits for JobOwner"
+            );
+        }
+        assert!(contract
+            .validate_input(
+                "background_job_list",
+                &json!({ "owner": { "session": { "sessionId": "session-a" } } })
+            )
+            .is_err());
+    }
 }

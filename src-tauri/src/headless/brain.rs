@@ -745,8 +745,10 @@ mod tests {
         // `FORCE_COLOR` (the documented way to keep colour in `docker logs`)
         // makes the child paint its own tag. The CSI introducer is a `[`, so
         // an unstripped scan pairs it with the tag's `]` and walks past it.
-        let (level, message) =
-            classify_brain_line("\x1b[31m[ERROR]\x1b[0m [gateway] upstream refused", log::Level::Info);
+        let (level, message) = classify_brain_line(
+            "\x1b[31m[ERROR]\x1b[0m [gateway] upstream refused",
+            log::Level::Info,
+        );
         assert_eq!(level, log::Level::Error);
         assert_eq!(message, "[gateway] upstream refused");
     }

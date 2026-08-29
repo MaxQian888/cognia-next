@@ -73,15 +73,18 @@ const headlessDispositionsSchema = z.object({
     z.object({
       disposition: z.enum([
         "local-only",
-        // Client-owned but still remotely dispatchable: the command is
-        // implemented by the Node brain and reaches it through the bridge arm
-        // in rpc/data_sync.rs, so it IS in KNOWN_COMMANDS. These were filed
-        // under `local-only`, whose reason reads "depends on renderer / local
-        // window / desktop state / hardware / OS-local gesture" — plainly
-        // untrue of `sync_pull`, `message_send` and `session_list`, the core
-        // mobile data plane. Same exclusion from a native Headless
-        // implementation, opposite reason, and the label now says which.
-        "brain-owned-bridged",
+        // `brain-owned-bridged` used to live here: 22 commands filed as
+        // client-target because the Node brain implements them rather than
+        // native Rust. That was the right observation about *where they run*
+        // and the wrong conclusion about *who may call them* — `target:
+        // "client"` makes `authorize_transport` refuse every device
+        // transport, so `sync_pull`, `session_list`, `message_send` and
+        // `app_settings_update` answered 403 to the phone whose data plane
+        // they are. They are `target: "execution"` now, dispatched through the
+        // bridge arm in `rpc/data_sync.rs`, and a disposition is by definition
+        // not for them: this catalog explains why a CLIENT command has no
+        // native Headless implementation. Do not re-add the label; a remote
+        // command that the brain happens to serve needs no excuse.
         "covered-by-headless",
         "runtime-internal",
         "separate-design-required",
@@ -297,6 +300,54 @@ export function applyArgumentAliases(schema, pairs) {
   if (eitherOf.length > 0) {
     next.allOf = [...(next.allOf ?? []), ...eitherOf]
   }
+  return next
+}
+
+/**
+ * The one command that must never be asked for a lease: it is what MINTS one.
+ *
+ * `authorize_approval` in `companion_api/remote_execution.rs` special-cases it
+ * for the same reason, and its interactive approval is enforced inside the
+ * dispatch arm by `host_consent` — a human answering on the host. Requiring
+ * `adminLease` in its request schema would make the step-up flow unreachable
+ * from a device: no lease without the call, no call without a lease.
+ */
+const ADMIN_LEASE_MINTING_COMMANDS = new Set(["host_admin_lease_issue"])
+
+/**
+ * Admit the step-up lease on the DEVICE-plane schema of an interactive command.
+ *
+ * `authorize_approval` reads the lease out of `args.adminLease` for every
+ * `approval: "interactive"` command, and it runs BEFORE `validate_contract_value`
+ * — so a device-plane schema that omits the field while declaring
+ * `additionalProperties: false` describes a request that can never be both
+ * authorised and valid. The host demands a field the contract forbids.
+ *
+ * The rule used to live inside `rewriteRemoteGitRequestSchema`, which meant
+ * only `git_*` commands got it. It belongs to `approval`, not to a name prefix:
+ * `terminal_exec` is interactive too, and a paired browser had no way to
+ * present the lease the host was about to demand of it.
+ *
+ * Read the CURRENT `approval` from the manifest rather than trusting a list
+ * here — `terminal_complete_paths` and `terminal_list_path_executables` are
+ * `approval: "none"` and therefore get no `adminLease`, which is what makes
+ * per-keystroke completion possible from a paired client at all.
+ *
+ * DEVICE PLANE ONLY. The loopback service principal is exempt from
+ * `authorize_approval` entirely, so `/internal/_rpc` must keep the un-leased
+ * shape — which is also what makes `buildDevicePlaneOverrides` emit these
+ * commands as overrides at all.
+ */
+function admitAdminLease(name, schema, descriptor) {
+  if (descriptor?.approval !== "interactive") return schema
+  if (ADMIN_LEASE_MINTING_COMMANDS.has(name)) return schema
+  // A `$ref` or a non-object schema has no property bag to extend, and the
+  // generic `RpcArgs` fallback already accepts arbitrary members.
+  if (!schema || schema.type !== "object") return schema
+  if (schema.properties?.adminLease !== undefined) return schema
+  const next = clone(schema)
+  next.properties = { ...(next.properties ?? {}), adminLease: { type: "string", minLength: 1 } }
+  next.required = [...(next.required ?? []), "adminLease"]
   return next
 }
 
@@ -3124,12 +3175,24 @@ export function inspectCommittedContract() {
     null,
     2,
   )}\n`
+  // The device plane, and only the device plane, carries the step-up lease.
+  // `argumentSchemas` stays un-leased so the base catalog and the service spec
+  // (both derived from it) keep describing the loopback shape — which is what
+  // makes `buildDevicePlaneOverrides` see a difference and emit an override.
+  // Git commands already gained the field inside `rewriteRemoteGitRequestSchema`
+  // upstream of this, and `admitAdminLease` is a no-op when it is present.
+  const devicePlaneArgumentSchemas = new Map(
+    [...argumentSchemas].map(([name, entry]) => [
+      name,
+      { ...entry, schema: admitAdminLease(name, entry.schema, byName.get(name)) },
+    ])
+  )
   const desiredPublicSpec = buildPublicSpec(
     publicSpec,
     contract,
     manifest,
     remoteNames,
-    argumentSchemas
+    devicePlaneArgumentSchemas
   )
   const desiredHeadlessSpec = buildHeadlessSpec(
     headlessBaseSpec(),

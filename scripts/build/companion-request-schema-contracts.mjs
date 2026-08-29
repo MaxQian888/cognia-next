@@ -24,28 +24,42 @@ const browserLoadOptions = z.object({
   initialDelayMs: z.number().int().nonnegative().optional(),
 })
 
+// `cognia_jobs::JobOwner` and `MonitorCondition` are both
+// `#[serde(tag = "kind", rename_all = "camelCase")]`, so the wire form is
+// INTERNALLY tagged — `{ "kind": "session", "sessionId": "…" }`, not
+// `{ "session": { "sessionId": "…" } }`. These two contracts described the
+// externally-tagged shape serde never emits and cannot parse, which made every
+// owner-filtered `background_*_list` and every `background_monitor_register_
+// scheduled` a 422 before dispatch. Nothing caught it because the only caller
+// on this plane sends `{}`. `lib/jobs/background-jobs.ts`'s `BackgroundJobOwner`
+// and `BackgroundMonitorCondition` are the matching TypeScript mirrors.
 const jobOwner = z.union([
-  z.object({ session: z.object({ sessionId: z.string().min(1) }) }),
-  z.object({ scheduledTask: z.object({ taskId: z.string().min(1) }) }),
-  z.literal("app"),
+  z.object({ kind: z.literal("session"), sessionId: z.string().min(1) }),
+  z.object({ kind: z.literal("scheduledTask"), taskId: z.string().min(1) }),
+  z.object({ kind: z.literal("app") }),
 ])
 
 const monitorCondition = z.union([
-  z.object({ jobExit: z.object({ jobId: z.string().min(1) }) }),
+  z.object({ kind: z.literal("jobExit"), jobId: z.string().min(1) }),
   z.object({
-    jobOutput: z.object({ jobId: z.string().min(1), pattern: z.string() }),
+    kind: z.literal("jobOutput"),
+    jobId: z.string().min(1),
+    pattern: z.string(),
   }),
   z.object({
-    shellPredicate: z.object({
-      command: z.string().min(1),
-      program: z.string().min(1),
-      args: stringArray,
-      cwd: z.string().min(1),
-      env: z.record(z.string(), z.string()).optional(),
-      intervalMs: z.number().int().positive().optional(),
-    }),
+    kind: z.literal("shellPredicate"),
+    command: z.string().min(1),
+    program: z.string().min(1),
+    args: stringArray,
+    cwd: z.string().min(1),
+    env: z.record(z.string(), z.string()).optional(),
+    intervalMs: z.number().int().positive().optional(),
   }),
-  z.object({ upstream: z.object({ source: z.string().min(1), id: z.string().min(1) }) }),
+  z.object({
+    kind: z.literal("upstream"),
+    source: z.string().min(1),
+    id: z.string().min(1),
+  }),
 ])
 
 const jsonArrayItem = z.union([

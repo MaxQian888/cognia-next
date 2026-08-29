@@ -66,31 +66,36 @@ test("publishes the concrete raw result contract in OpenAPI and the host catalog
 
   assert.equal(command.outputTyped, true)
   assert.equal(command.outputSchemaSource, "contract")
-  assert.deepEqual(command.outputSchema, {
-    type: "object",
-    required: ["rows", "total"],
-    properties: {
-      rows: {
-        type: "array",
-        items: {
-          type: "object",
-          required: ["id", "title", "kind", "createdAt", "updatedAt"],
-          properties: {
-            id: { type: "string" },
-            title: { type: "string" },
-            kind: { type: "string" },
-            createdAt: { type: "integer" },
-            updatedAt: { type: "integer" },
-          },
-          additionalProperties: false,
-        },
-      },
-      total: { type: "integer", minimum: 0 },
-      nextOffset: { type: "integer", minimum: 0 },
-    },
-    additionalProperties: false,
-  })
   assert.deepEqual(responseSchema, command.outputSchema)
+
+  const validate = new Ajv2020().compile(command.outputSchema)
+  assert.equal(
+    validate({
+      rows: [
+        { id: "direct", title: "Direct", kind: "direct", createdAt: 1, updatedAt: 2 },
+      ],
+      total: 1,
+    }),
+    true,
+  )
+  assert.equal(
+    validate({
+      rows: [
+        {
+          id: "bridge",
+          title: "Legacy bridge row",
+          projectId: "project-a",
+          lastMessagePreview: "Hello",
+          lastMessageAt: 2,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      next_offset: 1,
+      has_more: true,
+    }),
+    true,
+  )
 })
 
 test("merges compatible closed-object allOf request schemas", () => {

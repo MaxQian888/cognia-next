@@ -86,16 +86,42 @@ describe("RoutingTransport", () => {
     expect(remote.calls).toHaveLength(0)
   })
 
-  it("keeps manifest client commands local while a remote host is active", async () => {
+  it("keeps the caller's own client data plane local while a remote host is active", async () => {
+    // These carry a `client.*` capability and are `target: "execution"` only so
+    // a paired phone can reach its own mirror over the wire. On the desktop the
+    // data is this machine's: a theme change or a plugin toggle must not land
+    // on the selected remote Host.
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")
     const routing = new RoutingTransport(local.transport)
     setActiveRemoteTransport(remote.transport)
 
     await routing.call("app_settings_update", { theme: "dark" })
+    await routing.call("plugin_set_enabled", { id: "p", enabled: true })
+    await routing.call("register_push_token", { token: "t" })
+    await routing.call("session_list", {})
 
-    expect(local.calls.map((call) => call.name)).toEqual(["app_settings_update"])
+    expect(local.calls.map((call) => call.name)).toEqual([
+      "app_settings_update",
+      "plugin_set_enabled",
+      "register_push_token",
+      "session_list",
+    ])
     expect(remote.calls).toHaveLength(0)
+  })
+
+  it("still follows the active remote for commands the remote host owns", async () => {
+    // The counterpart: `terminal_exec` is `execution` with a `terminal.open`
+    // capability — it runs on the machine being driven, not on this one.
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await routing.call("terminal_exec", { command: "ls" })
+
+    expect(remote.calls.map((call) => call.name)).toEqual(["terminal_exec"])
+    expect(local.calls).toHaveLength(0)
   })
 
   it("rejects service-only commands from the device routing plane", async () => {

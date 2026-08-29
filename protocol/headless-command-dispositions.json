@@ -653,7 +653,6 @@
         "terminal_headless_run",
         "terminal_headless_spawn",
         "terminal_host_service",
-        "terminal_list_path_executables",
         "terminal_reattach",
         "terminal_release_control",
         "terminal_resize",
@@ -768,34 +767,6 @@
         "workflow_waitpoint_create": "Write-through of a renderer-authored Dexie record into its host SQLite mirror (lib/db/workflow-waitpoints.ts:163 dual-writes after the Dexie add). The renderer store is the author of every waitpoint; the native row exists to arbitrate a decide race. Same role as workflow_persist_run_state.",
         "workflow_waitpoint_get": "The renderer's read-back leg of the same mirror sync, used to probe before and after a decide (lib/db/workflow-waitpoints.ts:174)."
       }
-    },
-    {
-      "disposition": "brain-owned-bridged",
-      "reason": "Implemented by the Node brain rather than natively in Rust, and reachable remotely through the desktop-write bridge arm (rpc/data_sync.rs). Excluded from a native Headless implementation because the brain already owns it — NOT because it depends on a renderer, a local window, or hardware.",
-      "commands": [
-        "adapter_update_policy",
-        "app_settings_update",
-        "character_bind_twin",
-        "character_delete",
-        "character_upsert",
-        "mcp_set_enabled",
-        "mcp_set_tool_rules",
-        "message_delete",
-        "message_get_by_session",
-        "message_send",
-        "message_update",
-        "plugin_set_enabled",
-        "register_push_token",
-        "revoke_push_token",
-        "session_list",
-        "session_timeline",
-        "session_turn_messages",
-        "skill_set_enabled",
-        "sync_list_tables",
-        "sync_pull",
-        "transcript_capabilities",
-        "twin_profile_get"
-      ]
     },
     {
       "disposition": "local-only",

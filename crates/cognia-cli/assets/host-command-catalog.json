@@ -373,14 +373,14 @@
       "name": "adapter_update_policy",
       "category": "connectors",
       "resource": "connectors",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "adapter_update_policy (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -1518,14 +1518,14 @@
       "name": "app_settings_update",
       "category": "system",
       "resource": "settings",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "app_settings_update (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -1824,16 +1824,25 @@
             ]
           },
           "exitCode": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "pid": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "startedAtMs": {
             "type": "integer"
           },
           "endedAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "totalOutputBytes": {
             "type": "integer"
@@ -1842,7 +1851,10 @@
             "type": "integer"
           },
           "label": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1870,50 +1882,51 @@
               {
                 "type": "object",
                 "properties": {
-                  "session": {
-                    "type": "object",
-                    "properties": {
-                      "sessionId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "sessionId"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "session"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "session"
+                  "kind",
+                  "sessionId"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "object",
                 "properties": {
-                  "scheduledTask": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "taskId"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "scheduledTask"
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "scheduledTask"
+                  "kind",
+                  "taskId"
                 ],
                 "additionalProperties": false
               },
               {
-                "type": "string",
-                "const": "app"
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "app"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
               }
             ]
           }
@@ -1922,20 +1935,143 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "src-tauri/src/jobs/mod.rs \"jobs.list\" -> json!({ \"jobs\": rows })",
+        "required": [
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundJobRecord",
+              "required": [
+                "id",
+                "command",
+                "cwd",
+                "owner",
+                "status",
+                "startedAtMs",
+                "totalOutputBytes",
+                "droppedOutputBytes"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "owner": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "sessionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "session"
+                          ]
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "taskId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "scheduledTask"
+                          ]
+                        },
+                        "taskId": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "app"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "exited",
+                    "killed",
+                    "interrupted",
+                    "failed"
+                  ]
+                },
+                "exitCode": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "pid": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "startedAtMs": {
+                  "type": "integer"
+                },
+                "endedAtMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "totalOutputBytes": {
+                  "type": "integer"
+                },
+                "droppedOutputBytes": {
+                  "type": "integer"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "background-jobs"
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -2115,16 +2251,25 @@
             ]
           },
           "exitCode": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "pid": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "startedAtMs": {
             "type": "integer"
           },
           "endedAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "totalOutputBytes": {
             "type": "integer"
@@ -2133,7 +2278,10 @@
             "type": "integer"
           },
           "label": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -2265,16 +2413,28 @@
             "type": "integer"
           },
           "settledAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "expiresAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "detail": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "label": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -2302,50 +2462,51 @@
               {
                 "type": "object",
                 "properties": {
-                  "session": {
-                    "type": "object",
-                    "properties": {
-                      "sessionId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "sessionId"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "session"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "session"
+                  "kind",
+                  "sessionId"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "object",
                 "properties": {
-                  "scheduledTask": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "taskId"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "scheduledTask"
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "scheduledTask"
+                  "kind",
+                  "taskId"
                 ],
                 "additionalProperties": false
               },
               {
-                "type": "string",
-                "const": "app"
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "app"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
               }
             ]
           }
@@ -2354,20 +2515,141 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "src-tauri/src/jobs/mod.rs \"monitors.list\" -> json!({ \"monitors\": rows })",
+        "required": [
+          "monitors"
+        ],
+        "properties": {
+          "monitors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "lib/jobs/background-jobs.ts BackgroundMonitorRecord",
+              "required": [
+                "id",
+                "condition",
+                "owner",
+                "status",
+                "createdAtMs"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "condition": {
+                  "type": "object",
+                  "description": "Discriminated by `kind`; the per-kind fields are declared open (BackgroundMonitorCondition).",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "owner": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "sessionId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "session"
+                          ]
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "taskId"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "scheduledTask"
+                          ]
+                        },
+                        "taskId": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "app"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "waiting",
+                    "fired",
+                    "unsatisfiable",
+                    "cancelled",
+                    "expired"
+                  ]
+                },
+                "createdAtMs": {
+                  "type": "integer"
+                },
+                "settledAtMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "expiresAtMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "background-monitors"
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -2396,129 +2678,113 @@
               {
                 "type": "object",
                 "properties": {
-                  "jobExit": {
-                    "type": "object",
-                    "properties": {
-                      "jobId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "jobId"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "jobExit"
+                  },
+                  "jobId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "jobExit"
+                  "kind",
+                  "jobId"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "object",
                 "properties": {
-                  "jobOutput": {
-                    "type": "object",
-                    "properties": {
-                      "jobId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "pattern": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "jobId",
-                      "pattern"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "jobOutput"
+                  },
+                  "jobId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pattern": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "jobOutput"
+                  "kind",
+                  "jobId",
+                  "pattern"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "object",
                 "properties": {
-                  "shellPredicate": {
+                  "kind": {
+                    "type": "string",
+                    "const": "shellPredicate"
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "program": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "env": {
                     "type": "object",
-                    "properties": {
-                      "command": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "program": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "args": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "cwd": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "env": {
-                        "type": "object",
-                        "propertyNames": {
-                          "type": "string"
-                        },
-                        "additionalProperties": {
-                          "type": "string"
-                        },
-                        "example": {}
-                      },
-                      "intervalMs": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      }
+                    "propertyNames": {
+                      "type": "string"
                     },
-                    "required": [
-                      "command",
-                      "program",
-                      "args",
-                      "cwd"
-                    ],
-                    "additionalProperties": false
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "example": {}
+                  },
+                  "intervalMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
                 "required": [
-                  "shellPredicate"
+                  "kind",
+                  "command",
+                  "program",
+                  "args",
+                  "cwd"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "object",
                 "properties": {
-                  "upstream": {
-                    "type": "object",
-                    "properties": {
-                      "source": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "source",
-                      "id"
-                    ],
-                    "additionalProperties": false
+                  "kind": {
+                    "type": "string",
+                    "const": "upstream"
+                  },
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "upstream"
+                  "kind",
+                  "source",
+                  "id"
                 ],
                 "additionalProperties": false
               }
@@ -2638,16 +2904,28 @@
             "type": "integer"
           },
           "settledAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "expiresAtMs": {
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "detail": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "label": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -4834,19 +5112,40 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "services/workspace-runtime/src/browser-service.mjs BrowserService.snapshot; mirrored by lib/browser/protocol.ts BrowserSnapshot, where blockedDomains is optional.",
+        "required": [
+          "generation",
+          "url",
+          "title",
+          "nodes"
+        ],
+        "properties": {
+          "generation": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "SnapshotNode is owned by the browser runtime's accessibility projection and changes with it; the snapshot envelope around it is typed above."
+            }
+          },
+          "blockedDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "browser"
       },
       "outputTyped": true
@@ -5108,14 +5407,14 @@
       "name": "character_bind_twin",
       "category": "sessions",
       "resource": "character",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "character_bind_twin (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -5155,14 +5454,14 @@
       "name": "character_delete",
       "category": "sessions",
       "resource": "character",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "high",
       "approval": "interactive",
       "idempotency": "required",
       "summary": "character_delete (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: high.",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -5195,14 +5494,14 @@
       "name": "character_upsert",
       "category": "sessions",
       "resource": "character",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "character_upsert (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -11099,7 +11398,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_config_create (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11196,7 +11495,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_config_delete (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11290,7 +11589,7 @@
       "operation": "read",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "structural",
       "summary": "external_agent_config_get (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11391,7 +11690,7 @@
       "operation": "read",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "structural",
       "summary": "external_agent_config_list (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11479,7 +11778,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_config_reconcile (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11534,7 +11833,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_config_update (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11636,7 +11935,7 @@
       "operation": "read",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "structural",
       "summary": "external_agent_list (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -11646,20 +11945,50 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts externalAgentList",
+        "required": [
+          "agents"
+        ],
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "lib/companion/desktop-write-source.ts ExternalAgentSummary",
+              "required": [
+                "id",
+                "name",
+                "protocol",
+                "transport",
+                "enabled",
+                "defaultPermissionMode"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "protocol": {
+                  "type": "string"
+                },
+                "transport": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "defaultPermissionMode": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "external-agents"
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -11881,7 +12210,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_update (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -18677,16 +19006,11 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "protocolVersion",
           "accountId",
           "runtimeTargetId",
           "channel"
         ],
         "properties": {
-          "protocolVersion": {
-            "type": "integer",
-            "const": 1
-          },
           "accountId": {
             "type": "string",
             "minLength": 1
@@ -18727,15 +19051,10 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "protocolVersion",
           "accountId",
           "runtimeTargetId"
         ],
         "properties": {
-          "protocolVersion": {
-            "type": "integer",
-            "const": 1
-          },
           "accountId": {
             "type": "string",
             "minLength": 1
@@ -18772,16 +19091,11 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "protocolVersion",
           "accountId",
           "runtimeTargetId",
           "actions"
         ],
         "properties": {
-          "protocolVersion": {
-            "type": "integer",
-            "const": 1
-          },
           "accountId": {
             "type": "string",
             "minLength": 1
@@ -20996,14 +21310,14 @@
       "name": "mcp_set_enabled",
       "category": "extensions",
       "resource": "mcp",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "mcp_set_enabled (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -21031,14 +21345,14 @@
       "name": "mcp_set_tool_rules",
       "category": "extensions",
       "resource": "mcp",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "mcp_set_tool_rules (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -21153,19 +21467,115 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "oneOf": [
+          {
+            "type": "object",
+            "x-cognia-wire-source": "lib/companion/desktop-write-source.ts memoryListRpc",
+            "required": [
+              "ok",
+              "memories"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              },
+              "memories": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "x-cognia-wire-source": "packages/memory/src/api/wire.ts MemoryWireRow (toMemoryWireRow omits every absent optional rather than emitting null).",
+                  "required": [
+                    "id",
+                    "text",
+                    "type",
+                    "scope",
+                    "importance",
+                    "tags",
+                    "pinned",
+                    "provenance",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "characterId": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "branch": {
+                      "type": "string"
+                    },
+                    "pathPattern": {
+                      "type": "string"
+                    },
+                    "importance": {
+                      "type": "number"
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pinned": {
+                      "type": "boolean"
+                    },
+                    "provenance": {
+                      "x-cognia-opaque-reason": "Memory['provenance'] is owned by the memory domain and versioned with it; the wire row around it is typed above."
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "x-cognia-wire-source": "packages/memory/src/api/search-memory.ts SearchMemoriesExternalResult, the ok:false arm. Memory being off is a normal answer, not an error response.",
+            "required": [
+              "ok",
+              "reason"
+            ],
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "temporary",
+                  "backend_unavailable",
+                  "policy_denied"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ],
         "x-cognia-schema-owner": "memory"
       },
       "outputTyped": true
@@ -21216,19 +21626,132 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
-        },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "oneOf": [
+          {
+            "type": "object",
+            "x-cognia-wire-source": "lib/companion/desktop-write-source.ts memorySearchRpc",
+            "required": [
+              "ok",
+              "hits"
+            ],
+            "properties": {
+              "ok": {
+                "const": true
+              },
+              "hits": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "memory",
+                    "relevance",
+                    "score"
+                  ],
+                  "properties": {
+                    "memory": {
+                      "type": "object",
+                      "x-cognia-wire-source": "packages/memory/src/api/wire.ts MemoryWireRow (toMemoryWireRow omits every absent optional rather than emitting null).",
+                      "required": [
+                        "id",
+                        "text",
+                        "type",
+                        "scope",
+                        "importance",
+                        "tags",
+                        "pinned",
+                        "provenance",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "characterId": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "branch": {
+                          "type": "string"
+                        },
+                        "pathPattern": {
+                          "type": "string"
+                        },
+                        "importance": {
+                          "type": "number"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "provenance": {
+                          "x-cognia-opaque-reason": "Memory['provenance'] is owned by the memory domain and versioned with it; the wire row around it is typed above."
+                        },
+                        "createdAt": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "relevance": {
+                      "type": "number"
+                    },
+                    "score": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "x-cognia-wire-source": "packages/memory/src/api/search-memory.ts SearchMemoriesExternalResult, the ok:false arm. Memory being off is a normal answer, not an error response.",
+            "required": [
+              "ok",
+              "reason"
+            ],
+            "properties": {
+              "ok": {
+                "const": false
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "temporary",
+                  "backend_unavailable",
+                  "policy_denied"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ],
         "x-cognia-schema-owner": "memory"
       },
       "outputTyped": true
@@ -21361,14 +21884,14 @@
       "name": "message_delete",
       "category": "sessions",
       "resource": "message",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "message_delete (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -21405,14 +21928,14 @@
       "name": "message_get_by_session",
       "category": "sessions",
       "resource": "message",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "message_get_by_session (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -21436,41 +21959,93 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
+        "description": "One page of messages. The Rust direct store returns compact MessageRow values with total + nextOffset; the indexed desktop bridge returns raw StoredMessage values with next_offset and omits a full count.",
         "type": "object",
         "required": [
-          "rows",
-          "total"
+          "rows"
         ],
         "properties": {
           "rows": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "sessionId",
-                "role",
-                "content",
-                "createdAt"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "sessionId",
+                    "role",
+                    "content",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
                 },
-                "sessionId": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                },
-                "content": {
-                  "type": "string"
-                },
-                "createdAt": {
-                  "type": "integer"
+                {
+                  "description": "Raw renderer-side StoredMessage returned by the indexed desktop bridge. The Rust direct store returns MessageRow instead.",
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "sessionId",
+                    "role",
+                    "parts",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "turnKey": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "parts": {
+                      "type": "array",
+                      "x-cognia-opaque-reason": "AI SDK UIMessage parts are a versioned discriminated union; StoredMessage owns their shape."
+                    },
+                    "senderId": {
+                      "type": "string"
+                    },
+                    "senderKind": {
+                      "type": "string"
+                    },
+                    "platformMessageId": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "x-cognia-opaque-reason": "StoredMessage metadata is an extensible application-owned record."
+                    },
+                    "createdAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
                 }
-              },
-              "additionalProperties": false
+              ]
             }
           },
           "total": {
@@ -21480,9 +22055,14 @@
           "nextOffset": {
             "type": "integer",
             "minimum": 0
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "message"
       },
       "outputTyped": true
     },
@@ -21490,14 +22070,14 @@
       "name": "message_send",
       "category": "sessions",
       "resource": "message",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "message_send (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -21532,14 +22112,14 @@
       "name": "message_update",
       "category": "sessions",
       "resource": "message",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "message_update (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -25921,14 +26501,14 @@
       "name": "plugin_set_enabled",
       "category": "extensions",
       "resource": "plugin",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "plugin_set_enabled (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -27213,19 +27793,34 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "lib/provider-diagnostics/companion.ts getRemoteProviderDiagnosticsHistory",
+        "required": [
+          "capturedAt",
+          "desktopRevision",
+          "stale",
+          "samples"
+        ],
+        "properties": {
+          "capturedAt": {
+            "type": "number"
+          },
+          "desktopRevision": {
+            "type": "number"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "ProviderDiagnosticSample minus `endpoint` is owned by the provider-diagnostics domain; the history envelope around it is typed above."
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "provider-diagnostics"
       },
       "outputTyped": true
@@ -27404,19 +27999,55 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-agent-state provider_profiles ProfileDocs, with schemaVersion and profileVersion inserted by export_redacted.",
+        "required": [
+          "providerProfiles",
+          "deploymentProfiles",
+          "transportProfiles",
+          "legacyAliases",
+          "schemaVersion",
+          "profileVersion"
+        ],
+        "properties": {
+          "providerProfiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+            }
+          },
+          "deploymentProfiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+            }
+          },
+          "transportProfiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+            }
+          },
+          "legacyAliases": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "schemaVersion": {
+            "type": "integer"
+          },
+          "profileVersion": {
+            "type": "integer"
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "provider-profiles"
       },
       "outputTyped": true
@@ -27635,14 +28266,14 @@
       "name": "register_push_token",
       "category": "connectors",
       "resource": "notifications",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "register_push_token (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -27808,14 +28439,14 @@
       "name": "revoke_push_token",
       "category": "connectors",
       "resource": "notifications",
-      "target": "client",
+      "target": "execution",
       "operation": "side-effect",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "revoke_push_token (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object"
@@ -32607,14 +33238,14 @@
       "name": "session_list",
       "category": "sessions",
       "resource": "session",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "session_list (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -32640,10 +33271,10 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
+        "description": "One page of sessions. Two data planes serve `session_list` and they page differently: the Rust direct store (`companion_api/store.rs::SessionPage`) counts the whole table and returns `total` + `nextOffset`, while the indexed bridge (`lib/companion/desktop-message-source.ts::readSessionPage`) reads one row past the page and returns `next_offset` + `has_more` rather than paying for a full count. `rows` is the only field both always send, and the consumer type (`lib/claude/ipc.ts::SessionListPage`) already declares the rest optional. Requiring `total` and naming only `nextOffset` described neither implementation: it made every bridge-served `session_list` a 500 `contract_output_violation` the moment the command became device-reachable.",
         "type": "object",
         "required": [
-          "rows",
-          "total"
+          "rows"
         ],
         "properties": {
           "rows": {
@@ -32653,7 +33284,6 @@
               "required": [
                 "id",
                 "title",
-                "kind",
                 "createdAt",
                 "updatedAt"
               ],
@@ -32667,6 +33297,21 @@
                 "kind": {
                   "type": "string"
                 },
+                "projectId": {
+                  "type": "string"
+                },
+                "characterId": {
+                  "type": "string"
+                },
+                "teamId": {
+                  "type": "string"
+                },
+                "lastMessagePreview": {
+                  "type": "string"
+                },
+                "lastMessageAt": {
+                  "type": "integer"
+                },
                 "createdAt": {
                   "type": "integer"
                 },
@@ -32679,11 +33324,22 @@
           },
           "total": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Whole-table count. Direct store only; the bridge omits it."
           },
           "nextOffset": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Direct store's next-page cursor (camelCase via serde `rename_all`)."
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The bridge's next-page cursor. Same meaning as `nextOffset`, different spelling, because the two planes were written apart."
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Bridge only: whether a row existed past this page."
           }
         },
         "additionalProperties": false
@@ -32694,14 +33350,14 @@
       "name": "session_timeline",
       "category": "sessions",
       "resource": "session",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "session_timeline (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -32740,14 +33396,14 @@
       "name": "session_turn_messages",
       "category": "sessions",
       "resource": "session",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "session_turn_messages (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -32802,14 +33458,14 @@
       "name": "skill_set_enabled",
       "category": "extensions",
       "resource": "skills",
-      "target": "client",
+      "target": "execution",
       "operation": "write",
       "capability": "client.write",
       "risk": "low",
       "approval": "none",
       "idempotency": "required",
       "summary": "skill_set_enabled (client.write)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -33541,14 +34197,14 @@
       "name": "sync_list_tables",
       "category": "system",
       "resource": "sync",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "sync_list_tables (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object"
@@ -33592,14 +34248,14 @@
       "name": "sync_pull",
       "category": "system",
       "resource": "sync",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "sync_pull (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -33631,7 +34287,10 @@
               "agentTaskAttempts",
               "templateDefinitions",
               "templatePackages",
-              "templateInstances"
+              "templateInstances",
+              "plans",
+              "connectorDrafts",
+              "outboundQueue"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -33640,6 +34299,11 @@
             "format": "int64",
             "default": 0,
             "description": "Last cursor the phone received (ms epoch). Pass `0` for a full pull."
+          },
+          "content_protocol_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Retrieval content-protocol version the client understands, so the responder can down-convert rows it stores in a newer shape. Read by `validate_content_protocol` in `rpc/data_sync.rs` and sent by every caller (`lib/sync/handlers/base.ts`); the schema omitted it, and with `additionalProperties: false` that made every sync_pull a 422 the moment the command became device-reachable."
           }
         },
         "additionalProperties": false
@@ -36532,11 +37196,11 @@
       "target": "execution",
       "operation": "read",
       "capability": "terminal.open",
-      "risk": "high",
-      "approval": "interactive",
+      "risk": "low",
+      "approval": "none",
       "idempotency": "structural",
       "summary": "terminal_complete_paths (terminal.open)",
-      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -37473,6 +38137,44 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_list_path_executables",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_list_path_executables (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prefix"
+        ],
+        "properties": {
+          "prefix": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "x-cognia-wire-source": "Vec<String> — cognia_terminal::path_scan::list_path_executables_inner.",
+        "items": {
+          "type": "string"
         }
       },
       "outputTyped": true
@@ -40481,14 +41183,14 @@
       "name": "transcript_capabilities",
       "category": "sessions",
       "resource": "transcript",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "transcript_capabilities (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -40898,14 +41600,14 @@
       "name": "twin_profile_get",
       "category": "knowledge",
       "resource": "twin",
-      "target": "client",
+      "target": "execution",
       "operation": "read",
       "capability": "client.read",
       "risk": "low",
       "approval": "none",
       "idempotency": "structural",
       "summary": "twin_profile_get (client.read)",
-      "description": "Loopback service-token command. Target: client; risk: low.",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
@@ -41749,19 +42451,22 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts twinSourceList",
+        "required": [
+          "sources"
+        ],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "twin"
       },
       "outputTyped": true
@@ -42560,19 +43265,22 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "array",
-        "items": {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ],
-          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts workflowRunList",
+        "required": [
+          "runs"
+        ],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+            }
+          }
         },
-        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "additionalProperties": false,
         "x-cognia-schema-owner": "workflow"
       },
       "outputTyped": true
@@ -42925,5 +43633,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "864b658aca2163579a87cfe965fab77b8fc40fb6042365bd9729513bb78fdda4"
+  "catalogHash": "20656b3a0db576bd71b7596662ae97e1f7efc6dd84c531f2c791e0518552af19"
 }

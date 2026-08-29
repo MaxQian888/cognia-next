@@ -6055,16 +6055,11 @@
     "host_state_snapshot": {
       "type": "object",
       "required": [
-        "protocolVersion",
         "accountId",
         "runtimeTargetId",
         "channel"
       ],
       "properties": {
-        "protocolVersion": {
-          "type": "integer",
-          "const": 1
-        },
         "accountId": {
           "type": "string",
           "minLength": 1
@@ -6083,15 +6078,10 @@
     "host_state_status": {
       "type": "object",
       "required": [
-        "protocolVersion",
         "accountId",
         "runtimeTargetId"
       ],
       "properties": {
-        "protocolVersion": {
-          "type": "integer",
-          "const": 1
-        },
         "accountId": {
           "type": "string",
           "minLength": 1
@@ -6106,16 +6096,11 @@
     "host_state_submit": {
       "type": "object",
       "required": [
-        "protocolVersion",
         "accountId",
         "runtimeTargetId",
         "actions"
       ],
       "properties": {
-        "protocolVersion": {
-          "type": "integer",
-          "const": 1
-        },
         "accountId": {
           "type": "string",
           "minLength": 1
@@ -9504,7 +9489,10 @@
             "agentTaskAttempts",
             "templateDefinitions",
             "templatePackages",
-            "templateInstances"
+            "templateInstances",
+            "plans",
+            "connectorDrafts",
+            "outboundQueue"
           ],
           "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
@@ -9513,6 +9501,11 @@
           "format": "int64",
           "default": 0,
           "description": "Last cursor the phone received (ms epoch). Pass `0` for a full pull."
+        },
+        "content_protocol_version": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Retrieval content-protocol version the client understands, so the responder can down-convert rows it stores in a newer shape. Read by `validate_content_protocol` in `rpc/data_sync.rs` and sent by every caller (`lib/sync/handlers/base.ts`); the schema omitted it, and with `additionalProperties: false` that made every sync_pull a 422 the moment the command became device-reachable."
         }
       },
       "additionalProperties": false
@@ -10748,6 +10741,21 @@
       "properties": {
         "projectId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal_list_path_executables": {
+      "type": "object",
+      "required": [
+        "prefix"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
         }
       },
       "additionalProperties": false

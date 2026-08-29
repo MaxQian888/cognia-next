@@ -27,7 +27,7 @@ import type {
   TransportBinaryResponse,
   TransportCallOptions,
 } from "./transport-types"
-import { getCommandDescriptor } from "./command-descriptors"
+import { getCommandDescriptor, isClientDataPlaneCommand } from "./command-descriptors"
 
 /**
  * The currently-active remote transport, or `null` to route locally. `null` is
@@ -166,6 +166,16 @@ export class RoutingTransport implements Transport {
       return this.local.call<T>(name, args, options)
     }
     if (descriptor.target === "execution") {
+      // `target` alone is not the routing answer. Twenty-two commands are
+      // `execution` only so a paired phone or browser can reach its OWN mirror
+      // — `authorize_transport` admits no other target — and they carry a
+      // `client.*` capability saying so. On the desktop that data is this
+      // machine's: toggling a plugin, changing a theme or registering a push
+      // token must not land on whichever Host is selected just because a
+      // different client needed the same command over the wire.
+      if (isClientDataPlaneCommand(name)) {
+        return this.local.call<T>(name, args, options)
+      }
       return (activeRemote ?? this.local).call<T>(name, args, options)
     }
     if (descriptor.target === "host-admin") {

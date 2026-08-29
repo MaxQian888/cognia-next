@@ -476,6 +476,44 @@ describe("call() — success", () => {
 })
 
 // ---------------------------------------------------------------------------
+// call() — client-target commands never reach the wire
+// ---------------------------------------------------------------------------
+
+describe("call() — client-target commands", () => {
+  it("refuses a client-target command without contacting the host", async () => {
+    await setConfig()
+
+    transport = new CompanionTransport()
+    await expect(transport.call("sandbox_health_check")).rejects.toMatchObject({
+      code: "command_transport_forbidden",
+      retryable: false,
+    })
+    // The point of the guard: no round trip. The host would have answered 403
+    // `command_transport_forbidden` anyway, so the request was pure cost — and
+    // on the composer's boot path it produced a console error every poll.
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("refuses before the not_paired check, so an unpaired shell gets the real reason", async () => {
+    // No config stored. "Not paired" would be a misleading answer: pairing a
+    // host would not make a client-local command reachable.
+    transport = new CompanionTransport()
+    await expect(transport.call("sandbox_health_probe")).rejects.toMatchObject({
+      code: "command_transport_forbidden",
+    })
+  })
+
+  it("still sends execution-target commands", async () => {
+    await setConfig()
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ ok: true })
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // configProvider injection (ADR-0059 T-B2)
 // ---------------------------------------------------------------------------
 

@@ -58,6 +58,20 @@
       },
       "additionalProperties": false
     },
+    "BackgroundJobList": {
+      "type": "object",
+      "x-cognia-wire-source": "src-tauri/src/jobs/mod.rs \"jobs.list\" -> json!({ \"jobs\": rows })",
+      "required": ["jobs"],
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackgroundJobRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "BackgroundJobOwner": {
       "oneOf": [
         {
@@ -132,16 +146,16 @@
           "enum": ["running", "exited", "killed", "interrupted", "failed"]
         },
         "exitCode": {
-          "type": "integer"
+          "type": ["integer", "null"]
         },
         "pid": {
-          "type": "integer"
+          "type": ["integer", "null"]
         },
         "startedAtMs": {
           "type": "integer"
         },
         "endedAtMs": {
-          "type": "integer"
+          "type": ["integer", "null"]
         },
         "totalOutputBytes": {
           "type": "integer"
@@ -150,7 +164,21 @@
           "type": "integer"
         },
         "label": {
-          "type": "string"
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BackgroundMonitorList": {
+      "type": "object",
+      "x-cognia-wire-source": "src-tauri/src/jobs/mod.rs \"monitors.list\" -> json!({ \"monitors\": rows })",
+      "required": ["monitors"],
+      "properties": {
+        "monitors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackgroundMonitorRecord"
+          }
         }
       },
       "additionalProperties": false
@@ -185,16 +213,16 @@
           "type": "integer"
         },
         "settledAtMs": {
-          "type": "integer"
+          "type": ["integer", "null"]
         },
         "expiresAtMs": {
-          "type": "integer"
+          "type": ["integer", "null"]
         },
         "detail": {
-          "type": "string"
+          "type": ["string", "null"]
         },
         "label": {
-          "type": "string"
+          "type": ["string", "null"]
         }
       },
       "additionalProperties": false
@@ -361,6 +389,37 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrowserSnapshot": {
+      "type": "object",
+      "x-cognia-wire-source": "services/workspace-runtime/src/browser-service.mjs BrowserService.snapshot; mirrored by lib/browser/protocol.ts BrowserSnapshot, where blockedDomains is optional.",
+      "required": ["generation", "url", "title", "nodes"],
+      "properties": {
+        "generation": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "SnapshotNode is owned by the browser runtime's accessibility projection and changes with it; the snapshot envelope around it is typed above."
+          }
+        },
+        "blockedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -934,6 +993,46 @@
         },
         "current": {
           "type": "null"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalAgentSummary": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts ExternalAgentSummary",
+      "required": ["id", "name", "protocol", "transport", "enabled", "defaultPermissionMode"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "defaultPermissionMode": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalAgentSummaryList": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts externalAgentList",
+      "required": ["agents"],
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalAgentSummary"
+          }
         }
       },
       "additionalProperties": false
@@ -2150,14 +2249,207 @@
       },
       "additionalProperties": false
     },
-    "MessagePage": {
+    "MemoryListResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "x-cognia-wire-source": "lib/companion/desktop-write-source.ts memoryListRpc",
+          "required": ["ok", "memories"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "memories": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/MemoryWireRow"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/MemoryUnavailable"
+        }
+      ]
+    },
+    "MemorySearchResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "x-cognia-wire-source": "lib/companion/desktop-write-source.ts memorySearchRpc",
+          "required": ["ok", "hits"],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["memory", "relevance", "score"],
+                "properties": {
+                  "memory": {
+                    "$ref": "#/$defs/MemoryWireRow"
+                  },
+                  "relevance": {
+                    "type": "number"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/MemoryUnavailable"
+        }
+      ]
+    },
+    "MemoryUnavailable": {
       "type": "object",
-      "required": ["rows", "total"],
+      "x-cognia-wire-source": "packages/memory/src/api/search-memory.ts SearchMemoriesExternalResult, the ok:false arm. Memory being off is a normal answer, not an error response.",
+      "required": ["ok", "reason"],
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["disabled", "temporary", "backend_unavailable", "policy_denied"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "MemoryWireRow": {
+      "type": "object",
+      "x-cognia-wire-source": "packages/memory/src/api/wire.ts MemoryWireRow (toMemoryWireRow omits every absent optional rather than emitting null).",
+      "required": [
+        "id",
+        "text",
+        "type",
+        "scope",
+        "importance",
+        "tags",
+        "pinned",
+        "provenance",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "characterId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "pathPattern": {
+          "type": "string"
+        },
+        "importance": {
+          "type": "number"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "x-cognia-opaque-reason": "Memory['provenance'] is owned by the memory domain and versioned with it; the wire row around it is typed above."
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BridgeMessageRow": {
+      "description": "Raw renderer-side StoredMessage returned by the indexed desktop bridge. The Rust direct store returns MessageRow instead.",
+      "type": "object",
+      "required": ["id", "sessionId", "role", "parts", "createdAt"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnKey": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "parts": {
+          "type": "array",
+          "x-cognia-opaque-reason": "AI SDK UIMessage parts are a versioned discriminated union; StoredMessage owns their shape."
+        },
+        "senderId": {
+          "type": "string"
+        },
+        "senderKind": {
+          "type": "string"
+        },
+        "platformMessageId": {
+          "type": "string"
+        },
+        "metadata": {
+          "x-cognia-opaque-reason": "StoredMessage metadata is an extensible application-owned record."
+        },
+        "createdAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MessagePage": {
+      "description": "One page of messages. The Rust direct store returns compact MessageRow values with total + nextOffset; the indexed desktop bridge returns raw StoredMessage values with next_offset and omits a full count.",
+      "type": "object",
+      "required": ["rows"],
       "properties": {
         "rows": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/MessageRow"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/MessageRow"
+              },
+              {
+                "$ref": "#/$defs/BridgeMessageRow"
+              }
+            ]
           }
         },
         "total": {
@@ -2165,6 +2457,10 @@
           "minimum": 0
         },
         "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "next_offset": {
           "type": "integer",
           "minimum": 0
         }
@@ -2709,6 +3005,82 @@
       },
       "additionalProperties": false
     },
+    "ProviderDiagnosticsHistory": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/provider-diagnostics/companion.ts getRemoteProviderDiagnosticsHistory",
+      "required": ["capturedAt", "desktopRevision", "stale", "samples"],
+      "properties": {
+        "capturedAt": {
+          "type": "number"
+        },
+        "desktopRevision": {
+          "type": "number"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "ProviderDiagnosticSample minus `endpoint` is owned by the provider-diagnostics domain; the history envelope around it is typed above."
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProviderProfilesExport": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-agent-state provider_profiles ProfileDocs, with schemaVersion and profileVersion inserted by export_redacted.",
+      "required": [
+        "providerProfiles",
+        "deploymentProfiles",
+        "transportProfiles",
+        "legacyAliases",
+        "schemaVersion",
+        "profileVersion"
+      ],
+      "properties": {
+        "providerProfiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+          }
+        },
+        "deploymentProfiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+          }
+        },
+        "transportProfiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+          }
+        },
+        "legacyAliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "profileVersion": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
     "ProviderSearch": {
       "type": "object",
       "required": ["results"],
@@ -3074,8 +3446,9 @@
       "additionalProperties": false
     },
     "SessionPage": {
+      "description": "One page of sessions. Two data planes serve `session_list` and they page differently: the Rust direct store (`companion_api/store.rs::SessionPage`) counts the whole table and returns `total` + `nextOffset`, while the indexed bridge (`lib/companion/desktop-message-source.ts::readSessionPage`) reads one row past the page and returns `next_offset` + `has_more` rather than paying for a full count. `rows` is the only field both always send, and the consumer type (`lib/claude/ipc.ts::SessionListPage`) already declares the rest optional. Requiring `total` and naming only `nextOffset` described neither implementation: it made every bridge-served `session_list` a 500 `contract_output_violation` the moment the command became device-reachable.",
       "type": "object",
-      "required": ["rows", "total"],
+      "required": ["rows"],
       "properties": {
         "rows": {
           "type": "array",
@@ -3085,18 +3458,29 @@
         },
         "total": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Whole-table count. Direct store only; the bridge omits it."
         },
         "nextOffset": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Direct store's next-page cursor (camelCase via serde `rename_all`)."
+        },
+        "next_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The bridge's next-page cursor. Same meaning as `nextOffset`, different spelling, because the two planes were written apart."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "Bridge only: whether a row existed past this page."
         }
       },
       "additionalProperties": false
     },
     "SessionRow": {
       "type": "object",
-      "required": ["id", "title", "kind", "createdAt", "updatedAt"],
+      "required": ["id", "title", "createdAt", "updatedAt"],
       "properties": {
         "id": {
           "type": "string"
@@ -3106,6 +3490,21 @@
         },
         "kind": {
           "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "characterId": {
+          "type": "string"
+        },
+        "teamId": {
+          "type": "string"
+        },
+        "lastMessagePreview": {
+          "type": "string"
+        },
+        "lastMessageAt": {
+          "type": "integer"
         },
         "createdAt": {
           "type": "integer"
@@ -3612,6 +4011,13 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    "TerminalPathExecutableList": {
+      "type": "array",
+      "x-cognia-wire-source": "Vec<String> \u2014 cognia_terminal::path_scan::list_path_executables_inner.",
+      "items": {
+        "type": "string"
       }
     },
     "TerminalProfileSyncResult": {
@@ -4189,6 +4595,22 @@
       },
       "additionalProperties": false
     },
+    "TwinSourceList": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts twinSourceList",
+      "required": ["sources"],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "WorkflowApprovalList": {
       "type": "object",
       "required": ["approvals"],
@@ -4445,6 +4867,22 @@
         }
       },
       "additionalProperties": false
+    },
+    "WorkflowRunList": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts workflowRunList",
+      "required": ["runs"],
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The row is owned by that domain and versioned with it; this plane owns the envelope around it, which is typed above."
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -4541,7 +4979,7 @@
       "$ref": "#/$defs/BackgroundJobRecord"
     },
     "background_job_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/BackgroundJobList"
     },
     "background_job_read": {
       "$ref": "#/$defs/LegacyRecord"
@@ -4553,7 +4991,7 @@
       "$ref": "#/$defs/BackgroundMonitorRecord"
     },
     "background_monitor_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/BackgroundMonitorList"
     },
     "background_monitor_register_scheduled": {
       "$ref": "#/$defs/BackgroundMonitorRecord"
@@ -4664,7 +5102,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "browser_snapshot": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/BrowserSnapshot"
     },
     "browser_stop": {
       "$ref": "#/$defs/LegacyResult"
@@ -5098,7 +5536,7 @@
       "additionalProperties": false
     },
     "external_agent_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ExternalAgentSummaryList"
     },
     "external_agent_release_run": {
       "type": "object",
@@ -5733,10 +6171,10 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "memory_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/MemoryListResult"
     },
     "memory_search": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/MemorySearchResult"
     },
     "memory_store": {
       "$ref": "#/$defs/LegacyResult"
@@ -6057,7 +6495,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "provider_diagnostics_history": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ProviderDiagnosticsHistory"
     },
     "provider_diagnostics_start": {
       "$ref": "#/$defs/LegacyRecord"
@@ -6069,7 +6507,7 @@
       "$ref": "#/$defs/ProfileVersion"
     },
     "provider_profiles_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/ProviderProfilesExport"
     },
     "provider_profiles_version": {
       "$ref": "#/$defs/ProfileVersion"
@@ -6641,6 +7079,9 @@
     "terminal_list_for_project": {
       "$ref": "#/$defs/TerminalSessionList"
     },
+    "terminal_list_path_executables": {
+      "$ref": "#/$defs/TerminalPathExecutableList"
+    },
     "thread_handoff_abort": {
       "$ref": "#/$defs/ThreadHandoffTicket"
     },
@@ -6754,7 +7195,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "twin_source_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/TwinSourceList"
     },
     "twin_source_update": {
       "$ref": "#/$defs/LegacyRecord"
@@ -6821,7 +7262,7 @@
       "additionalProperties": false
     },
     "workflow_run_list": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/WorkflowRunList"
     },
     "workflow_schedule_pause": {
       "$ref": "#/$defs/LegacyResult"
