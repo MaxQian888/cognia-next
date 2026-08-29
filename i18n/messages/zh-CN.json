@@ -11429,6 +11429,8 @@
       "remove": "移除",
       "unavailable": "该操作已不可用。"
     },
+    "referenceAria": "在当前对话中引用“{title}”",
+    "referenceHint": "在当前对话中引用（⌘↵）",
     "roles": {
       "assistant": "助手",
       "other": "工具",

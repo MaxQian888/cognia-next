@@ -72,6 +72,7 @@ import { SettingsLoadFailedBanner } from "@/components/error/settings-load-faile
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
+import { ComposerReferenceHost } from "@/components/chat/composer-reference-host"
 import { HostConsentPrompt } from "@/components/host-consent/host-consent-prompt"
 import { ThreadHandoffInboundPromptProvider } from "@/components/thread-handoff/thread-handoff-inbound-prompt"
 import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
@@ -376,6 +377,10 @@ export default async function RootLayout({
                              * "Report issue" and `/report` open the unified
                              * "Report a problem" dialog through here. */}
                             <ReportProblemHost />
+                            {/* ⌘K (and anything else out of a composer's tree)
+                                staging a reference onto the FOCUSED composer.
+                                Renders nothing. */}
+                            <ComposerReferenceHost />
                             {/* ADR-0153 — a paired device asking for an admin
                              * lease is refused until a human answers here.
                              * Mounted for every shell, not behind

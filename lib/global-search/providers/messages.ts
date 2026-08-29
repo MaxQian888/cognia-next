@@ -102,6 +102,9 @@ export function messageResultToItem(
     timestamp: result.createdAt,
     extra: {
       role: result.role,
+      // Carried so the row can be REFERENCED, not only opened: a message
+      // reference is addressed by conversation and message together.
+      sessionId: result.sessionId,
       archived: result.archived,
       otherBranchCount: result.otherBranchCount,
       occurrenceCount: result.count,

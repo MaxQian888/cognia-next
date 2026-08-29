@@ -55,6 +55,7 @@ import { GlobalSearchEmptyState } from "./global-search-empty-state"
 import { GlobalSearchFilterChips } from "./global-search-filter-chips"
 import { GlobalSearchFooter } from "./global-search-footer"
 import { GlobalSearchResultRow } from "./global-search-result-row"
+import { isReferenceable, referenceCandidateFor } from "@/lib/global-search/referenceable"
 import { cycleScope, GlobalSearchScopeTabs, scopeForDigit } from "./global-search-scope-tabs"
 
 const log = loggers.ui
@@ -171,6 +172,23 @@ export function GlobalSearchDialog({
     [parsed, runItem]
   )
 
+  /**
+   * Stage a row as context for the active conversation instead of opening it.
+   *
+   * Closes the dialog like a selection does — the reference is the outcome, and
+   * leaving the palette open over a composer that just gained a chip hides the
+   * only feedback there is.
+   */
+  const handleReference = useCallback(
+    (item: GlobalSearchItem) => {
+      const candidate = referenceCandidateFor(item)
+      if (!candidate) return
+      if (parsed.text) recordRecentQuery(parsed.raw)
+      runItem({ ...item, action: { type: "reference-in-composer", candidate } })
+    },
+    [parsed, runItem]
+  )
+
   const handleRecent = useCallback(
     (item: RecentItem) => {
       log.info("global-search recent", { id: item.id })
@@ -183,6 +201,8 @@ export function GlobalSearchDialog({
     setScope(next)
     setLimit(undefined)
   }, [])
+
+  const groups = outcome?.groups ?? []
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -199,6 +219,24 @@ export function GlobalSearchDialog({
         }
         return
       }
+      // ⌘↵ / Ctrl+↵ references the highlighted row rather than opening it —
+      // the same secondary action the row's own control performs. `cmdk` marks
+      // the active row with `data-selected`, which is the only handle on it
+      // from here.
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        // Always consumed, even over a row that cannot be referenced: a
+        // modifier that means "reference" on some rows and "open" on others is
+        // worse than one that does nothing on the rest, because the two
+        // outcomes are not undoable in the same way.
+        event.preventDefault()
+        const selected = (event.currentTarget as HTMLElement).querySelector(
+          '[data-testid="global-search-row"][data-selected="true"]'
+        )
+        const id = selected?.getAttribute("data-item-id")
+        const item = groups.flatMap((group) => group.items).find((i) => i.id === id)
+        if (item && isReferenceable(item)) handleReference(item)
+        return
+      }
       if (event.key === "Backspace" && parsed.text === "" && parsed.tokens.length > 0) {
         // No free text left, only filter chips, caret at the end: Backspace
         // drops the last chip whole instead of eating it letter by letter.
@@ -210,10 +248,9 @@ export function GlobalSearchDialog({
         setRawQuery(removeFilterToken(rawQuery, parsed.tokens[parsed.tokens.length - 1]!))
       }
     },
-    [changeScope, scope, rawQuery, parsed.text, parsed.tokens]
+    [changeScope, scope, rawQuery, parsed.text, parsed.tokens, handleReference, groups]
   )
 
-  const groups = outcome?.groups ?? []
   const isEmptyQuery = parsed.text.length === 0 && parsed.tokens.length === 0
   const showEmpty = !isEmptyQuery && !loading && !error && groups.length === 0
   const placeholder = scope === "all" ? t("placeholder") : t(`placeholders.${scope}`)
@@ -342,7 +379,12 @@ export function GlobalSearchDialog({
                         </CommandItem>
                       ) : null}
                       {group.items.map((item) => (
-                        <GlobalSearchResultRow key={item.id} item={item} onSelect={handleSelect} />
+                        <GlobalSearchResultRow
+                          key={item.id}
+                          item={item}
+                          onSelect={handleSelect}
+                          onReference={handleReference}
+                        />
                       ))}
                       {group.truncated && scope === "all" ? (
                         <CommandItem

@@ -11429,6 +11429,8 @@
       "remove": "Remove",
       "unavailable": "That action is no longer available."
     },
+    "referenceAria": "Reference “{title}” in the current conversation",
+    "referenceHint": "Reference in the current conversation (⌘↵)",
     "roles": {
       "assistant": "Assistant",
       "other": "Tool",

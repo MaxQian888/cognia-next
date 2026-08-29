@@ -37,6 +37,7 @@ import { openRecorder } from "@/stores/skills/recorder-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
+import { requestComposerReference } from "@/lib/chat/composer-reference-request"
 
 const log = loggers.ui
 
@@ -282,6 +283,13 @@ export function useGlobalSearchActions({
           // skipping that gate would skip the overlap and budget warnings,
           // which for Pi packages are the only warnings there are.
           router.push(piPackageInstallHref(action.spec))
+          return
+        case "reference-in-composer":
+          // Handed to the composer through a window event rather than staged
+          // here: staging is per entity kind and lives in the mention
+          // registry, and the palette must not grow a second copy of it. See
+          // `lib/chat/composer-reference-request.ts`.
+          requestComposerReference(action.candidate)
           return
         case "callback":
           await action.run()

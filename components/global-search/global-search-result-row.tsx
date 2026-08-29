@@ -9,11 +9,13 @@
  */
 
 import { useFormatter, useNow, useTranslations } from "next-intl"
+import { AtSignIcon } from "lucide-react"
 
 import { MatchHighlight } from "@/components/chat/completion/match-highlight"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Badge } from "@/components/ui/badge"
 import { CommandItem } from "@/components/ui/command"
+import { isReferenceable } from "@/lib/global-search/referenceable"
 import type { GlobalSearchItem } from "@/lib/global-search/types"
 import { cn } from "@/lib/utils"
 
@@ -27,12 +29,18 @@ export interface GlobalSearchResultRowProps {
   onSelect: (item: GlobalSearchItem) => void
   /** Also render the kind label on the right (used inside mixed lists). */
   showKind?: boolean
+  /**
+   * Stage this row as context for the active conversation instead of opening
+   * it. Omitted where the palette has no composer to stage into.
+   */
+  onReference?: (item: GlobalSearchItem) => void
 }
 
 export function GlobalSearchResultRow({
   item,
   onSelect,
   showKind = false,
+  onReference,
 }: GlobalSearchResultRowProps) {
   const t = useTranslations("globalSearch")
   const format = useFormatter()
@@ -52,9 +60,12 @@ export function GlobalSearchResultRow({
       value={item.id}
       onSelect={() => onSelect(item)}
       disabled={Boolean(disabledReason)}
-      className="items-start gap-3 py-2"
+      className="group items-start gap-3 py-2"
       data-testid="global-search-row"
       data-kind={item.kind}
+      // cmdk lowercases and trims `data-value`, so the dialog's ⌘↵ handler
+      // cannot look a row up by it. This carries the id verbatim.
+      data-item-id={item.id}
     >
       <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-muted-foreground">
         {item.icon && "avatar" in item.icon ? (
@@ -110,6 +121,26 @@ export function GlobalSearchResultRow({
           <span className="text-[10px] text-muted-foreground">{disabledReason}</span>
         ) : null}
       </span>
+      {onReference && isReferenceable(item) && !disabledReason ? (
+        // A secondary action, so the row's primary meaning (open it) is
+        // unchanged. `onMouseDown` + preventDefault because `CommandItem`
+        // selects on click, and selecting would open the row out from under
+        // the reference.
+        <button
+          type="button"
+          data-testid="global-search-reference"
+          aria-label={t("referenceAria", { title: item.title })}
+          title={t("referenceHint")}
+          onMouseDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onReference(item)
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-data-[selected=true]:opacity-100"
+        >
+          <AtSignIcon className="size-3.5" aria-hidden />
+        </button>
+      ) : null}
       <span className="ml-auto flex shrink-0 flex-col items-end gap-0.5 pl-2 text-[11px] text-muted-foreground">
         {showKind ? <span>{t(`kinds.${item.kind}`)}</span> : null}
         {item.meta ? <span className="max-w-[160px] truncate">{item.meta}</span> : null}

@@ -395,3 +395,92 @@ describe("session list gating", () => {
     )
   })
 })
+
+describe("referencing from the palette", () => {
+  // ⌘K could already FIND a message in another conversation; the only thing a
+  // hit could do was navigate, so you searched for the thing you wanted to
+  // reuse and then had to find it again from the `@` panel.
+  const messageGroup = () =>
+    group({
+      kind: "message",
+      providerId: "builtin.messages",
+      items: [
+        {
+          id: "message:m1",
+          kind: "message",
+          title: "Restacking",
+          score: 1,
+          extra: { sessionId: "s1" },
+          action: { type: "open-session", sessionId: "s1", messageId: "m1" },
+        },
+      ],
+    })
+
+  /** A workflow is a thing you RUN — the registry's line for "not referenceable". */
+  const workflowGroup = () =>
+    group({
+      kind: "workflow",
+      providerId: "builtin.library",
+      items: [
+        {
+          id: "workflow:w1",
+          kind: "workflow",
+          title: "Nightly sync",
+          score: 1,
+          action: { type: "navigate", href: "/workflows" },
+        },
+      ],
+    })
+
+  /** Open with a query, which is what makes the dialog render groups. */
+  async function openWithResults(groups = [messageGroup()]) {
+    searchState.outcome = outcome(groups)
+    renderDialog()
+    act(() => requestCommandPalette({ query: "restack" }))
+    await screen.findByTestId("global-search-dialog")
+  }
+
+  it("stages the row instead of opening it", async () => {
+    await openWithResults()
+    fireEvent.mouseDown(screen.getByTestId("global-search-reference"))
+    await waitFor(() => expect(runItem).toHaveBeenCalled())
+    expect(runItem.mock.calls[0]![0].action).toMatchObject({
+      type: "reference-in-composer",
+      candidate: { entityKind: "message", id: "s1#m1" },
+    })
+  })
+
+  it("references the highlighted row on Cmd+Enter", async () => {
+    await openWithResults()
+    screen.getByTestId("global-search-row").setAttribute("data-selected", "true")
+    fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "Enter", metaKey: true })
+    await waitFor(() => expect(runItem).toHaveBeenCalled())
+    expect(runItem.mock.calls[0]![0].action.type).toBe("reference-in-composer")
+  })
+
+  it("leaves a plain Enter meaning open", async () => {
+    await openWithResults()
+    screen.getByTestId("global-search-row").setAttribute("data-selected", "true")
+    fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "Enter" })
+    expect(runItem).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: expect.objectContaining({ type: "reference-in-composer" }),
+      })
+    )
+  })
+
+  // A modifier that means "reference" on some rows and "open" on others is
+  // worse than one that does nothing on the rest.
+  it("does not fall through to opening on Cmd+Enter over an unreferenceable row", async () => {
+    await openWithResults([workflowGroup()])
+    screen.getByTestId("global-search-row").setAttribute("data-selected", "true")
+    fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "Enter", metaKey: true })
+    expect(runItem).not.toHaveBeenCalled()
+  })
+
+  // The registry's line: a workflow is a thing you RUN, not a body to read.
+  it("offers no control on a row that cannot be referenced", async () => {
+    await openWithResults([workflowGroup()])
+    expect(screen.queryByTestId("global-search-reference")).toBeNull()
+  })
+})

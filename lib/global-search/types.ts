@@ -21,6 +21,7 @@ import type { WorkspaceCapabilityOverlay } from "@/lib/workspace/capability-over
 import type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
+import type { EntityMentionCandidate } from "@/lib/chat/mentions/entity-sources"
 
 /** Every kind of item the dialog knows how to render and act on. */
 export type GlobalSearchKind =
@@ -157,6 +158,16 @@ export type GlobalSearchAction =
    * gets, since Pi itself never warns.
    */
   | { type: "install"; target: "pi-package"; spec: string }
+  /**
+   * Stage a record as context for the ACTIVE conversation instead of opening
+   * it.
+   *
+   * Deliberately not a `callback`: staging is per entity kind and already lives
+   * in the mention registry, so carrying the candidate keeps ⌘K from learning
+   * how any of it works — the handler hands it to the same
+   * `useEntityMentionStaging` a pick from the `@` panel goes through.
+   */
+  | { type: "reference-in-composer"; candidate: EntityMentionCandidate }
   | { type: "callback"; run: () => void | Promise<void> }
 
 /** Icon slot: a lucide component or an avatar subject (characters, teams). */
@@ -178,6 +189,15 @@ export interface GlobalSearchItemExtra {
   snippet?: Snippet
   /** Item is disabled / not runnable here, with a reason to show. */
   disabledReason?: string
+  /**
+   * Message hit: the conversation it belongs to.
+   *
+   * The row's own id is the MESSAGE id, and a message reference has to be
+   * addressed by both halves — `lib/global-search/referenceable.ts` builds the
+   * candidate from this. The action already carried it; the item did not, so
+   * the row could navigate to a message it could not describe.
+   */
+  sessionId?: string
 }
 
 export interface GlobalSearchItem {

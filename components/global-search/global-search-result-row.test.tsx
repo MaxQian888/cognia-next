@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Command } from "cmdk"
 
@@ -40,6 +40,25 @@ function renderRow(item: GlobalSearchItem, onSelect = jest.fn()) {
     </Command>
   )
   return onSelect
+}
+
+/** Same wrapper, with the secondary action wired. */
+function renderReferenceableRow(
+  item: GlobalSearchItem,
+  { onSelect = jest.fn(), onReference }: { onSelect?: jest.Mock; onReference?: jest.Mock } = {}
+) {
+  render(
+    <Command shouldFilter={false}>
+      <Command.List>
+        <GlobalSearchResultRow
+          item={item}
+          onSelect={onSelect}
+          {...(onReference ? { onReference } : {})}
+        />
+      </Command.List>
+    </Command>
+  )
+  return { onSelect, onReference }
 }
 
 describe("GlobalSearchResultRow", () => {
@@ -94,5 +113,62 @@ describe("GlobalSearchResultRow", () => {
       icon: { avatar: { name: "Ada", avatarColor: "#f00", avatarEmoji: "🧠" } },
     })
     expect(screen.getByText("🧠")).toBeInTheDocument()
+  })
+})
+
+describe("the reference control", () => {
+  const messageItem = (over = {}) =>
+    ({
+      id: "message:m_1",
+      kind: "message" as const,
+      title: "Restacking",
+      score: 1,
+      extra: { sessionId: "s_1" },
+      action: { type: "open-session", sessionId: "s_1", messageId: "m_1" },
+      ...over,
+    }) as never
+
+  it("is absent when the host offers no composer to stage into", () => {
+    renderReferenceableRow(messageItem())
+    expect(screen.queryByTestId("global-search-reference")).toBeNull()
+  })
+
+  it("appears on a referenceable row", () => {
+    renderReferenceableRow(messageItem(), { onReference: jest.fn() })
+    expect(screen.getByTestId("global-search-reference")).toBeInTheDocument()
+  })
+
+  // The registry drew the line at "has a body a model can read".
+  it("is absent on a row that cannot be referenced", () => {
+    renderReferenceableRow(messageItem({ id: "workflow:w", kind: "workflow", extra: undefined }), {
+      onReference: jest.fn(),
+    })
+    expect(screen.queryByTestId("global-search-reference")).toBeNull()
+  })
+
+  it("is absent on a disabled row", () => {
+    renderReferenceableRow(
+      messageItem({ extra: { sessionId: "s_1", disabledReason: "no host" } }),
+      { onReference: jest.fn() }
+    )
+    expect(screen.queryByTestId("global-search-reference")).toBeNull()
+  })
+
+  // `CommandItem` selects on click, and selecting would open the row out from
+  // under the reference.
+  it("references without opening the row", () => {
+    const onSelect = jest.fn()
+    const onReference = jest.fn()
+    renderReferenceableRow(messageItem(), { onSelect, onReference })
+    fireEvent.mouseDown(screen.getByTestId("global-search-reference"))
+    expect(onReference).toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  // cmdk lowercases and trims `data-value`, so the dialog's ⌘↵ handler needs
+  // the id verbatim.
+  it("carries the item id verbatim for the keyboard path", () => {
+    renderReferenceableRow(messageItem())
+    expect(screen.getByTestId("global-search-row")).toHaveAttribute("data-item-id", "message:m_1")
   })
 })

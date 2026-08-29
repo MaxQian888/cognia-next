@@ -89,6 +89,7 @@ const uiState = { setSelectedGuild: jest.fn(), toggleSidebar: jest.fn() }
 jest.mock("@/stores/ui", () => ({ useUIStore: { getState: () => uiState } }))
 
 import { focusSession, useGlobalSearchActions } from "./use-global-search-actions"
+import { onComposerReferenceRequest } from "@/lib/chat/composer-reference-request"
 
 const sessions = [
   { id: "s1", title: "A", projectId: "p1" },
@@ -351,5 +352,32 @@ describe("useGlobalSearchActions", () => {
       )
     )
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("bad"))
+  })
+})
+
+describe("reference-in-composer", () => {
+  // Staging is per entity kind and lives in the mention registry; the palette
+  // must not grow a second copy of it, so the action carries the candidate and
+  // the window seam does the rest.
+  it("hands the candidate to the composer through the seam", async () => {
+    const seen: unknown[] = []
+    const off = onComposerReferenceRequest((candidate) => seen.push(candidate))
+    const { result, close } = setup()
+    const candidate = {
+      entityKind: "memory" as const,
+      id: "mem_1",
+      title: "Prefers pnpm",
+      searchText: "",
+    }
+    await act(async () => {
+      await result.current.runItem(
+        item({ type: "reference-in-composer", candidate }, { kind: "memory" })
+      )
+    })
+    expect(seen).toEqual([candidate])
+    // Closing is the same outcome a selection has: leaving the palette open
+    // over a composer that just gained a chip hides the only feedback there is.
+    expect(close).toHaveBeenCalled()
+    off()
   })
 })
