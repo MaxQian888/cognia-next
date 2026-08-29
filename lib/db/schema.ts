@@ -4825,7 +4825,49 @@ export class CogniaDB extends Dexie {
     this.version(203).stores({
       siteBuildLogs: "&id, versionId, siteId, operationId, [versionId+phase], createdAt",
     })
+
+    // v204 — chat result index: one lean row per thing a turn PRODUCED, so a
+    // later conversation can reference it. See `lib/db/chat-result-index.ts`.
+    //
+    // A sibling of the ADR-0099 `chatSearchText` table and not a column on it,
+    // because the two answer different questions: the search projection drops
+    // tool OUTPUTS on purpose (they would bury real prose in a corpus that has
+    // to stay resident), and a result reference exists precisely to carry one.
+    // Rows hold a handle plus a clamped preview, never the output itself.
+    //
+    // `[createdAt+resultId]` is a total order, like `chatSearchText`'s
+    // `[createdAt+messageId]`: results routinely share a millisecond, so paging
+    // on the timestamp alone would re-read or skip the tied rows. The primary
+    // key is `${messageId}:${partIndex}` so re-projecting one message
+    // overwrites its own rows rather than accumulating them.
+    //
+    // The upgrade rewinds `chatSearchState`. Both indexes are filled by ONE
+    // descending walk over `messages`, which is the expensive part, and that
+    // walk has a single cursor — on an install where the search backfill has
+    // already finished, leaving it complete would mean results never backfill
+    // at all. Re-projecting search text is idempotent by `messageId` and runs
+    // at idle, so the cost is a repeated walk, not a wrong index.
+    this.version(204)
+      .stores({
+        chatResultIndex:
+          "&resultId, messageId, sessionId, [sessionId+createdAt], [createdAt+resultId], projectId, [projectId+createdAt], kind, toolName",
+        chatResultIndexState: "id",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("chatSearchState").put({
+          id: "singleton",
+          oldestProjectedAt: null,
+          oldestProjectedId: null,
+          complete: false,
+          updatedAt: Date.now(),
+        })
+      })
   }
+
+  // v204 — chat result index (what a turn produced) + its backfill watermark.
+  // Rebuildable derived data; see `lib/db/chat-result-index.ts`.
+  chatResultIndex!: Table<import("./chat-result-index").ChatResultIndexRow, string>
+  chatResultIndexState!: Table<import("./chat-result-index").ChatResultIndexStateRow, "singleton">
 
   // v201 — host-owned external-agent configurations. See
   // `lib/db/external-agent-configs.ts`.

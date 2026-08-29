@@ -27,6 +27,19 @@ import type { StoredMessage } from "@cognia/agent-config-types"
 
 import { projectSearchText } from "@/lib/chat/search/project-text"
 import { getMessageMentions } from "@/lib/chat/mentions/read"
+// One walk, two derived tables. Reading `messages` WITH their `parts` is the
+// expensive half of indexing — a batch is 500 whole rows — so the result index
+// (`@result:` / `^`) rides along on the walk that is already paying for it
+// rather than opening a second one. What each table KEEPS is entirely
+// different; only the read is shared.
+import {
+  deleteChatResultsForMessages,
+  deleteChatResultsForSession,
+  projectMessageResults,
+  putChatResultRows,
+  reconcileSessionResults,
+  setChatResultIndexState,
+} from "./chat-result-index"
 import { getDb } from "./schema"
 
 /** Lean, searchable projection of one message. */
@@ -143,11 +156,16 @@ export async function putChatSearchText(rows: readonly ChatSearchTextRow[]): Pro
 export async function deleteChatSearchTextForMessages(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return
   await getDb().chatSearchText.bulkDelete(ids as string[])
+  // The result rows go with them. A surviving one is worse than a surviving
+  // search projection: a stale hit jumps nowhere, but a stale result would be
+  // INLINED into a prompt as though the message still said it.
+  await deleteChatResultsForMessages(ids)
 }
 
 /** Drop every projection of a session. Called from the session delete paths. */
 export async function deleteChatSearchTextForSession(sessionId: string): Promise<void> {
   await getDb().chatSearchText.where("sessionId").equals(sessionId).delete()
+  await deleteChatResultsForSession(sessionId)
 }
 
 export async function countChatSearchText(): Promise<number> {
@@ -193,6 +211,11 @@ export async function reprojectSession(sessionId: string): Promise<{
 
   if (removed.length > 0) await db.chatSearchText.bulkDelete(removed)
   await putChatSearchText(written)
+  // Same message list, second projection. Reconciled rather than appended for
+  // the same reason the search rows are: an edit or a truncate REMOVES
+  // messages, and a stale result row would keep offering something whose
+  // message no longer renders.
+  await reconcileSessionResults(sessionId, messages)
 
   return { written, removed }
 }
@@ -247,15 +270,26 @@ export async function backfillChatSearchTextStep({
   }
 
   const rows: ChatSearchTextRow[] = []
+  const results = []
   for (const message of batch) {
     const projected = projectMessageToSearchRow(message)
     if (projected) rows.push(projected)
+    results.push(...projectMessageResults(message))
   }
   await putChatSearchText(rows)
+  await putChatResultRows(results)
 
   const oldest = batch[batch.length - 1]
   const complete = batch.length < batchSize
   await setChatSearchState({
+    oldestProjectedAt: oldest.createdAt,
+    oldestProjectedId: oldest.id,
+    complete,
+  })
+  // The result index shares this walk, so it shares its watermark. Kept as its
+  // own row rather than read off `chatSearchState` so the two can be rewound
+  // independently later without one migration meaning two things.
+  await setChatResultIndexState({
     oldestProjectedAt: oldest.createdAt,
     oldestProjectedId: oldest.id,
     complete,

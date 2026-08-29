@@ -20,11 +20,11 @@
 //   - The token ends at the next whitespace; backspacing over the trigger
 //     char dismisses the popover.
 
-import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
+import { findTokenEnd, isMentionStart, isTriggerStart } from "@/lib/slash-commands/mention-boundary"
 import { isHttpUrlToken } from "@/lib/chat/link-token"
 import { tokenizeLine } from "@/lib/slash-commands/parse-segments"
 import { docsProviderPrefixes } from "@/lib/docs-providers"
-import { entityMentionPrefixes } from "@/lib/chat/mentions/entity-sources"
+import { entityMentionPrefixes, entityMentionShortcuts } from "@/lib/chat/mentions/entity-sources"
 
 export type TriggerKind =
   | "slash"
@@ -199,6 +199,19 @@ const WORKFLOW_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: Trigger
   { prefix: "edge:", kind: WFEDGE_TRIGGER },
 ]
 
+/**
+ * Single-character shortcuts, in the modes where a typed namespace applies.
+ *
+ * Read from the registry per call, exactly like the prefixes: a test that
+ * resets the registry must not leave this list stale. Empty for the workflow
+ * and team composers, where `@` already means something else and a second
+ * symbol would mean a third thing.
+ */
+function shortcutsFor(mode: MentionMode | undefined) {
+  if (mode === "workflow" || mode === "agents") return []
+  return entityMentionShortcuts()
+}
+
 function namespacePrefixesFor(
   mode: MentionMode | undefined
 ): ReadonlyArray<{ prefix: string; kind: TriggerKind }> {
@@ -332,7 +345,12 @@ export function detectTrigger(
       // command name rides along on `withinCommand` so the hint bar stays up.
       if (caret > tokenEnd) {
         const commandName = value.slice(slashPos + 1, tokenEnd)
-        const mention = detectMentionAt(value, caret, opts, tokenEnd, commandName)
+        // A shortcut inside a command's arguments resolves by the same rules a
+        // mention there does — `/review ^` must complete, or the two trigger
+        // characters would disagree about where they work.
+        const mention =
+          detectMentionAt(value, caret, opts, tokenEnd, commandName) ??
+          detectShortcutAt(value, caret, opts, tokenEnd, commandName)
         if (mention) return mention
       }
       let argumentFields: Pick<
@@ -367,7 +385,49 @@ export function detectTrigger(
     }
   }
 
-  return detectMentionAt(value, caret, opts)
+  return detectMentionAt(value, caret, opts) ?? detectShortcutAt(value, caret, opts)
+}
+
+/**
+ * The `^…` half: a registry-declared single character that opens one source's
+ * panel with no namespace to type.
+ *
+ * Deliberately AFTER the `@` scan and after the slash branch, so a shortcut
+ * character inside a mention or a command argument stays literal — `@a^b` is
+ * one path, not a mention with a result picker inside it.
+ *
+ * The result is spelled as an ordinary namespaced entity trigger, so the
+ * popover, the pick handler and the staging path need no shortcut branch at
+ * all: `^` is a second door onto the same source, not a second mechanism.
+ */
+function detectShortcutAt(
+  value: string,
+  caret: number,
+  opts?: DetectTriggerOptions,
+  minStart = 0,
+  withinCommand?: string
+): ComposerTrigger | null {
+  const shortcuts = shortcutsFor(opts?.mentionMode)
+  if (shortcuts.length === 0) return null
+  for (let i = caret - 1; i >= minStart; i--) {
+    const ch = value[i]
+    const match = shortcuts.find((s) => s.shortcut === ch)
+    if (match) {
+      if (!isTriggerStart(value, i, ch)) return null
+      const queryEnd = findTokenEnd(value, i + 1, value.length)
+      if (caret > queryEnd) return null
+      return {
+        kind: ENTITY_TRIGGER,
+        namespace: match.prefix,
+        tokenStart: i,
+        tokenEnd: queryEnd,
+        query: value.slice(i + 1, caret),
+        ...(withinCommand ? { withinCommand } : {}),
+      }
+    }
+    if (/\s/.test(ch)) break
+  }
+  return null
 }
 
 /**

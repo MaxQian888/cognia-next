@@ -79,6 +79,7 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
   plan: "Plan",
   session: "Another conversation",
   message: "A message from another conversation",
+  result: "A result produced in another conversation",
   artifact: "Artifact",
 }
 

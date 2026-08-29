@@ -581,3 +581,56 @@ describe("detectTrigger — mentions inside a slash command's arguments", () => 
     expect(tg?.withinCommand).toBeUndefined()
   })
 })
+
+describe("^ shortcut", () => {
+  const at = (value: string) => detectTrigger(value, value.length)
+
+  it("opens the result source with no namespace to type", () => {
+    expect(at("^")).toMatchObject({ kind: "entity", namespace: "result:", query: "" })
+  })
+
+  it("carries what was typed after it as the query", () => {
+    expect(at("look at ^grep")).toMatchObject({ namespace: "result:", query: "grep" })
+  })
+
+  it("spans exactly its own token", () => {
+    const t = at("use ^diff")!
+    expect(t.tokenStart).toBe(4)
+    expect(t.tokenEnd).toBe(9)
+  })
+
+  // The boundary rule `@` already has, applied to a character that appears in
+  // arithmetic and in git revisions.
+  it.each([["2^3"], ["git rev-parse HEAD^"], ["a^b"]])("stays literal in %s", (value) => {
+    const t = detectTrigger(value, value.length)
+    expect(t?.namespace).not.toBe("result:")
+  })
+
+  it("triggers at the start of a line", () => {
+    expect(at("first\n^re")).toMatchObject({ namespace: "result:", query: "re" })
+  })
+
+  it("closes once the caret moves past the token", () => {
+    expect(detectTrigger("^grep done", 10)?.namespace).not.toBe("result:")
+  })
+
+  // `@` and `^` must agree about where they work.
+  it("completes inside a slash command's arguments", () => {
+    const t = at("/review ^gr")
+    expect(t).toMatchObject({ kind: "entity", namespace: "result:", query: "gr" })
+    expect(t).toMatchObject({ withinCommand: "review" })
+  })
+
+  // A shortcut character inside a mention token is part of the path.
+  it("does not fire inside an @ token", () => {
+    expect(at("@src/a^b")).toMatchObject({ kind: "file" })
+  })
+
+  it("is inert in the workflow composer, where @ already means a node", () => {
+    expect(detectTrigger("^re", 3, { mentionMode: "workflow" })?.namespace).not.toBe("result:")
+  })
+
+  it("is inert in the team workspace, where @ means a member", () => {
+    expect(detectTrigger("^re", 3, { mentionMode: "agents" })?.namespace).not.toBe("result:")
+  })
+})

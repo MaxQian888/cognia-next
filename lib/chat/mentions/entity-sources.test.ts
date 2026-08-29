@@ -3,6 +3,7 @@ import zhMessages from "@/i18n/messages/zh-CN/chat.json"
 
 import {
   ENTITY_MENTION_RESULT_LIMIT,
+  entityMentionShortcuts,
   searchEntityMentionCandidates,
   MAX_ENTITY_SNAPSHOT_CHARS,
   __resetEntityMentionSourcesForTests,
@@ -42,12 +43,20 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 jest.mock("@/lib/chat/search/pending-rows", () => ({ pendingSearchRows: () => [] }))
 
+const loadNewestResultsMock = jest.fn()
+const searchResultsMock = jest.fn()
+jest.mock("@/lib/db/chat-result-index", () => ({
+  loadNewestChatResults: (n: number) => loadNewestResultsMock(n),
+  searchChatResults: (q: string, n: number) => searchResultsMock(q, n),
+}))
+
 const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   memory: "memory:",
   issue: "issue:",
   plan: "plan:",
   session: "chat:",
   message: "msg:",
+  result: "result:",
   artifact: "artifact:",
 }
 
@@ -75,7 +84,7 @@ beforeEach(() => {
 })
 
 describe("entity mention registry", () => {
-  it("registers exactly the six built-in sources", () => {
+  it("registers exactly the built-in sources", () => {
     const kinds = listEntityMentionSources().map((s) => s.entityKind)
     expect(kinds.sort()).toEqual(Object.keys(EXPECTED_PREFIXES).sort())
   })
@@ -491,5 +500,120 @@ describe("untrusted wrapping for a message", () => {
       "whatever a tool returned"
     )
     expect(entitySnapshotBody("message", "x")).not.toBe("x")
+  })
+})
+
+describe("@result: candidates", () => {
+  const source = () => getEntityMentionSourceByPrefix("result:")!
+
+  const resultRow = (over: Record<string, unknown> = {}) => ({
+    resultId: "m1:1",
+    messageId: "m1",
+    sessionId: "s1",
+    projectId: "p",
+    createdAt: 1_000,
+    kind: "tool",
+    toolName: "Read",
+    title: "/tmp/a.txt",
+    preview: "the file body",
+    bytes: 2_400,
+    searchText: "read /tmp/a.txt the file body",
+    ...over,
+  })
+
+  beforeEach(() => {
+    invalidateEntityMentionCaches()
+    loadNewestResultsMock.mockReset().mockResolvedValue([])
+    searchResultsMock.mockReset().mockResolvedValue([])
+  })
+
+  // The empty query IS the `^` case: the most recent results, by index walk.
+  it("lists the newest results for an empty query", async () => {
+    loadNewestResultsMock.mockResolvedValue([resultRow()])
+    const rows = await searchEntityMentionCandidates(source(), "", {})
+    expect(loadNewestResultsMock).toHaveBeenCalled()
+    expect(searchResultsMock).not.toHaveBeenCalled()
+    expect(rows[0]).toMatchObject({ entityKind: "result", id: "m1:1", title: "/tmp/a.txt" })
+  })
+
+  it("searches the index for a non-empty query", async () => {
+    searchResultsMock.mockResolvedValue([resultRow()])
+    await searchEntityMentionCandidates(source(), "grep", {})
+    expect(searchResultsMock).toHaveBeenCalledWith("grep", expect.any(Number))
+    expect(loadNewestResultsMock).not.toHaveBeenCalled()
+  })
+
+  // A row says what it is about to inline; a 2 MB file read and a one-line
+  // command look identical without it.
+  it("says the tool, the size and the excerpt on the row", async () => {
+    loadNewestResultsMock.mockResolvedValue([resultRow()])
+    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    expect(row.subtitle).toContain("Read")
+    expect(row.subtitle).toContain("2.4 kB")
+    expect(row.subtitle).toContain("the file body")
+  })
+
+  it("links back to the message that produced it", async () => {
+    loadNewestResultsMock.mockResolvedValue([resultRow()])
+    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    expect(row.href).toBe("/?session=s1&message=m1")
+  })
+
+  it("keeps the list inside the active workspace, sparing pre-isolation rows", async () => {
+    loadNewestResultsMock.mockResolvedValue([
+      resultRow({ resultId: "a", projectId: "p" }),
+      resultRow({ resultId: "b", projectId: "q" }),
+      resultRow({ resultId: "c", projectId: "" }),
+    ])
+    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    expect(rows.map((r) => r.id)).toEqual(["a", "c"])
+  })
+
+  it("caps the offered rows", async () => {
+    loadNewestResultsMock.mockResolvedValue(
+      Array.from({ length: 40 }, (_, i) => resultRow({ resultId: `r${i}` }))
+    )
+    expect(await searchEntityMentionCandidates(source(), "", {})).toHaveLength(
+      ENTITY_MENTION_RESULT_LIMIT
+    )
+  })
+})
+
+describe("shortcut characters", () => {
+  afterEach(() => {
+    __resetEntityMentionSourcesForTests()
+  })
+
+  it("exposes the result source's shortcut to the trigger detector", () => {
+    expect(entityMentionShortcuts()).toEqual([
+      { shortcut: "^", prefix: "result:", entityKind: "result" },
+    ])
+  })
+
+  it("refuses a shortcut that is not one character", () => {
+    expect(() =>
+      registerEntityMentionSource({
+        ...fakeSource("custom", "custom:"),
+        shortcut: "^^",
+      })
+    ).toThrow(/one character/)
+  })
+
+  // `@` is the namespace root; `!` and `#` are first-line modes that claim
+  // their whole line and would swallow the shortcut's query.
+  it.each([["@"], ["!"], ["#"], ["/"]])("refuses the reserved character %s", (char) => {
+    expect(() =>
+      registerEntityMentionSource({ ...fakeSource("custom", "custom:"), shortcut: char })
+    ).toThrow(/one character/)
+  })
+
+  it("refuses a shortcut another source already claims", () => {
+    expect(() =>
+      registerEntityMentionSource({ ...fakeSource("custom", "custom:"), shortcut: "^" })
+    ).toThrow(/already used by "result"/)
+  })
+
+  it("allows a source with no shortcut at all", () => {
+    expect(() => registerEntityMentionSource(fakeSource("custom", "custom:"))).not.toThrow()
   })
 })

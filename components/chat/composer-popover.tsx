@@ -54,6 +54,7 @@ import {
   SplineIcon,
   SheetIcon,
   ShapesIcon,
+  SquareChevronRightIcon,
   SquareTerminalIcon,
   TableIcon,
   TargetIcon,
@@ -939,6 +940,9 @@ const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
   // singular one has to read as a single turn or the two rows look alike in a
   // list that mixes them.
   message: MessageSquareTextIcon,
+  // A result is an OUTPUT, not a document: the glyph has to separate "what came
+  // back" from the artifact row sitting next to it in the same list.
+  result: SquareChevronRightIcon,
   artifact: ShapesIcon,
 }
 

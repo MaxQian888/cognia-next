@@ -512,6 +512,7 @@
         "memory": "memory",
         "message": "message",
         "plan": "plan",
+        "result": "result",
         "session": "conversation"
       },
       "entityStaged": "Attached “{title}” to your next message.",

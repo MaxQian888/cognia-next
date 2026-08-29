@@ -217,9 +217,10 @@ export interface EntitySelectionRef extends ContextSelectionBase {
 
 /**
  * The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@msg:` /
- * `@artifact:` reach.
+ * `@result:` (also `^`) / `@artifact:` reach.
  */
-export type EntitySelectionKind = "memory" | "issue" | "plan" | "session" | "message" | "artifact"
+export type EntitySelectionKind =
+  "memory" | "issue" | "plan" | "session" | "message" | "result" | "artifact"
 
 /**
  * Anything the user can stage as context for their next message.

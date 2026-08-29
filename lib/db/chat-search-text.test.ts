@@ -20,6 +20,7 @@ import {
   setChatSearchState,
   type ChatSearchTextRow,
 } from "./chat-search-text"
+import { getChatResultIndexState, loadNewestChatResults } from "./chat-result-index"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 
@@ -437,5 +438,85 @@ describe("scanOlderChatSearchText", () => {
       return true
     })
     expect(seen).toEqual([])
+  })
+})
+
+describe("the result index rides the same walk", () => {
+  // Reading `messages` WITH their `parts` is the expensive half of indexing.
+  // The result index shares that read rather than opening a second one.
+  // `as never` for the same reason `message-renderer.tsx` casts: the AI SDK's
+  // `UIMessagePart` union does not describe a concrete `tool-<name>` part's
+  // `input` / `output`.
+  const tool = (name: string, input: unknown, output: unknown) =>
+    ({
+      type: `tool-${name}`,
+      state: "output-available",
+      input,
+      output,
+    }) as never
+
+  it("emits result rows when a session is re-projected", async () => {
+    await seedMessages([
+      message({
+        id: "r1",
+        sessionId: "s-res",
+        parts: [
+          { type: "text", text: "reading" },
+          tool("Read", { file_path: "/tmp/a" }, "contents"),
+        ],
+      }),
+    ])
+    await reprojectSession("s-res")
+    const rows = await loadNewestChatResults(10)
+    expect(rows.map((r) => r.resultId)).toEqual(["r1:1"])
+    expect(rows[0].preview).toBe("contents")
+  })
+
+  it("drops result rows for a message that is gone from the session", async () => {
+    await seedMessages([
+      message({ id: "r1", sessionId: "s-res", parts: [tool("Read", { path: "/a" }, "one")] }),
+    ])
+    await reprojectSession("s-res")
+    await getDb().messages.delete("r1")
+    await reprojectSession("s-res")
+    expect(await loadNewestChatResults(10)).toEqual([])
+  })
+
+  it("emits result rows from a backfill batch too", async () => {
+    await seedMessages([
+      message({ id: "b1", sessionId: "s-b", parts: [tool("Bash", { command: "ls" }, "a.txt")] }),
+    ])
+    await backfillChatSearchTextStep({ batchSize: 10 })
+    expect((await loadNewestChatResults(10)).map((r) => r.title)).toEqual(["ls"])
+  })
+
+  it("advances the result watermark with the search one", async () => {
+    await seedMessages([
+      message({ id: "b1", sessionId: "s-b", parts: [{ type: "text", text: "x" }] }),
+    ])
+    await backfillChatSearchTextStep({ batchSize: 10 })
+    const [search, results] = await Promise.all([getChatSearchState(), getChatResultIndexState()])
+    expect(results.oldestProjectedAt).toBe(search.oldestProjectedAt)
+    expect(results.complete).toBe(search.complete)
+  })
+
+  // A stale search projection produces a hit that jumps nowhere; a stale result
+  // row gets INLINED into a prompt as though the message still said it.
+  it("drops result rows when the message projections are dropped", async () => {
+    await seedMessages([
+      message({ id: "r1", sessionId: "s-res", parts: [tool("Read", { path: "/a" }, "one")] }),
+    ])
+    await reprojectSession("s-res")
+    await deleteChatSearchTextForMessages(["r1"])
+    expect(await loadNewestChatResults(10)).toEqual([])
+  })
+
+  it("drops result rows when a whole session's projections are dropped", async () => {
+    await seedMessages([
+      message({ id: "r1", sessionId: "s-res", parts: [tool("Read", { path: "/a" }, "one")] }),
+    ])
+    await reprojectSession("s-res")
+    await deleteChatSearchTextForSession("s-res")
+    expect(await loadNewestChatResults(10)).toEqual([])
   })
 })

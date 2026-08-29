@@ -83,6 +83,17 @@ export interface EntityMentionSource {
   /** Namespace typed after the `@`, including the colon (`"memory:"`). */
   prefix: string
   /**
+   * A single character that opens this source's panel on its own, with no
+   * namespace to type — `^` for results.
+   *
+   * Declared here, not in the trigger detector, for the reason the prefixes
+   * are: a second symbol should be one field on one registration, not an edit
+   * to `composer-trigger.ts`. At most one source may claim a given character,
+   * and it must not be `@` (the namespace root) or one of the first-line mode
+   * characters `!` / `#`, which claim their whole line.
+   */
+  shortcut?: string
+  /**
    * Every candidate this source can offer in this context, with `searchText`
    * already built. Cached per `(kind, projectId, sessionId)` by
    * `lib/chat/mentions/entity-cache.ts`, so the store is read once per picking
@@ -110,6 +121,15 @@ export interface EntityMentionSource {
   snapshot(candidate: EntityMentionCandidate): Promise<string | null>
 }
 
+/**
+ * Characters a shortcut may not be.
+ *
+ * `@` is the namespace root; `!` and `#` are the composer's first-line modes
+ * (`components/chat/composer-trigger.ts`), which claim their entire line and
+ * would swallow the shortcut's query. `/` anchors a command.
+ */
+const RESERVED_TRIGGER_CHARS: ReadonlySet<string> = new Set(["@", "!", "#", "/"])
+
 const sources = new Map<EntitySelectionKind, EntityMentionSource>()
 
 export function registerEntityMentionSource(source: EntityMentionSource): void {
@@ -126,10 +146,22 @@ export function registerEntityMentionSource(source: EntityMentionSource): void {
       `entity mention source "${source.entityKind}" prefix must end with ":" (got "${source.prefix}")`
     )
   }
+  if (source.shortcut !== undefined) {
+    if (source.shortcut.length !== 1 || RESERVED_TRIGGER_CHARS.has(source.shortcut)) {
+      throw new Error(
+        `entity mention source "${source.entityKind}" shortcut must be one character and not ${[...RESERVED_TRIGGER_CHARS].join(" / ")} (got "${source.shortcut}")`
+      )
+    }
+  }
   for (const other of sources.values()) {
     if (other.prefix === source.prefix) {
       throw new Error(
         `entity mention source "${source.entityKind}" claims prefix "${source.prefix}" already used by "${other.entityKind}"`
+      )
+    }
+    if (source.shortcut !== undefined && other.shortcut === source.shortcut) {
+      throw new Error(
+        `entity mention source "${source.entityKind}" claims shortcut "${source.shortcut}" already used by "${other.entityKind}"`
       )
     }
   }
@@ -153,6 +185,20 @@ export function listEntityMentionSources(): EntityMentionSource[] {
 /** `{ prefix, entityKind }` per source — consumed by `detectTrigger`. */
 export function entityMentionPrefixes(): { prefix: string; entityKind: EntitySelectionKind }[] {
   return listEntityMentionSources().map((s) => ({ prefix: s.prefix, entityKind: s.entityKind }))
+}
+
+/**
+ * `{ shortcut, prefix, entityKind }` per source that declares one — consumed by
+ * `detectTrigger`, read on every call for the same reason the prefixes are.
+ */
+export function entityMentionShortcuts(): {
+  shortcut: string
+  prefix: string
+  entityKind: EntitySelectionKind
+}[] {
+  return listEntityMentionSources()
+    .filter((s): s is EntityMentionSource & { shortcut: string } => Boolean(s.shortcut))
+    .map((s) => ({ shortcut: s.shortcut, prefix: s.prefix, entityKind: s.entityKind }))
 }
 
 /** Resolve the source owning a namespace prefix (`"issue:"`). */
@@ -203,6 +249,10 @@ const UNTRUSTED_ENTITY_KINDS: ReadonlySet<EntitySelectionKind> = new Set([
   // `@msg:` body deliberately carries the TOOL OUTPUT the transcript snapshot
   // drops. That is the part most likely to be text the web wrote.
   "message",
+  // A tool output is, by definition, text this app did not write: a file it
+  // read, a page it fetched, a command's stdout. It is the single most likely
+  // carrier of an instruction aimed at the model.
+  "result",
   "memory",
 ])
 
@@ -259,6 +309,13 @@ export async function searchEntityMentionCandidates(
 ): Promise<EntityMentionCandidate[]> {
   if (source.search) return source.search(query, ctx)
   return take(await loadEntityCandidates(source, ctx), query)
+}
+
+/** `12.3 kB` — what the row is about to inline, in the units a person reads. */
+function formatResultSize(bytes: number): string {
+  if (bytes < 1_000) return `${bytes} B`
+  if (bytes < 1_000_000) return `${(bytes / 1_000).toFixed(1)} kB`
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
 }
 
 interface MessageCandidateInput {
@@ -498,6 +555,45 @@ function registerBuiltinEntityMentionSources(): void {
       const parsed = parseMessageRefId(candidate.id)
       if (!parsed) return null
       return buildMessageReferenceText(parsed)
+    },
+  })
+
+  registerEntityMentionSource({
+    entityKind: "result",
+    prefix: "result:",
+    // `^` — the one shortcut character. Reusing a result is the reference
+    // people reach for mid-sentence and most often want from the LAST few
+    // turns, and `@result:` is eight characters before the first candidate
+    // appears. Same source, second door: the panel, the staging path and the
+    // prompt block are all the namespace's.
+    shortcut: "^",
+    async search(query, ctx) {
+      const { loadNewestChatResults, searchChatResults } =
+        await import("@/lib/db/chat-result-index")
+      // Over-fetch, then filter by workspace: `projectId` is on the row, but a
+      // second compound index just for this would buy nothing at these sizes,
+      // and a pre-isolation row (`projectId: ""`) must stay reachable.
+      const rows = query
+        ? await searchChatResults(query, ENTITY_MENTION_RESULT_LIMIT * 3)
+        : await loadNewestChatResults(ENTITY_MENTION_RESULT_LIMIT * 3)
+      return rows
+        .filter((r) => !ctx.projectId || !r.projectId || r.projectId === ctx.projectId)
+        .slice(0, ENTITY_MENTION_RESULT_LIMIT)
+        .map((r) => ({
+          entityKind: "result" as const,
+          // The row id already encodes its message and part; carrying it whole
+          // is what lets `snapshot` re-read the live body instead of trusting
+          // the preview it was listed with.
+          id: r.resultId,
+          title: r.title,
+          subtitle: `${r.toolName} · ${formatResultSize(r.bytes)} · ${r.preview}`.slice(0, 200),
+          href: `/?session=${encodeURIComponent(r.sessionId)}&message=${encodeURIComponent(r.messageId)}`,
+          searchText: r.searchText,
+        }))
+    },
+    async snapshot(candidate) {
+      const { resultBodyText } = await import("./result-reference")
+      return resultBodyText(candidate.id)
     },
   })
 

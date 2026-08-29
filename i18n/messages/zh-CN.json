@@ -5357,6 +5357,7 @@
           "memory": "记忆",
           "message": "消息",
           "plan": "计划",
+          "result": "结果",
           "session": "会话"
         },
         "entityStaged": "已把「{title}」附加到下一条消息。",
