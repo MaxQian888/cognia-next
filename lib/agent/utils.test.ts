@@ -2,12 +2,10 @@ import {
   formatBytes,
   formatDuration,
   formatToolName,
-  formatAgentAsMarkdown,
   parseReplayEvent,
   TOOL_STATE_CONFIG,
   TASK_BOARD_COLUMNS,
 } from "./utils"
-import type { BackgroundAgent } from "@/types/agent/background-agent"
 import type { DBAgentTrace } from "@/lib/db"
 
 jest.mock("@cognia/logging", () => {
@@ -71,31 +69,6 @@ describe("formatToolName", () => {
 
   it("preserves single tokens", () => {
     expect(formatToolName("bash")).toBe("Bash")
-  })
-})
-
-describe("formatAgentAsMarkdown", () => {
-  it("renders agent name, status, and progress as markdown", () => {
-    const agent: BackgroundAgent = {
-      id: "a-1",
-      name: "Demo Agent",
-      task: "Summarize the README.",
-      status: "running",
-      progress: 42,
-      logs: [],
-      subAgents: [],
-      steps: [],
-      notifications: [],
-      executionState: { lastActivity: new Date() },
-      config: { permissionMode: "default", autoStart: false, requireApprovalFor: [] },
-      createdAt: new Date(),
-    } as unknown as BackgroundAgent
-
-    const md = formatAgentAsMarkdown(agent)
-    expect(md).toContain("# Demo Agent")
-    expect(md).toContain("**Status:** running")
-    expect(md).toContain("**Task:** Summarize the README.")
-    expect(md).toContain("**Progress:** 42%")
   })
 })
 

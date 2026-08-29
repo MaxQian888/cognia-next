@@ -5,7 +5,6 @@
  */
 
 import type { ToolState } from "@/types/core/message"
-import type { BackgroundAgent } from "@/types/agent/background-agent"
 import type { ReplayEvent } from "@/types/agent/component-types"
 import type { AgentTraceRecord } from "@/types/agent/agent-trace"
 import type { DBAgentTrace } from "@/lib/db"
@@ -286,33 +285,6 @@ export function formatDuration(ms: number): string {
  * migration. New code should import the canonical location.
  */
 export { downloadFile } from "@/lib/files/download"
-
-/**
- * Format a background agent as markdown for export
- */
-export function formatAgentAsMarkdown(agent: BackgroundAgent): string {
-  const lines: string[] = [
-    `# ${agent.name}`,
-    "",
-    `**Status:** ${agent.status}`,
-    `**Task:** ${agent.task}`,
-    `**Progress:** ${agent.progress}%`,
-    "",
-    agent.startedAt ? `**Started:** ${agent.startedAt.toISOString()}` : "",
-    agent.completedAt ? `**Completed:** ${agent.completedAt.toISOString()}` : "",
-    "",
-    "## Sub-Agents",
-    "",
-    ...agent.subAgents.map((sa) => `- **${sa.name}** (${sa.status}): ${sa.task || "No task"}`),
-    "",
-    "## Logs",
-    "",
-    ...agent.logs.map(
-      (log) => `- [${log.level.toUpperCase()}] ${log.timestamp.toISOString()}: ${log.message}`
-    ),
-  ]
-  return lines.filter(Boolean).join("\n")
-}
 
 // ============================================================================
 // Session Replay Utilities

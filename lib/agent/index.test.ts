@@ -15,8 +15,15 @@ describe("agent module barrel", () => {
     expect(typeof agent.formatTokens).toBe("function")
     expect(typeof agent.formatDuration).toBe("function")
     expect(typeof agent.downloadFile).toBe("function")
-    expect(typeof agent.formatAgentAsMarkdown).toBe("function")
     expect(typeof agent.parseReplayEvent).toBe("function")
+  })
+
+  it("no longer re-exports the markdown formatter for a shape nothing builds", () => {
+    // `formatAgentAsMarkdown` rendered a `BackgroundAgent` — a record the
+    // manager stopped producing when it became a facade over
+    // `BackgroundTaskRegistry`. It had no callers and could not be given real
+    // data.
+    expect("formatAgentAsMarkdown" in agent).toBe(false)
   })
 
   it("re-exports the static config registries from utils", () => {

@@ -26,7 +26,6 @@ export {
   formatTokens,
   formatDuration,
   downloadFile,
-  formatAgentAsMarkdown,
   parseReplayEvent,
 } from "./utils"
 
