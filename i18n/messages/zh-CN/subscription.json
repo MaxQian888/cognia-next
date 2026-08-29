@@ -371,7 +371,8 @@
     "resetExpired": "即将重置",
     "resetsInHm": "{hours} 小时 {minutes} 分后重置",
     "resetsInM": "{minutes} 分后重置",
-    "unavailable": "该提供商不支持限额查询。"
+    "unavailable": "该提供商不支持限额查询。",
+    "resetsAt": "{at} 重置"
   },
   "login": {
     "actions": {
@@ -665,7 +666,19 @@
       "all": "全部",
       "chat": "对话",
       "label": "来源",
-      "workflow": "工作流"
+      "workflow": "工作流",
+      "connector": "连接器",
+      "embedding": "向量化",
+      "eval": "评测",
+      "goal": "目标",
+      "imported": "导入",
+      "memory": "记忆",
+      "ocr": "OCR",
+      "plugin": "插件",
+      "subagent": "子智能体",
+      "tts": "语音",
+      "twin": "数字分身",
+      "webSearch": "联网搜索"
     },
     "tableDescription": "最新 200 条。passive 来自真实对话流量；probe 来自可选的主动探测。",
     "tableTitle": "最近样本",
@@ -712,7 +725,8 @@
       "sevenDay": "7 天窗口",
       "sourceEndpoint": "用量接口实时数据",
       "sourceHeaders": "来自对话响应头",
-      "title": "当前配额窗口"
+      "title": "当前配额窗口",
+      "resetsAt": "{at} 重置"
     }
   },
   "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"

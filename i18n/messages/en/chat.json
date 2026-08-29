@@ -816,23 +816,71 @@
     "duration": "Duration",
     "durationValue": "{seconds}s",
     "estimated": "estimated",
-    "fallback": "Fallback",
-    "fiveHour": "5-hour window",
+    "fallback": "Fallback buffer",
     "freshWindow": "No usage metrics yet — the context window is fresh.",
     "inputTokens": "Input (incl. cache)",
     "messages": "Messages",
     "messagesValue": "{user} user · {assistant} assistant",
-    "notReported": "not reported",
     "outputTokens": "Output",
     "overageDisabled": "Overage disabled",
-    "resetsIn": "resets in {hours}h {minutes}m",
-    "resetting": "resetting…",
-    "sevenDay": "7-day window",
     "turns": "Turns",
     "turnsValue": "{assistant} assistant ({metrics} with metrics)",
     "usageFooter": "See Settings → Subscription → Usage for charts and history.",
     "usageTitle": "Subscription usage",
-    "windowUsed": "{pct}% used"
+    "active": "Active",
+    "attributionMore": "{count, plural, =1 {1 more not shown} other {# more not shown}}",
+    "attributionTitle": "What's using it",
+    "axis": {
+      "model": "By model",
+      "surface": "By surface"
+    },
+    "axisLabel": "Group by",
+    "bucketDetail": "{turns, plural, =1 {1 turn} other {# turns}} · {tokens} tokens",
+    "cacheHit": "Cache hit",
+    "capturedAt": "Captured {time}",
+    "copy": "Copy usage report",
+    "copyFailed": "Copy failed: {error}",
+    "copySuccess": "Usage report copied",
+    "inputTokensRaw": "Input",
+    "noWindows": "No quota window reported for this account yet.",
+    "note": {
+      "localSpendUnavailable": "Local usage history is unavailable, so spend cannot be attributed.",
+      "noAccount": "No active Claude subscription account, so no plan quota could be read.",
+      "noLocalSpend": "No usage recorded on this machine in the last 7 days.",
+      "queryDisabled": "Quota queries are off for this account. Enable them in Settings → Subscription.",
+      "quotaError": "Quota query failed.",
+      "quotaErrorDetail": "Quota query failed: {detail}",
+      "stale": "Quota reading is older than 5 minutes.",
+      "webMode": "Quota windows need the desktop app — the browser build cannot read the account keychain."
+    },
+    "planLimits": "Plan limits",
+    "reasoning": "Reasoning",
+    "representative": "Representative window",
+    "representativeClaim": {
+      "five_hour": "5-hour",
+      "seven_day": "7-day"
+    },
+    "scope": {
+      "session": "This session",
+      "today": "Today",
+      "week": "Last 7 days"
+    },
+    "scopeEmpty": "No recorded turns in this range.",
+    "scopeLabel": "Attribution range",
+    "sessions": "Sessions",
+    "sourceEndpoint": "Live usage API",
+    "sourceHeaders": "From chat response headers",
+    "sourceNone": "No quota reading available",
+    "status": {
+      "allowed": "Healthy",
+      "allowed_warning": "Approaching limit",
+      "rate_limited": "Rate limited",
+      "unknown": "Unknown"
+    },
+    "unpricedTurns": "{turns, plural, =1 {1 turn has no known price — cost is a lower bound.} other {# turns have no known price — cost is a lower bound.}}",
+    "updatedAt": "updated {time}",
+    "updatedJustNow": "updated just now",
+    "updatedMinutes": "updated {minutes}m ago"
   },
   "empty": {
     "brandAlt": "Cognia",
@@ -1170,7 +1218,20 @@
     "divergedHint": "This conversation has also changed in {source} since Cognia took ownership of it. Cognia does not merge the two — the copy you are reading is Cognia's. Click to dismiss.",
     "origin": "From {source}",
     "originHint": "This conversation was imported from {source}. Continuing it here makes Cognia its owner — later changes on the {source} side are no longer mirrored.",
-    "unknownSource": "another agent"
+    "unknownSource": "another agent",
+    "canonicalState": "{count, plural, one {# preserved task, plan, history, or Agent event} other {# preserved tasks, plans, history items, and Agent events}}",
+    "resume": "Resume",
+    "resumeErrors": {
+      "binding-missing": "The source did not provide a native session ID.",
+      "cwd-missing": "The original working directory no longer exists.",
+      "handshake-failed": "The original agent could not resume this session.",
+      "preset-missing": "The import did not record a compatible runtime preset.",
+      "preset-not-configured": "Configure the matching external Agent preset first.",
+      "resume-unverified": "The connected Agent has not verified session/resume support.",
+      "runtime-unavailable": "The matching external Agent is not connected or executable."
+    },
+    "resumeNative": "Verify the original Agent and resume this exact native session",
+    "resumeReady": "Native session resumed. The external Agent is selected for the next turn."
   },
   "inlineError": {
     "dismiss": "Dismiss",

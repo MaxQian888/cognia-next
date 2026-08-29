@@ -33,10 +33,33 @@
       "dropped": "已丢弃",
       "summarized": "已摘要"
     },
+    "background": "后台",
+    "lifecycle": "生命周期",
+    "lifecycleStatuses": {
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "failed": "失败",
+      "interrupted": "已中断",
+      "pending": "等待开始",
+      "running": "运行中",
+      "waiting": "等待中"
+    },
+    "nativeResumeCandidate": "可通过 {preset} 尝试原生恢复；实际可用性会在恢复时验证。",
     "noLosses": "转换无损。",
+    "readOnlyMirror": "只读镜像；可使用 Cognia 模型继续。",
+    "recoverability": "恢复能力",
+    "relationship": "关系",
+    "relationships": {
+      "background": "后台任务",
+      "branch": "分支",
+      "fork": "派生",
+      "subagent": "子 Agent",
+      "team-member": "团队成员"
+    },
     "rebuilt": "重建",
     "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
     "reverseDormant": "把这份记录反向写回原助手、生成一个新会话的能力已定义（{fidelity}），但 Cognia 尚未提供该入口。",
+    "sourceVersion": "来源版本",
     "title": "转换保真度"
   },
   "importSelected": "导入选中的 {count} 项",
@@ -57,9 +80,13 @@
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
     "continue-dev": "Continue",
+    "cline": "Cline",
+    "copilot-cli": "Copilot CLI",
+    "cursor": "Cursor",
     "gemini-cli": "Gemini CLI",
     "opencode": "OpenCode",
-    "pi": "Pi"
+    "pi": "Pi",
+    "qwen-code": "Qwen Code"
   },
   "title": "导入 Agent 会话",
   "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",

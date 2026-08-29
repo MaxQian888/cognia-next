@@ -33,10 +33,33 @@
       "dropped": "Dropped",
       "summarized": "Summarized"
     },
+    "background": "Background",
+    "lifecycle": "Lifecycle",
+    "lifecycleStatuses": {
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "failed": "Failed",
+      "interrupted": "Interrupted",
+      "pending": "Pending",
+      "running": "Running",
+      "waiting": "Waiting"
+    },
+    "nativeResumeCandidate": "Native resume candidate via {preset}; availability is verified at resume time.",
     "noLosses": "Converted without loss.",
+    "readOnlyMirror": "Read-only mirror; continue with a Cognia model.",
+    "recoverability": "Recovery",
+    "relationship": "Relationship",
+    "relationships": {
+      "background": "Background",
+      "branch": "Branch",
+      "fork": "Fork",
+      "subagent": "Subagent",
+      "team-member": "Team member"
+    },
     "rebuilt": "Reconstructed",
     "rebuiltHint": "This record was rebuilt from trusted artifacts — it is provenance-marked and does not claim to be the original transcript.",
     "reverseDormant": "Writing this history back out as a new session in the original agent is defined ({fidelity}) but not yet available in Cognia.",
+    "sourceVersion": "Source version",
     "title": "Conversion fidelity"
   },
   "importSelected": "Import {count} selected",
@@ -57,9 +80,13 @@
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
     "continue-dev": "Continue",
+    "cline": "Cline",
+    "copilot-cli": "Copilot CLI",
+    "cursor": "Cursor",
     "gemini-cli": "Gemini CLI",
     "opencode": "OpenCode",
-    "pi": "Pi"
+    "pi": "Pi",
+    "qwen-code": "Qwen Code"
   },
   "title": "Import agent sessions",
   "unrecognized": "These files weren't recognized as a supported agent session.",
