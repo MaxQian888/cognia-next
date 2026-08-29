@@ -10,6 +10,8 @@ pnpm-lock.yaml
 *.min.js
 *.min.css
 public/monaco
+# Offline React artifact runtime — minified bundles from build-artifact-runtime.mjs.
+public/artifact-runtime
 # Serwist owns these generated, minified service-worker bundles.
 public/sw.js
 public/swe-worker-*.js

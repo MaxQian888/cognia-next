@@ -80,6 +80,11 @@ const eslintConfig = defineConfig([
     // Bundled Monaco assets copied from node_modules by
     // scripts/copy-monaco-assets.mjs — minified vendor JS, never authored here.
     "public/monaco/**",
+    // Offline React artifact runtime emitted by
+    // scripts/build/build-artifact-runtime.mjs — minified bundles of react,
+    // react-dom and @babel/standalone. The authored source is
+    // lib/artifacts/runtime/artifact-shell-entry.ts.
+    "public/artifact-runtime/**",
     // Downloaded Cubism runtime binary from scripts/build/download-cubism-core.mjs.
     "public/live2d/**",
     // tesseract.js worker/core assets copied from node_modules by

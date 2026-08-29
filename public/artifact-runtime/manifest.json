@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "reactVersion": "19.2.8",
+  "babelVersion": "8.0.4",
+  "files": {
+    "react-runtime.js": {
+      "bytes": 192680,
+      "sha256": "e6c3f0c7c6cbdf774be5649173dbbfc347f4781db947c58c9f18a095789cc21c"
+    },
+    "jsx-transform.js": {
+      "bytes": 2442523,
+      "sha256": "a8b723044ca8e3f526ff7e4b269797d10eaf0e742087d4ba4e49e953d0adefd7"
+    },
+    "artifact-shell.js": {
+      "bytes": 3096,
+      "sha256": "f67ff99c6c6a1880ebeff2a70e625ce9de44b65322c8e47371a88f17f7b85473"
+    }
+  }
+}

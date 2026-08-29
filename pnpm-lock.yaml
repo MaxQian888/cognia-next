@@ -545,6 +545,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.2.18)(immer@11.1.17)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
     devDependencies:
+      '@babel/standalone':
+        specifier: ^8.0.4
+        version: 8.0.4
       '@changesets/cli':
         specifier: ^2.31.1
         version: 2.31.1(@types/node@26.2.0)
@@ -2116,6 +2119,10 @@ packages:
   '@babel/runtime@7.29.7':
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
+
+  '@babel/standalone@8.0.4':
+    resolution: {integrity: sha512-z8WgyJCfEl7qGAfJJksICOL5zQPpfwa6Yew+91Txf1k3xuDtlDdDe5GX2QdIhgx0HD7oYOCLoF8Y6CwNdawJwQ==}
+    engines: {node: ^22.18.0 || >=24.11.0}
 
   '@babel/template@7.29.7':
     resolution: {integrity: sha512-puq+Gf35oI24FeN11LkoUQFqv9uwNeWpxXZi/Ji3rRIoKAzKnxRaZ+Gkj0vKS9ZCiTESfng1N9LyOyXvo+m+Gg==}
@@ -15483,6 +15490,8 @@ snapshots:
       - supports-color
 
   '@babel/runtime@7.29.7': {}
+
+  '@babel/standalone@8.0.4': {}
 
   '@babel/template@7.29.7':
     dependencies:
