@@ -3,7 +3,7 @@
  * Defines types for sub-agents that can be spawned by parent agents
  */
 
-import type { AgentTool, ToolCall } from "@/lib/ai/agent"
+import type { ToolCall } from "@/lib/ai/agent"
 import type { ProviderName } from "@cognia/provider-types/provider"
 
 /**
@@ -113,61 +113,37 @@ export type SubAgentExecutionMode =
   | "conditional" // Execute based on conditions
 
 /**
- * SubAgent configuration
+ * SubAgent configuration — the fields a template can actually set and a
+ * dispatch actually reads.
+ *
+ * It used to advertise twelve more: `customTools`, `inheritParentContext`,
+ * `shareResults`, `retryConfig`, `dependencies`, `condition`, a
+ * `summarizeResults` / `maxResultTokens` / `summarizationPrompt` trio, and a
+ * `useExternalAgent` / `externalAgentId` / `externalAgentPermissionMode` trio.
+ * Not one was read anywhere, and no editor could write them — the last three
+ * were superseded by `externalPresetId` below, which is the field
+ * `lib/plugin/agent-sdk/dispatch.ts` really routes on. A config type that
+ * promises dependency graphs and result summarisation the executor does not
+ * implement sends every reader down a path that dead-ends.
  */
 export interface SubAgentConfig {
   /** Custom system prompt for the sub-agent */
   systemPrompt?: string
   /** Available tools for this sub-agent */
   tools?: string[]
-  /** Custom tool definitions */
-  customTools?: Record<string, AgentTool>
   /** Maximum execution steps */
   maxSteps?: number
   /** Execution timeout in milliseconds */
   timeout?: number
   /** Execution priority */
   priority?: SubAgentPriority
-  /** Whether to inherit parent agent's context */
-  inheritParentContext?: boolean
-  /** Whether to share results with sibling sub-agents */
-  shareResults?: boolean
   /** Provider override */
   provider?: ProviderName
   /** Model override */
   model?: string
   /** Temperature override */
   temperature?: number
-  /** Retry configuration */
-  retryConfig?: {
-    maxRetries: number
-    retryDelay: number
-    exponentialBackoff: boolean
-  }
-  /** Dependencies - IDs of sub-agents that must complete first */
-  dependencies?: string[]
-  /** Condition for conditional execution */
-  condition?: string | ((context: SubAgentContext) => boolean)
 
-  // === Context Isolation (Claude Best Practice) ===
-  // Prevent context pollution by summarizing results before returning to parent.
-
-  /** Summarize results before returning to parent agent */
-  summarizeResults?: boolean
-  /** Maximum tokens for summarized result */
-  maxResultTokens?: number
-  /** Custom summarization prompt */
-  summarizationPrompt?: string
-
-  // === External Agent Delegation ===
-  // Support for executing sub-agents on external agents (ACP, A2A, etc.)
-
-  /** Execute this sub-agent on an external agent */
-  useExternalAgent?: boolean
-  /** External agent ID to use for execution */
-  externalAgentId?: string
-  /** Permission mode for external agent execution */
-  externalAgentPermissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
   /**
    * Back this sub-agent with an external CLI agent (Claude Code / Codex / …) by
    * preset id. Projected onto `AgentDefinition.externalPresetId` so `dispatch_agent`
