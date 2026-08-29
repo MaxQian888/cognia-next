@@ -221,6 +221,46 @@ describe("applySettings", () => {
   })
 })
 
+describe("installCompanionSignalingController — transport readiness", () => {
+  // `suspendCompanionTransport` puts the `WebStubTransport` back mid-pair and
+  // then notifies, which re-runs the installer. The stub has `call` and
+  // `subscribe` and nothing else, so driving it threw a TypeError inside the
+  // pairing that was in flight.
+  const stub = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
+
+  it("no-ops on a transport that cannot be driven, instead of throwing", () => {
+    let uninstall: (() => void) | undefined
+    expect(() => {
+      uninstall = installCompanionSignalingController({
+        // The runtime IS a companion build — that is exactly why the runtime
+        // check alone was not enough.
+        hasWebCompanionTargetOverride: true,
+        transportOverride: stub as unknown as Tx,
+      })
+    }).not.toThrow()
+    expect(stub.subscribe).not.toHaveBeenCalled()
+    expect(() => uninstall?.()).not.toThrow()
+  })
+
+  it.each([
+    "onConnectionStateChange",
+    "getConnectionState",
+    "reconnectWs",
+    "isOnConnectedLan",
+    "enableWebRtcTier",
+    "disableWebRtcTier",
+  ])("treats a transport missing %s as not drivable", (missing) => {
+    const partial = new FakeTransport() as unknown as Record<string, unknown>
+    delete partial[missing]
+    expect(() =>
+      installCompanionSignalingController({
+        hasWebCompanionTargetOverride: true,
+        transportOverride: partial as unknown as Tx,
+      })()
+    ).not.toThrow()
+  })
+})
+
 describe("installCompanionSignalingController — TURN provisioner", () => {
   // NB: the liveQuery initial fire is unreliable under fake-indexeddb (see the
   // file header), so these exercise the provisioner via a network trigger,

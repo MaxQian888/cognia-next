@@ -42,7 +42,7 @@ use axum::{
     middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{any, delete, get, post, put},
-    Router,
+    Extension, Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::watch;
@@ -231,7 +231,7 @@ pub async fn spawn_server(
         .await
         .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
 
-    let app = build_router(state);
+    let app = build_router(state).layer(Extension(TransportPlane::Tls));
 
     let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
@@ -309,7 +309,8 @@ pub async fn spawn_browser_listener(
         .map_err(|source| CompanionServerError::Bind { addr, source })?
         .port();
 
-    let app = build_router_with_origin_policy(state, origin_policy);
+    let app = build_router_with_origin_policy(state, origin_policy)
+        .layer(Extension(TransportPlane::Plaintext));
     let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
     let (terminated_tx, terminated_rx) = watch::channel(false);
@@ -373,6 +374,27 @@ pub async fn spawn_browser_listener(
 ///   POST /api/_rpc/{name}
 ///   GET  /ws/events
 /// ```
+/// Which listener a request arrived on.
+///
+/// A handler that has to name a **same-origin** URL cannot work this out from
+/// headers. A direct request carries no `x-forwarded-proto`, so every scheme
+/// decision defaults to the TLS one — and the browser plane
+/// (`browser_access`) is plaintext by construction, so that default handed a
+/// tab `wss://127.0.0.1:27891/signaling` for a port that speaks no TLS and
+/// could never complete a handshake.
+///
+/// The listener knows. Each one states its plane here, and nothing a client
+/// sends can contradict it — unlike `x-forwarded-proto`, which is a claim by
+/// whatever sits in front and is only trusted because a proxy is the authority
+/// on the scheme its own clients used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportPlane {
+    /// The HTTPS companion listener.
+    Tls,
+    /// The plaintext, loopback-only browser listener.
+    Plaintext,
+}
+
 pub fn build_router(state: SharedState) -> Router {
     build_router_with_origin_policy(state, super::web_origin::WebOriginPolicy::from_env())
 }

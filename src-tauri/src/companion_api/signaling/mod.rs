@@ -44,6 +44,23 @@ pub fn install_hub(hub: Option<&Arc<SignalingHub>>) {
     *INSTALLED_HUB.write() = hub.map(Arc::downgrade);
 }
 
+/// The signaling endpoint this Host has actually joined, if a hub is installed.
+///
+/// Read by `auth_config_handler` so a client is pointed at the *same*
+/// rendezvous the Host is sitting in. Signaling is a meeting place, not an
+/// ingress: two peers that dial different servers never see each other, so the
+/// Host's own endpoint — env `COGNIA_SIGNALING_URL`, build-time
+/// `NEXT_PUBLIC_SIGNALING_URL`, or a renderer push through
+/// [`SignalingHub::configure`] — is the only value that can be right by
+/// construction.
+pub fn installed_signaling_url() -> Option<String> {
+    INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
+        .map(|hub| hub.signaling_url())
+}
+
 /// Rebuild the hub's device set from the signaling registrations that are
 /// still *active*.
 ///
@@ -212,6 +229,14 @@ impl SignalingHub {
         if !pending.is_empty() {
             self.sync_devices(pending);
         }
+    }
+
+    /// The endpoint this hub's device clients dial.
+    ///
+    /// Cheap enough to read per request: one `parking_lot` lock and a
+    /// `String` clone, on a handler that already does far more work.
+    pub fn signaling_url(&self) -> String {
+        self.inner.lock().signaling_url.clone()
     }
 
     /// Renderer push: replace the configured signaling URL + ICE/TURN

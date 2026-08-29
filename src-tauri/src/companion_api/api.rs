@@ -83,7 +83,11 @@ struct SignalingPublicConfig {
     ice_servers: Vec<Value>,
 }
 
-async fn auth_config_handler(State(state): State<SharedState>, headers: HeaderMap) -> Response {
+async fn auth_config_handler(
+    State(state): State<SharedState>,
+    plane: Option<Extension<super::server::TransportPlane>>,
+    headers: HeaderMap,
+) -> Response {
     let mode = deployment_mode();
     let host_id = super::healthz::derive_server_id(&state.secret.read());
     let oidc = if mode == DeploymentMode::MultiTenant {
@@ -120,8 +124,12 @@ async fn auth_config_handler(State(state): State<SharedState>, headers: HeaderMa
     } else {
         None
     };
-    let signaling_url = non_empty_env("COGNIA_PUBLIC_SIGNALING_URL")
-        .unwrap_or_else(|| same_origin_signaling_url(&headers));
+    // Absent only for a router built outside a listener (the unit tests), where
+    // the TLS plane is the historical behaviour to preserve.
+    let plane = plane.map_or(super::server::TransportPlane::Tls, |Extension(kind)| kind);
+    let signaling_url = resolve_public_signaling_url(&headers, plane, || {
+        super::signaling::installed_signaling_url()
+    });
     Json(AuthConfigResponse {
         deployment_mode: match mode {
             DeploymentMode::SingleUser => "single-user",
@@ -149,7 +157,76 @@ fn non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn same_origin_signaling_url(headers: &HeaderMap) -> String {
+/// The signaling endpoint to hand a client, in order of who actually knows.
+///
+/// # Why the same-origin guess is not the default
+///
+/// Signaling is a **rendezvous**, not an ingress. The Host has already joined
+/// a room on one specific server; a client told to dial a different server
+/// joins a different room and the two never meet. So the endpoint the Host
+/// itself uses is the only value that is right by construction — and this Host
+/// knows it, in `SignalingHub`.
+///
+/// The old fallback ignored that and synthesised `{scheme}://{host}/signaling`
+/// from the request, which is a claim that *this* listener serves `/signaling`.
+/// It does not: the companion router mounts `/ws/events`, `/ws/acp`,
+/// `/ws/terminal` and `/ws/worker`, and signaling lives in a separate service
+/// (`services/signaling-server`). A browser on the loopback plane was handed
+/// `ws://127.0.0.1:27891/signaling` and got a failed handshake every time,
+/// while the Host sat in `wss://signaling.cognia.cn/signaling` waiting for it.
+///
+/// The guess is still right in one deployment: a reverse proxy that terminates
+/// for both the companion API and the signaling service on one origin. That
+/// case is detectable — the proxy announces itself with `x-forwarded-host` /
+/// `x-forwarded-proto` — so it keeps the same-origin answer, and only it does.
+///
+/// Order:
+/// 1. `COGNIA_PUBLIC_SIGNALING_URL` — an operator translating an internal
+///    address into the public one clients must use. Always wins.
+/// 2. Same origin, **when a proxy fronted the request**. Unchanged behaviour
+///    for every deployment that has one.
+/// 3. The Host's own hub endpoint — the room it is actually sitting in.
+/// 4. Same origin, when there is no hub at all. Nothing better is knowable,
+///    and with no hub there is no WebRTC tier to reach anyway.
+fn resolve_public_signaling_url(
+    headers: &HeaderMap,
+    plane: super::server::TransportPlane,
+    host_endpoint: impl FnOnce() -> Option<String>,
+) -> String {
+    if let Some(explicit) = non_empty_env("COGNIA_PUBLIC_SIGNALING_URL") {
+        return explicit;
+    }
+    if fronted_by_proxy(headers) {
+        return same_origin_signaling_url(headers, plane);
+    }
+    host_endpoint()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| same_origin_signaling_url(headers, plane))
+}
+
+/// Whether a reverse proxy terminated this request rather than our listener.
+///
+/// A same-origin answer is safe only when the proxy declares the public scheme.
+/// `x-forwarded-host` alone proves a proxy exists but cannot distinguish an
+/// HTTPS browser from an HTTP browser behind a plaintext listener.
+fn fronted_by_proxy(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// The same-origin signaling endpoint this deployment advertises.
+///
+/// `x-forwarded-proto` still wins when present: a reverse proxy is the
+/// authority on the scheme its own clients used, and the Host behind it may
+/// well be plaintext. With no proxy in front, the **listener** is the
+/// authority — which is what `plane` carries. Defaulting to `wss` there was
+/// the bug: a browser reaching the plaintext loopback plane was handed
+/// `wss://127.0.0.1:27891/signaling`, a URL whose handshake can never
+/// complete.
+fn same_origin_signaling_url(headers: &HeaderMap, plane: super::server::TransportPlane) -> String {
     let scheme = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
@@ -160,7 +237,10 @@ fn same_origin_signaling_url(headers: &HeaderMap) -> String {
                 "wss"
             }
         })
-        .unwrap_or("wss");
+        .unwrap_or(match plane {
+            super::server::TransportPlane::Plaintext => "ws",
+            super::server::TransportPlane::Tls => "wss",
+        });
     let host = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get("host"))
@@ -2211,6 +2291,7 @@ fn unix_time_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::server::TransportPlane;
     use super::*;
     use parking_lot::RwLock;
     use std::sync::Arc;
@@ -2478,8 +2559,116 @@ mod tests {
         headers.insert("x-forwarded-proto", "https".parse().unwrap());
         headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
         assert_eq!(
-            same_origin_signaling_url(&headers),
+            same_origin_signaling_url(&headers, TransportPlane::Tls),
             "wss://brain.example/signaling"
+        );
+    }
+
+    #[test]
+    fn public_signaling_url_follows_the_listener_when_no_proxy_declares_a_scheme() {
+        // The browser plane is plaintext by construction, so `wss` there names
+        // a port that speaks no TLS — the handshake cannot complete, and the
+        // failure surfaces in a tab as a bare "WebSocket connection failed".
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "127.0.0.1:27891".parse().unwrap());
+        assert_eq!(
+            same_origin_signaling_url(&headers, TransportPlane::Plaintext),
+            "ws://127.0.0.1:27891/signaling"
+        );
+        assert_eq!(
+            same_origin_signaling_url(&headers, TransportPlane::Tls),
+            "wss://127.0.0.1:27891/signaling"
+        );
+    }
+
+    #[test]
+    fn a_proxy_declared_scheme_still_outranks_the_listener() {
+        // A TLS-terminating proxy in front of a plaintext Host is the whole
+        // reason `x-forwarded-proto` is consulted first.
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
+        assert_eq!(
+            same_origin_signaling_url(&headers, TransportPlane::Plaintext),
+            "wss://brain.example/signaling"
+        );
+    }
+
+    #[test]
+    fn a_direct_client_is_pointed_at_the_room_the_host_actually_joined() {
+        // The live bug: no proxy, so the synthesised `/signaling` named this
+        // listener — which mounts no such route — while the Host sat in
+        // `wss://signaling.cognia.cn/signaling`. The two peers dialled
+        // different servers and could never meet.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "127.0.0.1:27891".parse().unwrap());
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || Some(
+                "wss://signaling.cognia.cn/signaling".to_string()
+            )),
+            "wss://signaling.cognia.cn/signaling"
+        );
+    }
+
+    #[test]
+    fn a_proxied_client_keeps_the_same_origin_answer() {
+        // A reverse proxy terminating for both the companion API and the
+        // signaling service on one origin is the deployment the guess was
+        // written for, and it announces itself.
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || Some(
+                "wss://signaling.internal:8080/signaling".to_string()
+            )),
+            "wss://brain.example/signaling"
+        );
+    }
+
+    #[test]
+    fn a_forwarded_host_without_a_scheme_uses_the_host_endpoint() {
+        // A TLS-terminating proxy may rewrite the host but omit the public
+        // scheme. The plaintext listener cannot safely infer whether the
+        // browser used HTTP or HTTPS, so it must keep the explicit hub URL.
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-host", "brain.example".parse().unwrap());
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || Some(
+                "wss://signaling.internal:8080/signaling".to_string()
+            )),
+            "wss://signaling.internal:8080/signaling"
+        );
+    }
+
+    #[test]
+    fn an_empty_forwarded_header_is_not_a_proxy() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "127.0.0.1:27891".parse().unwrap());
+        headers.insert("x-forwarded-host", "   ".parse().unwrap());
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || Some(
+                "wss://signaling.cognia.cn/signaling".to_string()
+            )),
+            "wss://signaling.cognia.cn/signaling"
+        );
+    }
+
+    #[test]
+    fn without_a_hub_the_same_origin_guess_is_all_that_is_left() {
+        // No hub means no WebRTC tier to reach either way; say the historical
+        // thing rather than nothing.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "127.0.0.1:27891".parse().unwrap());
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || None),
+            "ws://127.0.0.1:27891/signaling"
+        );
+        assert_eq!(
+            resolve_public_signaling_url(&headers, TransportPlane::Plaintext, || Some(
+                "   ".to_string()
+            )),
+            "ws://127.0.0.1:27891/signaling"
         );
     }
 

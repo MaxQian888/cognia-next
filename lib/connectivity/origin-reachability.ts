@@ -39,6 +39,7 @@
  */
 
 import { combineAbortSignals } from "./capacitor-http"
+import { isLoopbackHostname } from "./loopback-hostname"
 
 export interface ProbeOriginOptions {
   /** Caller cancellation, so a closed dialog drops the probe mid-flight. */
@@ -127,10 +128,7 @@ export function isBrowserTrustableOrigin(baseUrl: string): boolean {
   return !isIpLiteral(url.hostname) && !url.hostname.endsWith(".local")
 }
 
-export function isLoopbackHostname(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "")
-  return host === "localhost" || host === "::1" || /^127\./.test(host)
-}
+export { isLoopbackHostname }
 
 function isIpLiteral(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "")

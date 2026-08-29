@@ -4,6 +4,7 @@ import {
   CompanionApiError,
   companionErrorCode,
   devicePlatformLabel,
+  fetchCompanionAuthConfig,
   issueSocketTicket,
   registerCompanionDevice,
   registerCompanionWorker,
@@ -410,5 +411,52 @@ describe("devicePlatformLabel (ADR-0127)", () => {
     expect(devicePlatformLabel()).toBe("web")
     g.window = { __TAURI_INTERNALS__: {} }
     expect(devicePlatformLabel()).toBe("unknown")
+  })
+})
+
+describe("signaling transport in the auth config", () => {
+  const fetcherFor = (url: unknown) =>
+    jest.fn().mockResolvedValue(
+      Response.json({
+        deploymentMode: "single-user",
+        hostId: "host-1",
+        tenantId: "tenant-a",
+        signaling: { url, iceServers: [] },
+      })
+    ) as unknown as AuthFetcher
+
+  it.each([
+    "wss://host.test/signaling",
+    // The plaintext loopback plane is the only address a browser tab can reach
+    // the Host on. Once the Host started naming it honestly, a `^wss://` rule
+    // turned the whole config into "malformed" and killed pairing outright.
+    "ws://127.0.0.1:27891/signaling",
+    "ws://localhost:27891/signaling",
+    "ws://[::1]:27891/signaling",
+  ])("accepts %s", async (url) => {
+    await expect(
+      fetchCompanionAuthConfig("http://127.0.0.1:27891", undefined, fetcherFor(url))
+    ).resolves.toMatchObject({ signaling: { url } })
+  })
+
+  it.each([
+    // The rendezvous carries the room descriptor; cleartext across a shared
+    // network stays refused, loopback exemption or not.
+    "ws://192.168.1.42:27891/signaling",
+    "ws://signaling.example.com/signaling",
+    // Not a WebSocket scheme at all.
+    "https://host.test/signaling",
+    "not a url",
+    "",
+  ])("refuses %s", async (url) => {
+    await expect(
+      fetchCompanionAuthConfig("http://127.0.0.1:27891", undefined, fetcherFor(url))
+    ).rejects.toThrow(/malformed/)
+  })
+
+  it("still refuses a config whose signaling block is not an object", async () => {
+    await expect(
+      fetchCompanionAuthConfig("http://127.0.0.1:27891", undefined, fetcherFor(undefined))
+    ).rejects.toThrow(/malformed/)
   })
 })

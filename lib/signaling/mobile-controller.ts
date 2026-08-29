@@ -133,12 +133,42 @@ export async function probeCandidateDefault(
 }
 
 /**
+ * Does this transport actually expose the surface the controller drives?
+ *
+ * Every method named here is called unconditionally below, so the guard and
+ * the call sites must stay in step; a missing one is a TypeError at the first
+ * transition rather than a degraded controller.
+ */
+function isCompanionTransport(value: unknown): value is CompanionTransport {
+  if (!value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  return [
+    "onConnectionStateChange",
+    "getConnectionState",
+    "reconnectWs",
+    "isOnConnectedLan",
+    "enableWebRtcTier",
+    "disableWebRtcTier",
+  ].every((method) => typeof record[method] === "function")
+}
+
+/**
  * Install the controller. Returns an uninstall function. Re-installing
  * after uninstall is safe; concurrent installs share the live transport.
  *
  * A no-op on any runtime whose transport is not a `CompanionTransport` — the
  * Tauri desktop (it is the peer) and a plain web build with no configured
  * server.
+ *
+ * That is decided on the transport, not only on the runtime. A web-companion
+ * runtime holds the `WebStubTransport` (`call` + `subscribe`, nothing else)
+ * until a pairing resolves, and `suspendCompanionTransport` puts it back
+ * mid-pair before notifying — which re-runs this installer against the stub.
+ * The runtime check says "yes, a companion build" and the cast used to say
+ * "trust me, it is a CompanionTransport", so the first `onConnectionStateChange`
+ * threw a TypeError inside `enterOffline` and killed the pairing that was in
+ * flight. Waiting is correct rather than lossy: installing the real transport
+ * notifies again, and this installer runs once more with something to drive.
  */
 export function installCompanionSignalingController(
   options: MobileSignalingControllerOptions = {}
@@ -159,9 +189,13 @@ export function installCompanionSignalingController(
   // `transport` is the `Transport` interface, the upgrade method only
   // exists on `CompanionTransport`. Both Capacitor and web-companion builds
   // resolve to `CompanionTransport` (see `lib/tauri/transport-instance.ts`).
-  const tx =
-    (options.transportOverride as CompanionTransport | undefined) ??
-    (transport as unknown as CompanionTransport)
+  const candidate = options.transportOverride ?? (transport as unknown)
+  if (!isCompanionTransport(candidate)) {
+    return () => {
+      // The stub is in place — there is nothing to drive yet.
+    }
+  }
+  const tx = candidate
   const readSettings = options.getSettingsOverride ?? getSettings
   const subscribeNetworkFn = options.subscribeNetworkOverride ?? subscribeNetwork
   const subscribeResumeFn = options.subscribeResumeOverride ?? subscribeResume

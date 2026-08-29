@@ -149,24 +149,53 @@ it("upserts public Companion metadata without storing a credential value", async
   expect(target).not.toHaveProperty("deviceJwt")
 })
 
-it("rejects plaintext Companion endpoints unless the non-production dev flag is explicit", async () => {
+it("accepts a plaintext loopback Companion endpoint with no flag at all", async () => {
+  // The browser plane (`browser_access`, 27891) is plaintext by construction —
+  // a tab cannot validate the Host's self-signed certificate — so demanding
+  // https here made the documented topology unpairable. Worse, this guard runs
+  // after the Host has already spent the one-shot invitation.
+  const registry = new RuntimeTargetRegistry()
+
+  for (const baseUrl of [
+    "http://127.0.0.1:27891/path",
+    "http://localhost:27891",
+    "http://[::1]:27891",
+  ]) {
+    await expect(
+      registry.upsertCompanionTarget({
+        accountId: ACCOUNT_ID,
+        id: "companion-dev",
+        label: "Dev host",
+        hostKind: "desktop" as const,
+        baseUrl,
+        deviceId: "device-dev",
+        serverVersion: "2.0.0",
+        credentialRef: "companion-host:acct_runtime:companion-dev:device-private-jwk",
+      })
+    ).resolves.toMatchObject({ baseUrl: new URL(baseUrl).origin })
+  }
+})
+
+it("rejects plaintext Companion endpoints off this machine unless the dev flag is explicit", async () => {
   const registry = new RuntimeTargetRegistry()
   const input = {
     accountId: ACCOUNT_ID,
-    id: "companion-dev",
-    label: "Dev host",
+    id: "companion-lan",
+    label: "LAN host",
     hostKind: "desktop" as const,
-    baseUrl: "http://127.0.0.1:7890/path",
-    deviceId: "device-dev",
+    baseUrl: "http://192.168.1.42:7890/path",
+    deviceId: "device-lan",
     serverVersion: "2.0.0",
-    credentialRef: "companion-host:acct_runtime:companion-dev:device-private-jwk",
+    credentialRef: "companion-host:acct_runtime:companion-lan:device-private-jwk",
   }
 
+  // Cleartext credentials on a shared network stay refused; the loopback
+  // exemption is about the address, not about relaxing the rule.
   await expect(registry.upsertCompanionTarget(input)).rejects.toThrow(/HTTPS/)
 
   process.env.NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP = "1"
   await expect(registry.upsertCompanionTarget(input)).resolves.toMatchObject({
-    baseUrl: "http://127.0.0.1:7890",
+    baseUrl: "http://192.168.1.42:7890",
   })
 })
 

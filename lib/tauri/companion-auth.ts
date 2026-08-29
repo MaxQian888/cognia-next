@@ -3,6 +3,7 @@ import type { CompanionConfig } from "./companion-storage"
 import { generatePersistableSigningIdentity, type RoomDescriptor } from "@/lib/signaling/crypto"
 import { APP_VERSION } from "@/lib/app-version"
 import { requireJwtPayload } from "@/lib/security/jwt-payload"
+import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 
 export interface CompanionAuthConfig {
   deploymentMode: "single-user" | "multi-tenant"
@@ -288,9 +289,34 @@ function isSignalingConfig(value: unknown): value is CompanionAuthConfig["signal
   const record = value as Record<string, unknown>
   return (
     typeof record.url === "string" &&
-    /^wss:\/\//.test(record.url) &&
+    isUsableSignalingUrl(record.url) &&
     Array.isArray(record.iceServers)
   )
+}
+
+/**
+ * `wss://` anywhere, or `ws://` on this machine.
+ *
+ * A `^wss://` prefix test used to be the whole rule, which made the entire
+ * auth-config response "malformed" the moment the Host answered honestly about
+ * its plaintext loopback listener — the one plane a browser tab can reach it
+ * on. The failure landed on `fetchCompanionAuthConfig`, so it read as "the
+ * Host is broken" during pairing rather than "signaling is not available over
+ * this transport".
+ *
+ * Cleartext signaling aimed off this machine stays refused: the rendezvous
+ * carries the room descriptor, and that must not cross a shared network in the
+ * clear. Same rule the Host's own `is_secure_or_loopback` applies.
+ */
+function isUsableSignalingUrl(value: string): boolean {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  if (url.protocol === "wss:") return true
+  return url.protocol === "ws:" && isLoopbackHostname(url.hostname)
 }
 
 function parseSignalingRegistration(

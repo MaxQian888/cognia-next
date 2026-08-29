@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie"
 
 import { assertAccountId } from "@/lib/accounts/account-types"
+import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 import type { CompanionRuntimeTarget, RuntimeTarget } from "./runtime-target"
 
 export const RUNTIME_TARGET_REGISTRY_DB_NAME = "cognia-runtime-target-registry"
@@ -282,13 +283,34 @@ function validateTargetShape(
   }
 }
 
+/**
+ * The transport rule for a Companion target's base URL.
+ *
+ * Plaintext **loopback** is accepted unconditionally, because it is not a
+ * downgrade — it is the only address a browser tab can reach the Host on. The
+ * HTTPS listener presents a self-signed certificate with no CA and a tab
+ * validates against system roots with no escape hatch, while
+ * `http://127.0.0.1` is "potentially trustworthy" per Secure Contexts. Every
+ * other guard on this same transport already says so: the pair screen's
+ * `diagnoseTransport`, the Host's `web_origin::is_secure_or_loopback`, and both
+ * MCP origin checks.
+ *
+ * This one used to demand `https:` and offer only a dev env flag, which made
+ * the documented browser-plane topology impossible to pair without it — and it
+ * runs AFTER the Host has consumed the one-shot invitation, so every attempt
+ * burned a code and reported "require HTTPS" from a step the user could not
+ * see. Loopback is now decided on the address, and the flag keeps its original
+ * job: plaintext aimed OFF this machine, in development only.
+ */
 function normalizeHttpsUrl(value: string): string {
   const url = new URL(value)
-  const allowInsecureDevelopmentHttp =
-    process.env.NODE_ENV !== "production" &&
-    process.env.NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP === "1"
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && allowInsecureDevelopmentHttp)) {
-    throw new Error("Companion runtime targets require HTTPS.")
+  if (url.protocol === "https:") return url.origin
+  if (url.protocol === "http:") {
+    if (isLoopbackHostname(url.hostname)) return url.origin
+    const allowInsecureDevelopmentHttp =
+      process.env.NODE_ENV !== "production" &&
+      process.env.NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP === "1"
+    if (allowInsecureDevelopmentHttp) return url.origin
   }
-  return url.origin
+  throw new Error("Companion runtime targets require HTTPS outside loopback.")
 }

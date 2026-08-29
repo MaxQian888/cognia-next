@@ -137,13 +137,48 @@ pub fn is_origin_allowed(
 /// Browser `Origin` values never carry paths, queries, fragments, credentials,
 /// or wildcards. Requiring the canonical HTTPS shape makes an operator typo a
 /// startup/configuration error instead of silently widening the trust boundary.
+///
+/// Plaintext **loopback** is the one exception. A developer's app is served
+/// from `http://localhost:3000`, which can never be an HTTPS origin, so
+/// without this the WebRTC tier is untestable from any browser: the entry the
+/// operator would have to write is one the validator refuses to accept. The
+/// exemption is narrow and deliberate — `http://localhost` is "potentially
+/// trustworthy" per Secure Contexts, which is the same reasoning that puts the
+/// Host's own plaintext browser listener on loopback — and it widens nothing
+/// on its own: an empty allowlist still denies every cross-origin browser, and
+/// a public deployment has no reason to list a loopback origin.
 pub fn is_valid_allowed_origin(origin: &str) -> bool {
+    if let Some(authority) = origin.strip_prefix("http://") {
+        return is_loopback_authority(authority);
+    }
     let Some(authority) = origin.strip_prefix("https://") else {
         return false;
     };
+    is_well_formed_authority(authority)
+}
+
+fn is_well_formed_authority(authority: &str) -> bool {
     !authority.is_empty()
         && !authority.contains(['/', '?', '#', '@', '*'])
         && !authority.chars().any(char::is_whitespace)
+}
+
+/// `localhost`, `127.0.0.1` or `[::1]`, with an optional port and nothing else.
+///
+/// Matched on the whole host, never a suffix: `localhost.evil.example` and
+/// `127.0.0.1.evil.example` are ordinary public names that resolve wherever
+/// their owner points them.
+fn is_loopback_authority(authority: &str) -> bool {
+    if !is_well_formed_authority(authority) {
+        return false;
+    }
+    let host = match authority.rsplit_once(':') {
+        // An IPv6 literal keeps its brackets; a `host:port` split must leave a
+        // port that is entirely digits, or `[::1]` would split on its own colon.
+        Some((head, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => head,
+        _ => authority,
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
 }
 
 // ---------------------------------------------------------------------------
@@ -266,5 +301,51 @@ mod tests {
         assert!(!is_valid_allowed_origin("https://*.cognia.cn"));
         assert!(!is_valid_allowed_origin("https://app.cognia.cn/path"));
         assert!(!is_valid_allowed_origin("https://user@app.cognia.cn"));
+    }
+
+    #[test]
+    fn plaintext_loopback_is_configurable_for_local_development() {
+        assert!(is_valid_allowed_origin("http://localhost:3000"));
+        assert!(is_valid_allowed_origin("http://localhost"));
+        assert!(is_valid_allowed_origin("http://127.0.0.1:3000"));
+        assert!(is_valid_allowed_origin("http://[::1]:3000"));
+        assert!(is_valid_allowed_origin("http://[::1]"));
+    }
+
+    #[test]
+    fn plaintext_is_refused_for_everything_that_is_not_loopback() {
+        // Public names that merely READ as loopback. Their owner points them
+        // wherever they like, so a suffix match here would hand the allowlist
+        // to whoever registers the domain.
+        assert!(!is_valid_allowed_origin("http://localhost.evil.example"));
+        assert!(!is_valid_allowed_origin("http://127.0.0.1.evil.example"));
+        assert!(!is_valid_allowed_origin("http://notlocalhost"));
+        assert!(!is_valid_allowed_origin("http://192.168.1.10:3000"));
+        assert!(!is_valid_allowed_origin("http://localhost:3000/path"));
+        assert!(!is_valid_allowed_origin("http://user@localhost:3000"));
+        assert!(!is_valid_allowed_origin("http://*.localhost"));
+        assert!(!is_valid_allowed_origin("http://"));
+    }
+
+    #[test]
+    fn a_loopback_entry_only_admits_that_exact_origin() {
+        let allow = vec!["http://localhost:3000".to_string()];
+        assert!(is_origin_allowed(
+            Some("http://localhost:3000"),
+            Some("http://127.0.0.1:7892"),
+            &allow
+        ));
+        // A different port is a different origin.
+        assert!(!is_origin_allowed(
+            Some("http://localhost:3001"),
+            Some("http://127.0.0.1:7892"),
+            &allow
+        ));
+        // And listing one changes nothing for anybody else.
+        assert!(!is_origin_allowed(
+            Some("https://app.evil.example"),
+            Some("http://127.0.0.1:7892"),
+            &allow
+        ));
     }
 }
