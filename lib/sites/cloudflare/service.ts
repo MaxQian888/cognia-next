@@ -37,6 +37,12 @@ import { sha256Hex } from "@/lib/share/hash"
 import { writeTextFile } from "@/lib/file/file-operations"
 import { assertSiteAuthoringCapability } from "@/lib/sites/authoring-policy"
 import { latestEnvironmentRevision } from "@/lib/sites/console-model"
+import {
+  parseSiteWorkerAnalytics,
+  parseSiteWorkerLogs,
+  type SiteAnalyticsView,
+  type SiteLogsView,
+} from "./observability-parse"
 import type { SiteHostingManifest } from "@/lib/sites/manifest"
 import type {
   SiteEnvironmentRevisionRow,
@@ -936,7 +942,13 @@ export class CloudflareSitesService {
     })
   }
 
-  async analytics(siteId: string, from: string, to: string): Promise<unknown> {
+  /**
+   * Worker (and, with a zone and a hostname, zone) analytics for a window.
+   *
+   * Parsed at this boundary rather than returned as `unknown`: the console had
+   * no way to render a number it could not name, so it rendered the payload.
+   */
+  async analytics(siteId: string, from: string, to: string): Promise<SiteAnalyticsView> {
     const { site, client } = await this.client(siteId)
     assertSiteAuthoringCapability(site.authoringPolicy, this.deps.actorAccountId, "view")
     const domains = (await listSiteResources(site.id)).filter(
@@ -954,24 +966,28 @@ export class CloudflareSitesService {
           return undefined
         }
       })()
-    return client.queryWorkerAnalytics(site.providerConfig.accountId, {
-      workerName: site.providerConfig.workerName,
-      from,
-      to,
-      zoneId: site.providerConfig.zoneId,
-      hostname,
-    })
+    return parseSiteWorkerAnalytics(
+      await client.queryWorkerAnalytics(site.providerConfig.accountId, {
+        workerName: site.providerConfig.workerName,
+        from,
+        to,
+        zoneId: site.providerConfig.zoneId,
+        hostname,
+      })
+    )
   }
 
-  async logs(siteId: string, from: number, to: number, errorsOnly = false): Promise<unknown> {
+  async logs(siteId: string, from: number, to: number, errorsOnly = false): Promise<SiteLogsView> {
     const { site, client } = await this.client(siteId)
     assertSiteAuthoringCapability(site.authoringPolicy, this.deps.actorAccountId, "view")
-    return client.queryWorkerLogs(site.providerConfig.accountId, {
-      workerName: site.providerConfig.workerName,
-      from,
-      to,
-      errorsOnly,
-    })
+    return parseSiteWorkerLogs(
+      await client.queryWorkerLogs(site.providerConfig.accountId, {
+        workerName: site.providerConfig.workerName,
+        from,
+        to,
+        errorsOnly,
+      })
+    )
   }
 
   async takeDown(siteId: string): Promise<void> {

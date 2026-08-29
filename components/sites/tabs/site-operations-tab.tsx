@@ -16,6 +16,8 @@ import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
 
 import { JsonTree } from "@/components/shared/json-tree"
+import { SiteAnalyticsPanel } from "../observability/site-analytics-view"
+import { SiteLogTable } from "../observability/site-log-table"
 import { TimeRangePicker } from "@/components/observability/time-range-picker"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -27,6 +29,7 @@ import {
   type TimeRange,
 } from "@/lib/observability/time-range"
 import { siteAnalyticsIsZoneScoped, siteObservabilityHostname } from "@/lib/sites/console-model"
+import type { SiteAnalyticsView, SiteLogsView } from "@/lib/sites/cloudflare/observability-parse"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 import type {
   SiteDeploymentRow,
@@ -46,6 +49,21 @@ export interface SiteObservabilityQuery {
   errorsOnly: boolean
 }
 
+/**
+ * A query result, tagged with the Site it came from.
+ *
+ * The console used to hold one untagged slot shared by logs, analytics, and
+ * reconcile, and never cleared it when the selection changed — so site A's
+ * numbers rendered under site B's name. The tag is checked at render as well
+ * as cleared on change: the clearing effect fires after paint, so the guard is
+ * what actually prevents the wrong answer being shown.
+ */
+export interface SiteObservabilityResult {
+  kind: "logs" | "analytics" | "reconcile"
+  siteId: string
+  value: unknown
+}
+
 export interface SiteOperationsTabProps {
   site: SiteProjectRow
   operations: readonly SiteOperationRow[]
@@ -58,8 +76,8 @@ export interface SiteOperationsTabProps {
    * build no longer disables unrelated controls.
    */
   isBusy: (key?: string) => boolean
-  /** Last query result, already unwrapped by the console. */
-  result: unknown
+  /** Last query result, or null. Ignored when it belongs to another Site. */
+  result: SiteObservabilityResult | null
   onQuery: (query: SiteObservabilityQuery) => void
   onClearResult: () => void
   onRefreshOperation: (operationId: string) => void
@@ -86,6 +104,9 @@ export function SiteOperationsTab({
   const [customUntil, setCustomUntil] = useState<number | null>(null)
   const [errorsOnly, setErrorsOnly] = useState(false)
 
+  // Belt and braces with the console's clearing effect: that runs after paint,
+  // so this guard is what actually keeps site A's numbers off site B's page.
+  const current = result && result.siteId === site.id ? result : null
   const hostname = siteObservabilityHostname(resources, deployments)
   const zoneScoped = siteAnalyticsIsZoneScoped(site.providerConfig)
 
@@ -185,25 +206,59 @@ export function SiteOperationsTab({
                 type="button"
                 size="xs"
                 variant="ghost"
-                disabled={result === undefined}
+                disabled={!current}
                 onClick={onClearResult}
               >
                 {t("actions.clearOutput")}
               </Button>
             </div>
-            <div
-              className="max-h-[50vh] overflow-auto p-3 text-xs"
-              data-testid="site-observability-result"
-            >
-              {result === undefined ? (
+            <div className="p-3 text-xs" data-testid="site-observability-result">
+              {!current ? (
                 <p className="text-muted-foreground">{t("observability.empty")}</p>
+              ) : current.kind === "logs" ? (
+                isLogsView(current.value) ? (
+                  <SiteLogTable view={current.value} />
+                ) : (
+                  <UnreadablePayload value={current.value} />
+                )
+              ) : current.kind === "analytics" ? (
+                isAnalyticsView(current.value) ? (
+                  <SiteAnalyticsPanel view={current.value} />
+                ) : (
+                  <UnreadablePayload value={current.value} />
+                )
               ) : (
-                <JsonTree value={result} />
+                <JsonTree value={current.value} />
               )}
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Structural guards — the provider view may still be an unparsed payload. */
+function isLogsView(value: unknown): value is SiteLogsView {
+  return Boolean(value) && typeof value === "object" && "entries" in (value as object)
+}
+
+function isAnalyticsView(value: unknown): value is SiteAnalyticsView {
+  return Boolean(value) && typeof value === "object" && "worker" in (value as object)
+}
+
+/**
+ * The escape hatch. A provider that changes its response shape must still be
+ * inspectable, so the JSON tree stays reachable rather than being replaced.
+ */
+function UnreadablePayload({ value }: { value: unknown }) {
+  const t = useTranslations("sites")
+  return (
+    <div className="space-y-2" data-testid="site-observability-unreadable">
+      <p className="text-xs text-warning">{t("observability.unrecognized")}</p>
+      <div className="max-h-[46vh] overflow-auto">
+        <JsonTree value={value} />
+      </div>
     </div>
   )
 }

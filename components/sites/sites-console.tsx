@@ -60,7 +60,11 @@ import { useSitePublishActions } from "@/hooks/sites/use-site-publish-actions"
 import { SiteAccessTab } from "./tabs/site-access-tab"
 import { SiteDomainsTab } from "./tabs/site-domains-tab"
 import { SiteEnvironmentTab } from "./tabs/site-environment-tab"
-import { SiteOperationsTab, type SiteObservabilityQuery } from "./tabs/site-operations-tab"
+import {
+  SiteOperationsTab,
+  type SiteObservabilityQuery,
+  type SiteObservabilityResult,
+} from "./tabs/site-operations-tab"
 import { SitePublishTab } from "./tabs/site-publish-tab"
 import { SiteResourcesTab } from "./tabs/site-resources-tab"
 import { SiteVersionsTab } from "./tabs/site-versions-tab"
@@ -82,7 +86,9 @@ export function SitesConsole() {
   const setPinnedId = useSiteConsoleStore((state) => state.select)
   const setTab = useSiteConsoleStore((state) => state.setTab)
   const [confirmation, setConfirmation] = useState<Confirmation>(null)
-  const [observabilityResult, setObservabilityResult] = useState<unknown>(undefined)
+  const [observabilityResult, setObservabilityResult] = useState<SiteObservabilityResult | null>(
+    null
+  )
 
   const live = useSiteLiveData(pinnedId)
   const site = live.sites.find((row) => row.id === live.selectedId) ?? null
@@ -204,11 +210,18 @@ export function SitesConsole() {
                 new Date(query.range.since).toISOString(),
                 new Date(query.range.until).toISOString()
               )
-        setObservabilityResult(value)
+        // Tagged with the Site it came from: an untagged slot rendered site A's
+        // numbers under site B's name after a selection change.
+        setObservabilityResult({ kind: query.kind, siteId: site.id, value })
         return value
       },
       { successMessage: null }
     )
+  }
+
+  const showReconcileResult = (value: unknown) => {
+    if (!site) return
+    setObservabilityResult({ kind: "reconcile", siteId: site.id, value })
   }
 
   return (
@@ -249,7 +262,7 @@ export function SitesConsole() {
                 label: t("actions.reconcile"),
                 icon: RefreshCwIcon,
                 disabled: !site || isBusy("reconcile") || !providerGate.allowed,
-                onSelect: () => publish.reconcile(setObservabilityResult),
+                onSelect: () => publish.reconcile(showReconcileResult),
               },
             ]}
           />
@@ -408,7 +421,7 @@ export function SitesConsole() {
                   versions={live.versions}
                   gate={providerGate}
                   isBusy={isBusy}
-                  onReconcile={() => publish.reconcile(setObservabilityResult)}
+                  onReconcile={() => publish.reconcile(showReconcileResult)}
                   onReclaim={publish.reclaimArtifacts}
                 />
               </div>
@@ -426,7 +439,7 @@ export function SitesConsole() {
                   isBusy={isBusy}
                   result={observabilityResult}
                   onQuery={runObservability}
-                  onClearResult={() => setObservabilityResult(undefined)}
+                  onClearResult={() => setObservabilityResult(null)}
                   onRefreshOperation={publish.refreshOperation}
                   onCancelOperation={publish.cancelOperation}
                 />

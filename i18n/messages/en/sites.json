@@ -286,10 +286,38 @@
     }
   },
   "observability": {
+    "analytics": {
+      "chartView": "Chart view",
+      "date": "Date",
+      "errorRate": "Error rate",
+      "errors": "Errors",
+      "noData": "No traffic in this window.",
+      "pageViews": "Page views",
+      "partial": "Cloudflare returned partial data: {detail}",
+      "requests": "Requests",
+      "subrequests": "Subrequests",
+      "tableView": "Table view",
+      "uniques": "Unique visitors"
+    },
     "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
     "empty": "No query has run yet.",
     "errorsOnly": "Errors only",
     "hostname": "Hostname: {hostname}",
+    "level": {
+      "debug": "DEBUG",
+      "error": "ERROR",
+      "info": "INFO",
+      "unknown": "—",
+      "warn": "WARN"
+    },
+    "logs": {
+      "empty": "No log events in this window.",
+      "level": "Level",
+      "message": "Message",
+      "status": "Status",
+      "time": "Time",
+      "unparsed": "{count, plural, =1 {# event} other {# events}} could not be read."
+    },
     "noHostname": "No custom domain or production URL yet, so analytics stay Worker-scoped.",
     "result": "Query result",
     "segments": {
@@ -298,6 +326,7 @@
       "operations": "Operation journal"
     },
     "title": "Provider observability",
+    "unrecognized": "Cloudflare returned a shape Cognia does not recognize — showing the raw response.",
     "workerScoped": "No zone ID set, so analytics stay Worker-scoped."
   },
   "operationEvent": {

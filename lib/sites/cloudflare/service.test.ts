@@ -335,10 +335,17 @@ it("manages custom domains, logs, analytics, takedown, and restore", async () =>
     dependencies: [],
   })
   const domain = await service.addDomain("site_1", "Docs.Example.com")
-  await expect(service.analytics("site_1", "2026-07-01", "2026-07-18")).resolves.toEqual({
-    requests: 10,
+  // Parsed at the service boundary rather than handed back as `unknown` — the
+  // client stub returns a shape the parser does not recognize, which must
+  // surface as `unrecognized` rather than throwing.
+  await expect(service.analytics("site_1", "2026-07-01", "2026-07-18")).resolves.toMatchObject({
+    unrecognized: true,
+    worker: { points: [] },
   })
-  await expect(service.logs("site_1", 1, 2, true)).resolves.toEqual({ events: [] })
+  await expect(service.logs("site_1", 1, 2, true)).resolves.toMatchObject({
+    entries: [],
+    unrecognized: false,
+  })
 
   await service.takeDown("site_1")
   expect((await getSiteProject("site_1"))?.lifecycle).toBe("taken-down")

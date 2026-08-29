@@ -94,7 +94,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteOperationsTab>
       deployments={[]}
       gate={allowed}
       isBusy={() => false}
-      result={undefined}
+      result={null}
       onQuery={onQuery}
       onClearResult={onClearResult}
       onRefreshOperation={onRefreshOperation}
@@ -167,18 +167,82 @@ it("names the hostname the query will use once one exists", async () => {
   expect(screen.getByText("observability.workerScoped", { exact: false })).toBeInTheDocument()
 })
 
-it("renders the query result as a tree rather than a stringified blob", async () => {
+it("renders provider logs as rows rather than a JSON dump", async () => {
   const user = userEvent.setup()
-  renderTab({ result: { requests: 42 } })
+  renderTab({
+    result: {
+      kind: "logs",
+      siteId: "site_1",
+      value: {
+        entries: [
+          {
+            id: "e1",
+            timestamp: 1_700_000_000_000,
+            level: "error",
+            message: "boom",
+            statusCode: 500,
+            raw: {},
+          },
+        ],
+        unparsed: 0,
+        unrecognized: false,
+      },
+    },
+  })
   await user.click(screen.getByRole("radio", { name: "observability.segments.logs" }))
-  const output = screen.getByTestId("site-observability-result")
-  expect(output).toHaveTextContent("requests")
-  expect(output).toHaveTextContent("42")
+  expect(screen.getByTestId("site-log-table")).toBeInTheDocument()
+  expect(screen.getByTestId("site-log-row-e1")).toHaveTextContent("boom")
+})
+
+it("renders analytics as numbers rather than a JSON dump", async () => {
+  const user = userEvent.setup()
+  renderTab({
+    result: {
+      kind: "analytics",
+      siteId: "site_1",
+      value: {
+        worker: {
+          points: [{ date: "2026-08-01", requests: 10, errors: 1, subrequests: 2 }],
+          totals: { date: "", requests: 10, errors: 1, subrequests: 2 },
+        },
+        providerErrors: [],
+        unrecognized: false,
+      },
+    },
+  })
+  await user.click(screen.getByRole("radio", { name: "observability.segments.analytics" }))
+  expect(screen.getByTestId("site-analytics")).toBeInTheDocument()
+})
+
+it("falls back to the JSON tree when the provider shape is unreadable", async () => {
+  // A provider that changes its response must stay inspectable rather than
+  // rendering nothing.
+  const user = userEvent.setup()
+  renderTab({ result: { kind: "logs", siteId: "site_1", value: { unexpected: true } } })
+  await user.click(screen.getByRole("radio", { name: "observability.segments.logs" }))
+  expect(screen.getByTestId("site-observability-unreadable")).toBeInTheDocument()
+})
+
+it("ignores a result belonging to a different Site", async () => {
+  // One untagged slot used to render site A's numbers under site B's name
+  // after a selection change.
+  const user = userEvent.setup()
+  renderTab({
+    result: {
+      kind: "logs",
+      siteId: "site_other",
+      value: { entries: [], unparsed: 0, unrecognized: false },
+    },
+  })
+  await user.click(screen.getByRole("radio", { name: "observability.segments.logs" }))
+  expect(screen.getByTestId("site-observability-result")).toHaveTextContent("observability.empty")
 })
 
 it("clears the result", async () => {
   const user = userEvent.setup()
-  const { onClearResult } = renderTab({ result: { a: 1 } })
+  const { onClearResult } = renderTab({
+    result: { kind: "reconcile", siteId: "site_1", value: { a: 1 } },
+  })
   await user.click(screen.getByRole("radio", { name: "observability.segments.logs" }))
   await user.click(screen.getByText("actions.clearOutput"))
   expect(onClearResult).toHaveBeenCalled()

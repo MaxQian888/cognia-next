@@ -286,10 +286,38 @@
     }
   },
   "observability": {
+    "analytics": {
+      "chartView": "图表视图",
+      "date": "日期",
+      "errorRate": "错误率",
+      "errors": "错误数",
+      "noData": "该时间范围内没有流量。",
+      "pageViews": "页面浏览量",
+      "partial": "Cloudflare 返回了部分数据：{detail}",
+      "requests": "请求数",
+      "subrequests": "子请求数",
+      "tableView": "表格视图",
+      "uniques": "独立访客"
+    },
     "description": "直接查询 Cloudflare Worker 日志与请求分析，不复制到另一套运行时。",
     "empty": "尚未执行查询。",
     "errorsOnly": "仅错误",
     "hostname": "主机名：{hostname}",
+    "level": {
+      "debug": "调试",
+      "error": "错误",
+      "info": "信息",
+      "unknown": "—",
+      "warn": "警告"
+    },
+    "logs": {
+      "empty": "该时间范围内没有日志事件。",
+      "level": "级别",
+      "message": "消息",
+      "status": "状态",
+      "time": "时间",
+      "unparsed": "有 {count} 条事件无法解析。"
+    },
     "noHostname": "还没有自定义域名或生产地址，分析数据只能按 Worker 统计。",
     "result": "查询结果",
     "segments": {
@@ -298,6 +326,7 @@
       "operations": "操作日志"
     },
     "title": "服务商可观测性",
+    "unrecognized": "Cloudflare 返回了无法识别的结构——下面是原始响应。",
     "workerScoped": "未设置 Zone ID，分析数据只能按 Worker 统计。"
   },
   "operationEvent": {
