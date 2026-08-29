@@ -3,6 +3,8 @@ import type {
   McpUiResourcePermissions,
 } from "@modelcontextprotocol/ext-apps/app-bridge"
 
+import { injectFrameCsp, serializeFrameCsp } from "@/lib/security/frame-csp"
+
 const CSP_KEYS = ["connectDomains", "resourceDomains", "frameDomains", "baseUriDomains"] as const
 const PERMISSION_KEYS = ["camera", "microphone", "geolocation", "clipboardWrite"] as const
 
@@ -124,21 +126,20 @@ export function injectMcpAppCsp(html: string, csp: McpUiResourceCsp): string {
   const resources = csp.resourceDomains?.join(" ") || "'none'"
   const frames = csp.frameDomains?.join(" ") || "'none'"
   const base = csp.baseUriDomains?.join(" ") || "'none'"
-  const policy = [
-    "default-src 'none'",
-    `connect-src ${connect}`,
-    `script-src 'unsafe-inline' ${resources}`,
-    `style-src 'unsafe-inline' ${resources}`,
-    `img-src data: blob: ${resources}`,
-    `font-src ${resources}`,
-    `media-src blob: ${resources}`,
-    `frame-src ${frames}`,
-    `base-uri ${base}`,
-    "form-action 'none'",
-    "object-src 'none'",
-  ].join("; ")
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${policy.replaceAll('"', "&quot;")}">`
-  return /<head[\s>]/i.test(html)
-    ? html.replace(/<head([^>]*)>/i, `<head$1>${meta}`)
-    : `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`
+  return injectFrameCsp(
+    html,
+    serializeFrameCsp([
+      ["default-src", "'none'"],
+      ["connect-src", connect],
+      ["script-src", `'unsafe-inline' ${resources}`],
+      ["style-src", `'unsafe-inline' ${resources}`],
+      ["img-src", `data: blob: ${resources}`],
+      ["font-src", resources],
+      ["media-src", `blob: ${resources}`],
+      ["frame-src", frames],
+      ["base-uri", base],
+      ["form-action", "'none'"],
+      ["object-src", "'none'"],
+    ])
+  )
 }
