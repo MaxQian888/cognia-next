@@ -114,8 +114,8 @@ export function escapeHtml(text: string): string {
  * `lib/shiki/highlight-cache.ts` and `packages/mermaid/src/render-cache.ts` use.
  */
 const SANITIZE_CACHE_SIZE = 40
-const sanitizeCache = new LruCache<string, string>(SANITIZE_CACHE_SIZE)
-const svgSanitizeCache = new LruCache<string, string>(SANITIZE_CACHE_SIZE)
+const sanitizeCache = new LruCache<string>(SANITIZE_CACHE_SIZE)
+const svgSanitizeCache = new LruCache<string>(SANITIZE_CACHE_SIZE)
 
 /** Test seam — drops both caches. */
 export function clearArtifactSanitizeCaches(): void {
