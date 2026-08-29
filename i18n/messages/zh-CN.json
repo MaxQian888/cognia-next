@@ -1775,7 +1775,17 @@
     }
   },
   "agentMode": {
+    "a2uiTemplateComponents": "{n, plural, other {# 个组件}}",
+    "a2uiTemplateHide": "隐藏定义",
+    "a2uiTemplateComponents": "{n, plural, other {# 个组件}}",
+    "a2uiTemplateHide": "隐藏定义",
     "a2uiTemplatePreviewTitle": "A2UI 模板预览",
+    "a2uiTemplateShow": "显示定义",
+    "a2uiTemplateSpecNote": "模板原始定义——这是该模式保存的内容，并非实时界面。",
+    "a2uiTemplateUntitled": "未命名模板",
+    "a2uiTemplateShow": "显示定义",
+    "a2uiTemplateSpecNote": "模板原始定义——这是该模式保存的内容，并非实时界面。",
+    "a2uiTemplateUntitled": "未命名模板",
     "agentTeams": "代理团队",
     "builtInModes": "内置模式",
     "create": "创建",
@@ -19885,6 +19895,7 @@
       "level": "等级 {level}"
     },
     "quickMenu": {
+      "clean": "清洁",
       "clickThrough": "鼠标穿透",
       "feed": "喂食",
       "hideDesktopPet": "隐藏桌宠",
@@ -19895,7 +19906,9 @@
       "play": "玩耍",
       "showDesktopPet": "显示桌宠",
       "showMainWindow": "显示主窗口",
-      "talk": "聊天"
+      "sleep": "休息",
+      "talk": "聊天",
+      "treat": "奖励"
     },
     "rarity": {
       "common": "普通",
@@ -40024,9 +40037,19 @@
       "apiKey": "API key",
       "apiKeyOptional": "API key（可选）",
       "backend": "后端",
+      "backendDisplay": {
+        "chroma": "Chroma",
+        "milvus": "Milvus",
+        "native": "原生（本地 SQLite）",
+        "pinecone": "Pinecone",
+        "qdrant": "Qdrant",
+        "weaviate": "Weaviate"
+      },
       "backendNativeDisplay": "原生（Tauri 本地）",
       "baseURL": "服务地址 (Base URL)",
       "cancel": "取消",
+      "chromaServerOnly": "Chroma 通过桌面端 Rust 后端运行，需要可访问的 Chroma 服务器。",
+      "completeVectorConfiguration": "请先补全当前后端的必填配置，再测试连接。",
       "confirmReset": "确认重置",
       "distillLlm": "蒸馏 LLM",
       "embedding": "向量嵌入",
@@ -40048,6 +40071,14 @@
       "queryExpansionToggleLabel": "LLM 查询扩展",
       "ragDefaultsBody": "每个角色可以在角色记录上单独覆盖（twinSettings.ragTopK、twinSettings.styleSamplesK）。未设置时，运行时回落到 topK = 6、styleSamplesK = 3，并默认启用 RAG 与风格少样本。",
       "ragDefaultsTitle": "RAG 默认值",
+      "readiness": {
+        "configured": "已配置",
+        "degraded": "已降级",
+        "operational": "可正常使用",
+        "reachable": "可连接",
+        "unconfigured": "未配置",
+        "unreachable": "无法连接"
+      },
       "rerankerModelHint": "Lexical 为本地运行、无需 Key。LLM 让蒸馏模型对相关性打分（使用蒸馏 LLM 的 API Key）。",
       "rerankerModelLabel": "重排序模型",
       "rerankerModelLexical": "Lexical（本地，无需 API Key）",
@@ -40061,6 +40092,7 @@
       "resetSuccess": "向量库已重置。刷新页面以重新初始化。",
       "runtimeTitle": "运行时配置",
       "save": "保存运行时设置",
+      "saveFailed": "无法保存运行时设置：{message}",
       "savedAt": "已保存于 {when}",
       "saving": "保存中…",
       "serverUrl": "服务器 URL",
@@ -40077,8 +40109,10 @@
       "title": "设置",
       "tokenOptional": "Token（可选）",
       "url": "URL",
+      "vectorDesktopOnly": "云端和原生向量后端仅在桌面端可用。浏览器仍可查看其他设置，但这里不会提供无法使用的后端选项。",
       "vectorStore": "向量库",
       "voiceEmpty": "（空）",
+      "workerDesktopOnly": "孪生索引工作器依赖桌面端向量运行时，无法在浏览器中启用。",
       "workerToggleLabel": "为本孪生自动启动后台任务工作器"
     },
     "sourceUploader": {

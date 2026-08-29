@@ -1775,7 +1775,17 @@
     }
   },
   "agentMode": {
+    "a2uiTemplateComponents": "{n, plural, one {# component} other {# components}}",
+    "a2uiTemplateHide": "Hide spec",
+    "a2uiTemplateComponents": "{n, plural, one {# component} other {# components}}",
+    "a2uiTemplateHide": "Hide spec",
     "a2uiTemplatePreviewTitle": "A2UI template preview",
+    "a2uiTemplateShow": "Show spec",
+    "a2uiTemplateSpecNote": "Raw template spec — this is what the mode stores, not a live surface.",
+    "a2uiTemplateUntitled": "Untitled template",
+    "a2uiTemplateShow": "Show spec",
+    "a2uiTemplateSpecNote": "Raw template spec — this is what the mode stores, not a live surface.",
+    "a2uiTemplateUntitled": "Untitled template",
     "agentTeams": "Agent Teams",
     "builtInModes": "Built-in Modes",
     "create": "Create",
@@ -19885,6 +19895,7 @@
       "level": "Level {level}"
     },
     "quickMenu": {
+      "clean": "Clean",
       "clickThrough": "Click-through",
       "feed": "Feed",
       "hideDesktopPet": "Hide desktop pet",
@@ -19895,7 +19906,9 @@
       "play": "Play",
       "showDesktopPet": "Show desktop pet",
       "showMainWindow": "Show main window",
-      "talk": "Talk"
+      "sleep": "Sleep",
+      "talk": "Talk",
+      "treat": "Treat"
     },
     "rarity": {
       "common": "Common",
@@ -40024,9 +40037,19 @@
       "apiKey": "API key",
       "apiKeyOptional": "API key (optional)",
       "backend": "Backend",
+      "backendDisplay": {
+        "chroma": "Chroma",
+        "milvus": "Milvus",
+        "native": "Native (local SQLite)",
+        "pinecone": "Pinecone",
+        "qdrant": "Qdrant",
+        "weaviate": "Weaviate"
+      },
       "backendNativeDisplay": "Native (Tauri local)",
       "baseURL": "Base URL",
       "cancel": "Cancel",
+      "chromaServerOnly": "Chroma runs through the desktop Rust backend and requires a reachable Chroma server.",
+      "completeVectorConfiguration": "Complete the required backend fields before testing the connection.",
       "confirmReset": "Confirm reset",
       "distillLlm": "Distill LLM",
       "embedding": "Embedding",
@@ -40048,6 +40071,14 @@
       "queryExpansionToggleLabel": "LLM query expansion",
       "ragDefaultsBody": "Per-character overrides live on the character record (twinSettings.ragTopK, twinSettings.styleSamplesK). When unset, the runtime falls back to topK = 6, styleSamplesK = 3, with both RAG and style few-shot enabled.",
       "ragDefaultsTitle": "RAG defaults",
+      "readiness": {
+        "configured": "Configured",
+        "degraded": "Degraded",
+        "operational": "Operational",
+        "reachable": "Reachable",
+        "unconfigured": "Unconfigured",
+        "unreachable": "Unreachable"
+      },
       "rerankerModelHint": "Lexical is local and key-free. LLM asks the distill model to rate relevance (uses the distill LLM API key).",
       "rerankerModelLabel": "Reranker model",
       "rerankerModelLexical": "Lexical (local, no API key)",
@@ -40061,6 +40092,7 @@
       "resetSuccess": "Vector store reset. Reload the page to reinitialise the store.",
       "runtimeTitle": "Runtime configuration",
       "save": "Save runtime settings",
+      "saveFailed": "Could not save runtime settings: {message}",
       "savedAt": "saved {when}",
       "saving": "Saving…",
       "serverUrl": "Server URL",
@@ -40077,8 +40109,10 @@
       "title": "Settings",
       "tokenOptional": "Token (optional)",
       "url": "URL",
+      "vectorDesktopOnly": "Cloud and native vector backends are available in the desktop app. Browser settings remain visible, but no unusable backend can be selected here.",
       "vectorStore": "Vector store",
       "voiceEmpty": "(empty)",
+      "workerDesktopOnly": "The Twin indexing worker needs the desktop vector runtime and cannot be enabled in the browser.",
       "workerToggleLabel": "Auto-start the job worker for this twin"
     },
     "sourceUploader": {
