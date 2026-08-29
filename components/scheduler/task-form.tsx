@@ -115,6 +115,10 @@ interface TaskFormProps {
 // connection:*, wiki-lint, github-issue-sync, …) are created by their own
 // subsystem and must never appear here — pinned by the filter below and by
 // `task-form.test.tsx`.
+/** Channels the scheduler can actually deliver on (`types/scheduler`'s union
+ *  minus `none`, which is the absence of a channel rather than one). */
+const TASK_NOTIFICATION_CHANNELS: NotificationChannel[] = ["desktop", "toast", "im", "webhook"]
+
 const TASK_TYPES: Array<{ value: ScheduledTaskType }> = (
   [
     { value: "chat" },
@@ -306,6 +310,7 @@ interface TaskFormState {
    * operator who wants everything in one place configures it once.
    */
   notificationImConversationKey: string
+  notificationWebhookUrl: string
   taskTimeout: number
   maxRetries: number
   retryDelay: number
@@ -470,6 +475,7 @@ function createInitialState(
     notifyOnProgress: initialValues?.notification?.onProgress ?? false,
     notificationChannels: initialValues?.notification?.channels || ["toast"],
     notificationImConversationKey: initialValues?.notification?.imTarget?.conversationKey ?? "",
+    notificationWebhookUrl: initialValues?.notification?.webhookUrl ?? "",
     taskTimeout: initialValues?.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
     maxRetries: initialValues?.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
     retryDelay: initialValues?.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
@@ -518,6 +524,9 @@ export function TaskForm({
 }: TaskFormProps) {
   const t = useTranslations("scheduler")
   const tCron = useTranslations("scheduler.cronDescribe")
+  // Reuses the settings section's channel labels + webhook copy so the two
+  // surfaces cannot drift into naming the same channel differently.
+  const tChannel = useTranslations("scheduler.settings.defaults.notification")
   const locale = useLocale()
   const isZh = locale.startsWith("zh")
   const [f, updateForm] = useReducer(formReducer, { initialValues, defaultTimezone }, (init) =>
@@ -719,6 +728,7 @@ export function TaskForm({
       notifyOnProgress: input.notification?.onProgress ?? false,
       notificationChannels: input.notification?.channels || ["toast"],
       notificationImConversationKey: input.notification?.imTarget?.conversationKey ?? "",
+      notificationWebhookUrl: input.notification?.webhookUrl ?? "",
       taskTimeout: input.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
       maxRetries: input.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
       retryDelay: input.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
@@ -918,6 +928,9 @@ export function TaskForm({
         // Only persisted when the channel is actually on and a key was typed;
         // an empty key means "fall back to the global ops channel", which is
         // expressed by the field's absence rather than by an empty string.
+        ...(f.notificationChannels.includes("webhook") && f.notificationWebhookUrl.trim()
+          ? { webhookUrl: f.notificationWebhookUrl.trim() }
+          : {}),
         ...(f.notificationChannels.includes("im") && f.notificationImConversationKey.trim()
           ? { imTarget: { conversationKey: f.notificationImConversationKey.trim() } }
           : {}),
@@ -1559,23 +1572,31 @@ export function TaskForm({
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("notificationChannels") || "Channels"}</Label>
-            <div className="flex gap-2">
-              {(["desktop", "toast", "im"] as NotificationChannel[]).map((channel) => (
-                <div key={channel} className="flex-1 space-y-1">
+            {/* Every channel `lib/scheduler/notification-integration.ts` can
+                deliver on, and the same set Settings → Scheduled Tasks offers
+                as a default. `webhook` used to be missing here, so a default of
+                webhook could not be switched off (or on) for an individual
+                task. Labels come from the settings section's keys rather than
+                rendering the raw enum — `im` used to read as "Im". */}
+            <div className="flex flex-wrap gap-2">
+              {TASK_NOTIFICATION_CHANNELS.map((channel) => (
+                <div key={channel} className="min-w-24 flex-1 space-y-1">
                   <Button
                     type="button"
                     variant={f.notificationChannels.includes(channel) ? "secondary" : "outline"}
                     aria-pressed={f.notificationChannels.includes(channel)}
                     onClick={() => toggleChannel(channel)}
                     className={cn(
-                      "w-full rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-all",
+                      "w-full rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                       "hover:border-amber-500/50 hover:bg-amber-500/5",
                       f.notificationChannels.includes(channel)
                         ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400"
                         : "border-border bg-background/50 text-muted-foreground"
                     )}
                   >
-                    {channel}
+                    {tChannel(
+                      `channel${channel.charAt(0).toUpperCase()}${channel.slice(1)}` as never
+                    )}
                   </Button>
                   {f.notificationChannels.includes(channel) && (
                     <Button
@@ -1594,6 +1615,23 @@ export function TaskForm({
                 </div>
               ))}
             </div>
+            {f.notificationChannels.includes("webhook") && (
+              <div className="space-y-1">
+                <Label
+                  htmlFor="notification-webhook-url"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {tChannel("webhookUrl")}
+                </Label>
+                <Input
+                  id="notification-webhook-url"
+                  type="url"
+                  value={f.notificationWebhookUrl}
+                  onChange={(e) => updateForm({ notificationWebhookUrl: e.target.value })}
+                  placeholder={tChannel("webhookUrlPlaceholder")}
+                />
+              </div>
+            )}
             {f.notificationChannels.includes("im") && (
               <div className="space-y-1">
                 <Label

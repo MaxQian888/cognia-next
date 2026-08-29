@@ -229,7 +229,7 @@ describe("TaskForm", () => {
       render(<TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />)
       expect(screen.queryByLabelText("notifyImConversation")).not.toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole("button", { name: "im" }))
+      fireEvent.click(screen.getByRole("button", { name: "channelIm" }))
       expect(screen.getByLabelText("notifyImConversation")).toBeInTheDocument()
     })
 
@@ -240,7 +240,7 @@ describe("TaskForm", () => {
       fireEvent.change(document.querySelector("input") as HTMLInputElement, {
         target: { value: "Digest task" },
       })
-      fireEvent.click(screen.getByRole("button", { name: "im" }))
+      fireEvent.click(screen.getByRole("button", { name: "channelIm" }))
       fireEvent.change(screen.getByLabelText("notifyImConversation"), {
         target: { value: " slack:ops:C1 " },
       })
@@ -277,7 +277,7 @@ describe("TaskForm", () => {
       fireEvent.change(document.querySelector("input") as HTMLInputElement, {
         target: { value: "Digest task" },
       })
-      fireEvent.click(screen.getByRole("button", { name: "im" }))
+      fireEvent.click(screen.getByRole("button", { name: "channelIm" }))
 
       fireEvent.click(screen.getByTestId("scheduler-task-submit"))
       await screen.findByTestId("scheduler-task-form")
@@ -418,5 +418,86 @@ describe("TaskForm — default timezone from Settings", () => {
   it("still falls back to UTC when neither is set", () => {
     render(<TaskForm {...noop} />)
     expect(screen.getByTestId("tz-stub")).toHaveValue("UTC")
+  })
+})
+
+describe("TaskForm — webhook notification channel", () => {
+  // `webhook` was missing from this picker while the settings defaults card
+  // offered it, so a default of webhook could not be switched off (or on) for
+  // an individual task, and the URL had nowhere to be edited.
+  const noop = { onSubmit: jest.fn(async () => undefined), onCancel: jest.fn() }
+
+  it("offers every channel the scheduler can deliver on", () => {
+    render(<TaskForm {...noop} />)
+    for (const label of ["channelDesktop", "channelToast", "channelIm", "channelWebhook"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+    }
+  })
+
+  it("labels channels rather than rendering the raw enum", () => {
+    render(<TaskForm {...noop} />)
+    expect(screen.queryByRole("button", { name: "im" })).not.toBeInTheDocument()
+  })
+
+  it("hides the URL field until the webhook channel is selected", () => {
+    render(<TaskForm {...noop} />)
+    expect(screen.queryByLabelText("webhookUrl")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "channelWebhook" }))
+    expect(screen.getByLabelText("webhookUrl")).toBeInTheDocument()
+  })
+
+  it("submits the typed URL on the task's notification block", async () => {
+    const onSubmit = jest.fn(async () => undefined)
+    render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
+    fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+      target: { value: "Digest task" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "channelWebhook" }))
+    fireEvent.change(screen.getByLabelText("webhookUrl"), {
+      target: { value: " https://example.com/hook " },
+    })
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notification: expect.objectContaining({
+          channels: expect.arrayContaining(["webhook"]),
+          // Trimmed — a stray space would produce an unreachable URL.
+          webhookUrl: "https://example.com/hook",
+        }),
+      })
+    )
+  })
+
+  it("omits the URL when the webhook channel is not selected", async () => {
+    const onSubmit = jest.fn(async () => undefined)
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={jest.fn()}
+        initialValues={{ notification: { webhookUrl: "https://stale/hook" } }}
+      />
+    )
+    fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+      target: { value: "Digest task" },
+    })
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+    const submitted = onSubmit.mock.calls[0][0] as {
+      notification?: { webhookUrl?: string }
+    }
+    expect(submitted.notification?.webhookUrl).toBeUndefined()
+  })
+
+  it("seeds the URL field from an existing task", () => {
+    render(
+      <TaskForm
+        {...noop}
+        initialValues={{
+          notification: { channels: ["webhook"], webhookUrl: "https://example.com/hook" },
+        }}
+      />
+    )
+    expect(screen.getByLabelText("webhookUrl")).toHaveValue("https://example.com/hook")
   })
 })
