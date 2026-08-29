@@ -1079,6 +1079,151 @@ describe("call() — retries", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
+  // The shape this Host actually sends. `RpcError::rate_limited` puts the
+  // wait in the message and sets no header, so a client that only reads the
+  // header falls back to sub-second jitter and burns all three attempts long
+  // before a bucket refilling at 1/s recovers.
+  it("honors retry_after_seconds from the body when no header is sent", async () => {
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockResponse(
+          {
+            code: "rate_limited",
+            message: "device exceeded the per-minute quota; retry_after_seconds=3",
+            retryable: true,
+          },
+          429
+        )
+      )
+      .mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_sidecar_status")
+    await Promise.resolve()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    await jest.advanceTimersByTimeAsync(2_999)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(1)
+    await callPromise
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("prefers the Retry-After header over the body when both are present", async () => {
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy
+      .mockResolvedValueOnce(
+        mockResponseWithHeaders(
+          {
+            code: "rate_limited",
+            message: "device exceeded the per-minute quota; retry_after_seconds=9",
+            retryable: true,
+          },
+          429,
+          { "Retry-After": "2" }
+        )
+      )
+      .mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_sidecar_status")
+    await Promise.resolve()
+
+    await jest.advanceTimersByTimeAsync(2_000)
+    await callPromise
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("clamps a body-carried wait to the same ceiling as the header", async () => {
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy.mockResolvedValue(
+      mockResponse(
+        {
+          code: "rate_limited",
+          message: "device exceeded the per-minute quota; retry_after_seconds=3600",
+          retryable: true,
+        },
+        429
+      )
+    )
+
+    transport = new CompanionTransport()
+    let caught: unknown
+    const callPromise = transport.call("claude_sidecar_status").catch((err) => {
+      caught = err
+    })
+    await jest.runAllTimersAsync()
+    await callPromise
+
+    expect((caught as { retryAfterMs?: number }).retryAfterMs).toBe(30_000)
+  })
+
+  it("hands the caller the wait the Host asked for", async () => {
+    // The transport exhausts its own attempts and then throws. Without the
+    // interval on the error, a caller that retries above this layer picks its
+    // own schedule and keeps the rate limit pinned indefinitely.
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy.mockResolvedValue(
+      mockResponseWithHeaders({ code: "rate_limited", message: "slow down" }, 429, {
+        "Retry-After": "5",
+      })
+    )
+
+    transport = new CompanionTransport()
+    let caught: unknown
+    const callPromise = transport.call("claude_sidecar_status").catch((err) => {
+      caught = err
+    })
+    await jest.runAllTimersAsync()
+    await callPromise
+
+    expect(caught).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      retryAfterMs: 5_000,
+    })
+  })
+
+  it("clamps a Host that asks the caller to wait longer than the ceiling", async () => {
+    // The interval reaches the caller, so it must stay bounded here too — a
+    // Host that answers `Retry-After: 3600` cannot park a client for an hour.
+    jest.useFakeTimers({ now: 0 })
+    fetchSpy.mockResolvedValue(
+      mockResponseWithHeaders({ code: "rate_limited", message: "slow down" }, 429, {
+        "Retry-After": "3600",
+      })
+    )
+
+    transport = new CompanionTransport()
+    let caught: unknown
+    const callPromise = transport.call("claude_sidecar_status").catch((err) => {
+      caught = err
+    })
+    await jest.runAllTimersAsync()
+    await callPromise
+
+    expect((caught as { retryAfterMs?: number }).retryAfterMs).toBe(30_000)
+  })
+
+  it("leaves the wait unset when the Host named none", async () => {
+    jest.useFakeTimers()
+    fetchSpy.mockResolvedValue(
+      mockResponse({ code: "server_error", message: "boom", retryable: false }, 500)
+    )
+
+    transport = new CompanionTransport()
+    let caught: unknown
+    const callPromise = transport.call("claude_sidecar_status").catch((err) => {
+      caught = err
+    })
+    await jest.runAllTimersAsync()
+    await callPromise
+
+    expect(caught).toMatchObject({ retryable: false })
+    expect((caught as { retryAfterMs?: number }).retryAfterMs).toBeUndefined()
+  })
+
   it("retries 3 times on network (TypeError) then throws", async () => {
     jest.useFakeTimers()
     fetchSpy.mockRejectedValue(new TypeError("Network error"))

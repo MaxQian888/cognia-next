@@ -2532,15 +2532,22 @@ pub async fn rpc_handler(
     // service principal is loopback-only and performs a large deterministic
     // bootstrap burst, so charging it against a 10-request device bucket
     // leaves runtimes half-initialized.
+    // Hoisted above the gate: which bucket this call is charged to is the
+    // same question as whether it can change anything.
+    let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
+
     if ctx.scope != "service" {
+        let class = if is_read_only {
+            crate::companion_api::rate_limit::RequestClass::ReadOnly
+        } else {
+            crate::companion_api::rate_limit::RequestClass::Mutating
+        };
         if let crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } =
-            state.rate_limiter.check(&ctx.device_id)
+            state.rate_limiter.check_class(&ctx.device_id, class)
         {
             return Err(RpcError::rate_limited(retry_after.as_secs()));
         }
     }
-
-    let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
     // Atomically reserve the write before dispatch. The same ledger is used
     // by WebRTC, so RTC timeout followed by HTTPS fallback cannot execute it

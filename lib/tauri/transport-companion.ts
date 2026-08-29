@@ -254,20 +254,31 @@ export type CompanionErrorCode = "network" | "timeout" | "server_error" | string
 export class CompanionError extends Error {
   readonly code: CompanionErrorCode
   readonly retryable: boolean
+  /**
+   * How long the Host asked the caller to wait, from its `Retry-After` header.
+   *
+   * Carried because a caller that retries on its own schedule through a rate
+   * limit never clears it — it keeps the quota pinned and every unrelated
+   * command 429s behind it. Only set when the Host actually said so.
+   */
+  readonly retryAfterMs?: number
 
   constructor({
     code,
     message,
     retryable,
+    retryAfterMs,
   }: {
     code: CompanionErrorCode
     message: string
     retryable: boolean
+    retryAfterMs?: number
   }) {
     super(message)
     this.name = "CompanionError"
     this.code = code
     this.retryable = retryable
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -1270,17 +1281,21 @@ export class CompanionTransport implements Transport {
       // (`headless_host_required`), and the status code alone cannot tell them
       // apart — retrying the latter just burns the attempt budget.
       const hostSaysRetryable = detail?.retryable
+      const hostRetryAfterMs =
+        parseRetryAfterMs(response.headers?.get("retry-after") ?? null) ??
+        retryAfterMsFromErrorMessage(detail?.message)
       lastError = new CompanionError({
         code: detail?.code ?? (response.status >= 500 ? "server_error" : `http_${response.status}`),
         message: detail?.message ?? `HTTP ${response.status}`,
         retryable: hostSaysRetryable ?? true,
+        ...(hostRetryAfterMs === null ? {} : { retryAfterMs: hostRetryAfterMs }),
       })
       this.setPlaneHealth({
         rpc: response.status === 503 || response.status === 504 ? "unavailable" : "ready",
       })
       if (hostSaysRetryable === false) throw lastError
       if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {
-        retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after") ?? null)
+        retryAfterMs = hostRetryAfterMs
         continue
       }
       throw lastError
@@ -1772,6 +1787,27 @@ function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number | n
   }
   if (!Number.isFinite(delayMs)) return null
   return Math.min(delayMs, HTTP_RETRY_AFTER_CAP_MS)
+}
+
+/**
+ * The wait a 429 asks for, when it arrives in the body instead of a header.
+ *
+ * The Host's rate limiter answers `429` with a flat envelope whose message
+ * carries `retry_after_seconds=N` and no `Retry-After` header — deliberately,
+ * per `RpcError::rate_limited` ("the flat envelope keeps the contract simple;
+ * phones can parse the integer"). Nothing parsed it, so the one call that
+ * knows how long to wait fell back to the generic 0-250ms jitter and burned
+ * its attempts inside a second while the bucket needed whole seconds. The
+ * header still wins when present; this is the fallback for the shape this
+ * Host actually sends.
+ */
+function retryAfterMsFromErrorMessage(message: string | undefined): number | null {
+  if (!message) return null
+  const match = /retry_after_seconds=(\d+)/.exec(message)
+  if (!match) return null
+  const seconds = Number(match[1])
+  if (!Number.isFinite(seconds)) return null
+  return Math.min(seconds * 1_000, HTTP_RETRY_AFTER_CAP_MS)
 }
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
