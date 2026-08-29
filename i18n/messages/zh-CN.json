@@ -16152,8 +16152,8 @@
       "permissionPlan": "计划模式",
       "sectionTitle": "已配置的 Agent",
       "title": "外部 Agent",
-      "toggleFailed": "无法将更改加入队列：{message}",
-      "updateQueued": "更改已加入桌面端队列。"
+      "toggleFailed": "无法保存更改：{message}",
+      "updateQueued": "更改已保存到主机。"
     },
     "fleet": {
       "connectFirst": "连接到你的桌面以查看其智能体队列。",

@@ -16152,8 +16152,8 @@
       "permissionPlan": "Plan",
       "sectionTitle": "Configured agents",
       "title": "External agents",
-      "toggleFailed": "Could not queue the change: {message}",
-      "updateQueued": "Change queued for the desktop."
+      "toggleFailed": "Could not save the change: {message}",
+      "updateQueued": "Change saved on the Host."
     },
     "fleet": {
       "connectFirst": "Connect to your desktop to watch its agent fleet.",
