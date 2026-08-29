@@ -12,6 +12,12 @@
  * `plan_step` is the only variant that collects reject feedback inline: the
  * text becomes the step's failure reason in the plan event log, so "why" has
  * to be capturable at the moment of rejection.
+ *
+ * The header carries THREE identity signals, because the dialog is mounted at
+ * the app root and can therefore appear over any surface: the producer's own
+ * `title`, the gate kind, and the scope id. It used to show only the gate kind,
+ * so two budget gates opened by two different runs rendered as the same modal
+ * and the operator had no way to tell which one they were releasing.
  */
 
 import { useState } from "react"
@@ -19,10 +25,12 @@ import { useTranslations } from "next-intl"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -51,7 +59,18 @@ export interface ApprovalGateDialogProps {
   open: boolean
   onClose: () => void
   gateType: ApprovalGateType
-  /** Scope identifier (display only — caller binds approve/reject). */
+  /**
+   * Producer-authored headline for THIS gate (`PendingGate.title`), e.g. the
+   * blocked plan step's name. Falls back to the gate-kind title when absent —
+   * which is all the dialog used to show, so two different budget gates were
+   * indistinguishable on screen.
+   */
+  title?: string
+  /**
+   * Scope identifier the approve/reject binds to (`ApprovalKey.id` — a run id,
+   * a teammate id, or a plan-step id). Rendered so the operator can see WHAT
+   * they are releasing; the caller still owns the actual binding.
+   */
   scopeId: string
   body?: string
   onApprove: (payload?: unknown) => void
@@ -98,7 +117,23 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t(`${i18nKey}.title`)}</DialogTitle>
+          <DialogTitle data-testid="approval-gate-title">
+            {props.title || t(`${i18nKey}.title`)}
+          </DialogTitle>
+          {/* Identity line. The title above may be the producer's (which does
+              not say which KIND of gate this is), and the scope id is the only
+              thing distinguishing two simultaneous gates of the same kind. */}
+          <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Badge variant="outline" className="text-[10px]">
+              {t(`${i18nKey}.title`)}
+            </Badge>
+            <span
+              className="min-w-0 break-all font-mono text-[11px]"
+              data-testid="approval-gate-scope"
+            >
+              {t("scopeLabel", { id: props.scopeId })}
+            </span>
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">{props.body ?? t(`${i18nKey}.body`)}</p>

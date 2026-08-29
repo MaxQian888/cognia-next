@@ -37,6 +37,7 @@
       "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
       "title": "Re-plan checkpoint"
     },
+    "scopeLabel": "Scope: {id}",
     "teammateFix": {
       "body": "A teammate failed catastrophically. Fix the configuration and rejoin, or skip.",
       "rejoin": "Rejoin",

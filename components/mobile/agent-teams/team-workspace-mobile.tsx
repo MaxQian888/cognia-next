@@ -33,7 +33,6 @@ import { AgentTeamOverview } from "@/components/agent/workspace/overview"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
 import { TeamRunsList } from "@/components/agent/team/runs-list"
-import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import { TeamBoardMobile } from "@/components/mobile/agent-teams/team-board-mobile"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { abortTeam } from "@/lib/ai/agent/agent-team-runtime"
@@ -180,8 +179,9 @@ export function TeamWorkspaceMobile() {
           </TabsContent>
         </div>
       </Tabs>
-
-      <GateModalsHost />
+      {/* No <GateModalsHost /> here. `app/layout.tsx` mounts it once for every
+          shell — mobile included — so a second copy on this page rendered two
+          stacked dialogs per gate, with two focus traps competing. */}
     </main>
   )
 }

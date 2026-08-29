@@ -42,8 +42,11 @@ jest.mock("@/components/agent/workspace/activity", () => ({
 jest.mock("@/components/agent/team/runs-list", () => ({
   TeamRunsList: () => <div data-testid="runs-list" />,
 }))
+// Rendered as a MARKER, not null: `app/layout.tsx` already mounts this host
+// for every shell, so this page mounting its own copy is the defect the test
+// below pins — and a null mock could never see it.
 jest.mock("@/components/agent/team/gate-modals-host", () => ({
-  GateModalsHost: () => null,
+  GateModalsHost: () => <div data-testid="gate-modals-host" />,
 }))
 jest.mock("@/components/mobile/agent-teams/team-board-mobile", () => ({
   TeamBoardMobile: ({ teamId: id }: { teamId: string }) => (
@@ -86,6 +89,13 @@ describe("<TeamWorkspaceMobile />", () => {
     render(<TeamWorkspaceMobile />)
     await user.click(screen.getByTestId("mobile-team-tab-board"))
     expect(screen.getByTestId("board-section")).toBeInTheDocument()
+  })
+
+  it("does not mount a second GateModalsHost over the app-root one", () => {
+    // Two hosts render two stacked Radix dialogs per pending gate, whose focus
+    // traps fight; the loser is invisible but still trapping.
+    render(<TeamWorkspaceMobile />)
+    expect(screen.queryByTestId("gate-modals-host")).not.toBeInTheDocument()
   })
 
   it("shows an empty state with a back action when the team is missing", async () => {

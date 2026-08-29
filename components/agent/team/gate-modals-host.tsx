@@ -6,8 +6,14 @@
  * Subscribes to `usePendingGatesStore` and renders one <ApprovalGateDialog>
  * per open gate. Without this host the budget / deadlock / teammate-fix gates
  * have a producer (`TeamNotifier.openGate`) but no UI, so a paused team run
- * (`concurrency.reduceTo(0)`) hangs forever with no release valve. Mount once
- * on the team workspace surface.
+ * (`concurrency.reduceTo(0)`) hangs forever with no release valve.
+ *
+ * Mounted EXACTLY ONCE, at the app root (`app/layout.tsx`), for every shell —
+ * desktop and mobile alike. A gate can open while the user is on any surface,
+ * so the host cannot live on the team workspace; and because the root mount is
+ * unconditional, no surface may mount a second copy. Two hosts render two
+ * stacked Radix dialogs per gate whose focus traps fight each other, and the
+ * loser is invisible but still trapping.
  *
  * Every resolution path — approve, reject, or dismiss — resolves the underlying
  * approval-bus waiter AND removes the store entry. Dismissing the dialog without
@@ -138,6 +144,7 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
       open
       onClose={() => rejectAndClose()}
       gateType={gate.gateType}
+      title={gate.title}
       scopeId={gate.key.id}
       body={gate.body}
       onApprove={approveAndClose}
