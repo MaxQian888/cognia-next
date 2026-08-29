@@ -172,6 +172,12 @@ const CharacterSendParams = z.object({
   characterId: requiredString("required"),
   content: requiredString("required"),
   sessionId: optionalString,
+  /**
+   * Who the persisted message is attributed to. "user" (default) needs the
+   * chat UI open before the character replies — the executor reports it as
+   * `deliveryDeferred`; "assistant" posts as the character itself.
+   */
+  role: z.enum(["user", "assistant"]).optional(),
 })
 
 const CharacterCreateParams = z.object({

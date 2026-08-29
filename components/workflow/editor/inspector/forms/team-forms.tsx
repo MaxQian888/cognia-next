@@ -40,6 +40,9 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
   const characterId = readString(params, "characterId")
   const content = readString(params, "content")
   const sessionId = readString(params, "sessionId")
+  // "user" is the executor's fallback; it also decides whether the character
+  // actually answers, so the choice is worth stating up front.
+  const role = readString(params, "role", "user")
   return (
     <FieldGroup>
       <Field label={t("character.label")} htmlFor="cs-char" name="characterId" required>
@@ -65,13 +68,31 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
           placeholder={t("content.placeholder")}
         />
       </Field>
-      <Field label={t("sessionId.label")} htmlFor="cs-session" name="sessionId">
-        <Input
-          id="cs-session"
-          value={sessionId}
-          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
-        />
-      </Field>
+      <FieldRow>
+        <Field label={t("sessionId.label")} htmlFor="cs-session" name="sessionId">
+          <Input
+            id="cs-session"
+            value={sessionId}
+            onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+          />
+        </Field>
+        <Field label={t("role.label")} htmlFor="cs-role" hint={t("role.hint")} name="role">
+          <Select value={role} onValueChange={(v) => onChange(patchParam(params, "role", v))}>
+            <SelectTrigger id="cs-role">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="user">{t("role.user")}</SelectItem>
+              <SelectItem value="assistant">{t("role.assistant")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldRow>
+      {role === "user" ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="cs-deferred-note">
+          {t("role.deferredNote")}
+        </p>
+      ) : null}
     </FieldGroup>
   )
 }

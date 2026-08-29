@@ -41797,6 +41797,13 @@
           "label": "Message content",
           "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
         },
+        "role": {
+          "assistant": "The character",
+          "deferredNote": "Posted as the user, the character only replies while its chat is open — the step reports the delivery as deferred.",
+          "hint": "Who the message is attributed to in the session.",
+          "label": "Post as",
+          "user": "The user"
+        },
         "sessionId": {
           "label": "Target session id (optional)"
         }

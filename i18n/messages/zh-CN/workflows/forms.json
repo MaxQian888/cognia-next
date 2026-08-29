@@ -564,6 +564,13 @@
       "label": "消息内容",
       "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
     },
+    "role": {
+      "assistant": "该角色",
+      "deferredNote": "以用户身份发送时，只有该角色的聊天界面打开时它才会回复——步骤会把投递标记为已延后。",
+      "hint": "这条消息在会话中归属于谁。",
+      "label": "以谁的身份发送",
+      "user": "用户"
+    },
     "sessionId": {
       "label": "目标会话 ID（可选）"
     }

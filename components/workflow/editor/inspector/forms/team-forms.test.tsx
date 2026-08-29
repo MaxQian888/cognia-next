@@ -136,3 +136,26 @@ describe("TeamTaskDispatchConfig — the synthesized task settings", () => {
     expect(within(access).getByRole("combobox")).toHaveTextContent("Read and write")
   })
 })
+
+/**
+ * `action.character.send` persists the message as `user` or `assistant`, and
+ * the choice is load-bearing: a `user` message only draws a reply while that
+ * character's chat is open (the executor reports `deliveryDeferred`), while
+ * `assistant` posts as the character itself. Neither the schema nor the form
+ * offered it, so only the deferred half was reachable.
+ */
+describe("CharacterSendConfig — message attribution", () => {
+  it("defaults to the executor's own fallback and explains the deferral", () => {
+    const { container } = render(<CharacterSendConfig params={{}} onChange={jest.fn()} />)
+    const role = container.querySelector('[data-field="role"]') as HTMLElement
+    expect(within(role).getByRole("combobox")).toHaveTextContent("The user")
+    expect(container.querySelector('[data-testid="cs-deferred-note"]')).not.toBeNull()
+  })
+
+  it("drops the deferral note once the character itself is speaking", () => {
+    const { container } = render(
+      <CharacterSendConfig params={{ role: "assistant" }} onChange={jest.fn()} />
+    )
+    expect(container.querySelector('[data-testid="cs-deferred-note"]')).toBeNull()
+  })
+})
