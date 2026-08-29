@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -306,6 +306,30 @@ describe("ArtifactPreview", () => {
         )
       )
     })
+  })
+
+  it("stops spinning and says so when a scripted frame never announces itself", async () => {
+    // The shape a CSP refusal takes: the bundles are served, the frame loads,
+    // and nothing inside it ever runs. Without a deadline the panel spins.
+    jest.useFakeTimers()
+    try {
+      render(<ArtifactPreview artifact={dummy({ type: "react", content: "x" })} />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      act(() => {
+        jest.advanceTimersByTime(200)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      act(() => {
+        jest.advanceTimersByTime(9000)
+      })
+      expect(screen.getByRole("alert")).toHaveTextContent("runtimeInitFailed")
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("logs a warning when the iframe posts an artifact-preview-error", () => {

@@ -108,6 +108,13 @@ class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewE
   }
 }
 
+/**
+ * How long a scripted frame may stay silent before the panel calls it a
+ * runtime failure. Generous enough for a cold parse of the React bundle, far
+ * short of the 15 seconds the CDN watchdog it replaces used to burn.
+ */
+const SHELL_READY_TIMEOUT_MS = 8000
+
 function PreviewLoading({ message }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
@@ -269,6 +276,12 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   } | null>(null)
   /** True once the in-frame bootstrap has announced itself for THIS document. */
   const shellReadyRef = useRef(false)
+  /**
+   * A scripted frame that never announces itself is the shape a CSP refusal
+   * takes: the bundles are served, the frame loads, and nothing runs. Without
+   * this the panel would spin forever instead of saying so.
+   */
+  const shellDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // The offline runtime under `public/artifact-runtime/`. Imported lazily: a
   // chart preview has no business pulling in the JSX worker plumbing.
@@ -448,7 +461,21 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       }
       // A scripted frame is still booting; it drops the curtain itself when the
       // bootstrap reports `artifact-preview-ready`.
-      if (frameMode !== "react" && frameMode !== "interactive") setIsLoading(false)
+      if (frameMode !== "react" && frameMode !== "interactive") {
+        setIsLoading(false)
+        return
+      }
+      if (shellReadyRef.current) return
+      if (shellDeadlineRef.current) clearTimeout(shellDeadlineRef.current)
+      shellDeadlineRef.current = setTimeout(() => {
+        if (shellReadyRef.current) return
+        loggers.ui.error("artifacts.preview.shell-never-ready", undefined, {
+          artifactId: artifact.id,
+          frameMode,
+        })
+        setIsLoading(false)
+        setError(tRef.current("runtimeInitFailed"))
+      }, SHELL_READY_TIMEOUT_MS)
     }
 
     // The 100ms delay exists to let a freshly-keyed iframe attach its document.
@@ -493,6 +520,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
         // The bootstrap is listening; hand it the strings, the palette and the
         // code. Nothing before this point can reach an opaque-origin frame.
         shellReadyRef.current = true
+        if (shellDeadlineRef.current) {
+          clearTimeout(shellDeadlineRef.current)
+          shellDeadlineRef.current = null
+        }
         event.source?.postMessage(
           {
             type: "artifact-shell-config",
@@ -523,7 +554,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       }
     }
     window.addEventListener("message", handleMessage)
-    return () => window.removeEventListener("message", handleMessage)
+    return () => {
+      window.removeEventListener("message", handleMessage)
+      if (shellDeadlineRef.current) clearTimeout(shellDeadlineRef.current)
+    }
   }, [
     artifact.id,
     artifact.type,
