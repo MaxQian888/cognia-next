@@ -123,7 +123,16 @@ const FILE_WRITE_TOOL_IDS = new Set([
  * point. The risk is sending somewhere the requester did not ask for, which
  * needs an agent-callable send tool — that is what this set catches.
  */
-const EXTERNAL_SEND_IDS = new Set(["connector_send", "send_message", "send_email"])
+const EXTERNAL_SEND_IDS = new Set([
+  "connector_send",
+  "send_message",
+  "send_email",
+  // Publishing a Cognia Site puts a URL other people can load in front of the
+  // world, and it cannot be unsent: `takeDown` removes the Site, it does not
+  // restore the previous version. `build_site` produces an immutable local
+  // version and is deliberately absent.
+  "deploy_site",
+])
 
 /** Ids that reach secrets at rest. */
 const CREDENTIAL_IDS = new Set(["keyring", "secrets", "secret_store", "subscription", "oauth"])

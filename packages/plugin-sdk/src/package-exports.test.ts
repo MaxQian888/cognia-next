@@ -19,6 +19,7 @@ describe("plugin-sdk package exports", () => {
     "./permissions",
     "./extensions",
     "./templates",
+    "./api/site",
     "./api/tool",
     "./api/context-panel",
     "./api/editor",

@@ -1972,12 +1972,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     artifactsChannelAvailable && appSettings?.artifacts?.agentAuthoring !== false
 
   const editorWriteToolsSurfaced = await proIdeWriteToolsAvailable(ctx)
+  // Sites publishing needs Dexie, the OS keyring, and `sandbox_exec` — all
+  // renderer-side, none reachable from the sidecar — so the tools ride the same
+  // desktop condition as the manifest entries below, one source of truth so the
+  // tier can never be surfaced apart from the tools it governs.
+  const sitesToolsSurfaced = (await import("@/lib/tauri")).isTauri()
   const commandRules = appSettings?.agentPermissions?.commandRules
   const toolRules = appSettings?.agentPermissions?.toolRules
   const { buildEditorToolRuleset } = await import("@/lib/claude/permissions/editor-tool-rules")
   const { buildArtifactToolRuleset } = await import("@/lib/claude/permissions/artifact-tool-rules")
+  const { buildSiteToolRuleset } = await import("@/lib/claude/permissions/site-tool-rules")
   const mergedRuleset = mergeRulesets(
     editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
+    sitesToolsSurfaced ? buildSiteToolRuleset() : undefined,
     artifactAuthoringEnabled ? buildArtifactToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
@@ -2786,6 +2793,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   } catch (err) {
     loggers.app.warn("failed to append editor built-in tool", { error: String(err) })
+  }
+
+  // Cognia Sites tools (ADR-0084). Desktop only, for the same reason the tier
+  // above is: every step of a publish needs Dexie, the keyring, and the OS
+  // sandbox, none of which the sidecar has.
+  if (sitesToolsSurfaced) {
+    try {
+      const { buildSitesBuiltinManifestEntries } = await import("@/lib/claude/sites-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildSitesBuiltinManifestEntries()]
+    } catch (err) {
+      loggers.app.warn("failed to append Sites built-in tools", { error: String(err) })
+    }
   }
 
   // Plugin conversion is a prompt-skill-backed capability, not a global

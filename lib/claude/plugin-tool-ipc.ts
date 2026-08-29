@@ -42,6 +42,11 @@ import {
   runEditorBuiltinTool,
   type EditorToolRunDeps,
 } from "./editor-builtin-tools"
+import {
+  isSitesBuiltinTool,
+  resolveSitesToolDeps,
+  runSitesBuiltinTool,
+} from "./sites-builtin-tools"
 import { isTeamBuiltinTool, runTeamBuiltinTool } from "./team-builtin-tools"
 import {
   VECTOR_BUILTIN_PLUGIN_ID,
@@ -542,6 +547,17 @@ export async function handlePluginToolExec(
         request.args,
         await resolveEditorToolDeps(),
         { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Cognia Sites built-ins (ADR-0084) ────────────────────────────────
+    // Host-routed: every step needs Dexie, the OS keyring, and `sandbox_exec`,
+    // none of which the .mjs sidecar has.
+    if (isSitesBuiltinTool(request.name)) {
+      const result = await runSitesBuiltinTool(
+        request.name,
+        request.args,
+        await resolveSitesToolDeps()
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }

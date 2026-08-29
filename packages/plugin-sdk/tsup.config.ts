@@ -33,6 +33,7 @@ const runtimeEntries = {
   sandbox: "src/api/sandbox.ts",
   "scheduled-task": "src/api/scheduled-task.ts",
   "security-findings": "src/api/security-findings.ts",
+  site: "src/api/site.ts",
   "shared-memory-adapter": "src/api/shared-memory-adapter.ts",
   skill: "src/api/skill.ts",
   "skill-recorder": "src/api/skill-recorder.ts",
