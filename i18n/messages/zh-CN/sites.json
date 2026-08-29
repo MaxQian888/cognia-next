@@ -253,6 +253,38 @@
     "title": "托管清单",
     "unsupported": "清单位于站点源码目录中，只有桌面端能读取。"
   },
+  "notify": {
+    "buildFailed": {
+      "title": "{name} 构建失败"
+    },
+    "deployFailed": {
+      "title": "{name} 部署失败"
+    },
+    "deploySucceeded": {
+      "body": "{url}",
+      "title": "{name} 已上线"
+    },
+    "open": "打开站点",
+    "operationFailed": {
+      "title": "{name}：{operation} 失败"
+    },
+    "purge": {
+      "title": "{name}：托管资源已清除"
+    },
+    "restore": {
+      "title": "{name} 已恢复服务"
+    },
+    "takedown": {
+      "title": "{name} 已下线"
+    },
+    "uploadFailed": {
+      "title": "{name} 上传失败"
+    },
+    "waitingReconcile": {
+      "body": "无法确认 Cloudflare 是否已应用该操作，请执行对账确认。",
+      "title": "{name}：{operation} 需要对账"
+    }
+  },
   "observability": {
     "description": "直接查询 Cloudflare Worker 日志与请求分析，不复制到另一套运行时。",
     "empty": "尚未执行查询。",

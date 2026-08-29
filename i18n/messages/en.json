@@ -17874,6 +17874,7 @@
       "plugin": "Plugins",
       "scheduler": "Scheduler",
       "session": "Sessions",
+      "site": "Sites",
       "system": "System",
       "workflow": "Workflows"
     }
@@ -35842,6 +35843,38 @@
       },
       "title": "Hosting manifest",
       "unsupported": "The manifest lives in the Site's source tree, which only the desktop app can read."
+    },
+    "notify": {
+      "buildFailed": {
+        "title": "{name} failed to build"
+      },
+      "deployFailed": {
+        "title": "{name} failed to deploy"
+      },
+      "deploySucceeded": {
+        "body": "{url}",
+        "title": "{name} is live"
+      },
+      "open": "Open Site",
+      "operationFailed": {
+        "title": "{name}: {operation} failed"
+      },
+      "purge": {
+        "title": "{name}: managed resources purged"
+      },
+      "restore": {
+        "title": "{name} is serving again"
+      },
+      "takedown": {
+        "title": "{name} was taken down"
+      },
+      "uploadFailed": {
+        "title": "{name} failed to upload"
+      },
+      "waitingReconcile": {
+        "body": "Cognia could not confirm whether Cloudflare applied this. Reconcile to find out.",
+        "title": "{name}: {operation} needs reconciliation"
+      }
     },
     "observability": {
       "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",

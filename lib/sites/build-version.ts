@@ -257,7 +257,10 @@ export async function buildAndSaveSiteVersion(
   await deps.claimOperation({
     operationId,
     leaseOwner: deps.leaseOwner,
-    leaseMs: 30 * 60 * 1000,
+    // An hour, matching `CloudflareSitesService.leaseMsFor`. A lease shorter
+    // than the build it protects lets recovery terminate a build that is still
+    // running, and the live call then fails on a lease-owner mismatch.
+    leaseMs: 60 * 60 * 1000,
     now: deps.now(),
   })
   /**

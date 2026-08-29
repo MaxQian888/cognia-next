@@ -177,24 +177,13 @@ it("falls back to not-found when detection rejects", async () => {
   )
 })
 
-it("recovers interrupted operations for the owner only", async () => {
-  const owner = setup()
-  await waitFor(() =>
-    expect(owner.service.recoverInterruptedOperations).toHaveBeenCalledWith("site_1")
-  )
-  owner.unmount()
-
-  const stranger = setup({ actorAccountId: "stranger" })
-  await waitFor(() => expect(stranger.result.current.wrangler).not.toBeNull())
-  expect(stranger.service.recoverInterruptedOperations).not.toHaveBeenCalled()
-})
-
-it("claims recovery once per Site, not once per render", async () => {
-  const owner = setup()
-  await waitFor(() => expect(owner.service.recoverInterruptedOperations).toHaveBeenCalledTimes(1))
-  owner.rerender()
-  owner.rerender()
-  expect(owner.service.recoverInterruptedOperations).toHaveBeenCalledTimes(1)
+it("no longer sweeps for interrupted operations on mount", async () => {
+  // It swept the selected Site only, and only for its owner, so a crash
+  // mid-upload stayed wedged until somebody opened /sites and clicked that
+  // exact Site. `lib/sites/boot.ts` sweeps every owned Site at startup instead.
+  const { service } = setup()
+  await waitFor(() => expect(detectWranglerBinary).toHaveBeenCalled())
+  expect(service.recoverInterruptedOperations).not.toHaveBeenCalled()
 })
 
 it("derives the step states from the manifest, environment, and versions", async () => {

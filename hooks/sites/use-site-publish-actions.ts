@@ -8,7 +8,7 @@
  * own busy flag. Here they share the action runner, the manifest controller,
  * and the preview session, so the console body stays a rendering concern.
  */
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 
 import { cancelSiteOperation, getSiteOperation } from "@/lib/db/sites"
 import {
@@ -115,30 +115,12 @@ export function useSitePublishActions({
     redetect,
   } = useWranglerDetection(wranglerEnabled && site !== null)
 
-  // Reconcile any operation a crash interrupted. Owner only: the recovery path
-  // claims leases, and a viewer holding no lease would just churn.
-  //
-  // The factory is read through a ref so recovery keys off the Site alone. A
-  // caller that rebuilds the factory each render would otherwise re-run this
-  // effect — and re-claim leases — on every render.
-  const siteId = site?.id ?? null
-  const isOwner = site?.authoringPolicy.ownerAccountId === actorAccountId
-  const serviceRef = useRef(service)
-  useEffect(() => {
-    serviceRef.current = service
-  }, [service])
-  useEffect(() => {
-    if (!siteId || !isOwner) return
-    void serviceRef
-      .current()
-      .recoverInterruptedOperations(siteId)
-      .catch(() => undefined)
-  }, [siteId, isOwner])
+  // The console no longer sweeps for interrupted operations on mount: it did
+  // so for the selected Site only, and only for its owner, so a crash mid-
+  // upload stayed wedged until somebody opened /sites and clicked that exact
+  // Site. `components/providers/initializers/sites-initializer.tsx` now sweeps
+  // every owned Site once at startup (`lib/sites/boot.ts`).
 
-  // A verified credential on this host is the honest answer to "is the provider
-  // connected". The old predicate — "does a provider resource exist" — left a
-  // Site whose token was saved and verified reading as not started until the
-  // first provision.
   const connectDone =
     (site ? siteTokenStanding(site) === "verified" : false) ||
     live.resources.some((row) => row.status === "active")

@@ -218,6 +218,22 @@ export class CloudflareSitesService {
     return { site, client: this.deps.createClient({ token }) }
   }
 
+  /**
+   * How long an operation may hold its lease before recovery may reclaim it.
+   *
+   * Uploading a large artifact through wrangler routinely exceeds ten minutes,
+   * which was the previous value for everything. A lease shorter than the work
+   * it protects is not a safety mechanism: recovery sees `running` with an
+   * expired lease, terminates it, and the live call then fails at
+   * `completeSiteOperation` on a lease-owner mismatch — with the provider-side
+   * effect already applied. The long operations get a window that actually
+   * covers them; everything else keeps the tighter one so a genuinely dead
+   * claim is reclaimed promptly.
+   */
+  private leaseMsFor(type: SiteOperationType): number {
+    return type === "build" || type === "upload" ? 60 * 60 * 1000 : 10 * 60 * 1000
+  }
+
   private async runOperation<T>(input: {
     site: SiteProjectRow
     type: SiteOperationType
@@ -247,7 +263,7 @@ export class CloudflareSitesService {
     await claimSiteOperation({
       operationId: queued.id,
       leaseOwner: this.deps.leaseOwner,
-      leaseMs: 10 * 60 * 1000,
+      leaseMs: this.leaseMsFor(input.type),
       now: this.deps.now(),
     })
     try {

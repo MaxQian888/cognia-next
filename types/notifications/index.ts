@@ -19,6 +19,13 @@ export type NotificationSource =
   | "system"
   /** Issue tracker lifecycle (ADR-0132): assignments, run outcomes, review-ready, comments. */
   | "issue"
+  /**
+   * Cognia Sites publish lifecycle (ADR-0084): deploy outcomes, build and
+   * upload failures, operations waiting on reconciliation. A build takes
+   * minutes; without these, finishing one while the user is on another route
+   * produced nothing at all.
+   */
+  | "site"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */
 export type NotificationLevel = "info" | "success" | "warning" | "error" | "critical"
@@ -47,6 +54,7 @@ export const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   "workflow",
   "system",
   "issue",
+  "site",
 ] as const
 
 export const NOTIFICATION_LEVELS: readonly NotificationLevel[] = [

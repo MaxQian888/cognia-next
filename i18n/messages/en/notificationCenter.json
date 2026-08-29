@@ -66,6 +66,7 @@
     "plugin": "Plugins",
     "scheduler": "Scheduler",
     "session": "Sessions",
+    "site": "Sites",
     "system": "System",
     "workflow": "Workflows"
   }

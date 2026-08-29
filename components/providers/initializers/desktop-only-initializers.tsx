@@ -137,6 +137,13 @@ const SelectionToolbarInitializer = dynamic(
   () => import("./selection-toolbar-initializer").then((m) => m.SelectionToolbarInitializer),
   { ssr: false }
 )
+// Sites recovery reaches the OS keyring and the local execution host, both of
+// which only exist here; off the desktop every call throws and no Site
+// notification could be produced anyway.
+const SitesInitializer = dynamic(
+  () => import("./sites-initializer").then((m) => m.SitesInitializer),
+  { ssr: false }
+)
 const TrayPanelInitializer = dynamic(
   () => import("./tray-panel-initializer").then((m) => m.TrayPanelInitializer),
   { ssr: false }
@@ -196,6 +203,7 @@ export function DesktopOnlyInitializers() {
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />
       <SessionImportWatchInitializer />
+      <SitesInitializer />
     </>
   )
 }
