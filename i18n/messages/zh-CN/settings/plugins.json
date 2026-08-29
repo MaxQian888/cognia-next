@@ -29,6 +29,12 @@
     "emptyForPlugin": "该插件未声明任何自定义数据表。"
   },
   "description": "插件在 /plugins 工作台中管理。此入口一览状态并提供进入工作台的链接。",
+  "developerMode": {
+    "description": "显示插件创作工具，并允许受信任的本地开发会话。",
+    "title": "开发者模式",
+    "toggle": "启用开发者模式",
+    "warning": "仅运行你信任的本地插件代码。"
+  },
   "overview": {
     "badgeEnabled": "{count} 已启用",
     "badgeError": "{count} 异常",

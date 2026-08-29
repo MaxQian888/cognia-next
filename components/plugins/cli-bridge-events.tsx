@@ -3,10 +3,10 @@
 /**
  * Side-effect-only mount that wires the renderer to the Tauri events
  * emitted by `src-tauri/src/cli_bridge/handlers.rs` whenever a `cognia`
- * CLI install / uninstall / hot-reload completes. Subscribes once and
- * routes each event into the `hot-reload-history-store` + triggers a
- * fresh plugin scan so the Library tab reflects the change without a
- * restart.
+ * CLI install / uninstall and Dev Session lifecycle changes occur.
+ * Install changes trigger plugin discovery; development events feed the
+ * canonical in-memory Dev Session store and are never treated as activation
+ * success without the renderer's generation-backed proof.
  *
  * Mounted next to `PluginErrorToaster` / `PluginEnableFailureToaster`
  * in `app/layout.tsx`. No-op on web / Capacitor (the hook checks

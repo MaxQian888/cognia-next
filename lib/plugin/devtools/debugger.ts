@@ -18,6 +18,7 @@ import { loggers } from "../core/logger"
 export interface DebugSession {
   id: string
   pluginId: string
+  generation: number
   startedAt: Date
   status: "active" | "paused" | "stopped"
   breakpoints: Breakpoint[]
@@ -53,6 +54,7 @@ export interface WatchExpression {
 export interface LogEntry {
   id: string
   pluginId: string
+  generation: number
   level: "debug" | "info" | "warn" | "error"
   message: string
   args: unknown[]
@@ -101,10 +103,11 @@ export class PluginDebugger {
   // Session Management
   // ===========================================================================
 
-  startSession(pluginId: string): DebugSession {
+  startSession(pluginId: string, generation = 0): DebugSession {
     const session: DebugSession = {
       id: this.generateId(),
       pluginId,
+      generation,
       startedAt: new Date(),
       status: "active",
       breakpoints: [...this.globalBreakpoints],
@@ -320,6 +323,7 @@ export class PluginDebugger {
     const entry: LogEntry = {
       id: this.generateId(),
       pluginId,
+      generation: this.sessions.get(pluginId)?.generation ?? 0,
       level,
       message,
       args: this.safeClone(args) as unknown[],
@@ -355,11 +359,18 @@ export class PluginDebugger {
     }
   }
 
-  getLogs(pluginId: string, options?: { level?: LogEntry["level"]; limit?: number }): LogEntry[] {
+  getLogs(
+    pluginId: string,
+    options?: { level?: LogEntry["level"]; generation?: number; limit?: number }
+  ): LogEntry[] {
     let logs = this.logs.get(pluginId) || []
 
     if (options?.level) {
       logs = logs.filter((l) => l.level === options.level)
+    }
+
+    if (options?.generation !== undefined) {
+      logs = logs.filter((log) => log.generation === options.generation)
     }
 
     if (options?.limit) {

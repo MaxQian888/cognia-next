@@ -1,6 +1,6 @@
 ---
 title: DevTools UI
-description: 渲染端表面 —— 每 30 秒轮询的 useCogniaCliStatus hook、状态卡片、三 tab 安装对话框、基于终端的命令启动器，以及带 ready / degraded / missing 三种色调的工具栏状态徽标。
+description: 渲染端 Dev Session 工作台、CLI/bridge 状态、终端启动器、可验证激活时间线与诊断。
 ---
 
 # DevTools UI
@@ -15,6 +15,18 @@ description: 渲染端表面 —— 每 30 秒轮询的 useCogniaCliStatus hook�
   `cognia plugin build/dev/lint/new/install` 跑在真实终端 tab 里，并将托管目录注入 PATH，
   而 **状态徽标** 把一切浓缩成一个绿 / 琥珀 / 灰的圆点。
 </TLDR>
+
+## Dev Session 权威状态
+
+`PluginDevSessionWorkbench` 是 DevTools 主流程。启动器先生成 UUID，再运行
+`cognia plugin dev --session-id <uuid>`，并在内存 `PluginDevSessionStore` 中关联返回的终端
+session。只有 App 启动的 session 提供终端操作；外部 CLI 的事件可观察，但不会出现伪造的控制按钮。
+
+工作台不会根据安装或发现事件推断 reload 成功。只有 renderer bridge 记录的
+`activationProof` 同时证明 lifecycle 为 active、generation 已递增且 artifact revision 对应 Rust
+实际安装的 artifact 时，才展示成功。Activity、attempt diagnostics 与结构化 runtime 日志共用同一
+session/attempt 身份。Advanced diagnostics 只包含已实现的 lifecycle、trigger audit 与
+extension-point 诊断；旧 Hook/Profiler/Bus tab 不再属于 Dev Session 主流程。
 
 ## 状态 hook
 
@@ -80,7 +92,7 @@ i18n 命名空间：`plugins.cliInstall`。
 | 按钮 | argv | 需要 bridge？ |
 | --- | --- | --- |
 | `build` | `plugin build` | 否 |
-| `dev` | `plugin dev` | **是** —— 关闭时先警告 |
+| `dev` | `plugin dev --session-id <uuid>` | **是** —— 关闭时先警告 |
 | `lint` | `plugin lint` | 否 |
 | `new` | `plugin new` | 否 |
 | `install` | `plugin install "<picked .zip>"` | **是** |

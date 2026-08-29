@@ -32,6 +32,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 const ENDPOINT_FILE_NAME: &str = "cli-endpoint.json";
 
@@ -94,6 +95,7 @@ pub fn load_endpoint() -> Result<EndpointFile> {
 pub fn get_json<R: for<'de> Deserialize<'de>>(endpoint: &EndpointFile, path: &str) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
     let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(35)))
         .http_status_as_error(false)
         .build()
         .new_agent();
@@ -169,8 +171,18 @@ pub fn post_json<R: for<'de> Deserialize<'de>>(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<R> {
+    post_json_with_timeout(endpoint, path, body, Duration::from_secs(35))
+}
+
+pub fn post_json_with_timeout<R: for<'de> Deserialize<'de>>(
+    endpoint: &EndpointFile,
+    path: &str,
+    body: &serde_json::Value,
+    timeout: Duration,
+) -> Result<R> {
     let url = format!("{}{}", endpoint.base_url.trim_end_matches('/'), path);
     let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
         .http_status_as_error(false)
         .build()
         .new_agent();

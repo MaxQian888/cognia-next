@@ -54,11 +54,7 @@ export function LocalPluginDropzone({ className, onInstalled }: LocalPluginDropz
       // build doesn't. Without a path we fall back to the click flow,
       // which opens the directory picker.
       if (typeof first.path === "string" && first.path.length > 0) {
-        // Reuse the same hook entry point. trigger() opens the picker
-        // when no path is supplied; without a direct "install this path"
-        // we surface a hint instead — kept simple to avoid adding a
-        // second install code path.
-        void trigger()
+        void trigger(first.path)
       } else {
         void trigger()
       }

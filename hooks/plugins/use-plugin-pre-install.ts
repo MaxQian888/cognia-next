@@ -35,7 +35,8 @@ export interface UsePluginPreInstall {
   install: (
     pluginId: string,
     version: string | undefined,
-    pluginName: string
+    pluginName: string,
+    clientOverride?: MarketplaceClient
   ) => Promise<RunMarketplaceInstallResult>
   /** Current dialog target (read-only). */
   target: PreInstallTarget | null
@@ -104,9 +105,11 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
     async (
       pluginId: string,
       version: string | undefined,
-      pluginName: string
+      pluginName: string,
+      clientOverride?: MarketplaceClient
     ): Promise<RunMarketplaceInstallResult> => {
-      if (!client) {
+      const activeClient = clientOverride ?? client
+      if (!activeClient) {
         return {
           status: "failed",
           stage: "install",
@@ -123,7 +126,7 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
       // listPlugins which we don't have — acceptable trade-off.
       let totalSteps = 3
       try {
-        const entry = await client.getPlugin(pluginId)
+        const entry = await activeClient.getPlugin(pluginId)
         if (entry) {
           const m = entry.manifest
           const hasPerms =
@@ -144,7 +147,7 @@ export function usePluginPreInstall(client: MarketplaceClient | null): UsePlugin
         const opts: RunMarketplaceInstallOpts = {
           pluginId,
           version,
-          client,
+          client: activeClient,
           requestConflictReview: (conflict) =>
             awaitStep<"continue" | "cancel">("conflict", () => {
               setTarget({

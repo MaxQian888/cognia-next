@@ -756,6 +756,9 @@ pub(crate) enum PluginCommand {
         path: PathBuf,
         #[arg(long)]
         reload_url: Option<String>,
+        /// Stable UUID used to correlate this process with the desktop Dev Session UI.
+        #[arg(long)]
+        session_id: Option<String>,
         /// Build once, optionally hot-reload, then exit instead of watching.
         #[arg(long)]
         once: bool,
@@ -1111,6 +1114,7 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
         PluginCommand::Dev {
             path,
             reload_url,
+            session_id,
             once,
             json,
         } => {
@@ -1122,7 +1126,7 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 once,
                 json
             ));
-            commands::dev::run(path, reload_url, once, ui)
+            commands::dev::run(path, reload_url, session_id, once, ui)
         }
         PluginCommand::EmbedVersion {
             wasm,

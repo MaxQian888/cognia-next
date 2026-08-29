@@ -64,8 +64,8 @@ Creator 是正式的内置预置加 `/creator` 工作台，仅在开发者模式
 （`stores/plugin-runtime/plugin-store.ts`，已持久化且已有
 `updatePluginSettings` action）：`components/plugins/plugin-devtools-panel.tsx`
 中直接读 `cognia.plugins.developerMode` 的分支改为读取该来源，旧 key 在启动时
-一次性迁移。`lib/plugin/core/manager.ts` 中的 `config.debug` / `config.devMode`
-是**单个插件**的调试插桩开关，与全局门禁不是同一个概念，保持独立。路由保留在
+一次性迁移。每插件的 `config.debug` 仍可额外启用 instrumentation；全局 Developer Mode
+会为非内置插件启用带 generation 标签的结构化日志，两者都不会形成第二套可见性门禁。路由保留在
 静态导出中，关闭开发者模式时渲染访问门禁。Creator
 只在用户显式选择的 authoring root 内写入，进度记录在现有 workflow run event
 log，而不是新建存储。

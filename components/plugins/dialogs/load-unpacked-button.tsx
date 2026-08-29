@@ -31,7 +31,7 @@ export interface LoadUnpackedButtonProps {
 }
 
 interface UseLoadUnpackedFlow {
-  trigger: () => Promise<void>
+  trigger: (sourceDir?: string) => Promise<void>
   busy: boolean
   error: string | null
   /** Pre-install dialog element — must be rendered exactly once below. */
@@ -49,59 +49,52 @@ export function useLoadUnpackedFlow(
   const t = useTranslations("plugins.loadUnpacked")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sourceDir, setSourceDir] = useState<string | null>(null)
-  // The pre-install client is bound to a source directory; we recreate it
-  // on every trigger so re-picking a different folder doesn't carry stale
-  // manifest cache.
-  const client = sourceDir ? createLocalDirectoryClient(sourceDir) : null
-  const preInstall = usePluginPreInstall(client)
+  const preInstall = usePluginPreInstall(null)
 
-  const trigger = useCallback(async () => {
-    setError(null)
-    if (!canUseTauriInvoke()) {
-      setError(t("tauriRequiredError"))
-      return
-    }
-    try {
-      setBusy(true)
-      const dialog = await import("@tauri-apps/plugin-dialog")
-      const picked = await dialog.open({
-        directory: true,
-        multiple: false,
-        title: t("directoryPickerTitle"),
-      })
-      if (typeof picked !== "string") return // user cancelled
-      setSourceDir(picked)
-      // Resolve the real plugin id from disk so the pre-install chain
-      // gets a meaningful id (used for conflict detection against the
-      // installed-plugins table).
-      const manifest = await previewLocalManifest(picked)
-      const pluginId = manifest.id
-      const pluginName = manifest.name ?? pluginId
-
-      // Rebuild the client now that we have a sourceDir to bind to. The
-      // useMemo inside usePluginPreInstall takes the new client when the
-      // state flips on the next render — but `install()` only resolves
-      // after we await, by which time React has re-rendered with the
-      // bound client. Defer to a microtask so the state flush settles.
-      await Promise.resolve()
-
-      const result = await preInstall.install(pluginId, manifest.version, pluginName)
-      if (result.status === "installed") {
-        toast.success(t("installSuccess", { name: pluginName }))
-        onInstalled?.(result.pluginId)
-      } else if (result.status === "cancelled") {
-        // Quiet — the user explicitly backed out at a step.
-      } else {
-        setError(result.message)
+  const trigger = useCallback(
+    async (providedSourceDir?: string) => {
+      setError(null)
+      if (!canUseTauriInvoke()) {
+        setError(t("tauriRequiredError"))
+        return
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-      setSourceDir(null)
-    }
-  }, [onInstalled, preInstall, t])
+      try {
+        setBusy(true)
+        const picked = providedSourceDir
+          ? providedSourceDir
+          : await import("@tauri-apps/plugin-dialog").then((dialog) =>
+              dialog.open({
+                directory: true,
+                multiple: false,
+                title: t("directoryPickerTitle"),
+              })
+            )
+        if (typeof picked !== "string") return // user cancelled
+        // Resolve the real plugin id from disk so the pre-install chain
+        // gets a meaningful id (used for conflict detection against the
+        // installed-plugins table).
+        const manifest = await previewLocalManifest(picked)
+        const pluginId = manifest.id
+        const pluginName = manifest.name ?? pluginId
+
+        const client = createLocalDirectoryClient(picked)
+        const result = await preInstall.install(pluginId, manifest.version, pluginName, client)
+        if (result.status === "installed") {
+          toast.success(t("installSuccess", { name: pluginName }))
+          onInstalled?.(result.pluginId)
+        } else if (result.status === "cancelled") {
+          // Quiet — the user explicitly backed out at a step.
+        } else {
+          setError(result.message)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [onInstalled, preInstall, t]
+  )
 
   const dialog = (
     <PluginPreInstallDialog

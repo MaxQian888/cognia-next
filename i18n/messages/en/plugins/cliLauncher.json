@@ -4,7 +4,7 @@
   "bundleFilter": "Plugin bundle",
   "cmd": {
     "build": "Build",
-    "dev": "Dev",
+    "dev": "Start",
     "install": "Install…",
     "lint": "Lint",
     "new": "New"

@@ -6,6 +6,7 @@ import enMessages from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CogniaCliLauncher } from "./cognia-cli-launcher"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
+import { usePluginDevSessionStore } from "@/stores/plugins/plugin-dev-session-store"
 
 // --- Mocks -----------------------------------------------------------------
 
@@ -69,6 +70,7 @@ function renderLauncher() {
 beforeEach(() => {
   jest.clearAllMocks()
   useDevProjectStore.getState().clearProject()
+  usePluginDevSessionStore.getState().clear()
   mockStatus.mockReturnValue(status())
 })
 
@@ -134,8 +136,12 @@ describe("CogniaCliLauncher", () => {
     await userEvent.click(screen.getByTestId("cognia-cli-run-dev"))
     expect(toastWarning).toHaveBeenCalled()
     expect(launchCognia).toHaveBeenCalledWith(
-      expect.objectContaining({ command: "plugin dev", cwd: "/proj" })
+      expect.objectContaining({
+        command: expect.stringMatching(/^plugin dev --session-id [0-9a-f-]+$/),
+        cwd: "/proj",
+      })
     )
+    expect(usePluginDevSessionStore.getState().sessions[0]?.terminalSessionId).toBe("s1")
   })
 
   it("installs a picked bundle via `cognia plugin install`", async () => {

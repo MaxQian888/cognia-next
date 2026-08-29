@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
@@ -56,6 +56,12 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockPlugins)),
 }))
 
+const setDeveloperModeEnabled = jest.fn()
+jest.mock("@/lib/plugin/devtools/developer-mode", () => ({
+  useDeveloperMode: () => false,
+  setDeveloperModeEnabled: (...args: unknown[]) => setDeveloperModeEnabled(...args),
+}))
+
 import { PluginsSection } from "./plugins-section"
 
 describe("PluginsSection (workspace launcher)", () => {
@@ -90,11 +96,18 @@ describe("PluginsSection (workspace launcher)", () => {
     expect(link).toHaveAttribute("href", "/integrations")
   })
 
-  it("does not render the removed jump-board cards or policy controls", () => {
+  it("does not render the removed jump-board cards", () => {
     render(<PluginsSection />)
     expect(screen.queryByText("installedCard.title")).not.toBeInTheDocument()
     expect(screen.queryByText("marketplaceCard.title")).not.toBeInTheDocument()
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
+  })
+
+  it("exposes the canonical Developer Mode toggle", () => {
+    render(<PluginsSection />)
+    const toggle = screen.getByRole("switch", { name: "developerMode.toggle" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+    expect(setDeveloperModeEnabled).toHaveBeenCalledWith(true)
   })
 
   it("calls onClose when a workspace link is activated", () => {

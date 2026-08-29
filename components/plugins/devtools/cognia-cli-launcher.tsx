@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/card"
 import { InstalledMarker } from "@/components/plugins/_shared/installed-marker"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
+import { usePluginDevSessionStore } from "@/stores/plugins/plugin-dev-session-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { launchCognia } from "@/lib/terminal/run-cognia"
 import { previewLocalManifest } from "@/lib/plugin/local/install-from-directory"
@@ -93,7 +94,12 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
     }
   }
 
-  async function run(command: string, key: CommandKey, needsBridge?: boolean) {
+  async function run(
+    command: string,
+    key: CommandKey,
+    needsBridge?: boolean,
+    devSessionId?: string
+  ) {
     if (needsBridge && bridgeDown) {
       toast.warning(t("bridgeWarning"))
     }
@@ -108,6 +114,8 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
         toast.error(t("launchFailed", { message: outcome.message }))
       } else if (outcome.kind === "denied") {
         toast.error(t("launchDenied"))
+      } else if (devSessionId) {
+        usePluginDevSessionStore.getState().attachTerminal(devSessionId, outcome.sessionId)
       }
     } finally {
       setBusyKey(null)
@@ -128,6 +136,11 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
       return
     }
     if (!projectDir || !cmd.argv) return
+    if (cmd.key === "dev") {
+      const sessionId = crypto.randomUUID()
+      await run(`${cmd.argv} --session-id ${sessionId}`, cmd.key, cmd.needsBridge, sessionId)
+      return
+    }
     await run(cmd.argv, cmd.key, cmd.needsBridge)
   }
 

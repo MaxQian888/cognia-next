@@ -15,6 +15,7 @@ import {
   getPluginManager,
   initializePluginManager,
   __resetPluginManagerForTesting,
+  shouldEnablePluginDebug,
   toClonableManifest,
 } from "./manager"
 import {
@@ -224,6 +225,22 @@ describe("PluginManager", () => {
     type: "frontend",
     capabilities: ["tools"],
     main: "index.ts",
+  })
+
+  it("uses canonical Developer Mode for local debug instrumentation", () => {
+    const localPlugin = {
+      source: "local" as const,
+      config: {},
+    }
+    const builtinPlugin = {
+      source: "builtin" as const,
+      config: {},
+    }
+
+    expect(shouldEnablePluginDebug(localPlugin, true)).toBe(true)
+    expect(shouldEnablePluginDebug(localPlugin, false)).toBe(false)
+    expect(shouldEnablePluginDebug(builtinPlugin, true)).toBe(false)
+    expect(shouldEnablePluginDebug({ ...builtinPlugin, config: { debug: true } }, false)).toBe(true)
   })
 
   beforeEach(() => {

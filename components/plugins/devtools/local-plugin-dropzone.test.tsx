@@ -68,6 +68,15 @@ describe("LocalPluginDropzone", () => {
     expect(mockTrigger).toHaveBeenCalledTimes(1)
   })
 
+  it("passes the Tauri-provided dropped directory path to the install flow", () => {
+    renderWithIntl(<LocalPluginDropzone />)
+    const zone = screen.getByTestId("local-plugin-dropzone")
+    const file = new File(["x"], "plugin.json") as File & { path?: string }
+    file.path = "/plugins/demo"
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } })
+    expect(mockTrigger).toHaveBeenCalledWith("/plugins/demo")
+  })
+
   it("does not trigger on an empty drop", () => {
     renderWithIntl(<LocalPluginDropzone />)
     const zone = screen.getByTestId("local-plugin-dropzone")

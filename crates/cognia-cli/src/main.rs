@@ -195,6 +195,9 @@ fn main() -> eyre::Result<()> {
         if let Some(exit) = err.downcast_ref::<commands::host::HostExit>() {
             std::process::exit(exit.code);
         }
+        if err.is::<commands::dev::DevInterruptedExit>() {
+            std::process::exit(130);
+        }
         return Err(anyhow_to_eyre(err));
     }
     Ok(())

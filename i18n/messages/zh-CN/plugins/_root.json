@@ -1,4 +1,9 @@
 {
   "description": "浏览、安装、配置并治理在 Cognia 中运行的插件。查看权限、定时任务、使用统计与开发工具——完整的市场搜索与安装流程都在这里。",
+  "devtoolsDisabled": {
+    "description": "请先在设置中启用开发者模式，再打开插件创作工具。",
+    "openSettings": "打开设置",
+    "title": "开发者模式未启用"
+  },
   "title": "插件"
 }

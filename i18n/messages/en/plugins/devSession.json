@@ -1,0 +1,72 @@
+{
+  "actions": {
+    "launchDenied": "Terminal launch was denied.",
+    "launchFailed": "Couldn't restart the session: {message}",
+    "openTerminal": "Open terminal",
+    "restart": "Restart",
+    "stop": "Stop",
+    "terminalUnavailable": "The terminal session is no longer available."
+  },
+  "activity": {
+    "duration": "{duration} ms",
+    "empty": "No build attempts yet. Start a Dev Session to run the initial build."
+  },
+  "attemptState": {
+    "active": "Active",
+    "build_failed": "Build failed",
+    "building": "Building",
+    "detected": "Change detected",
+    "installing": "Installing",
+    "reload_failed": "Reload failed",
+    "restart_required": "Restart required"
+  },
+  "current": {
+    "attempt": "Attempt {attempt}",
+    "title": "Current Dev Session",
+    "waiting": "Waiting for a verified runtime activation"
+  },
+  "desktopRequired": {
+    "description": "Manifest validation is available here, but building, installing, and activating local plugin code requires the Cognia desktop app.",
+    "title": "Desktop required for runtime activation"
+  },
+  "diagnostics": {
+    "empty": "No diagnostics for the current attempt.",
+    "structuredOnly": "Runtime output includes only logs attributable to the plugin runtime. Raw console output is not presented as complete plugin logging.",
+    "title": "Attempt diagnostics"
+  },
+  "proof": {
+    "generation": "Generation {generation}",
+    "version": "Package {version}"
+  },
+  "runtimeLogs": {
+    "filter": "Structured logs for {pluginId}, generation {generation}",
+    "title": "Runtime logs",
+    "waiting": "Logs appear after a generation-backed activation succeeds."
+  },
+  "sessionState": {
+    "idle": "Idle",
+    "stale": "Stale",
+    "starting": "Starting",
+    "stopped": "Stopped",
+    "stopping": "Stopping",
+    "watching": "Watching"
+  },
+  "stage": {
+    "active": "Active",
+    "activating": "Activating",
+    "building": "Building",
+    "detected": "Detected",
+    "discovering": "Discovering",
+    "installing": "Installing",
+    "quiescing": "Quiescing",
+    "verifying": "Verifying"
+  },
+  "tabs": {
+    "activity": "Activity",
+    "advanced": "Advanced diagnostics",
+    "diagnostics": "Diagnostics"
+  },
+  "timeline": {
+    "ariaLabel": "Current attempt stages"
+  }
+}

@@ -16,6 +16,23 @@ jest.mock("@/lib/plugin/local/install-from-directory", () => ({
   installPluginFromDirectory: jest.fn(),
 }))
 
+const mockPreInstall = jest.fn()
+jest.mock("@/hooks/plugins/use-plugin-pre-install", () => ({
+  usePluginPreInstall: () => ({
+    target: null,
+    install: mockPreInstall,
+    resolveContinue: jest.fn(),
+    resolveCancel: jest.fn(),
+  }),
+}))
+
+const mockCreateLocalDirectoryClient = jest.fn((_sourceDir: string) => ({
+  kind: "local-directory",
+}))
+jest.mock("@/lib/plugin/local/local-directory-client", () => ({
+  createLocalDirectoryClient: (sourceDir: string) => mockCreateLocalDirectoryClient(sourceDir),
+}))
+
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
@@ -26,7 +43,7 @@ import {
   previewLocalManifest,
   installPluginFromDirectory,
 } from "@/lib/plugin/local/install-from-directory"
-import { LoadUnpackedButton } from "./load-unpacked-button"
+import { LoadUnpackedButton, useLoadUnpackedFlow } from "./load-unpacked-button"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const sonner = require("sonner") as { toast: { success: jest.Mock; error: jest.Mock } }
 
@@ -51,6 +68,8 @@ beforeEach(() => {
   mockCanUse.mockReturnValue(true)
   mockPreview.mockReset()
   mockInstall.mockReset()
+  mockPreInstall.mockReset()
+  mockCreateLocalDirectoryClient.mockClear()
   sonner.toast.success.mockReset()
   sonner.toast.error.mockReset()
 })
@@ -93,5 +112,37 @@ describe("LoadUnpackedButton", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("invalid plugin.json")
     expect(mockInstall).not.toHaveBeenCalled()
     expect(onInstalled).not.toHaveBeenCalled()
+  })
+
+  it("installs a provided dropped directory without reopening the picker", async () => {
+    mockPreview.mockResolvedValueOnce({
+      id: "demo.plugin",
+      name: "Demo Plugin",
+      version: "1.2.3",
+      type: "frontend",
+    } as never)
+    mockPreInstall.mockResolvedValueOnce({ status: "installed", pluginId: "demo.plugin" })
+    const onInstalled = jest.fn()
+
+    function DroppedDirectoryHarness() {
+      const flow = useLoadUnpackedFlow({ onInstalled })
+      return <button onClick={() => void flow.trigger("/tmp/demo-plugin")}>Install dropped</button>
+    }
+
+    renderWithIntl(<DroppedDirectoryHarness />)
+    await act(async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Install dropped" }))
+    })
+
+    expect(mockOpen).not.toHaveBeenCalled()
+    expect(mockPreview).toHaveBeenCalledWith("/tmp/demo-plugin")
+    expect(mockCreateLocalDirectoryClient).toHaveBeenCalledWith("/tmp/demo-plugin")
+    expect(mockPreInstall).toHaveBeenCalledWith(
+      "demo.plugin",
+      "1.2.3",
+      "Demo Plugin",
+      expect.objectContaining({ kind: "local-directory" })
+    )
+    expect(onInstalled).toHaveBeenCalledWith("demo.plugin")
   })
 })

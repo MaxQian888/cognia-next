@@ -138,6 +138,7 @@ import {
 import { withTimeout } from "@cognia/primitives"
 import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
+import { isDeveloperModeEnabled } from "@/lib/plugin/devtools/developer-mode"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import {
   advancePluginActivationProgress,
@@ -235,6 +236,13 @@ import {
   type PluginGraphReservation,
   type PluginLifecycleCoordinatorSnapshot,
 } from "./lifecycle-coordinator"
+
+export function shouldEnablePluginDebug(
+  plugin: Pick<Plugin, "config" | "source">,
+  developerModeEnabled = isDeveloperModeEnabled()
+): boolean {
+  return plugin.config?.debug === true || (developerModeEnabled && plugin.source !== "builtin")
+}
 
 // =============================================================================
 // Governance mode resolution
@@ -3157,12 +3165,13 @@ export class PluginManager {
       definition.activation = this.parseActivationSpec(plugin.manifest)
 
       // Check if debug mode is enabled for this plugin
-      const enableDebug =
-        plugin.config?.debug === true ||
-        (process.env.NODE_ENV === "development" && plugin.config?.devMode === true)
+      const enableDebug = shouldEnablePluginDebug(plugin)
 
       // Create plugin context with optional debug instrumentation
-      const context = createFullPluginContext(plugin, this, { enableDebug })
+      const context = createFullPluginContext(plugin, this, {
+        enableDebug,
+        generation: this.activationLeases.get(pluginId)?.generation ?? 0,
+      })
       this.contexts.set(pluginId, context)
 
       const i18nLocales = plugin.manifest.i18n?.locales

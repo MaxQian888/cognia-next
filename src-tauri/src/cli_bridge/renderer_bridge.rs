@@ -9,9 +9,9 @@
 //! payload }`, the WebView dispatches on `command` and posts the result
 //! back through the `cli_bridge_renderer_response` Tauri command.
 //!
-//! Default timeout is 30 seconds — same as the companion bridges. The CLI
-//! client aborts earlier (10 s) so the HTTP round-trip always resolves
-//! before the Rust side gives up.
+//! Default timeout is 30 seconds — same as the companion bridges. Individual
+//! callers may choose a shorter bound; plugin activation uses 25 seconds so
+//! the HTTP client can retain a larger end-to-end timeout.
 
 use std::collections::HashMap;
 use std::sync::Arc;

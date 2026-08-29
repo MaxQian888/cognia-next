@@ -140,10 +140,12 @@ jest.mock("../utils/i18n-loader", () => ({
     createPluginAPI: jest.fn(() => ({})),
   })),
 }))
+const mockStartDebugSession = jest.fn()
+const mockCreateDebugContext = jest.fn((_pluginId: string, context: unknown) => context)
 jest.mock("../devtools/debugger", () => ({
   getPluginDebugger: jest.fn(() => ({
-    startSession: jest.fn(),
-    createDebugContext: jest.fn(),
+    startSession: mockStartDebugSession,
+    createDebugContext: mockCreateDebugContext,
   })),
 }))
 
@@ -289,6 +291,8 @@ function pluginTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 
 describe("createPluginContext", () => {
   beforeEach(() => {
+    mockStartDebugSession.mockClear()
+    mockCreateDebugContext.mockClear()
     mockIsTauri.mockReturnValue(false)
     __resetCharacterPacksForTesting()
     __resetSkillsForTesting()
@@ -323,6 +327,22 @@ describe("createPluginContext", () => {
     const plugin = createMockPlugin()
     const context = createPluginContext(plugin, mockManager)
 
+    expect(context.pluginId).toBe("test-plugin")
+  })
+
+  it("tags debug sessions with the activation generation", () => {
+    const plugin = createMockPlugin()
+
+    const context = createPluginContext(plugin, mockManager, {
+      enableDebug: true,
+      generation: 12,
+    })
+
+    expect(mockStartDebugSession).toHaveBeenCalledWith("test-plugin", 12)
+    expect(mockCreateDebugContext).toHaveBeenCalledWith(
+      "test-plugin",
+      expect.objectContaining({ pluginId: "test-plugin" })
+    )
     expect(context.pluginId).toBe("test-plugin")
   })
 

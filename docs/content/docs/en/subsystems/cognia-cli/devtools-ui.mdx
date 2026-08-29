@@ -1,6 +1,6 @@
 ---
 title: DevTools UI
-description: The renderer surface — the 30-second-polling useCogniaCliStatus hook, the status card, the three-tab install dialog, the terminal-backed command launcher, and the toolbar status chip with its ready / degraded / missing tones.
+description: The renderer Dev Session workbench, CLI/bridge status, terminal launcher, verified activation timeline, and diagnostics.
 ---
 
 # DevTools UI
@@ -16,6 +16,20 @@ description: The renderer surface — the 30-second-polling useCogniaCliStatus h
   in a real terminal tab with managed dirs injected into PATH, and the **status chip** condenses
   everything into a green/amber/gray dot.
 </TLDR>
+
+## Dev Session authority
+
+`PluginDevSessionWorkbench` is the DevTools main flow. The launcher creates a UUID before running
+`cognia plugin dev --session-id <uuid>` and associates the returned terminal session in the
+in-memory `PluginDevSessionStore`. Only App-launched sessions expose terminal actions; events from
+an external CLI remain observable without fake controls.
+
+The workbench does not infer reload success from install or discovery events. It displays success
+only after the renderer bridge records an `activationProof` whose lifecycle state is active,
+generation increased, and artifact revision matches the Rust-installed artifact. Activity,
+attempt diagnostics, and structured runtime logs share that session/attempt identity. Advanced
+diagnostics contains the implemented lifecycle, trigger-audit, and extension-point surfaces; the
+old Hook/Profiler/Bus tabs are not part of the Dev Session flow.
 
 ## The status hook
 
@@ -81,7 +95,7 @@ dirs into PATH — so the button works even when `cognia` isn't on the user's ow
 | Button | argv | Needs bridge? |
 | --- | --- | --- |
 | `build` | `plugin build` | no |
-| `dev` | `plugin dev` | **yes** — warns first when down |
+| `dev` | `plugin dev --session-id <uuid>` | **yes** — warns first when down |
 | `lint` | `plugin lint` | no |
 | `new` | `plugin new` | no |
 | `install` | `plugin install "<picked .zip>"` | **yes** |

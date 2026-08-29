@@ -1,98 +1,86 @@
 ---
 title: Devtools
-description: Plugin development tools — hot reload, message logging, permission inspection, and profiler.
+description: Build, install, activate, and verify local plugins with a generation-backed Dev Session.
 ---
 
 # Devtools
 
-Cognia ships a built-in plugin developer toolkit under `lib/plugin/devtools/`. It is only visible in development mode and helps you build, debug, and profile plugins.
+Cognia's Plugin DevTools is a Dev Session workbench. It presents one connected flow instead of
+independent build, hot-reload, log, and profiler panels:
 
-## Enabling devtools
+`select project → build → install → quiesce old runtime → activate → verify`
 
-Set the environment variable before starting the dev server:
+## Enable Developer Mode
+
+Open **Settings → Plugins** and enable **Developer Mode**. This is the only feature gate; it is
+stored as `pluginSettings.developerModeEnabled`. Enabling it permits trusted local plugin code to
+run. The legacy local-storage key is migrated once at boot and is not a second source of truth.
+
+Web builds keep manifest validation and explanatory UI available, but starting or reloading a
+runtime requires Cognia Desktop.
+
+## Start a Dev Session
+
+Choose a plugin project and select **Start**, or run:
 
 ```bash
-# Windows PowerShell
-$env:NEXT_PUBLIC_PLUGIN_DEVTOOLS="1"
-pnpm tauri dev
-
-# macOS / Linux
-NEXT_PUBLIC_PLUGIN_DEVTOOLS=1 pnpm tauri dev
+cognia plugin dev
 ```
 
-A new "Plugin DevTools" tab appears in Settings.
+The CLI registers its watcher before immediately running attempt 1. Later changes are debounced
+for 250 ms, builds stay serial, and one pending build is retained when files change during a build.
+Build or activation failures do not stop watch mode; fix the problem and the next change retries in
+the same session.
 
-## Features
+The App launcher adds `--session-id <uuid>` before opening the integrated terminal. That association
+is memory-only, so App-started sessions can expose **Open terminal**, **Stop**, and **Restart**. An
+external CLI session is observable but does not show terminal actions the App cannot perform.
 
-### Real-time message log
+## What counts as success
 
-Every `postMessage` between the host and each plugin worker is logged with:
+Installing or scanning a bundle is not a successful reload. The bridge returns success only when:
 
-- Timestamp
-- Direction (host → worker or worker → host)
-- Message type (`api.call`, `hook.emit`, `extension.mount`, …)
-- Serialized payload (truncated at 4KB)
+- the artifact manifest ID matches the requested plugin;
+- Rust installed the artifact and calculated its deterministic SHA-256 revision;
+- the old runtime quiesced safely;
+- the renderer observed `actualState: active` with no dirty or pending transition;
+- lifecycle `generation` is greater than `previousGeneration`; and
+- the proof carries the installed artifact revision and package version.
 
-### Permission inspector
+Frontend, Python, hybrid, WASM, and VS Code extension plugins use the same capability decision. A
+runtime that cannot be safely unloaded returns `restart_required`; Web/mobile returns `unsupported`.
+Neither case is presented as hot-reload success.
 
-Shows for each plugin:
+`cognia plugin dev --once --json` emits schema version 1 with `outcome`, `activationProof`, and a
+structured `{code, message, action, retriable}` error. A host that returns legacy `{ok: true}` without
+an activation proof fails closed as `host_unverified`. Without a running App endpoint the build still
+finishes, but reload is reported as `skipped: no-endpoint` and `--once` returns non-zero because no
+runtime activation was proven.
 
-- **Granted** — Permissions the user has approved.
-- **Denied** — Permissions the user declined.
-- **Missing** — Permissions the plugin declared but were never requested.
+## Activity and diagnostics
 
-Click any permission to toggle it (useful for testing denial paths).
+The workbench retains up to 10 in-memory sessions and 50 attempts per session. Heartbeats arrive
+every 5 seconds; a session becomes stale after 15 seconds without one. The current attempt timeline
+shows build, install, discovery, quiesce, activation, and verification stages. Successful attempts
+show the generation and artifact revision.
 
-### Scheduled task monitor
+Runtime logs come from the structured plugin logger and are filtered by `pluginId + generation`.
+Raw `console.*` output that cannot be attributed to a runtime generation is not presented as a
+complete plugin log. Advanced diagnostics contains only implemented lifecycle state, trigger audit,
+and extension-point diagnostics.
 
-Lists all tasks registered by plugins:
+The unpacked-plugin dropzone uses the actual dropped directory and sends it through the same
+manifest, conflict, permission, and configuration review as a picked directory.
 
-- Job ID and cron expression
-- Last run time and result
-- Next scheduled run
-- Manual trigger button
+## Stop and recovery
 
-### Profiler
-
-Records timing for every API call:
-
-| Metric     | Description                        |
-| ---------- | ---------------------------------- |
-| Call count | How many times the API was invoked |
-| Total time | Cumulative time spent in the API   |
-| Average    | Mean latency                       |
-| P99        | 99th percentile latency            |
-
-Export to JSON for analysis in external tools.
-
-### Hot reload
-
-`dev-server.ts` watches the plugin source directory. On file change:
-
-1. The plugin worker is terminated.
-2. The new code is reloaded from disk.
-3. `onActivate()` is called on the fresh instance.
-4. The devtools log shows a "[hot-reload]" marker.
-
-This gives you sub-second feedback loops during development.
-
-### Loading an unpacked plugin
-
-In the devtools UI, click "Load unpacked plugin" and select a directory containing `cognia-plugin.json`. The plugin is loaded directly from source without packaging.
-
-## Best practices
-
-- **Always test permission denial** — Use the permission inspector to simulate users declining permissions.
-- **Profile before release** — Check the profiler for unexpectedly slow API calls.
-- **Watch the message log** — Excessive `postMessage` traffic indicates inefficient RPC patterns.
+A single Ctrl+C requests graceful shutdown, interrupts an active child build, sends the terminal
+session event, and exits with code 130. App **Stop** sends that interrupt once. Dirty or stuck loaders
+return an actionable `restart_required` result instead of claiming success.
 
 ## Related
 
 <Cards>
-  <Card
-    title="Packaging"
-    href="./packaging"
-    description="Building the final .cognia-plugin archive."
-  />
+  <Card title="Packaging" href="./packaging" description="Build the final plugin archive." />
   <Card title="Manifest" href="./manifest" description="Manifest validation and common errors." />
 </Cards>

@@ -7,10 +7,9 @@
 //! { "ok": false, "error": "human readable" }
 //! ```
 //!
-//! The bridge's job is to apply the filesystem + state mutations
-//! synchronously, then emit an event so the TS PluginManager refreshes
-//! its in-memory view. The renderer reacts to those events the same
-//! way it reacts to user-driven install/uninstall from Settings.
+//! Install/uninstall apply filesystem mutations and emit discovery events.
+//! Development reload additionally round-trips through the renderer and only
+//! succeeds after a new active lifecycle generation is proven.
 
 use ::anyhow;
 use axum::{
@@ -21,6 +20,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -52,14 +52,54 @@ pub struct UninstallRequest {
     pub purge_data: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ReloadRequest {
+    #[serde(default = "default_schema_version", alias = "schemaVersion")]
+    pub schema_version: u32,
+    #[serde(default, alias = "sessionId")]
+    pub session_id: Option<String>,
+    #[serde(default = "default_attempt")]
+    pub attempt: u64,
+    #[serde(default = "default_activate")]
+    pub activate: bool,
     #[serde(default)]
     pub bundle_path: Option<String>,
     #[serde(default)]
     pub source_dir: Option<String>,
     #[serde(default)]
     pub plugin_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PluginDevSessionEventRequest {
+    #[serde(default = "default_schema_version", alias = "schemaVersion")]
+    pub schema_version: u32,
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    pub attempt: u64,
+    pub event: String,
+    #[serde(default, alias = "projectName")]
+    pub project_name: Option<String>,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(alias = "occurredAt")]
+    pub occurred_at: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default, alias = "durationMs")]
+    pub duration_ms: Option<u64>,
+}
+
+const fn default_schema_version() -> u32 {
+    1
+}
+
+const fn default_attempt() -> u64 {
+    1
+}
+
+const fn default_activate() -> bool {
+    true
 }
 
 /// One transcript turn handed off from the standalone CLI.
@@ -495,115 +535,506 @@ pub async fn uninstall(
 }
 
 pub async fn reload(State(state): State<SharedState>, Json(req): Json<ReloadRequest>) -> Response {
-    // If a bundle is provided, treat reload as "re-install in place".
-    // If an unpacked source directory is provided, use the same install-directory
-    // path first, then fire the hot-reload event for the installed plugin id.
-    // Otherwise, just fire the host's existing hot-reload event so the
-    // TS PluginManager unloads + reloads the existing on-disk artifact.
-    if req.bundle_path.is_some() && req.source_dir.is_some() {
-        return (
+    let timeout_session_id = req
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let timeout_attempt = req.attempt;
+    let timeout_plugin_id = req.plugin_id.clone().unwrap_or_default();
+    match tokio::time::timeout(std::time::Duration::from_secs(30), reload_inner(state, req)).await {
+        Ok(response) => response,
+        Err(_) => plugin_dev_failure_response(
+            &timeout_session_id,
+            timeout_attempt,
+            &timeout_plugin_id,
+            "verify",
+            "reload_timeout",
+            "plugin reload exceeded the 30 second host deadline".to_string(),
+            "Retry the reload and inspect runtime diagnostics",
+            true,
+        ),
+    }
+}
+
+async fn reload_inner(state: SharedState, req: ReloadRequest) -> Response {
+    if req.schema_version != 1 {
+        return err_response(StatusCode::BAD_REQUEST, "unsupported reload schema_version");
+    }
+    if req.attempt == 0 {
+        return err_response(
             StatusCode::BAD_REQUEST,
-            Json(ErrResponse {
-                ok: false,
-                error: "reload accepts only one of bundle_path or source_dir".into(),
-            }),
-        )
-            .into_response();
+            "reload attempt must be greater than zero",
+        );
     }
-    if let Some(source_dir) = req.source_dir.as_deref() {
-        match install_from_directory_inner(&state.app_handle, source_dir).await {
-            Ok((plugin_id, warnings)) => {
-                let _ = state.app_handle.emit(
-                    &format!("plugin-hot-reload:{plugin_id}"),
-                    json!({ "source": "cli-bridge" }),
-                );
-                let _ = state.app_handle.emit(
-                    "plugin-hot-reload",
-                    json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "install-directory" }),
-                );
-                return Json(OkResponse {
-                    ok: true,
-                    plugin_id: Some(plugin_id),
-                    warnings,
-                })
-                .into_response();
-            }
-            Err(e) => {
-                log::warn!("cli_bridge reload-via-install-directory failed: {e:#}");
-                return (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(ErrResponse {
-                        ok: false,
-                        error: e.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+    if req.bundle_path.is_some() && req.source_dir.is_some() {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            "reload accepts only one of bundle_path or source_dir",
+        );
+    }
+    let session_id = match req.session_id.as_deref() {
+        Some(value) => match uuid::Uuid::parse_str(value) {
+            Ok(value) => value.to_string(),
+            Err(_) => return err_response(StatusCode::BAD_REQUEST, "session_id must be a UUID"),
+        },
+        None => uuid::Uuid::new_v4().to_string(),
+    };
+
+    let bundle_path = req.bundle_path.clone();
+    let source_dir = req.source_dir.clone();
+    let requested_plugin_id = req.plugin_id.clone();
+    if bundle_path.is_none()
+        && source_dir.is_none()
+        && requested_plugin_id
+            .as_deref()
+            .is_none_or(|plugin_id| plugin_id.trim().is_empty())
+    {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            "reload requires bundle_path, source_dir, or plugin_id",
+        );
+    }
+    let blocking_state = state.clone();
+    let install_result = tokio::task::spawn_blocking(move || {
+        let (plugin_id, warnings) = if let Some(source_dir) = source_dir.as_deref() {
+            install_from_directory_blocking(
+                &blocking_state.app_handle,
+                source_dir,
+                requested_plugin_id.as_deref(),
+            )?
+        } else if let Some(bundle_path) = bundle_path.as_deref() {
+            install_inner_blocking(&blocking_state, bundle_path, requested_plugin_id.as_deref())?
+        } else {
+            (requested_plugin_id.unwrap_or_default(), Vec::new())
+        };
+        Ok::<_, anyhow::Error>((plugin_id, warnings))
+    })
+    .await;
+    let (plugin_id, warnings) = match install_result {
+        Ok(Ok(value)) => value,
+        Err(error) => {
+            log::warn!("cli_bridge reload install task failed: {error:#}");
+            return plugin_dev_failure_response(
+                &session_id,
+                req.attempt,
+                req.plugin_id.as_deref().unwrap_or(""),
+                "install",
+                "install_task_failed",
+                error.to_string(),
+                "Retry the reload and inspect host diagnostics",
+                true,
+            );
         }
-    }
-    if let Some(bundle_path) = req.bundle_path.as_deref() {
-        match install_inner(&state, bundle_path).await {
-            Ok((plugin_id, _)) => {
-                // Per-plugin channel for callers that already know the id
-                // (used by hot-reload contracts shipped before the global
-                // channel existed), plus a single global channel the
-                // renderer's `use-cli-bridge-events` hook subscribes to
-                // once and dispatches into the hot-reload history store.
-                let _ = state.app_handle.emit(
-                    &format!("plugin-hot-reload:{plugin_id}"),
-                    json!({ "source": "cli-bridge" }),
-                );
-                let _ = state.app_handle.emit(
-                    "plugin-hot-reload",
-                    json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "install" }),
-                );
-                return Json(OkResponse {
-                    ok: true,
-                    plugin_id: Some(plugin_id),
-                    warnings: vec![],
-                })
-                .into_response();
+        Ok(Err(error)) => {
+            log::warn!("cli_bridge reload install failed: {error:#}");
+            if error.downcast_ref::<PluginIdMismatch>().is_some() {
+                return err_response(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string());
             }
-            Err(e) => {
-                log::warn!("cli_bridge reload-via-install failed: {e:#}");
-                return (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(ErrResponse {
-                        ok: false,
-                        error: e.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        }
-    }
-    let plugin_id = match req.plugin_id.as_deref() {
-        Some(s) if !s.trim().is_empty() => s.to_string(),
-        _ => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrResponse {
-                    ok: false,
-                    error: "reload requires bundle_path, source_dir, or plugin_id".into(),
-                }),
-            )
-                .into_response();
+            return plugin_dev_failure_response(
+                &session_id,
+                req.attempt,
+                req.plugin_id.as_deref().unwrap_or(""),
+                "install",
+                "install_failed",
+                error.to_string(),
+                "Fix the plugin bundle or source directory and retry",
+                true,
+            );
         }
     };
-    let _ = state.app_handle.emit(
-        &format!("plugin-hot-reload:{plugin_id}"),
-        json!({ "source": "cli-bridge" }),
-    );
-    let _ = state.app_handle.emit(
-        "plugin-hot-reload",
-        json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "reload" }),
-    );
-    Json(OkResponse {
-        ok: true,
-        plugin_id: Some(plugin_id),
-        warnings: vec![],
+    let metadata_state = state.clone();
+    let metadata_plugin_id = plugin_id.clone();
+    let metadata_result = tokio::task::spawn_blocking(move || {
+        installed_artifact_metadata(&metadata_state, &metadata_plugin_id)
     })
+    .await;
+    let (package_version, plugin_type, artifact_revision) = match metadata_result {
+        Ok(Ok(metadata)) => metadata,
+        Ok(Err(error)) => {
+            log::warn!("cli_bridge reload metadata failed: {error:#}");
+            return plugin_dev_failure_response(
+                &session_id,
+                req.attempt,
+                &plugin_id,
+                "discover",
+                "installed_artifact_unverified",
+                error.to_string(),
+                "Rebuild the plugin bundle and retry",
+                true,
+            );
+        }
+        Err(error) => {
+            log::warn!("cli_bridge reload metadata task failed: {error:#}");
+            return plugin_dev_failure_response(
+                &session_id,
+                req.attempt,
+                &plugin_id,
+                "discover",
+                "metadata_task_failed",
+                error.to_string(),
+                "Retry the reload and inspect host diagnostics",
+                true,
+            );
+        }
+    };
+    let payload = json!({
+        "schemaVersion": 1,
+        "sessionId": session_id,
+        "attempt": req.attempt,
+        "pluginId": plugin_id,
+        "pluginType": plugin_type,
+        "packageVersion": package_version,
+        "artifactRevision": artifact_revision,
+        "activate": req.activate,
+    });
+
+    match state
+        .renderer
+        .clone()
+        .dispatch(
+            &state.app_handle,
+            "plugin_dev_reload",
+            payload,
+            std::time::Duration::from_secs(25),
+        )
+        .await
+    {
+        Ok(mut result) => {
+            if let Err(error) = validate_renderer_activation_proof(
+                &result,
+                &session_id,
+                req.attempt,
+                &plugin_id,
+                &plugin_type,
+                &package_version,
+                &artifact_revision,
+            ) {
+                return plugin_dev_failure_response(
+                    &session_id,
+                    req.attempt,
+                    &plugin_id,
+                    "verify",
+                    "activation_proof_mismatch",
+                    error.to_string(),
+                    "Retry the reload and inspect renderer diagnostics",
+                    true,
+                );
+            }
+            if let Some(object) = result.as_object_mut() {
+                let mut merged_warnings = object
+                    .get("warnings")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                for warning in warnings {
+                    if !merged_warnings.contains(&warning) {
+                        merged_warnings.push(warning);
+                    }
+                }
+                object.insert("warnings".to_string(), json!(merged_warnings));
+            }
+            Json(result).into_response()
+        }
+        Err(error) => {
+            let timed_out = error.contains("timed out");
+            Json(json!({
+                "schemaVersion": 1,
+                "ok": false,
+                "outcome": "failed",
+                "stage": if timed_out { "verify" } else { "activate" },
+                "sessionId": session_id,
+                "attempt": req.attempt,
+                "pluginId": plugin_id,
+                "warnings": warnings,
+                "error": {
+                    "code": if timed_out { "activation_timeout" } else { "renderer_unavailable" },
+                    "message": error,
+                    "action": "Keep Cognia open and retry the development reload",
+                    "retriable": true,
+                }
+            }))
+            .into_response()
+        }
+    }
+}
+
+fn plugin_dev_failure_response(
+    session_id: &str,
+    attempt: u64,
+    plugin_id: &str,
+    stage: &str,
+    code: &str,
+    message: String,
+    action: &str,
+    retriable: bool,
+) -> Response {
+    Json(json!({
+        "schemaVersion": 1,
+        "ok": false,
+        "outcome": "failed",
+        "stage": stage,
+        "sessionId": session_id,
+        "attempt": attempt,
+        "pluginId": plugin_id,
+        "warnings": [],
+        "error": {
+            "code": code,
+            "message": message,
+            "action": action,
+            "retriable": retriable,
+        }
+    }))
     .into_response()
+}
+
+fn validate_renderer_activation_proof(
+    result: &serde_json::Value,
+    session_id: &str,
+    attempt: u64,
+    plugin_id: &str,
+    plugin_type: &str,
+    package_version: &str,
+    artifact_revision: &str,
+) -> anyhow::Result<()> {
+    if result.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Ok(());
+    }
+    let proof = result
+        .get("activationProof")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("renderer returned success without activationProof"))?;
+    anyhow::ensure!(
+        result
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(1),
+        "renderer proof schema version mismatch"
+    );
+    anyhow::ensure!(
+        result.get("outcome").and_then(serde_json::Value::as_str) == Some("activated"),
+        "renderer proof outcome mismatch"
+    );
+    anyhow::ensure!(
+        result.get("stage").and_then(serde_json::Value::as_str) == Some("verify"),
+        "renderer proof stage mismatch"
+    );
+    anyhow::ensure!(
+        result.get("sessionId").and_then(serde_json::Value::as_str) == Some(session_id),
+        "renderer proof session ID mismatch"
+    );
+    anyhow::ensure!(
+        result.get("attempt").and_then(serde_json::Value::as_u64) == Some(attempt),
+        "renderer proof attempt mismatch"
+    );
+    anyhow::ensure!(
+        result.get("pluginType").and_then(serde_json::Value::as_str) == Some(plugin_type),
+        "renderer proof plugin type mismatch"
+    );
+    let actual_plugin_id = result
+        .get("pluginId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let actual_version = proof
+        .get("packageVersion")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let actual_revision = proof
+        .get("artifactRevision")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let previous_generation = proof
+        .get("previousGeneration")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("renderer proof previous generation is missing"))?;
+    let generation = proof
+        .get("generation")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("renderer proof generation is missing"))?;
+    anyhow::ensure!(
+        actual_plugin_id == plugin_id,
+        "renderer proof plugin ID mismatch"
+    );
+    anyhow::ensure!(
+        actual_version == package_version,
+        "renderer proof package version mismatch"
+    );
+    anyhow::ensure!(
+        actual_revision == artifact_revision,
+        "renderer proof artifact revision mismatch"
+    );
+    anyhow::ensure!(
+        proof.get("actualState").and_then(serde_json::Value::as_str) == Some("active"),
+        "renderer proof runtime is not active"
+    );
+    anyhow::ensure!(
+        generation > previous_generation,
+        "renderer proof generation did not increase"
+    );
+    anyhow::ensure!(
+        proof.get("reloadMode").and_then(serde_json::Value::as_str) == Some("hot"),
+        "renderer proof reload mode is not hot"
+    );
+    Ok(())
+}
+
+const PLUGIN_DEV_SESSION_EVENTS: [&str; 8] = [
+    "session_started",
+    "heartbeat",
+    "change_detected",
+    "build_started",
+    "build_succeeded",
+    "build_failed",
+    "session_stopping",
+    "session_stopped",
+];
+
+fn validate_plugin_dev_session_event(req: &PluginDevSessionEventRequest) -> anyhow::Result<()> {
+    if req.schema_version != 1 {
+        anyhow::bail!("unsupported session event schema_version");
+    }
+    uuid::Uuid::parse_str(&req.session_id)
+        .map_err(|_| anyhow::anyhow!("session_id must be a UUID"))?;
+    if !PLUGIN_DEV_SESSION_EVENTS.contains(&req.event.as_str()) {
+        anyhow::bail!("unsupported plugin dev session event: {}", req.event);
+    }
+    if req
+        .summary
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 1024)
+    {
+        anyhow::bail!("session event summary exceeds 1024 characters");
+    }
+    for (name, value) in [
+        ("project_name", req.project_name.as_deref()),
+        ("stage", req.stage.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.chars().count() > 128) {
+            anyhow::bail!("session event {name} exceeds 128 characters");
+        }
+    }
+    Ok(())
+}
+
+pub async fn plugin_dev_session_event(
+    State(state): State<SharedState>,
+    Json(req): Json<PluginDevSessionEventRequest>,
+) -> Response {
+    if let Err(error) = validate_plugin_dev_session_event(&req) {
+        return err_response(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string());
+    }
+    let payload = json!({
+        "schemaVersion": req.schema_version,
+        "sessionId": req.session_id,
+        "attempt": req.attempt,
+        "event": req.event,
+        "projectName": req.project_name,
+        "stage": req.stage,
+        "occurredAt": req.occurred_at,
+        "summary": req.summary,
+        "durationMs": req.duration_ms,
+    });
+    if let Err(error) = state
+        .app_handle
+        .emit("cli-bridge:plugin-dev-session", payload)
+    {
+        log::warn!("cli_bridge plugin dev session event emit failed: {error}");
+        return Json(json!({ "ok": false, "error": "renderer_event_unavailable" })).into_response();
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+fn validate_expected_plugin_id(expected: Option<&str>, installed: &str) -> anyhow::Result<()> {
+    if let Some(expected) = expected.filter(|value| !value.trim().is_empty()) {
+        if expected != installed {
+            return Err(PluginIdMismatch {
+                expected: expected.to_string(),
+                installed: installed.to_string(),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct PluginIdMismatch {
+    expected: String,
+    installed: String,
+}
+
+impl std::fmt::Display for PluginIdMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "reload expected plugin id `{}` but installed artifact declares `{}`",
+            self.expected, self.installed
+        )
+    }
+}
+
+impl std::error::Error for PluginIdMismatch {}
+
+fn installed_artifact_metadata(
+    state: &SharedState,
+    plugin_id: &str,
+) -> anyhow::Result<(String, String, String)> {
+    let plugin_state = state.app_handle.state::<PluginRuntimeState>();
+    let install_dir = plugin_state.plugin_dir(plugin_id);
+    let manifest_bytes = std::fs::read(install_dir.join("plugin.json"))?;
+    let (manifest, installed_id) = read_manifest_from_bytes(&manifest_bytes)?;
+    validate_expected_plugin_id(Some(plugin_id), &installed_id)?;
+    let version = manifest
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("installed plugin manifest has no valid version"))?
+        .to_string();
+    let plugin_type = manifest
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| {
+            matches!(
+                *value,
+                "frontend" | "python" | "hybrid" | "wasm" | "vscode-extension"
+            )
+        })
+        .ok_or_else(|| anyhow::anyhow!("installed plugin manifest has no supported type"))?
+        .to_string();
+    let revision = installed_tree_revision(&install_dir)?;
+    Ok((version, plugin_type, revision))
+}
+
+fn installed_tree_revision(root: &Path) -> anyhow::Result<String> {
+    fn collect_files(root: &Path, current: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                collect_files(root, &path, files)?;
+            } else if file_type.is_file() {
+                files.push(path.strip_prefix(root)?.to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect_files(root, root, &mut files)?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for relative in files {
+        let path_bytes = relative.to_string_lossy();
+        let contents = std::fs::read(root.join(&relative))?;
+        hasher.update((path_bytes.len() as u64).to_le_bytes());
+        hasher.update(path_bytes.as_bytes());
+        hasher.update((contents.len() as u64).to_le_bytes());
+        hasher.update(contents);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 /// Build the `cli-bridge:session-handoff` event payload. Pure so the wire
@@ -647,6 +1078,14 @@ pub async fn install_inner(
     state: &SharedState,
     bundle_path: &str,
 ) -> anyhow::Result<(String, Vec<String>)> {
+    install_inner_blocking(state, bundle_path, None)
+}
+
+fn install_inner_blocking(
+    state: &SharedState,
+    bundle_path: &str,
+    expected_plugin_id: Option<&str>,
+) -> anyhow::Result<(String, Vec<String>)> {
     let bundle = PathBuf::from(bundle_path);
     if !bundle.is_absolute() {
         anyhow::bail!("bundle_path must be absolute");
@@ -658,6 +1097,7 @@ pub async fn install_inner(
 
     let plugin_state = state.app_handle.state::<PluginRuntimeState>();
     let (manifest, plugin_id) = read_manifest_from_zip(&bytes)?;
+    validate_expected_plugin_id(expected_plugin_id, &plugin_id)?;
     let target_dir = plugin_state.plugin_dir(&plugin_id);
     replace_directory_atomically(&target_dir, |staging| extract_zip_into(&bytes, staging))?;
 
@@ -678,6 +1118,14 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
     app_handle: &tauri::AppHandle<P>,
     source_dir: &str,
 ) -> anyhow::Result<(String, Vec<String>)> {
+    install_from_directory_blocking(app_handle, source_dir, None)
+}
+
+fn install_from_directory_blocking<P: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<P>,
+    source_dir: &str,
+    expected_plugin_id: Option<&str>,
+) -> anyhow::Result<(String, Vec<String>)> {
     let source = PathBuf::from(source_dir);
     if !source.is_absolute() {
         anyhow::bail!("source_dir must be absolute");
@@ -697,6 +1145,7 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
     }
     let manifest_bytes = std::fs::read(&manifest_path)?;
     let (manifest, plugin_id) = read_manifest_from_bytes(&manifest_bytes)?;
+    validate_expected_plugin_id(expected_plugin_id, &plugin_id)?;
 
     let plugin_state = app_handle.state::<PluginRuntimeState>();
     let target_dir = plugin_state.plugin_dir(&plugin_id);
@@ -1121,6 +1570,175 @@ mod tests {
         assert_eq!(request.source_dir.as_deref(), Some("C:/plugins/demo"));
         assert!(request.bundle_path.is_none());
         assert!(request.plugin_id.is_none());
+        assert_eq!(request.schema_version, 1);
+        assert_eq!(request.attempt, 1);
+        assert!(request.activate);
+    }
+
+    #[test]
+    fn reload_request_accepts_trustworthy_dev_session_fields() {
+        let request: ReloadRequest = serde_json::from_value(json!({
+            "schema_version": 1,
+            "session_id": "550e8400-e29b-41d4-a716-446655440000",
+            "attempt": 7,
+            "activate": true,
+            "bundle_path": "/tmp/demo.cpk",
+            "plugin_id": "demo.plugin"
+        }))
+        .unwrap();
+        assert_eq!(request.schema_version, 1);
+        assert_eq!(
+            request.session_id.as_deref(),
+            Some("550e8400-e29b-41d4-a716-446655440000")
+        );
+        assert_eq!(request.attempt, 7);
+        assert!(request.activate);
+    }
+
+    #[test]
+    fn expected_plugin_id_rejects_a_different_installed_artifact() {
+        let error =
+            validate_expected_plugin_id(Some("expected.plugin"), "actual.plugin").unwrap_err();
+        assert!(error.downcast_ref::<PluginIdMismatch>().is_some());
+        assert!(error.to_string().contains("expected.plugin"));
+        assert!(error.to_string().contains("actual.plugin"));
+    }
+
+    #[test]
+    fn installed_tree_revision_is_stable_and_changes_with_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("dist")).unwrap();
+        std::fs::write(tmp.path().join("plugin.json"), br#"{"id":"demo.plugin"}"#).unwrap();
+        std::fs::write(tmp.path().join("dist/index.js"), b"one").unwrap();
+
+        let first = installed_tree_revision(tmp.path()).unwrap();
+        let second = installed_tree_revision(tmp.path()).unwrap();
+        assert_eq!(first, second);
+        assert!(first.starts_with("sha256:"));
+
+        std::fs::write(tmp.path().join("dist/index.js"), b"two").unwrap();
+        let changed = installed_tree_revision(tmp.path()).unwrap();
+        assert_ne!(first, changed);
+    }
+
+    #[test]
+    fn renderer_activation_proof_must_match_the_installed_artifact() {
+        let result = json!({
+            "schemaVersion": 1,
+            "ok": true,
+            "outcome": "activated",
+            "stage": "verify",
+            "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+            "attempt": 7,
+            "pluginId": "demo.plugin",
+            "pluginType": "frontend",
+            "activationProof": {
+                "previousGeneration": 3,
+                "generation": 4,
+                "actualState": "active",
+                "packageVersion": "1.0.0",
+                "artifactRevision": "sha256:actual",
+                "reloadMode": "hot"
+            }
+        });
+        assert!(validate_renderer_activation_proof(
+            &result,
+            "550e8400-e29b-41d4-a716-446655440000",
+            7,
+            "demo.plugin",
+            "frontend",
+            "1.0.0",
+            "sha256:actual"
+        )
+        .is_ok());
+        let error = validate_renderer_activation_proof(
+            &result,
+            "550e8400-e29b-41d4-a716-446655440000",
+            7,
+            "demo.plugin",
+            "frontend",
+            "1.0.0",
+            "sha256:different",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("artifact revision mismatch"));
+
+        let mut stale = result.clone();
+        stale["activationProof"]["generation"] = json!(3);
+        let error = validate_renderer_activation_proof(
+            &stale,
+            "550e8400-e29b-41d4-a716-446655440000",
+            7,
+            "demo.plugin",
+            "frontend",
+            "1.0.0",
+            "sha256:actual",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("generation did not increase"));
+
+        let mut inactive = result;
+        inactive["activationProof"]["actualState"] = json!("inactive");
+        assert!(validate_renderer_activation_proof(
+            &inactive,
+            "550e8400-e29b-41d4-a716-446655440000",
+            7,
+            "demo.plugin",
+            "frontend",
+            "1.0.0",
+            "sha256:actual",
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("not active"));
+    }
+
+    #[test]
+    fn dev_session_event_accepts_only_the_public_event_catalog() {
+        let valid: PluginDevSessionEventRequest = serde_json::from_value(json!({
+            "schema_version": 1,
+            "session_id": "550e8400-e29b-41d4-a716-446655440000",
+            "attempt": 1,
+            "event": "build_started",
+            "occurred_at": "2026-08-29T12:00:00Z"
+        }))
+        .unwrap();
+        assert!(validate_plugin_dev_session_event(&valid).is_ok());
+
+        let invalid = PluginDevSessionEventRequest {
+            event: "arbitrary_event".into(),
+            ..valid
+        };
+        assert!(validate_plugin_dev_session_event(&invalid).is_err());
+
+        let oversized = PluginDevSessionEventRequest {
+            project_name: Some("x".repeat(129)),
+            ..serde_json::from_value(json!({
+                "schema_version": 1,
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "attempt": 1,
+                "event": "heartbeat",
+                "occurred_at": "2026-08-29T12:00:00Z"
+            }))
+            .unwrap()
+        };
+        assert!(validate_plugin_dev_session_event(&oversized).is_err());
+    }
+
+    #[test]
+    fn operational_reload_failures_use_an_http_200_response() {
+        let response = plugin_dev_failure_response(
+            "550e8400-e29b-41d4-a716-446655440000",
+            1,
+            "demo.plugin",
+            "activate",
+            "activation_failed",
+            "loader crashed".to_string(),
+            "Inspect diagnostics",
+            true,
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]

@@ -15,10 +15,8 @@
 //!   * **Smart degradation**: on a non-TTY (CI, redirected stdout), the
 //!     panel collapses to per-event `println!` lines so logs stay grep
 //!     friendly.
-//!   * **Double-press Ctrl+C** to exit cleanly: first press warns
-//!     ("Press Ctrl+C again to quit"), second press breaks the loop.
-//!     Without this, novices instinctively hammer Ctrl+C and lose the
-//!     last in-flight rebuild.
+//!   * **Graceful Ctrl+C**: one interrupt cancels an in-flight build, emits a
+//!     terminal session event, and exits with the conventional code 130.
 
 use anyhow::{bail, Context, Result};
 use chrono::Local;
@@ -28,28 +26,42 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{
+    load_endpoint, post_json, post_json_with_timeout, EndpointFile,
+};
 use crate::shared::{
     clear_process_interrupt, read_plugin_manifest, request_process_interrupt, ProcessInterrupted,
 };
 use crate::ui::{style, RuntimeUi};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
+static DEV_PROJECT_DISPLAY_NAME: OnceLock<String> = OnceLock::new();
 
 /// Quit-state values driven by the Ctrl+C handler. Atomic so the handler
 /// stays signal-safe.
 const QUIT_RUNNING: u8 = 0;
-const QUIT_FIRST_PRESS: u8 = 1;
-const QUIT_SECOND_PRESS: u8 = 2;
+const QUIT_STOP_REQUESTED: u8 = 1;
 
-/// `cognia plugin dev` — runs the watch/rebuild loop until two Ctrl+C
-/// presses (or stdin EOF).
+#[derive(Debug)]
+pub(crate) struct DevInterruptedExit;
+
+impl std::fmt::Display for DevInterruptedExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("plugin development session interrupted")
+    }
+}
+
+impl std::error::Error for DevInterruptedExit {}
+
+/// `cognia plugin dev` — runs the watch/rebuild loop until one Ctrl+C
+/// requests a graceful stop (or stdin EOF).
 pub fn run(
     path: PathBuf,
     reload_url: Option<String>,
+    session_id: Option<String>,
     once: bool,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
@@ -72,6 +84,15 @@ pub fn run(
         }
         Err(err) => return Err(err).with_context(|| format!("resolve {}", path.display())),
     };
+    let _ = DEV_PROJECT_DISPLAY_NAME.set(
+        crate_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("plugin")
+            .chars()
+            .take(128)
+            .collect(),
+    );
     if !crate_root.join("plugin.json").exists() {
         if ui.flags.json {
             return emit_json_input_failure(
@@ -91,9 +112,15 @@ pub fn run(
     };
 
     let reload_endpoint = resolve_reload_endpoint(reload_url.as_deref());
+    let session_id = match session_id {
+        Some(value) => uuid::Uuid::parse_str(&value)
+            .map_err(|_| anyhow::anyhow!("--session-id must be a UUID"))?
+            .to_string(),
+        None => uuid::Uuid::new_v4().to_string(),
+    };
 
     if once {
-        return run_once(&crate_root, reload_endpoint.as_ref(), ui);
+        return run_once(&crate_root, reload_endpoint.as_ref(), &session_id, ui);
     }
 
     // Install the Ctrl+C handler exactly once per process. Tests skip
@@ -125,37 +152,62 @@ pub fn run(
         }
     }
 
+    send_session_event(
+        reload_endpoint.as_ref(),
+        &session_id,
+        0,
+        "session_started",
+        None,
+        None,
+    );
+    let mut heartbeat = HeartbeatGuard::start(reload_endpoint.as_ref(), &session_id);
+
+    let mut attempt = 1_u64;
+    panel.set_status("Building initial plugin");
+    let started = Instant::now();
+    build_active.store(true, Ordering::SeqCst);
+    let initial_outcome = rebuild_and_reload(
+        &crate_root,
+        reload_endpoint.as_ref(),
+        &session_id,
+        attempt,
+        ui,
+    );
+    build_active.store(false, Ordering::SeqCst);
+    panel.record_build(&initial_outcome, started.elapsed());
+    if let Err(error) = &initial_outcome {
+        panel.println_above(format!(
+            "{}initial build failed: {error:#}",
+            style::error_prefix()
+        ));
+    }
+    attempt += 1;
+    panel.set_status("Watching");
+
     let mut pending = false;
     let mut last_change = Instant::now() - DEBOUNCE * 2;
-    let mut first_press_warned = false;
     loop {
-        // ── Ctrl+C state machine ───────────────────────────────────────
-        match quit_state.load(Ordering::SeqCst) {
-            QUIT_SECOND_PRESS => {
-                panel.println_above(format!("{}exiting (Ctrl+C ×2)", style::warn_prefix()));
-                break;
-            }
-            QUIT_FIRST_PRESS if !first_press_warned => {
-                first_press_warned = true;
-                panel.println_above(format!(
-                    "{}Press Ctrl+C again to quit",
-                    style::warn_prefix()
-                ));
-            }
-            _ => {}
+        if quit_state.load(Ordering::SeqCst) == QUIT_STOP_REQUESTED {
+            panel.println_above(format!(
+                "{}stopping development session",
+                style::warn_prefix()
+            ));
+            break;
         }
-
         match rx.recv_timeout(DEBOUNCE) {
             Ok(Ok(event)) => {
                 if should_rebuild(&event) {
                     pending = true;
                     last_change = Instant::now();
                     panel.set_status("Change detected, debouncing");
-                    // Any fs activity resets the "press again" warning
-                    // window so users don't see stale messaging.
-                    if first_press_warned && quit_state.load(Ordering::SeqCst) == QUIT_FIRST_PRESS {
-                        // do nothing — wait for the second press
-                    }
+                    send_session_event(
+                        reload_endpoint.as_ref(),
+                        &session_id,
+                        attempt,
+                        "change_detected",
+                        None,
+                        None,
+                    );
                 }
             }
             Ok(Err(e)) => {
@@ -172,7 +224,13 @@ pub fn run(
                     let prior_quiet = ui.flags.quiet;
                     ui.flags.quiet = true;
                     build_active.store(true, Ordering::SeqCst);
-                    let outcome = rebuild_and_reload(&crate_root, reload_endpoint.as_ref(), ui);
+                    let outcome = rebuild_and_reload(
+                        &crate_root,
+                        reload_endpoint.as_ref(),
+                        &session_id,
+                        attempt,
+                        ui,
+                    );
                     build_active.store(false, Ordering::SeqCst);
                     ui.flags.quiet = prior_quiet;
                     let elapsed = started.elapsed();
@@ -189,24 +247,73 @@ pub fn run(
                         ));
                     }
                     panel.set_status("Watching");
+                    attempt += 1;
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+    heartbeat.stop();
+    send_session_event(
+        reload_endpoint.as_ref(),
+        &session_id,
+        attempt.saturating_sub(1),
+        "session_stopping",
+        None,
+        None,
+    );
+    send_session_event(
+        reload_endpoint.as_ref(),
+        &session_id,
+        attempt.saturating_sub(1),
+        "session_stopped",
+        None,
+        None,
+    );
     panel.finish();
-    Ok(())
+    if quit_state.load(Ordering::SeqCst) == QUIT_STOP_REQUESTED {
+        Err(DevInterruptedExit.into())
+    } else {
+        Ok(())
+    }
 }
 
 fn run_once(
     crate_root: &Path,
     reload_endpoint: Option<&EndpointFile>,
+    session_id: &str,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
+    send_session_event(
+        reload_endpoint,
+        session_id,
+        0,
+        "session_started",
+        None,
+        None,
+    );
+    send_session_event(reload_endpoint, session_id, 1, "build_started", None, None);
+    let build_started = Instant::now();
     let outcome = match build_once(crate_root, ui) {
         Ok(outcome) => outcome,
         Err(err) if ui.flags.json => {
             let error = dev_build_error_message(&err);
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "build_failed",
+                Some(&error),
+                Some(build_started.elapsed()),
+            );
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "session_stopped",
+                None,
+                None,
+            );
             let payload = DevBuildFailureJsonPayload {
                 schema_version: 1,
                 ok: false,
@@ -219,11 +326,45 @@ fn run_once(
             println!("{}", serde_json::to_string_pretty(&payload)?);
             return Err(crate::shared::JsonFailureExit.into());
         }
-        Err(err) => return Err(err),
+        Err(err) => {
+            let message = dev_build_error_message(&err);
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "build_failed",
+                Some(&message),
+                Some(build_started.elapsed()),
+            );
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "session_stopped",
+                None,
+                None,
+            );
+            return Err(err);
+        }
     };
-    let reload = match reload_bundle(crate_root, reload_endpoint, &outcome.bundle_path) {
+    send_session_event(
+        reload_endpoint,
+        session_id,
+        1,
+        "build_succeeded",
+        None,
+        Some(build_started.elapsed()),
+    );
+    let reload = match reload_bundle(
+        crate_root,
+        reload_endpoint,
+        &outcome.bundle_path,
+        session_id,
+        1,
+    ) {
         Ok(reload) => reload,
         Err(err) if ui.flags.json => {
+            let (reload_outcome, structured_error) = reload_failure_payload(&err);
             let payload = DevOnceFailureJsonPayload {
                 schema_version: 1,
                 ok: false,
@@ -239,19 +380,41 @@ fn run_once(
                     ok: Some(false),
                     endpoint: reload_endpoint.map(|endpoint| endpoint.base_url.clone()),
                     skipped_reason: None,
+                    outcome: Some(reload_outcome),
+                    activation_proof: None,
                 },
-                error: err.to_string(),
+                error: structured_error,
             };
             println!("{}", serde_json::to_string_pretty(&payload)?);
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "session_stopped",
+                None,
+                None,
+            );
             return Err(crate::shared::JsonFailureExit.into());
         }
-        Err(err) => return Err(err),
+        Err(err) => {
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                1,
+                "session_stopped",
+                None,
+                None,
+            );
+            return Err(err);
+        }
     };
+
+    let verified = reload.ok == Some(true);
 
     if ui.flags.json {
         let payload = DevOnceJsonPayload {
             schema_version: 1,
-            ok: true,
+            ok: verified,
             action: "dev",
             mode: "once",
             plugin_id: outcome.plugin_id,
@@ -287,7 +450,21 @@ fn run_once(
             _ => {}
         }
     }
-    Ok(())
+    send_session_event(
+        reload_endpoint,
+        session_id,
+        1,
+        "session_stopped",
+        None,
+        None,
+    );
+    if verified {
+        Ok(())
+    } else if ui.flags.json {
+        Err(crate::shared::JsonFailureExit.into())
+    } else {
+        bail!("host_unverified: the build succeeded but no runtime activation was proven")
+    }
 }
 
 fn build_once(
@@ -372,11 +549,49 @@ fn push_watch_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
 fn rebuild_and_reload(
     crate_root: &std::path::Path,
     reload_endpoint: Option<&EndpointFile>,
+    session_id: &str,
+    attempt: u64,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let outcome = crate::commands::build::build(crate_root.to_path_buf(), None, false, ui)?;
+    send_session_event(
+        reload_endpoint,
+        session_id,
+        attempt,
+        "build_started",
+        None,
+        None,
+    );
+    let started = Instant::now();
+    let outcome = match crate::commands::build::build(crate_root.to_path_buf(), None, false, ui) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            send_session_event(
+                reload_endpoint,
+                session_id,
+                attempt,
+                "build_failed",
+                Some(&dev_build_error_message(&error)),
+                Some(started.elapsed()),
+            );
+            return Err(error);
+        }
+    };
+    send_session_event(
+        reload_endpoint,
+        session_id,
+        attempt,
+        "build_succeeded",
+        None,
+        Some(started.elapsed()),
+    );
 
-    reload_bundle(crate_root, reload_endpoint, &outcome.bundle_path)?;
+    reload_bundle(
+        crate_root,
+        reload_endpoint,
+        &outcome.bundle_path,
+        session_id,
+        attempt,
+    )?;
     Ok(())
 }
 
@@ -384,6 +599,8 @@ fn reload_bundle(
     crate_root: &Path,
     reload_endpoint: Option<&EndpointFile>,
     bundle: &Path,
+    session_id: &str,
+    attempt: u64,
 ) -> Result<DevReloadJsonPayload> {
     let Some(endpoint) = reload_endpoint else {
         return Ok(DevReloadJsonPayload::skipped("no-endpoint"));
@@ -396,23 +613,125 @@ fn reload_bundle(
     let response: DevReloadResponse = post_json(
         endpoint,
         "/api/dev/plugins/reload",
-        &json!({ "bundle_path": bundle.to_string_lossy(), "plugin_id": id }),
+        &json!({
+            "schema_version": 1,
+            "session_id": session_id,
+            "attempt": attempt,
+            "activate": true,
+            "bundle_path": bundle.to_string_lossy(),
+            "plugin_id": id,
+        }),
     )
     .context("reload endpoint POST failed")?;
-    if !response.ok {
-        bail!(
-            "{}",
-            response
-                .error
-                .unwrap_or_else(|| "reload rejected by cognia".to_string())
-        );
+    validate_reload_response(response, &endpoint.base_url)
+}
+
+fn send_session_event(
+    endpoint: Option<&EndpointFile>,
+    session_id: &str,
+    attempt: u64,
+    event: &str,
+    summary: Option<&str>,
+    duration: Option<Duration>,
+) {
+    let Some(endpoint) = endpoint else {
+        return;
+    };
+    let summary = summary.map(sanitize_event_summary);
+    let stage = match event {
+        "session_started" => "starting",
+        "heartbeat" => "watching",
+        "change_detected" => "detected",
+        "build_started" => "building",
+        "build_succeeded" => "installing",
+        "build_failed" => "build_failed",
+        "session_stopping" => "stopping",
+        "session_stopped" => "stopped",
+        _ => "watching",
+    };
+    let _: Result<serde_json::Value> = post_json_with_timeout(
+        endpoint,
+        "/api/dev/plugins/session-events",
+        &json!({
+            "schema_version": 1,
+            "session_id": session_id,
+            "attempt": attempt,
+            "event": event,
+            "project_name": DEV_PROJECT_DISPLAY_NAME.get(),
+            "stage": stage,
+            "occurred_at": chrono::Utc::now().to_rfc3339(),
+            "summary": summary,
+            "duration_ms": duration.map(|value| value.as_millis() as u64),
+        }),
+        Duration::from_secs(2),
+    );
+}
+
+struct HeartbeatGuard {
+    stop: Option<mpsc::Sender<()>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl HeartbeatGuard {
+    fn start(endpoint: Option<&EndpointFile>, session_id: &str) -> Self {
+        let Some(endpoint) = endpoint.cloned() else {
+            return Self {
+                stop: None,
+                worker: None,
+            };
+        };
+        let session_id = session_id.to_string();
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || loop {
+            match stop_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    send_session_event(Some(&endpoint), &session_id, 0, "heartbeat", None, None);
+                }
+            }
+        });
+        Self {
+            stop: Some(stop_tx),
+            worker: Some(worker),
+        }
     }
-    Ok(DevReloadJsonPayload {
-        attempted: true,
-        ok: Some(true),
-        endpoint: Some(endpoint.base_url.clone()),
-        skipped_reason: None,
-    })
+
+    fn stop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for HeartbeatGuard {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn sanitize_event_summary(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(|token| {
+            let windows_absolute = token.as_bytes().get(1) == Some(&b':')
+                && token
+                    .as_bytes()
+                    .get(2)
+                    .is_some_and(|byte| *byte == b'/' || *byte == b'\\');
+            if token.starts_with('/') || windows_absolute {
+                "<path>"
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(1024)
+        .collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -446,7 +765,7 @@ struct DevOnceFailureJsonPayload {
     plugin_type: String,
     bundle: String,
     reload: DevReloadJsonPayload,
-    error: String,
+    error: DevReloadError,
 }
 
 #[derive(Debug, Serialize)]
@@ -470,13 +789,55 @@ struct DevReloadJsonPayload {
     endpoint: Option<String>,
     #[serde(rename = "skippedReason", skip_serializing_if = "Option::is_none")]
     skipped_reason: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<String>,
+    #[serde(rename = "activationProof", skip_serializing_if = "Option::is_none")]
+    activation_proof: Option<DevActivationProof>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevActivationProof {
+    previous_generation: u64,
+    generation: u64,
+    actual_state: String,
+    package_version: String,
+    artifact_revision: String,
+    reload_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevReloadResponse {
+    schema_version: Option<u32>,
     ok: bool,
-    error: Option<String>,
+    outcome: Option<String>,
+    activation_proof: Option<DevActivationProof>,
+    error: Option<DevReloadError>,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DevReloadError {
+    code: String,
+    message: String,
+    action: Option<String>,
+    #[serde(default)]
+    retriable: bool,
+}
+
+#[derive(Debug)]
+struct DevReloadFailure {
+    outcome: String,
+    error: DevReloadError,
+}
+
+impl std::fmt::Display for DevReloadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.error.code, self.error.message)
+    }
+}
+
+impl std::error::Error for DevReloadFailure {}
 
 #[derive(Debug, Serialize)]
 struct DevFailureJsonPayload {
@@ -511,8 +872,75 @@ impl DevReloadJsonPayload {
             ok: None,
             endpoint: None,
             skipped_reason: Some(reason),
+            outcome: None,
+            activation_proof: None,
         }
     }
+}
+
+fn validate_reload_response(
+    response: DevReloadResponse,
+    endpoint: &str,
+) -> Result<DevReloadJsonPayload> {
+    let Some(proof) = response.activation_proof else {
+        let error = response.error.unwrap_or_else(|| DevReloadError {
+            code: "host_unverified".into(),
+            message: "the host returned no activation proof".into(),
+            action: Some("Upgrade Cognia Desktop and retry".into()),
+            retriable: false,
+        });
+        return Err(DevReloadFailure {
+            outcome: response.outcome.unwrap_or_else(|| "failed".into()),
+            error,
+        }
+        .into());
+    };
+    if response.schema_version != Some(1)
+        || !response.ok
+        || response.outcome.as_deref() != Some("activated")
+        || proof.actual_state != "active"
+        || proof.generation <= proof.previous_generation
+        || proof.artifact_revision.trim().is_empty()
+    {
+        let error = response.error.unwrap_or_else(|| DevReloadError {
+            code: "reload_not_activated".into(),
+            message: "activation proof did not confirm a new active generation".into(),
+            action: Some("Inspect runtime diagnostics and retry".into()),
+            retriable: true,
+        });
+        return Err(DevReloadFailure {
+            outcome: response.outcome.unwrap_or_else(|| "failed".into()),
+            error,
+        }
+        .into());
+    }
+    Ok(DevReloadJsonPayload {
+        attempted: true,
+        ok: Some(true),
+        endpoint: Some(endpoint.to_string()),
+        skipped_reason: None,
+        outcome: response.outcome,
+        activation_proof: Some(proof),
+    })
+}
+
+fn reload_failure_payload(error: &anyhow::Error) -> (String, DevReloadError) {
+    if let Some(failure) = error.downcast_ref::<DevReloadFailure>() {
+        return (failure.outcome.clone(), failure.error.clone());
+    }
+    (
+        "failed".into(),
+        DevReloadError {
+            code: "bridge_error".into(),
+            message: error.to_string(),
+            action: Some("Verify the Cognia Desktop bridge and retry".into()),
+            retriable: true,
+        },
+    )
+}
+
+fn request_graceful_stop(state: &AtomicU8) {
+    state.store(QUIT_STOP_REQUESTED, Ordering::SeqCst);
 }
 
 /// Resolve the reload endpoint. If `--reload-url` is supplied we try to
@@ -533,24 +961,13 @@ fn resolve_reload_endpoint(override_url: Option<&str>) -> Option<EndpointFile> {
     }
 }
 
-/// Install a process-wide Ctrl+C handler that flips an atomic counter.
+/// Install a process-wide Ctrl+C handler that requests a graceful stop.
 /// `set_handler` errors only when called twice in the same process —
 /// production runs are once per `dev`, so that's a programmer bug;
 /// surface it loudly. Tests skip this entirely.
 fn install_quit_handler(state: Arc<AtomicU8>, build_active: Arc<AtomicBool>) -> Result<()> {
     let result = ctrlc::set_handler(move || {
-        // Exactly ONE transition per press:
-        //   RUNNING       → FIRST_PRESS
-        //   FIRST_PRESS   → SECOND_PRESS
-        //   SECOND_PRESS  → (terminal — no further change)
-        // `fetch_update` guarantees we only apply one of these per call,
-        // unlike a chain of `compare_exchange`s which would collapse two
-        // states in a single Ctrl+C press.
-        let _ = state.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| match cur {
-            QUIT_RUNNING => Some(QUIT_FIRST_PRESS),
-            QUIT_FIRST_PRESS => Some(QUIT_SECOND_PRESS),
-            _ => None,
-        });
+        request_graceful_stop(&state);
         if build_active.load(Ordering::SeqCst) {
             request_process_interrupt();
         }
@@ -812,23 +1229,23 @@ mod tests {
     }
 
     #[test]
-    fn quit_state_machine_promotes_through_first_to_second_press() {
-        // Mirror the handler closure body, exposed for direct testing.
-        let press = |s: &Arc<AtomicU8>| {
-            let _ = s.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| match cur {
-                QUIT_RUNNING => Some(QUIT_FIRST_PRESS),
-                QUIT_FIRST_PRESS => Some(QUIT_SECOND_PRESS),
-                _ => None,
-            });
-        };
+    fn one_interrupt_requests_a_graceful_stop() {
+        let press = |s: &Arc<AtomicU8>| request_graceful_stop(s);
         let s = Arc::new(AtomicU8::new(QUIT_RUNNING));
         press(&s);
-        assert_eq!(s.load(Ordering::SeqCst), QUIT_FIRST_PRESS);
-        press(&s);
-        assert_eq!(s.load(Ordering::SeqCst), QUIT_SECOND_PRESS);
-        // A third press is a no-op — we stay terminal.
-        press(&s);
-        assert_eq!(s.load(Ordering::SeqCst), QUIT_SECOND_PRESS);
+        assert_eq!(s.load(Ordering::SeqCst), QUIT_STOP_REQUESTED);
+    }
+
+    #[test]
+    fn session_event_summary_redacts_absolute_paths_and_is_bounded() {
+        let summary = format!(
+            "failed at /Users/author/secret.ts C:\\plugin\\main.py {}",
+            "x".repeat(2_000)
+        );
+        let sanitized = sanitize_event_summary(&summary);
+        assert!(!sanitized.contains("/Users/author"));
+        assert!(!sanitized.contains("C:\\plugin"));
+        assert!(sanitized.chars().count() <= 1024);
     }
 
     #[test]
@@ -871,7 +1288,7 @@ mod tests {
     fn dev_once_json_payload_is_schema_versioned() {
         let payload = DevOnceJsonPayload {
             schema_version: 1,
-            ok: true,
+            ok: false,
             action: "dev",
             mode: "once",
             plugin_id: "demo".into(),
@@ -884,12 +1301,49 @@ mod tests {
         let json = serde_json::to_value(payload).unwrap();
 
         assert_eq!(json["schemaVersion"], 1);
-        assert_eq!(json["ok"], true);
+        assert_eq!(json["ok"], false);
         assert_eq!(json["action"], "dev");
         assert_eq!(json["mode"], "once");
         assert_eq!(json["pluginId"], "demo");
         assert_eq!(json["reload"]["attempted"], false);
         assert_eq!(json["reload"]["skippedReason"], "no-endpoint");
+    }
+
+    #[test]
+    fn reload_response_requires_a_generation_backed_activation_proof() {
+        let response = DevReloadResponse {
+            schema_version: Some(1),
+            ok: true,
+            outcome: Some("activated".into()),
+            activation_proof: Some(DevActivationProof {
+                previous_generation: 2,
+                generation: 3,
+                actual_state: "active".into(),
+                package_version: "1.0.0".into(),
+                artifact_revision: "sha256:abc".into(),
+                reload_mode: "hot".into(),
+            }),
+            error: None,
+        };
+
+        let payload = validate_reload_response(response, "http://127.0.0.1:7891").unwrap();
+        assert_eq!(payload.ok, Some(true));
+        assert_eq!(payload.outcome.as_deref(), Some("activated"));
+        assert_eq!(payload.activation_proof.unwrap().generation, 3);
+    }
+
+    #[test]
+    fn reload_response_from_an_unverified_old_host_is_rejected() {
+        let response = DevReloadResponse {
+            schema_version: None,
+            ok: true,
+            outcome: None,
+            activation_proof: None,
+            error: None,
+        };
+
+        let error = validate_reload_response(response, "http://127.0.0.1:7891").unwrap_err();
+        assert!(error.to_string().contains("host_unverified"));
     }
 
     #[test]
@@ -909,8 +1363,15 @@ mod tests {
                 ok: Some(false),
                 endpoint: Some("http://127.0.0.1:7891".into()),
                 skipped_reason: None,
+                outcome: Some("failed".into()),
+                activation_proof: None,
             },
-            error: "reload target not installed".into(),
+            error: DevReloadError {
+                code: "plugin_not_found".into(),
+                message: "reload target not installed".into(),
+                action: Some("Install the plugin".into()),
+                retriable: true,
+            },
         };
 
         let json = serde_json::to_value(payload).unwrap();
@@ -922,7 +1383,9 @@ mod tests {
         assert_eq!(json["pluginId"], "demo");
         assert_eq!(json["reload"]["attempted"], true);
         assert_eq!(json["reload"]["ok"], false);
-        assert_eq!(json["error"], "reload target not installed");
+        assert_eq!(json["error"]["code"], "plugin_not_found");
+        assert_eq!(json["error"]["message"], "reload target not installed");
+        assert_eq!(json["error"]["retriable"], true);
     }
 
     #[test]

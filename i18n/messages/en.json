@@ -20503,7 +20503,7 @@
       "bundleFilter": "Plugin bundle",
       "cmd": {
         "build": "Build",
-        "dev": "Dev",
+        "dev": "Start",
         "install": "Install…",
         "lint": "Lint",
         "new": "New"
@@ -20870,6 +20870,78 @@
       },
       "workflowTriggers": "Workflow triggers"
     },
+    "devSession": {
+      "actions": {
+        "launchDenied": "Terminal launch was denied.",
+        "launchFailed": "Couldn't restart the session: {message}",
+        "openTerminal": "Open terminal",
+        "restart": "Restart",
+        "stop": "Stop",
+        "terminalUnavailable": "The terminal session is no longer available."
+      },
+      "activity": {
+        "duration": "{duration} ms",
+        "empty": "No build attempts yet. Start a Dev Session to run the initial build."
+      },
+      "attemptState": {
+        "active": "Active",
+        "build_failed": "Build failed",
+        "building": "Building",
+        "detected": "Change detected",
+        "installing": "Installing",
+        "reload_failed": "Reload failed",
+        "restart_required": "Restart required"
+      },
+      "current": {
+        "attempt": "Attempt {attempt}",
+        "title": "Current Dev Session",
+        "waiting": "Waiting for a verified runtime activation"
+      },
+      "desktopRequired": {
+        "description": "Manifest validation is available here, but building, installing, and activating local plugin code requires the Cognia desktop app.",
+        "title": "Desktop required for runtime activation"
+      },
+      "diagnostics": {
+        "empty": "No diagnostics for the current attempt.",
+        "structuredOnly": "Runtime output includes only logs attributable to the plugin runtime. Raw console output is not presented as complete plugin logging.",
+        "title": "Attempt diagnostics"
+      },
+      "proof": {
+        "generation": "Generation {generation}",
+        "version": "Package {version}"
+      },
+      "runtimeLogs": {
+        "filter": "Structured logs for {pluginId}, generation {generation}",
+        "title": "Runtime logs",
+        "waiting": "Logs appear after a generation-backed activation succeeds."
+      },
+      "sessionState": {
+        "idle": "Idle",
+        "stale": "Stale",
+        "starting": "Starting",
+        "stopped": "Stopped",
+        "stopping": "Stopping",
+        "watching": "Watching"
+      },
+      "stage": {
+        "activating": "Activating",
+        "active": "Active",
+        "building": "Building",
+        "detected": "Detected",
+        "discovering": "Discovering",
+        "installing": "Installing",
+        "quiescing": "Quiescing",
+        "verifying": "Verifying"
+      },
+      "tabs": {
+        "activity": "Activity",
+        "advanced": "Advanced diagnostics",
+        "diagnostics": "Diagnostics"
+      },
+      "timeline": {
+        "ariaLabel": "Current attempt stages"
+      }
+    },
     "devtools": {
       "dropzone": {
         "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace.",
@@ -20900,6 +20972,11 @@
         "validating": "Validating…",
         "warningsHeading": "Warnings"
       }
+    },
+    "devtoolsDisabled": {
+      "description": "Enable Developer Mode in Settings before opening plugin authoring tools.",
+      "openSettings": "Open settings",
+      "title": "Developer Mode is off"
     },
     "devtoolsPanel": {
       "bus": {
@@ -33452,6 +33529,12 @@
         "emptyForPlugin": "This plugin has not declared any custom data tables."
       },
       "description": "Plugins are managed in the /plugins workspace. This launcher shows status at a glance and links into the workspace.",
+      "developerMode": {
+        "description": "Show plugin authoring tools and allow trusted local development sessions.",
+        "title": "Developer Mode",
+        "toggle": "Enable Developer Mode",
+        "warning": "Only run local plugin code that you trust."
+      },
       "overview": {
         "badgeEnabled": "{count} enabled",
         "badgeError": "{count} errored",

@@ -52,6 +52,17 @@ describe("usePluginPreInstall", () => {
     expect(result.current.busy).toBe(false)
   })
 
+  it("accepts a per-install client for a freshly selected local directory", async () => {
+    const client = makeClient()
+    const { result } = renderHook(() => usePluginPreInstall(null))
+
+    await act(async () => {
+      await result.current.install("demo-plugin", "1.0.0", "Demo", client)
+    })
+
+    expect(client.installPlugin).toHaveBeenCalledWith("demo-plugin", "1.0.0")
+  })
+
   it("delegates to runMarketplaceInstall when a client is provided and the manifest is bare", async () => {
     const client = makeClient()
     const { result } = renderHook(() => usePluginPreInstall(client))

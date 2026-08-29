@@ -23,6 +23,18 @@ jest.mock("@/lib/companion/desktop-write-source", () => ({
   dispatchCommand: (...args: unknown[]) => desktopWriteDispatchMock(...args),
 }))
 
+const pluginDevReloadMock = jest.fn()
+jest.mock("./handlers/plugin-dev-reload", () => ({
+  pluginDevReload: (...args: unknown[]) => pluginDevReloadMock(...args),
+}))
+
+const recordReloadResultMock = jest.fn()
+jest.mock("@/stores/plugins/plugin-dev-session-store", () => ({
+  usePluginDevSessionStore: {
+    getState: () => ({ recordReloadResult: recordReloadResultMock }),
+  },
+}))
+
 // The real @tauri-apps imports must never load in jsdom-free node tests —
 // every test below injects a fake bridge.
 jest.mock("@tauri-apps/api/event", () => ({ listen: jest.fn() }))
@@ -62,6 +74,8 @@ beforeEach(() => {
   agentTeamRunMock.mockReset()
   agentTeamRunStatusMock.mockReset()
   desktopWriteDispatchMock.mockReset()
+  pluginDevReloadMock.mockReset()
+  recordReloadResultMock.mockReset()
 })
 
 describe("dispatchCommand", () => {
@@ -82,6 +96,12 @@ describe("dispatchCommand", () => {
 
     await dispatchCommand("agent_team_run_status", { teamId: "t1", sinceTs: 5 })
     expect(agentTeamRunStatusMock).toHaveBeenCalledWith({ teamId: "t1", sinceTs: 5 })
+
+    pluginDevReloadMock.mockResolvedValue({ ok: true, outcome: "activated" })
+    const reloadPayload = { pluginId: "demo.plugin", attempt: 1 }
+    await dispatchCommand("plugin_dev_reload", reloadPayload)
+    expect(pluginDevReloadMock).toHaveBeenCalledWith(reloadPayload)
+    expect(recordReloadResultMock).toHaveBeenCalledWith({ ok: true, outcome: "activated" })
   })
 
   it("throws on an unknown command", async () => {

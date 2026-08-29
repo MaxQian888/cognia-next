@@ -9,11 +9,9 @@
  * comment in the bridge said "renderer wires this in M3". This hook is
  * that M3 wiring.
  *
- * Each handled event refreshes the in-memory plugin runtime (`PluginManager`
- * scan) so the user sees the new row appear in the Library tab without
- * restarting the app. The actual `recordHotReload` side effect lives in
- * `stores/plugin-runtime/hot-reload-history-store.ts` so a separate panel
- * can render the history; we just feed it.
+ * Install/uninstall events refresh discovery only. Development build events
+ * feed the canonical in-memory Dev Session store; runtime success is recorded
+ * exclusively by the renderer request that verifies a new lifecycle generation.
  *
  * On web / Capacitor the hook is a noop — the bridge isn't running there.
  */
@@ -26,9 +24,9 @@ import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { loggers } from "@cognia/logging"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import {
-  recordHotReloadEvent,
-  type HotReloadEntry,
-} from "@/stores/plugin-runtime/hot-reload-history-store"
+  usePluginDevSessionStore,
+  type PluginDevSessionEvent,
+} from "@/stores/plugins/plugin-dev-session-store"
 
 interface InstallPayload {
   plugin_id: string
@@ -37,15 +35,9 @@ interface UninstallPayload {
   plugin_id: string
   purge_data?: boolean
 }
-interface HotReloadPayload {
-  plugin_id: string
-  source?: string
-  via?: "install" | "reload"
-}
-
 const INSTALL_EVENT = "cli-bridge:plugin-installed"
 const UNINSTALL_EVENT = "cli-bridge:plugin-uninstalled"
-const HOT_RELOAD_EVENT = "plugin-hot-reload"
+const DEV_SESSION_EVENT = "cli-bridge:plugin-dev-session"
 
 /**
  * Mount once at the app root (next to the other plugin runtime mounts).
@@ -56,6 +48,10 @@ export function useCliBridgeEvents(): void {
     if (!isTauri()) return
     let active = true
     const unlisteners: UnlistenFn[] = []
+    const staleTimer = window.setInterval(
+      () => usePluginDevSessionStore.getState().markStale(),
+      5_000
+    )
 
     void (async () => {
       try {
@@ -63,50 +59,27 @@ export function useCliBridgeEvents(): void {
           const id = event.payload?.plugin_id
           if (!id) return
           loggers.plugin.info(`[cli-bridge] install event for ${id}`)
-          recordHotReloadEvent({
-            pluginId: id,
-            source: "cli-bridge",
-            kind: "install",
-            timestamp: Date.now(),
-            status: "success",
-          })
           void refreshManagerScan()
         })
         const unUninstall = await listen<UninstallPayload>(UNINSTALL_EVENT, (event) => {
           const id = event.payload?.plugin_id
           if (!id) return
           loggers.plugin.info(`[cli-bridge] uninstall event for ${id}`)
-          recordHotReloadEvent({
-            pluginId: id,
-            source: "cli-bridge",
-            kind: "uninstall",
-            timestamp: Date.now(),
-            status: "success",
-          })
           void refreshManagerScan()
         })
-        const unReload = await listen<HotReloadPayload>(HOT_RELOAD_EVENT, (event) => {
-          const id = event.payload?.plugin_id
-          if (!id) return
-          loggers.plugin.info(`[cli-bridge] hot-reload event for ${id}`)
-          recordHotReloadEvent({
-            pluginId: id,
-            source: event.payload?.source ?? "cli-bridge",
-            kind: event.payload?.via === "install" ? "install" : "hot-reload",
-            timestamp: Date.now(),
-            status: "success",
-          })
-          void refreshManagerScan()
+        const unSession = await listen<PluginDevSessionEvent>(DEV_SESSION_EVENT, (event) => {
+          if (!event.payload?.sessionId) return
+          usePluginDevSessionStore.getState().ingest(event.payload)
         })
 
         if (active) {
-          unlisteners.push(unInstall, unUninstall, unReload)
+          unlisteners.push(unInstall, unUninstall, unSession)
         } else {
           // Listener resolved after unmount — clean up immediately so
           // we don't leak a Tauri channel.
           safeUnlisten(unInstall)
           safeUnlisten(unUninstall)
-          safeUnlisten(unReload)
+          safeUnlisten(unSession)
         }
       } catch (err) {
         loggers.plugin.warn(`[cli-bridge] failed to subscribe`, { error: String(err) })
@@ -115,6 +88,7 @@ export function useCliBridgeEvents(): void {
 
     return () => {
       active = false
+      window.clearInterval(staleTimer)
       for (const off of unlisteners) safeUnlisten(off)
     }
   }, [])
@@ -127,6 +101,3 @@ async function refreshManagerScan(): Promise<void> {
     loggers.plugin.warn(`[cli-bridge] post-event scan failed`, { error: String(err) })
   }
 }
-
-// Re-export for symmetry with the hot-reload store consumers.
-export type { HotReloadEntry }

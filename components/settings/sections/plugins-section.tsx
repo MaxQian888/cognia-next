@@ -14,7 +14,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { listPlugins } from "@/lib/db/plugins"
+import { setDeveloperModeEnabled, useDeveloperMode } from "@/lib/plugin/devtools/developer-mode"
 
 interface Props {
   /** Optional close handler — called before navigating, in case the host is a Sheet. */
@@ -25,6 +27,7 @@ export function PluginsSection({ onClose }: Props) {
   const t = useTranslations("settings.plugins")
   const tOverview = useTranslations("settings.plugins.overview")
   const plugins = useLiveQuery(() => listPlugins(), [])
+  const developerMode = useDeveloperMode()
 
   const enabled = plugins?.filter((p) => p.enabled).length ?? 0
   const errored = plugins?.filter((p) => p.status === "error").length ?? 0
@@ -77,6 +80,20 @@ export function PluginsSection({ onClose }: Props) {
             </Link>
           </Button>
         </div>
+      </Card>
+
+      <Card className="flex items-start justify-between gap-4 p-4">
+        <div className="space-y-1">
+          <Label htmlFor="plugin-developer-mode">{t("developerMode.title")}</Label>
+          <p className="text-xs text-muted-foreground">{t("developerMode.description")}</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400">{t("developerMode.warning")}</p>
+        </div>
+        <Switch
+          id="plugin-developer-mode"
+          checked={developerMode}
+          onCheckedChange={setDeveloperModeEnabled}
+          aria-label={t("developerMode.toggle")}
+        />
       </Card>
     </div>
   )

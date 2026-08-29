@@ -20503,7 +20503,7 @@
       "bundleFilter": "插件包",
       "cmd": {
         "build": "构建",
-        "dev": "开发",
+        "dev": "启动",
         "install": "安装…",
         "lint": "检查",
         "new": "新建"
@@ -20870,6 +20870,78 @@
       },
       "workflowTriggers": "工作流触发"
     },
+    "devSession": {
+      "actions": {
+        "launchDenied": "终端启动请求被拒绝。",
+        "launchFailed": "无法重启会话：{message}",
+        "openTerminal": "打开终端",
+        "restart": "重新启动",
+        "stop": "停止",
+        "terminalUnavailable": "该终端会话已不可用。"
+      },
+      "activity": {
+        "duration": "{duration} 毫秒",
+        "empty": "还没有构建尝试。启动开发会话后会立即执行首次构建。"
+      },
+      "attemptState": {
+        "active": "已激活",
+        "build_failed": "构建失败",
+        "building": "构建中",
+        "detected": "检测到变更",
+        "installing": "安装中",
+        "reload_failed": "重载失败",
+        "restart_required": "需要重启"
+      },
+      "current": {
+        "attempt": "第 {attempt} 次尝试",
+        "title": "当前开发会话",
+        "waiting": "等待可验证的 runtime 激活"
+      },
+      "desktopRequired": {
+        "description": "此处仍可校验 manifest，但构建、安装和激活本地插件代码需要 Cognia 桌面端。",
+        "title": "Runtime 激活需要桌面端"
+      },
+      "diagnostics": {
+        "empty": "当前尝试没有诊断信息。",
+        "structuredOnly": "Runtime 输出只包含可归属到插件 runtime 的日志；不会把原始 console 输出伪装成完整插件日志。",
+        "title": "尝试诊断"
+      },
+      "proof": {
+        "generation": "Generation {generation}",
+        "version": "包版本 {version}"
+      },
+      "runtimeLogs": {
+        "filter": "{pluginId} generation {generation} 的结构化日志",
+        "title": "Runtime 日志",
+        "waiting": "完成带 generation 证明的激活后显示日志。"
+      },
+      "sessionState": {
+        "idle": "空闲",
+        "stale": "已失联",
+        "starting": "启动中",
+        "stopped": "已停止",
+        "stopping": "停止中",
+        "watching": "监听中"
+      },
+      "stage": {
+        "activating": "激活中",
+        "active": "已激活",
+        "building": "构建中",
+        "detected": "检测变更",
+        "discovering": "发现插件",
+        "installing": "安装中",
+        "quiescing": "卸载旧 runtime",
+        "verifying": "验证中"
+      },
+      "tabs": {
+        "activity": "活动",
+        "advanced": "高级诊断",
+        "diagnostics": "诊断"
+      },
+      "timeline": {
+        "ariaLabel": "当前尝试阶段"
+      }
+    },
     "devtools": {
       "dropzone": {
         "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。",
@@ -20900,6 +20972,11 @@
         "validating": "校验中…",
         "warningsHeading": "警告"
       }
+    },
+    "devtoolsDisabled": {
+      "description": "请先在设置中启用开发者模式，再打开插件创作工具。",
+      "openSettings": "打开设置",
+      "title": "开发者模式未启用"
     },
     "devtoolsPanel": {
       "bus": {
@@ -33452,6 +33529,12 @@
         "emptyForPlugin": "该插件未声明任何自定义数据表。"
       },
       "description": "插件在 /plugins 工作台中管理。此入口一览状态并提供进入工作台的链接。",
+      "developerMode": {
+        "description": "显示插件创作工具，并允许受信任的本地开发会话。",
+        "title": "开发者模式",
+        "toggle": "启用开发者模式",
+        "warning": "仅运行你信任的本地插件代码。"
+      },
       "overview": {
         "badgeEnabled": "{count} 已启用",
         "badgeError": "{count} 异常",

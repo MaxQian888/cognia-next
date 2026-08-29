@@ -24,12 +24,14 @@ Dexie 与 vector-backed runtime state。独立进程与 browser renderer 的配�
 ## 决策
 
 1. 在 `127.0.0.1:0` 运行专用 Axum `cli_bridge` listener。在
-   `<config_dir>/cognia/cli-endpoint.json` 发布 base URL 与每次启动随机生成的 token；全部 12 条
-   路由都要求 loopback origin 与 `X-Cognia-Dev-Token`。
+   `<config_dir>/cognia/cli-endpoint.json` 发布 base URL 与每次启动随机生成的 token；所有路由
+   都要求 loopback origin 与 `X-Cognia-Dev-Token`。当前 catalog 有 18 条路由，包含插件 Dev
+   Session 事件与可验证 reload。
 2. 显式划分路由归属。`cognia` 负责插件生命周期与 ACP brokerage；`cognia-agent` 负责 session
    handoff、twin context 与 team 操作。Health 由两者共享。
-3. 只有权威状态位于 WebView 的四条 twin/team 路由使用 Tauri renderer request/response。插件操作
-   留在 Rust，session handoff 保持 event-driven。
+3. 权威状态位于 WebView 时使用 Tauri renderer request/response。插件开发中，Rust 负责鉴权、
+   路径校验、安装、manifest 一致性和已安装 artifact 的 SHA-256；renderer 负责 WebView runtime
+   的 quiesce、激活及 lifecycle generation 验证。只有两端都成功才算 reload 成功。
 4. CLI bridge 与 `companion_api` 保持分离；同一用户本地工具不复用 device pairing、LAN 暴露、TLS
    配置或 device-JWT 路由 catalog。
 5. 保持 forked store 与共享实现。GUI 保留 browser IndexedDB 与 keyring state；CLI 通过 fake
@@ -42,6 +44,8 @@ Dexie 与 vector-backed runtime state。独立进程与 browser renderer 的配�
 - 任一 CLI 都能在没有固定端口或 network-visible service 的前提下发现运行中的桌面端。
 - 两个产品不会只因共享 endpoint file 就误用彼此的路由。
 - Twin/team 操作需要活跃 WebView，并受有界 client/server timeout 保护。
+- 插件 bundle 已安装或已发现不能证明 runtime 已变化。reload 仅在获得新的 active lifecycle
+  generation 与 Rust 实际安装 artifact 的 revision 后返回成功。
 - Endpoint-file confidentiality 是同一用户本地控制，无法防御已作为该用户运行的恶意进程。
 - Store divergence 是预期行为。新的同步表面必须是明确 projection 或 import，而不是临时共享文件写入。
 - 当前 Tauri startup path 在 `cli_bridge::init` 周围没有显式的移动端编译排除；renderer listener

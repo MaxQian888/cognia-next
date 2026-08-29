@@ -72,10 +72,10 @@ source, `pluginSettings.developerModeEnabled`
 already has an `updatePluginSettings` action; the direct localStorage read of
 `cognia.plugins.developerMode` in
 `components/plugins/plugin-devtools-panel.tsx` becomes a reader of it, and the
-legacy key is migrated once at boot. The per-plugin `config.debug` /
-`config.devMode` instrumentation flag in `lib/plugin/core/manager.ts` is a
-different concept — debug instrumentation for one plugin, not a global gate —
-and stays separate. The route stays in the static export and renders an access
+legacy key is migrated once at boot. The per-plugin `config.debug` flag remains
+an additional instrumentation input, while global Developer Mode enables structured,
+generation-tagged logging for non-builtin plugins; neither creates a second visibility gate.
+The route stays in the static export and renders an access
 gate when developer mode is off. Creator writes only inside a user-chosen authoring root, and
 records progress in the existing workflow run event log rather than a new store.
 

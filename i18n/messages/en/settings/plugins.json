@@ -29,6 +29,12 @@
     "emptyForPlugin": "This plugin has not declared any custom data tables."
   },
   "description": "Plugins are managed in the /plugins workspace. This launcher shows status at a glance and links into the workspace.",
+  "developerMode": {
+    "description": "Show plugin authoring tools and allow trusted local development sessions.",
+    "title": "Developer Mode",
+    "toggle": "Enable Developer Mode",
+    "warning": "Only run local plugin code that you trust."
+  },
   "overview": {
     "badgeEnabled": "{count} enabled",
     "badgeError": "{count} errored",

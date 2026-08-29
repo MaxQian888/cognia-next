@@ -32,6 +32,7 @@ import { isTauri } from "@/lib/tauri"
 
 import { useCliBridgeEvents } from "./use-cli-bridge-events"
 import { useHotReloadHistoryStore } from "@/stores/plugin-runtime/hot-reload-history-store"
+import { usePluginDevSessionStore } from "@/stores/plugins/plugin-dev-session-store"
 
 const mockListen = listen as jest.MockedFunction<typeof listen>
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
@@ -43,9 +44,9 @@ function makeUnlisten() {
 }
 
 type EventName =
-  "cli-bridge:plugin-installed" | "cli-bridge:plugin-uninstalled" | "plugin-hot-reload"
+  "cli-bridge:plugin-installed" | "cli-bridge:plugin-uninstalled" | "cli-bridge:plugin-dev-session"
 
-type Callback = (event: { payload: { plugin_id: string; source?: string; via?: string } }) => void
+type Callback = (event: { payload: Record<string, unknown> }) => void
 
 interface ListenerRecord {
   unlisten: jest.Mock
@@ -55,13 +56,13 @@ interface ListenerRecord {
 const listeners: Record<EventName, ListenerRecord | undefined> = {
   "cli-bridge:plugin-installed": undefined,
   "cli-bridge:plugin-uninstalled": undefined,
-  "plugin-hot-reload": undefined,
+  "cli-bridge:plugin-dev-session": undefined,
 }
 
 function resetListeners() {
   listeners["cli-bridge:plugin-installed"] = undefined
   listeners["cli-bridge:plugin-uninstalled"] = undefined
-  listeners["plugin-hot-reload"] = undefined
+  listeners["cli-bridge:plugin-dev-session"] = undefined
 }
 
 function Harness() {
@@ -76,6 +77,7 @@ beforeEach(() => {
   mockIsTauri.mockReturnValue(true)
   mockScan.mockClear()
   useHotReloadHistoryStore.getState().clear()
+  usePluginDevSessionStore.getState().clear()
   mockListen.mockImplementation(async (event, callback) => {
     const name = event as EventName
     const unlisten = makeUnlisten()
@@ -98,61 +100,46 @@ describe("useCliBridgeEvents", () => {
     expect(mockListen).toHaveBeenCalledTimes(3)
     expect(listeners["cli-bridge:plugin-installed"]).toBeDefined()
     expect(listeners["cli-bridge:plugin-uninstalled"]).toBeDefined()
-    expect(listeners["plugin-hot-reload"]).toBeDefined()
+    expect(listeners["cli-bridge:plugin-dev-session"]).toBeDefined()
   })
 
-  it("records install events in the hot-reload history and rescans", async () => {
+  it("rescans install events without recording a fake runtime success", async () => {
     render(<Harness />)
     await flushMicrotasks()
     listeners["cli-bridge:plugin-installed"]!.callback({
       payload: { plugin_id: "demo-plugin" },
     })
     const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries).toHaveLength(1)
-    expect(entries[0]).toMatchObject({
-      pluginId: "demo-plugin",
-      kind: "install",
-      source: "cli-bridge",
-    })
+    expect(entries).toHaveLength(0)
     await flushMicrotasks()
     expect(mockScan).toHaveBeenCalled()
   })
 
-  it("classifies a hot-reload-via-install event as kind=install", async () => {
+  it("records CLI build events in the canonical dev session store", async () => {
     render(<Harness />)
     await flushMicrotasks()
-    listeners["plugin-hot-reload"]!.callback({
-      payload: { plugin_id: "demo-plugin", source: "cli-bridge", via: "install" },
+    listeners["cli-bridge:plugin-dev-session"]!.callback({
+      payload: {
+        schemaVersion: 1,
+        sessionId: "session-a",
+        attempt: 1,
+        event: "build_started",
+        occurredAt: "2026-08-29T10:00:00Z",
+      },
     })
-    // The earlier `cli-bridge:plugin-installed` event in the bridge fires
-    // first; the global event arrives ~1ms later. Both should dedupe in
-    // the store to a single row of kind="install".
-    listeners["cli-bridge:plugin-installed"]!.callback({
-      payload: { plugin_id: "demo-plugin" },
-    })
-    const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries).toHaveLength(1)
-    expect(entries[0].kind).toBe("install")
+    expect(usePluginDevSessionStore.getState().sessions[0].attempts[0].state).toBe("building")
   })
 
-  it("classifies a hot-reload-via-reload event as kind=hot-reload", async () => {
-    render(<Harness />)
-    await flushMicrotasks()
-    listeners["plugin-hot-reload"]!.callback({
-      payload: { plugin_id: "demo-plugin", source: "cli-bridge", via: "reload" },
-    })
-    const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries[0].kind).toBe("hot-reload")
-  })
-
-  it("records uninstall events", async () => {
+  it("rescans uninstall events without recording a reload result", async () => {
     render(<Harness />)
     await flushMicrotasks()
     listeners["cli-bridge:plugin-uninstalled"]!.callback({
       payload: { plugin_id: "demo-plugin" },
     })
     const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries[0].kind).toBe("uninstall")
+    expect(entries).toHaveLength(0)
+    await flushMicrotasks()
+    expect(mockScan).toHaveBeenCalled()
   })
 
   it("ignores events with missing plugin_id", async () => {
@@ -177,10 +164,10 @@ describe("useCliBridgeEvents", () => {
     await flushMicrotasks()
     const installUnlisten = listeners["cli-bridge:plugin-installed"]!.unlisten
     const uninstallUnlisten = listeners["cli-bridge:plugin-uninstalled"]!.unlisten
-    const reloadUnlisten = listeners["plugin-hot-reload"]!.unlisten
+    const sessionUnlisten = listeners["cli-bridge:plugin-dev-session"]!.unlisten
     unmount()
     expect(installUnlisten).toHaveBeenCalled()
     expect(uninstallUnlisten).toHaveBeenCalled()
-    expect(reloadUnlisten).toHaveBeenCalled()
+    expect(sessionUnlisten).toHaveBeenCalled()
   })
 })

@@ -41,6 +41,18 @@ describe("PluginDebugger", () => {
       expect(session?.pluginId).toBe("plugin-a")
     })
 
+    it("tags structured runtime logs with the lifecycle generation", () => {
+      debugger_.startSession("plugin-a", 7)
+      debugger_.log("plugin-a", "info", "ready")
+      debugger_.startSession("plugin-b", 8)
+      debugger_.log("plugin-b", "info", "other")
+
+      expect(debugger_.getLogs("plugin-a", { generation: 7 })).toEqual([
+        expect.objectContaining({ pluginId: "plugin-a", generation: 7, message: "ready" }),
+      ])
+      expect(debugger_.getLogs("plugin-a", { generation: 8 })).toEqual([])
+    })
+
     it("should pause a session", () => {
       debugger_.startSession("plugin-a")
       debugger_.pauseSession("plugin-a")

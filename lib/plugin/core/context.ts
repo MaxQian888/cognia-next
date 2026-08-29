@@ -232,7 +232,7 @@ export type FullPluginContext = PluginContext
 export function createPluginContext(
   plugin: Plugin,
   manager: PluginManager,
-  options?: { enableDebug?: boolean }
+  options?: { enableDebug?: boolean; generation?: number }
 ): PluginBaseContext {
   const pluginId = plugin.manifest.id
 
@@ -290,7 +290,7 @@ export function createPluginContext(
   // If debug mode is enabled, wrap the context with debug instrumentation
   if (options?.enableDebug) {
     const debugger_ = getPluginDebugger()
-    debugger_.startSession(pluginId)
+    debugger_.startSession(pluginId, options.generation ?? 0)
     return debugger_.createDebugContext(pluginId, baseContext)
   }
 
@@ -303,7 +303,7 @@ export function createPluginContext(
 export function createFullPluginContext(
   plugin: Plugin,
   manager: PluginManager,
-  options?: { enableDebug?: boolean }
+  options?: { enableDebug?: boolean; generation?: number }
 ): FullPluginContext {
   const pluginId = plugin.manifest.id
 

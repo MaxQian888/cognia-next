@@ -1,6 +1,6 @@
 //! Axum server bootstrap for the CLI bridge.
 //!
-//! Binds to `127.0.0.1:0` (ephemeral port), wires the twelve routes behind
+//! Binds to `127.0.0.1:0` (ephemeral port), wires the route catalog behind
 //! the loopback + dev-token middleware, and returns
 //! `(bound_port, shutdown_tx)` so the caller can shut us down later.
 
@@ -76,6 +76,10 @@ pub fn build_router(state: SharedState) -> Router {
         )
         .route("/api/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/dev/plugins/reload", post(handlers::reload))
+        .route(
+            "/api/dev/plugins/session-events",
+            post(handlers::plugin_dev_session_event).layer(RequestBodyLimitLayer::new(64 * 1024)),
+        )
         // ── ACP bridge ticket broker ─────────────────────────────────────
         // Mints a single-use Companion socket ticket for the `cognia acp` stdio↔WS
         // bridge (same loopback + dev-token trust model as plugin install).
@@ -183,13 +187,14 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    const DOCUMENTED_DEV_ROUTES: [&str; 17] = [
+    const DOCUMENTED_DEV_ROUTES: [&str; 18] = [
         "/api/dev/health",
         "/api/dev/plugins/installed",
         "/api/dev/plugins/install",
         "/api/dev/plugins/install-directory",
         "/api/dev/plugins/uninstall",
         "/api/dev/plugins/reload",
+        "/api/dev/plugins/session-events",
         "/api/dev/acp/ticket",
         "/api/dev/sessions/handoff",
         "/api/dev/host-state/snapshot",

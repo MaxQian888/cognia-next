@@ -108,6 +108,15 @@ export async function dispatchCommand(
       const { agentTeamRunStatus } = await import("./handlers/agent-team")
       return agentTeamRunStatus(payload)
     }
+    case "plugin_dev_reload": {
+      const { pluginDevReload } = await import("./handlers/plugin-dev-reload")
+      const result = await pluginDevReload(
+        payload as unknown as import("./handlers/plugin-dev-reload").PluginDevReloadPayload
+      )
+      const { usePluginDevSessionStore } = await import("@/stores/plugins/plugin-dev-session-store")
+      usePluginDevSessionStore.getState().recordReloadResult(result)
+      return result
+    }
     case "host_state_snapshot":
     case "host_state_submit":
     case "host_state_status": {

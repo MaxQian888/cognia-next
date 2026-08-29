@@ -27,11 +27,14 @@ stores also differ between the standalone process and browser renderer.
 
 1. Run a dedicated Axum `cli_bridge` listener on `127.0.0.1:0`. Publish its base URL and a random
    per-launch token in `<config_dir>/cognia/cli-endpoint.json`; require loopback origin and
-   `X-Cognia-Dev-Token` on all 12 routes.
+   `X-Cognia-Dev-Token` on every route. The current catalog has 18 routes, including plugin Dev
+   Session events and verified reload.
 2. Keep route ownership explicit. `cognia` owns plugin lifecycle and ACP brokerage;
    `cognia-agent` owns session handoff, twin context, and team operations. Health is shared.
-3. Use Tauri renderer request/response only for the four twin/team routes whose authoritative
-   state is in the WebView. Keep plugin operations in Rust and session handoff event-driven.
+3. Use Tauri renderer request/response whenever the authoritative state is in the WebView. For
+   plugin development, Rust owns authentication, path validation, installation, manifest parity,
+   and the installed artifact SHA-256. The renderer owns WebView runtime quiescence, activation,
+   and lifecycle generation verification. Reload succeeds only when both sides succeed.
 4. Keep the CLI bridge separate from `companion_api`; do not reuse device pairing, LAN exposure,
    TLS configuration, or the device-JWT route catalog for same-user local tooling.
 5. Preserve forked stores and shared implementation. The GUI retains browser IndexedDB and
@@ -47,6 +50,9 @@ stores also differ between the standalone process and browser renderer.
 - The two products cannot accidentally consume each other's routes merely because they share an
   endpoint file.
 - Twin/team operations require a live WebView and have bounded client/server timeouts.
+- A plugin bundle being installed or discovered is not evidence that its runtime changed. The
+  reload response is successful only with a new active lifecycle generation and the revision of
+  the artifact Rust actually installed.
 - Endpoint-file confidentiality is a same-user local control, not protection from a malicious
   process already running as that user.
 - Store divergence is expected. New synchronization surfaces must be deliberate projections or

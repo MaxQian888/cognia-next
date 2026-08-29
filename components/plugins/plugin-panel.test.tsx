@@ -95,6 +95,11 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), message: jest.fn() },
 }))
 
+const useDeveloperModeMock = jest.fn(() => true)
+jest.mock("@/lib/plugin/devtools/developer-mode", () => ({
+  useDeveloperMode: () => useDeveloperModeMock(),
+}))
+
 // The cascade-uninstall spies live inside the factory (jest.mock factories
 // hit the TDZ for outer consts) and are re-exported so the test can assert
 // the two table deletes actually fired.
@@ -180,6 +185,8 @@ beforeEach(() => {
   deletePermissionsMock.mockClear()
   deleteAnalyticsMock.mockClear()
   getPluginMarketplaceMock.mockReturnValue({ checkForUpdates: jest.fn(async () => []) })
+  useDeveloperModeMock.mockReset()
+  useDeveloperModeMock.mockReturnValue(true)
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -253,6 +260,20 @@ describe("PluginPanel (3-pane shell)", () => {
 
     expect(screen.getByTestId("plugin-devtools-pane")).toBeInTheDocument()
     expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  it("redirects a disabled direct Devtools URL to Library and exposes the settings action", async () => {
+    useDeveloperModeMock.mockReturnValue(false)
+    mockSearchString = "section=devtools"
+
+    render(<PluginPanel />)
+
+    await waitFor(() => expect(usePluginsStore.getState().activeSection).toBe("library"))
+    expect(mockReplace).toHaveBeenCalledWith("/plugins?section=library", { scroll: false })
+    expect(toast.message).toHaveBeenCalledWith(
+      "devtoolsDisabled.title",
+      expect.objectContaining({ description: "devtoolsDisabled.description" })
+    )
   })
 
   it("opens the rollback dialog when the store target is set", () => {

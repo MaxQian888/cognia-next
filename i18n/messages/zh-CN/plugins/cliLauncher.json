@@ -4,7 +4,7 @@
   "bundleFilter": "插件包",
   "cmd": {
     "build": "构建",
-    "dev": "开发",
+    "dev": "启动",
     "install": "安装…",
     "lint": "检查",
     "new": "新建"

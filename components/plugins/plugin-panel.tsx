@@ -62,6 +62,7 @@ import { PluginGovernanceHeader } from "./governance/plugin-governance-header"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
 import { AgentPackagesPane } from "./agent-packages/agent-packages-pane"
 import { PluginDetailPane } from "./detail/plugin-detail-pane"
+import { useDeveloperMode } from "@/lib/plugin/devtools/developer-mode"
 
 // One-time translation of legacy `?tab=` deep links into the canonical
 // `?section=/&sub=/&gov=/&subtab=` vocabulary. The redirect rewrites the URL
@@ -122,6 +123,8 @@ export function PluginPanel() {
   const setLibrarySubFilter = usePluginsStore((s) => s.setLibrarySubFilter)
   const setGovernanceView = usePluginsStore((s) => s.setGovernanceView)
   const setDetailSubTab = usePluginsStore((s) => s.setDetailSubTab)
+  const developerMode = useDeveloperMode()
+  const tPage = useTranslations("plugins")
 
   // URL sync — `?section=`, `?sub=`, `?gov=`, `?subtab=` drive the layout.
   // We adopt the URL value on mount AND whenever the URL changes; local
@@ -153,6 +156,20 @@ export function PluginPanel() {
   }, [requestedTabParam])
 
   useEffect(() => {
+    if (requestedSectionParam === "devtools" && !developerMode) {
+      setActiveSection("library")
+      const next = new URLSearchParams(searchParams?.toString() ?? "")
+      next.set("section", "library")
+      router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+      toast.message(tPage("devtoolsDisabled.title"), {
+        description: tPage("devtoolsDisabled.description"),
+        action: {
+          label: tPage("devtoolsDisabled.openSettings"),
+          onClick: () => router.push("/settings?section=plugins"),
+        },
+      })
+      return
+    }
     if (isValidSection(requestedSectionParam)) {
       setActiveSection(requestedSectionParam)
     }
@@ -174,8 +191,21 @@ export function PluginPanel() {
     ) {
       setDetailSubTab(requestedSubtabParam as PluginDetailSubTab)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedSectionParam, requestedSubParam, requestedGovParam, requestedSubtabParam])
+  }, [
+    requestedSectionParam,
+    requestedSubParam,
+    requestedGovParam,
+    requestedSubtabParam,
+    developerMode,
+    pathname,
+    router,
+    searchParams,
+    setActiveSection,
+    setDetailSubTab,
+    setGovernanceView,
+    setLibrarySubFilter,
+    tPage,
+  ])
 
   const [updateOpen, setUpdateOpen] = useState(false)
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)
@@ -276,25 +306,27 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   const t = useTranslations("plugins.sections")
   const tPage = useTranslations("plugins")
   const activeSection = usePluginsStore((s) => s.activeSection)
+  const developerMode = useDeveloperMode()
+  const visibleSection = activeSection === "devtools" && !developerMode ? "library" : activeSection
 
   // Second header tier — one control vocabulary for every section. Each
   // section supplies its own segments/tools through `PluginSectionToolbar`
   // rather than inventing a picker of its own (see that component's note).
   const controls =
-    activeSection === "library" ? (
+    visibleSection === "library" ? (
       <PluginLibraryHeader />
-    ) : activeSection === "governance" ? (
+    ) : visibleSection === "governance" ? (
       <PluginGovernanceHeader />
     ) : undefined
 
   const center =
-    activeSection === "library" ? (
+    visibleSection === "library" ? (
       <PluginLibraryPane />
-    ) : activeSection === "discover" ? (
+    ) : visibleSection === "discover" ? (
       <PluginDiscoverPane />
-    ) : activeSection === "agent-packages" ? (
+    ) : visibleSection === "agent-packages" ? (
       <AgentPackagesPane />
-    ) : activeSection === "governance" ? (
+    ) : visibleSection === "governance" ? (
       <PluginGovernancePane />
     ) : (
       <PluginDevtoolsPane />
@@ -308,10 +340,10 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
           icon={<PlugIcon />}
           title={tPage("title")}
           description={tPage("description")}
-          context={t(activeSection)}
+          context={t(visibleSection)}
           controls={controls}
           actions={
-            activeSection === "library" ? (
+            visibleSection === "library" ? (
               <PluginPanelToolbar
                 onCheckUpdates={onCheckUpdates}
                 onSyncRegistry={onSyncRegistry}
@@ -341,7 +373,7 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       // which have no row in the plugins table, so the detail pane would have
       // nothing to show for whatever is selected there.
       rightPane={
-        activeSection === "devtools" || activeSection === "agent-packages"
+        visibleSection === "devtools" || visibleSection === "agent-packages"
           ? undefined
           : {
               label: t("detailSheetLabel"),

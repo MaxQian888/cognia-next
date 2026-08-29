@@ -1552,7 +1552,7 @@ fn quiet_suppresses_sign_verify_release_success_output_without_hiding_side_effec
 }
 
 #[test]
-fn quiet_suppresses_dev_once_success_output_without_hiding_bundle() {
+fn quiet_dev_once_without_host_fails_closed_after_building_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let endpoint_file = tmp.path().join("missing-endpoint.json");
     let plugin_dir = tmp.path().join("plugin");
@@ -1576,15 +1576,15 @@ fn quiet_suppresses_dev_once_success_output_without_hiding_bundle() {
         &[("COGNIA_CLI_ENDPOINT_FILE", endpoint_file.to_str().unwrap())],
     );
 
-    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert_ne!(code, Some(0), "an unverified host must fail closed");
     assert!(expected_bundle.exists());
     assert!(
         stdout.trim().is_empty(),
-        "quiet dev --once success should not print stdout: {stdout}"
+        "quiet dev --once should not print progress on stdout: {stdout}"
     );
     assert!(
-        stderr.trim().is_empty(),
-        "quiet dev --once success should not print stderr: {stderr}"
+        stderr.contains("host_unverified"),
+        "quiet mode must retain the actionable failure: {stderr}"
     );
 }
 
@@ -2086,11 +2086,15 @@ fn plugin_dev_once_json_builds_once_without_starting_watcher() {
         &[("COGNIA_CLI_ENDPOINT_FILE", endpoint_file.to_str().unwrap())],
     );
 
-    assert_eq!(code, Some(0), "dev --once --json should succeed: {stderr}");
+    assert_ne!(
+        code,
+        Some(0),
+        "dev --once --json must fail without verified activation"
+    );
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("dev --once --json should emit valid JSON");
     assert_eq!(parsed["schemaVersion"], 1);
-    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["action"], "dev");
     assert_eq!(parsed["mode"], "once");
     assert_eq!(parsed["pluginId"], "dev-once-json");
@@ -2106,7 +2110,7 @@ fn plugin_dev_once_json_builds_once_without_starting_watcher() {
     );
     assert!(
         stderr.trim().is_empty(),
-        "dev --once --json should keep stderr empty on success: {stderr}"
+        "dev --once --json should keep structured failure details on stdout: {stderr}"
     );
 }
 
@@ -2188,12 +2192,20 @@ fn plugin_dev_once_json_bridge_rejection_emits_payload_without_human_noise() {
     let port = server.server_addr().to_ip().unwrap().port();
     write_endpoint_file(&endpoint_file, &format!("http://127.0.0.1:{port}"));
 
-    let server_thread = std::thread::spawn(move || {
+    let server_thread = std::thread::spawn(move || loop {
         if let Ok(Some(mut req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
             assert_eq!(req.method(), &tiny_http::Method::Post);
+            if req.url() == "/api/dev/plugins/session-events" {
+                let _ = read_request_body(&mut req);
+                let _ = req.respond(json_response(r#"{"ok":true}"#));
+                continue;
+            }
             assert_eq!(req.url(), "/api/dev/plugins/reload");
             let body = read_request_body(&mut req);
             assert_eq!(body["plugin_id"], "dev-once-rejected");
+            assert_eq!(body["schema_version"], 1);
+            assert_eq!(body["attempt"], 1);
+            assert_eq!(body["activate"], true);
             assert!(
                 body["bundle_path"]
                     .as_str()
@@ -2202,8 +2214,9 @@ fn plugin_dev_once_json_bridge_rejection_emits_payload_without_human_noise() {
                 "reload body should include built bundle path: {body}"
             );
             let _ = req.respond(json_response(
-                r#"{"ok":false,"error":"reload target not installed"}"#,
+                r#"{"schemaVersion":1,"ok":false,"outcome":"failed","stage":"activate","error":{"code":"plugin_not_installed","message":"reload target not installed","action":"Install the plugin and retry","retriable":true}}"#,
             ));
+            break;
         }
     });
 
@@ -2237,7 +2250,9 @@ fn plugin_dev_once_json_bridge_rejection_emits_payload_without_human_noise() {
     assert_eq!(parsed["pluginType"], "python");
     assert_eq!(parsed["reload"]["attempted"], true);
     assert_eq!(parsed["reload"]["ok"], false);
-    assert_eq!(parsed["error"], "reload target not installed");
+    assert_eq!(parsed["reload"]["outcome"], "failed");
+    assert_eq!(parsed["error"]["code"], "plugin_not_installed");
+    assert_eq!(parsed["error"]["message"], "reload target not installed");
     assert!(
         stderr.trim().is_empty(),
         "dev --once --json reload rejection should not duplicate human diagnostics on stderr: {stderr}"

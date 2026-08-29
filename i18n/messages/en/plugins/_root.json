@@ -1,4 +1,9 @@
 {
   "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
+  "devtoolsDisabled": {
+    "description": "Enable Developer Mode in Settings before opening plugin authoring tools.",
+    "openSettings": "Open settings",
+    "title": "Developer Mode is off"
+  },
   "title": "Plugins"
 }
