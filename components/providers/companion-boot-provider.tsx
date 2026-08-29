@@ -343,10 +343,13 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           return
         }
         if (manifest?.features["session.state-sync"]?.version === 1) {
+          // See the web provider: the Host owns the host-state namespace and
+          // `registeredTarget.id` is only our name for the pairing.
+          const hostStateScope = manifest.schemaVersion === 2 ? manifest.hostStateScope : undefined
           const hostStateSync = await installHostStateSyncForTarget({
             transport,
-            accountId: DEFAULT_LOCAL_ACCOUNT_ID,
-            runtimeTargetId: registeredTarget.id,
+            accountId: hostStateScope?.accountId ?? DEFAULT_LOCAL_ACCOUNT_ID,
+            runtimeTargetId: hostStateScope?.runtimeTargetId ?? registeredTarget.id,
           })
           if (isStale()) {
             hostStateSync.stop()

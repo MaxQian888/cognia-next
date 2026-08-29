@@ -18,6 +18,11 @@
  *  - Only unlocks an account that ALREADY exists. First-run account creation
  *    still asks for a password: the account id scopes the Dexie database
  *    (`cognia-account-<id>`), so it must stay a deliberate choice.
+ *  - Never on the web. The caller (`resolveDevAutoUnlockTarget`) refuses on any
+ *    browser-vault platform, because there the password IS the vault key and an
+ *    unlock without one leaves the app claiming to be signed in over a locked
+ *    vault. Desktop and mobile reach their secrets through the OS keyring, so
+ *    the relaxation is real there and only there.
  *  - Locking at runtime (`lock()`, idle auto-lock) still locks. Only the boot
  *    path is relaxed, so the gate itself stays reachable in dev.
  */

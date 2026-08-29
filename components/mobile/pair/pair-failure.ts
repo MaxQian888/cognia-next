@@ -193,7 +193,10 @@ export function diagnosePairFailure(error: unknown, context: PairFailureContext)
       kind: "http",
       status: error.status,
       code: error.code || undefined,
-      invitationSpent: error.status === 401 || error.status === 409,
+      invitationSpent:
+        error.status === 401 ||
+        error.status === 409 ||
+        isSpentInvitationCode(error.code || undefined),
       retryable: error.status >= 500,
       remedies: httpRemedies(error.status, error.code),
     }
@@ -352,11 +355,63 @@ function browserCanTrust(context: PairFailureContext): boolean {
   return isBrowserTrustableOrigin(context.baseUrl)
 }
 
+/**
+ * Host refusal codes that mean *this invitation is gone* — expired, already
+ * redeemed, or never supplied. The string is the only thing that separates them
+ * from an allow-list refusal, because both arrive as a bare 403.
+ */
+const SPENT_INVITATION_CODES = new Set([
+  "invalid_owner_invitation",
+  "owner_invitation_required",
+  "worker_enrollment_required",
+  "browser_enrollment_required",
+])
+
+/** Host refusal codes that mean the *caller's origin* was refused. */
+const ORIGIN_REFUSAL_CODES = new Set([
+  "web_origin_forbidden",
+  "private_network_access_forbidden",
+  "device_origin_mismatch",
+])
+
+/**
+ * Host refusal codes about *which account or tenant* is asking. A fresh
+ * invitation from the same account reproduces them exactly; the stale device
+ * record or the host binding has to go first.
+ */
+const IDENTITY_REFUSAL_CODES = new Set(["host_binding_mismatch", "tenant_mismatch"])
+
+/**
+ * True when a 403 says the invitation itself is used up.
+ *
+ * Read by the caller so the panel's "this invitation is now spent" line comes
+ * from the Host's own verdict rather than from a status-code guess. Only 401
+ * and 409 used to set it, so a re-submitted `cgnp3` — the single most common
+ * way to reach this code — was reported as still reusable.
+ */
+export function isSpentInvitationCode(code: string | undefined): boolean {
+  return code !== undefined && SPENT_INVITATION_CODES.has(code)
+}
+
+/**
+ * Order the remedies for an HTTP refusal.
+ *
+ * 403 is four unrelated verdicts wearing one status: the origin was refused,
+ * the invitation is used up, the account/tenant does not match, or the Host is
+ * in a state that forbids the call. Collapsing them into one bucket is how a
+ * re-submitted invitation came back as "turn on browser access" — advice for a
+ * listener the request had demonstrably just travelled through. The Host always
+ * sends a `code`; route on it, and only fall back to the bucket when it is
+ * absent.
+ */
 function httpRemedies(status: number, code: string): PairRemedy[] {
-  if (code === "web_origin_forbidden" || code === "private_network_access_forbidden") {
+  if (ORIGIN_REFUSAL_CODES.has(code)) {
     return ["enableBrowserAccess", "allowlistOrigin", "freshInvitation"]
   }
+  if (SPENT_INVITATION_CODES.has(code)) return ["freshInvitation", "removeStaleDevice"]
+  if (IDENTITY_REFUSAL_CODES.has(code)) return ["removeStaleDevice", "checkHostLogs"]
   if (status === 401 || status === 409) return ["freshInvitation", "removeStaleDevice"]
+  // A code-less 403 really is ambiguous — keep the historical ordering.
   if (status === 403) return ["enableBrowserAccess", "allowlistOrigin", "freshInvitation"]
   if (status === 404) return ["updateHost", "checkHostRunning"]
   if (status >= 500) return ["checkHostLogs", "freshInvitation"]
@@ -384,7 +439,7 @@ export function pairFailureBodyKey(failure: PairFailure): string {
     case "unreachable":
       return "networkError.unreachable"
     case "http":
-      return httpBodyKey(failure.status)
+      return httpBodyKey(failure.status, failure.code)
     case "vault_locked":
       return "failure.body.vaultLocked"
     case "persist_failed":
@@ -401,9 +456,16 @@ export function pairFailureBodyKey(failure: PairFailure): string {
   }
 }
 
-function httpBodyKey(status: number | undefined): string {
+function httpBodyKey(status: number | undefined, code?: string): string {
   if (status === 401) return "httpError.401"
-  if (status === 403) return "httpError.403"
+  if (status === 403) {
+    // The generic 403 sentence sends the reader to the allow-list. That is the
+    // wrong place for two of the four things a 403 means here, and the Host
+    // already said which one it is.
+    if (isSpentInvitationCode(code)) return "httpError.403Spent"
+    if (code !== undefined && IDENTITY_REFUSAL_CODES.has(code)) return "httpError.403Identity"
+    return "httpError.403"
+  }
   if (status === 404) return "httpError.404"
   if (status !== undefined && status >= 500) return "httpError.5xx"
   return "httpError.generic"
@@ -424,9 +486,77 @@ export function formatPairDiagnostics(failure: PairFailure): string {
   return lines.filter((line): line is string => line !== null).join("\n")
 }
 
+/**
+ * The full text of a caught error — headline *and* the causes underneath it.
+ *
+ * A plain `error.message` is a lie for the two error shapes this flow actually
+ * produces. `AggregateError` puts its constituents in `.errors` and gives the
+ * wrapper a summary sentence of its own, so activation's
+ * "Companion Host activation failed and rollback was incomplete." rendered as
+ * the *entire* technical detail while the two errors that say what went wrong
+ * — a 403 from the Host, a target that could not be restored — were dropped on
+ * the floor. `CompanionPairPhaseError` and anything constructed with
+ * `{ cause }` hide theirs one level down the same way.
+ *
+ * The detail line is the only place a user can read the real failure, so it
+ * flattens both: breadth through `AggregateError.errors`, depth through
+ * `cause`. Visited-set and caps keep a self-referential `cause` from spinning
+ * and a fan-out from filling the panel.
+ */
 function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
+  const parts = flattenErrorText(error, new Set())
+  // `CompanionPairPhaseError` copies its reason's message and *also* keeps it
+  // as `cause`, and an `AggregateError` whose members share a cause repeats it
+  // per member. Both are the same sentence twice on screen; drop the repeats
+  // rather than the structure that produces them.
+  return parts.filter((part, index) => parts.indexOf(part) === index).join(" ← ")
+}
+
+/** Depth of `cause` links followed. Beyond this the chain is noise, not detail. */
+const MAX_CAUSE_DEPTH = 4
+/** Constituents rendered from one `AggregateError`. */
+const MAX_AGGREGATE_ERRORS = 4
+
+function flattenErrorText(error: unknown, seen: Set<unknown>, depth = 0): string[] {
+  if (depth > MAX_CAUSE_DEPTH) return []
+  // `cause` is absent on most errors; `String(undefined)` would otherwise put
+  // the literal text "undefined" at the end of every detail line.
+  if (error === undefined || error === null) return []
+  if (typeof error === "object") {
+    if (seen.has(error)) return []
+    seen.add(error)
+  }
+  if (!(error instanceof Error)) {
+    const text = String(error)
+    return text ? [text] : []
+  }
+
+  const parts: string[] = []
+  if (error.message) parts.push(error.message)
+
+  // `AggregateError.errors` first: its members are siblings of the headline,
+  // not a deeper cause, and they are the ones that name the real failure.
+  const members = error instanceof AggregateError ? error.errors : []
+  if (Array.isArray(members) && members.length > 0) {
+    const shown = members.slice(0, MAX_AGGREGATE_ERRORS)
+    const rendered = shown
+      .map((member) => flattenErrorText(member, seen, depth + 1).join(" ← "))
+      .filter((text) => text.length > 0)
+    // Activation and its rollback routinely fail at the same leg for the same
+    // reason, which printed one sentence twice. Identical members carry no
+    // extra information; number them only when they actually differ.
+    const distinct = rendered.filter((text, index) => rendered.indexOf(text) === index)
+    if (distinct.length === 1) parts.push(distinct[0])
+    else if (distinct.length > 1) {
+      parts.push(distinct.map((text, index) => `[${index + 1}] ${text}`).join(" "))
+    }
+    if (members.length > shown.length) {
+      parts.push(`(+${members.length - shown.length} more)`)
+    }
+  }
+
+  parts.push(...flattenErrorText(error.cause, seen, depth + 1))
+  return parts.filter((part) => part.length > 0)
 }
 
 function currentOrigin(): string | undefined {

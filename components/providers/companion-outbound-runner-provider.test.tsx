@@ -1,6 +1,10 @@
 import { render, waitFor } from "@testing-library/react"
 
 import type { OutboundDispatcher } from "@/lib/queue/outbound-queue"
+import {
+  clearActiveRuntimeTargetContext,
+  getActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { CompanionOutboundRunnerProvider } from "./companion-outbound-runner-provider"
 
 const unsubscribe = jest.fn()
@@ -129,6 +133,7 @@ const scope = { accountId: "acct-web", targetId: "desktop-studio", routingGenera
 
 beforeEach(() => {
   jest.clearAllMocks()
+  clearActiveRuntimeTargetContext()
   pendingObserver = undefined
   runtimeTarget = null
   transitionParticipant = null
@@ -193,6 +198,48 @@ it("uses the stable Host id and default Mobile account on a fresh install", () =
       canDispatch: expect.any(Function),
     })
   )
+})
+
+it("refuses to route a Web companion through the snapshot's placeholder id", () => {
+  // `web-companion` names a surface, not a stored target. Installing it as the
+  // routing context is what made a freshly paired browser report "no
+  // paired-Host record exists for the active runtime target": the boot
+  // provider republishes that opening snapshot on every rebind, so the
+  // placeholder landed on top of the real Host id the pairing had just set,
+  // and the credential lookup then asked the book for a record nothing files.
+  runtimeTarget = { id: "web-companion" }
+
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="web"
+      webCompanionOverride
+      mobilePairedOverride={false}
+    />
+  )
+
+  expect(createRunner).not.toHaveBeenCalled()
+  expect(getActiveRuntimeTargetContext()?.targetId).not.toBe("web-companion")
+})
+
+it("routes as soon as the snapshot carries the real Host id", () => {
+  runtimeTarget = { id: "host-web-a" }
+
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="web"
+      webCompanionOverride
+      mobilePairedOverride={false}
+    />
+  )
+
+  expect(createRunner).toHaveBeenCalledWith(
+    expect.objectContaining({
+      scope: expect.objectContaining({ targetId: "host-web-a" }),
+    })
+  )
+  expect(getActiveRuntimeTargetContext()?.targetId).toBe("host-web-a")
 })
 
 it("quiesces through the runtime-target transition before cleanup", async () => {

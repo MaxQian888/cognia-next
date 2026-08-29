@@ -592,6 +592,36 @@ describe("<CompanionBootProvider /> — paired", () => {
     expect(hostStateStopMock).toHaveBeenCalledTimes(1)
   })
 
+  it("addresses host-state in the Host's namespace when the manifest declares one", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(pairedConfig)
+    // `host-a` is the id this phone filed the pairing under; the desktop Host
+    // stores its host-state channels under its own local runtime.
+    transportCallMock.mockResolvedValueOnce(
+      buildLocalHostFeatureManifest({
+        platform: "tauri",
+        hostId: "host-a",
+        hostStateScope: { accountId: "local_acct_a", runtimeTargetId: "local-host" },
+      })
+    )
+
+    const view = render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(installHostStateSyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "local_acct_a", runtimeTargetId: "local-host" })
+      )
+    )
+    expect(installHostStateSyncMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeTargetId: "host-a" })
+    )
+    view.unmount()
+  })
+
   it("does not install host bindings when target registration fails", async () => {
     setMobile()
     hydrateMock.mockResolvedValueOnce(pairedConfig)

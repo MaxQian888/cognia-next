@@ -8,6 +8,7 @@ import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { getDb } from "@/lib/db/schema"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { isPlaceholderRuntimeTargetId } from "@/lib/runtime/runtime-target"
 import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbound-queue"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
@@ -113,7 +114,19 @@ export function CompanionOutboundRunnerProvider({
         : null,
     [accountId, collabBaseUrl]
   )
-  const targetId = runtimeTarget?.id ?? (platform === "tauri" ? "local-host" : null)
+  // The snapshot's target id names a *surface*; this provider installs it as
+  // the routing context, which is what `companionStorage().load()` resolves a
+  // credential by. `web-companion` is a placeholder the Web boot provider
+  // publishes before it knows which Host it talks to, and nothing is ever
+  // filed under it — installing it made a freshly paired client fail to find
+  // its own record ("no paired-Host record exists for the active runtime
+  // target"), because the boot provider re-publishes that opening snapshot on
+  // every `restartWebHostBindings()` and so clobbered the real id the pairing
+  // had just set. Wait for the real one instead.
+  const resolvedTargetId = isPlaceholderRuntimeTargetId(runtimeTarget?.id)
+    ? null
+    : (runtimeTarget?.id ?? null)
+  const targetId = resolvedTargetId ?? (platform === "tauri" ? "local-host" : null)
   const scope = useMemo(() => {
     if (scopeOverride) return scopeOverride
     if (!accountId || !targetId) return null

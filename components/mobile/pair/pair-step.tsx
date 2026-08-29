@@ -60,9 +60,11 @@ import { notify } from "@/lib/capacitor/haptics"
 import { recordRecentServer } from "@/lib/connectivity/recent-servers"
 import { probeOriginReachable } from "@/lib/connectivity/origin-reachability"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
+import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import { readClipboardText } from "@/lib/tauri/clipboard"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
+import { useAccountStore, usesBrowserVault } from "@/stores/account/account-store"
 
 import { registerPairPayload } from "./pair-api"
 import {
@@ -94,6 +96,16 @@ export interface PairStepProps {
   autoSubmit?: boolean
   webMode?: boolean
   persistPairing?: (config: CompanionConfig) => Promise<void>
+  /**
+   * Whether this client can store a device key at all, right now.
+   *
+   * Desktop and mobile always can — secrets go to the OS keyring. A browser
+   * keeps them in the Browser Vault, whose session key is derived from the
+   * local account password, so it is unusable until the account is unlocked.
+   */
+  isCredentialStoreReady?: () => boolean
+  /** Take the user to the account lock screen. */
+  onRequestUnlock?: () => void | Promise<void>
   onPaired: (config: CompanionConfig) => void
   onBack?: () => void
   /** Lets the shell's scene follow what the form is doing. */
@@ -109,6 +121,32 @@ type Phase =
 
 /** Budget for the failure-path reachability probe. */
 const PROBE_TIMEOUT_MS = 2000
+
+/**
+ * Can this client keep a device key?
+ *
+ * Only the web answers "not yet": `getActiveBrowserVault()` is null until
+ * someone unlocks the account with its password, and every credential write
+ * through it throws `BrowserVaultLockedError`.
+ */
+function defaultCredentialStoreReady(): boolean {
+  return !usesBrowserVault() || getActiveBrowserVault() !== null
+}
+
+/**
+ * Make the app agree with its own vault, which is what puts the lock screen on
+ * screen.
+ *
+ * There is no route to navigate to: `AccountGate` wraps the whole tree and
+ * decides from `useAccountStore().locked`, which is `activeAccountId !==
+ * unlockedAccountId`. A locked vault under an "unlocked" account id is exactly
+ * the disagreement that hid the gate, so `lock()` — which clears the id, the
+ * vault, the database selection and the runtime target together — is the way
+ * back to it, not a `router.push`.
+ */
+function defaultRequestUnlock(): Promise<void> {
+  return useAccountStore.getState().lock()
+}
 
 /**
  * Ask the peer whether it is there at all, ignoring whether we may read it.
@@ -135,11 +173,16 @@ export function PairStep({
   autoSubmit = false,
   webMode = false,
   persistPairing = saveCompanionConfig,
+  isCredentialStoreReady = defaultCredentialStoreReady,
+  onRequestUnlock = defaultRequestUnlock,
   onPaired,
   onBack,
   onActivityChange,
 }: PairStepProps) {
   const t = useTranslations("mobile.pair")
+  // The unlock button is the account subsystem's own affordance; borrowing its
+  // label keeps the two screens saying the same word for the same act.
+  const tAccount = useTranslations("account.gate")
   const keyboard = useKeyboardInsets()
   const [payload, setPayload] = useState(prefilledPairPayload)
   const [phase, setPhase] = useState<Phase>({ kind: "idle" })
@@ -174,6 +217,31 @@ export function PairStep({
         }
       }
 
+      // The second pre-flight, and the reason this one cannot wait until the
+      // write fails: the Host burns the invitation at registration, before this
+      // client ever reaches its credential store. Submitting with a locked
+      // vault therefore spends a one-shot code on a save that is already known
+      // to throw, and leaves the only way forward — unlock, pair again —
+      // needing an invitation that no longer exists. Checked here, nothing has
+      // been sent and the string in the field is still redeemable.
+      if (!isCredentialStoreReady()) {
+        setPhase({
+          kind: "error",
+          failure: {
+            stage: "persist",
+            kind: "vault_locked",
+            detail: t("failure.body.vaultLockedPending"),
+            bodyText: t("failure.body.vaultLockedPending"),
+            remedies: ["unlockAccount"],
+            retryable: true,
+            invitationSpent: false,
+            baseUrl,
+          },
+          action: { label: tAccount("unlockAccount"), onAction: onRequestUnlock },
+        })
+        return
+      }
+
       setPhase({ kind: "pairing" })
       const result = await registerPairPayload(canonicalPayload)
       if (result.kind === "invalid_payload") {
@@ -196,13 +264,23 @@ export function PairStep({
       try {
         await persistPairing(result.config)
       } catch (error) {
+        // Reachable when the vault is locked *between* the pre-flight and the
+        // write — an idle auto-lock mid-request, or a store this component does
+        // not own. The invitation is spent by now, so the panel's own copy
+        // still says "get a fresh one"; the button goes where that sentence
+        // has always pointed and never led.
+        const failure = diagnosePairFailure(error, {
+          stage: "persist",
+          baseUrl: result.config.baseUrl,
+          webMode,
+        })
         setPhase({
           kind: "error",
-          failure: diagnosePairFailure(error, {
-            stage: "persist",
-            baseUrl: result.config.baseUrl,
-            webMode,
-          }),
+          failure,
+          action:
+            failure.kind === "vault_locked"
+              ? { label: tAccount("unlockAccount"), onAction: onRequestUnlock }
+              : undefined,
         })
         return
       }
@@ -216,7 +294,16 @@ export function PairStep({
       void notify("success")
       onPaired(result.config)
     },
-    [acceptPayload, onPaired, persistPairing, webMode]
+    [
+      acceptPayload,
+      isCredentialStoreReady,
+      onPaired,
+      onRequestUnlock,
+      persistPairing,
+      t,
+      tAccount,
+      webMode,
+    ]
   )
 
   const onScanQr = useCallback(async () => {

@@ -1,4 +1,9 @@
-import { resolveRuntimeTarget, type RuntimeTargetResolutionInput } from "./runtime-target"
+import {
+  isPlaceholderRuntimeTargetId,
+  PLACEHOLDER_WEB_COMPANION_TARGET_ID,
+  resolveRuntimeTarget,
+  type RuntimeTargetResolutionInput,
+} from "./runtime-target"
 
 function resolve(overrides: Partial<RuntimeTargetResolutionInput> = {}) {
   return resolveRuntimeTarget({
@@ -48,5 +53,35 @@ describe("resolveRuntimeTarget", () => {
   it("leaves Tauri and headless execution on their native local hosts", () => {
     expect(resolve({ platform: "tauri" })).toBeNull()
     expect(resolve({ platform: "headless" })).toBeNull()
+  })
+})
+
+describe("placeholder target ids", () => {
+  it("flags the Web companion label the resolver invents", () => {
+    // `resolveRuntimeTarget` has no way to know which Host a browser talks to,
+    // so it names the surface. Anything that routes, resolves a credential or
+    // keys persistence has to refuse that name.
+    expect(isPlaceholderRuntimeTargetId(PLACEHOLDER_WEB_COMPANION_TARGET_ID)).toBe(true)
+    expect(
+      isPlaceholderRuntimeTargetId(
+        resolveRuntimeTarget({
+          platform: "web",
+          mobileRuntimeMode: undefined,
+          webCompanionConfigured: true,
+        })?.id
+      )
+    ).toBe(true)
+  })
+
+  it.each(["web-standalone", "mobile-standalone", "mobile-companion", "local-host", "host-abc"])(
+    "leaves %s alone — it names a stored target",
+    (id) => {
+      expect(isPlaceholderRuntimeTargetId(id)).toBe(false)
+    }
+  )
+
+  it("treats an absent id as not-a-placeholder rather than throwing", () => {
+    expect(isPlaceholderRuntimeTargetId(null)).toBe(false)
+    expect(isPlaceholderRuntimeTargetId(undefined)).toBe(false)
   })
 })

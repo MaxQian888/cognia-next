@@ -354,6 +354,115 @@ describe("WebCompanionBootProvider", () => {
     expect(hostStateStopMock).toHaveBeenCalledTimes(1)
   })
 
+  it("addresses host-state in the Host's namespace when the manifest declares one", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      accountId: "acct-web",
+      targetId: "companion-cloud",
+    })
+    // `companion-cloud` is only OUR name for this pairing. The Host stores its
+    // channels under `local-host`, and refuses every `host_state_*` call that
+    // arrives under any other target.
+    transportCallMock.mockResolvedValue(
+      buildLocalHostFeatureManifest({
+        platform: "headless",
+        hostId: "host-cloud",
+        hostStateScope: { accountId: "local_acct_a", runtimeTargetId: "local-host" },
+      })
+    )
+
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(installHostStateSyncMock).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "local_acct_a", runtimeTargetId: "local-host" })
+      )
+    )
+    expect(installHostStateSyncMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeTargetId: "companion-cloud" })
+    )
+    view.unmount()
+  })
+
+  it("stops retrying a manifest the Host says will never succeed", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      accountId: "acct-web",
+      targetId: "companion-cloud",
+    })
+    // A contract violation is deterministic: the same body fails identically
+    // every time. Retrying it spent the device's quota until the Host answered
+    // 429 to everything, which then hid the original refusal.
+    transportCallMock.mockRejectedValue(
+      Object.assign(new Error("the request body violates the Headless command contract"), {
+        code: "contract_input_violation",
+        retryable: false,
+      })
+    )
+
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("offline"))
+    const calls = transportCallMock.mock.calls.length
+    // Well past the first two backoff rungs (250ms, 1s would both have fired).
+    await new Promise((resolve) => setTimeout(resolve, 1_400))
+    expect(transportCallMock.mock.calls.length).toBe(calls)
+    expect(getRuntimeSnapshot().host).toMatchObject({ compatible: false })
+    view.unmount()
+  })
+
+  it("waits as long as the Host asked before retrying a rate limit", async () => {
+    const random = jest.spyOn(Math, "random").mockReturnValue(0)
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      accountId: "acct-web",
+      targetId: "companion-cloud",
+    })
+    // 429 is retryable, but on OUR schedule it never clears — the Host names
+    // the wait and this loop has to take it.
+    transportCallMock.mockRejectedValue(
+      Object.assign(new Error("device exceeded the remote execution quota"), {
+        code: "rate_limited",
+        retryable: true,
+        retryAfterMs: 700,
+      })
+    )
+
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(transportCallMock).toHaveBeenCalled())
+    const calls = transportCallMock.mock.calls.length
+    random.mockRestore()
+    // Downward jitter used to retry at 595ms even though the Host required 700ms.
+    await new Promise((resolve) => setTimeout(resolve, 620))
+    expect(transportCallMock.mock.calls.length).toBe(calls)
+    view.unmount()
+  })
+
   it("keeps Web connecting until the event replay boundary is ready", async () => {
     planeHealthValue = { rpc: "ready", events: "replaying" }
     hydrateMock.mockResolvedValue({

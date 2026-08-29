@@ -21,6 +21,14 @@ import {
   runStagedSyncDown,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
+import {
+  describeCompanionCredentialDiagnosis,
+  diagnoseCompanionCredential,
+} from "@/lib/companion/credential-availability"
+// The sentinel this provider PUBLISHES, and `companion-outbound-runner-provider`
+// refuses to install as a routing context. Producer and consumer share the
+// constant so a rename cannot silently un-guard the consumer.
+import { PLACEHOLDER_WEB_COMPANION_TARGET_ID } from "@/lib/runtime/runtime-target"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { CompanionPlaneHealth } from "@/lib/tauri/transport-companion"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
@@ -39,6 +47,32 @@ import {
 const log = loggers.shell
 
 const RECOVERY_BACKOFF_MS = [250, 1_000, 4_000, 16_000, 30_000] as const
+
+/**
+ * Read the Host's own verdict off a rejected call.
+ *
+ * Shape-checked rather than `instanceof CompanionError`: the error crosses a
+ * module boundary, and a class identity that does not survive that boundary
+ * would make this guard throw inside the very `catch` meant to handle the
+ * failure — turning a retryable blip into a dead boot.
+ */
+function hostRefusal(
+  error: unknown
+): { code: string; message: string; retryable: boolean; retryAfterMs?: number } | null {
+  if (typeof error !== "object" || error === null) return null
+  const candidate = error as { code?: unknown; retryable?: unknown; retryAfterMs?: unknown }
+  if (typeof candidate.code !== "string" || typeof candidate.retryable !== "boolean") return null
+  return {
+    code: candidate.code,
+    message: error instanceof Error ? error.message : String(error),
+    retryable: candidate.retryable,
+    ...(typeof candidate.retryAfterMs === "number" &&
+    Number.isFinite(candidate.retryAfterMs) &&
+    candidate.retryAfterMs >= 0
+      ? { retryAfterMs: candidate.retryAfterMs }
+      : {}),
+  }
+}
 
 /**
  * Cloud-companion boot for the PLAIN BROWSER (ADR-0059 C1).
@@ -132,7 +166,22 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       if (cancelled) return
 
       if (!config) {
-        notifyWebHostBindingsFailed(new Error("The selected Web Host credential is unavailable."))
+        // `load()` collapses four unrelated causes into one null. Re-derive
+        // which one it was before naming it, or the pairing panel reports
+        // "credential is unavailable" for a locked Vault, an unpaired client
+        // and a half-written record alike — and every remedy it then offers is
+        // a guess. Read-only, so it is safe on this failure path.
+        const diagnosis = await diagnoseCompanionCredential()
+        // The diagnosis is a second await, and `disposeSubscriptions` (which
+        // `restartWebHostBindings` calls) can land inside it. Publishing after
+        // that clobbers the snapshot the newer boot just wrote, pinning the UI
+        // on "requires pairing" for a pairing that succeeded.
+        if (cancelled) return
+        notifyWebHostBindingsFailed(
+          new Error(
+            `The selected Web Host credential is unavailable: ${describeCompanionCredentialDiagnosis(diagnosis)}.`
+          )
+        )
         updateRuntimeSnapshot({
           vaultState: getActiveBrowserVault() ? "unavailable" : "locked",
           connectionState: "offline",
@@ -150,7 +199,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
 
       updateRuntimeSnapshot({
         target: {
-          id: config.targetId ?? "web-companion",
+          id: config.targetId ?? PLACEHOLDER_WEB_COMPANION_TARGET_ID,
           kind: "companion",
           platform: "web",
           hostKind: classifyWsHost(config.baseUrl) === "ws-lan" ? "desktop" : "cloud",
@@ -215,10 +264,17 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
           host: runtimeHostSnapshotFromManifest(manifest, { hostStateWriteEnabled: false }),
         })
         if (manifest.features["session.state-sync"]?.version === 1 && !hostStateSync) {
+          // Host-state is addressed in the HOST's namespace, not ours.
+          // `config.targetId` is the id we filed this pairing under; the Host
+          // writes its channels under its own active runtime target and
+          // refuses anything else. Fall back to our id only for a Host too old
+          // to declare one.
+          const scope = manifest.hostStateScope
           hostStateSync = await installHostStateSyncForTarget({
             transport,
-            accountId: config.accountId ?? "local-default",
-            runtimeTargetId: config.targetId ?? "web-companion",
+            accountId: scope?.accountId ?? config.accountId ?? "local-default",
+            runtimeTargetId:
+              scope?.runtimeTargetId ?? config.targetId ?? PLACEHOLDER_WEB_COMPANION_TARGET_ID,
           })
           updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifest) })
           cleanup.push(() => hostStateSync?.stop())
@@ -240,21 +296,51 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
             return false
           } catch (error) {
             if (cancelled) return false
+            // The Host answers every refusal with `retryable`, and this loop
+            // used to discard it: a deterministic refusal (a contract
+            // violation, a revoked grant) was retried on the same schedule as
+            // a dropped packet, forever. The retries then spent the device's
+            // remote-execution quota, so the Host started answering 429 to
+            // everything — a second failure, caused entirely by the response
+            // to the first, and one that hides it.
+            const refusal = hostRefusal(error)
+            if (refusal && !refusal.retryable) {
+              updateRuntimeSnapshot({
+                connectionState: "offline",
+                host: { compatible: false, operations: [], grants: [] },
+              })
+              log.warn("web companion: host refused the manifest", {
+                code: refusal.code,
+                error: refusal.message,
+              })
+              notifyWebHostBindingsFailed(
+                new Error(`The Host refused this client: ${refusal.message} (${refusal.code}).`)
+              )
+              return false
+            }
             updateRuntimeSnapshot({ connectionState: "connecting" })
             log.warn("web companion: host manifest unavailable", {
               error: error instanceof Error ? error.message : String(error),
             })
-            const base =
+            // When the Host names a wait, take it: our own schedule is what
+            // keeps a rate limit pinned. A wait of zero is not a wait, though —
+            // honouring it verbatim would drop the backoff entirely and spin
+            // this loop with no pause at all, which is the quota-burning
+            // behaviour the `retryable` check above exists to end. Zero (and
+            // anything absent or nonsensical) falls back to our own schedule.
+            const hostAsked = refusal?.retryAfterMs
+            const backoff =
               RECOVERY_BACKOFF_MS[Math.min(recoveryAttempt, RECOVERY_BACKOFF_MS.length - 1)]
+            const delay =
+              hostAsked !== undefined && hostAsked > 0
+                ? hostAsked
+                : Math.round(backoff * (0.85 + Math.random() * 0.3))
             recoveryAttempt++
             await new Promise<void>((resolve) => {
-              recoveryTimer = setTimeout(
-                () => {
-                  recoveryTimer = null
-                  resolve()
-                },
-                Math.round(base * (0.85 + Math.random() * 0.3))
-              )
+              recoveryTimer = setTimeout(() => {
+                recoveryTimer = null
+                resolve()
+              }, delay)
             })
           }
         }

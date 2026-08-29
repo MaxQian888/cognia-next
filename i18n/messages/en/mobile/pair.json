@@ -68,7 +68,8 @@
     "body": {
       "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
       "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
-      "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help."
+      "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
+      "vaultLockedPending": "Your local account is locked, so this browser cannot store the device key yet. Nothing has been sent — the invitation in the field is still valid. Unlock your account, then submit it again."
     },
     "copyDiagnostics": "Copy diagnostics",
     "diagnosticsCopied": "Diagnostics copied",
@@ -83,7 +84,7 @@
       "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
       "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
       "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
-      "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
+      "unlockAccount": "Sign in to your local account with its password, then pair again.",
       "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
       "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin."
     },
@@ -138,6 +139,8 @@
   "httpError": {
     "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
     "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
+    "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
+    "403Spent": "The Host refused the invitation itself — it has expired or was already redeemed. Issue a new one; re-sending this string cannot work.",
     "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
     "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
     "generic": "Pairing failed (HTTP {status})."

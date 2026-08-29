@@ -142,6 +142,57 @@ describe("Host refusals that arrive as real HTTP answers", () => {
     expect(failure.remedies).toEqual(["freshInvitation", "removeStaleDevice"])
   })
 
+  it("sends a re-submitted invitation to a fresh one, not to the allow-list", () => {
+    // The live regression: a `cgnp3` pasted twice comes back as a bare 403, and
+    // the one-bucket mapping answered "turn on browser access" — for a listener
+    // the request had just travelled through to earn the refusal.
+    const failure = diagnosePairFailure(
+      new CompanionApiError(
+        "the owner invitation is expired or already used",
+        "invalid_owner_invitation",
+        403
+      ),
+      { stage: "register", baseUrl: LOOPBACK, webMode: true, online: true }
+    )
+    expect(failure.remedies).toEqual(["freshInvitation", "removeStaleDevice"])
+    expect(failure.remedies).not.toContain("enableBrowserAccess")
+    expect(failure.invitationSpent).toBe(true)
+    expect(pairFailureBodyKey(failure)).toBe("httpError.403Spent")
+  })
+
+  it.each(["owner_invitation_required", "worker_enrollment_required", "browser_enrollment_required"])(
+    "treats %s the same way — the invitation, not the origin",
+    (code) => {
+      const failure = diagnosePairFailure(
+        new CompanionApiError("a one-time invitation is required", code, 403),
+        { stage: "register", baseUrl: LOOPBACK, online: true }
+      )
+      expect(failure.remedies[0]).toBe("freshInvitation")
+      expect(failure.invitationSpent).toBe(true)
+    }
+  )
+
+  it("does not offer a fresh invitation when the account itself is refused", () => {
+    // A new invitation from the same account reproduces this byte for byte.
+    const failure = diagnosePairFailure(
+      new CompanionApiError("binding mismatch", "host_binding_mismatch", 403),
+      { stage: "register", baseUrl: LOOPBACK, online: true }
+    )
+    expect(failure.remedies).toEqual(["removeStaleDevice", "checkHostLogs"])
+    expect(failure.invitationSpent).toBe(false)
+    expect(pairFailureBodyKey(failure)).toBe("httpError.403Identity")
+  })
+
+  it("keeps the ambiguous ordering for a 403 with no code", () => {
+    const failure = diagnosePairFailure(new CompanionApiError("nope", "", 403), {
+      stage: "register",
+      baseUrl: LOOPBACK,
+      online: true,
+    })
+    expect(failure.remedies[0]).toBe("enableBrowserAccess")
+    expect(pairFailureBodyKey(failure)).toBe("httpError.403")
+  })
+
   it("offers a retry only for a server-side fault", () => {
     const failure = diagnosePairFailure(
       new CompanionApiError("boom", "", 503),
@@ -252,6 +303,105 @@ describe("formatPairDiagnostics", () => {
   })
 })
 
+describe("the technical detail keeps the cause", () => {
+  it("unpacks an AggregateError instead of showing only its summary", () => {
+    // The live regression: activation wrapped the real 403 and the rollback
+    // failure in an AggregateError, and the panel rendered nothing but the
+    // wrapper's own sentence — so the two errors that said what went wrong
+    // never reached the screen.
+    const aggregate = new AggregateError(
+      [new Error("sync_pull refused: 403"), new Error("previous target could not be restored")],
+      "Companion Host activation failed and rollback was incomplete."
+    )
+    const failure = diagnosePairFailure(
+      new CompanionPairPhaseError("activate", aggregate),
+      { stage: "activate", baseUrl: LOOPBACK, webMode: true, online: true }
+    )
+    expect(failure.kind).toBe("activate_failed")
+    expect(failure.detail).toContain("Companion Host activation failed")
+    expect(failure.detail).toContain("sync_pull refused: 403")
+    expect(failure.detail).toContain("previous target could not be restored")
+  })
+
+  it("follows a `cause` chain down to the error that started it", () => {
+    const root = new Error("connect ECONNREFUSED 127.0.0.1:27891")
+    const middle = new Error("host_feature_manifest failed", { cause: root })
+    const failure = diagnosePairFailure(new CompanionPairPhaseError("activate", middle), {
+      stage: "activate",
+      online: true,
+    })
+    expect(failure.detail).toContain("host_feature_manifest failed")
+    expect(failure.detail).toContain("ECONNREFUSED")
+  })
+
+  it("does not append the literal text `undefined` when there is no cause", () => {
+    const failure = diagnosePairFailure(new Error("plain failure"), {
+      stage: "activate",
+      online: true,
+    })
+    expect(failure.detail).toBe("plain failure")
+  })
+
+  it("terminates on a self-referential cause", () => {
+    const looping = new Error("loops back on itself")
+    ;(looping as { cause?: unknown }).cause = looping
+    const failure = diagnosePairFailure(looping, { stage: "activate", online: true })
+    expect(failure.detail).toBe("loops back on itself")
+  })
+
+  it("says an identical activation and rollback failure once, not twice", () => {
+    // The live shape: `restartWebHostBindings` failed the same way on the way
+    // in and on the way back, and `CompanionPairPhaseError` copies its reason's
+    // message as well as keeping it as `cause` — three prints of one sentence.
+    const same = "The selected Web Host credential is unavailable."
+    const failure = diagnosePairFailure(
+      new CompanionPairPhaseError(
+        "activate",
+        new AggregateError(
+          [new Error(same), new Error(same)],
+          "Companion Host activation failed and rollback was incomplete."
+        )
+      ),
+      { stage: "activate", online: true }
+    )
+    expect(failure.detail.match(/rollback was incomplete/g)).toHaveLength(1)
+    expect(failure.detail.match(/credential is unavailable/g)).toHaveLength(1)
+    expect(failure.detail).not.toContain("[1]")
+  })
+
+  it("still numbers two genuinely different legs", () => {
+    const failure = diagnosePairFailure(
+      new AggregateError([new Error("activation: 403"), new Error("rollback: no target")], "both"),
+      { stage: "activate", online: true }
+    )
+    expect(failure.detail).toContain("[1] activation: 403")
+    expect(failure.detail).toContain("[2] rollback: no target")
+  })
+
+  it("caps a wide AggregateError instead of filling the panel", () => {
+    const aggregate = new AggregateError(
+      Array.from({ length: 9 }, (_, index) => new Error(`leg ${index}`)),
+      "many legs failed"
+    )
+    const failure = diagnosePairFailure(aggregate, { stage: "activate", online: true })
+    expect(failure.detail).toContain("leg 0")
+    expect(failure.detail).toContain("leg 3")
+    expect(failure.detail).not.toContain("leg 4")
+    expect(failure.detail).toContain("(+5 more)")
+  })
+
+  it("carries the unpacked causes into the copy-paste diagnostics block", () => {
+    const failure = diagnosePairFailure(
+      new CompanionPairPhaseError(
+        "activate",
+        new AggregateError([new Error("the real cause")], "the useless summary")
+      ),
+      { stage: "activate", online: true }
+    )
+    expect(formatPairDiagnostics(failure)).toContain("the real cause")
+  })
+})
+
 describe("message-catalogue coverage", () => {
   // `lint:i18n` skips dynamic keys, and every title/remedy here is looked up as
   // `failure.title.${kind}` / `failure.remedy.${id}`. Without this test a new
@@ -310,6 +460,11 @@ describe("message-catalogue coverage", () => {
     }
     for (const remedy of REMEDIES) {
       expect(typeof lookup(pair, `failure.remedy.${remedy}`)).toBe("string")
+    }
+    // The 403 body key is chosen by refusal code, so the `kind` loop above
+    // only ever reaches the generic one.
+    for (const key of ["httpError.403Spent", "httpError.403Identity"]) {
+      expect(typeof lookup(pair, key)).toBe("string")
     }
   })
 

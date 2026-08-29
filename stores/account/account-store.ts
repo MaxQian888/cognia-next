@@ -752,6 +752,24 @@ function resolveDevAutoUnlockTarget(
   activeAccountId: string | null
 ): string | null {
   if (!isDevAutoUnlockEnabled()) return null
+  // Never on a browser-vault platform. The convenience this function exists for
+  // is "skip re-typing the password", and on desktop/mobile that is harmless:
+  // secrets live in the OS keyring, which needs no password to reach. On the
+  // web they live in the Browser Vault, whose session key is derived from the
+  // password itself (`unlockBrowserVault`) — so an auto-unlock with no password
+  // cannot produce one.
+  //
+  // Returning an id anyway is what made the app lie about itself: `computeLocked`
+  // saw `activeAccountId === unlockedAccountId` and reported unlocked, so
+  // AccountGate never rendered, while `getActiveBrowserVault()` stayed null and
+  // every credential read/write threw `BrowserVaultLockedError`. `/pair` showed
+  // it worst — the Host registered the device, the local save threw, and the
+  // one-shot invitation was already spent, with no route to the lock screen
+  // because the gate believed the user was signed in.
+  //
+  // So on the web the gate always runs in dev. That is not lost convenience:
+  // there is no unlocked-without-a-password state to preserve there.
+  if (shouldUseBrowserVault()) return null
   if (activeAccountId && accounts.some((account) => account.id === activeAccountId)) {
     return activeAccountId
   }

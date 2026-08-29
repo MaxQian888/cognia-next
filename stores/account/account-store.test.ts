@@ -1055,6 +1055,42 @@ describe("account store dev auto-unlock", () => {
     expect(store.getState().locked).toBe(true)
     expect(mockClearAccountDatabaseSelection).toHaveBeenCalled()
   })
+
+  // The Browser Vault session key is derived from the password, so a
+  // password-less unlock cannot open it. Claiming the account is unlocked
+  // anyway is what let the app render its whole shell over a locked vault —
+  // `locked` said signed-in, `getActiveBrowserVault()` said null, and every
+  // credential write threw. On the web the gate must run even in dev.
+  it("refuses to auto-unlock on a browser-vault platform, so the gate still runs", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = false
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().locked).toBe(true)
+    expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
+    expect(mockActivateAccountLocalState).not.toHaveBeenCalled()
+    expect(mockSetActiveAccountId).not.toHaveBeenCalled()
+  })
+
+  it("still auto-unlocks on Capacitor, which reaches secrets through the keyring", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    expect(store.getState().locked).toBe(false)
+  })
 })
 
 describe("account store unlock progress and recovery", () => {
