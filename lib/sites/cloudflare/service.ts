@@ -576,6 +576,12 @@ export class CloudflareSitesService {
       main: paths.entryPath,
       compatibility_date: version.build.compatibilityDate,
       compatibility_flags: version.build.compatibilityFlags,
+      // Recorded on the version since the manifest gained `cloudflare.routes`,
+      // and only emitted when there are any — wrangler treats an empty `routes`
+      // array as "detach every route", which is not what "none configured"
+      // means.
+      // Wrangler's plain-pattern form, which infers the zone from the pattern.
+      ...(version.build.routes.length > 0 ? { routes: version.build.routes } : {}),
       vars: environment.variables,
       d1_databases: bindingResources
         .filter((row) => row.kind === "d1-database")
@@ -1175,9 +1181,35 @@ export class CloudflareSitesService {
     }
   }
 
+  /**
+   * Resolve every operation waiting on an uncertain provider outcome.
+   *
+   * Wrapped in an operation of its own. `SiteOperationType` has always carried
+   * `"reconcile"` and nothing ever queued one, so reconciliation did real
+   * provider round-trips that left no durable trace: a crash mid-reconcile was
+   * invisible, and the result was only visible if you happened to be on the
+   * operations tab. Now it appears in the journal, feeds recovery, and
+   * notifies like everything else.
+   *
+   * The idempotency key carries a nonce on purpose. `queueSiteOperation`
+   * returns the existing row for a repeated key and `runOperation` then throws
+   * "already succeeded" — a fixed key would make reconciliation a thing you can
+   * do exactly once per Site, forever.
+   */
   async reconcile(siteId: string): Promise<{ resolved: number; remaining: number }> {
-    const { site, client } = await this.client(siteId, true)
+    const { site } = await this.client(siteId, true)
     assertSiteAuthoringCapability(site.authoringPolicy, this.deps.actorAccountId, "manage")
+    return this.runOperation({
+      site,
+      type: "reconcile",
+      idempotencyKey: `reconcile:${site.id}:${this.deps.newId("run")}`,
+      payload: { siteId: site.id },
+      action: () => this.reconcileWaiting(siteId),
+    })
+  }
+
+  private async reconcileWaiting(siteId: string): Promise<{ resolved: number; remaining: number }> {
+    const { site, client } = await this.client(siteId, true)
     const waiting = (await listSiteOperations(site.id)).filter(
       (operation) => operation.status === "waiting-reconcile"
     )

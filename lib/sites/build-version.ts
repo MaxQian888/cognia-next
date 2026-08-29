@@ -22,9 +22,14 @@ import { packageSiteArtifact, type SiteArtifactFile } from "./artifact-package"
 import { buildLogRowFrom, buildPhaseMessage } from "./build-log"
 import { assertSiteAuthoringCapability } from "./authoring-policy"
 import { runConfinedSiteBuild, type ConfinedSiteBuildResult } from "./confined-build"
-import { parseSiteHostingManifest } from "./manifest"
+import { parseSiteHostingManifest, type SiteHostingManifest } from "./manifest"
 import { resolveSiteManifestPath, resolveSiteSourceDir } from "./manifest-file"
-import type { SiteBuildPhase, SiteVersionRow } from "@/types/sites"
+import type {
+  SiteBuildPhase,
+  SiteProjectRow,
+  SiteSourceSnapshot,
+  SiteVersionRow,
+} from "@/types/sites"
 import type { GitCommit, GitStatus } from "@/types/git"
 
 interface LocalEntry {
@@ -161,6 +166,55 @@ export async function collectSiteBuildOutput(
   return [...new Map(files.map((file) => [file.path, file])).values()]
 }
 
+/**
+ * The provenance a build would record, without starting one.
+ *
+ * Extracted so `findIdenticalReadyVersion` can be asked "has this exact input
+ * already been built" before spending minutes finding out. Exported for that
+ * preflight, not only for the test.
+ */
+export async function resolveSiteBuildSource(
+  site: SiteProjectRow,
+  manifest: SiteHostingManifest,
+  dependencies?: Partial<
+    Pick<BuildVersionDeps, "join" | "readBytes" | "pathExists" | "gitSnapshot">
+  >
+): Promise<SiteSourceSnapshot> {
+  const base = defaults()
+  const deps = {
+    join: base.join,
+    readBytes: base.readBytes,
+    pathExists: base.pathExists,
+    gitSnapshot: base.gitSnapshot,
+    ...dependencies,
+  }
+  const git = await deps.gitSnapshot(site.sourceRoot)
+  const dirty = [...git.status.staged, ...git.status.changes, ...git.status.merge].length > 0
+  const lockfiles = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb", "Cargo.lock"]
+  let lockfileDigest = await sha256Hex("no-lockfile")
+  for (const name of lockfiles) {
+    const path = await deps.join(site.sourceRoot, name)
+    if (await deps.pathExists(path)) {
+      lockfileDigest = await sha256Bytes(await deps.readBytes(path))
+      break
+    }
+  }
+  return {
+    commitSha: git.commit?.hash ?? "unversioned",
+    dirty,
+    lockfileDigest,
+    inputDigest: await sha256Hex(
+      canonicalStringify({
+        manifest,
+        commitSha: git.commit?.hash ?? "unversioned",
+        changedPaths: [...git.status.staged, ...git.status.changes, ...git.status.merge]
+          .map((change) => change.path)
+          .sort(),
+      })
+    ),
+  }
+}
+
 export interface BuildAndSaveSiteVersionInput {
   siteId: string
   environmentRevisionId: string
@@ -189,31 +243,8 @@ export async function buildAndSaveSiteVersion(
   const manifest = parseSiteHostingManifest(
     await deps.readText(await resolveSiteManifestPath(site, deps.join))
   )
-  const git = await deps.gitSnapshot(site.sourceRoot)
-  const dirty = [...git.status.staged, ...git.status.changes, ...git.status.merge].length > 0
-  const lockfiles = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb", "Cargo.lock"]
-  let lockfileDigest = await sha256Hex("no-lockfile")
-  for (const name of lockfiles) {
-    const path = await deps.join(site.sourceRoot, name)
-    if (await deps.pathExists(path)) {
-      lockfileDigest = await sha256Bytes(await deps.readBytes(path))
-      break
-    }
-  }
-  const source = {
-    commitSha: git.commit?.hash ?? "unversioned",
-    dirty,
-    lockfileDigest,
-    inputDigest: await sha256Hex(
-      canonicalStringify({
-        manifest,
-        commitSha: git.commit?.hash ?? "unversioned",
-        changedPaths: [...git.status.staged, ...git.status.changes, ...git.status.merge]
-          .map((change) => change.path)
-          .sort(),
-      })
-    ),
-  }
+  const source = await resolveSiteBuildSource(site, manifest, deps)
+
   const versionId = deps.newId("siteversion")
   let version: SiteVersionRow
   try {
@@ -228,12 +259,16 @@ export async function buildAndSaveSiteVersion(
         packageManager: input.packageManager,
         compatibilityDate: manifest.cloudflare.compatibilityDate,
         compatibilityFlags: manifest.cloudflare.compatibilityFlags,
-        routes: [],
+        routes: manifest.cloudflare.routes ?? [],
         bindings: manifest.cloudflare.bindings.map((binding) => ({
           kind: binding.kind,
           name: binding.name,
           resourceId: binding.providerResourceId,
         })),
+        // Part of the build's provenance: two versions from the same commit
+        // with different network allowances are not the same build.
+        installNetworkHosts: [...(input.installNetworkHosts ?? [])],
+        buildNetworkHosts: [...(input.buildNetworkHosts ?? [])],
       },
       now: deps.now(),
     })

@@ -7,7 +7,7 @@ jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "tauri") }
 
 import { usePlatform } from "@/hooks/use-platform"
 import type { SiteProjectRow } from "@/types/sites"
-import { resolveSiteGate, useSiteActionGate, useSiteHostIsCapable } from "./use-site-action-gate"
+import { resolveSiteGate, useSiteActionGate } from "./use-site-action-gate"
 
 const usePlatformMock = usePlatform as jest.Mock
 
@@ -183,11 +183,5 @@ describe("useSiteActionGate", () => {
       reason: "requires-desktop",
       title: "t:host.reason.requires-desktop",
     })
-  })
-
-  it("reports host capability for the console banner", () => {
-    expect(renderHook(() => useSiteHostIsCapable()).result.current).toBe(true)
-    usePlatformMock.mockReturnValue("web")
-    expect(renderHook(() => useSiteHostIsCapable()).result.current).toBe(false)
   })
 })

@@ -85,6 +85,11 @@
     "networkHosts": "Approved install hosts",
     "packageManager": "Package manager snapshot",
     "runtime": "Runtime snapshot",
+    "seededFrom": {
+      "default": "Using defaults.",
+      "last-version": "Seeded from the last build.",
+      "manifest": "Seeded from the hosting manifest."
+    },
     "title": "Confined build and local preview"
   },
   "buildLog": {

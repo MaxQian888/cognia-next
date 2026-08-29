@@ -4909,7 +4909,10 @@
       "downloadFailed": "Couldn't save the artifact",
       "expand": "Expand preview",
       "openInCanvas": "Open in canvas",
-      "openInCanvasAria": "Open artifact in canvas"
+      "openInCanvasAria": "Open artifact in canvas",
+      "previewAnyway": "Preview anyway",
+      "previewDeferred": "This artifact is large — previewing it is a click away.",
+      "previewReactManual": "React artifacts load a runtime, so they preview on request."
     },
     "askUser": {
       "dismiss": "Dismiss",
@@ -4922,6 +4925,13 @@
     },
     "backgroundRuns": {
       "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
+    },
+    "backlinks": {
+      "chipLabel": "{count, plural, one {Referenced by # conversation} other {Referenced by # conversations}}",
+      "empty": "No conversation has referenced this yet.",
+      "listLabel": "Referenced in",
+      "panelTitle": "Referenced in",
+      "timesInConversation": "{count, plural, one {# time} other {# times}}"
     },
     "branch": {
       "ariaLineage": "Go to the message this branch was created from, in {title}",
@@ -27615,6 +27625,8 @@
       }
     },
     "artifacts": {
+      "agentAuthoringHint": "Gives the assistant tools to create and revise artifacts and canvas documents by name, instead of relying on detection of fenced code blocks. Revisions still follow the review setting above.",
+      "agentAuthoringLabel": "Let the assistant create artifacts",
       "autoCreateHint": "When on, qualifying code blocks in assistant replies are converted into artifacts and the side panel slides in.",
       "autoCreateLabel": "Enable auto-detection",
       "defaultPanelMode": {
@@ -35681,6 +35693,11 @@
       "networkHosts": "Approved install hosts",
       "packageManager": "Package manager snapshot",
       "runtime": "Runtime snapshot",
+      "seededFrom": {
+        "default": "Using defaults.",
+        "last-version": "Seeded from the last build.",
+        "manifest": "Seeded from the hosting manifest."
+      },
       "title": "Confined build and local preview"
     },
     "buildLog": {
@@ -35694,8 +35711,8 @@
       "noStdout": "Nothing was written to stdout.",
       "open": "Build log",
       "phase": {
-        "install": "Install",
         "build": "Build",
+        "install": "Install",
         "package": "Package"
       },
       "stderr": "stderr",

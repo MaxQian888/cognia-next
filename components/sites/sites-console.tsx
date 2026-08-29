@@ -35,6 +35,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSiteActionGate, type SiteGate } from "@/hooks/sites/use-site-action-gate"
 import { useSiteActions } from "@/hooks/sites/use-site-actions"
+import { useSiteBuildInputs } from "@/hooks/sites/use-site-build-inputs"
 import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import { useSitePreviewSession } from "@/hooks/sites/use-site-preview-session"
@@ -96,6 +97,14 @@ export function SitesConsole() {
   const gate = useSiteActionGate(site, actorAccountId)
   const manifest = useSiteHostingManifest(site)
   const preview = useSitePreviewSession(site?.id ?? null)
+  // Keyed on the Site: the publish tab used to hold these as literals that did
+  // not reset on selection change, so one Site's runtime and network
+  // allowances were used for another's build.
+  const buildInputs = useSiteBuildInputs(
+    site?.id ?? null,
+    live.versions,
+    manifest.state.status === "ok" ? manifest.state.manifest : undefined
+  )
 
   const publish = useSitePublishActions({
     site,
@@ -345,6 +354,9 @@ export function SitesConsole() {
                   onStartPreview={publish.startPreview}
                   onStopPreview={publish.stopPreview}
                   onRedetectWrangler={publish.redetectWrangler}
+                  buildInputs={buildInputs.inputs}
+                  buildInputsSource={buildInputs.source}
+                  setBuildInputs={buildInputs.setInputs}
                   onGoToVersions={() => setTab("versions")}
                   onGoToEnvironment={() => setTab("environment")}
                 />

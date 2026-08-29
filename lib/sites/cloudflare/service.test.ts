@@ -828,3 +828,21 @@ it("refuses to keep a secret no previous revision holds", async () => {
     })
   ).rejects.toThrow(/no stored secret to keep for GHOST/)
 })
+
+it("records reconciliation as a durable operation, repeatably", async () => {
+  // `SiteOperationType` always carried `"reconcile"` and nothing ever queued
+  // one, so reconciliation did real provider round-trips that left no trace.
+  await configureToken()
+  await service.reconcile("site_1")
+  await service.reconcile("site_1")
+
+  const operations = (await getDb().siteOperations.toArray()).filter(
+    (row) => row.type === "reconcile"
+  )
+  expect(operations).toHaveLength(2)
+  expect(operations.every((row) => row.status === "succeeded")).toBe(true)
+  // A fixed idempotency key would make reconciliation a thing you can do
+  // exactly once per Site, forever: `queueSiteOperation` returns the existing
+  // row and `runOperation` then throws "already succeeded".
+  expect(new Set(operations.map((row) => row.idempotencyKey)).size).toBe(2)
+})

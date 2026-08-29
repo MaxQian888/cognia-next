@@ -25,6 +25,7 @@ import type {
   SiteProjectRow,
   SiteSecretEdit,
   SiteResourceRow,
+  SiteSourceSnapshot,
   SiteVersionRow,
   SiteVersionStatus,
   SiteVisitorPolicy,
@@ -357,6 +358,38 @@ export function countVersionsByStatus(
   const counts = { all: versions.length, ready: 0, building: 0, failed: 0 }
   for (const version of versions) counts[version.status] += 1
   return counts
+}
+
+/**
+ * A ready version built from byte-identical inputs, if one exists.
+ *
+ * `lockfileDigest` was computed on every build, hashed into the version row,
+ * and never read by anything. This is the read: before spending minutes on a
+ * rebuild, say that version N already produced exactly this, and offer to
+ * deploy it.
+ *
+ * `dirty` must be false on both sides. A dirty tree's `inputDigest` covers the
+ * *paths* that changed, not their contents — two dirty builds with the same
+ * changed-file list are not the same build, and claiming otherwise would offer
+ * to deploy stale output.
+ */
+export function findIdenticalReadyVersion(
+  versions: readonly SiteVersionRow[],
+  candidate: Pick<SiteSourceSnapshot, "inputDigest" | "lockfileDigest" | "dirty">,
+  environmentRevisionId: string
+): SiteVersionRow | undefined {
+  if (candidate.dirty) return undefined
+  return [...versions]
+    .sort((left, right) => right.sequence - left.sequence)
+    .find(
+      (version) =>
+        version.status === "ready" &&
+        version.artifactCollectedAt === undefined &&
+        version.source.dirty === false &&
+        version.source.inputDigest === candidate.inputDigest &&
+        version.source.lockfileDigest === candidate.lockfileDigest &&
+        version.environmentRevisionId === environmentRevisionId
+    )
 }
 
 /* --------------------------------------------------------------- resources */

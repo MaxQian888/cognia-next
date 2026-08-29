@@ -4909,7 +4909,10 @@
       "downloadFailed": "无法保存该 artifact",
       "expand": "展开预览",
       "openInCanvas": "在画布中打开",
-      "openInCanvasAria": "在画布中打开 artifact"
+      "openInCanvasAria": "在画布中打开 artifact",
+      "previewAnyway": "仍然预览",
+      "previewDeferred": "这个 artifact 比较大，点一下即可预览。",
+      "previewReactManual": "React artifact 需要加载运行时，按需预览。"
     },
     "askUser": {
       "dismiss": "忽略",
@@ -4922,6 +4925,13 @@
     },
     "backgroundRuns": {
       "count": "{count, plural, other {后台还有 # 个会话在运行}}"
+    },
+    "backlinks": {
+      "chipLabel": "被 {count} 个对话引用",
+      "empty": "还没有对话引用过它。",
+      "listLabel": "被这些对话引用",
+      "panelTitle": "被引用",
+      "timesInConversation": "{count} 次"
     },
     "branch": {
       "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
@@ -27615,6 +27625,8 @@
       }
     },
     "artifacts": {
+      "agentAuthoringHint": "给助手一组工具，让它按名字直接创建与修订 artifact 和画布文档，而不是依赖对围栏代码块的识别。修订仍然遵循上面的审阅设置。",
+      "agentAuthoringLabel": "允许助手创建 artifact",
       "autoCreateHint": "开启后，符合条件的代码块会被自动转换为 Artifact，并自动滑出侧边面板。",
       "autoCreateLabel": "启用自动检测",
       "defaultPanelMode": {
@@ -35681,6 +35693,11 @@
       "networkHosts": "已批准的安装网络主机",
       "packageManager": "包管理器快照",
       "runtime": "运行时快照",
+      "seededFrom": {
+        "default": "使用默认值。",
+        "last-version": "沿用上一次构建的设置。",
+        "manifest": "根据托管清单推断。"
+      },
       "title": "受限构建与本地预览"
     },
     "buildLog": {
@@ -35694,8 +35711,8 @@
       "noStdout": "标准输出没有任何内容。",
       "open": "构建日志",
       "phase": {
-        "install": "安装",
         "build": "构建",
+        "install": "安装",
         "package": "打包"
       },
       "stderr": "标准错误",

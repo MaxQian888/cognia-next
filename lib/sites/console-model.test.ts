@@ -6,6 +6,7 @@ import {
   environmentDiffIsEmpty,
   environmentRevisionDiff,
   filterVersionViews,
+  findIdenticalReadyVersion,
   groupResourcesByKind,
   joinVersionsWithDeployments,
   latestEnvironmentRevision,
@@ -542,5 +543,83 @@ describe("siteTokenStanding", () => {
         providerTokenState: { executionTargetKey: "local", status: "rejected" },
       })
     ).toBe("rejected")
+  })
+})
+
+describe("findIdenticalReadyVersion", () => {
+  const version = (over: Record<string, unknown>) =>
+    ({
+      id: "v1",
+      siteId: "s1",
+      sequence: 1,
+      status: "ready",
+      environmentRevisionId: "env_1",
+      source: { commitSha: "abc", dirty: false, lockfileDigest: "lock", inputDigest: "input" },
+      build: {
+        command: "[]",
+        runtime: "node@24",
+        packageManager: "pnpm@10",
+        compatibilityDate: "2026-01-01",
+        compatibilityFlags: [],
+        routes: [],
+        bindings: [],
+      },
+      artifactDigest: "d",
+      createdAt: 1,
+      ...over,
+    }) as never
+
+  const candidate = { inputDigest: "input", lockfileDigest: "lock", dirty: false }
+
+  it("finds the newest version built from byte-identical inputs", () => {
+    // `lockfileDigest` was hashed into every version row and read by nothing.
+    const found = findIdenticalReadyVersion(
+      [version({ id: "old", sequence: 1 }), version({ id: "new", sequence: 2 })],
+      candidate,
+      "env_1"
+    )
+    expect(found?.id).toBe("new")
+  })
+
+  it("refuses when either side has a dirty tree", () => {
+    // A dirty `inputDigest` covers the paths that changed, not their contents;
+    // two dirty builds with the same changed-file list are not the same build.
+    expect(
+      findIdenticalReadyVersion([version({})], { ...candidate, dirty: true }, "env_1")
+    ).toBeUndefined()
+    expect(
+      findIdenticalReadyVersion(
+        [
+          version({
+            source: { commitSha: "abc", dirty: true, lockfileDigest: "lock", inputDigest: "input" },
+          }),
+        ],
+        candidate,
+        "env_1"
+      )
+    ).toBeUndefined()
+  })
+
+  it("refuses on a different lockfile, even with the same commit", () => {
+    expect(
+      findIdenticalReadyVersion([version({})], { ...candidate, lockfileDigest: "other" }, "env_1")
+    ).toBeUndefined()
+  })
+
+  it("refuses across environment revisions", () => {
+    expect(findIdenticalReadyVersion([version({})], candidate, "env_2")).toBeUndefined()
+  })
+
+  it("refuses a version whose artifact retention already took", () => {
+    // Offering to deploy bytes that no longer exist is worse than rebuilding.
+    expect(
+      findIdenticalReadyVersion([version({ artifactCollectedAt: 5 })], candidate, "env_1")
+    ).toBeUndefined()
+  })
+
+  it("refuses a version that is not ready", () => {
+    for (const status of ["building", "failed"]) {
+      expect(findIdenticalReadyVersion([version({ status })], candidate, "env_1")).toBeUndefined()
+    }
   })
 })

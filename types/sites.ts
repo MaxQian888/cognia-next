@@ -2,6 +2,21 @@ export type SiteProvider = "cloudflare"
 
 export type SiteLifecycle = "active" | "taken-down" | "deleting" | "deleted"
 
+/**
+ * Where a Site's privileged work runs.
+ *
+ * Intentionally a one-member union today. ADR-0084 makes the execution target
+ * explicit precisely so credentials cannot be silently forwarded by the
+ * process-wide remote-host transport, and the machinery for more than one
+ * target is already load-bearing: `executionTargetKey` indexes
+ * `siteOperations`, and `claimNextSiteOperation` leases work per target rather
+ * than per Site. A remote target is a credential-locality decision, not a type
+ * change, so this stays one member until that decision is made — and
+ * `types/sites.test.ts` pins it so widening the union is deliberate.
+ *
+ * The `new-site-dialog` labels this inert rather than hiding it, so the seam is
+ * visible where the choice would be made.
+ */
 export type SiteExecutionTarget = { kind: "local" }
 
 export interface SiteAuthoringPolicy {
@@ -104,7 +119,18 @@ export interface SiteSourceSnapshot {
 }
 
 export interface SiteBindingSnapshot {
-  kind: "d1" | "r2" | "kv" | "service" | "analytics-engine"
+  /**
+   * Narrowed to what the stack can actually produce.
+   *
+   * This union previously also listed `kv`, `service`, and
+   * `analytics-engine`. None of them was reachable: `parseSiteHostingManifest`
+   * rejects any other kind, `provisionBindings` has no branch for them, and
+   * `SiteResourceKind` has no matching resource — so no stored row could ever
+   * contain one. `manifest.test.ts` pins the two sets equal, so adding KV means
+   * changing both together rather than leaving the type claiming a capability
+   * that does not exist.
+   */
+  kind: "d1" | "r2"
   name: string
   resourceId?: string
 }
@@ -115,8 +141,22 @@ export interface SiteBuildSnapshot {
   packageManager: string
   compatibilityDate: string
   compatibilityFlags: string[]
+  /**
+   * Cloudflare route patterns (`example.com/api/*`) this version publishes on,
+   * from `cloudflare.routes` in the hosting manifest. Empty means the Worker is
+   * reachable only on its `workers.dev` name and any attached custom domains.
+   */
   routes: string[]
   bindings: SiteBindingSnapshot[]
+  /**
+   * Network hosts the install and build phases were allowed to reach.
+   *
+   * Part of the build's provenance, not decoration: two versions built from the
+   * same commit with different network allowances are not the same build. Absent
+   * on versions written before this was recorded.
+   */
+  installNetworkHosts?: string[]
+  buildNetworkHosts?: string[]
 }
 
 export type SiteVersionStatus = "building" | "ready" | "failed"

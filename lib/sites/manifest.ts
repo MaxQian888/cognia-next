@@ -15,6 +15,12 @@ export interface SiteHostingManifest {
   cloudflare: {
     compatibilityDate: string
     compatibilityFlags: string[]
+    /**
+     * Route patterns the Worker answers on, e.g. `example.com/api/*`. Optional:
+     * a Site with none is still reachable on `workers.dev` and any attached
+     * custom domain.
+     */
+    routes?: string[]
     bindings: Array<{
       kind: "d1" | "r2"
       name: string
@@ -79,6 +85,27 @@ function stringArray(value: unknown, label: string): string[] {
   return [...new Set(value.map((item) => item.trim()).filter(Boolean))]
 }
 
+/**
+ * Route patterns, validated as patterns rather than URLs.
+ *
+ * A Cloudflare route is a host plus a path glob — `example.com/api/*` — so it
+ * is neither a bare hostname nor a parseable URL. Refusing a scheme is the
+ * check that matters: `https://example.com/*` is the mistake people make, and
+ * Cloudflare rejects it far from here.
+ */
+function routePatterns(value: unknown): string[] {
+  const patterns = stringArray(value, "cloudflare.routes")
+  for (const pattern of patterns) {
+    if (pattern.includes("://")) {
+      throw new Error(`cloudflare route must not include a scheme: ${pattern}`)
+    }
+    if (!/^[A-Za-z0-9*._-]+(?:\/[^\s]*)?$/.test(pattern)) {
+      throw new Error(`cloudflare route pattern is invalid: ${pattern}`)
+    }
+  }
+  return patterns
+}
+
 function previewUrl(value: unknown): string {
   if (typeof value !== "string") throw new Error("preview.url is required")
   let url: URL
@@ -110,7 +137,11 @@ export function parseSiteHostingManifest(text: string): SiteHostingManifest {
   const preview = object(root.preview, "preview")
   strictKeys(preview, ["command", "url"], "preview")
   const cloudflare = object(root.cloudflare, "cloudflare")
-  strictKeys(cloudflare, ["compatibilityDate", "compatibilityFlags", "bindings"], "cloudflare")
+  strictKeys(
+    cloudflare,
+    ["compatibilityDate", "compatibilityFlags", "routes", "bindings"],
+    "cloudflare"
+  )
   if (
     typeof cloudflare.compatibilityDate !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/.test(cloudflare.compatibilityDate)
@@ -174,6 +205,7 @@ export function parseSiteHostingManifest(text: string): SiteHostingManifest {
         cloudflare.compatibilityFlags,
         "cloudflare.compatibilityFlags"
       ),
+      ...(cloudflare.routes === undefined ? {} : { routes: routePatterns(cloudflare.routes) }),
       bindings,
     },
   }

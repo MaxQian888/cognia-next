@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -71,6 +71,10 @@ function manifest(ready: boolean): SiteHostingManifestController {
 const allowed = { allowed: true, reason: "ok" as const, title: undefined }
 const blocked = { allowed: false, reason: "requires-desktop" as const, title: "Desktop only" }
 
+const setBuildInputs = jest.fn()
+
+beforeEach(() => setBuildInputs.mockClear())
+
 function renderTab(props: Partial<React.ComponentProps<typeof SitePublishTab>> = {}) {
   const handlers = {
     onSaveToken: jest.fn(),
@@ -98,6 +102,14 @@ function renderTab(props: Partial<React.ComponentProps<typeof SitePublishTab>> =
       previewGate={allowed}
       deployGate={allowed}
       filesystemGate={allowed}
+      buildInputs={{
+        runtime: "node@24",
+        packageManager: "pnpm@10",
+        installNetworkHosts: ["registry.npmjs.org"],
+        buildNetworkHosts: [],
+      }}
+      buildInputsSource="default"
+      setBuildInputs={setBuildInputs}
       {...handlers}
       {...props}
     />
@@ -146,29 +158,66 @@ it("blocks build and preview until the manifest exists, and says why", () => {
   expect(screen.getAllByRole("alert")[0]).toHaveTextContent("errors.manifestMissing")
 })
 
-it("builds with the runtime, package manager, and approved install hosts", async () => {
+it("builds with exactly the inputs it was given", async () => {
   const user = userEvent.setup()
-  const handlers = renderTab()
-  await user.clear(screen.getByLabelText("build.networkHosts"))
-  await user.type(screen.getByLabelText("build.networkHosts"), "registry.npmjs.org, example.com")
+  const handlers = renderTab({
+    buildInputs: {
+      runtime: "node@22",
+      packageManager: "yarn@4",
+      installNetworkHosts: ["registry.internal"],
+      buildNetworkHosts: ["api.example.com"],
+    },
+  })
   await user.click(screen.getByTestId("site-build"))
-
   expect(handlers.onBuild).toHaveBeenCalledWith({
-    runtime: "node@24",
-    packageManager: "pnpm@10",
-    installNetworkHosts: ["registry.npmjs.org", "example.com"],
-    buildNetworkHosts: [],
+    runtime: "node@22",
+    packageManager: "yarn@4",
+    installNetworkHosts: ["registry.internal"],
+    buildNetworkHosts: ["api.example.com"],
   })
 })
 
-it("keeps the build phase off the network unless hosts are named", async () => {
-  const user = userEvent.setup()
-  const handlers = renderTab()
-  await user.type(screen.getByLabelText("build.buildNetworkHosts"), "api.example.com")
-  await user.click(screen.getByTestId("site-build"))
+it("reports each edit rather than holding its own copy", () => {
+  // The inputs used to be component state that did not reset when the selected
+  // Site changed, so one Site's network allowances were used for another's
+  // build. Controlled by the caller now, so the field reports and never stores.
+  renderTab()
+  fireEvent.change(screen.getByLabelText("build.networkHosts"), {
+    target: { value: "example.com, registry.internal" },
+  })
+  expect(setBuildInputs).toHaveBeenLastCalledWith({
+    installNetworkHosts: ["example.com", "registry.internal"],
+  })
 
-  expect(handlers.onBuild).toHaveBeenCalledWith(
-    expect.objectContaining({ buildNetworkHosts: ["api.example.com"] })
+  fireEvent.change(screen.getByLabelText("build.buildNetworkHosts"), {
+    target: { value: "api.example.com" },
+  })
+  expect(setBuildInputs).toHaveBeenLastCalledWith({ buildNetworkHosts: ["api.example.com"] })
+
+  fireEvent.change(screen.getByLabelText("build.runtime"), { target: { value: "node@20" } })
+  expect(setBuildInputs).toHaveBeenLastCalledWith({ runtime: "node@20" })
+})
+
+it("offers known runtimes as choices, and still shows a value that is not one", () => {
+  // `node@42` used to reach the sandbox unchallenged; a select with an
+  // unmatched value renders blank, which would be worse.
+  renderTab({
+    buildInputs: {
+      runtime: "node@23-custom",
+      packageManager: "pnpm@10",
+      installNetworkHosts: [],
+      buildNetworkHosts: [],
+    },
+  })
+  const select = screen.getByLabelText("build.runtime") as HTMLSelectElement
+  expect(select).toHaveValue("node@23-custom")
+  expect([...select.options].map((option) => option.value)).toContain("node@24")
+})
+
+it("says where the build inputs came from", () => {
+  renderTab({ buildInputsSource: "last-version" })
+  expect(screen.getByTestId("site-build-input-source")).toHaveTextContent(
+    "build.seededFrom.last-version"
   )
 })
 

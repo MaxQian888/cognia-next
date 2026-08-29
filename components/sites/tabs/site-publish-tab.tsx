@@ -18,6 +18,8 @@ import { PlayIcon, RocketIcon, SquareIcon } from "lucide-react"
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Separator } from "@/components/ui/separator"
 import {
   SITE_STEP_ORDER,
@@ -28,6 +30,12 @@ import {
   type SiteStepState,
 } from "@/hooks/sites/use-site-live-data"
 import { useSiteOperationEvents } from "@/hooks/sites/use-site-operation-events"
+import {
+  SITE_BUILD_PACKAGE_MANAGERS,
+  SITE_BUILD_RUNTIMES,
+  type SiteBuildInputSource,
+  type SiteBuildInputs,
+} from "@/lib/sites/build-inputs"
 import { siteTokenStanding } from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type { SiteHostingManifestController } from "@/hooks/sites/use-site-hosting-manifest"
@@ -38,19 +46,6 @@ import type { WranglerDetection } from "@/lib/sites/wrangler-detect"
 import { SitePublishStep } from "../site-publish-step"
 import { SiteManifestEditor } from "../site-manifest-editor"
 import { splitValues } from "../split-values"
-
-export interface SiteBuildInputs {
-  runtime: string
-  packageManager: string
-  /** Hosts the dependency install may reach. */
-  installNetworkHosts: string[]
-  /**
-   * Hosts the build command itself may reach. Empty means no network, which is
-   * the fail-closed default ADR-0084 requires — a build that fetches at build
-   * time has to say so explicitly.
-   */
-  buildNetworkHosts: string[]
-}
 
 export interface SitePublishTabProps {
   site: SiteProjectRow
@@ -78,6 +73,9 @@ export interface SitePublishTabProps {
   onStartPreview: () => void
   onStopPreview: () => void
   onRedetectWrangler: () => void
+  buildInputs: SiteBuildInputs
+  buildInputsSource: SiteBuildInputSource
+  setBuildInputs: (patch: Partial<SiteBuildInputs>) => void
   onGoToVersions: () => void
   onGoToEnvironment: () => void
 }
@@ -103,6 +101,9 @@ export function SitePublishTab({
   onStartPreview,
   onStopPreview,
   onRedetectWrangler,
+  buildInputs,
+  buildInputsSource,
+  setBuildInputs,
   onGoToVersions,
   onGoToEnvironment,
 }: SitePublishTabProps) {
@@ -110,11 +111,13 @@ export function SitePublishTab({
   const format = useFormatter()
   const now = useNow()
   const [token, setToken] = useState("")
-  const [runtime, setRuntime] = useState("node@24")
-  const [packageManager, setPackageManager] = useState("pnpm@10")
-  const [installHosts, setInstallHosts] = useState("registry.npmjs.org")
-  const [buildHosts, setBuildHosts] = useState("")
 
+  // The stored value always appears, even when it is not one of the presets —
+  // a Radix/native select with an unmatched value renders blank.
+  const runtimeOptions = [...new Set([buildInputs.runtime, ...SITE_BUILD_RUNTIMES])]
+  const packageManagerOptions = [
+    ...new Set([buildInputs.packageManager, ...SITE_BUILD_PACKAGE_MANAGERS]),
+  ]
   const tokenStanding = siteTokenStanding(site)
   const runningOperation = pickRunningOperation(operations)
   const runningStep = stepOfOperation(runningOperation)
@@ -232,35 +235,76 @@ export function SitePublishTab({
         error={manifestBlocked}
         hint={buildGate.title}
       >
-        <div className="grid gap-3 md:grid-cols-3">
-          <Input
-            value={runtime}
-            aria-label={t("build.runtime")}
-            placeholder={t("build.runtime")}
-            onChange={(event) => setRuntime(event.target.value)}
-          />
-          <Input
-            value={packageManager}
-            aria-label={t("build.packageManager")}
-            placeholder={t("build.packageManager")}
-            onChange={(event) => setPackageManager(event.target.value)}
-          />
-          <Input
-            value={installHosts}
-            aria-label={t("build.networkHosts")}
-            placeholder={t("build.networkHosts")}
-            onChange={(event) => setInstallHosts(event.target.value)}
-          />
+        <div className="grid gap-3 @md/site-pane:grid-cols-2">
+          <div>
+            <Label htmlFor="site-build-runtime" className="text-xs">
+              {t("build.runtime")}
+            </Label>
+            <NativeSelect
+              id="site-build-runtime"
+              className="mt-1"
+              value={buildInputs.runtime}
+              onChange={(event) => setBuildInputs({ runtime: event.target.value })}
+            >
+              {/* A typo like `node@42` used to reach the sandbox unchallenged;
+                  the stored value still shows even when it is not on the list. */}
+              {runtimeOptions.map((option) => (
+                <NativeSelectOption key={option} value={option}>
+                  {option}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          <div>
+            <Label htmlFor="site-build-package-manager" className="text-xs">
+              {t("build.packageManager")}
+            </Label>
+            <NativeSelect
+              id="site-build-package-manager"
+              className="mt-1"
+              value={buildInputs.packageManager}
+              onChange={(event) => setBuildInputs({ packageManager: event.target.value })}
+            >
+              {packageManagerOptions.map((option) => (
+                <NativeSelectOption key={option} value={option}>
+                  {option}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          <div>
+            <Label htmlFor="site-install-hosts" className="text-xs">
+              {t("build.networkHosts")}
+            </Label>
+            <Input
+              id="site-install-hosts"
+              className="mt-1"
+              value={buildInputs.installNetworkHosts.join(", ")}
+              placeholder={t("build.networkHosts")}
+              onChange={(event) =>
+                setBuildInputs({ installNetworkHosts: splitValues(event.target.value) })
+              }
+            />
+          </div>
+          <div>
+            <Label htmlFor="site-build-hosts" className="text-xs">
+              {t("build.buildNetworkHosts")}
+            </Label>
+            <Input
+              id="site-build-hosts"
+              className="mt-1"
+              value={buildInputs.buildNetworkHosts.join(", ")}
+              placeholder={t("build.buildNetworkHosts")}
+              onChange={(event) =>
+                setBuildInputs({ buildNetworkHosts: splitValues(event.target.value) })
+              }
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{t("build.buildNetworkHostsHint")}</p>
+          </div>
         </div>
-        <div className="mt-2">
-          <Input
-            value={buildHosts}
-            aria-label={t("build.buildNetworkHosts")}
-            placeholder={t("build.buildNetworkHosts")}
-            onChange={(event) => setBuildHosts(event.target.value)}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">{t("build.buildNetworkHostsHint")}</p>
-        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="site-build-input-source">
+          {t(`build.seededFrom.${buildInputsSource}`)}
+        </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
@@ -278,14 +322,7 @@ export function SitePublishTab({
             size="sm"
             disabled={isBusy("build") || !buildGate.allowed || !manifest.ready}
             title={buildGate.title}
-            onClick={() =>
-              onBuild({
-                runtime,
-                packageManager,
-                installNetworkHosts: splitValues(installHosts),
-                buildNetworkHosts: splitValues(buildHosts),
-              })
-            }
+            onClick={() => onBuild(buildInputs)}
             data-testid="site-build"
           >
             <RocketIcon aria-hidden className="size-4" />

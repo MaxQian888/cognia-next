@@ -85,6 +85,11 @@
     "networkHosts": "已批准的安装网络主机",
     "packageManager": "包管理器快照",
     "runtime": "运行时快照",
+    "seededFrom": {
+      "default": "使用默认值。",
+      "last-version": "沿用上一次构建的设置。",
+      "manifest": "根据托管清单推断。"
+    },
     "title": "受限构建与本地预览"
   },
   "buildLog": {

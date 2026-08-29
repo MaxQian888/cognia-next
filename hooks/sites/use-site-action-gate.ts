@@ -127,8 +127,3 @@ export function useSiteActionGate(
     [platform, site, actorAccountId, t]
   )
 }
-
-/** True when this shell can run builds, previews, and provider calls at all. */
-export function useSiteHostIsCapable(): boolean {
-  return usePlatform() === "tauri"
-}
