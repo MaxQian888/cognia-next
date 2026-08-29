@@ -88,6 +88,8 @@ export function SitesConsole() {
     run,
     service,
     loadProjects,
+    // A shell that cannot shell out to wrangler must not probe for it.
+    wranglerEnabled: platform === "tauri",
   })
 
   const retention = useMemo(() => purgeRetentionReport(live.resources), [live.resources])
@@ -290,8 +292,10 @@ export function SitesConsole() {
               </div>
             </TabsContent>
 
-            <TabsContent value="versions" className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto max-w-5xl p-4">
+            {/* The versions list virtualizes, so it owns its own scroll
+                container: this pane must not scroll on its behalf. */}
+            <TabsContent value="versions" className="min-h-0 flex-1 overflow-hidden">
+              <div className="mx-auto flex h-full min-h-0 max-w-5xl flex-col p-4">
                 <SiteVersionsTab
                   versions={live.versions}
                   deployments={live.deployments}
@@ -346,8 +350,9 @@ export function SitesConsole() {
               </div>
             </TabsContent>
 
-            <TabsContent value="operations" className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto max-w-5xl p-4">
+            {/* Same as versions: the operation journal owns its scroll. */}
+            <TabsContent value="operations" className="min-h-0 flex-1 overflow-hidden">
+              <div className="mx-auto flex h-full min-h-0 max-w-5xl flex-col p-4">
                 <SiteOperationsTab
                   site={site}
                   operations={live.operations}

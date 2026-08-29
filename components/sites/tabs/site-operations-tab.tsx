@@ -98,8 +98,8 @@ export function SiteOperationsTab({
   }
 
   return (
-    <div className="space-y-3" data-testid="site-operations-tab">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="site-operations-tab">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <ToggleGroup
           type="single"
           value={segment}
@@ -167,7 +167,7 @@ export function SiteOperationsTab({
           refreshTitle={gate.title}
         />
       ) : (
-        <div className="space-y-2">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
           {segment === "analytics" ? (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <InfoIcon aria-hidden className="size-3.5 shrink-0" />

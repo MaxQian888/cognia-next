@@ -10,8 +10,9 @@
  * message were all dropped. When an upload failed there was nowhere to read
  * why. This shows the whole row and expands into the event stream.
  */
-import { useMemo } from "react"
+import { memo, useMemo, useRef } from "react"
 import { useTranslations, useFormatter, useNow } from "next-intl"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronDownIcon, CopyIcon, RefreshCwIcon, XCircleIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -115,6 +116,114 @@ function SiteOperationTimelineLoader({ operationId }: { operationId: string }) {
   return <SiteOperationTimeline events={events} />
 }
 
+interface SiteOperationJournalRowProps {
+  operation: SiteOperationRow
+  onRefresh?: (operationId: string) => void
+  onCancel?: (operationId: string) => void
+  refreshDisabled?: boolean
+  refreshTitle?: string
+}
+
+/**
+ * One operation. Memoized because the journal is virtualized and the console
+ * re-renders on every operation write — a build in flight would otherwise
+ * repaint every visible row on each transition.
+ */
+const SiteOperationJournalRow = memo(function SiteOperationJournalRow({
+  operation,
+  onRefresh,
+  onCancel,
+  refreshDisabled,
+  refreshTitle,
+}: SiteOperationJournalRowProps) {
+  const t = useTranslations("sites")
+  const format = useFormatter()
+  const now = useNow()
+  const { copy, copied } = useCopy()
+  const failure = operationFailureText(operation)
+  return (
+    <Collapsible key={operation.id} className="border-b last:border-b-0">
+      <CollapsibleTrigger
+        className="group flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 motion-reduce:transition-none"
+        data-testid={`site-operation-${operation.id}`}
+      >
+        <span className="shrink-0 text-sm font-medium">{t(`operationType.${operation.type}`)}</span>
+        <SiteStatusPill
+          face={SITE_OPERATION_FACE[operation.status]}
+          label={t(`operationStatus.${operation.status}`)}
+        />
+        {operation.attemptCount > 1 ? (
+          <Badge variant="outline" className="shrink-0 font-normal tabular-nums">
+            {t("operations.attempts", { count: operation.attemptCount })}
+          </Badge>
+        ) : null}
+        {failure ? (
+          <span className="min-w-0 flex-1 truncate text-xs text-destructive" title={failure}>
+            {failure}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1" />
+        )}
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {format.relativeTime(new Date(operation.updatedAt), now)}
+        </span>
+        <ChevronDownIcon
+          aria-hidden
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none"
+        />
+      </CollapsibleTrigger>
+
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
+        <div className="flex flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-2 text-xs">
+          <span className="text-muted-foreground">{t("operations.providerRequestId")}</span>
+          <code className="min-w-0 truncate font-mono">{operation.providerRequestId ?? "—"}</code>
+          {operation.providerRequestId ? (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={t("actions.copyUrl")}
+              onClick={() => copy(operation.providerRequestId as string)}
+            >
+              <CopyIcon aria-hidden className={cn("size-3", copied && "text-success")} />
+            </Button>
+          ) : null}
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            {onRefresh ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={refreshDisabled}
+                title={refreshTitle}
+                onClick={() => onRefresh(operation.id)}
+              >
+                <RefreshCwIcon aria-hidden className="size-3" />
+                {t("actions.refreshOperation")}
+              </Button>
+            ) : null}
+            {onCancel && !TERMINAL_STATUSES.has(operation.status) ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                title={t("operations.cancelHint")}
+                onClick={() => onCancel(operation.id)}
+                data-testid={`site-operation-cancel-${operation.id}`}
+              >
+                <XCircleIcon aria-hidden className="size-3" />
+                {t("actions.cancelOperation")}
+              </Button>
+            ) : null}
+          </span>
+        </div>
+        <SiteOperationTimelineLoader operationId={operation.id} />
+      </CollapsibleContent>
+    </Collapsible>
+  )
+})
+
 export function SiteOperationJournal({
   operations,
   onRefresh,
@@ -123,15 +232,23 @@ export function SiteOperationJournal({
   refreshTitle,
 }: SiteOperationJournalProps) {
   const t = useTranslations("sites")
-  const format = useFormatter()
-  const now = useNow()
-  const { copy, copied } = useCopy()
   // Newest first: the thing that just failed is the thing being looked for.
   // Above the empty-state return — a hook cannot sit behind a conditional.
   const ordered = useMemo(
     () => [...operations].sort((left, right) => right.updatedAt - left.updatedAt),
     [operations]
   )
+  // One row per operation, several per build, kept forever. Collapsed rows are
+  // uniform; `measureElement` corrects the ones the user expands.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: ordered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 46,
+    overscan: 8,
+    getItemKey: (index) => ordered[index]?.id ?? index,
+  })
 
   if (operations.length === 0) {
     return (
@@ -150,95 +267,34 @@ export function SiteOperationJournal({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border" data-testid="site-operation-journal">
-      {ordered.map((operation) => {
-        const failure = operationFailureText(operation)
-        return (
-          <Collapsible key={operation.id} className="border-b last:border-b-0">
-            <CollapsibleTrigger
-              className="group flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 motion-reduce:transition-none"
-              data-testid={`site-operation-${operation.id}`}
+    <div
+      ref={scrollRef}
+      className="min-h-0 flex-1 overflow-y-auto rounded-xl border"
+      data-testid="site-operation-journal"
+    >
+      <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const operation = ordered[virtualRow.index]
+          if (!operation) return null
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+              className="absolute left-0 top-0 w-full"
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
-              <span className="shrink-0 text-sm font-medium">
-                {t(`operationType.${operation.type}`)}
-              </span>
-              <SiteStatusPill
-                face={SITE_OPERATION_FACE[operation.status]}
-                label={t(`operationStatus.${operation.status}`)}
+              <SiteOperationJournalRow
+                operation={operation}
+                onRefresh={onRefresh}
+                onCancel={onCancel}
+                refreshDisabled={refreshDisabled}
+                refreshTitle={refreshTitle}
               />
-              {operation.attemptCount > 1 ? (
-                <Badge variant="outline" className="shrink-0 font-normal tabular-nums">
-                  {t("operations.attempts", { count: operation.attemptCount })}
-                </Badge>
-              ) : null}
-              {failure ? (
-                <span className="min-w-0 flex-1 truncate text-xs text-destructive" title={failure}>
-                  {failure}
-                </span>
-              ) : (
-                <span className="min-w-0 flex-1" />
-              )}
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {format.relativeTime(new Date(operation.updatedAt), now)}
-              </span>
-              <ChevronDownIcon
-                aria-hidden
-                className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none"
-              />
-            </CollapsibleTrigger>
-
-            <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
-              <div className="flex flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-2 text-xs">
-                <span className="text-muted-foreground">{t("operations.providerRequestId")}</span>
-                <code className="min-w-0 truncate font-mono">
-                  {operation.providerRequestId ?? "—"}
-                </code>
-                {operation.providerRequestId ? (
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("actions.copyUrl")}
-                    onClick={() => copy(operation.providerRequestId as string)}
-                  >
-                    <CopyIcon aria-hidden className={cn("size-3", copied && "text-success")} />
-                  </Button>
-                ) : null}
-                <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                  {onRefresh ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      disabled={refreshDisabled}
-                      title={refreshTitle}
-                      onClick={() => onRefresh(operation.id)}
-                    >
-                      <RefreshCwIcon aria-hidden className="size-3" />
-                      {t("actions.refreshOperation")}
-                    </Button>
-                  ) : null}
-                  {onCancel && !TERMINAL_STATUSES.has(operation.status) ? (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      className="text-muted-foreground"
-                      title={t("operations.cancelHint")}
-                      onClick={() => onCancel(operation.id)}
-                      data-testid={`site-operation-cancel-${operation.id}`}
-                    >
-                      <XCircleIcon aria-hidden className="size-3" />
-                      {t("actions.cancelOperation")}
-                    </Button>
-                  ) : null}
-                </span>
-              </div>
-              <SiteOperationTimelineLoader operationId={operation.id} />
-            </CollapsibleContent>
-          </Collapsible>
-        )
-      })}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

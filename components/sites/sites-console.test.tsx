@@ -7,6 +7,25 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 // app mounts the provider in `app/layout.tsx`, so tests have to supply it.
 const render = (ui: React.ReactElement) => baseRender(<TooltipProvider>{ui}</TooltipProvider>)
 
+// The journal and versions list virtualize; jsdom reports zero height, so the
+// real virtualizer renders nothing.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 64,
+        size: 64,
+        end: (index + 1) * 64,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 64,
+    measureElement: jest.fn(),
+    scrollToIndex: jest.fn(),
+  }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,

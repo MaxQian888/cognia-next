@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/input-group"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { resolveSiteRailHint, type SiteRailHint } from "@/lib/sites/console-model"
+import { indexSiteRailHints, type SiteRailHint } from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type {
   SiteDeploymentRow,
@@ -35,6 +35,9 @@ import { SITE_LIFECYCLE_FACE, SiteStatusDot, SiteStatusPill } from "./site-statu
 type LifecycleFilter = "all" | Extract<SiteLifecycle, "active" | "taken-down">
 
 const LIFECYCLE_FILTERS: LifecycleFilter[] = ["all", "active", "taken-down"]
+
+/** A row the index could not answer for — treated as never deployed. */
+const NEVER_HINT: SiteRailHint = { kind: "never", tone: "neutral", live: false }
 
 export interface SiteListRailProps {
   sites: readonly SiteProjectRow[]
@@ -75,6 +78,12 @@ export function SiteListRail({
       running: running.size,
     }
   }, [sites, operationSignals])
+
+  // One pass over both signal lists instead of one filter per rendered row.
+  const hints = useMemo(
+    () => indexSiteRailHints(sites, activeDeployments, operationSignals),
+    [sites, activeDeployments, operationSignals]
+  )
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -166,7 +175,7 @@ export function SiteListRail({
         ) : (
           <ul>
             {rows.map((site) => {
-              const hint = resolveSiteRailHint(site, activeDeployments, operationSignals)
+              const hint = hints.get(site.id) ?? NEVER_HINT
               const selected = site.id === selectedId
               return (
                 <li key={site.id}>

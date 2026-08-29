@@ -1,6 +1,25 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+// The journal and versions list virtualize; jsdom reports zero height, so the
+// real virtualizer renders nothing.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 64,
+        size: 64,
+        end: (index + 1) * 64,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 64,
+    measureElement: jest.fn(),
+    scrollToIndex: jest.fn(),
+  }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,

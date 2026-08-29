@@ -8,17 +8,13 @@
  * own busy flag. Here they share the action runner, the manifest controller,
  * and the preview session, so the console body stays a rendering concern.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 
 import { cancelSiteOperation, getSiteOperation } from "@/lib/db/sites"
 import { uploadSiteVersion } from "@/lib/sites/publish-version"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
-import {
-  ensureWranglerApproved,
-  redetectWranglerBinary,
-  type WranglerDetection,
-} from "@/lib/sites/wrangler-detect"
+import type { WranglerDetection } from "@/lib/sites/wrangler-detect"
 import { latestEnvironmentRevision } from "@/lib/sites/console-model"
 import type { SiteScaffoldFile } from "@/lib/sites/manifest-scaffold"
 import type { SiteProjectRow, SiteVersionRow, SiteVisitorPolicy } from "@/types/sites"
@@ -31,6 +27,7 @@ import {
 import type { SiteHostingManifestController } from "./use-site-hosting-manifest"
 import type { SitePreviewSessionController } from "./use-site-preview-session"
 import type { SiteActions } from "./use-site-actions"
+import { useWranglerDetection } from "./use-wrangler-detection"
 
 export interface SiteBuildInputs {
   runtime: string
@@ -49,6 +46,11 @@ export interface UseSitePublishActionsInput {
   run: SiteActions["run"]
   service: SiteActions["service"]
   loadProjects: () => Promise<unknown> | unknown
+  /**
+   * False on a host that cannot upload at all, so the wrangler probe never
+   * runs there. Defaults to true.
+   */
+  wranglerEnabled?: boolean
 }
 
 export interface SitePublishActions {
@@ -87,27 +89,20 @@ export function useSitePublishActions({
   run,
   service,
   loadProjects,
+  wranglerEnabled = true,
 }: UseSitePublishActionsInput): SitePublishActions {
-  const [wrangler, setWrangler] = useState<WranglerDetection | null>(null)
-
   useEffect(() => {
     void loadProjects()
   }, [loadProjects])
 
-  // Auto-detect and approve wrangler once, so upload never asks for a path.
-  useEffect(() => {
-    let cancelled = false
-    ensureWranglerApproved()
-      .then((detection) => {
-        if (!cancelled) setWrangler(detection)
-      })
-      .catch(() => {
-        if (!cancelled) setWrangler({ path: null, version: null, ready: false })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Probe only; the ledger hash is deferred to the upload that needs it. The
+  // old effect ran `ensureWranglerApproved` on every mount, SHA-256ing a
+  // multi-megabyte binary with no Site selected and no intent to upload.
+  const {
+    detection: wrangler,
+    ensureApproved,
+    redetect,
+  } = useWranglerDetection(wranglerEnabled && site !== null)
 
   // Reconcile any operation a crash interrupted. Owner only: the recovery path
   // claims leases, and a viewer holding no lease would just churn.
@@ -231,22 +226,21 @@ export function useSitePublishActions({
   }, [run, requireSite, preview])
 
   const redetectWrangler = useCallback(() => {
-    void run("wrangler", async () => {
-      setWrangler(await redetectWranglerBinary())
-    })
-  }, [run])
+    void run("wrangler", () => redetect())
+  }, [run, redetect])
 
   const upload = useCallback(
     (version: SiteVersionRow) => {
       void run(`upload:${version.id}`, () =>
-        uploadSiteVersion({
-          siteId: requireSite().id,
-          versionId: version.id,
-          actorAccountId,
-        })
+        uploadSiteVersion(
+          { siteId: requireSite().id, versionId: version.id, actorAccountId },
+          // The ledger hash happens here, once, rather than on every console
+          // mount.
+          { ensureWrangler: ensureApproved }
+        )
       )
     },
-    [run, requireSite, actorAccountId]
+    [run, requireSite, actorAccountId, ensureApproved]
   )
 
   const deploy = useCallback(

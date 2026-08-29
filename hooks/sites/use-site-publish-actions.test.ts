@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 jest.mock("@/lib/sites/wrangler-detect", () => ({
+  detectWranglerBinary: jest.fn(async () => ({
+    path: "/usr/bin/wrangler",
+    version: "3.90.0",
+    ready: true,
+  })),
   ensureWranglerApproved: jest.fn(async () => ({
     path: "/usr/bin/wrangler",
     version: "3.90.0",
@@ -11,6 +16,10 @@ jest.mock("@/lib/sites/wrangler-detect", () => ({
     version: "4.0.0",
     ready: true,
   })),
+}))
+const uploadSiteVersion = jest.fn(async () => "cf-version-1")
+jest.mock("@/lib/sites/publish-version", () => ({
+  uploadSiteVersion: (...args: unknown[]) => uploadSiteVersion(...args),
 }))
 jest.mock("@/lib/sites/build-version", () => ({
   buildAndSaveSiteVersion: jest.fn(async () => ({})),
@@ -40,7 +49,7 @@ jest.mock("@/lib/db/sites", () => ({
 import { cancelSiteOperation } from "@/lib/db/sites"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
-import { ensureWranglerApproved } from "@/lib/sites/wrangler-detect"
+import { detectWranglerBinary, ensureWranglerApproved } from "@/lib/sites/wrangler-detect"
 import type { SiteEnvironmentRevisionRow, SiteProjectRow, SiteVersionRow } from "@/types/sites"
 import type { SiteLiveData } from "./use-site-live-data"
 import { useSitePublishActions } from "./use-site-publish-actions"
@@ -147,14 +156,17 @@ beforeEach(() => {
   jest.clearAllMocks()
 })
 
-it("auto-detects and approves wrangler so upload never asks for a path", async () => {
+it("probes for wrangler without hashing it", async () => {
+  // `ensureWranglerApproved` SHA-256s a multi-megabyte binary to record it in
+  // the tool ledger. Mounting the console is not a reason to pay that.
   const { result } = setup()
   await waitFor(() => expect(result.current.wrangler?.ready).toBe(true))
-  expect(ensureWranglerApproved).toHaveBeenCalled()
+  expect(detectWranglerBinary).toHaveBeenCalled()
+  expect(ensureWranglerApproved).not.toHaveBeenCalled()
 })
 
 it("falls back to not-found when detection rejects", async () => {
-  ;(ensureWranglerApproved as jest.Mock).mockRejectedValueOnce(new Error("no ipc"))
+  ;(detectWranglerBinary as jest.Mock).mockRejectedValueOnce(new Error("no ipc"))
   const { result } = setup()
   await waitFor(() =>
     expect(result.current.wrangler).toEqual({
@@ -297,18 +309,16 @@ it("adopts the preview URL on start and clears it on stop", async () => {
   expect(preview.adopt).toHaveBeenLastCalledWith(null)
 })
 
-it("refuses to upload before wrangler resolves", async () => {
-  ;(ensureWranglerApproved as jest.Mock).mockResolvedValueOnce({
-    path: null,
-    version: null,
-    ready: false,
-  })
-  const { result, service } = setup()
+it("hands upload the approval callback, so the ledger hash happens there", async () => {
+  const { result } = setup()
   await waitFor(() => expect(result.current.wrangler).not.toBeNull())
   await act(async () => {
     result.current.upload({ id: "v1", artifactDigest: "abc" } as SiteVersionRow)
   })
-  expect(service.uploadVersion).not.toHaveBeenCalled()
+  expect(uploadSiteVersion).toHaveBeenCalledWith(
+    { siteId: "site_1", versionId: "v1", actorAccountId: "owner" },
+    expect.objectContaining({ ensureWrangler: expect.any(Function) })
+  )
 })
 
 it("deploys, takes down, restores, and reconciles through the service", async () => {

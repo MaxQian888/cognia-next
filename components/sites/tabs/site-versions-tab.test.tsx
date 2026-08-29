@@ -1,6 +1,26 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+// jsdom reports zero height for the scroll container, so the real virtualizer
+// renders nothing. The repo convention is to mock it wholesale and let every
+// row through.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 88,
+        size: 88,
+        end: (index + 1) * 88,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 88,
+    measureElement: jest.fn(),
+    scrollToIndex: jest.fn(),
+  }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,

@@ -118,6 +118,57 @@ export interface SiteRailHint {
 }
 
 /**
+ * One hint per Site in a single pass.
+ *
+ * The rail called {@link resolveSiteRailHint} per row, and each call filtered
+ * the full cross-Site signal lists — O(sites × signals) on every render. This
+ * groups both inputs once and answers every row from the grouped maps.
+ */
+export function indexSiteRailHints(
+  sites: readonly Pick<SiteProjectRow, "id">[],
+  activeDeployments: readonly SiteDeploymentRow[],
+  operationSignals: readonly SiteOperationRow[]
+): ReadonlyMap<string, SiteRailHint> {
+  const operationsBySite = new Map<string, SiteOperationRow[]>()
+  for (const operation of operationSignals) {
+    const bucket = operationsBySite.get(operation.siteId)
+    if (bucket) bucket.push(operation)
+    else operationsBySite.set(operation.siteId, [operation])
+  }
+  const newestDeployment = new Map<string, SiteDeploymentRow>()
+  for (const deployment of activeDeployments) {
+    const current = newestDeployment.get(deployment.siteId)
+    if (!current || deployment.updatedAt > current.updatedAt) {
+      newestDeployment.set(deployment.siteId, deployment)
+    }
+  }
+  const hints = new Map<string, SiteRailHint>()
+  for (const site of sites) {
+    hints.set(site.id, hintFrom(operationsBySite.get(site.id) ?? [], newestDeployment.get(site.id)))
+  }
+  return hints
+}
+
+/** The precedence rule, shared by both entry points. */
+function hintFrom(
+  mine: readonly SiteOperationRow[],
+  deployment: SiteDeploymentRow | undefined
+): SiteRailHint {
+  if (mine.some((operation) => operation.status === "queued" || operation.status === "running")) {
+    return { kind: "running", tone: "info", live: true }
+  }
+  // A live Site whose last build failed still reads as live: the failure is
+  // surfaced in that Site's overview banner, and the rail should not shout red
+  // at a site that is serving traffic fine.
+  if (deployment) return { kind: "live", tone: "success", live: false, at: deployment.updatedAt }
+  if (mine.length > 0) {
+    const newest = mine.reduce((latest, row) => (row.updatedAt > latest.updatedAt ? row : latest))
+    return { kind: "failed", tone: "danger", live: false, at: newest.updatedAt }
+  }
+  return { kind: "never", tone: "neutral", live: false }
+}
+
+/**
  * One line of status per Site in the rail, from the cross-Site signals the
  * console loads for every row (active deployments and in-flight operations).
  *
@@ -129,25 +180,15 @@ export function resolveSiteRailHint(
   activeDeployments: readonly SiteDeploymentRow[],
   operationSignals: readonly SiteOperationRow[]
 ): SiteRailHint {
-  const mine = operationSignals.filter((operation) => operation.siteId === site.id)
-  if (mine.some((operation) => operation.status === "queued" || operation.status === "running")) {
-    return { kind: "running", tone: "info", live: true }
-  }
-  const deployment = activeDeployments
-    .filter((row) => row.siteId === site.id)
-    .reduce<SiteDeploymentRow | undefined>(
-      (newest, row) => (!newest || row.updatedAt > newest.updatedAt ? row : newest),
-      undefined
-    )
-  // A live Site whose last build failed still reads as live: the failure is
-  // surfaced in that Site's overview banner, and the rail should not shout red
-  // at a site that is serving traffic fine.
-  if (deployment) return { kind: "live", tone: "success", live: false, at: deployment.updatedAt }
-  if (mine.length > 0) {
-    const newest = mine.reduce((latest, row) => (row.updatedAt > latest.updatedAt ? row : latest))
-    return { kind: "failed", tone: "danger", live: false, at: newest.updatedAt }
-  }
-  return { kind: "never", tone: "neutral", live: false }
+  return hintFrom(
+    operationSignals.filter((operation) => operation.siteId === site.id),
+    activeDeployments
+      .filter((row) => row.siteId === site.id)
+      .reduce<SiteDeploymentRow | undefined>(
+        (newest, row) => (!newest || row.updatedAt > newest.updatedAt ? row : newest),
+        undefined
+      )
+  )
 }
 
 /* ---------------------------------------------------------------- failures */
