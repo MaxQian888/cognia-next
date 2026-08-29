@@ -63,7 +63,10 @@
     "downloadFailed": "无法保存该 artifact",
     "expand": "展开预览",
     "openInCanvas": "在画布中打开",
-    "openInCanvasAria": "在画布中打开 artifact"
+    "openInCanvasAria": "在画布中打开 artifact",
+    "previewAnyway": "仍然预览",
+    "previewDeferred": "这个 artifact 比较大，点一下即可预览。",
+    "previewReactManual": "React artifact 需要加载运行时，按需预览。"
   },
   "askUser": {
     "dismiss": "忽略",

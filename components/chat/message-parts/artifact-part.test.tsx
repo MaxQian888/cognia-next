@@ -170,4 +170,40 @@ describe("ArtifactPart", () => {
     expect(screen.queryByTestId("artifact-part")).toBeNull()
     expect(mockCopy).not.toHaveBeenCalled()
   })
+
+  describe("preview deferral", () => {
+    it("previews a normal artifact once the card is near the viewport", () => {
+      // jsdom has no layout, so every rect is 0x0 at the origin — which the
+      // near-viewport latch correctly reads as on-screen.
+      mockArtifacts["art-1"] = createArtifactRow({ type: "document", content: "# short" })
+      render(<ArtifactPart part={createPart()} />)
+      expect(screen.getByTestId("artifact-preview")).toBeInTheDocument()
+      expect(screen.queryByTestId("artifact-part-preview-anyway")).toBeNull()
+    })
+
+    it("keeps a React artifact behind a click regardless of its size", () => {
+      // It costs a whole runtime load, which a scroll must not trigger.
+      mockArtifacts["art-1"] = createArtifactRow({ type: "react", content: "<App/>" })
+      render(<ArtifactPart part={createPart()} />)
+      expect(screen.queryByTestId("artifact-preview")).toBeNull()
+      expect(screen.getByTestId("artifact-part-preview-anyway")).toBeInTheDocument()
+    })
+
+    it("keeps a large artifact behind a click", () => {
+      mockArtifacts["art-1"] = createArtifactRow({
+        type: "html",
+        content: "<p>x</p>".repeat(4000),
+      })
+      render(<ArtifactPart part={createPart()} />)
+      expect(screen.queryByTestId("artifact-preview")).toBeNull()
+      expect(screen.getByTestId("artifact-part-preview-anyway")).toBeInTheDocument()
+    })
+
+    it("renders it when the user asks", () => {
+      mockArtifacts["art-1"] = createArtifactRow({ type: "react", content: "<App/>" })
+      render(<ArtifactPart part={createPart()} />)
+      fireEvent.click(screen.getByTestId("artifact-part-preview-anyway"))
+      expect(screen.getByTestId("artifact-preview")).toBeInTheDocument()
+    })
+  })
 })

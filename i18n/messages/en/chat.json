@@ -63,7 +63,10 @@
     "downloadFailed": "Couldn't save the artifact",
     "expand": "Expand preview",
     "openInCanvas": "Open in canvas",
-    "openInCanvasAria": "Open artifact in canvas"
+    "openInCanvasAria": "Open artifact in canvas",
+    "previewAnyway": "Preview anyway",
+    "previewDeferred": "This artifact is large — previewing it is a click away.",
+    "previewReactManual": "React artifacts load a runtime, so they preview on request."
   },
   "askUser": {
     "dismiss": "Dismiss",

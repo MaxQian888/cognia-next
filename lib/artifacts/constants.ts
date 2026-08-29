@@ -391,3 +391,11 @@ export const CHART_COLORS = [
   "#FFBB28",
   "#FF8042",
 ]
+
+/**
+ * How much content an artifact card in the chat transcript will render
+ * unprompted. Mirrors `MERMAID_AUTO_RENDER_MAX_CHARS` and exists for the same
+ * reason: a transcript full of open artifact cards mounts one live iframe each
+ * at first paint, and a large document is the expensive one.
+ */
+export const ARTIFACT_AUTO_PREVIEW_MAX_CHARS = 24_000

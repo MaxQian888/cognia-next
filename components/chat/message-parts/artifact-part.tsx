@@ -7,7 +7,7 @@
  * back to a "cleared" placeholder when the store no longer has the row.
  */
 
-import { memo, useCallback, useState } from "react"
+import { memo, useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
@@ -26,6 +26,8 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { revealArtifactInWorkspace } from "@/lib/artifacts/reveal"
 import { exportArtifact } from "@/lib/artifacts/export"
 import { getPreferredArtifactExportFormat } from "@/components/artifacts/runtime-adapters"
+import { ARTIFACT_AUTO_PREVIEW_MAX_CHARS } from "@/lib/artifacts/constants"
+import { useNearViewport } from "@/hooks/chat/use-near-viewport"
 import { toast } from "sonner"
 import { useCopy } from "@/hooks/ui/use-copy"
 import type { ArtifactPart as ArtifactPartType } from "@/lib/claude/parts-extensions"
@@ -41,7 +43,22 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
   const t = useTranslations("chat.artifactPart")
   const artifact = useArtifactStore((s) => s.artifacts[part.artifactId])
   const [open, setOpen] = useState(part.defaultOpen !== false)
+  const [forcePreview, setForcePreview] = useState(false)
   const { copy, copied } = useCopy()
+
+  // A transcript full of artifact cards mounted one live iframe EACH at first
+  // paint — every one of them sanitising, writing a document and, for a React
+  // artifact, loading a whole runtime. The same latch `mermaid-block.tsx` uses:
+  // nothing renders until the card is about a screen away.
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const near = useNearViewport(bodyRef, { disabled: forcePreview })
+
+  // Two things stay behind an explicit click rather than a scroll:
+  // a large document, and ANY React artifact — the latter costs a runtime load
+  // regardless of how short its source is.
+  const oversized = (artifact?.content.length ?? 0) > ARTIFACT_AUTO_PREVIEW_MAX_CHARS
+  const manualOnly = artifact?.type === "react" || oversized
+  const showPreview = forcePreview || (near && !manualOnly)
 
   const handleOpenInCanvas = useCallback(() => {
     revealArtifactInWorkspace(part.artifactId)
@@ -139,8 +156,32 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
       </ArtifactHeader>
       {open && (
         <ArtifactContent className="max-h-72 p-0">
-          <div className="h-72 w-full">
-            <ArtifactPreview artifact={artifact} />
+          <div className="h-72 w-full" ref={bodyRef} data-testid="artifact-part-body">
+            {showPreview ? (
+              <ArtifactPreview artifact={artifact} />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+                <p className="text-muted-foreground text-xs">
+                  {artifact.type === "react"
+                    ? t("previewReactManual")
+                    : oversized
+                      ? t("previewDeferred")
+                      : ""}
+                </p>
+                {manualOnly ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setForcePreview(true)}
+                    data-testid="artifact-part-preview-anyway"
+                    type="button"
+                  >
+                    {t("previewAnyway")}
+                  </Button>
+                ) : null}
+              </div>
+            )}
           </div>
         </ArtifactContent>
       )}

@@ -175,13 +175,15 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     setArtifactRuntimeHealth(artifact.id, runtimeHealth, error ?? undefined)
   }, [artifact.id, error, runtimeHealth, setArtifactRuntimeHealth])
 
+  // Re-push the palette on a theme flip WITHOUT re-rendering the document, so
+  // a live preview restyles in place. Applies to every same-origin frame, not
+  // just the diagram-design profile — an SVG or plain HTML preview was
+  // otherwise stuck on a light backdrop in a dark app.
   useEffect(() => {
-    if (artifact.type !== "html" || artifact.metadata?.rendererProfile !== "diagram-design-v1") {
-      return
-    }
+    if (artifact.type !== "html" && artifact.type !== "svg") return
     const doc = iframeRef.current?.contentDocument
     if (doc) applyArtifactThemeVariables(doc, diagramThemeVariables)
-  }, [artifact.metadata?.rendererProfile, artifact.type, diagramThemeVariables])
+  }, [artifact.type, diagramThemeVariables])
   const widgetMetadata = artifact.metadata?.widget
   const effectiveIframeHeight =
     widgetMetadata?.sizing === "content-height" ? iframeHeight : undefined
@@ -259,7 +261,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
           case "svg": {
             const doc = iframe.contentDocument
             if (!doc) return
-            renderSVG(doc, artifact.content)
+            renderSVG(doc, artifact.content, diagramThemeVariablesRef.current)
             break
           }
           case "react":
@@ -469,7 +471,9 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       <iframe
         ref={iframeRef}
         key={key}
-        className={cn("w-full border-0 bg-white", !effectiveIframeHeight && "h-full")}
+        // `bg-white` here made the frame itself a light rectangle in a dark
+        // app, before its document even painted.
+        className={cn("w-full border-0 bg-background", !effectiveIframeHeight && "h-full")}
         sandbox={adapter.sandbox}
         title={t("previewTitle", { title: artifact.title })}
         style={effectiveIframeHeight ? { height: effectiveIframeHeight } : undefined}

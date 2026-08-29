@@ -182,15 +182,22 @@ export function renderHTML(doc: Document, content: string, options: RenderHTMLOp
   doc.open()
   doc.write(sanitized)
   doc.close()
-  if (options.rendererProfile === "diagram-design-v1" && options.themeVariables) {
-    applyArtifactThemeVariables(doc, options.themeVariables)
-  }
+  // Injected for EVERY html preview, not only the diagram-design profile. The
+  // variables are `:root` custom properties, so an author who set an explicit
+  // background still wins — this only gives a document that did NOT choose one
+  // something that matches the app in both themes, instead of the browser's
+  // white default.
+  if (options.themeVariables) applyArtifactThemeVariables(doc, options.themeVariables)
 }
 
 /**
  * Render sanitized SVG content into an iframe document
  */
-export function renderSVG(doc: Document, content: string): void {
+export function renderSVG(
+  doc: Document,
+  content: string,
+  themeVariables?: ArtifactThemeVariables
+): void {
   let sanitized = svgSanitizeCache.get(content)
   if (sanitized === undefined) {
     sanitized = DOMPurify.sanitize(content, {
@@ -205,7 +212,11 @@ export function renderSVG(doc: Document, content: string): void {
     <html>
     <head>
       <style>
-        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #f5f5f5; }
+        /* The host injects --background via applyArtifactThemeVariables; the
+           literal is the fallback for a frame that never receives it. A
+           hard-coded light backdrop made every SVG preview a bright rectangle
+           in a dark app. */
+        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: var(--background, #f5f5f5); }
         svg { max-width: 100%; max-height: 100vh; }
       </style>
     </head>
@@ -213,6 +224,7 @@ export function renderSVG(doc: Document, content: string): void {
     </html>
   `)
   doc.close()
+  if (themeVariables) applyArtifactThemeVariables(doc, themeVariables)
 }
 
 /**
