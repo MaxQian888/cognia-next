@@ -10,6 +10,7 @@ import {
   AlertTriangle as WarnIcon,
   Timer as TimerIcon,
   Pin as PinIcon,
+  Lock as LockIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
 import { useFormatter, useNow, useTranslations } from "next-intl"
@@ -498,6 +499,19 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             <div className="text-sm font-medium truncate text-foreground flex-1">
               {displayLabel}
             </div>
+            {data.locked ? (
+              // A locked node cannot be dragged (the store keeps React Flow's
+              // `draggable` in step with the flag). Without a mark the node
+              // just refuses to move for no visible reason — group containers
+              // have always carried their own label for the same reason.
+              <span
+                title={tNode("lockedTitle")}
+                className="inline-flex items-center rounded-pill bg-muted px-1 py-px text-muted-foreground"
+                data-testid="wf-node-lock-badge"
+              >
+                <LockIcon className="size-3" aria-hidden="true" />
+              </span>
+            ) : null}
             {decoration.pinned ? (
               <span
                 title={tNode("pinnedTitle")}

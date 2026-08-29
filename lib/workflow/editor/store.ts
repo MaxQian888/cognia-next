@@ -604,6 +604,26 @@ function diagnosticsSignature(r: DiagnosticsResult): string {
   return `${r.errorCount}:${r.warningCount}:${r.infoCount}:${r.diagnostics.map((d) => d.id).join(",")}`
 }
 
+/**
+ * Merge a `WorkflowNodeData` patch into a React Flow node, keeping the fields
+ * React Flow itself owns in step with the ones we store on `data`.
+ *
+ * `locked` is the case that matters: `workflowToReactFlow` sets
+ * `draggable: false` for nodes that load locked, but a patch only ever touched
+ * `data`. Toggling the lock from the selection toolbar therefore flipped the
+ * icon and persisted the flag while the node stayed draggable, and unlocking a
+ * node that had loaded locked left it pinned — both only corrected themselves
+ * on the next load.
+ */
+function applyNodeDataPatch(
+  node: RFWorkflowNode,
+  patch: Partial<WorkflowNodeData>
+): RFWorkflowNode {
+  const next: RFWorkflowNode = { ...node, data: { ...node.data, ...patch } }
+  if ("locked" in patch) next.draggable = !patch.locked
+  return next
+}
+
 export function createEditorStore(initial: VisualWorkflow): EditorStore {
   const converted = workflowToReactFlow(initial)
   // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
@@ -1032,9 +1052,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
 
         updateNodeData: (id, patch) => {
           set({
-            nodes: get().nodes.map((n) =>
-              n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
-            ),
+            nodes: get().nodes.map((n) => (n.id === id ? applyNodeDataPatch(n, patch) : n)),
             dirty: true,
           })
         },
@@ -1043,9 +1061,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (ids.length === 0) return
           const idSet = new Set(ids)
           set({
-            nodes: get().nodes.map((n) =>
-              idSet.has(n.id) ? { ...n, data: { ...n.data, ...patch } } : n
-            ),
+            nodes: get().nodes.map((n) => (idSet.has(n.id) ? applyNodeDataPatch(n, patch) : n)),
             dirty: true,
           })
         },

@@ -15,6 +15,7 @@
     "succeeded": "{ago} 运行 · 用时 {duration}",
     "succeededNoDuration": "{ago} 运行"
   },
+  "lockedTitle": "已锁定——在选区工具栏中解锁后才能移动",
   "loopContainer": {
     "dropHint": "把节点拖进来组成循环体",
     "mode": {

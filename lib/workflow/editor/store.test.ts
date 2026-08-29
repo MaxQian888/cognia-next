@@ -1701,3 +1701,68 @@ describe("editor store — copilot reference / highlight channels", () => {
     expect(useStore.getState().referencedNodeIds).toEqual({ n_a: true })
   })
 })
+
+/**
+ * `workflowToReactFlow` sets `draggable: false` for a node that loads locked,
+ * but the lock toggle only ever patched `data`. Flipping the lock therefore
+ * left the node draggable — and unlocking one that had loaded locked left it
+ * pinned — until the workflow was reopened.
+ */
+describe("lock keeps React Flow's draggable in step", () => {
+  function lockableWorkflow(): VisualWorkflow {
+    return {
+      ...emptyWorkflow(),
+      nodes: [
+        {
+          id: "n1",
+          type: "data.code" as WorkflowNodeKind,
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "n1", params: {} },
+        },
+        {
+          id: "n2",
+          type: "data.code" as WorkflowNodeKind,
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "n2", params: {} },
+        },
+      ],
+    }
+  }
+
+  it("stops a node being dragged the moment it is locked", () => {
+    const store = createEditorStore(lockableWorkflow())
+    const id = store.getState().nodes[0]!.id
+    store.getState().updateNodeData(id, { locked: true })
+    const node = store.getState().nodes.find((n) => n.id === id)!
+    expect(node.data.locked).toBe(true)
+    expect(node.draggable).toBe(false)
+  })
+
+  it("gives dragging back on unlock, without waiting for a reload", () => {
+    const store = createEditorStore(lockableWorkflow())
+    const id = store.getState().nodes[0]!.id
+    store.getState().updateNodeData(id, { locked: true })
+    store.getState().updateNodeData(id, { locked: false })
+    const node = store.getState().nodes.find((n) => n.id === id)!
+    expect(node.draggable).toBe(true)
+  })
+
+  it("applies across a batch, which is what the selection toolbar calls", () => {
+    const store = createEditorStore(lockableWorkflow())
+    const ids = store.getState().nodes.map((n) => n.id)
+    store.getState().updateNodeDataBatch(ids, { locked: true })
+    expect(store.getState().nodes.every((n) => n.draggable === false)).toBe(true)
+  })
+
+  it("leaves draggable alone for patches that do not mention the lock", () => {
+    const store = createEditorStore(lockableWorkflow())
+    const id = store.getState().nodes[0]!.id
+    store.getState().updateNodeData(id, { locked: true })
+    store.getState().updateNodeData(id, { label: "renamed" })
+    const node = store.getState().nodes.find((n) => n.id === id)!
+    expect(node.draggable).toBe(false)
+    expect(node.data.label).toBe("renamed")
+  })
+})

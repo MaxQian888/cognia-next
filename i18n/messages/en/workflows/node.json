@@ -15,6 +15,7 @@
     "succeeded": "Ran {ago} · {duration}",
     "succeededNoDuration": "Ran {ago}"
   },
+  "lockedTitle": "Locked — unlock it from the selection toolbar to move it",
   "loopContainer": {
     "dropHint": "Drag nodes here to build the loop body",
     "mode": {

@@ -63,6 +63,7 @@ interface RenderArgs {
   withProvider?: boolean
   typeVersion?: number
   params?: Record<string, unknown>
+  locked?: boolean
 }
 
 function renderNode({
@@ -74,6 +75,7 @@ function renderNode({
   withProvider = true,
   typeVersion = 1,
   params = {},
+  locked = false,
 }: RenderArgs = {}) {
   const ui = (
     <TooltipProvider>
@@ -86,6 +88,7 @@ function renderNode({
           params,
           kind,
           typeVersion,
+          ...(locked ? { locked: true } : {}),
         }}
         positionAbsoluteX={0}
         positionAbsoluteY={0}
@@ -523,5 +526,24 @@ describe("WorkflowNodeComponent", () => {
       expect(screen.getByTestId("wf-node-error-badge")).toBeInTheDocument()
       expect(screen.queryByTestId("wf-node-warning-badge")).toBeNull()
     })
+  })
+})
+
+/**
+ * A locked node cannot be dragged, and until now nothing on the node said so —
+ * it simply refused to move. Group containers have always carried their own
+ * label for exactly this reason.
+ */
+describe("locked nodes", () => {
+  it("marks a locked node so the refusal to drag is explained", () => {
+    const { store } = withStore()
+    renderNode({ store, locked: true })
+    expect(screen.getByTestId("wf-node-lock-badge")).toBeInTheDocument()
+  })
+
+  it("shows no lock mark on an ordinary node", () => {
+    const { store } = withStore()
+    renderNode({ store })
+    expect(screen.queryByTestId("wf-node-lock-badge")).toBeNull()
   })
 })
