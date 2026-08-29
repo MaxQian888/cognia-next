@@ -7,6 +7,8 @@ import {
   escapeHtml,
   renderHTML,
   renderSVG,
+  buildArtifactFrameCsp,
+  getInteractiveHtmlShellHtml,
   getReactShellHtml,
   sanitizeHTML,
 } from "./preview-utils"
@@ -122,58 +124,85 @@ describe("renderHTML / renderSVG", () => {
 })
 
 describe("getReactShellHtml", () => {
-  const messages = {
-    cdnLoadTitle: "CDN Loading Failed",
-    cdnLoadDescription:
-      "Unable to load React dependencies from CDN. Check your network connection.",
-    noComponentFound: "No component found. Export an App, Component, or Main function.",
+  const runtime = {
+    origin: "tauri://localhost",
+    reactRuntimeUrl: "tauri://localhost/artifact-runtime/react-runtime.js",
+    shellUrl: "tauri://localhost/artifact-runtime/artifact-shell.js",
   }
-  const html = getReactShellHtml(messages)
+  const html = getReactShellHtml(runtime)
 
-  it("includes a CSP meta tag locking external dependencies to known CDNs", () => {
+  it("carries no external origin at all", () => {
+    // React 19 publishes no UMD build, so `unpkg.com/react@19/umd/*` was a hard
+    // 404 and every preview fell through to a 15s timeout notice.
+    expect(html).not.toMatch(/unpkg\.com/)
+    expect(html).not.toMatch(/cdn\.tailwindcss\.com/)
+    expect(html).not.toMatch(/https?:\/\//)
+  })
+
+  it("loads both bundles from the shell origin", () => {
+    expect(html).toContain(`<script src="${runtime.reactRuntimeUrl}"></script>`)
+    expect(html).toContain(`<script src="${runtime.shellUrl}"></script>`)
+  })
+
+  it("contains no inline script and no eval", () => {
+    // A srcdoc child inherits the packaged shell's CSP, which grants neither
+    // 'unsafe-inline' nor 'unsafe-eval' — an inline shell simply never runs.
+    expect(html).not.toMatch(/<script(?![^>]*\ssrc=)/i)
+    expect(html).not.toMatch(/\beval\(/)
+    expect(html).not.toMatch(/new Function/)
+  })
+
+  it("names the shell origin and blob: in its own policy", () => {
+    // The frame policy intersects with the inherited one; naming only
+    // 'unsafe-inline' (as the old shell did) makes that intersection empty.
     expect(html).toMatch(/Content-Security-Policy/i)
-    expect(html).toMatch(/unpkg\.com/)
-    expect(html).toMatch(/cdn\.tailwindcss\.com/)
+    expect(html).toContain("script-src tauri://localhost blob:")
+    expect(html).toContain("connect-src 'none'")
+    expect(html).not.toContain("'unsafe-inline'; script")
   })
 
-  it("loads React 19 + ReactDOM + Babel standalone via CDN", () => {
-    expect(html).toMatch(/react@19/)
-    expect(html).toMatch(/react-dom@19/)
-    expect(html).toMatch(/@babel\/standalone/)
+  it("mounts a single root container for the bootstrap", () => {
+    expect(html).toContain('<div id="root"></div>')
+  })
+})
+
+describe("buildArtifactFrameCsp", () => {
+  it("forbids network access and nested contexts", () => {
+    const csp = buildArtifactFrameCsp("https://app.example")
+    expect(csp).toContain("default-src 'none'")
+    expect(csp).toContain("connect-src 'none'")
+    expect(csp).toContain("object-src 'none'")
+    expect(csp).toContain("base-uri 'none'")
+    expect(csp).toContain("form-action 'none'")
   })
 
-  it("listens for postMessage 'render-component' to inject code", () => {
-    expect(html).toMatch(/render-component/)
-    expect(html).toMatch(/createRoot/)
+  it("never grants unsafe-inline or unsafe-eval", () => {
+    const csp = buildArtifactFrameCsp("https://app.example")
+    expect(csp).not.toContain("'unsafe-eval'")
+    expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/)
+  })
+})
+
+describe("getInteractiveHtmlShellHtml", () => {
+  const runtime = {
+    origin: "tauri://localhost",
+    shellUrl: "tauri://localhost/artifact-runtime/artifact-shell.js",
+  }
+
+  it("puts the policy ahead of the bootstrap it governs", () => {
+    const html = getInteractiveHtmlShellHtml(
+      "<html><head></head><body><p>x</p></body></html>",
+      runtime
+    )
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("artifact-shell.js"))
   })
 
-  it("injects the provided messages into the iframe shell", () => {
-    expect(html).toMatch(/CDN Loading Failed/)
-    expect(html).toContain(messages.cdnLoadDescription)
-    expect(html).toContain(messages.noComponentFound)
-  })
-
-  it("renders translated messages when given non-English values", () => {
-    const localized = getReactShellHtml({
-      cdnLoadTitle: "CDN 加载失败",
-      cdnLoadDescription: "无法从 CDN 加载 React 依赖，请检查网络连接。",
-      noComponentFound: "未找到组件。",
-    })
-    expect(localized).toContain("CDN 加载失败")
-    expect(localized).toContain("无法从 CDN 加载 React 依赖")
-    expect(localized).toContain("未找到组件。")
-  })
-
-  it("safely escapes characters that would otherwise break the inline script", () => {
-    const tricky = getReactShellHtml({
-      cdnLoadTitle: 'has "quotes" and \\backslash',
-      cdnLoadDescription: "ends with </script>tag",
-      noComponentFound: "newline\nthen 'apostrophe'",
-    })
-    // The </script> sequence must be broken so the inline script doesn't end early.
-    expect(tricky).not.toMatch(/<\/script>tag/)
-    // The original characters survive in some encoded form (JSON.stringify escapes them).
-    expect(tricky).toContain('has \\"quotes\\"')
-    expect(tricky).toContain("\\\\backslash")
+  it("keeps the artifact's body and adds no inline script", () => {
+    const html = getInteractiveHtmlShellHtml(
+      "<html><head></head><body><p>x</p></body></html>",
+      runtime
+    )
+    expect(html).toContain("<p>x</p>")
+    expect(html).not.toMatch(/<script(?![^>]*\ssrc=)/i)
   })
 })

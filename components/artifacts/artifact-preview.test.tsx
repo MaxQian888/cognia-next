@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -41,6 +41,24 @@ jest.mock("./artifact-renderers", () => ({
   },
 }))
 
+const mockSettings: { artifacts?: { interactiveHtml?: boolean } } = {}
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (state: { settings: typeof mockSettings }) => T) =>
+    selector({ settings: mockSettings }),
+}))
+
+const transformArtifactJsx = jest.fn(async (code: string) => ({ code, isModule: false }))
+const loadArtifactReactRuntime = jest.fn(async () => ({
+  origin: "https://app.test",
+  reactRuntimeUrl: "https://app.test/artifact-runtime/react-runtime.js",
+  shellUrl: "https://app.test/artifact-runtime/artifact-shell.js",
+  reactVersion: "19.2.8",
+}))
+jest.mock("@/lib/artifacts/react-runtime-loader", () => ({
+  loadArtifactReactRuntime: (...args: unknown[]) => loadArtifactReactRuntime(...(args as [])),
+  transformArtifactJsx: (...args: [string]) => transformArtifactJsx(...args),
+}))
+
 jest.mock("./jupyter-renderer", () => ({
   JupyterRenderer: ({ content }: { content: string }) => (
     <div data-testid="jupyter">{content.slice(0, 8)}</div>
@@ -63,6 +81,12 @@ const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,
+})
+
+beforeEach(() => {
+  transformArtifactJsx.mockClear()
+  loadArtifactReactRuntime.mockClear()
+  delete mockSettings.artifacts
 })
 
 describe("ArtifactPreview", () => {
@@ -119,7 +143,7 @@ describe("ArtifactPreview", () => {
     document.documentElement.style.removeProperty("--primary")
   })
 
-  it("uses a React iframe shell for react artifacts", async () => {
+  it("serves the React shell from the local runtime, with no external origin", async () => {
     const { container } = render(
       <ArtifactPreview artifact={dummy({ type: "react", content: "function App(){}" })} />
     )
@@ -127,8 +151,160 @@ describe("ArtifactPreview", () => {
     expect(iframe).not.toBeNull()
     // The renderer schedules srcdoc population after a queueMicrotask + rAF in
     // production. waitFor polls until React's effect runs without race conditions.
+    await waitFor(() => expect(loadArtifactReactRuntime).toHaveBeenCalled())
     await waitFor(() => {
-      expect(iframe!.srcdoc).toMatch(/cdnLoadTitle/)
+      expect(iframe!.srcdoc).toContain("/artifact-runtime/react-runtime.js")
+    })
+    expect(iframe!.srcdoc).toContain("/artifact-runtime/artifact-shell.js")
+    // React 19 publishes no UMD build; the CDN tags this replaced were a 404.
+    expect(iframe!.srcdoc).not.toMatch(/unpkg\.com|cdn\.tailwindcss\.com/)
+    expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts")
+  })
+
+  it("pushes transformed code only after the frame's bootstrap says it is listening", async () => {
+    const { container } = render(
+      <ArtifactPreview artifact={dummy({ type: "react", content: "const App = () => <p/>" })} />
+    )
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+    await waitFor(() => expect(iframe.srcdoc).toContain("artifact-shell.js"))
+    // Nothing is pushed on `load`: the script tags may still be executing.
+    expect(transformArtifactJsx).not.toHaveBeenCalled()
+
+    const post = jest.fn()
+    const frameWindow = iframe.contentWindow as Window
+    frameWindow.postMessage = post
+    const event = new MessageEvent("message", { data: { type: "artifact-shell-ready" } })
+    // The host filters by source, exactly as it does for a real frame.
+    Object.defineProperty(event, "source", { value: frameWindow })
+    window.dispatchEvent(event)
+
+    await waitFor(() => expect(transformArtifactJsx).toHaveBeenCalledWith("const App = () => <p/>"))
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "artifact-shell-config" }),
+      expect.objectContaining({ targetOrigin: "*" })
+    )
+  })
+
+  it("re-renders an edited React artifact in place, without re-navigating the frame", async () => {
+    // The old shell built a NEW root per message, so the only way to show an
+    // edit was to rebuild the whole document.
+    const { container, rerender } = render(
+      <ArtifactPreview artifact={dummy({ type: "react", content: "const App = () => 1" })} />
+    )
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+    await waitFor(() => expect(iframe.srcdoc).toContain("artifact-shell.js"))
+    const frameWindow = iframe.contentWindow as Window
+    frameWindow.postMessage = jest.fn()
+    const ready = new MessageEvent("message", { data: { type: "artifact-shell-ready" } })
+    Object.defineProperty(ready, "source", { value: frameWindow })
+    window.dispatchEvent(ready)
+    await waitFor(() => expect(transformArtifactJsx).toHaveBeenCalledTimes(1))
+    const srcdocBefore = iframe.srcdoc
+
+    rerender(
+      <ArtifactPreview artifact={dummy({ type: "react", content: "const App = () => 2" })} />
+    )
+    await waitFor(() => expect(transformArtifactJsx).toHaveBeenCalledTimes(2))
+    expect(container.querySelector("iframe")).toBe(iframe)
+    expect(iframe.srcdoc).toBe(srcdocBefore)
+  })
+
+  it("surfaces a specific failure when the local runtime is missing", async () => {
+    loadArtifactReactRuntime.mockRejectedValueOnce(new Error("gone"))
+    render(<ArtifactPreview artifact={dummy({ type: "react", content: "x" })} />)
+    // Immediately, not after a 15 second CDN timeout.
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("runtimeInitFailed"))
+  })
+
+  describe("interactive HTML", () => {
+    const scripted = () =>
+      dummy({
+        id: "html-1",
+        type: "html",
+        content: `<html><body><button onclick="go()">go</button><script>function go(){}</script></body></html>`,
+      })
+
+    it("offers nothing while the setting is off", () => {
+      render(<ArtifactPreview artifact={scripted()} />)
+      expect(screen.queryByTestId("artifact-interactive-bar")).toBeNull()
+    })
+
+    it("offers nothing for a document with no scripts, even with the setting on", () => {
+      mockSettings.artifacts = { interactiveHtml: true }
+      render(<ArtifactPreview artifact={dummy({ type: "html", content: "<p>report</p>" })} />)
+      expect(screen.queryByTestId("artifact-interactive-bar")).toBeNull()
+    })
+
+    it("explains the scripts are inert and keeps the sanitised render until asked", () => {
+      mockSettings.artifacts = { interactiveHtml: true }
+      const { container } = render(<ArtifactPreview artifact={scripted()} />)
+      expect(screen.getByTestId("artifact-interactive-bar")).toHaveTextContent(
+        "interactiveOfferHint"
+      )
+      expect(screen.getByTestId("artifact-interactive-run")).toBeInTheDocument()
+      // Still the static frame: same-origin, written in through contentDocument.
+      expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-same-origin")
+    })
+
+    it("authorises one artifact only, and drops same-origin when it does", async () => {
+      mockSettings.artifacts = { interactiveHtml: true }
+      const { container } = render(<ArtifactPreview artifact={scripted()} />)
+      fireEvent.click(screen.getByTestId("artifact-interactive-run"))
+      await waitFor(() =>
+        expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts")
+      )
+      // Opaque origin: no host access, no cookies, no storage.
+      expect(container.querySelector("iframe")?.getAttribute("sandbox")).not.toContain(
+        "allow-same-origin"
+      )
+      await waitFor(() =>
+        expect(container.querySelector("iframe")?.srcdoc).toContain("artifact-shell.js")
+      )
+      const srcdoc = container.querySelector("iframe")!.srcdoc
+      // The handler was rewritten out of the markup; it comes back as a script.
+      expect(srcdoc).not.toContain("onclick")
+      expect(srcdoc).toContain("data-cognia-handler")
+    })
+
+    it("hands the lifted scripts over once the frame's bootstrap is listening", async () => {
+      mockSettings.artifacts = { interactiveHtml: true }
+      const { container } = render(<ArtifactPreview artifact={scripted()} />)
+      fireEvent.click(screen.getByTestId("artifact-interactive-run"))
+      const iframe = container.querySelector("iframe") as HTMLIFrameElement
+      await waitFor(() => expect(iframe.srcdoc).toContain("artifact-shell.js"))
+      const post = jest.fn()
+      const frameWindow = iframe.contentWindow as Window
+      frameWindow.postMessage = post
+      const event = new MessageEvent("message", { data: { type: "artifact-shell-ready" } })
+      Object.defineProperty(event, "source", { value: frameWindow })
+      window.dispatchEvent(event)
+      await waitFor(() =>
+        expect(post).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "run-scripts",
+            scripts: expect.arrayContaining([expect.objectContaining({ code: "function go(){}" })]),
+          }),
+          "*"
+        )
+      )
+    })
+
+    it("says so when a third-party script had to be dropped", async () => {
+      mockSettings.artifacts = { interactiveHtml: true }
+      render(
+        <ArtifactPreview
+          artifact={dummy({
+            type: "html",
+            content: `<html><body><script src="https://cdn.example/a.js"></script></body></html>`,
+          })}
+        />
+      )
+      fireEvent.click(screen.getByTestId("artifact-interactive-run"))
+      await waitFor(() =>
+        expect(screen.getByTestId("artifact-interactive-dropped")).toHaveTextContent(
+          "interactiveDroppedScripts"
+        )
+      )
     })
   })
 

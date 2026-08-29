@@ -3,12 +3,19 @@
 /**
  * ArtifactPreview - Live preview for HTML, React, SVG, Mermaid, Chart, Math,
  * Markdown documents, and Jupyter notebooks. Sanitizes HTML/SVG via DOMPurify
- * and isolates React in a sandboxed iframe with CSP-locked CDN dependencies.
+ * and isolates scripted artifacts in an opaque-origin sandboxed iframe served
+ * entirely from the offline runtime in `public/artifact-runtime/`.
+ *
+ * The scripted frames (React, and the opt-in interactive HTML mode) never carry
+ * an inline script and never eval: measured in a packaged Tauri shell
+ * (ADR-0158), an `about:srcdoc` child inherits `tauri.conf.json`'s CSP, which
+ * grants neither `'unsafe-inline'` nor `'unsafe-eval'`. Code reaches the frame
+ * as a same-origin bundle plus a `blob:` script.
  */
 
-import { useCallback, useEffect, useRef, useState, Component } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, Component } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircle, RefreshCw, Loader2 } from "lucide-react"
+import { AlertCircle, RefreshCw, Loader2, PlayIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
@@ -18,9 +25,13 @@ import {
   DIAGRAM_DESIGN_THEME_KEYS,
   renderHTML,
   renderSVG,
+  getInteractiveHtmlShellHtml,
   getReactShellHtml,
   escapeHtml,
 } from "@/lib/artifacts"
+import type { ArtifactFrameRuntime } from "@/lib/artifacts/preview-utils"
+import { compileInteractiveHtml, hasInteractiveContent } from "@/lib/artifacts/interactive-html"
+import { useSettingsStore } from "@/stores/settings"
 import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -154,6 +165,32 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   // successful render; folding it into `ready` (as this used to) made the panel
   // claim a preview it never produced.
   const [unsupported, setUnsupported] = useState(false)
+
+  // ---- scripted frames (react + the opt-in interactive HTML mode) ----------
+  const interactiveHtmlEnabled = useSettingsStore(
+    (state) => state.settings?.artifacts?.interactiveHtml === true
+  )
+  // Authorisation is PER ARTIFACT: the grant is the artifact's own id, so
+  // moving the panel to a different artifact silently un-grants it without any
+  // reset effect. The setting says "you may offer this"; the button says "run
+  // this one".
+  const [interactiveArtifactId, setInteractiveArtifactId] = useState<string | null>(null)
+  const offersInteractive =
+    artifact.type === "html" && interactiveHtmlEnabled && hasInteractiveContent(artifact.content)
+  const interactiveActive = offersInteractive && interactiveArtifactId === artifact.id
+  const frameMode: "html" | "svg" | "react" | "interactive" | "text" =
+    artifact.type === "react"
+      ? "react"
+      : artifact.type === "html"
+        ? interactiveActive
+          ? "interactive"
+          : "html"
+        : artifact.type === "svg"
+          ? "svg"
+          : "text"
+  const needsRuntime = frameMode === "react" || frameMode === "interactive"
+  const [frameRuntime, setFrameRuntime] = useState<ArtifactFrameRuntime | null>(null)
+
   const runtimeHealth: ArtifactRuntimeHealth = error
     ? "error"
     : isLoading
@@ -166,6 +203,15 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   useEffect(() => {
     diagramThemeVariablesRef.current = diagramThemeVariables
   }, [diagramThemeVariables])
+
+  // `useTranslations()` hands back a fresh function on every render. Anything
+  // that reads it from an effect dependency list therefore re-runs on every
+  // render — which, for the async runtime effect below, is an endless
+  // load → setState → load loop that never lets the frame settle.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  })
 
   // Persist only settled outcomes, so "which artifacts are broken?" survives a
   // reload and the workspace runtime filter has something to match. `loading`
@@ -180,29 +226,35 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   // just the diagram-design profile — an SVG or plain HTML preview was
   // otherwise stuck on a light backdrop in a dark app.
   useEffect(() => {
-    if (artifact.type !== "html" && artifact.type !== "svg") return
+    // Only the same-origin frames can be written into. The scripted ones are
+    // opaque-origin, so their palette rides `artifact-preview-parent-context`.
+    if (frameMode !== "html" && frameMode !== "svg") return
     const doc = iframeRef.current?.contentDocument
     if (doc) applyArtifactThemeVariables(doc, diagramThemeVariables)
-  }, [artifact.type, diagramThemeVariables])
+  }, [frameMode, diagramThemeVariables])
   const widgetMetadata = artifact.metadata?.widget
   const effectiveIframeHeight =
     widgetMetadata?.sizing === "content-height" ? iframeHeight : undefined
 
   const syncParentContext = useCallback(() => {
-    if (!widgetMetadata || !iframeRef.current?.contentWindow) {
+    const target = iframeRef.current?.contentWindow
+    // A scripted frame always needs this message: it is the ONLY channel that
+    // reaches an opaque-origin document, so the palette rides it too.
+    if (!target || (!widgetMetadata && !needsRuntime)) {
       return
     }
 
-    iframeRef.current.contentWindow.postMessage(
+    target.postMessage(
       {
         type: "artifact-preview-parent-context",
-        theme: widgetMetadata.theme || "inherit",
-        sizing: widgetMetadata.sizing || "auto",
+        theme: widgetMetadata?.theme || "inherit",
+        sizing: widgetMetadata?.sizing || "auto",
         hostStrategy: artifact.metadata?.hostStrategy,
+        themeVariables: needsRuntime ? diagramThemeVariablesRef.current : undefined,
       },
       "*"
     )
-  }, [artifact.metadata?.hostStrategy, widgetMetadata])
+  }, [artifact.metadata?.hostStrategy, needsRuntime, widgetMetadata])
 
   // What is currently painted in the iframe. The render effect keys on
   // `artifact.content`, and a Canvas split view drives that from the live
@@ -211,18 +263,92 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const lastRenderedRef = useRef<{
     id: string
     type: string
+    mode: string
     rendererProfile: string | undefined
     content: string
   } | null>(null)
+  /** True once the in-frame bootstrap has announced itself for THIS document. */
+  const shellReadyRef = useRef(false)
+
+  // The offline runtime under `public/artifact-runtime/`. Imported lazily: a
+  // chart preview has no business pulling in the JSX worker plumbing.
+  useEffect(() => {
+    if (!needsRuntime) return
+    let cancelled = false
+    void import("@/lib/artifacts/react-runtime-loader")
+      .then((module) => module.loadArtifactReactRuntime())
+      .then((runtime) => {
+        if (cancelled) return
+        setFrameRuntime(runtime)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        loggers.ui.error("artifacts.preview.runtime-unavailable", err, {
+          artifactId: artifact.id,
+          artifactType: artifact.type,
+        })
+        // Synchronous and specific, in place of the old 15-second CDN timeout.
+        setFrameRuntime(null)
+        setIsLoading(false)
+        setError(tRef.current("runtimeInitFailed"))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifact.id, artifact.type, needsRuntime])
+
+  // Compiled once per (artifact, content) and read back when the frame reports
+  // ready — the markup goes into `srcdoc`, the scripts go over postMessage.
+  const interactiveProgram = useMemo(
+    () => (frameMode === "interactive" ? compileInteractiveHtml(artifact.content) : null),
+    [artifact.content, frameMode]
+  )
+  const interactiveProgramRef = useRef(interactiveProgram)
+  useEffect(() => {
+    interactiveProgramRef.current = interactiveProgram
+  }, [interactiveProgram])
+
+  /**
+   * Push the artifact into a live scripted frame. React code is transformed by
+   * the host's Worker first, so the frame never needs Babel or `'unsafe-eval'`.
+   */
+  const pushScriptedContent = useCallback(async () => {
+    const target = iframeRef.current?.contentWindow
+    if (!target) return
+    try {
+      if (frameMode === "react") {
+        const { transformArtifactJsx } = await import("@/lib/artifacts/react-runtime-loader")
+        const { code, isModule } = await transformArtifactJsx(artifact.content)
+        target.postMessage({ type: "render-component", code, isModule }, "*")
+        return
+      }
+      if (frameMode === "interactive") {
+        target.postMessage(
+          { type: "run-scripts", scripts: interactiveProgramRef.current?.scripts ?? [] },
+          "*"
+        )
+      }
+    } catch (err) {
+      loggers.ui.error("artifacts.preview.scripted-push-failed", err, {
+        artifactId: artifact.id,
+        frameMode,
+      })
+      setIsLoading(false)
+      setError(err instanceof Error ? err.message : tRef.current("previewError"))
+    }
+  }, [artifact.content, artifact.id, frameMode])
 
   useEffect(() => {
     if (!needsIframe) return
+    // A scripted frame cannot be seeded before the runtime URLs are known.
+    if (needsRuntime && !frameRuntime) return
 
     const last = lastRenderedRef.current
     const unchanged =
       last !== null &&
       last.id === artifact.id &&
       last.type === artifact.type &&
+      last.mode === frameMode &&
       last.rendererProfile === artifact.metadata?.rendererProfile &&
       last.content === artifact.content
     // `key` is the manual-refresh counter; a refresh must re-render even when
@@ -233,14 +359,24 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     // Re-rendering INTO a live document does not need the loading curtain: the
     // frame already has something on screen, and raising it made every
     // keystroke in a Canvas split view flash a full-cover backdrop blur.
-    const isFreshFrame = last === null || last.id !== artifact.id || last.type !== artifact.type
+    const isFreshFrame =
+      last === null ||
+      last.id !== artifact.id ||
+      last.type !== artifact.type ||
+      last.mode !== frameMode
 
-    const rafId = isFreshFrame
-      ? requestAnimationFrame(() => {
-          setError(null)
-          setIsLoading(true)
-        })
-      : null
+    // A React frame that is already up takes new code over postMessage. That is
+    // what makes an edit repaint in place instead of re-navigating the iframe —
+    // the old shell had to re-navigate because it built a NEW root per message.
+    const canRenderInPlace = frameMode === "react" && !isFreshFrame && shellReadyRef.current
+
+    const rafId =
+      isFreshFrame && !canRenderInPlace
+        ? requestAnimationFrame(() => {
+            setError(null)
+            setIsLoading(true)
+          })
+        : null
 
     const doRenderPreview = () => {
       if (!iframeRef.current) return
@@ -248,7 +384,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       const iframe = iframeRef.current
 
       try {
-        switch (artifact.type) {
+        switch (frameMode) {
           case "html": {
             const doc = iframe.contentDocument
             if (!doc) return
@@ -264,13 +400,27 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
             renderSVG(doc, artifact.content, diagramThemeVariablesRef.current)
             break
           }
-          case "react":
-            iframe.srcdoc = getReactShellHtml({
-              cdnLoadTitle: t("cdnLoadTitle"),
-              cdnLoadDescription: t("cdnLoadDescription"),
-              noComponentFound: t("noComponentFound"),
-            })
+          case "react": {
+            if (!frameRuntime) return
+            if (canRenderInPlace) {
+              void pushScriptedContent()
+              break
+            }
+            shellReadyRef.current = false
+            iframe.srcdoc = getReactShellHtml(frameRuntime)
             break
+          }
+          case "interactive": {
+            if (!frameRuntime || !interactiveProgramRef.current) return
+            // The markup itself changed, so the document is rebuilt; the
+            // scripts follow over postMessage once the shell reports ready.
+            shellReadyRef.current = false
+            iframe.srcdoc = getInteractiveHtmlShellHtml(
+              interactiveProgramRef.current.html,
+              frameRuntime
+            )
+            break
+          }
           default: {
             const doc = iframe.contentDocument
             if (doc) {
@@ -292,10 +442,13 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       lastRenderedRef.current = {
         id: artifact.id,
         type: artifact.type,
+        mode: frameMode,
         rendererProfile: artifact.metadata?.rendererProfile,
         content: artifact.content,
       }
-      setIsLoading(false)
+      // A scripted frame is still booting; it drops the curtain itself when the
+      // bootstrap reports `artifact-preview-ready`.
+      if (frameMode !== "react" && frameMode !== "interactive") setIsLoading(false)
     }
 
     // The 100ms delay exists to let a freshly-keyed iframe attach its document.
@@ -315,8 +468,12 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     artifact.content,
     artifact.metadata?.rendererProfile,
     artifact.type,
+    frameMode,
+    frameRuntime,
     key,
     needsIframe,
+    needsRuntime,
+    pushScriptedContent,
     t,
   ])
 
@@ -330,6 +487,24 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
           message: event.data.message,
         })
         setError(event.data.message || t("previewError"))
+        return
+      }
+      if (event.data?.type === "artifact-shell-ready") {
+        // The bootstrap is listening; hand it the strings, the palette and the
+        // code. Nothing before this point can reach an opaque-origin frame.
+        shellReadyRef.current = true
+        event.source?.postMessage(
+          {
+            type: "artifact-shell-config",
+            messages: {
+              noComponentFound: t("noComponentFound"),
+              runtimeInitFailed: t("runtimeInitFailed"),
+            },
+          },
+          { targetOrigin: "*" }
+        )
+        syncParentContext()
+        void pushScriptedContent()
         return
       }
       if (event.data?.type === "artifact-preview-ready") {
@@ -349,7 +524,14 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     }
     window.addEventListener("message", handleMessage)
     return () => window.removeEventListener("message", handleMessage)
-  }, [artifact.id, artifact.type, syncParentContext, t, widgetMetadata?.sizing])
+  }, [
+    artifact.id,
+    artifact.type,
+    pushScriptedContent,
+    syncParentContext,
+    t,
+    widgetMetadata?.sizing,
+  ])
 
   const handleRefresh = () => {
     setKey((k) => k + 1)
@@ -445,11 +627,46 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   return (
     <div
       data-testid="artifact-preview"
-      className={cn("relative h-full w-full", className)}
+      // A column only when a notice bar is present, so the frame gives up the
+      // rows above it instead of overflowing the panel.
+      className={cn("relative h-full w-full", offersInteractive && "flex flex-col", className)}
       role="region"
       aria-label={t("previewTitle", { title: artifact.title })}
     >
       <RuntimeHealthBadge state={runtimeHealth} />
+      {offersInteractive && (
+        <div
+          data-testid="artifact-interactive-bar"
+          className="flex items-center justify-between gap-3 border-b bg-muted/40 px-3 py-2 text-xs"
+        >
+          <span className="min-w-0 truncate text-muted-foreground">
+            {interactiveActive ? t("interactiveRunningHint") : t("interactiveOfferHint")}
+          </span>
+          {!interactiveActive && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              data-testid="artifact-interactive-run"
+              onClick={() => setInteractiveArtifactId(artifact.id)}
+            >
+              <PlayIcon className="mr-1 size-3" />
+              {t("interactiveRunAction")}
+            </Button>
+          )}
+        </div>
+      )}
+      {interactiveActive && (interactiveProgram?.droppedExternalScripts.length ?? 0) > 0 && (
+        <div
+          data-testid="artifact-interactive-dropped"
+          className="border-b bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+        >
+          {t("interactiveDroppedScripts", {
+            count: interactiveProgram?.droppedExternalScripts.length ?? 0,
+          })}
+        </div>
+      )}
       {isLoading && (
         <div className="absolute inset-0 z-20 bg-background/80 backdrop-blur-sm">
           <PreviewLoading message={t("loadingPreview")} />
@@ -473,17 +690,21 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
         key={key}
         // `bg-white` here made the frame itself a light rectangle in a dark
         // app, before its document even painted.
-        className={cn("w-full border-0 bg-background", !effectiveIframeHeight && "h-full")}
-        sandbox={adapter.sandbox}
+        className={cn(
+          "w-full border-0 bg-background",
+          !effectiveIframeHeight && (offersInteractive ? "min-h-0 flex-1" : "h-full")
+        )}
+        // An interactive HTML frame drops `allow-same-origin` — an opaque
+        // origin is what keeps a scripted artifact away from the host, its
+        // cookies and its storage. The static render keeps same-origin because
+        // it is written in through `contentDocument`.
+        sandbox={needsRuntime ? "allow-scripts" : adapter.sandbox}
         title={t("previewTitle", { title: artifact.title })}
         style={effectiveIframeHeight ? { height: effectiveIframeHeight } : undefined}
         onLoad={() => {
-          if (artifact.type === "react") {
-            iframeRef.current?.contentWindow?.postMessage(
-              { type: "render-component", code: artifact.content },
-              "*"
-            )
-          }
+          // A scripted frame is NOT ready on `load` — its bootstrap says so
+          // itself, and pushing code before that races the script tags.
+          if (needsRuntime) return
           syncParentContext()
           setIsLoading(false)
         }}

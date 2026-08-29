@@ -3348,10 +3348,12 @@
     }
   },
   "artifactPreview": {
-    "cdnLoadDescription": "无法从 CDN 加载 React 依赖，请检查网络连接。",
-    "cdnLoadTitle": "CDN 加载失败",
     "failedToParseChart": "图表数据解析失败",
     "iframeLoadError": "加载预览 iframe 失败",
+    "interactiveDroppedScripts": "{count, plural, =1 {已移除 1 个来自其他站点的脚本} other {已移除 # 个来自其他站点的脚本}}——artifact 预览无法访问网络。",
+    "interactiveOfferHint": "此 artifact 包含脚本，当前未运行。",
+    "interactiveRunAction": "运行交互版",
+    "interactiveRunningHint": "正在隔离沙箱中运行交互版——无法访问应用、Cookie 或网络。",
     "invalidChartFormat": "无效的图表数据格式",
     "loadingPreview": "正在加载预览...",
     "noChartData": "暂无图表数据",
@@ -3360,7 +3362,8 @@
     "notebookParseError": "Jupyter Notebook 解析失败",
     "previewError": "预览错误",
     "previewFailed": "预览渲染失败",
-    "previewTitle": "预览：{title}"
+    "previewTitle": "预览：{title}",
+    "runtimeInitFailed": "Artifact 运行时初始化失败。执行 `pnpm artifact-runtime:build` 可重新生成。"
   },
   "artifacts": {
     "allRuntimeStates": "所有运行时状态",

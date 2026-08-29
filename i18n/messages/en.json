@@ -3348,10 +3348,12 @@
     }
   },
   "artifactPreview": {
-    "cdnLoadDescription": "Unable to load React dependencies from CDN. Check your network connection.",
-    "cdnLoadTitle": "CDN Loading Failed",
     "failedToParseChart": "Failed to parse chart data",
     "iframeLoadError": "Failed to load preview iframe",
+    "interactiveDroppedScripts": "{count, plural, =1 {One script loaded from another site was removed} other {# scripts loaded from other sites were removed}} — an artifact preview cannot reach the network.",
+    "interactiveOfferHint": "This artifact contains scripts. They are not running.",
+    "interactiveRunAction": "Run interactive version",
+    "interactiveRunningHint": "Running the interactive version in an isolated sandbox — no access to the app, your cookies, or the network.",
     "invalidChartFormat": "Invalid chart data format",
     "loadingPreview": "Loading preview...",
     "noChartData": "No chart data",
@@ -3360,7 +3362,8 @@
     "notebookParseError": "Failed to parse notebook",
     "previewError": "Preview error",
     "previewFailed": "Preview failed to render",
-    "previewTitle": "Preview: {title}"
+    "previewTitle": "Preview: {title}",
+    "runtimeInitFailed": "The artifact runtime failed to initialize. Run `pnpm artifact-runtime:build` to restore it."
   },
   "artifacts": {
     "allRuntimeStates": "All Runtime States",

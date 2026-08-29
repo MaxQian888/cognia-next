@@ -43,6 +43,12 @@
       "note": "Probes candidate proxies on 127.0.0.1; routing a proxy probe through a proxy would test the wrong thing."
     },
     {
+      "file": "lib/artifacts/react-runtime-loader.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads the manifest of the bundled artifact runtime under public/artifact-runtime/. Same-origin static asset, resolved against location.href — never a network origin, and the packaged shell's connect-src would refuse one."
+    },
+    {
       "file": "lib/browser/remote-stream.ts",
       "kind": "websocket",
       "reason": "companion-pinned",
