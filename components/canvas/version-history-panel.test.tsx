@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { VersionHistoryPanel } from "./version-history-panel"
 
 // Bypass TooltipProvider context (production wraps the app at layout.tsx).
@@ -109,10 +110,19 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("./version-diff-view", () => ({
-  VersionDiffView: ({ oldContent, newContent }: { oldContent: string; newContent: string }) => (
+  VersionDiffView: ({
+    oldContent,
+    newContent,
+    mode,
+  }: {
+    oldContent: string
+    newContent: string
+    mode?: string
+  }) => (
     <div data-testid="version-diff-view">
       <span>Old: {oldContent.substring(0, 20)}</span>
       <span>New: {newContent.substring(0, 20)}</span>
+      <span data-testid="version-diff-mode">{mode ?? "_unset"}</span>
     </div>
   ),
 }))
@@ -244,5 +254,77 @@ describe("VersionHistoryPanel", () => {
       const previewButtons = screen.getAllByText("Preview")
       expect(previewButtons.length).toBeGreaterThan(0)
     })
+  })
+})
+
+describe("VersionHistoryPanel — Settings → Canvas → Versions", () => {
+  // `diffViewMode` and `showVersionTimestamps` were written by the canvas
+  // settings section and read by nothing: the comparison dialog never passed a
+  // `mode` (though `VersionDiffView` has always accepted one) and the relative
+  // date was unconditional.
+  const versions = [
+    {
+      id: "v1",
+      documentId: "doc-1",
+      content: "Version 1 content",
+      createdAt: new Date("2026-01-02T10:00:00Z"),
+      description: "First version",
+      isAutoSave: false,
+    },
+    {
+      id: "v2",
+      documentId: "doc-1",
+      content: "Version 2 content",
+      createdAt: new Date("2026-01-02T11:00:00Z"),
+      description: "Second version",
+      isAutoSave: true,
+    },
+  ]
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetCanvasVersions.mockReturnValue(versions)
+    useCanvasSettingsStore.getState().resetSection("version")
+  })
+
+  afterAll(() => {
+    useCanvasSettingsStore.getState().resetSection("version")
+  })
+
+  it("shows per-version timestamps by default", () => {
+    render(<VersionHistoryPanel documentId="doc-1" />)
+    expect(screen.getAllByTestId("canvas-version-timestamp")).toHaveLength(2)
+  })
+
+  it("hides them when showVersionTimestamps is off", () => {
+    useCanvasSettingsStore.getState().updateVersionSettings({ showVersionTimestamps: false })
+    render(<VersionHistoryPanel documentId="doc-1" />)
+    expect(screen.queryByTestId("canvas-version-timestamp")).not.toBeInTheDocument()
+  })
+
+  it("keeps each row titled by promoting the description into the heading", () => {
+    useCanvasSettingsStore.getState().updateVersionSettings({ showVersionTimestamps: false })
+    render(<VersionHistoryPanel documentId="doc-1" />)
+    expect(screen.getByText("First version")).toBeInTheDocument()
+    expect(screen.getByText("Second version")).toBeInTheDocument()
+  })
+
+  function openDiff() {
+    render(<VersionHistoryPanel documentId="doc-1" />)
+    fireEvent.click(screen.getByText("Compare"))
+    fireEvent.click(screen.getByTestId("canvas-version-item-v1"))
+    fireEvent.click(screen.getByTestId("canvas-version-item-v2"))
+    fireEvent.click(screen.getByText("View Diff"))
+  }
+
+  it("renders the comparison in the configured diff mode", () => {
+    useCanvasSettingsStore.getState().updateVersionSettings({ diffViewMode: "side-by-side" })
+    openDiff()
+    expect(screen.getByTestId("version-diff-mode")).toHaveTextContent("side-by-side")
+  })
+
+  it("falls back to the stored default mode", () => {
+    openDiff()
+    expect(screen.getByTestId("version-diff-mode")).toHaveTextContent("inline")
   })
 })

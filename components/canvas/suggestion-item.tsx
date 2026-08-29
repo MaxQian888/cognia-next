@@ -1,7 +1,13 @@
 "use client"
 
 /**
- * SuggestionItem - Individual suggestion component with inline diff preview
+ * SuggestionItem - Individual suggestion component with inline diff preview.
+ *
+ * Shows the model's self-reported confidence when Settings → Canvas → AI →
+ * "Show confidence" is on. That switch shipped with nothing behind it: no
+ * suggestion carried a confidence and no surface rendered one, so turning it on
+ * changed nothing. The badge is omitted for a suggestion whose model gave no
+ * usable number rather than inventing one.
  */
 
 import { memo, useState } from "react"
@@ -12,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { SUGGESTION_TYPE_COLORS } from "@/lib/canvas/constants"
 import type { CanvasSuggestion } from "@/types"
 
@@ -37,6 +44,7 @@ export const SuggestionItem = memo(function SuggestionItem({
 }: SuggestionItemProps) {
   const t = useTranslations("canvas")
   const [open, setOpen] = useState(false)
+  const showConfidence = useCanvasSettingsStore((s) => s.settings.ai.showConfidence)
 
   const Icon = TYPE_ICONS[suggestion.type] || Edit3
   const colorClass = SUGGESTION_TYPE_COLORS[suggestion.type] || SUGGESTION_TYPE_COLORS.edit
@@ -68,6 +76,16 @@ export const SuggestionItem = memo(function SuggestionItem({
                 {suggestion.range.endLine !== suggestion.range.startLine &&
                   `-${suggestion.range.endLine}`}
               </span>
+            )}
+            {showConfidence && suggestion.confidence !== undefined && (
+              <Badge
+                variant="secondary"
+                className="text-[10px]"
+                data-testid="suggestion-confidence"
+                title={t("confidenceHint")}
+              >
+                {t("confidence", { percent: Math.round(suggestion.confidence * 100) })}
+              </Badge>
             )}
           </div>
           <p className="text-sm leading-relaxed">{suggestion.explanation}</p>

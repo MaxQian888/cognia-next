@@ -1,7 +1,15 @@
 "use client"
 
 /**
- * VersionHistoryPanel - displays and manages canvas document versions
+ * VersionHistoryPanel - displays and manages canvas document versions.
+ *
+ * Honors two Settings → Canvas → Versions preferences that used to be written
+ * and never read: `diffViewMode` (the comparison dialog always rendered the
+ * `VersionDiffView` default even though the component has always accepted a
+ * `mode` prop with exactly these three values) and `showVersionTimestamps`
+ * (the relative date was unconditional). The date-group headers stay: they are
+ * the list's structure, not a per-version timestamp, and hiding them would
+ * leave unlabelled buckets.
  */
 
 import { useState, useMemo } from "react"
@@ -40,6 +48,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useArtifactStore } from "@/stores"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { cn } from "@/lib/utils"
 import type { CanvasDocumentVersion } from "@/types"
 import { VersionDiffView } from "@/components/canvas/version-diff-view"
@@ -61,6 +70,10 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
   const [selectedVersions, setSelectedVersions] = useState<string[]>([])
   const [showDiff, setShowDiff] = useState(false)
 
+  const diffViewMode = useCanvasSettingsStore((s) => s.settings.version.diffViewMode)
+  const showVersionTimestamps = useCanvasSettingsStore(
+    (s) => s.settings.version.showVersionTimestamps
+  )
   const canvasDocuments = useArtifactStore((state) => state.canvasDocuments)
   const getCanvasVersions = useArtifactStore((state) => state.getCanvasVersions)
   const saveCanvasVersion = useArtifactStore((state) => state.saveCanvasVersion)
@@ -230,6 +243,7 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
                             onRestore={() => handleRestoreVersion(version.id)}
                             onDelete={() => setDeleteVersion(version)}
                             formatDate={formatDate}
+                            showTimestamp={showVersionTimestamps}
                             t={t}
                             compareMode={compareMode}
                             isSelected={selectedVersions.includes(version.id)}
@@ -348,6 +362,7 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
               newContent={compareVersions.v2.content}
               oldLabel={compareVersions.v1.description || formatDate(compareVersions.v1.createdAt)}
               newLabel={compareVersions.v2.description || formatDate(compareVersions.v2.createdAt)}
+              mode={diffViewMode}
               className="flex-1 min-h-[400px] border rounded-md overflow-hidden"
             />
           )}
@@ -370,6 +385,8 @@ interface VersionItemProps {
   onRestore: () => void
   onDelete: () => void
   formatDate: (date: Date) => string
+  /** Settings → Canvas → Versions → "Show version timestamps". */
+  showTimestamp: boolean
   t: ReturnType<typeof useTranslations>
   compareMode?: boolean
   isSelected?: boolean
@@ -383,6 +400,7 @@ function VersionItem({
   onRestore,
   onDelete,
   formatDate,
+  showTimestamp,
   t,
   compareMode,
   isSelected,
@@ -402,9 +420,23 @@ function VersionItem({
     >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-medium">{formatDate(version.createdAt)}</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {showTimestamp ? (
+              <>
+                <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="text-sm font-medium" data-testid="canvas-version-timestamp">
+                  {formatDate(version.createdAt)}
+                </span>
+              </>
+            ) : (
+              // With the timestamp hidden the row would otherwise lose its
+              // title, so the description takes the heading slot (and is not
+              // repeated below). A version with neither still reads as its
+              // badges + line count.
+              version.description && (
+                <span className="min-w-0 truncate text-sm font-medium">{version.description}</span>
+              )
+            )}
             {isCurrent && (
               <Badge variant="default" className="text-xs">
                 {t("current")}
@@ -416,7 +448,7 @@ function VersionItem({
               </Badge>
             )}
           </div>
-          {version.description && (
+          {showTimestamp && version.description && (
             <p className="mt-1 text-sm text-muted-foreground truncate">{version.description}</p>
           )}
           <p className="mt-1 text-xs text-muted-foreground">

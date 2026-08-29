@@ -3,6 +3,7 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { SuggestionItem } from "./suggestion-item"
 
 const mockSuggestion = {
@@ -69,7 +70,7 @@ jest.mock("@/components/ui/tooltip", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       apply: "Apply",
       dismiss: "Dismiss",
@@ -78,6 +79,8 @@ jest.mock("next-intl", () => ({
       viewChanges: "View changes",
       original: "Original",
       suggested: "Suggested",
+      confidence: `${params?.percent}% confident`,
+      confidenceHint: "Self-reported",
     }
     return translations[key] || key
   },
@@ -229,5 +232,42 @@ describe("SuggestionItem", () => {
       render(<SuggestionItem suggestion={mockSuggestion} {...mockHandlers} />)
       expect(screen.getByText("const count = 1;")).toBeInTheDocument()
     })
+  })
+})
+
+describe("SuggestionItem — Settings → Canvas → AI → Show confidence", () => {
+  // The switch shipped with nothing behind it: `CanvasSuggestion` carried no
+  // confidence and no surface rendered one.
+  beforeEach(() => {
+    useCanvasSettingsStore.getState().resetSection("ai")
+  })
+
+  afterAll(() => {
+    useCanvasSettingsStore.getState().resetSection("ai")
+  })
+
+  const withConfidence = { ...mockSuggestion, confidence: 0.82 }
+
+  it("hides the badge while the setting is off (the default)", () => {
+    render(<SuggestionItem suggestion={withConfidence} {...mockHandlers} />)
+    expect(screen.queryByTestId("suggestion-confidence")).not.toBeInTheDocument()
+  })
+
+  it("renders the confidence as a percentage once the setting is on", () => {
+    useCanvasSettingsStore.getState().updateAISettings({ showConfidence: true })
+    render(<SuggestionItem suggestion={withConfidence} {...mockHandlers} />)
+    expect(screen.getByTestId("suggestion-confidence")).toHaveTextContent("82% confident")
+  })
+
+  it("shows nothing for a suggestion whose model reported no confidence", () => {
+    useCanvasSettingsStore.getState().updateAISettings({ showConfidence: true })
+    render(<SuggestionItem suggestion={mockSuggestion} {...mockHandlers} />)
+    expect(screen.queryByTestId("suggestion-confidence")).not.toBeInTheDocument()
+  })
+
+  it("renders a zero confidence rather than treating it as absent", () => {
+    useCanvasSettingsStore.getState().updateAISettings({ showConfidence: true })
+    render(<SuggestionItem suggestion={{ ...mockSuggestion, confidence: 0 }} {...mockHandlers} />)
+    expect(screen.getByTestId("suggestion-confidence")).toHaveTextContent("0% confident")
   })
 })

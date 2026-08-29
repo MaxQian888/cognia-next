@@ -562,6 +562,13 @@ export interface CanvasSuggestion {
   originalText: string
   suggestedText: string
   explanation: string
+  /**
+   * The model's own 0–1 confidence in this suggestion, when it reported one.
+   * Surfaced only when Settings → Canvas → AI → "Show confidence" is on — that
+   * switch existed with nothing to show, because nothing produced the number.
+   * Absent whenever the model omitted it or returned a value outside 0–1.
+   */
+  confidence?: number
   status: "pending" | "accepted" | "rejected"
 }
 

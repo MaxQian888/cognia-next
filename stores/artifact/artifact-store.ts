@@ -18,6 +18,7 @@ import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@cognia/logging"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useChatStore } from "@/stores/chat"
 import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
@@ -337,25 +338,63 @@ function rehydratePersistedArtifactState<T extends Partial<ArtifactState>>(state
   return next
 }
 
+/** Retention policy — Settings → Canvas → Versions. */
+export interface CanvasVersionRetention {
+  /** Ceiling on the total number of versions kept for one document. */
+  maxVersions: number
+  /** Never prune a version the user named (gave a description). */
+  keepNamedVersions: boolean
+}
+
 /**
- * Keep manual versions intact while pruning oldest auto-save checkpoints.
+ * The retention policy in force. `Settings → Canvas → Versions` writes
+ * `maxVersions` + `keepNamedVersions`, and until this read existed neither
+ * reached the store — the cap was the hard-coded
+ * `MAX_CANVAS_AUTOSAVE_VERSIONS`, so raising or lowering the setting changed
+ * nothing. Falls back to the constant when the settings store has not
+ * hydrated (SSR, a fresh install, or a caller outside React).
  */
-function applyCanvasVersionRetention(
+function currentVersionRetention(): CanvasVersionRetention {
+  const version = useCanvasSettingsStore.getState?.().settings?.version
+  const max = version?.maxVersions
+  return {
+    maxVersions:
+      typeof max === "number" && Number.isFinite(max) && max > 0
+        ? Math.floor(max)
+        : MAX_CANVAS_AUTOSAVE_VERSIONS,
+    keepNamedVersions: version?.keepNamedVersions !== false,
+  }
+}
+
+/**
+ * Prune a document's version list down to the retention ceiling, oldest first.
+ *
+ * `keepNamedVersions` (default on) makes a named version un-prunable, which is
+ * the generalisation of the previous behaviour — that pruned only `isAutoSave`
+ * entries and kept every manual one unconditionally. Turning it off lets the
+ * ceiling apply to every version, which is the whole point of the switch.
+ *
+ * A list made ENTIRELY of protected versions is returned untouched: the ceiling
+ * is a retention policy, not a mandate to delete work the user explicitly named.
+ */
+export function applyCanvasVersionRetention(
   versions: CanvasDocumentVersion[],
-  maxAutoSaveVersions = MAX_CANVAS_AUTOSAVE_VERSIONS
+  retention: CanvasVersionRetention = currentVersionRetention()
 ): CanvasDocumentVersion[] {
-  const autoSaveVersions = versions
-    .filter((v) => v.isAutoSave)
+  const { maxVersions, keepNamedVersions } = retention
+  if (versions.length <= maxVersions) return versions
+
+  const isProtected = (v: CanvasDocumentVersion) =>
+    keepNamedVersions && !v.isAutoSave && Boolean(v.description?.trim())
+
+  const prunable = versions
+    .filter((v) => !isProtected(v))
     .sort((a, b) => ensureDate(a.createdAt).getTime() - ensureDate(b.createdAt).getTime())
 
-  if (autoSaveVersions.length <= maxAutoSaveVersions) {
-    return versions
-  }
+  const overBy = versions.length - maxVersions
+  if (overBy <= 0 || prunable.length === 0) return versions
 
-  const removeIds = new Set(
-    autoSaveVersions.slice(0, autoSaveVersions.length - maxAutoSaveVersions).map((v) => v.id)
-  )
-
+  const removeIds = new Set(prunable.slice(0, Math.min(overBy, prunable.length)).map((v) => v.id))
   return versions.filter((v) => !removeIds.has(v.id))
 }
 

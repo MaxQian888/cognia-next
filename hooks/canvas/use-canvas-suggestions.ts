@@ -50,6 +50,7 @@ Respond as JSON: {"suggestions":[{"type":"fix|improve|edit|comment",
   "explanation":"<one sentence>",
   "originalText":"<verbatim>",
   "suggestedText":"<verbatim>",
+  "confidence":<0-1, how sure you are this change is correct and wanted>,
   "startLine":N,"endLine":N}]}.
 
 If no useful suggestion exists, return {"suggestions":[]}.`
@@ -78,8 +79,23 @@ interface RawSuggestion {
   explanation?: string
   originalText?: string
   suggestedText?: string
+  confidence?: unknown
   startLine?: number
   endLine?: number
+}
+
+/**
+ * A 0–1 confidence, or `undefined` when the model omitted it or answered with
+ * something that is not a usable number. Percentages (a model that answers
+ * `85`) are normalised rather than dropped; anything else is discarded, since a
+ * made-up number is worse than no badge at all.
+ */
+export function normalizeConfidence(raw: unknown): number | undefined {
+  const value = typeof raw === "string" ? Number(raw.replace("%", "").trim()) : raw
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  if (value >= 0 && value <= 1) return value
+  if (value > 1 && value <= 100) return value / 100
+  return undefined
 }
 
 function parseSuggestions(text: string, max: number): Omit<CanvasSuggestion, "id">[] {
@@ -113,6 +129,9 @@ function parseSuggestions(text: string, max: number): Omit<CanvasSuggestion, "id
       originalText: s.originalText ?? "",
       suggestedText: s.suggestedText ?? "",
       range: { startLine: s.startLine!, endLine: s.endLine! },
+      ...(normalizeConfidence(s.confidence) !== undefined
+        ? { confidence: normalizeConfidence(s.confidence) }
+        : {}),
       status: "pending" as const,
     }))
 }

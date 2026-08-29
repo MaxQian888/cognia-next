@@ -59,7 +59,11 @@ jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
-import { useCanvasSuggestions, sliceContextWindow } from "./use-canvas-suggestions"
+import {
+  useCanvasSuggestions,
+  normalizeConfidence,
+  sliceContextWindow,
+} from "./use-canvas-suggestions"
 
 beforeEach(() => {
   generateTextMock.mockReset()
@@ -336,5 +340,31 @@ describe("sliceContextWindow", () => {
   it("clamps the window at the document start when the caret is near line 1", () => {
     const out = sliceContextWindow(doc, 1, 2)
     expect(out).toBe("L1\nL2\nL3")
+  })
+})
+
+describe("normalizeConfidence", () => {
+  // Settings → Canvas → AI → "Show confidence" had nothing to show because no
+  // suggestion carried a number. The badge is only worth rendering when the
+  // value is usable — a made-up one is worse than none.
+  it("accepts a 0-1 fraction", () => {
+    expect(normalizeConfidence(0)).toBe(0)
+    expect(normalizeConfidence(0.82)).toBe(0.82)
+    expect(normalizeConfidence(1)).toBe(1)
+  })
+
+  it("normalises a percentage the model answered with", () => {
+    expect(normalizeConfidence(85)).toBeCloseTo(0.85)
+    expect(normalizeConfidence("85%")).toBeCloseTo(0.85)
+  })
+
+  it("discards anything that is not a usable number", () => {
+    expect(normalizeConfidence(undefined)).toBeUndefined()
+    expect(normalizeConfidence(null)).toBeUndefined()
+    expect(normalizeConfidence("high")).toBeUndefined()
+    expect(normalizeConfidence(-1)).toBeUndefined()
+    expect(normalizeConfidence(101)).toBeUndefined()
+    expect(normalizeConfidence(Number.NaN)).toBeUndefined()
+    expect(normalizeConfidence(Number.POSITIVE_INFINITY)).toBeUndefined()
   })
 })

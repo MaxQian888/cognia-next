@@ -56,6 +56,7 @@ import {
   selectOpenArtifactIds,
   useArtifactStore,
 } from "./artifact-store"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 
 const initial = {
@@ -1846,42 +1847,80 @@ describe("persist partialize — artifacts live in Dexie", () => {
   })
 })
 
-describe("auto-save retention", () => {
-  it("keeps only the most recent auto-saves when the cap is exceeded", () => {
+describe("canvas version retention (Settings → Canvas → Versions)", () => {
+  // `version.maxVersions` + `version.keepNamedVersions` are written by the
+  // canvas settings section and, until the store read them, changed nothing:
+  // retention used a hard-coded 30-auto-save cap.
+  function seed(count: number, opts: { named?: boolean } = {}) {
     const id = useArtifactStore.getState().createCanvasDocument({
       title: "doc",
       content: "v0",
       language: "javascript",
       type: "code",
     })
-    // Bypass the saveCanvasVersion API by directly seeding many auto-saves.
-    const many: Array<{
-      id: string
-      content: string
-      title: string
-      createdAt: Date
-      isAutoSave: boolean
-    }> = []
-    for (let i = 0; i < 35; i++) {
-      many.push({
-        id: `v-${i}`,
-        content: `c-${i}`,
-        title: "doc",
-        createdAt: new Date(2023, 0, i + 1),
-        isAutoSave: true,
-      })
-    }
+    const many = Array.from({ length: count }, (_, i) => ({
+      id: `v-${i}`,
+      content: `c-${i}`,
+      title: "doc",
+      createdAt: new Date(2023, 0, i + 1),
+      isAutoSave: !opts.named,
+      ...(opts.named ? { description: `named-${i}` } : {}),
+    }))
     useArtifactStore.setState((state) => ({
       canvasDocuments: {
         ...state.canvasDocuments,
         [id]: { ...state.canvasDocuments[id], versions: many as never },
       },
     }))
-    // Now force retention to apply via saveCanvasVersion (auto-save = true)
+    return id
+  }
+
+  function setRetention(patch: { maxVersions?: number; keepNamedVersions?: boolean }) {
+    useCanvasSettingsStore.getState().updateVersionSettings(patch)
+  }
+
+  afterEach(() => {
+    useCanvasSettingsStore.getState().resetSection("version")
+  })
+
+  it("prunes down to the configured maxVersions", () => {
+    setRetention({ maxVersions: 10 })
+    const id = seed(35)
+    useArtifactStore.getState().saveCanvasVersion(id, "trigger", true)
+    expect(useArtifactStore.getState().canvasDocuments[id].versions).toHaveLength(10)
+  })
+
+  it("honours a raised ceiling instead of the old hard-coded 30", () => {
+    setRetention({ maxVersions: 100 })
+    const id = seed(35)
+    useArtifactStore.getState().saveCanvasVersion(id, "trigger", true)
+    expect(useArtifactStore.getState().canvasDocuments[id].versions).toHaveLength(36)
+  })
+
+  it("keeps named versions when keepNamedVersions is on", () => {
+    setRetention({ maxVersions: 5, keepNamedVersions: true })
+    const id = seed(20, { named: true })
     useArtifactStore.getState().saveCanvasVersion(id, "trigger", true)
     const versions = useArtifactStore.getState().canvasDocuments[id].versions || []
-    // Cap is 30; we just added one more on top of 35, then retention prunes.
-    expect(versions.length).toBeLessThanOrEqual(30)
+    // Only the freshly added auto-save is prunable, and dropping it still
+    // leaves the list over the ceiling — protected work is never deleted.
+    expect(versions.filter((v) => v.description?.startsWith("named-"))).toHaveLength(20)
+  })
+
+  it("prunes named versions too once keepNamedVersions is off", () => {
+    setRetention({ maxVersions: 5, keepNamedVersions: false })
+    const id = seed(20, { named: true })
+    useArtifactStore.getState().saveCanvasVersion(id, "trigger", true)
+    expect(useArtifactStore.getState().canvasDocuments[id].versions).toHaveLength(5)
+  })
+
+  it("drops the oldest first", () => {
+    setRetention({ maxVersions: 3, keepNamedVersions: false })
+    const id = seed(10)
+    useArtifactStore.getState().saveCanvasVersion(id, "trigger", true)
+    const ids = (useArtifactStore.getState().canvasDocuments[id].versions || []).map((v) => v.id)
+    expect(ids).toContain("v-9")
+    expect(ids).not.toContain("v-0")
   })
 })
 
