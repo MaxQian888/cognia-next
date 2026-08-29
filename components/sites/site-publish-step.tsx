@@ -1,5 +1,6 @@
 "use client"
 
+import { Surface } from "@/components/surface/surface"
 import type { ReactNode } from "react"
 import { CheckCircle2Icon, CircleAlertIcon } from "lucide-react"
 
@@ -80,12 +81,14 @@ export function SitePublishStep({
           </p>
         ) : null}
         {error ? (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive"
+          <Surface
+            asChild
+            layer="raised"
+            radius="control"
+            className="border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive"
           >
-            {error}
-          </p>
+            <p role="alert">{error}</p>
+          </Surface>
         ) : null}
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         {children ? <div className="pt-1">{children}</div> : null}

@@ -269,7 +269,7 @@ export function SiteOperationJournal({
   return (
     <div
       ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto rounded-xl border"
+      className="min-h-0 flex-1 overflow-y-auto rounded-panel border"
       data-testid="site-operation-journal"
     >
       <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>

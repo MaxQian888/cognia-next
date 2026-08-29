@@ -35718,8 +35718,8 @@
       "noStdout": "标准输出没有任何内容。",
       "open": "构建日志",
       "phase": {
-        "build": "构建",
         "install": "安装",
+        "build": "构建",
         "package": "打包"
       },
       "stderr": "标准错误",
@@ -35743,6 +35743,10 @@
       "purge": {
         "description": "此操作会永久删除符合条件的 Cognia 托管资源。已接管和共享的服务商资源会保持不变，并在结果中标记为已保留。",
         "title": "清除托管的服务商资源？"
+      },
+      "removeDomain": {
+        "description": "{hostname} 将不再在 Cloudflare 上指向本站点，只能重新添加才能恢复。",
+        "title": "要解绑该域名吗？"
       }
     },
     "create": {
@@ -35872,6 +35876,13 @@
       },
       "title": "托管清单",
       "unsupported": "清单位于站点源码目录中，只有桌面端能读取。"
+    },
+    "mobile": {
+      "empty": "本设备上没有站点。",
+      "emptyExplain": "站点在桌面端创建与发布。手机读取的是自己的本地数据库，尚未镜像桌面端的数据——见 ADR-0084。",
+      "explain": "构建、预览与发布需要桌面端的沙箱、终端与钥匙串。手机上能展示的，是本机数据库里已有的内容。",
+      "readOnly": "本设备上为只读。",
+      "title": "站点"
     },
     "notify": {
       "buildFailed": {
@@ -36086,6 +36097,19 @@
       "title": "服务商资源"
     },
     "sidebarEmpty": "还没有站点，创建一个开始吧。",
+    "stats": {
+      "detail": {
+        "live": "{count} 个失败",
+        "running": "{count} 个待对账",
+        "storage": "已回收 {count} 个",
+        "versions": "{count} 个失败"
+      },
+      "live": "线上部署",
+      "resources": "托管资源",
+      "running": "进行中",
+      "storage": "本机产物",
+      "versions": "就绪版本"
+    },
     "stepState": {
       "done": "完成",
       "failed": "需处理",

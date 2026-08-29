@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { createSiteProject } from "@/lib/db/sites"
 import type { Project } from "@/types"
@@ -114,49 +115,84 @@ export function NewSiteDialog({
           <DialogDescription>{t("create.description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <NativeSelect
-            value={effectiveProjectId}
-            onChange={(event) => setProjectId(event.target.value)}
-            aria-label={t("create.project")}
-          >
-            {projects.map((candidate) => (
-              <NativeSelectOption key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Input
-            value={siteName}
-            onChange={(event) => setSiteName(event.target.value)}
-            placeholder={t("create.name")}
-          />
-          <Input
-            value={sourceSubpath}
-            onChange={(event) => setSourceSubpath(event.target.value)}
-            placeholder={t("create.subpath")}
-          />
-          <Input
-            value={accountId}
-            onChange={(event) => setAccountId(event.target.value)}
-            placeholder={t("create.accountId")}
-          />
-          <Input
-            value={workerName}
-            onChange={(event) => setWorkerName(event.target.value)}
-            placeholder={t("create.workerName")}
-          />
-          <Input
-            value={zoneId}
-            onChange={(event) => setZoneId(event.target.value)}
-            placeholder={t("provider.zoneId")}
-            aria-label={t("provider.zoneId")}
-          />
-          <Input
-            value={accessTeamName}
-            onChange={(event) => setAccessTeamName(event.target.value)}
-            placeholder={t("provider.accessTeamName")}
-            aria-label={t("provider.accessTeamName")}
-          />
+          <div>
+            <Label htmlFor="site-project">{t("create.project")}</Label>
+            <NativeSelect
+              id="site-project"
+              className="mt-1"
+              value={effectiveProjectId}
+              onChange={(event) => setProjectId(event.target.value)}
+            >
+              {projects.map((candidate) => (
+                <NativeSelectOption key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            {sourceRoot ? (
+              <p
+                className="mt-1 truncate font-mono text-xs text-muted-foreground"
+                title={sourceRoot}
+              >
+                {sourceRoot}
+              </p>
+            ) : null}
+          </div>
+          <div>
+            <Label htmlFor="site-siteName">{t("create.name")}</Label>
+            <Input
+              id="site-siteName"
+              className="mt-1"
+              value={siteName}
+              onChange={(event) => setSiteName(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="site-sourceSubpath">{t("create.subpath")}</Label>
+            <Input
+              id="site-sourceSubpath"
+              className="mt-1"
+              value={sourceSubpath}
+              onChange={(event) => setSourceSubpath(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="site-accountId">{t("create.accountId")}</Label>
+            <Input
+              id="site-accountId"
+              className="mt-1"
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="site-workerName">{t("create.workerName")}</Label>
+            <Input
+              id="site-workerName"
+              className="mt-1"
+              value={workerName}
+              onChange={(event) => setWorkerName(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="site-zoneId">{t("provider.zoneId")}</Label>
+            <Input
+              id="site-zoneId"
+              className="mt-1"
+              value={zoneId}
+              onChange={(event) => setZoneId(event.target.value)}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{t("provider.zoneIdHint")}</p>
+          </div>
+          <div>
+            <Label htmlFor="site-accessTeamName">{t("provider.accessTeamName")}</Label>
+            <Input
+              id="site-accessTeamName"
+              className="mt-1"
+              value={accessTeamName}
+              onChange={(event) => setAccessTeamName(event.target.value)}
+            />
+          </div>
         </div>
         <DialogFooter>
           <Button

@@ -124,7 +124,7 @@ export function SiteEnvironmentTab({
 
   return (
     <section
-      className="grid gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]"
+      className="grid gap-4 @2xl/site-pane:grid-cols-[14rem_minmax(0,1fr)]"
       data-testid="site-environment-tab"
     >
       <aside className="space-y-1">
@@ -161,7 +161,7 @@ export function SiteEnvironmentTab({
 
       <div className="min-w-0 space-y-4">
         {current ? (
-          <div className="rounded-xl border">
+          <div className="rounded-panel border">
             <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
               <h3 className="text-sm font-medium">{t("environment.currentRevision")}</h3>
               <Badge variant="outline" className="font-normal tabular-nums">
@@ -248,7 +248,7 @@ export function SiteEnvironmentTab({
         ) : null}
 
         {editing ? (
-          <div className="space-y-3 rounded-xl border p-3" data-testid="site-environment-editor">
+          <div className="space-y-3 rounded-panel border p-3" data-testid="site-environment-editor">
             <KvEditor
               label={t("environment.variables")}
               rows={variableRows}

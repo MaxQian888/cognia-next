@@ -14,6 +14,7 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { LayersIcon } from "lucide-react"
 
+import { Surface } from "@/components/surface/surface"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -64,8 +65,10 @@ export function SiteResourcesTab({
   const storage = useMemo(() => siteArtifactStorage(versions), [versions])
 
   const storageRow = (
-    <div
-      className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs"
+    <Surface
+      layer="raised"
+      radius="control"
+      className="flex flex-wrap items-center gap-3 border px-3 py-2 text-xs"
       data-testid="site-artifact-storage"
     >
       <span className="font-medium">{t("storage.title")}</span>
@@ -90,7 +93,7 @@ export function SiteResourcesTab({
       >
         {t("storage.reclaim")}
       </Button>
-    </div>
+    </Surface>
   )
 
   if (resources.length === 0) {
@@ -116,7 +119,11 @@ export function SiteResourcesTab({
     <div className="space-y-3" data-testid="site-resources-tab">
       {storageRow}
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs">
+      <Surface
+        layer="raised"
+        radius="control"
+        className="flex flex-wrap items-center gap-3 border px-3 py-2 text-xs"
+      >
         <span className="font-medium">{t("resources.retention.title")}</span>
         <span className="text-warning" data-testid="site-purge-scope-deleted">
           {t("resources.retention.purgeable", { count: retention.purgeable.length })}
@@ -137,9 +144,9 @@ export function SiteResourcesTab({
         >
           {t("actions.reconcile")}
         </Button>
-      </div>
+      </Surface>
 
-      <div className="overflow-hidden rounded-xl border">
+      <div className="overflow-hidden rounded-panel border">
         {groups.map((group) => {
           const KindIcon = SITE_RESOURCE_KIND_ICON[group.kind] ?? LayersIcon
           return (

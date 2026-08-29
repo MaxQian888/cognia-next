@@ -44,9 +44,9 @@ function renderDialog(
 }
 
 async function fillRequired() {
-  await userEvent.type(screen.getByPlaceholderText("create.name"), "Docs")
-  await userEvent.type(screen.getByPlaceholderText("create.accountId"), "account-1")
-  await userEvent.type(screen.getByPlaceholderText("create.workerName"), "docs-worker")
+  await userEvent.type(screen.getByLabelText("create.name"), "Docs")
+  await userEvent.type(screen.getByLabelText("create.accountId"), "account-1")
+  await userEvent.type(screen.getByLabelText("create.workerName"), "docs-worker")
 }
 
 beforeEach(() => {
@@ -57,10 +57,10 @@ beforeEach(() => {
 it("creates a Site from the dialog and reports the new id", async () => {
   const { onCreated, user } = renderDialog()
   await user.click(screen.getByRole("button", { name: "actions.newSite" }))
-  await userEvent.type(screen.getByPlaceholderText("create.name"), "Docs")
-  await userEvent.type(screen.getByPlaceholderText("create.subpath"), "apps/docs")
-  await userEvent.type(screen.getByPlaceholderText("create.accountId"), "account-1")
-  await userEvent.type(screen.getByPlaceholderText("create.workerName"), "docs-worker")
+  await userEvent.type(screen.getByLabelText("create.name"), "Docs")
+  await userEvent.type(screen.getByLabelText("create.subpath"), "apps/docs")
+  await userEvent.type(screen.getByLabelText("create.accountId"), "account-1")
+  await userEvent.type(screen.getByLabelText("create.workerName"), "docs-worker")
 
   await user.click(screen.getByRole("button", { name: "actions.create" }))
 
@@ -174,4 +174,30 @@ it("omits the optional provider fields when they are left blank", async () => {
       })
     )
   )
+})
+
+it("labels every field rather than leaning on placeholders", async () => {
+  // Seven inputs identified only by placeholder text, which disappears the
+  // moment anything is typed.
+  const { user } = renderDialog()
+  await user.click(screen.getByText("actions.newSite"))
+  for (const key of [
+    "create.project",
+    "create.name",
+    "create.subpath",
+    "create.accountId",
+    "create.workerName",
+    "provider.zoneId",
+    "provider.accessTeamName",
+  ]) {
+    expect(screen.getByLabelText(key)).toBeInTheDocument()
+  }
+})
+
+it("shows the source root the Site would be created against", async () => {
+  // The project picker names a project; the build runs in a directory. Saying
+  // which one removes the guess.
+  const { user } = renderDialog()
+  await user.click(screen.getByText("actions.newSite"))
+  expect(screen.getByText("/repo")).toBeInTheDocument()
 })

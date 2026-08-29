@@ -22,6 +22,18 @@ import {
 } from "lucide-react"
 
 import { ExternalLink } from "@/components/shared/external-link"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Surface } from "@/components/surface/surface"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -107,12 +119,12 @@ export function SiteDomainsTab({
 
   return (
     <div className="space-y-4" data-testid="site-domains-tab">
-      <section className="rounded-xl border">
+      <section className="rounded-panel border">
         <header className="border-b px-3 py-2">
           <h3 className="text-sm font-medium">{t("provider.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("provider.identityLocked")}</p>
         </header>
-        <div className="grid gap-3 p-3 md:grid-cols-2">
+        <div className="grid gap-3 p-3 @md/site-pane:grid-cols-2">
           <div className="text-xs">
             <span className="text-muted-foreground">{t("provider.account")}: </span>
             <code className="font-mono">{site.providerConfig.accountId}</code>
@@ -164,7 +176,7 @@ export function SiteDomainsTab({
         </div>
       </section>
 
-      <section className="rounded-xl border">
+      <section className="rounded-panel border">
         <header className="border-b px-3 py-2">
           <h3 className="text-sm font-medium">{t("domains.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("domains.description")}</p>
@@ -192,13 +204,17 @@ export function SiteDomainsTab({
           </div>
 
           {zoneMissing ? (
-            <p
-              className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs text-warning"
-              data-testid="site-zone-missing"
+            <Surface
+              asChild
+              layer="raised"
+              radius="control"
+              className="flex items-center gap-1.5 border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs text-warning"
             >
-              <InfoIcon aria-hidden className="size-3.5 shrink-0" />
-              {t("provider.zoneIdRequired")}
-            </p>
+              <p data-testid="site-zone-missing">
+                <InfoIcon aria-hidden className="size-3.5 shrink-0" />
+                {t("provider.zoneIdRequired")}
+              </p>
+            </Surface>
           ) : null}
 
           {domains.map((row) => (
@@ -213,23 +229,45 @@ export function SiteDomainsTab({
                 face={SITE_RESOURCE_FACE[row.status]}
                 label={t(`resources.status.${row.status}`)}
               />
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label={t("actions.remove")}
-                disabled={isBusy(`remove:${row.id}`) || !gate.allowed}
-                title={gate.title}
-                onClick={() => onRemoveDomain(row.id)}
-              >
-                <TrashIcon aria-hidden className="size-3.5" />
-              </Button>
+              {/* Detaching a custom domain takes the Site off that hostname
+                  at the provider; there is no undo but re-adding it. */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={t("actions.remove")}
+                    disabled={isBusy(`remove:${row.id}`) || !gate.allowed}
+                    title={gate.title}
+                    data-testid={`site-domain-remove-${row.id}`}
+                  >
+                    <TrashIcon aria-hidden className="size-3.5" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("confirm.removeDomain.title")}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("confirm.removeDomain.description", {
+                        hostname: row.displayName ?? row.providerResourceId,
+                      })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("actions.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={() => onRemoveDomain(row.id)}>
+                      {t("actions.remove")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="rounded-xl border">
+      <section className="rounded-panel border">
         <header className="border-b px-3 py-2">
           <h3 className="text-sm font-medium">{t("access.title")}</h3>
           <p className="text-xs text-muted-foreground">{t("access.description")}</p>
@@ -237,7 +275,7 @@ export function SiteDomainsTab({
         <div className="space-y-3 p-3">
           <fieldset>
             <legend className="sr-only">{t("access.mode")}</legend>
-            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid gap-2 @sm/site-pane:grid-cols-3 @2xl/site-pane:grid-cols-5">
               {ACCESS_MODES.map((mode) => (
                 <label
                   key={mode}

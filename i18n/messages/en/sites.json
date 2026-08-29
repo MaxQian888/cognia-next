@@ -128,6 +128,10 @@
     "purge": {
       "description": "This permanently deletes eligible Cognia-managed resources. Adopted and shared provider resources remain intact and will be reported as preserved.",
       "title": "Purge managed provider resources?"
+    },
+    "removeDomain": {
+      "description": "{hostname} stops routing to this Site at Cloudflare. Re-adding it is the only way back.",
+      "title": "Detach this domain?"
     }
   },
   "create": {
@@ -257,6 +261,13 @@
     },
     "title": "Hosting manifest",
     "unsupported": "The manifest lives in the Site's source tree, which only the desktop app can read."
+  },
+  "mobile": {
+    "empty": "No Sites on this device.",
+    "emptyExplain": "Sites are created and published on the desktop. This phone reads its own local database and does not yet mirror the desktop's — see ADR-0084.",
+    "explain": "Building, previewing, and publishing need the desktop app's sandbox, terminal, and keyring. What this phone can show is what its own database holds.",
+    "readOnly": "Read-only on this device.",
+    "title": "Sites"
   },
   "notify": {
     "buildFailed": {
@@ -471,6 +482,19 @@
     "title": "Provider resources"
   },
   "sidebarEmpty": "No Sites yet. Create one to get started.",
+  "stats": {
+    "detail": {
+      "live": "{count} failed",
+      "running": "{count} stuck",
+      "storage": "{count} pruned",
+      "versions": "{count} failed"
+    },
+    "live": "Live deployments",
+    "resources": "Managed resources",
+    "running": "In flight",
+    "storage": "Local archives",
+    "versions": "Ready versions"
+  },
   "stepState": {
     "done": "Done",
     "failed": "Needs attention",

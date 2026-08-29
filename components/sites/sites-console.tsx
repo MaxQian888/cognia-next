@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { CloudIcon, GlobeIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
+import { CloudIcon, GlobeIcon, RefreshCwIcon } from "lucide-react"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
@@ -31,7 +31,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSiteActionGate, type SiteGate } from "@/hooks/sites/use-site-action-gate"
 import { useSiteActions } from "@/hooks/sites/use-site-actions"
@@ -56,6 +57,7 @@ import {
 import { useProjectStore } from "@/stores/project/project-store"
 import { NewSiteDialog } from "./new-site-dialog"
 import { SiteListRail } from "./site-list-rail"
+import { SiteMobileOverview } from "./site-mobile-overview"
 import { SiteOverviewHeader } from "./site-overview-header"
 import { useSitePublishActions } from "@/hooks/sites/use-site-publish-actions"
 import { SiteAccessTab } from "./tabs/site-access-tab"
@@ -173,12 +175,17 @@ export function SitesConsole() {
   }, [deployGate, publish.wrangler, t])
 
   if (platform === "mobile") {
+    // ADR-0084 defers the mobile projection, and that stands — nothing here
+    // reaches another host. But the same ADR says the console renders in every
+    // shell over whichever local database that shell owns, and a bare
+    // "desktop only" card ignored the second half: it could not say whether
+    // this device knew about any Sites at all.
     return (
-      <Alert className="m-6" data-testid="sites-mobile-notice">
-        <CloudIcon />
-        <AlertTitle>{t("desktopOnly.title")}</AlertTitle>
-        <AlertDescription>{t("desktopOnly.description")}</AlertDescription>
-      </Alert>
+      <SiteMobileOverview
+        sites={live.sites}
+        activeDeployments={live.activeDeployments}
+        loading={live.loading}
+      />
     )
   }
 
@@ -315,12 +322,20 @@ export function SitesConsole() {
         ) : null}
 
         {site ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            // `@container/site-pane`: everything multi-column inside a tab
+            // sizes off THIS, never the viewport. The pane is a draggable
+            // fraction of the window (the rail takes 16–34%), so a viewport
+            // `md:` seats two columns in a 300px pane purely because the
+            // monitor is wide.
+            className="@container/site-pane flex min-h-0 flex-1 flex-col"
+          >
             <SiteOverviewHeader
               site={site}
               versions={live.versions}
               deployments={live.deployments}
               operations={live.operations}
+              resources={live.resources}
               actorAccountId={actorAccountId}
               gate={providerGate}
               metadataGate={metadataGate}
@@ -458,13 +473,30 @@ export function SitesConsole() {
               </div>
             </TabsContent>
           </div>
-        ) : live.loading ? null : (
-          <div className="grid h-full place-items-center p-6 text-sm text-muted-foreground">
-            <div className="flex flex-col items-center gap-3">
-              <PlusIcon aria-hidden className="size-5" />
-              {t("empty")}
-            </div>
+        ) : live.loading ? (
+          // "Still reading" must not paint the same thing as "you have no
+          // Sites", or every visit flashes an onboarding invitation before the
+          // Dexie read resolves. The pane was previously blank here, which read
+          // as a page that had failed.
+          <div className="space-y-3 p-6" data-testid="sites-console-loading">
+            <Skeleton className="h-16 w-full rounded-panel" />
+            <Skeleton className="h-9 w-2/3 rounded-panel" />
+            <Skeleton className="h-64 w-full rounded-panel" />
           </div>
+        ) : (
+          <Empty
+            role="status"
+            className="h-full gap-3 px-6 py-12"
+            data-testid="sites-console-empty"
+          >
+            <EmptyHeader>
+              <EmptyMedia variant="icon" className="bg-primary/10 text-primary">
+                <GlobeIcon aria-hidden />
+              </EmptyMedia>
+              <EmptyTitle className="text-sm">{t("title")}</EmptyTitle>
+              <EmptyDescription className="max-w-md text-xs">{t("empty")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </FeaturePageShell>
 

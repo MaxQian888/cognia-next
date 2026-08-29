@@ -16,6 +16,7 @@ import { useTranslations, useFormatter, useNow } from "next-intl"
 import { PlayIcon, RocketIcon, SquareIcon } from "lucide-react"
 
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
+import { Surface } from "@/components/surface/surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -132,8 +133,11 @@ export function SitePublishTab({
   const manifestBlocked = !manifest.ready ? t("errors.manifestMissing") : undefined
 
   return (
-    <div
-      className="space-y-4 rounded-xl border bg-card p-4 shadow-sm"
+    <Surface
+      layer="raised"
+      radius="panel"
+      elevation={1}
+      className="space-y-4 border p-4"
       data-testid="site-publish-tab"
     >
       <SitePublishStep
@@ -372,7 +376,7 @@ export function SitePublishTab({
             </Button>
           )}
           {previewUrl ? (
-            <div className="h-[50vh] min-h-[320px] overflow-hidden rounded-xl border">
+            <div className="h-[50vh] min-h-[320px] overflow-hidden rounded-panel border">
               <BrowserPreviewPane
                 key={previewUrl}
                 initialUrl={previewUrl}
@@ -434,6 +438,6 @@ export function SitePublishTab({
           )}
         </div>
       </SitePublishStep>
-    </div>
+    </Surface>
   )
 }

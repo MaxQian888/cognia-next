@@ -377,3 +377,27 @@ describe("deep links", () => {
     expect(new URL(window.location.href).searchParams.get("tab")).toBe("versions")
   })
 })
+
+describe("loading and empty states", () => {
+  beforeEach(() => {
+    useSiteConsoleStore.getState().reset()
+    searchParams.mockReturnValue(new URLSearchParams())
+  })
+
+  it("shows a skeleton while the first read resolves, not an empty page", () => {
+    // The pane was blank here, which reads as a page that failed rather than
+    // one that has not finished.
+    useSiteLiveDataMock.mockReturnValue(liveData({ sites: [], selectedId: null, loading: true }))
+    render(<SitesConsole />)
+    expect(screen.getByTestId("sites-console-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("sites-console-empty")).not.toBeInTheDocument()
+  })
+
+  it("invites the first Site only once the read has settled", () => {
+    // Otherwise every visit flashes an onboarding invitation.
+    useSiteLiveDataMock.mockReturnValue(liveData({ sites: [], selectedId: null }))
+    render(<SitesConsole />)
+    expect(screen.getByTestId("sites-console-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("sites-console-loading")).not.toBeInTheDocument()
+  })
+})

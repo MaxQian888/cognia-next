@@ -197,7 +197,7 @@ export function SiteOperationsTab({
             </p>
           ) : null}
 
-          <div className="rounded-xl border">
+          <div className="rounded-panel border">
             <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
               <span className="min-w-0 flex-1 truncate text-xs font-medium">
                 {t("observability.result")}

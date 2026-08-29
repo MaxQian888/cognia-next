@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 
 import type { SiteProjectRow, SiteResourceRow } from "@/types/sites"
@@ -108,12 +109,32 @@ it("shows the account and worker as fixed identity", () => {
   expect(screen.getByText("provider.identityLocked")).toBeInTheDocument()
 })
 
-it("lists and removes attached domains", async () => {
+it("lists attached domains", () => {
+  renderTab({ resources: [domain("r1", "docs.example.com")] })
+  expect(screen.getByTestId("site-domain-r1")).toHaveTextContent("docs.example.com")
+})
+
+it("asks before detaching a domain, and names the hostname it would take", async () => {
+  // Detaching stops the Site routing on that hostname at the provider; there
+  // is no undo but re-adding it. It used to fire on the first click.
   const user = userEvent.setup()
   const handlers = renderTab({ resources: [domain("r1", "docs.example.com")] })
-  expect(screen.getByTestId("site-domain-r1")).toHaveTextContent("docs.example.com")
-  await user.click(screen.getByRole("button", { name: "actions.remove" }))
+  await user.click(screen.getByTestId("site-domain-remove-r1"))
+  expect(handlers.onRemoveDomain).not.toHaveBeenCalled()
+  const dialog = await screen.findByRole("alertdialog")
+  expect(dialog).toHaveTextContent("docs.example.com")
+  expect(dialog).toHaveTextContent("confirm.removeDomain.title")
+
+  await user.click(within(dialog).getByText("actions.remove"))
   expect(handlers.onRemoveDomain).toHaveBeenCalledWith("r1")
+})
+
+it("leaves the domain attached when the confirmation is dismissed", async () => {
+  const user = userEvent.setup()
+  const handlers = renderTab({ resources: [domain("r1", "docs.example.com")] })
+  await user.click(screen.getByTestId("site-domain-remove-r1"))
+  await user.click(screen.getByText("actions.cancel"))
+  expect(handlers.onRemoveDomain).not.toHaveBeenCalled()
 })
 
 it("seeds the access editor from the stored policy so re-applying cannot wipe it", async () => {

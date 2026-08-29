@@ -90,7 +90,11 @@ export function SiteAnalyticsPanel({ view }: SiteAnalyticsPanelProps) {
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-panel border bg-border @xl/site-pane:grid-cols-4">
+      <Surface
+        layer="raised"
+        radius="panel"
+        className="grid grid-cols-2 gap-px overflow-hidden border @xl/site-pane:grid-cols-4"
+      >
         <StatCard
           icon={ActivityIcon}
           label={t("observability.analytics.requests")}
@@ -121,7 +125,7 @@ export function SiteAnalyticsPanel({ view }: SiteAnalyticsPanelProps) {
           color="bg-chart-4/10 text-chart-4"
           data-testid="site-analytics-uniques"
         />
-      </div>
+      </Surface>
 
       <div className="flex justify-end">
         <Button

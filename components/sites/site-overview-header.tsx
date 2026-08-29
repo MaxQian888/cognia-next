@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 
 import { ExternalLink } from "@/components/shared/external-link"
+import { Surface } from "@/components/surface/surface"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -42,9 +43,11 @@ import type {
   SiteDeploymentRow,
   SiteOperationRow,
   SiteProjectRow,
+  SiteResourceRow,
   SiteVersionRow,
 } from "@/types/sites"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
+import { SiteHeroStats } from "./site-hero-stats"
 import { SITE_DEPLOYMENT_FACE, SITE_LIFECYCLE_FACE, SiteStatusPill } from "./site-status"
 
 export interface SiteOverviewHeaderProps {
@@ -52,6 +55,7 @@ export interface SiteOverviewHeaderProps {
   versions: readonly SiteVersionRow[]
   deployments: readonly SiteDeploymentRow[]
   operations: readonly SiteOperationRow[]
+  resources: readonly SiteResourceRow[]
   actorAccountId: string
   gate: SiteGate
   metadataGate: SiteGate
@@ -72,6 +76,7 @@ export function SiteOverviewHeader({
   versions,
   deployments,
   operations,
+  resources,
   actorAccountId,
   gate,
   metadataGate,
@@ -172,7 +177,11 @@ export function SiteOverviewHeader({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2">
+      <Surface
+        layer="raised"
+        radius="control"
+        className="mt-3 flex flex-wrap items-center gap-2 border px-3 py-2"
+      >
         <LinkIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         {productionUrl ? (
           <ExternalLink
@@ -221,7 +230,7 @@ export function SiteOverviewHeader({
             solid
           />
         ) : null}
-      </div>
+      </Surface>
 
       <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
         <span>
@@ -263,6 +272,13 @@ export function SiteOverviewHeader({
           {t("overview.yourRole")}: {t(`overview.role.${role}`)}
         </span>
       </p>
+
+      <SiteHeroStats
+        versions={versions}
+        deployments={deployments}
+        operations={operations}
+        resources={resources}
+      />
 
       {failures.length > 0 ? (
         <Alert variant="destructive" className="mt-3" data-testid="site-failure-banner">

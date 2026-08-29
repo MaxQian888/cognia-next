@@ -16,6 +16,7 @@ import { PackageIcon, RocketIcon, UploadIcon } from "lucide-react"
 
 import { ExternalLink } from "@/components/shared/external-link"
 import { FilterChips } from "@/components/scheduler/filter-chips"
+import { Surface } from "@/components/surface/surface"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -76,7 +77,7 @@ const SiteVersionRow = memo(function SiteVersionRow({
       data-testid={`site-version-${version.id}`}
       className={cn(
         "grid grid-cols-1 gap-2 border-b border-l-2 border-l-transparent px-3 py-3 last:border-b-0 transition-colors hover:bg-accent/50 motion-reduce:transition-none",
-        "lg:grid-cols-[3.5rem_6rem_minmax(0,1fr)_10rem_auto] lg:items-center lg:gap-3",
+        "@2xl/site-pane:grid-cols-[3.5rem_6rem_minmax(0,1fr)_10rem_auto] @2xl/site-pane:items-center @2xl/site-pane:gap-3",
         live && "border-l-success bg-success/5"
       )}
     >
@@ -125,7 +126,7 @@ const SiteVersionRow = memo(function SiteVersionRow({
           : t("versions.noArtifact")}
       </span>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 lg:justify-end">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 @2xl/site-pane:justify-end">
         {version.status !== "building" ? (
           <SiteBuildLogViewer
             versionId={version.id}
@@ -175,21 +176,29 @@ const SiteVersionRow = memo(function SiteVersionRow({
       ) : null}
 
       {version.failureMessage ? (
-        <p
-          role="alert"
-          className="col-span-full rounded-md border border-destructive/40 bg-destructive/5 p-2 font-mono text-xs text-destructive"
+        <Surface
+          asChild
+          layer="raised"
+          radius="control"
+          className="col-span-full border border-destructive/40 bg-destructive/5 p-2 font-mono text-xs text-destructive"
         >
-          {t("versions.failure")}: {version.failureMessage}
-        </p>
+          <p role="alert">
+            {t("versions.failure")}: {version.failureMessage}
+          </p>
+        </Surface>
       ) : null}
 
       {deployment?.failureMessage ? (
-        <p
-          role="alert"
-          className="col-span-full rounded-md border border-destructive/40 bg-destructive/5 p-2 font-mono text-xs text-destructive"
+        <Surface
+          asChild
+          layer="raised"
+          radius="control"
+          className="col-span-full border border-destructive/40 bg-destructive/5 p-2 font-mono text-xs text-destructive"
         >
-          {t("versions.deploymentFailure")}: {deployment.failureMessage}
-        </p>
+          <p role="alert">
+            {t("versions.deploymentFailure")}: {deployment.failureMessage}
+          </p>
+        </Surface>
       ) : null}
     </div>
   )
@@ -284,7 +293,7 @@ export function SiteVersionsTab({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto rounded-xl border"
+        className="min-h-0 flex-1 overflow-y-auto rounded-panel border"
         data-testid="site-versions-list"
       >
         <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>

@@ -91,6 +91,7 @@ function renderHeader(props: Partial<React.ComponentProps<typeof SiteOverviewHea
       versions={[version()]}
       deployments={[deployment()]}
       operations={[]}
+      resources={[]}
       actorAccountId="owner"
       gate={allowed}
       metadataGate={allowed}
@@ -209,6 +210,7 @@ it("gates provider lifecycle actions but keeps metadata deletion on its own gate
       versions={[]}
       deployments={[]}
       operations={[]}
+      resources={[]}
       actorAccountId="owner"
       gate={blocked}
       metadataGate={allowed}
