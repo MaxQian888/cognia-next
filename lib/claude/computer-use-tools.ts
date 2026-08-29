@@ -68,6 +68,18 @@ export interface ApplyComputerUseInput {
   imSession?: boolean
   allowImComputerUse?: boolean
   /**
+   * Set to true when the turn originates from the mobile shell and the user
+   * has NOT switched on `AppSettings.mobileComputerUseEnabled` (Settings →
+   * Computer Use on the phone). Same shape as the G6 IM gate: a host-level
+   * veto that outranks a character with Computer Use globally enabled.
+   *
+   * The mobile master switch documented itself as "when off, mobile-initiated
+   * turns refuse to enter a computer-use loop regardless of per-character
+   * `enableComputerUse`" while nothing anywhere read the flag — this input and
+   * the matching term in `computerUseAllowedForChat` are what make that true.
+   */
+  mobileHostBlocked?: boolean
+  /**
    * ADR-0020 W3 — chat session id, used to look up per-session grants
    * when `Character.computerUseSettings.chatConsentMode === "session-grant"`.
    * Optional because non-chat callers (workflow nodes, MCP) never
@@ -122,6 +134,13 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
   // `opts.anthropicTools` so the field on that surface is dead).
   if (input.sessionId && character.computerUseSettings) {
     setActiveComputerUseSettings(input.sessionId, character.computerUseSettings)
+  }
+  // Mobile master switch — same short-circuit as the IM blacklist below, and
+  // checked first because it is a device-wide veto rather than a
+  // per-conversation one.
+  if (input.mobileHostBlocked === true) {
+    if (input.sessionId) clearActiveComputerUseSettings(input.sessionId)
+    return { opts, attachedCount: 0 }
   }
   // G6 IM blacklist — short-circuit before the registry walk so even a
   // character that has Computer Use globally enabled can't fire native

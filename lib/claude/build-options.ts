@@ -17,6 +17,7 @@ import type { IVectorStore } from "@cognia/vector/store"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
@@ -2442,8 +2443,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     characterComputerUseEnabled: character?.enableComputerUse,
   })
   const allowImComputerUse = imHostCapabilities.computer_use
+  // Mobile master switch (`AppSettings.mobileComputerUseEnabled`, Settings →
+  // Computer Use on the phone). The page documents it as "when off,
+  // mobile-initiated turns refuse to enter a computer-use loop regardless of
+  // per-character `enableComputerUse`" — but nothing read the flag, so the
+  // switch persisted, mirrored to the host, and changed nothing. It is a
+  // device-wide veto stacked on top of the per-character and per-conversation
+  // gates, and it applies to BOTH consumers of this verdict: the plugin-tools
+  // manifest below and the native-anthropic path via `applyComputerUseTools`.
+  const mobileHostBlocked =
+    detectHostProfile() === "mobile-companion" && appSettings?.mobileComputerUseEnabled !== true
   const computerUseAllowedForChat =
-    character?.enableComputerUse === true && (!imSession || allowImComputerUse)
+    character?.enableComputerUse === true &&
+    !mobileHostBlocked &&
+    (!imSession || allowImComputerUse)
 
   // Agent browser tools (ADR-0055) drive the embedded preview webview, which
   // only exists in the desktop shell. Opt-in per character; never surfaced on
@@ -3021,6 +3034,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts,
       imSession,
       allowImComputerUse,
+      mobileHostBlocked,
       // ADR-0020 W3 — session id flows in so the per-session grant
       // lookup can suppress redundant chat modals when the operator
       // chose `chatConsentMode: "session-grant"`.

@@ -100,11 +100,13 @@ jest.mock("@/lib/files/workspace-backend", () => ({
 // consent tier are surfaced at all. Defaults off so every existing expectation
 // keeps describing a non-desktop shell.
 const mockLocalCapabilities = jest.fn<string[], []>(() => [])
+const mockHostProfile = { value: "desktop" as string }
 jest.mock("@/lib/platform/capabilities", () => {
   const actual = jest.requireActual("@/lib/platform/capabilities")
   return {
     ...actual,
     detectLocalCapabilities: () => mockLocalCapabilities(),
+    detectHostProfile: () => mockHostProfile.value,
     hasCapability: (cap: string, caps?: string[]) =>
       (caps ?? mockLocalCapabilities()).includes(cap),
   }
@@ -3739,6 +3741,50 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       .filter(notWeb)
       .sort()
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor", "working_set"])
+  })
+
+  it("drops computer-use plugin tools on mobile until the master switch is on", async () => {
+    // `AppSettings.mobileComputerUseEnabled` (Settings → Computer Use on the
+    // phone) documented itself as a hard veto over per-character
+    // `enableComputerUse`, but nothing read it — the switch was inert.
+    mockHostProfile.value = "mobile-companion"
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        character: makeChar({ enableComputerUse: true }),
+        appSettings: { id: "singleton" } as AppSettings,
+      })
+      const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+      expect(names).not.toContain("computer_use")
+      expect(names).toContain("github_pr")
+    } finally {
+      mockHostProfile.value = "desktop"
+    }
+  })
+
+  it("keeps them on mobile once the master switch is on", async () => {
+    mockHostProfile.value = "mobile-companion"
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        character: makeChar({ enableComputerUse: true }),
+        appSettings: { id: "singleton", mobileComputerUseEnabled: true } as AppSettings,
+      })
+      const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+      expect(names).toContain("computer_use")
+    } finally {
+      mockHostProfile.value = "desktop"
+    }
+  })
+
+  it("does not apply the mobile switch on the desktop host", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableComputerUse: true }),
+      appSettings: { id: "singleton", mobileComputerUseEnabled: false } as AppSettings,
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+    expect(names).toContain("computer_use")
   })
 
   it("filters computer-use plugin tools when character.enableComputerUse !== true", async () => {

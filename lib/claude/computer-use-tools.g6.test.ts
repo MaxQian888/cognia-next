@@ -248,3 +248,68 @@ describe("applyComputerUseTools — active-settings cache (audit fix)", () => {
     expect(getActiveComputerUseSettings("any")).toBeNull()
   })
 })
+
+describe("applyComputerUseTools — mobile master switch", () => {
+  beforeEach(() => {
+    resetActiveComputerUseSettings()
+    resetSessionGrants()
+  })
+
+  it("attaches tools when the mobile gate is not blocking", () => {
+    const result = applyComputerUseTools({
+      character: baseChar,
+      opts: emptyOpts(),
+      mobileHostBlocked: false,
+    })
+    expect(result.attachedCount).toBe(1)
+  })
+
+  it("short-circuits when the mobile master switch is off", () => {
+    const result = applyComputerUseTools({
+      character: baseChar,
+      opts: emptyOpts(),
+      mobileHostBlocked: true,
+    })
+    expect(result.attachedCount).toBe(0)
+    expect(result.opts.anthropicTools).toBeUndefined()
+  })
+
+  it("outranks a character with Computer Use globally enabled", () => {
+    // The whole point of the switch, per the mobile page's own description.
+    const result = applyComputerUseTools({
+      character: { ...baseChar, enableComputerUse: true },
+      opts: emptyOpts(),
+      mobileHostBlocked: true,
+      imSession: false,
+    })
+    expect(result.attachedCount).toBe(0)
+  })
+
+  it("outranks a per-conversation IM opt-in", () => {
+    const result = applyComputerUseTools({
+      character: baseChar,
+      opts: emptyOpts(),
+      imSession: true,
+      allowImComputerUse: true,
+      mobileHostBlocked: true,
+    })
+    expect(result.attachedCount).toBe(0)
+  })
+
+  it("clears cached per-session settings so no force-tier zombie survives", () => {
+    const character = {
+      ...baseChar,
+      computerUseSettings: { requireConsent: true },
+    } as unknown as Character
+    applyComputerUseTools({ character, opts: emptyOpts(), sessionId: "s1" })
+    expect(getActiveComputerUseSettings("s1")).toBeDefined()
+
+    applyComputerUseTools({
+      character,
+      opts: emptyOpts(),
+      sessionId: "s1",
+      mobileHostBlocked: true,
+    })
+    expect(getActiveComputerUseSettings("s1")).toBeNull()
+  })
+})
