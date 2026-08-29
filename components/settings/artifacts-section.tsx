@@ -130,7 +130,11 @@ export function ArtifactsSection() {
       <div className="space-y-2 border-t pt-4">
         <Label className="text-sm">{t("enabledTypesLabel")}</Label>
         <p className="text-xs text-muted-foreground">{t("enabledTypesHint")}</p>
-        <div className="grid grid-cols-3 gap-2 pt-1">
+        {/* One column on a phone. At three, each cell was ~110px and a
+            `Switch` + icon left ~40px for the name — every label truncated to
+            one or two characters, and "Code" and "Chart" both rendered as
+            "C…", so the row could not be identified at all. */}
+        <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2 lg:grid-cols-3">
           {ARTIFACT_TYPES.map((type) => {
             const isOn = enabledTypes.includes(type)
             return (

@@ -46,7 +46,8 @@ export function SemanticRoutingSection() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      {/* Three number fields at ~110px each on a phone; stack them instead. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label className="text-xs" htmlFor="semantic-activation-count">
             {t("activationToolCount")}

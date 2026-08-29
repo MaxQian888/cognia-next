@@ -135,3 +135,32 @@ describe("ArtifactsSection", () => {
     expect(patch.artifacts.defaultPanelMode).toBe("preview")
   })
 })
+
+describe("ArtifactsSection — allowed-types grid", () => {
+  // A fixed three-column grid gave each cell ~110px on a phone; a `Switch` plus
+  // an icon left about 40px for the name, so every label truncated to one or
+  // two characters and "Code" and "Chart" both rendered as "C…".
+  it("stacks to a single column before sm and only widens from there", () => {
+    const { container } = render(<ArtifactsSection />)
+    const grids = [...container.querySelectorAll("div")].filter((d) =>
+      d.className.includes("grid-cols-1")
+    )
+    const typeGrid = grids.find((g) => g.querySelectorAll("label").length >= 5)
+    expect(typeGrid).toBeDefined()
+    expect(typeGrid!.className).toContain("sm:grid-cols-2")
+    expect(typeGrid!.className).toContain("lg:grid-cols-3")
+  })
+
+  it("gives every type its own full-width row on a phone", () => {
+    const { container } = render(<ArtifactsSection />)
+    const labels = [...container.querySelectorAll("label")].filter(
+      (l) => l.querySelector("button[role='switch']") !== null
+    )
+    expect(labels.length).toBeGreaterThanOrEqual(5)
+    // No label may rely on truncation to fit — the name is the only thing that
+    // identifies the row.
+    for (const l of labels) {
+      expect((l.textContent ?? "").trim().length).toBeGreaterThan(1)
+    }
+  })
+})
