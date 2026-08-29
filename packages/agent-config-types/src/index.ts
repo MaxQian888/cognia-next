@@ -6,6 +6,8 @@
 // a hard dependency on a Node-only package.
 
 import type { UIMessage } from "ai"
+
+export * from "./collaboration"
 import type {
   SearchProviderType,
   SearchProviderSettings,
@@ -2351,6 +2353,11 @@ export interface ChatSession {
     targetSessionId?: string
     at: number
   }
+  /**
+   * Server-authoritative collaboration binding. Absent means the session is
+   * local and private; legacy rows therefore remain private by default.
+   */
+  collaboration?: import("./collaboration").ChatCollaborationBinding
   /** Per-session override for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-session override for `--debug` (verbose logging). */
@@ -2469,6 +2476,8 @@ export interface StoredMessage {
   /** Character id for team-session assistant messages; undefined otherwise. */
   senderId?: string
   senderKind?: MessageSenderKind
+  /** Stable human/app/agent authorship for shared-session projections. */
+  collaboration?: import("./collaboration").MessageCollaborationMetadata
   /**
    * Denormalized copy of `metadata.platformMessage.messageId` (v49). Indexed
    * so `ConnectorBus.applyMessageEdit` / `applyMessageDelete` can locate the
