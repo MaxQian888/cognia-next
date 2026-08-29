@@ -60,7 +60,14 @@ export function useEntityMentionStaging({ sessionId }: UseEntityMentionStagingOp
           toast.error(t("entityEmpty", { title: candidate.title }))
           return null
         }
-        const selection = entitySelectionFrom(candidate, body)
+        // The fingerprint is read in the same breath as the body, so the two
+        // describe the same instant. A failure here must not lose the pick: an
+        // unfingerprinted chip is un-checkable, which the UI says, and that is
+        // strictly better than no chip at all.
+        const fingerprint = source.fingerprint
+          ? await source.fingerprint(candidate).catch(() => undefined)
+          : undefined
+        const selection = entitySelectionFrom(candidate, body, { fingerprint })
         useChatStore.getState().addContextSelection(selection, sessionId)
         toast.success(t("entityStaged", { title: candidate.title }))
         return selection

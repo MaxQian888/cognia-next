@@ -50,6 +50,7 @@ import { searchWithAppSettings } from "@/lib/search/configured-search"
 import { resolveWebAccess } from "@/lib/chat/web-access"
 import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
+import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { SendContent, SendOptions, ChatSession, Character } from "@cognia/agent-config-types"
@@ -3271,10 +3272,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // `clearContextSelections(session?.id)` below. Reading the focused
       // projection here sent the OTHER conversation's file and artifact
       // excerpts in this turn — and cleared selections that were never used.
-      const contextSelections = selectComposerContextSelections(
+      const stagedSelections = selectComposerContextSelections(
         useChatStore.getState(),
         session?.id ?? null
       )
+      // Last look before the snapshots leave. The chip bar re-checks on focus,
+      // but a record edited in the seconds between that and Enter would
+      // otherwise be sent as current. The bodies are NOT refreshed — the user
+      // approved these — only the divergence is recorded, so
+      // `formatContextSelectionsForLLM` can say the copy is behind.
+      const contextSelections = (await refreshSelectionFreshness(stagedSelections)).selections
       if (contextSelections.length > 0 && session?.id) {
         const selectionCtx = formatContextSelectionsForLLM(contextSelections)
         augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx

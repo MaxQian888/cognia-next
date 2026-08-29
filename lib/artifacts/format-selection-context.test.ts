@@ -287,7 +287,7 @@ describe("plugin selections", () => {
 })
 
 describe("entity selections", () => {
-  const base = { kind: "entity" as const, comment: "", snapshot: "body" }
+  const base = { kind: "entity" as const, comment: "", snapshot: "body", capturedAt: 1_000 }
 
   it("names the record kind so the model can tell a transcript from a plan", () => {
     expect(
@@ -352,6 +352,7 @@ describe("a referenced message", () => {
     title: "Restacking",
     snapshot: "assistant: run /stack restack",
     comment: "",
+    capturedAt: 1_000,
     href: "/?session=s1&message=m1",
     ...over,
   })
@@ -383,6 +384,7 @@ describe("a referenced message", () => {
         title: "Prefers pnpm",
         snapshot: "x",
         comment: "",
+        capturedAt: 1_000,
         href: "/memory",
       },
     ])
@@ -393,5 +395,47 @@ describe("a referenced message", () => {
   it("falls back to the plain heading when a message has no link", () => {
     const out = formatContextSelectionsForLLM([msg({ href: undefined })])
     expect(out).toContain('A message from another conversation "Restacking"')
+  })
+})
+
+describe("a snapshot that has gone stale", () => {
+  const sel = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "plan" as const,
+    entityId: "plan1",
+    title: "Ship the index",
+    snapshot: "Plan: Ship the index",
+    comment: "",
+    capturedAt: Date.UTC(2026, 7, 29, 12),
+    ...over,
+  })
+
+  // The body is deliberately NOT refreshed — the user approved this one. The
+  // model just has to be told it is behind rather than left to state it as
+  // current.
+  it("says when the copy was taken", () => {
+    const out = formatContextSelectionsForLLM([sel({ stale: true })])
+    expect(out).toContain("2026-08-29T12:00:00.000Z")
+    expect(out).toContain("Treat it as a snapshot, not as the current state")
+    expect(out).toContain("Plan: Ship the index")
+  })
+
+  it("says nothing for a copy that still matches", () => {
+    expect(formatContextSelectionsForLLM([sel()])).not.toContain("has changed since")
+  })
+
+  it("keeps the user's comment alongside the notice", () => {
+    const out = formatContextSelectionsForLLM([sel({ stale: true, comment: "check step 3" })])
+    expect(out).toContain("has changed since")
+    expect(out).toContain("Comment: check step 3")
+  })
+
+  // Only entity selections have a source that can be asked; a file or web
+  // excerpt has no version to compare against.
+  it("never claims a non-entity selection is stale", () => {
+    const out = formatContextSelectionsForLLM([
+      { kind: "file", relPath: "a.ts", title: "a.ts", snapshot: "x", comment: "" },
+    ])
+    expect(out).not.toContain("has changed since")
   })
 })

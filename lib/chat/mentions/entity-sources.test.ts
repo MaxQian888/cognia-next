@@ -178,7 +178,11 @@ describe("untrusted-content wrapping", () => {
 
 describe("entitySelectionFrom", () => {
   it("produces a staged selection carrying the record's identity", () => {
-    expect(entitySelectionFrom(candidate({ subtitle: "semantic · global" }), "body")).toEqual({
+    expect(
+      entitySelectionFrom(candidate({ subtitle: "semantic · global" }), "body", {
+        capturedAt: 1_700_000_000_000,
+      })
+    ).toEqual({
       kind: "entity",
       entityKind: "memory",
       entityId: "mem_1",
@@ -188,8 +192,25 @@ describe("entitySelectionFrom", () => {
       // words (see the untrusted-content block above).
       snapshot: entitySnapshotBody("memory", "body"),
       comment: "",
+      // Stamped so the prompt block can say WHEN the copy was taken once the
+      // record moves on underneath it.
+      capturedAt: 1_700_000_000_000,
       subtitle: "semantic · global",
     })
+  })
+
+  it("records the source's fingerprint when there is one", () => {
+    const selection = entitySelectionFrom(candidate(), "body", { fingerprint: "v7" })
+    expect(selection.fingerprint).toBe("v7")
+  })
+
+  // Absent, not null: `undefined` is what `isEntitySelectionStale` reads as
+  // "this chip predates fingerprints and cannot be checked".
+  it("omits the fingerprint when the source has none", () => {
+    expect("fingerprint" in entitySelectionFrom(candidate(), "body")).toBe(false)
+    expect("fingerprint" in entitySelectionFrom(candidate(), "body", { fingerprint: null })).toBe(
+      false
+    )
   })
 
   it("omits the optional fields rather than storing undefined", () => {

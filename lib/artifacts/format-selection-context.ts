@@ -132,8 +132,25 @@ function headingFor(sel: ContextSelectionRef): string {
   }
 }
 
+/**
+ * Say when a copy was taken, and only when it has since diverged.
+ *
+ * The snapshot is deliberately not refreshed (see
+ * `lib/chat/mentions/selection-freshness.ts`) — the user approved this body.
+ * But a model reasoning from a plan that has advanced three steps since, or a
+ * memory that was invalidated, should be told the copy is behind rather than
+ * left to state it as current. English, like every other string here: it is
+ * prompt scaffolding, not UI copy.
+ */
+function stalenessNote(sel: ContextSelectionRef): string | null {
+  if (sel.kind !== "entity" || !sel.stale) return null
+  return `[This copy was taken at ${new Date(sel.capturedAt).toISOString()}; the record has changed since. Treat it as a snapshot, not as the current state.]`
+}
+
 function formatOne(sel: ContextSelectionRef): string {
   const lines = [headingFor(sel), "```", sel.snapshot, "```"]
+  const note = stalenessNote(sel)
+  if (note) lines.push(note)
   if (sel.comment.trim()) {
     lines.push(`Comment: ${sel.comment.trim()}`)
   }

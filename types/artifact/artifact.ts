@@ -203,6 +203,29 @@ export interface PluginSelectionRef extends ContextSelectionBase {
 export interface EntitySelectionRef extends ContextSelectionBase {
   kind: "entity"
   entityKind: EntitySelectionKind
+  /** When the snapshot was taken. Epoch ms. */
+  capturedAt: number
+  /**
+   * The source record's version at capture time, whatever the source uses to
+   * mean "changed" — an `updatedAt`, a message count, mere existence.
+   *
+   * Compared, never interpreted: only the SOURCE knows what its fingerprint
+   * means, and the only question asked of it here is "is it still the same
+   * string". Absent when the source declares no `fingerprint`, which is what
+   * makes staleness un-checkable rather than false for that kind.
+   */
+  fingerprint?: string
+  /**
+   * The source has changed since the snapshot was taken.
+   *
+   * Recorded rather than derived because the check is asynchronous and the chip
+   * renders synchronously — and because it has to survive the render in which
+   * the user decides whether to refresh. The snapshot itself is deliberately
+   * NOT updated: a chip whose body changed under the user between reading it
+   * and sending it would be a worse failure than a chip that says it is out of
+   * date.
+   */
+  stale?: boolean
   /** The record's own id — memory id, issue id, plan id, session id, artifact id. */
   entityId: string
   /**

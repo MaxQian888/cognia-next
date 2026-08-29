@@ -119,6 +119,18 @@ export interface EntityMentionSource {
    * so the caller can say so instead of staging an empty chip.
    */
   snapshot(candidate: EntityMentionCandidate): Promise<string | null>
+  /**
+   * The record's version, for detecting that a staged snapshot has gone stale.
+   *
+   * Opaque: the caller only ever compares two of these for equality, so a
+   * source is free to return an `updatedAt`, a content hash, a message count,
+   * or `"1"` to mean "still exists". `null` means the record is GONE, which is
+   * a change like any other and the strongest one.
+   *
+   * Optional. A source that declares none makes its staged chips
+   * un-checkable — which the UI then says, rather than claiming they are fresh.
+   */
+  fingerprint?(candidate: EntityMentionCandidate): Promise<string | null>
 }
 
 /**
@@ -264,7 +276,8 @@ export function entitySnapshotBody(kind: EntitySelectionKind, text: string): str
 /** Build the staged selection for a picked candidate. */
 export function entitySelectionFrom(
   candidate: EntityMentionCandidate,
-  snapshot: string
+  snapshot: string,
+  { capturedAt = Date.now(), fingerprint }: EntitySelectionStamp = {}
 ): EntitySelectionRef {
   return {
     kind: "entity",
@@ -273,9 +286,41 @@ export function entitySelectionFrom(
     title: candidate.title,
     snapshot: entitySnapshotBody(candidate.entityKind, snapshot),
     comment: "",
+    capturedAt,
+    ...(fingerprint != null ? { fingerprint } : {}),
     ...(candidate.subtitle ? { subtitle: candidate.subtitle } : {}),
     ...(candidate.href ? { href: candidate.href } : {}),
   }
+}
+
+export interface EntitySelectionStamp {
+  /** Defaults to now. Injectable so a test can pin the timestamp. */
+  capturedAt?: number
+  /** The source's fingerprint at capture time, when it has one. */
+  fingerprint?: string | null
+}
+
+/**
+ * Has the record behind a staged selection changed since it was captured?
+ *
+ * `false` when the kind cannot be checked (no source, or a source that declares
+ * no `fingerprint`) or when the selection was staged before fingerprints
+ * existed. Un-checkable is not the same as changed, and reporting it as stale
+ * would train people to ignore the badge.
+ */
+export async function isEntitySelectionStale(
+  selection: Pick<EntitySelectionRef, "entityKind" | "entityId" | "title" | "fingerprint">
+): Promise<boolean> {
+  if (selection.fingerprint === undefined) return false
+  const source = getEntityMentionSource(selection.entityKind)
+  if (!source?.fingerprint) return false
+  const current = await source.fingerprint({
+    entityKind: selection.entityKind,
+    id: selection.entityId,
+    title: selection.title,
+    searchText: "",
+  })
+  return current !== selection.fingerprint
 }
 
 /** Lowercased haystack, skipping the blanks so `undefined` never matches. */
@@ -382,6 +427,13 @@ function registerBuiltinEntityMentionSources(): void {
       const row = await getMemory(candidate.id)
       return row ? row.text : null
     },
+    async fingerprint(candidate) {
+      const { getMemory } = await import("@/lib/db/memories")
+      const row = await getMemory(candidate.id)
+      // The status too, not just the timestamp: a memory that was invalidated
+      // is exactly the material a staged chip must stop asserting.
+      return row ? `${row.updatedAt}:${row.status}` : null
+    },
   })
 
   registerEntityMentionSource({
@@ -411,6 +463,11 @@ function registerBuiltinEntityMentionSources(): void {
       ]
       if (issue.description?.trim()) lines.push("", issue.description.trim())
       return lines.join("\n")
+    },
+    async fingerprint(candidate) {
+      const { getIssue } = await import("@/lib/db/issues")
+      const issue = await getIssue(candidate.id)
+      return issue ? String(issue.updatedAt) : null
     },
   })
 
@@ -447,6 +504,13 @@ function registerBuiltinEntityMentionSources(): void {
       }
       return lines.join("\n")
     },
+    async fingerprint(candidate) {
+      const { getPlan } = await import("@/lib/db/plans")
+      const plan = await getPlan(candidate.id)
+      // Step progress as well as the timestamp: a plan advances by steps, and
+      // that is the change a staged copy most needs to admit to.
+      return plan ? `${plan.updatedAt}:${plan.completedSteps}/${plan.totalSteps}` : null
+    },
   })
 
   registerEntityMentionSource({
@@ -481,6 +545,15 @@ function registerBuiltinEntityMentionSources(): void {
     async snapshot(candidate) {
       const { getSessionTranscriptText } = await import("./entity-transcript")
       return getSessionTranscriptText(candidate.id)
+    },
+    async fingerprint(candidate) {
+      const { getSession } = await import("@/lib/db/sessions")
+      const row = await getSession(candidate.id)
+      if (!row) return null
+      // `transcriptRevision` is the monotonic lineage counter the transcript
+      // already maintains, so it moves on exactly the writes that change what
+      // the snapshot would say. `updatedAt` alone moves on a rename too.
+      return `${row.transcriptRevision ?? 0}:${row.updatedAt}`
     },
   })
 
@@ -556,6 +629,18 @@ function registerBuiltinEntityMentionSources(): void {
       if (!parsed) return null
       return buildMessageReferenceText(parsed)
     },
+    async fingerprint(candidate) {
+      const { parseMessageRefId } = await import("./message-reference")
+      const parsed = parseMessageRefId(candidate.id)
+      if (!parsed) return null
+      const { getDb } = await import("@/lib/db/schema")
+      const row = await getDb().messages.get(parsed.messageId)
+      if (!row || row.sessionId !== parsed.sessionId) return null
+      // A message row has no version column, so the body's own length stands in
+      // — it is what an edit changes, and it costs nothing beyond the read the
+      // deletion check already makes.
+      return `${row.createdAt}:${JSON.stringify(row.parts).length}`
+    },
   })
 
   registerEntityMentionSource({
@@ -595,6 +680,14 @@ function registerBuiltinEntityMentionSources(): void {
       const { resultBodyText } = await import("./result-reference")
       return resultBodyText(candidate.id)
     },
+    async fingerprint(candidate) {
+      // The body itself, hashed by length. A tool result is immutable once its
+      // turn finishes, so the only changes worth catching are the message being
+      // deleted, edited, or its parts reordered — all of which move this.
+      const { resultBodyText } = await import("./result-reference")
+      const body = await resultBodyText(candidate.id)
+      return body === null ? null : String(body.length)
+    },
   })
 
   registerEntityMentionSource({
@@ -621,6 +714,11 @@ function registerBuiltinEntityMentionSources(): void {
       const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
       const artifact = useArtifactStore.getState().artifacts[candidate.id]
       return artifact ? artifact.content : null
+    },
+    async fingerprint(candidate) {
+      const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
+      const artifact = useArtifactStore.getState().artifacts[candidate.id]
+      return artifact ? String(artifact.updatedAt) : null
     },
   })
 }

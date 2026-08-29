@@ -15,12 +15,13 @@
 // nothing for a per-hunk proposal to diff them against, so offering the control
 // would promise a round trip that cannot happen.
 
-import { useCallback } from "react"
+import { useCallback, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   ChevronsUpDownIcon,
   DatabaseIcon,
+  RefreshCwIcon,
   FileDiff,
   FileCodeIcon,
   GlobeIcon,
@@ -29,7 +30,11 @@ import {
   ScanTextIcon,
   XIcon,
 } from "lucide-react"
-import { useChatStore, useComposerContextSelections } from "@/stores/chat"
+import {
+  selectComposerContextSelections,
+  useChatStore,
+  useComposerContextSelections,
+} from "@/stores/chat"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -39,7 +44,12 @@ import {
   clampSpan,
   parseMessageRefId,
 } from "@/lib/chat/mentions/message-reference"
-import { entitySnapshotBody } from "@/lib/chat/mentions/entity-sources"
+import {
+  entitySelectionFrom,
+  entitySnapshotBody,
+  getEntityMentionSource,
+} from "@/lib/chat/mentions/entity-sources"
+import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -91,6 +101,82 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const remove = useChatStore((s) => s.removeContextSelection)
   const promote = useChatStore((s) => s.promoteContextSelection)
   const replace = useChatStore((s) => s.replaceContextSelection)
+
+  // Re-check on mount and whenever the window regains focus. Those are the two
+  // moments a chip can have gone stale without this pane hearing about it: the
+  // record was edited in another window, or on another surface of this one.
+  useEffect(() => {
+    let cancelled = false
+    const check = () => {
+      const current = useChatStore.getState()
+      const staged = selectComposerContextSelections(current, composerSessionId)
+      if (staged.length === 0) return
+      // `.catch` and not a bare `void`: this runs on every focus, and a failed
+      // read must leave the chips exactly as they are rather than take the bar
+      // down with an unhandled rejection.
+      refreshSelectionFreshness(staged)
+        .then((pass) => {
+          if (cancelled || !pass.changed) return
+          // Written back one at a time through the same index-addressed action
+          // the rest of this component uses, so a concurrent add or remove cannot
+          // be clobbered by a whole-list write.
+          pass.selections.forEach((selection, index) => {
+            if (selection !== staged[index]) {
+              useChatStore.getState().replaceContextSelection(index, selection, composerSessionId)
+            }
+          })
+        })
+        .catch(() => undefined)
+    }
+    check()
+    window.addEventListener("focus", check)
+    return () => {
+      cancelled = true
+      window.removeEventListener("focus", check)
+    }
+  }, [composerSessionId])
+
+  const refresh = useCallback(
+    async (index: number, sel: ContextSelectionRef) => {
+      if (sel.kind !== "entity") return
+      const source = getEntityMentionSource(sel.entityKind)
+      if (!source) return
+      const candidate = {
+        entityKind: sel.entityKind,
+        id: sel.entityId,
+        title: sel.title,
+        searchText: "",
+        ...(sel.subtitle ? { subtitle: sel.subtitle } : {}),
+        ...(sel.href ? { href: sel.href } : {}),
+      }
+      try {
+        const body = await source.snapshot(candidate)
+        // Gone, not merely changed. Leaving the old body in place and saying so
+        // beats replacing it with nothing.
+        if (!body?.trim()) {
+          toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+          return
+        }
+        const fingerprint = source.fingerprint
+          ? await source.fingerprint(candidate).catch(() => undefined)
+          : undefined
+        replace(
+          index,
+          {
+            ...entitySelectionFrom(candidate, body, { fingerprint }),
+            // The user's own annotation and their chosen span survive a
+            // refresh: neither is a property of the source.
+            comment: sel.comment,
+            ...(sel.span ? { span: sel.span } : {}),
+          },
+          composerSessionId
+        )
+      } catch {
+        toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+      }
+    },
+    [replace, composerSessionId, t]
+  )
 
   const widen = useCallback(
     async (index: number, sel: ContextSelectionRef) => {
@@ -209,6 +295,9 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
         // Only a message reference has neighbours to reach for, and only until
         // the span hits its ceiling — past that the control would promise a
         // widening that `clampSpan` refuses.
+        // Recorded on the selection by the freshness pass above, not computed
+        // here: the check is asynchronous and this render is not.
+        const isStale = sel.kind === "entity" && Boolean(sel.stale)
         const canWiden =
           sel.kind === "entity" &&
           sel.entityKind === "message" &&
@@ -223,7 +312,8 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
               "group flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs",
               showEditTarget && isTarget && "border-primary/50"
             )}
-            title={sel.comment || label}
+            title={isStale ? t("selectionStaleHint") : sel.comment || label}
+            data-stale={isStale ? "true" : undefined}
           >
             <Icon className="size-3.5 text-muted-foreground" />
             {canPromote ? (
@@ -239,6 +329,20 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
             ) : (
               <span className="max-w-[min(280px,calc(100vw-6rem))] truncate">{label}</span>
             )}
+            {isStale ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid="context-selection-refresh"
+                aria-label={t("refreshSelectionAria", { title: sel.title })}
+                title={t("refreshSelectionHint")}
+                onClick={() => void refresh(index, sel)}
+                className="size-5 text-amber-600 opacity-80 transition-opacity hover:opacity-100 dark:text-amber-400"
+              >
+                <RefreshCwIcon className="size-3" />
+              </Button>
+            ) : null}
             {canWiden ? (
               <Button
                 type="button"

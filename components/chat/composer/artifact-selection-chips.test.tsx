@@ -15,6 +15,29 @@ jest.mock("@/lib/chat/mentions/message-reference", () => {
 const toastErrorMock = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (m: string) => toastErrorMock(m) } }))
 
+const refreshFreshnessMock = jest.fn()
+jest.mock("@/lib/chat/mentions/selection-freshness", () => ({
+  // Default-safe: most of this suite is about the chips, not about freshness,
+  // and an unmocked call must resolve to "nothing changed" rather than
+  // undefined.
+  refreshSelectionFreshness: (s: readonly unknown[]) =>
+    refreshFreshnessMock(s) ?? Promise.resolve({ selections: s, changed: false }),
+}))
+const snapshotMock = jest.fn()
+const fingerprintMock = jest.fn()
+jest.mock("@/lib/chat/mentions/entity-sources", () => {
+  const actual = jest.requireActual("@/lib/chat/mentions/entity-sources")
+  return {
+    ...actual,
+    getEntityMentionSource: () => ({
+      entityKind: "memory",
+      prefix: "memory:",
+      snapshot: snapshotMock,
+      fingerprint: fingerprintMock,
+    }),
+  }
+})
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -254,6 +277,7 @@ describe("entity chips", () => {
     subtitle: "COG-14 · in_progress",
     snapshot: "body",
     comment: "",
+    capturedAt: 1_000,
     ...over,
   })
 
@@ -323,6 +347,7 @@ describe("message span control", () => {
     kind: "entity" as const,
     entityKind: "message" as const,
     entityId: "s1#m1",
+    capturedAt: 1_000,
     title: "Restacking",
     snapshot: "assistant: run /stack restack",
     comment: "",
@@ -406,5 +431,108 @@ describe("message span control", () => {
       "selectionChipMessageSpanLabel"
     )
     expect(screen.getByTestId("artifact-selection-chip").textContent).toContain('"count":4')
+  })
+})
+
+describe("stale snapshots", () => {
+  const staleSel = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "memory" as const,
+    entityId: "mem1",
+    title: "Prefers pnpm",
+    snapshot: "the approved body",
+    comment: "",
+    capturedAt: 1_000,
+    fingerprint: "v1",
+    ...over,
+  })
+
+  beforeEach(() => {
+    refreshFreshnessMock.mockReset().mockResolvedValue({ selections: [], changed: false })
+    snapshotMock.mockReset().mockResolvedValue("fresh body")
+    fingerprintMock.mockReset().mockResolvedValue("v2")
+    toastErrorMock.mockReset()
+  })
+
+  it("shows no refresh control on a chip that still matches", () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel()))
+    render(<ArtifactSelectionChips />)
+    expect(screen.queryByTestId("context-selection-refresh")).toBeNull()
+  })
+
+  it("offers a refresh control once the chip is marked stale", () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    expect(screen.getByTestId("context-selection-refresh")).toBeInTheDocument()
+    expect(screen.getByTestId("artifact-selection-chip")).toHaveAttribute("data-stale", "true")
+  })
+
+  // Two moments a chip can go stale without this pane hearing about it: the
+  // record was edited in another window, or on another surface of this one.
+  it("re-checks on mount and again when the window regains focus", async () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel()))
+    render(<ArtifactSelectionChips />)
+    await waitFor(() => expect(refreshFreshnessMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    await waitFor(() => expect(refreshFreshnessMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("writes back only the selections whose staleness actually flipped", async () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel()))
+    const staged = useChatStore.getState().contextSelections
+    refreshFreshnessMock.mockResolvedValue({
+      selections: [{ ...staged[0], stale: true }],
+      changed: true,
+    })
+    render(<ArtifactSelectionChips />)
+    await waitFor(() =>
+      expect((useChatStore.getState().contextSelections[0] as { stale?: boolean }).stale).toBe(true)
+    )
+  })
+
+  it("re-reads the body and the fingerprint when refresh is clicked", async () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0].snapshot).toContain("fresh body")
+    )
+    const next = useChatStore.getState().contextSelections[0] as {
+      fingerprint?: string
+      stale?: boolean
+    }
+    expect(next.fingerprint).toBe("v2")
+    expect(next.stale).toBeUndefined()
+  })
+
+  // Neither is a property of the source, so neither is the source's to discard.
+  it("keeps the user's comment and their chosen span across a refresh", async () => {
+    act(() =>
+      useChatStore
+        .getState()
+        .addContextSelection(
+          staleSel({ stale: true, comment: "check this", span: { before: 1, after: 1 } })
+        )
+    )
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0].snapshot).toContain("fresh body")
+    )
+    expect(useChatStore.getState().contextSelections[0].comment).toBe("check this")
+    expect(useChatStore.getState().contextSelections[0].span).toEqual({ before: 1, after: 1 })
+  })
+
+  // Gone, not merely changed. Leaving the old body and saying so beats
+  // replacing it with nothing.
+  it("keeps the existing copy when the record can no longer be read", async () => {
+    snapshotMock.mockResolvedValue(null)
+    act(() => useChatStore.getState().addContextSelection(staleSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    expect(useChatStore.getState().contextSelections[0].snapshot).toBe("the approved body")
   })
 })
