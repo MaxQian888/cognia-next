@@ -31,14 +31,29 @@ interface TranscriptMessage {
   parts: Parameters<typeof projectSearchText>[0]
 }
 
+export interface FormatTranscriptOptions {
+  /**
+   * The caller read a bounded tail, so it knows a cut happened but not how big
+   * it was. The banner then omits the count rather than reporting the one
+   * message the over-read happens to expose, which would understate the cut by
+   * however many messages were never read.
+   */
+  earlierUnknown?: boolean
+}
+
 /** Format an already-loaded message list. Exported for tests. */
-export function formatTranscript(messages: readonly TranscriptMessage[]): string | null {
+export function formatTranscript(
+  messages: readonly TranscriptMessage[],
+  { earlierUnknown = false }: FormatTranscriptOptions = {}
+): string | null {
   const dropped = Math.max(0, messages.length - MAX_TRANSCRIPT_MESSAGES)
   const tail = dropped > 0 ? messages.slice(dropped) : messages
   const lines: string[] = []
   if (dropped > 0) {
     lines.push(
-      `[Earlier ${dropped} message(s) of this conversation are not included — only the most recent ${MAX_TRANSCRIPT_MESSAGES} are shown.]`,
+      earlierUnknown
+        ? `[Earlier messages of this conversation are not included — only the most recent ${MAX_TRANSCRIPT_MESSAGES} are shown.]`
+        : `[Earlier ${dropped} message(s) of this conversation are not included — only the most recent ${MAX_TRANSCRIPT_MESSAGES} are shown.]`,
       ""
     )
   }
@@ -57,10 +72,23 @@ export function formatTranscript(messages: readonly TranscriptMessage[]): string
   return lines.join("\n\n")
 }
 
-/** Load and format a session's transcript, or null when it has no readable body. */
+/**
+ * Load and format a session's transcript, or null when it has no readable body.
+ *
+ * Reads the TAIL only (`listRecentMessages`), not the whole conversation. The
+ * previous `listMessages(sessionId)` pulled every row of the session *with its
+ * `parts`* — a single tool result can be tens of KB — and then discarded all
+ * but the last 40. One extra message is read so the "[Earlier N …]" banner can
+ * still say that a cut happened; the exact N is unknowable without counting the
+ * whole session, so the banner is phrased for that (`formatTranscript` sees the
+ * over-read slice and drops exactly one message).
+ */
 export async function getSessionTranscriptText(sessionId: string): Promise<string | null> {
-  const { listMessages } = await import("@/lib/db/messages")
-  const messages = await listMessages(sessionId)
+  const { listRecentMessages } = await import("@/lib/db/messages")
+  const messages = await listRecentMessages(sessionId, MAX_TRANSCRIPT_MESSAGES + 1)
   if (messages.length === 0) return null
-  return formatTranscript(messages.map((m) => ({ role: m.role, parts: m.parts })))
+  return formatTranscript(
+    messages.map((m) => ({ role: m.role, parts: m.parts })),
+    { earlierUnknown: messages.length > MAX_TRANSCRIPT_MESSAGES }
+  )
 }

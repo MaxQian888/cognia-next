@@ -65,9 +65,22 @@ export interface UseSessionsOptions {
    * conversation on screen.
    */
   crossWorkspace?: boolean
+  /**
+   * Run the session live query at all. Defaults to true.
+   *
+   * `false` keeps the imperative half of this hook (`select`, `create`, the
+   * folder writes) while leaving `sessions` empty — for a consumer that is
+   * mounted permanently but only *looks* at the list some of the time. The
+   * command palette is the case that forced this: it is mounted unconditionally
+   * by `desktop-app-shell.tsx`, and its `crossWorkspace` live query re-read
+   * every full session row — `branchSeed.content` included, up to 24k chars
+   * each — on every `sessions` write, which during a streaming turn is once per
+   * persisted chunk, with the dialog closed.
+   */
+  enabled?: boolean
 }
 
-export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {}) {
+export function useSessions({ crossWorkspace = false, enabled = true }: UseSessionsOptions = {}) {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const setMessages = useChatStore((s) => s.setMessages)
   const setSessionMessagesLoading = useChatStore((s) => s.setSessionMessagesLoading)
@@ -83,9 +96,10 @@ export function useSessions({ crossWorkspace = false }: UseSessionsOptions = {})
   // Live-bind the session list to Dexie so other tabs / quick deletes update.
   const sessions = useLiveQuery<ChatSession[]>(() => {
     if (typeof window === "undefined") return Promise.resolve([])
+    if (!enabled) return Promise.resolve([])
     if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
     return crossWorkspace ? listSessions() : listScopedSessions(activeProjectId)
-  }, [activeProjectId, projectStoreLoaded, crossWorkspace])
+  }, [activeProjectId, projectStoreLoaded, crossWorkspace, enabled])
   const exposedSessions = useMemo(() => {
     if (!Array.isArray(sessions)) return []
     const exposed = filterExposedSessions(sessions, "main-list")

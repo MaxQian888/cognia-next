@@ -80,7 +80,11 @@ export function GlobalSearchDialog({
   const [scope, setScope] = useState<GlobalSearchScope>("all")
   const [limit, setLimit] = useState<number | undefined>(undefined)
 
-  const { sessions, select, create } = useSessions({ crossWorkspace: true })
+  // `enabled: open` — this dialog is mounted unconditionally by the desktop
+  // shell, and the cross-workspace live query re-reads every full session row
+  // on each `sessions` write (once per persisted streaming chunk). The engine
+  // below is already gated on `open`; the list feeding it has to be too.
+  const { sessions, select, create } = useSessions({ crossWorkspace: true, enabled: open })
   const ctx = useGlobalSearchContext({ sessions, scope })
   // Named, not just "this workspace": the point of the chip is to say WHICH
   // one, since the reason a hit is missing is that it lives in another.

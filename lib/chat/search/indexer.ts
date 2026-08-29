@@ -123,6 +123,22 @@ export function scheduleSearchIndexDrain(overrides: Partial<SearchIndexerDeps> =
   })
 }
 
+export interface DrainOptions {
+  /**
+   * Take a backfill step as part of this drain. Default true.
+   *
+   * `false` is for the READ path. `backfillChatSearchTextStep` reads 500 whole
+   * `messages` rows — `parts` included, so tool outputs and media reference
+   * sets — and both search surfaces call `drainSearchIndex()` in front of every
+   * debounced query. Until the backfill completes, that made each keystroke pay
+   * for a 500-row read it never needed: the query only requires the DIRTY
+   * sessions to be flushed, so that a message the user just sent is findable.
+   * Widening coverage into older history is the idle scheduler's job, and it
+   * still runs — {@link scheduleSearchIndexDrain} re-arms below.
+   */
+  backfill?: boolean
+}
+
 /**
  * Process the queue, then take **one** backfill step.
  *
@@ -132,7 +148,8 @@ export function scheduleSearchIndexDrain(overrides: Partial<SearchIndexerDeps> =
  * progress is incremental and always yields between batches.
  */
 export async function drainSearchIndex(
-  overrides: Partial<SearchIndexerDeps> = {}
+  overrides: Partial<SearchIndexerDeps> = {},
+  { backfill = true }: DrainOptions = {}
 ): Promise<DrainReport> {
   const deps = { ...defaultDeps(), ...overrides }
   const empty: DrainReport = {
@@ -187,14 +204,18 @@ export async function drainSearchIndex(
       if (foldRows.length > 0) corpus.fold(foldRows)
     }
 
-    const step = await deps.backfillStep()
-    report.backfilled = step.projected
-    report.backfillComplete = step.complete
+    if (backfill) {
+      const step = await deps.backfillStep()
+      report.backfilled = step.projected
+      report.backfillComplete = step.complete
+    }
   } finally {
     draining = false
   }
 
   // More history, or work queued while we ran — come back at the next idle tick.
+  // A skipped backfill leaves `backfillComplete` false, which is what re-arms
+  // the idle drain that will actually take the step.
   if (!report.backfillComplete || hasPendingIndexWork()) {
     scheduleSearchIndexDrain(overrides)
   }

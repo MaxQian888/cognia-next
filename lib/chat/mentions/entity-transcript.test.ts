@@ -1,4 +1,13 @@
-import { MAX_TRANSCRIPT_MESSAGES, formatTranscript } from "./entity-transcript"
+import {
+  MAX_TRANSCRIPT_MESSAGES,
+  formatTranscript,
+  getSessionTranscriptText,
+} from "./entity-transcript"
+
+const listRecentMessagesMock = jest.fn()
+jest.mock("@/lib/db/messages", () => ({
+  listRecentMessages: (...args: unknown[]) => listRecentMessagesMock(...args),
+}))
 
 type Parts = Parameters<typeof formatTranscript>[0][number]["parts"]
 
@@ -61,5 +70,45 @@ describe("formatTranscript", () => {
       parts: [] as unknown as Parts,
     }))
     expect(formatTranscript(messages)).toBeNull()
+  })
+})
+
+describe("getSessionTranscriptText", () => {
+  beforeEach(() => {
+    listRecentMessagesMock.mockReset()
+  })
+
+  // The whole point of the change: `listMessages` read every row of the session
+  // WITH its `parts` (a single tool result can be tens of KB) only to keep the
+  // last 40. One over-read tells the formatter a cut happened.
+  it("reads only the tail, plus one message to detect a cut", async () => {
+    listRecentMessagesMock.mockResolvedValue([{ role: "user", parts: text("hi") }])
+    await getSessionTranscriptText("s1")
+    expect(listRecentMessagesMock).toHaveBeenCalledWith("s1", MAX_TRANSCRIPT_MESSAGES + 1)
+  })
+
+  it("returns null for a session with no messages", async () => {
+    listRecentMessagesMock.mockResolvedValue([])
+    expect(await getSessionTranscriptText("s1")).toBeNull()
+  })
+
+  it("announces the cut without claiming to know its size", async () => {
+    listRecentMessagesMock.mockResolvedValue(
+      Array.from({ length: MAX_TRANSCRIPT_MESSAGES + 1 }, (_, i) => ({
+        role: "user",
+        parts: text(`m${i}`),
+      }))
+    )
+    const out = await getSessionTranscriptText("s1")
+    // Not "[Earlier 1 message(s) …]" — the over-read exposes one dropped
+    // message, but the session may hold thousands more that were never read.
+    expect(out).toContain("[Earlier messages of this conversation are not included")
+    expect(out).not.toContain("Earlier 1 message")
+    expect(out).toContain(`most recent ${MAX_TRANSCRIPT_MESSAGES}`)
+  })
+
+  it("says nothing about a cut when the session fits", async () => {
+    listRecentMessagesMock.mockResolvedValue([{ role: "user", parts: text("only") }])
+    expect(await getSessionTranscriptText("s1")).toBe("user: only")
   })
 })

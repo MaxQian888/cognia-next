@@ -231,6 +231,35 @@ describe("useSessions", () => {
     expect(listSessionsMock).not.toHaveBeenCalled()
   })
 
+  it("does not read the table at all when disabled", () => {
+    // The command palette is mounted unconditionally by the desktop shell. Its
+    // cross-workspace live query re-read every FULL session row on each
+    // `sessions` write — once per persisted streaming chunk — with the dialog
+    // closed.
+    liveQueryMock.mockImplementation((fn) => fn())
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+
+    renderHook(() => useSessions({ crossWorkspace: true, enabled: false }))
+
+    expect(listAllSessionsMock).not.toHaveBeenCalled()
+    expect(listSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("reads again once re-enabled", () => {
+    liveQueryMock.mockImplementation((fn) => fn())
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useSessions({ crossWorkspace: true, enabled }),
+      { initialProps: { enabled: false } }
+    )
+    expect(listAllSessionsMock).not.toHaveBeenCalled()
+    rerender({ enabled: true })
+    expect(listAllSessionsMock).toHaveBeenCalled()
+  })
+
   it("still treats a foreign-workspace active session as absent in crossWorkspace mode", async () => {
     // "Belongs to another workspace" is what re-points the chat pane after a
     // workspace switch; a cross-workspace list would otherwise resolve the row

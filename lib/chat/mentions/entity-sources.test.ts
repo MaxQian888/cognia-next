@@ -3,6 +3,7 @@ import zhMessages from "@/i18n/messages/zh-CN/chat.json"
 
 import {
   ENTITY_MENTION_RESULT_LIMIT,
+  searchEntityMentionCandidates,
   MAX_ENTITY_SNAPSHOT_CHARS,
   __resetEntityMentionSourcesForTests,
   clampEntitySnapshot,
@@ -17,7 +18,14 @@ import {
   type EntityMentionCandidate,
   type EntityMentionSource,
 } from "./entity-sources"
+import { invalidateEntityMentionCaches } from "./entity-cache"
 import type { EntitySelectionKind } from "@/types/artifact/artifact"
+
+// The `@chat:` source reaches these through `await import(...)`, so the mocks
+// keep Dexie out of this suite while still exercising the real `load()` body —
+// which is where the exposure filter and the self-exclusion live.
+const listSessionsMock = jest.fn()
+jest.mock("@/lib/db/sessions", () => ({ listSessions: () => listSessionsMock() }))
 
 const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   memory: "memory:",
@@ -206,5 +214,136 @@ describe("i18n catalogue coverage", () => {
       }
     ).composer.popover.entityKinds
     expect(Object.keys(catalogue).sort()).toEqual([...kinds].sort())
+  })
+})
+
+describe("searchEntityMentionCandidates", () => {
+  beforeEach(() => {
+    invalidateEntityMentionCaches()
+  })
+
+  function listSource(rows: EntityMentionCandidate[]): EntityMentionSource & { calls: number } {
+    const source = {
+      calls: 0,
+      entityKind: "memory" as EntitySelectionKind,
+      prefix: "memory:",
+      async load() {
+        source.calls++
+        return rows
+      },
+      async snapshot() {
+        return null
+      },
+    }
+    return source
+  }
+
+  it("filters the cached list instead of re-reading per keystroke", async () => {
+    const source = listSource([
+      candidate({ id: "1", title: "alpha", searchText: "alpha" }),
+      candidate({ id: "2", title: "beta", searchText: "beta" }),
+    ])
+    expect((await searchEntityMentionCandidates(source, "al", {})).map((c) => c.id)).toEqual(["1"])
+    expect((await searchEntityMentionCandidates(source, "alp", {})).map((c) => c.id)).toEqual(["1"])
+    expect((await searchEntityMentionCandidates(source, "be", {})).map((c) => c.id)).toEqual(["2"])
+    expect(source.calls).toBe(1)
+  })
+
+  it("returns everything for an empty query", async () => {
+    const source = listSource([candidate({ id: "1" }), candidate({ id: "2" })])
+    expect(await searchEntityMentionCandidates(source, "", {})).toHaveLength(2)
+  })
+
+  it("matches case-insensitively", async () => {
+    const source = listSource([candidate({ id: "1", searchText: "readme notes" })])
+    expect(await searchEntityMentionCandidates(source, "README", {})).toHaveLength(1)
+  })
+
+  it("caps the offered rows at the shared limit", async () => {
+    const rows = Array.from({ length: ENTITY_MENTION_RESULT_LIMIT + 5 }, (_, i) =>
+      candidate({ id: String(i), searchText: "x" })
+    )
+    expect(await searchEntityMentionCandidates(listSource(rows), "x", {})).toHaveLength(
+      ENTITY_MENTION_RESULT_LIMIT
+    )
+  })
+
+  it("lets a query-driven source own its own query", async () => {
+    const search = jest.fn(async () => [candidate({ id: "engine" })])
+    const source: EntityMentionSource = {
+      entityKind: "memory",
+      prefix: "memory:",
+      search,
+      snapshot: async () => null,
+    }
+    expect((await searchEntityMentionCandidates(source, "q", {})).map((c) => c.id)).toEqual([
+      "engine",
+    ])
+    expect(search).toHaveBeenCalledWith("q", {})
+  })
+})
+
+describe("source registration contract", () => {
+  afterEach(() => {
+    __resetEntityMentionSourcesForTests()
+  })
+
+  it("refuses a source that can neither list nor search", () => {
+    expect(() =>
+      registerEntityMentionSource({
+        entityKind: "custom" as EntitySelectionKind,
+        prefix: "custom:",
+        snapshot: async () => null,
+      })
+    ).toThrow(/load\(\) or search\(\)/)
+  })
+})
+
+describe("@chat: candidates", () => {
+  beforeEach(() => {
+    invalidateEntityMentionCaches()
+    listSessionsMock.mockReset()
+  })
+
+  const session = (over: Record<string, unknown>) => ({
+    id: "s",
+    title: "T",
+    updatedAt: 0,
+    ...over,
+  })
+
+  async function chatCandidates(ctx: Parameters<typeof searchEntityMentionCandidates>[2]) {
+    const source = getEntityMentionSourceByPrefix("chat:")!
+    return searchEntityMentionCandidates(source, "", ctx)
+  }
+
+  // A subagent's inner transcript, a workbench aside and a workflow-editor
+  // session are reachable from the turn that owns them, never from a list.
+  // Offering them here made the panel disagree with every other surface.
+  it.each([
+    ["subagent", { kind: "subagent" }],
+    ["resource-workbench aside", { kind: "resource-workbench" }],
+    ["workflow-editor", { kind: "workflow-editor" }],
+    ["embedded", { visibility: "embedded" }],
+  ])("never offers a %s session", async (_label, over) => {
+    listSessionsMock.mockResolvedValue([
+      session({ id: "hidden", ...over }),
+      session({ id: "plain" }),
+    ])
+    expect((await chatCandidates({})).map((c) => c.id)).toEqual(["plain"])
+  })
+
+  it("never offers the conversation being composed in", async () => {
+    listSessionsMock.mockResolvedValue([session({ id: "here" }), session({ id: "other" })])
+    expect((await chatCandidates({ sessionId: "here" })).map((c) => c.id)).toEqual(["other"])
+  })
+
+  it("keeps a session with no workspace stamp when a workspace is active", async () => {
+    listSessionsMock.mockResolvedValue([
+      session({ id: "legacy" }),
+      session({ id: "mine", projectId: "p" }),
+      session({ id: "theirs", projectId: "q" }),
+    ])
+    expect((await chatCandidates({ projectId: "p" })).map((c) => c.id)).toEqual(["legacy", "mine"])
   })
 })

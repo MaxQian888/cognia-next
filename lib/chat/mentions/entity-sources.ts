@@ -31,6 +31,11 @@
 import type { EntitySelectionKind, EntitySelectionRef } from "@/types/artifact/artifact"
 import { truncationMarker } from "@/lib/docs-providers/limits"
 import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
+// Statically imported even though this module is on the pure trigger
+// detector's path: `entity-cache` pulls only `lib/global-search/cache.ts`,
+// which imports nothing at all. A dynamic import here would buy nothing and
+// would make the test reset below unable to drop the caches synchronously.
+import { invalidateEntityMentionCaches, loadEntityCandidates } from "./entity-cache"
 
 /**
  * Characters kept from one referenced record.
@@ -71,8 +76,26 @@ export interface EntityMentionSource {
   entityKind: EntitySelectionKind
   /** Namespace typed after the `@`, including the colon (`"memory:"`). */
   prefix: string
-  /** Candidates matching `query` (already trimmed; may be empty = "recent"). */
-  search(query: string, ctx: EntityMentionContext): Promise<EntityMentionCandidate[]>
+  /**
+   * Every candidate this source can offer in this context, with `searchText`
+   * already built. Cached per `(kind, projectId, sessionId)` by
+   * `lib/chat/mentions/entity-cache.ts`, so the store is read once per picking
+   * session instead of once per keystroke — and the lowercased haystacks are
+   * built once with it.
+   *
+   * This is the shape for a source whose corpus can be listed. A source whose
+   * corpus cannot (one backed by a search engine rather than a table)
+   * implements {@link search} instead. Exactly one of the two is required.
+   */
+  load?(ctx: EntityMentionContext): Promise<EntityMentionCandidate[]>
+  /**
+   * Candidates matching `query` (already trimmed; may be empty = "recent").
+   *
+   * Defaults to a substring filter over the cached {@link load} result. Only a
+   * source that must push the query down to its own engine overrides it — and
+   * then it owns its own cost control, because nothing caches per query.
+   */
+  search?(query: string, ctx: EntityMentionContext): Promise<EntityMentionCandidate[]>
   /**
    * The record's body, as the model should read it. Returns null when the
    * record vanished between the pick and the read (deleted in another window),
@@ -86,6 +109,11 @@ const sources = new Map<EntitySelectionKind, EntityMentionSource>()
 export function registerEntityMentionSource(source: EntityMentionSource): void {
   if (sources.has(source.entityKind)) {
     throw new Error(`entity mention source "${source.entityKind}" already registered`)
+  }
+  if (!source.load && !source.search) {
+    throw new Error(
+      `entity mention source "${source.entityKind}" must implement load() or search()`
+    )
   }
   if (!source.prefix.endsWith(":")) {
     throw new Error(
@@ -204,6 +232,24 @@ function take(candidates: EntityMentionCandidate[], query: string): EntityMentio
   return candidates.filter((c) => matches(c, query)).slice(0, ENTITY_MENTION_RESULT_LIMIT)
 }
 
+/**
+ * Run one source's search — the single entry the panel calls.
+ *
+ * A `search`-implementing source owns its own query; a `load`-implementing one
+ * gets the cached list plus the shared substring filter. Splitting it here
+ * rather than inside each source is what keeps "the store is read once per
+ * picking session" a property of the registry instead of a discipline every
+ * new source has to remember.
+ */
+export async function searchEntityMentionCandidates(
+  source: EntityMentionSource,
+  query: string,
+  ctx: EntityMentionContext
+): Promise<EntityMentionCandidate[]> {
+  if (source.search) return source.search(query, ctx)
+  return take(await loadEntityCandidates(source, ctx), query)
+}
+
 // ---------------------------------------------------------------------------
 // Built-in sources
 // ---------------------------------------------------------------------------
@@ -212,7 +258,7 @@ function registerBuiltinEntityMentionSources(): void {
   registerEntityMentionSource({
     entityKind: "memory",
     prefix: "memory:",
-    async search(query, ctx) {
+    async load(ctx) {
       const { listMemories } = await import("@/lib/db/memories")
       // `status: "active"` and nothing else: an invalidated or superseded
       // memory is exactly the material a user must not accidentally re-assert.
@@ -220,19 +266,16 @@ function registerBuiltinEntityMentionSources(): void {
         status: "active",
         ...(ctx.projectId ? { projectId: ctx.projectId } : {}),
       })
-      return take(
-        rows.map((m) => ({
-          entityKind: "memory" as const,
-          id: m.id,
-          // A memory has no title — its text IS the statement, so the first
-          // line stands in and the row shows the scope beside it.
-          title: m.text.split("\n")[0]?.slice(0, 120) || m.id,
-          subtitle: `${m.type} · ${m.scope}`,
-          href: "/memory",
-          searchText: haystack(m.text, m.type, m.scope, m.tags.join(" ")),
-        })),
-        query
-      )
+      return rows.map((m) => ({
+        entityKind: "memory" as const,
+        id: m.id,
+        // A memory has no title — its text IS the statement, so the first
+        // line stands in and the row shows the scope beside it.
+        title: m.text.split("\n")[0]?.slice(0, 120) || m.id,
+        subtitle: `${m.type} · ${m.scope}`,
+        href: "/memory",
+        searchText: haystack(m.text, m.type, m.scope, m.tags.join(" ")),
+      }))
     },
     async snapshot(candidate) {
       const { getMemory } = await import("@/lib/db/memories")
@@ -244,22 +287,19 @@ function registerBuiltinEntityMentionSources(): void {
   registerEntityMentionSource({
     entityKind: "issue",
     prefix: "issue:",
-    async search(query, ctx) {
+    async load(ctx) {
       const { listIssues } = await import("@/lib/db/issues")
       const rows = await listIssues(ctx.projectId ? { projectId: ctx.projectId } : {})
-      return take(
-        rows.map((issue) => ({
-          entityKind: "issue" as const,
-          id: issue.id,
-          title: issue.title,
-          subtitle: `${issue.identifier} · ${issue.status}`,
-          href: `/issues?id=${encodeURIComponent(issue.id)}`,
-          // The identifier is what people actually type (`COG-14`), so it has
-          // to be in the haystack even though it is not the title.
-          searchText: haystack(issue.identifier, issue.title, issue.description, issue.status),
-        })),
-        query
-      )
+      return rows.map((issue) => ({
+        entityKind: "issue" as const,
+        id: issue.id,
+        title: issue.title,
+        subtitle: `${issue.identifier} · ${issue.status}`,
+        href: `/issues?id=${encodeURIComponent(issue.id)}`,
+        // The identifier is what people actually type (`COG-14`), so it has
+        // to be in the haystack even though it is not the title.
+        searchText: haystack(issue.identifier, issue.title, issue.description, issue.status),
+      }))
     },
     async snapshot(candidate) {
       const { getIssue } = await import("@/lib/db/issues")
@@ -277,19 +317,16 @@ function registerBuiltinEntityMentionSources(): void {
   registerEntityMentionSource({
     entityKind: "plan",
     prefix: "plan:",
-    async search(query, ctx) {
+    async load(ctx) {
       const { listAllPlans } = await import("@/lib/db/plans")
       const rows = await listAllPlans(200, ctx.projectId ?? undefined)
-      return take(
-        rows.map((plan) => ({
-          entityKind: "plan" as const,
-          id: plan.id,
-          title: plan.title,
-          subtitle: `${plan.status} · ${plan.completedSteps}/${plan.totalSteps}`,
-          searchText: haystack(plan.title, plan.description, plan.status),
-        })),
-        query
-      )
+      return rows.map((plan) => ({
+        entityKind: "plan" as const,
+        id: plan.id,
+        title: plan.title,
+        subtitle: `${plan.status} · ${plan.completedSteps}/${plan.totalSteps}`,
+        searchText: haystack(plan.title, plan.description, plan.status),
+      }))
     },
     async snapshot(candidate) {
       const { getPlan } = await import("@/lib/db/plans")
@@ -315,11 +352,17 @@ function registerBuiltinEntityMentionSources(): void {
   registerEntityMentionSource({
     entityKind: "session",
     prefix: "chat:",
-    async search(query, ctx) {
+    async load(ctx) {
       const { listSessions } = await import("@/lib/db/sessions")
+      const { filterExposedSessions } = await import("@/lib/chat/session-exposure")
       const rows = await listSessions()
-      return take(
-        rows
+      return (
+        // A subagent's inner transcript, a resource-workbench aside and a
+        // workflow-editor session are all `embedded`: they are reachable from
+        // the turn that owns them, never from a list. Offering them here made
+        // the panel's idea of "a conversation" disagree with every other
+        // surface in the app — this is the same channel ⌘K asks about.
+        filterExposedSessions(rows, "global-search")
           // Never offer the conversation you are composing in. Its transcript
           // is already the context — staging a snapshot of it would duplicate
           // every message the model can see anyway.
@@ -332,8 +375,7 @@ function registerBuiltinEntityMentionSources(): void {
             subtitle: new Date(s.updatedAt).toISOString().slice(0, 10),
             href: `/?session=${encodeURIComponent(s.id)}`,
             searchText: haystack(s.title, s.id),
-          })),
-        query
+          }))
       )
     },
     async snapshot(candidate) {
@@ -345,25 +387,22 @@ function registerBuiltinEntityMentionSources(): void {
   registerEntityMentionSource({
     entityKind: "artifact",
     prefix: "artifact:",
-    async search(query, ctx) {
+    async load(ctx) {
       // Artifacts live in the persisted Zustand store, not in Dexie — reading
       // `useArtifactStore.getState()` is the same access the plugin Artifact
       // API uses, so there is no second notion of "every artifact".
       const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
       const rows = Object.values(useArtifactStore.getState().artifacts)
-      return take(
-        rows
-          .filter((a) => !ctx.projectId || !a.projectId || a.projectId === ctx.projectId)
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-          .map((a) => ({
-            entityKind: "artifact" as const,
-            id: a.id,
-            title: a.title,
-            subtitle: a.language ? `${a.type} · ${a.language}` : a.type,
-            searchText: haystack(a.title, a.type, a.language),
-          })),
-        query
-      )
+      return rows
+        .filter((a) => !ctx.projectId || !a.projectId || a.projectId === ctx.projectId)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .map((a) => ({
+          entityKind: "artifact" as const,
+          id: a.id,
+          title: a.title,
+          subtitle: a.language ? `${a.type} · ${a.language}` : a.type,
+          searchText: haystack(a.title, a.type, a.language),
+        }))
     },
     async snapshot(candidate) {
       const { useArtifactStore } = await import("@/stores/artifact/artifact-store")
@@ -376,6 +415,9 @@ function registerBuiltinEntityMentionSources(): void {
 /** Test-only: restore the registry to exactly the built-in set. */
 export function __resetEntityMentionSourcesForTests(): void {
   sources.clear()
+  // The caches are keyed by entity kind, so a re-registered source would
+  // otherwise inherit the previous registration's candidate list.
+  invalidateEntityMentionCaches()
   registerBuiltinEntityMentionSources()
 }
 

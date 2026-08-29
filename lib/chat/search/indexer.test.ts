@@ -241,6 +241,32 @@ describe("drainSearchIndex", () => {
     expect(report.backfilled).toBe(500)
   })
 
+  it("skips the backfill when the caller asks it to", async () => {
+    // The read path. `backfillChatSearchTextStep` reads 500 whole message rows
+    // with their `parts`; a debounced keystroke only needs the dirty sessions
+    // flushed, so it must not pay for one. `schedule` is inert here so the
+    // re-armed idle drain does not run inside the assertion.
+    const backfillStep = jest.fn(async () => ({ projected: 500, complete: true }))
+    const reproject = jest.fn(async () => ({ written: [], removed: [] }))
+    markSessionDirty("s1")
+    const report = await drainSearchIndex(deps({ backfillStep, reproject, schedule: () => {} }), {
+      backfill: false,
+    })
+    expect(backfillStep).not.toHaveBeenCalled()
+    expect(reproject).toHaveBeenCalledWith("s1")
+    expect(report.backfilled).toBe(0)
+    expect(report.backfillComplete).toBe(false)
+  })
+
+  it("hands the skipped backfill to the idle drain instead of dropping it", async () => {
+    // Skipping must not strand coverage. The skipped step leaves
+    // `backfillComplete` false, which is exactly what re-arms the drain — so
+    // with a synchronous scheduler the step lands on the very next tick.
+    const backfillStep = jest.fn(async () => ({ projected: 500, complete: true }))
+    await drainSearchIndex(deps({ backfillStep }), { backfill: false })
+    expect(backfillStep).toHaveBeenCalledTimes(1)
+  })
+
   it("schedules another drain while history remains", async () => {
     // One step per idle callback: finishing the whole walk inside one callback is
     // the long task idle callbacks exist to avoid.

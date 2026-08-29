@@ -162,7 +162,12 @@ export function useGlobalSearch({
 
     setLoading(true)
     setError(null)
-    void drainSearchIndex()
+    // `{ backfill: false }` — the query only needs the DIRTY sessions flushed
+    // (so a just-sent message is findable). A backfill step reads 500 whole
+    // message rows with their `parts`, and paying that per keystroke is what
+    // made typing here cost more than the search it serves. The idle scheduler
+    // still advances coverage.
+    void drainSearchIndex(undefined, { backfill: false })
       .catch(() => undefined)
       .then(() => runGlobalSearch(parsed, ctx, { signal: controller.signal, limit }))
       .then((next) => {

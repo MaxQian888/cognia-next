@@ -87,36 +87,64 @@ export function stripHoistedMeta(
   return Object.keys(copy).length > 0 ? copy : undefined
 }
 
+/**
+ * One stored row as the in-memory `UIMessage` the app works with.
+ *
+ * Hoist top-level senderId/senderKind into metadata so the UI layer can read
+ * them off the in-memory UIMessage. (The store itself uses ai.UIMessage which
+ * has no senderId field.) We also surface `sessionId` so per-message components
+ * like the trigger badge can read it without threading new props, and
+ * `createdAt` so the timeline minimap and the message action bar can show a
+ * real wall-clock time instead of falling back to "now".
+ *
+ * Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
+ * persist strips it back out — the column stays the source of truth.
+ */
+function rowToUIMessage(r: StoredMessage): UIMessage {
+  const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
+  if (r.senderId !== undefined) metadata.senderId = r.senderId
+  if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
+  if (r.turnKey !== undefined) metadata.turnKey = r.turnKey
+  metadata.sessionId = r.sessionId
+  metadata.createdAt = r.createdAt
+  return {
+    id: r.id,
+    role: r.role,
+    parts: r.parts,
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+  } as UIMessage
+}
+
 export async function listMessages(sessionId: string): Promise<UIMessage[]> {
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")
     .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
     .toArray()
-  return rows
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .map((r) => {
-      // Hoist top-level senderId/senderKind into metadata so the UI layer can
-      // read them off the in-memory UIMessage. (The store itself uses
-      // ai.UIMessage which has no senderId field.)
-      // We also surface `sessionId` so per-message components like the
-      // trigger badge can read it without threading new props, and `createdAt`
-      // so the timeline minimap and the message action bar can show a real
-      // wall-clock time instead of falling back to "now".
-      // Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
-      // persist strips it back out — the column stays the source of truth.
-      const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
-      if (r.senderId !== undefined) metadata.senderId = r.senderId
-      if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
-      if (r.turnKey !== undefined) metadata.turnKey = r.turnKey
-      metadata.sessionId = r.sessionId
-      metadata.createdAt = r.createdAt
-      return {
-        id: r.id,
-        role: r.role,
-        parts: r.parts,
-        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-      }
-    })
+  return rows.sort((a, b) => a.createdAt - b.createdAt).map(rowToUIMessage)
+}
+
+/**
+ * The newest `limit` messages of a session, still in ascending order.
+ *
+ * For callers that only want the tail. `listMessages` reads every row of the
+ * conversation *with its `parts`* — a single tool result can be tens of KB, so
+ * on a long session that is megabytes read to keep a few dozen messages. The
+ * `@chat:` transcript snapshot was doing exactly that: a full-session read to
+ * keep the last 40.
+ *
+ * `.reverse().limit(n)` walks the `[sessionId+createdAt]` index backwards and
+ * stops, then the slice is re-sorted ascending so callers see the same order
+ * `listMessages` gives them.
+ */
+export async function listRecentMessages(sessionId: string, limit: number): Promise<UIMessage[]> {
+  if (limit <= 0) return []
+  const rows = await getDb()
+    .messages.where("[sessionId+createdAt]")
+    .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+    .reverse()
+    .limit(limit)
+    .toArray()
+  return rows.sort((a, b) => a.createdAt - b.createdAt).map(rowToUIMessage)
 }
 
 /**

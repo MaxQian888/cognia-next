@@ -8,6 +8,7 @@ import {
   commitMessageDelta,
   deleteStoredMessage,
   listMessages,
+  listRecentMessages,
   persistMessages,
   persistStreamingMessages,
   replaceSessionTranscript,
@@ -485,5 +486,65 @@ describe("thread handoff write guard", () => {
       persistMessages("handoff-locked", [msg("blocked", "user", "must not persist")])
     ).rejects.toMatchObject({ code: "session_handoff_locked" })
     expect(await getDb().messages.where("sessionId").equals("handoff-locked").count()).toBe(0)
+  })
+})
+
+describe("listRecentMessages", () => {
+  // `@chat:` used to call `listMessages` and throw away all but the last 40 —
+  // a read of every row of the session WITH its `parts`, where one tool result
+  // can be tens of KB.
+  // Message ids are the primary key, so they have to be unique ACROSS
+  // sessions — reusing `m0` in two sessions moves the row rather than adding
+  // one, which is how the leak test below silently emptied its own fixture.
+  const id = (sessionId: string, i: number) => `${sessionId}-m${i}`
+
+  async function seed(sessionId: string, count: number): Promise<void> {
+    await putSession(sessionId)
+    await replaceSessionTranscript(
+      sessionId,
+      Array.from({ length: count }, (_, i) =>
+        msg(id(sessionId, i), i % 2 === 0 ? "user" : "assistant", `t${i}`)
+      )
+    )
+  }
+
+  it("returns the newest messages, still in ascending order", async () => {
+    await seed("s-tail", 10)
+    const tail = await listRecentMessages("s-tail", 3)
+    expect(tail.map((m) => m.id)).toEqual([id("s-tail", 7), id("s-tail", 8), id("s-tail", 9)])
+  })
+
+  it("returns everything when the session is shorter than the limit", async () => {
+    await seed("s-short", 2)
+    expect((await listRecentMessages("s-short", 40)).map((m) => m.id)).toEqual([
+      id("s-short", 0),
+      id("s-short", 1),
+    ])
+  })
+
+  it("returns nothing for a non-positive limit rather than reading the table", async () => {
+    await seed("s-zero", 3)
+    expect(await listRecentMessages("s-zero", 0)).toEqual([])
+  })
+
+  it("is empty for a session with no messages", async () => {
+    await putSession("s-empty")
+    expect(await listRecentMessages("s-empty", 5)).toEqual([])
+  })
+
+  it("hoists the same metadata listMessages does", async () => {
+    await seed("s-meta", 3)
+    const [first] = await listRecentMessages("s-meta", 1)
+    const full = await listMessages("s-meta")
+    expect(first).toEqual(full[full.length - 1])
+    expect((first.metadata as { sessionId?: string }).sessionId).toBe("s-meta")
+  })
+
+  it("does not leak another session's messages", async () => {
+    await seed("s-a", 3)
+    await seed("s-b", 3)
+    const tail = await listRecentMessages("s-a", 10)
+    expect(tail).toHaveLength(3)
+    expect(tail.every((m) => (m.metadata as { sessionId?: string }).sessionId === "s-a")).toBe(true)
   })
 })

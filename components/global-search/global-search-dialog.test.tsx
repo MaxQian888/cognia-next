@@ -40,8 +40,12 @@ jest.mock("@cognia/logging", () => ({
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
+const useSessionsMock = jest.fn()
 jest.mock("@/hooks/chat", () => ({
-  useSessions: () => ({ sessions: [], select: jest.fn(), create: jest.fn() }),
+  useSessions: (opts?: unknown) => {
+    useSessionsMock(opts)
+    return { sessions: [], select: jest.fn(), create: jest.fn() }
+  },
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platformRef.current }))
 jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
@@ -366,5 +370,28 @@ describe("GlobalSearchDialog", () => {
     )
     fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "Escape" })
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+})
+
+describe("session list gating", () => {
+  // The dialog is mounted unconditionally by the desktop shell, and its
+  // cross-workspace live query reads every FULL session row (`branchSeed
+  // .content` included) on every `sessions` write — which during a streaming
+  // turn is once per persisted chunk. The engine was already gated on `open`;
+  // the list feeding it has to be too.
+  it("does not run the session live query while closed", () => {
+    useSessionsMock.mockClear()
+    renderDialog({ open: false })
+    expect(useSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ crossWorkspace: true, enabled: false })
+    )
+  })
+
+  it("runs it once open", () => {
+    useSessionsMock.mockClear()
+    renderDialog({ open: true })
+    expect(useSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ crossWorkspace: true, enabled: true })
+    )
   })
 })

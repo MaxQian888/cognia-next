@@ -141,3 +141,48 @@ describe("useEntityMentionSearch", () => {
     expect(search).not.toHaveBeenCalled()
   })
 })
+
+describe("stability of the returned state", () => {
+  // `composer-popover.tsx` builds its candidate list in a `useMemo` whose
+  // dependency array holds this object. A fresh identity per render rebuilt the
+  // whole list every frame and reset the keyboard highlight mid-typing — the
+  // sibling `use-remote-doc-search.ts` documents the same contract.
+  it("keeps the same object across a render with no input change", async () => {
+    const { result, rerender } = renderHook(() =>
+      useEntityMentionSearch({ namespace: "custom:", query: "a", context: {} })
+    )
+    await flushDebounce()
+    const first = result.current
+    rerender()
+    expect(result.current).toBe(first)
+  })
+
+  it("survives a re-render caused by a fresh context object", async () => {
+    const { result, rerender } = renderHook(
+      ({ context }: { context: { projectId?: string | null } }) =>
+        useEntityMentionSearch({ namespace: "custom:", query: "a", context }),
+      { initialProps: { context: { projectId: "p" } } }
+    )
+    await flushDebounce()
+    const first = result.current
+    // A new object with the same primitive fields — what the composer passes on
+    // every keystroke of the SURROUNDING message.
+    rerender({ context: { projectId: "p" } })
+    expect(result.current).toBe(first)
+  })
+
+  it("produces a new object when the results actually change", async () => {
+    const { result, rerender } = renderHook(
+      ({ query }: { query: string }) =>
+        useEntityMentionSearch({ namespace: "custom:", query, context: {} }),
+      { initialProps: { query: "a" } }
+    )
+    await flushDebounce()
+    const first = result.current
+    search.mockResolvedValueOnce([candidate("b")])
+    rerender({ query: "b" })
+    await flushDebounce()
+    await waitFor(() => expect(result.current.items).toHaveLength(1))
+    expect(result.current).not.toBe(first)
+  })
+})

@@ -14,10 +14,12 @@
  * filter in memory, so a fast typist would otherwise re-scan on every keystroke.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { loggers } from "@cognia/logging"
+import { invalidateEntityMentionCaches } from "@/lib/chat/mentions/entity-cache"
 import {
   getEntityMentionSourceByPrefix,
+  searchEntityMentionCandidates,
   type EntityMentionCandidate,
   type EntityMentionContext,
   type EntityMentionSource,
@@ -55,6 +57,9 @@ export function useEntityMentionSearch({
   const [items, setItems] = useState<readonly EntityMentionCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Which source the last effect run was for, so opening the panel (or
+  // switching namespace inside it) can drop the candidate caches exactly once.
+  const lastSourceRef = useRef<EntityMentionSource | null>(null)
 
   // `context` is a fresh object every render, so the effect keys off its two
   // primitive fields instead — otherwise the search would re-run on every
@@ -65,17 +70,25 @@ export function useEntityMentionSearch({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!source) {
+      lastSourceRef.current = null
       setItems([])
       setLoading(false)
       setError(null)
       return
     }
+    // The panel just opened on this source. Drop the cached candidate lists,
+    // for the reason ⌘K drops its own on dialog open: within one picking
+    // session a 15 s TTL is invisible, but a user who just created the record
+    // they are about to reference must not have to wait it out.
+    if (lastSourceRef.current !== source) {
+      lastSourceRef.current = source
+      invalidateEntityMentionCaches()
+    }
     let cancelled = false
     setLoading(true)
     setError(null)
     const handle = window.setTimeout(() => {
-      void source
-        .search(query.trim(), { projectId, sessionId })
+      void searchEntityMentionCandidates(source, query.trim(), { projectId, sessionId })
         .then((results) => {
           if (cancelled) return
           setItems(results)
@@ -99,5 +112,10 @@ export function useEntityMentionSearch({
   }, [source, query, projectId, sessionId])
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  return { source, items, loading, error }
+  // Memoized for the same reason `use-remote-doc-search.ts` memoizes its own
+  // return: `composer-popover.tsx` builds its candidate list in a `useMemo`
+  // whose dependency array holds this object, so a fresh identity every render
+  // rebuilt the whole list each frame and reset the keyboard highlight
+  // mid-typing.
+  return useMemo(() => ({ source, items, loading, error }), [source, items, loading, error])
 }
