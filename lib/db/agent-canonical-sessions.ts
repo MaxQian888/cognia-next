@@ -26,7 +26,10 @@
 
 import type {
   CanonicalSession,
+  CanonicalSessionLifecycleStatus,
+  CanonicalSessionRelationKind,
   SessionFidelity,
+  SessionLossEntry,
   SessionLossReport,
 } from "@cognia/agent-config-types/canonical-session"
 
@@ -37,12 +40,27 @@ export interface AgentCanonicalSessionRow {
   sourceRuntime: string
   /** Native runtime handle when one exists ("" when absent — indexable). */
   nativeSessionId: string
+  presetId?: string
+  cwd?: string
+  resumeMethod?: "protocol" | "cli" | "api" | "contextual"
+  bindingVerifiedAt?: string
+  sourceVersion?: string
+  sourceRevision?: string
+  relationKind?: CanonicalSessionRelationKind
+  parentCanonicalSessionId?: string
+  parentNativeSessionId?: string
+  rootCanonicalSessionId?: string
+  parentToolCallId?: string
+  taskId?: string
+  lifecycleStatus?: CanonicalSessionLifecycleStatus
+  background?: boolean
   title?: string
   turnCount: number
   importFidelity: SessionFidelity
   sequenceDigest: string
   /** Loss summary of the LAST conversion that produced this header. */
   lossCount: number
+  losses: SessionLossEntry[]
   rebuilt: boolean
   createdAt: number
   updatedAt: number
@@ -57,11 +75,40 @@ export function headerRowFromCanonical(
     canonicalSessionId: header.canonicalSessionId,
     sourceRuntime: header.sourceRuntime,
     nativeSessionId: header.runtimeBinding?.nativeSessionId ?? "",
+    ...(header.runtimeBinding?.presetId ? { presetId: header.runtimeBinding.presetId } : {}),
+    ...(header.runtimeBinding?.cwd ? { cwd: header.runtimeBinding.cwd } : {}),
+    ...(header.runtimeBinding?.resumeMethod
+      ? { resumeMethod: header.runtimeBinding.resumeMethod }
+      : {}),
+    ...(header.runtimeBinding?.verifiedAt
+      ? { bindingVerifiedAt: header.runtimeBinding.verifiedAt }
+      : {}),
+    ...(header.source?.version ? { sourceVersion: header.source.version } : {}),
+    ...(header.source?.revision ? { sourceRevision: header.source.revision } : {}),
+    ...(header.lineage?.kind ? { relationKind: header.lineage.kind } : {}),
+    ...(header.lineage?.parentCanonicalSessionId
+      ? { parentCanonicalSessionId: header.lineage.parentCanonicalSessionId }
+      : {}),
+    ...(header.lineage?.parentNativeSessionId
+      ? { parentNativeSessionId: header.lineage.parentNativeSessionId }
+      : {}),
+    ...(header.lineage?.rootCanonicalSessionId
+      ? { rootCanonicalSessionId: header.lineage.rootCanonicalSessionId }
+      : {}),
+    ...(header.lineage?.parentToolCallId
+      ? { parentToolCallId: header.lineage.parentToolCallId }
+      : {}),
+    ...(header.lineage?.taskId ? { taskId: header.lineage.taskId } : {}),
+    ...(header.lifecycle?.status ? { lifecycleStatus: header.lifecycle.status } : {}),
+    ...(header.lifecycle?.background !== undefined
+      ? { background: header.lifecycle.background }
+      : {}),
     ...(header.title ? { title: header.title } : {}),
     turnCount: header.turnCount,
     importFidelity: header.importFidelity,
     sequenceDigest: header.sequenceDigest,
     lossCount: loss.losses.length,
+    losses: loss.losses,
     rebuilt: loss.rebuilt === true,
     createdAt: Date.parse(header.createdAt) || Date.now(),
     updatedAt: Date.parse(header.updatedAt) || Date.now(),

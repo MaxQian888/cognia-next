@@ -19,7 +19,10 @@
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
-import type { SessionLossReport } from "@cognia/agent-config-types/canonical-session"
+import type {
+  CanonicalSessionHeader,
+  SessionLossReport,
+} from "@cognia/agent-config-types/canonical-session"
 
 export interface FidelityReportProps {
   loss: SessionLossReport
@@ -28,6 +31,10 @@ export interface FidelityReportProps {
    * an honest import-only source with no reverse direction at all.
    */
   reverseFidelity?: SessionLossReport["fidelity"]
+  sessionHeader?: Pick<
+    CanonicalSessionHeader,
+    "source" | "runtimeBinding" | "lineage" | "lifecycle"
+  >
 }
 
 const BADGE_VARIANT: Record<
@@ -41,7 +48,7 @@ const BADGE_VARIANT: Record<
   unsupported: "destructive",
 }
 
-export function FidelityReport({ loss, reverseFidelity }: FidelityReportProps) {
+export function FidelityReport({ loss, reverseFidelity, sessionHeader }: FidelityReportProps) {
   const t = useTranslations("sessionImport.fidelityReport")
 
   return (
@@ -59,6 +66,42 @@ export function FidelityReport({ loss, reverseFidelity }: FidelityReportProps) {
       </div>
       <p className="text-muted-foreground">{t(`fidelityHint.${loss.fidelity}`)}</p>
       {loss.rebuilt && <p className="text-muted-foreground">{t("rebuiltHint")}</p>}
+      {sessionHeader && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-muted-foreground">
+          {sessionHeader.source?.version && (
+            <>
+              <dt>{t("sourceVersion")}</dt>
+              <dd data-testid="source-version">{sessionHeader.source.version}</dd>
+            </>
+          )}
+          {sessionHeader.lineage?.kind && (
+            <>
+              <dt>{t("relationship")}</dt>
+              <dd data-testid="session-relationship">
+                {t(`relationships.${sessionHeader.lineage.kind}`)}
+                {sessionHeader.lineage.parentCanonicalSessionId
+                  ? ` · ${sessionHeader.lineage.parentCanonicalSessionId}`
+                  : ""}
+              </dd>
+            </>
+          )}
+          {sessionHeader.lifecycle?.status && (
+            <>
+              <dt>{t("lifecycle")}</dt>
+              <dd data-testid="session-lifecycle">
+                {t(`lifecycleStatuses.${sessionHeader.lifecycle.status}`)}
+                {sessionHeader.lifecycle.background ? ` · ${t("background")}` : ""}
+              </dd>
+            </>
+          )}
+          <dt>{t("recoverability")}</dt>
+          <dd data-testid="session-recoverability">
+            {sessionHeader.runtimeBinding?.nativeSessionId && sessionHeader.runtimeBinding.presetId
+              ? t("nativeResumeCandidate", { preset: sessionHeader.runtimeBinding.presetId })
+              : t("readOnlyMirror")}
+          </dd>
+        </dl>
+      )}
       {reverseFidelity && (
         <p className="text-muted-foreground" data-testid="reverse-dormant">
           {t("reverseDormant", { fidelity: t(`fidelity.${reverseFidelity}`) })}

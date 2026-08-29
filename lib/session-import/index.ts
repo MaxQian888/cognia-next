@@ -6,8 +6,19 @@ import type { ImportedConversation } from "@/lib/data/importers/types"
 import { resolveHome } from "@/lib/memory/external/home"
 import { resolveVendorRoots } from "@/lib/agent-roots"
 import { realSessionFs } from "./fs"
+import { buildImportedSessionGraph } from "./graph"
 import { getSessionSource, getSessionSources } from "./registry"
-import type { ImportOptions, SessionRef, SessionScanInput, SessionSummary } from "./types"
+import type {
+  ImportedSessionGraphNode,
+  ImportOptions,
+  SessionRef,
+  SessionScanInput,
+  SessionSummary,
+} from "./types"
+import type {
+  CanonicalSessionLifecycleStatus,
+  CanonicalSession,
+} from "@cognia/agent-config-types/canonical-session"
 
 /**
  * Default number of sessions parsed+persisted per transaction. Bounds peak
@@ -15,6 +26,32 @@ import type { ImportOptions, SessionRef, SessionScanInput, SessionSummary } from
  * buffering the whole selection and writing it in one giant `rw` transaction.
  */
 export const DEFAULT_IMPORT_CHUNK = 25
+
+function attachedStatusFromLifecycle(
+  status: CanonicalSessionLifecycleStatus | undefined
+): "staged" | "running" | "completed" | "interrupted" {
+  if (status === "running") return "running"
+  if (status === "completed") return "completed"
+  if (status === "failed" || status === "cancelled" || status === "interrupted") {
+    return "interrupted"
+  }
+  return "staged"
+}
+
+function canonicalStateFromSession(
+  session: CanonicalSession
+): NonNullable<ImportedConversation["session"]["importCanonicalState"]> {
+  return {
+    ...(session.permissions ? { permissions: session.permissions } : {}),
+    ...(session.checkpoints ? { checkpoints: session.checkpoints } : {}),
+    ...(session.tasks ? { tasks: session.tasks } : {}),
+    ...(session.plans ? { plans: session.plans } : {}),
+    ...(session.goals ? { goals: session.goals } : {}),
+    ...(session.history ? { history: session.history } : {}),
+    ...(session.interAgentMessages ? { interAgentMessages: session.interAgentMessages } : {}),
+    ...(session.recordedEvents ? { recordedEvents: session.recordedEvents } : {}),
+  }
+}
 
 export {
   registerSessionSource,
@@ -29,6 +66,7 @@ export {
   __resetDynamicSessionSourcesForTesting,
 } from "./registry"
 export { realSessionFs, walkFiles } from "./fs"
+export { buildExternalSessionSupportMatrix } from "./support-matrix"
 export type {
   AgentSessionSourceAdapter,
   PickedSessionFile,
@@ -40,6 +78,9 @@ export type {
   ImportOptions,
   ImportPhase,
   ImportProgress,
+  ImportedSessionGraph,
+  ImportedSessionGraphNode,
+  SessionImportDetail,
 } from "./types"
 
 /**
@@ -110,38 +151,149 @@ async function parseRefConversations(
   ref: SessionRef,
   input: SessionScanInput,
   projectId?: string
-): Promise<{ conversations: ImportedConversation[]; parsed: boolean }> {
+): Promise<{
+  conversations: ImportedConversation[]
+  canonicalNodes: ImportedSessionGraphNode[]
+  parsed: boolean
+}> {
   const source = getSessionSource(ref.sourceId)
-  if (!source) return { conversations: [], parsed: false }
+  if (!source) return { conversations: [], canonicalNodes: [], parsed: false }
   try {
-    const conv = await source.parseSession(ref, input)
-    const nested = conv.nested ?? []
+    const richGraph = source.parseGraph ? await source.parseGraph(ref, input) : undefined
+    const conv = richGraph ? undefined : await source.parseSession(ref, input)
+    const legacyGraph = conv
+      ? buildImportedSessionGraph(conv, {
+          sourceRuntime: source.id,
+          sourceVersion: source.verifiedVersion,
+          verifiedAt: source.verifiedAt,
+          // Read only when there is no codec — and a source with no codec has
+          // no declared fidelity either, so this is always "summary-only".
+          // The one intended downgrade for a legacy `parseSession` adapter is
+          // applied once, per node, on `node.loss.fidelity` just below;
+          // re-deriving it here decided nothing and risked downgrading twice.
+          importFidelity: source.codec?.importFidelity ?? "summary-only",
+          codec: source.codec,
+        })
+      : undefined
+    if (legacyGraph) {
+      for (const node of legacyGraph.nodes) {
+        const fidelity =
+          node.loss.fidelity === "native-exact"
+            ? "structured"
+            : node.loss.fidelity === "structured"
+              ? "contextual"
+              : node.loss.fidelity === "contextual"
+                ? "summary-only"
+                : node.loss.fidelity
+        node.loss.fidelity = fidelity
+        node.session.header.importFidelity = fidelity
+        node.loss.losses.push({
+          path: "graph.relationships",
+          kind: "summarized",
+          detail: "Legacy parseSession adapter does not expose a source session graph.",
+        })
+      }
+    }
+    const graph = richGraph ?? legacyGraph
+    const conversations = graph?.nodes.map((node) => node.conversation) ?? []
+    const canonicalNodes = graph?.nodes ?? []
+    const canonicalSessionIds = new Map(
+      canonicalNodes.map((node) => [
+        node.session.header.canonicalSessionId,
+        node.conversation.session.id,
+      ])
+    )
+    const graphRootSessionId = graph
+      ? canonicalSessionIds.get(graph.rootCanonicalSessionId)
+      : undefined
     // Stamp the originating adapter id. The session id encodes it, but a plugin
     // source id may itself contain a colon, so `import:<source>:<originalId>`
     // cannot be parsed back apart — and the UI needs to name the agent a
     // conversation came from.
-    conv.session.importSource = source.id
-    conv.session.importSourceLabel = source.displayName
-    for (const n of nested) {
-      n.session.importSource = source.id
-      n.session.importSourceLabel = source.displayName
-    }
-    if (projectId) {
-      conv.session.projectId = projectId
-      for (const m of conv.messages) m.projectId = projectId
-      for (const n of nested) {
-        n.session.projectId = projectId
-        for (const m of n.messages) m.projectId = projectId
+    for (const conversation of conversations) {
+      conversation.session.importSource = source.id
+      conversation.session.importSourceLabel = source.displayName
+      conversation.session.importOwnership ??= "source-mirror"
+      if (graph?.sourceVersion) conversation.session.importSourceVersion = graph.sourceVersion
+      if (graph?.sourceRevision) conversation.session.importSourceRevision = graph.sourceRevision
+      if (graphRootSessionId) conversation.session.importGraphRootId = graphRootSessionId
+      if (projectId) {
+        conversation.session.projectId = projectId
+      }
+      for (const message of conversation.messages) {
+        if (projectId) message.projectId = projectId
+        message.metadata = { ...message.metadata, importSourceOwned: true }
       }
     }
-    if (conv.messages.length === 0) return { conversations: [], parsed: true }
+
+    for (const node of canonicalNodes) {
+      const { header } = node.session
+      const target = node.conversation.session
+      if (header.runtimeBinding) target.importRuntimeBinding = header.runtimeBinding
+      target.importCanonicalState = canonicalStateFromSession(node.session)
+      target.importLossReport = node.loss
+      if (header.lineage) {
+        target.importRelation = header.lineage
+        const parentId = header.lineage.parentCanonicalSessionId
+          ? canonicalSessionIds.get(header.lineage.parentCanonicalSessionId)
+          : undefined
+        if (parentId) target.parentSessionId = parentId
+        if (header.lineage.kind === "subagent") target.kind = "subagent"
+        if (
+          parentId &&
+          (header.lineage.kind === "background" || header.lineage.kind === "team-member")
+        ) {
+          const lifecycle = header.lifecycle
+          const task = header.lineage.taskId
+            ? node.session.tasks?.find((candidate) => candidate.taskId === header.lineage?.taskId)
+            : node.session.tasks?.find((candidate) => candidate.summary)
+          const createdAt = Date.parse(lifecycle?.startedAt ?? header.createdAt) || Date.now()
+          const updatedAt =
+            Date.parse(lifecycle?.updatedAt ?? lifecycle?.endedAt ?? header.updatedAt) || createdAt
+          const completedAt = Date.parse(lifecycle?.endedAt ?? header.updatedAt) || updatedAt
+          target.attachedChild = {
+            parentSessionId: parentId,
+            lifecycleOwnerSessionId: parentId,
+            context: { mode: "none" },
+            workspace: "shared",
+            status: attachedStatusFromLifecycle(lifecycle?.status),
+            createdAt,
+            updatedAt,
+            ...(task?.summary
+              ? {
+                  result: {
+                    summary: task.summary,
+                    completedAt,
+                  },
+                }
+              : {}),
+          }
+          target.kind = "resource-workbench"
+          target.visibility = "embedded"
+          target.surfaceBinding = { kind: "session", sessionId: parentId }
+        }
+      }
+      if (header.lifecycle) target.importLifecycle = header.lifecycle
+    }
+
+    // Graph nodes are meaningful even with no chat turns: a background task can
+    // be pending/failed and carry only lifecycle/task/checkpoint state. Flat
+    // legacy plugins keep the old empty-transcript filter.
+    const importable = richGraph
+      ? conversations
+      : conversations.filter((conversation) => conversation.messages.length > 0)
+    if (importable.length === 0) return { conversations: [], canonicalNodes, parsed: true }
     return {
-      conversations: [{ session: conv.session, messages: conv.messages }, ...nested],
+      conversations: importable.map((conversation) => ({
+        session: conversation.session,
+        messages: conversation.messages,
+      })),
+      canonicalNodes,
       parsed: true,
     }
   } catch {
     // Skip a session that fails to parse.
-    return { conversations: [], parsed: false }
+    return { conversations: [], canonicalNodes: [], parsed: false }
   }
 }
 
@@ -176,8 +328,7 @@ export async function parseSessions(
  * the loss report into the per-source aggregate. Never fails the import.
  */
 async function projectCanonical(
-  codec: NonNullable<import("./codec-types").SessionCodec>,
-  conversation: ImportedConversation,
+  conversion: import("./codec-types").SessionCodecConversion,
   aggregate: Record<
     string,
     import("@cognia/agent-config-types/canonical-session").SessionLossReport
@@ -185,7 +336,7 @@ async function projectCanonical(
   sourceId: string
 ): Promise<void> {
   try {
-    const { session, loss } = codec.toCanonical(conversation)
+    const { session, loss } = conversion
     const bucket = (aggregate[sourceId] ??= { fidelity: loss.fidelity, losses: [] })
     bucket.losses.push(...loss.losses)
     const { headerRowFromCanonical, putCanonicalSessionHeader } =
@@ -209,6 +360,8 @@ export async function importSessions(
     string,
     import("@cognia/agent-config-types/canonical-session").SessionLossReport
   >
+  /** Session-level provenance and fidelity; unlike lossBySource this preserves graph identity. */
+  details: import("./types").SessionImportDetail[]
 }> {
   const { signal, onProgress, onRefParsed, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
   const total = refs.length
@@ -223,6 +376,7 @@ export async function importSessions(
     string,
     import("@cognia/agent-config-types/canonical-session").SessionLossReport
   > = {}
+  const details: import("./types").SessionImportDetail[] = []
 
   const flush = async () => {
     if (buffer.length === 0) return
@@ -242,9 +396,40 @@ export async function importSessions(
     if (parsedRef.parsed) onRefParsed?.(ref)
     // Canonical header projection (top-level conversation only; nested
     // subagent transcripts are the parent's loss entry, not headers).
-    const codec = getSessionSource(ref.sourceId)?.codec
-    if (codec && conversations[0]) {
-      await projectCanonical(codec, conversations[0], lossBySource, ref.sourceId)
+    const source = getSessionSource(ref.sourceId)
+    if (parsedRef.canonicalNodes.length > 0) {
+      for (const node of parsedRef.canonicalNodes) {
+        await projectCanonical(node, lossBySource, ref.sourceId)
+        const { header } = node.session
+        details.push({
+          sourceId: ref.sourceId,
+          canonicalSessionId: header.canonicalSessionId,
+          ...(header.title ? { title: header.title } : {}),
+          ...(header.source?.version ? { sourceVersion: header.source.version } : {}),
+          ...(header.source?.revision ? { sourceRevision: header.source.revision } : {}),
+          ...(header.runtimeBinding ? { runtimeBinding: header.runtimeBinding } : {}),
+          ...(header.lineage ? { lineage: header.lineage } : {}),
+          ...(header.lifecycle ? { lifecycle: header.lifecycle } : {}),
+          loss: node.loss,
+        })
+      }
+    } else if (source?.codec) {
+      for (const conversation of conversations) {
+        const conversion = source.codec.toCanonical(conversation)
+        await projectCanonical(conversion, lossBySource, ref.sourceId)
+        const { header } = conversion.session
+        details.push({
+          sourceId: ref.sourceId,
+          canonicalSessionId: header.canonicalSessionId,
+          ...(header.title ? { title: header.title } : {}),
+          ...(header.source?.version ? { sourceVersion: header.source.version } : {}),
+          ...(header.source?.revision ? { sourceRevision: header.source.revision } : {}),
+          ...(header.runtimeBinding ? { runtimeBinding: header.runtimeBinding } : {}),
+          ...(header.lineage ? { lineage: header.lineage } : {}),
+          ...(header.lifecycle ? { lifecycle: header.lifecycle } : {}),
+          loss: conversion.loss,
+        })
+      }
     }
     parsed += 1
     onProgress?.({ phase: "parsing", done: parsed, total })
@@ -254,5 +439,5 @@ export async function importSessions(
   }
   // Persist whatever is buffered — including partial work when aborted.
   await flush()
-  return { sessions, messages, lossBySource }
+  return { sessions, messages, lossBySource, details }
 }

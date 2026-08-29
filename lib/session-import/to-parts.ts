@@ -85,6 +85,7 @@ export function deriveTitle(firstUserText: string, fallback: string): string {
 
 /** Assemble one StoredMessage. Skips senderKind for system rows. */
 export function buildMessage(opts: {
+  id?: string
   sessionId: string
   projectId?: string
   index: number
@@ -99,7 +100,7 @@ export function buildMessage(opts: {
   metadata?: StoredMessage["metadata"]
 }): StoredMessage {
   return {
-    id: importedMessageId(opts.sessionId, opts.index),
+    id: opts.id ?? importedMessageId(opts.sessionId, opts.index),
     sessionId: opts.sessionId,
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     role: opts.role,

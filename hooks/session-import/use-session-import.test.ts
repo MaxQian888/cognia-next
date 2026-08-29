@@ -61,6 +61,29 @@ describe("useSessionImport", () => {
     })
   })
 
+  it("retains per-session graph details returned by the importer", async () => {
+    const details = [
+      {
+        sourceId: "codex",
+        canonicalSessionId: "canon:codex:root",
+        sourceVersion: "0.150.1",
+        loss: { fidelity: "structured" as const, losses: [] },
+      },
+    ]
+    const d = deps({
+      importSessions: jest.fn(async () => ({
+        lossBySource: {},
+        sessions: 1,
+        messages: 2,
+        details,
+      })),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => result.current.scan())
+    await act(async () => result.current.importSelected())
+    expect(result.current.state).toMatchObject({ status: "done", details })
+  })
+
   it("surfaces live progress and cancels an in-flight import, keeping partial work", async () => {
     let release: (() => void) | undefined
     const gate = new Promise<void>((r) => {

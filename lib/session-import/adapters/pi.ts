@@ -40,6 +40,7 @@ import {
   toolPart,
 } from "../to-parts"
 import { scanFileSummaries } from "../scan"
+import { buildImportedSessionGraph } from "../graph"
 import { importedUsageMetadata } from "../usage"
 import type {
   AgentSessionSourceAdapter,
@@ -337,14 +338,20 @@ function buildTurns(chain: PiEntry[], sessionId: string, projectId?: string): Bu
 
         if (role === "bashExecution") {
           // A direct `!command` the user ran; Pi records it as its own role.
-          const text = [message.command, message.output].filter(Boolean).join("\n")
           messages.push(
             buildMessage({
               sessionId,
               projectId,
               index: index++,
               role: "assistant",
-              parts: [textPart(text)],
+              parts: [
+                toolPart({
+                  name: "bash",
+                  toolCallId: entry.id ?? `bash-${index}`,
+                  input: { command: message.command ?? "" },
+                  ...(message.output !== undefined ? { output: message.output } : {}),
+                }),
+              ],
               createdAt,
             })
           )
@@ -509,6 +516,21 @@ export function parsePiSession(ref: SessionRef, content: string): ImportedConver
     updatedAt,
     seedMessages: main.messages,
   })
+  session.importRuntimeBinding = {
+    presetId: "pi-rpc",
+    nativeSessionId: header?.id ?? ref.originalSessionId,
+    cwd: header?.cwd,
+    resumeMethod: "api",
+    verifiedAt: piSessionSource.verifiedAt,
+  }
+  if (header?.parentSession) {
+    const parentFile = header.parentSession.replace(/\\/g, "/").split("/").pop() ?? ""
+    const parentNativeSessionId = parentFile.replace(/\.jsonl$/i, "")
+    session.importRelation = {
+      kind: "fork",
+      ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
+    }
+  }
 
   // Alternate leaves are branches the user can still reach in Pi's `/tree`.
   // They import as nested conversations rather than being discarded.
@@ -520,20 +542,28 @@ export function parsePiSession(ref: SessionRef, content: string): ImportedConver
     const branch = buildTurns(branchChain, branchSessionId)
     if (branch.messages.length === 0) continue
 
-    nested.push({
-      session: buildSession({
-        id: branchSessionId,
-        title: deriveTitle(branch.firstUserText, "Pi branch"),
-        ...(branch.model ? { model: branch.model } : {}),
-        ...(header?.cwd ? { workingDir: header.cwd } : {}),
-        createdAt,
-        updatedAt: branch.messages[branch.messages.length - 1].createdAt,
-        seedMessages: branch.messages,
-        kind: "subagent",
-        suppressSeed: true,
-      }),
-      messages: branch.messages,
+    const branchSession = buildSession({
+      id: branchSessionId,
+      title: deriveTitle(branch.firstUserText, "Pi branch"),
+      ...(branch.model ? { model: branch.model } : {}),
+      ...(header?.cwd ? { workingDir: header.cwd } : {}),
+      createdAt,
+      updatedAt: branch.messages[branch.messages.length - 1].createdAt,
+      seedMessages: branch.messages,
     })
+    branchSession.parentSessionId = sessionId
+    branchSession.importRelation = {
+      kind: "branch",
+      parentNativeSessionId: header?.id ?? ref.originalSessionId,
+    }
+    branchSession.importRuntimeBinding = {
+      presetId: "pi-rpc",
+      nativeSessionId: header?.id ?? ref.originalSessionId,
+      cwd: header?.cwd,
+      resumeMethod: "api",
+      verifiedAt: piSessionSource.verifiedAt,
+    }
+    nested.push({ session: branchSession, messages: branch.messages })
   }
 
   // Import notes ride the FIRST message's metadata, not the session row:
@@ -567,6 +597,8 @@ export const piSessionSource: AgentSessionSourceAdapter = {
   id: PI_SOURCE_ID,
   displayName: "Pi",
   labelKey: "pi",
+  verifiedVersion: "0.84.4",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: [".jsonl"],
 
   scanRoots(home, roots) {
@@ -606,6 +638,15 @@ export const piSessionSource: AgentSessionSourceAdapter = {
 
   async parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation> {
     return parsePiSession(ref, await readFile(input, ref.locator))
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    return buildImportedSessionGraph(await this.parseSession(ref, input), {
+      sourceRuntime: this.id,
+      sourceVersion: this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: this.codec?.importFidelity ?? "structured",
+      codec: this.codec,
+    })
   },
 
   summarizeFile: summarizePiFile,

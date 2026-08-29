@@ -12,6 +12,7 @@
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import { buildMessage, buildSession, deriveTitle, importedSessionId, textPart } from "../to-parts"
+import { buildImportedSessionGraph } from "../graph"
 import type {
   AgentSessionSourceAdapter,
   PickedSessionFile,
@@ -143,6 +144,8 @@ export const aiderSessionSource: AgentSessionSourceAdapter = {
   id: "aider",
   displayName: "Aider",
   labelKey: "aider",
+  verifiedVersion: "0.86.2",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: ACCEPTED,
 
   // Aider appends to `<repo>/.aider.chat.history.md`: there is no machine-wide
@@ -179,5 +182,21 @@ export const aiderSessionSource: AgentSessionSourceAdapter = {
       content = await input.fs.readTextFile(ref.locator)
     }
     return toConversation(parseAiderHistory(content, ref.locator))
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    const graph = buildImportedSessionGraph(await this.parseSession(ref, input), {
+      sourceRuntime: this.id,
+      sourceVersion: this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: "contextual",
+    })
+    for (const node of graph.nodes) {
+      node.loss.losses.push({
+        path: "markdown",
+        kind: "summarized",
+        detail: "Aider Markdown history does not carry structured tool, task, or runtime state.",
+      })
+    }
+    return graph
   },
 }

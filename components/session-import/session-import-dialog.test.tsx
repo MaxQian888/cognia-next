@@ -14,7 +14,13 @@ const pickerOnlySources: Array<{ id: string }> = []
 jest.mock("@/lib/session-import", () => ({
   getSessionSource: (id: string) =>
     id === "acme:cursor" ? { id, displayName: "Cursor (Acme)" } : undefined,
-  getPickerOnlySources: () => pickerOnlySources,
+  buildExternalSessionSupportMatrix: () => ({
+    importSources: pickerOnlySources.map((source) => ({
+      sourceId: source.id,
+      pickerOnly: true,
+    })),
+    runtimeOnlyPresetIds: [],
+  }),
 }))
 
 const hookState: { current: Record<string, unknown> } = { current: {} }
@@ -100,6 +106,63 @@ describe("SessionImportDialog", () => {
     render(<SessionImportDialog trigger={<button>open</button>} />)
     fireEvent.click(screen.getByText("open"))
     expect(screen.getByText("doneTitle")).toBeInTheDocument()
+  })
+
+  it("renders per-session graph fidelity details", () => {
+    setHook({
+      state: {
+        status: "done",
+        sessionsAdded: 2,
+        messagesAdded: 6,
+        details: [
+          {
+            sourceId: "codex",
+            canonicalSessionId: "canon:codex:root",
+            title: "Root session",
+            loss: { fidelity: "structured", losses: [] },
+          },
+          {
+            sourceId: "codex",
+            canonicalSessionId: "canon:codex:child",
+            title: "Background child",
+            sourceVersion: "0.150.1",
+            lineage: { kind: "background", parentCanonicalSessionId: "canon:codex:root" },
+            lifecycle: { status: "running", background: true },
+            loss: { fidelity: "structured", losses: [] },
+          },
+        ],
+      },
+    })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(screen.getByText("Background child")).toBeInTheDocument()
+    expect(screen.getByTestId("source-version")).toHaveTextContent("0.150.1")
+    expect(screen.getByTestId("session-relationship")).toHaveTextContent("relationships.background")
+    expect(screen.getByTestId("session-import-detail-canon:codex:root")).toHaveAttribute(
+      "data-depth",
+      "0"
+    )
+    expect(screen.getByTestId("session-import-detail-canon:codex:child")).toHaveAttribute(
+      "data-depth",
+      "1"
+    )
+  })
+
+  it("keeps the aggregate loss fallback for legacy plugin imports", () => {
+    setHook({
+      state: {
+        status: "done",
+        sessionsAdded: 1,
+        messagesAdded: 1,
+        lossBySource: {
+          "acme:cursor": { fidelity: "contextual", losses: [{ path: "tools", kind: "dropped" }] },
+        },
+      },
+    })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(screen.getByText("Cursor (Acme)")).toBeInTheDocument()
+    expect(screen.getByText("tools")).toBeInTheDocument()
   })
 
   it("labels a cancelled import distinctly from a completed one", () => {

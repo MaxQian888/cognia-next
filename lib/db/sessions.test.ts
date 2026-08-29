@@ -19,6 +19,7 @@ import {
   bulkDeleteSessions,
   clearBranchSeed,
   acknowledgeImportDivergence,
+  bindImportedSessionToNativeRuntime,
   freezeImportedSession,
   archiveSession,
   unarchiveSession,
@@ -437,7 +438,7 @@ describe("createSession — default preset auto-apply", () => {
     expect(fresh?.parentSessionId).toBe("p1")
   })
 
-  it("freezeImportedSession sets importFrozen (idempotent)", async () => {
+  it("freezeImportedSession marks Cognia ownership (idempotent)", async () => {
     const now = Date.now()
     await getDb().sessions.put({
       id: "import:codex:x1",
@@ -446,10 +447,45 @@ describe("createSession — default preset auto-apply", () => {
       updatedAt: now,
     })
     await freezeImportedSession("import:codex:x1")
-    expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
+    expect(await getSession("import:codex:x1")).toMatchObject({
+      importFrozen: true,
+      importOwnership: "cognia-owned",
+    })
     // Re-freezing stays true (no throw, no flip).
     await freezeImportedSession("import:codex:x1")
     expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
+  })
+
+  it("bindImportedSessionToNativeRuntime records a resumable native-bound session", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "import:codex:native",
+      title: "Imported",
+      importFrozen: true,
+      importOwnership: "cognia-owned",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await bindImportedSessionToNativeRuntime("import:codex:native", {
+      nativeSessionId: "thread-7",
+      presetId: "codex-app-server",
+      cwd: "/repo",
+      resumeMethod: "protocol",
+      verifiedAt: "2026-08-29T00:00:00.000Z",
+    })
+
+    expect(await getSession("import:codex:native")).toMatchObject({
+      importFrozen: false,
+      importOwnership: "native-bound",
+      importRuntimeBinding: {
+        nativeSessionId: "thread-7",
+        presetId: "codex-app-server",
+        cwd: "/repo",
+        resumeMethod: "protocol",
+      },
+      sdkSessionId: "thread-7",
+    })
   })
 
   it("acknowledgeImportDivergence clears the flag but keeps the observed digest", async () => {

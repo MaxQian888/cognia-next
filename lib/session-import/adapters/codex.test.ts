@@ -218,6 +218,88 @@ describe("parseCodexRollout", () => {
     // Second turn = cumulative delta (250-100, 70-30).
     expect(usages[1]).toMatchObject({ inputTokens: 150, outputTokens: 40 })
   })
+
+  it("parses current shell, search, image, tool-search, and agent-message items", () => {
+    const lines = [
+      {
+        type: "response_item",
+        payload: {
+          type: "local_shell_call",
+          call_id: "shell-1",
+          status: "completed",
+          action: { type: "exec", command: ["pwd"], timeout_ms: 1000 },
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          id: "web-1",
+          type: "web_search_call",
+          status: "completed",
+          action: { type: "search", query: "Codex protocol" },
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          id: "image-1",
+          type: "image_generation_call",
+          status: "completed",
+          revised_prompt: "diagram",
+          result: "YWJj",
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          id: "search-1",
+          type: "tool_search_call",
+          call_id: "search-call",
+          status: "completed",
+          execution: "search",
+          arguments: { query: "calendar" },
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          type: "tool_search_output",
+          call_id: "search-call",
+          status: "completed",
+          execution: "search",
+          tools: [{ name: "calendar" }],
+        },
+      },
+      {
+        type: "response_item",
+        payload: {
+          id: "agent-message-1",
+          type: "agent_message",
+          author: "root",
+          recipient: "child",
+          content: [{ type: "input_text", text: "continue the research" }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+
+    const parsed = parseCodexRollout(lines, "current.jsonl")
+    expect(parsed.messages.map((message) => message.parts[0].type)).toEqual([
+      "tool-local_shell",
+      "tool-web_search",
+      "tool-image_generation",
+      "tool-tool_search",
+      "text",
+    ])
+    expect(parsed.interAgentMessages).toEqual([
+      expect.objectContaining({
+        fromSessionId: "root",
+        toSessionId: "child",
+        text: "continue the research",
+      }),
+    ])
+  })
 })
 
 describe("codexSessionSource", () => {
@@ -276,6 +358,175 @@ describe("codexSessionSource", () => {
     const conv = await codexSessionSource.parseSession(list[0].ref, input)
     expect(conv.session.id).toBe("import:codex:cx-1")
     expect(conv.messages).toHaveLength(4)
+  })
+
+  it("projects lineage, lifecycle, plans, rollback, compaction, and collaboration into the graph", async () => {
+    const rich = [
+      {
+        timestamp: "2026-08-29T00:00:00Z",
+        type: "session_meta",
+        payload: {
+          session_id: "session-child",
+          id: "thread-child",
+          parent_thread_id: "thread-root",
+          cwd: "/work",
+          cli_version: "0.150.1",
+          agent_nickname: "researcher",
+          agent_role: "explorer",
+          source: { sub_agent: { thread_spawn: { parent_thread_id: "thread-root", depth: 1 } } },
+        },
+      },
+      {
+        timestamp: "2026-08-29T00:00:01Z",
+        type: "event_msg",
+        payload: { type: "turn_started", turn_id: "turn-1", started_at: 1787961601 },
+      },
+      {
+        timestamp: "2026-08-29T00:00:02Z",
+        type: "event_msg",
+        payload: {
+          type: "plan_update",
+          explanation: "implementation",
+          plan: [
+            { step: "inspect", status: "completed" },
+            { step: "patch", status: "in_progress" },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-08-29T00:00:02Z",
+        type: "event_msg",
+        payload: { type: "goal_update", goal_id: "goal-1", objective: "ship importer" },
+      },
+      {
+        timestamp: "2026-08-29T00:00:03Z",
+        type: "event_msg",
+        payload: {
+          type: "collab_agent_spawn_end",
+          call_id: "spawn-1",
+          sender_thread_id: "thread-child",
+          new_thread_id: "thread-grandchild",
+          prompt: "research",
+          status: "running",
+        },
+      },
+      {
+        timestamp: "2026-08-29T00:00:04Z",
+        type: "event_msg",
+        payload: { type: "context_compacted" },
+      },
+      {
+        timestamp: "2026-08-29T00:00:05Z",
+        type: "event_msg",
+        payload: { type: "thread_rolled_back", num_turns: 2 },
+      },
+      {
+        timestamp: "2026-08-29T00:00:06Z",
+        type: "event_msg",
+        payload: { type: "turn_aborted", turn_id: "turn-1", reason: "interrupted" },
+      },
+      {
+        timestamp: "2026-08-29T00:00:07Z",
+        type: "event_msg",
+        payload: {
+          type: "future_protocol_event",
+          access_token: "must-not-survive",
+          detail: "kept",
+        },
+      },
+      {
+        timestamp: "2026-08-29T00:00:08Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "work" }] },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [{ name: "rollout-rich.jsonl", path: "/p/rollout-rich.jsonl", content: rich }],
+    }
+    const list = await codexSessionSource.listSessions(input)
+    const conversation = await codexSessionSource.parseSession(list[0].ref, input)
+    expect(conversation.session).toMatchObject({
+      id: "import:codex:thread-child",
+      kind: "subagent",
+      parentSessionId: "import:codex:thread-root",
+      importLifecycle: { status: "interrupted" },
+    })
+
+    const graph = await codexSessionSource.parseGraph!(list[0].ref, input)
+    const canonical = graph.nodes[0].session
+    expect(canonical.header).toMatchObject({
+      source: { version: "0.150.1" },
+      runtimeBinding: { nativeSessionId: "thread-child", presetId: "codex" },
+      lineage: { kind: "subagent", parentNativeSessionId: "thread-root" },
+      lifecycle: { status: "interrupted" },
+    })
+    expect(canonical.plans?.[0].steps).toEqual(["inspect", "patch"])
+    expect(canonical.goals?.[0]).toMatchObject({ goalId: "goal-1", description: "ship importer" })
+    expect(canonical.tasks?.[0]).toMatchObject({
+      taskId: "spawn-1",
+      status: "running",
+      childCanonicalSessionId: "canon:codex:import:codex:thread-grandchild",
+    })
+    expect(canonical.history?.map((event) => event.kind)).toEqual(["compaction", "rollback"])
+    const diagnostic = canonical.recordedEvents?.find((event) => event.event.kind === "diagnostic")
+    expect(JSON.stringify(diagnostic)).not.toContain("must-not-survive")
+    expect(graph.nodes[0].loss.losses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "event_msg.future_protocol_event", kind: "approximated" }),
+      ])
+    )
+  })
+
+  it("groups parent and child rollout artifacts into one graph and hides the child top-level row", async () => {
+    const rollout = (id: string, parent?: string) =>
+      [
+        {
+          timestamp: "2026-08-29T00:00:00Z",
+          type: "session_meta",
+          payload: { id, ...(parent ? { parent_thread_id: parent } : {}) },
+        },
+        {
+          timestamp: "2026-08-29T00:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: `work in ${id}` }],
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n")
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [
+        { name: "rollout-root.jsonl", path: "/p/rollout-root.jsonl", content: rollout("root") },
+        {
+          name: "rollout-child.jsonl",
+          path: "/p/rollout-child.jsonl",
+          content: rollout("child", "root"),
+        },
+      ],
+    }
+
+    const list = await codexSessionSource.listSessions(input)
+    expect(list.map((summary) => summary.ref.originalSessionId)).toEqual(["root"])
+
+    const graph = await codexSessionSource.parseGraph!(list[0].ref, input)
+    expect(graph.nodes).toHaveLength(2)
+    const child = graph.nodes.find(
+      (node) => node.session.header.runtimeBinding?.nativeSessionId === "child"
+    )
+    expect(child?.session.header.lineage).toMatchObject({
+      kind: "subagent",
+      parentNativeSessionId: "root",
+      parentCanonicalSessionId: graph.rootCanonicalSessionId,
+    })
   })
 })
 

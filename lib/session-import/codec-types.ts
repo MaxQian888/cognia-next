@@ -68,6 +68,36 @@ interface RawPart {
   output?: unknown
   errorText?: string
   state?: string
+  filename?: string
+  mediaType?: string
+  url?: string
+  agentId?: string
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function usageFromMetadata(metadata: Record<string, unknown> | undefined) {
+  const raw = metadata?.usage
+  if (!raw || typeof raw !== "object") return undefined
+  const usage = raw as Record<string, unknown>
+  const mapped = {
+    inputTokens: finiteNumber(usage.inputTokens ?? usage.input_tokens),
+    outputTokens: finiteNumber(usage.outputTokens ?? usage.output_tokens),
+    cachedInputTokens: finiteNumber(
+      usage.cachedInputTokens ?? usage.cacheReadInputTokens ?? usage.cached_input_tokens
+    ),
+    cachedOutputTokens: finiteNumber(usage.cachedOutputTokens ?? usage.cached_output_tokens),
+    reasoningTokens: finiteNumber(usage.reasoningTokens ?? usage.thoughtsTokens),
+    toolTokens: finiteNumber(usage.toolTokens),
+    totalTokens: finiteNumber(usage.totalTokens ?? usage.total_tokens),
+    costUsd: finiteNumber(usage.costUsd ?? metadata?.costUsd),
+  }
+  const present = Object.fromEntries(
+    Object.entries(mapped).filter(([, value]) => value !== undefined)
+  )
+  return Object.keys(present).length > 0 ? present : undefined
 }
 
 function toolCallFromPart(part: RawPart, index: number): CanonicalToolCall {
@@ -93,6 +123,14 @@ function toolCallFromPart(part: RawPart, index: number): CanonicalToolCall {
       : {}),
     ...(resultText !== undefined ? { resultText } : {}),
     ...(part.errorText || part.state === "output-error" ? { isError: true } : {}),
+    ...(part.agentId ? { taskId: part.agentId } : {}),
+    ...(part.state === "input-available"
+      ? { status: "pending" as const }
+      : part.state === "output-error"
+        ? { status: "failed" as const }
+        : part.state === "output-available"
+          ? { status: "completed" as const }
+          : {}),
   }
 }
 
@@ -112,6 +150,8 @@ export function conversationToCanonical(
   for (const [index, message] of conversation.messages.entries()) {
     const parts = (message.parts ?? []) as RawPart[]
     const textPieces: string[] = []
+    const reasoningPieces: string[] = []
+    const richParts: NonNullable<CanonicalTurn["parts"]> = []
     const toolCalls: CanonicalToolCall[] = []
     for (const [partIndex, part] of parts.entries()) {
       if (part.type === "text" && typeof part.text === "string") {
@@ -119,11 +159,22 @@ export function conversationToCanonical(
       } else if (part.type === "dynamic-tool" || part.type?.startsWith("tool-")) {
         toolCalls.push(toolCallFromPart(part, partIndex))
       } else if (part.type === "reasoning") {
-        losses.push({
-          path: `turns[${index}].reasoning`,
-          kind: "dropped",
-          detail: "runtime-private thinking is not carried into the canonical record",
-        })
+        if (typeof part.text === "string") reasoningPieces.push(part.text)
+      } else if (part.type === "file" && typeof part.url === "string") {
+        if (part.url.startsWith("data:")) {
+          losses.push({
+            path: `turns[${index}].parts[${partIndex}]`,
+            kind: "approximated",
+            detail: "inline file body omitted from canonical record",
+          })
+        } else {
+          richParts.push({
+            type: "file",
+            name: part.filename ?? "file",
+            uri: part.url,
+            ...(part.mediaType ? { mediaType: part.mediaType } : {}),
+          })
+        }
       } else if (part.type) {
         losses.push({
           path: `turns[${index}].parts[${partIndex}]`,
@@ -133,11 +184,17 @@ export function conversationToCanonical(
       }
     }
     const role = message.role === "assistant" || message.role === "system" ? message.role : "user"
+    const metadata = message.metadata as Record<string, unknown> | undefined
+    const usage = usageFromMetadata(metadata)
     turns.push({
       turnId: message.id || `turn-${index}`,
       role,
       text: textPieces.join(""),
+      ...(reasoningPieces.length > 0 ? { reasoning: reasoningPieces.join("") } : {}),
+      ...(richParts.length > 0 ? { parts: richParts } : {}),
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      ...(typeof metadata?.model === "string" ? { model: metadata.model } : {}),
+      ...(usage ? { usage } : {}),
       ...(typeof message.metadata?.createdAt === "string"
         ? { at: message.metadata.createdAt as string }
         : {}),
@@ -157,8 +214,28 @@ export function conversationToCanonical(
       canonicalVersion: 1,
       canonicalSessionId: `canon:${options.sourceRuntime}:${conversation.session.id}`,
       sourceRuntime: options.sourceRuntime,
-      ...(conversation.session.sdkSessionId
-        ? { runtimeBinding: { nativeSessionId: conversation.session.sdkSessionId } }
+      ...(conversation.session.importSourceVersion || conversation.session.importSourceRevision
+        ? {
+            source: {
+              ...(conversation.session.importSourceVersion
+                ? { version: conversation.session.importSourceVersion }
+                : {}),
+              ...(conversation.session.importSourceRevision
+                ? { revision: conversation.session.importSourceRevision }
+                : {}),
+            },
+          }
+        : {}),
+      ...(conversation.session.importRuntimeBinding
+        ? { runtimeBinding: conversation.session.importRuntimeBinding }
+        : conversation.session.sdkSessionId
+          ? { runtimeBinding: { nativeSessionId: conversation.session.sdkSessionId } }
+          : {}),
+      ...(conversation.session.importRelation
+        ? { lineage: conversation.session.importRelation }
+        : {}),
+      ...(conversation.session.importLifecycle
+        ? { lifecycle: conversation.session.importLifecycle }
         : {}),
       ...(conversation.session.title ? { title: conversation.session.title } : {}),
       createdAt: new Date(conversation.session.createdAt ?? Date.now()).toISOString(),

@@ -23,13 +23,18 @@
  * {@link BranchLineageChip}; both self-hide and can show together.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, GitCompareArrowsIcon } from "lucide-react"
+import { DownloadIcon, GitCompareArrowsIcon, Loader2Icon, RotateCcwIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import type { ChatSession } from "@cognia/agent-config-types"
+import { FidelityReport } from "@/components/session-import/fidelity-report"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { acknowledgeImportDivergence } from "@/lib/db/sessions"
+import { resumeImportedSessionNative } from "@/lib/session-import/native-resume"
+import { compositionForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { cn } from "@/lib/utils"
 
 export function ImportedOriginChip({
@@ -41,6 +46,7 @@ export function ImportedOriginChip({
 }) {
   const t = useTranslations("chat.imported")
   const tSources = useTranslations("sessionImport.sources")
+  const [resuming, setResuming] = useState(false)
 
   // `importSource` is stamped by `importSessions`; the id prefix is the
   // fallback for rows written before the field existed.
@@ -60,25 +66,51 @@ export function ImportedOriginChip({
       ? (session.importSourceLabel ?? source)
       : tSources(source as never)
 
-  if (!session.importDiverged) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            variant="secondary"
-            className={cn("h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal", className)}
-            data-testid="imported-origin-chip"
-          >
-            <DownloadIcon className="size-3" />
-            {t("origin", { source: label })}
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>{t("originHint", { source: label })}</TooltipContent>
-      </Tooltip>
-    )
-  }
+  const canonicalStateCount = session.importCanonicalState
+    ? Object.values(session.importCanonicalState).reduce(
+        (count, entries) => count + (Array.isArray(entries) ? entries.length : 0),
+        0
+      )
+    : 0
+  const fidelityDetails = session.importLossReport ? (
+    <div className="max-w-sm space-y-2 p-1">
+      <FidelityReport
+        loss={session.importLossReport}
+        sessionHeader={{
+          source: {
+            version: session.importSourceVersion,
+            revision: session.importSourceRevision,
+          },
+          runtimeBinding: session.importRuntimeBinding,
+          lineage: session.importRelation,
+          lifecycle: session.importLifecycle,
+        }}
+      />
+      {canonicalStateCount > 0 && (
+        <p className="text-muted-foreground" data-testid="imported-canonical-state-summary">
+          {t("canonicalState", { count: canonicalStateCount })}
+        </p>
+      )}
+    </div>
+  ) : null
 
-  return (
+  const origin = !session.importDiverged ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge
+          variant="secondary"
+          className={cn("h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal", className)}
+          data-testid="imported-origin-chip"
+        >
+          <DownloadIcon className="size-3" />
+          {t("origin", { source: label })}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm">
+        {fidelityDetails ?? t("originHint", { source: label })}
+      </TooltipContent>
+    </Tooltip>
+  ) : (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
@@ -99,7 +131,81 @@ export function ImportedOriginChip({
           </Badge>
         </button>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{t("divergedHint", { source: label })}</TooltipContent>
+      <TooltipContent className="max-w-sm">
+        <div className="space-y-2">
+          <p>{t("divergedHint", { source: label })}</p>
+          {fidelityDetails}
+        </div>
+      </TooltipContent>
     </Tooltip>
+  )
+
+  const binding = session.importRuntimeBinding
+  const canAttemptNativeResume =
+    session.importOwnership !== "cognia-owned" &&
+    session.importOwnership !== "native-bound" &&
+    Boolean(binding?.nativeSessionId && binding.presetId)
+  if (!canAttemptNativeResume) return origin
+
+  const resume = async () => {
+    setResuming(true)
+    let result: Awaited<ReturnType<typeof resumeImportedSessionNative>>
+    try {
+      // `resumeImportedSessionNative` only try/catches the resume handshake —
+      // its dynamic `import(...)` of the external-agent manager and the
+      // `getAllAgents()` call above it can still reject (a chunk-load failure
+      // offline or against a stale deployment). Without this the `finally`
+      // never ran, `void resume()` swallowed the rejection with no toast, and
+      // the chip was left spinning on a disabled button until a remount.
+      result = await resumeImportedSessionNative(session)
+    } catch (error) {
+      toast.error(t("resumeErrors.handshake-failed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+      return
+    } finally {
+      setResuming(false)
+    }
+    if (!result.ok) {
+      toast.error(t(`resumeErrors.${result.code}`), {
+        ...(result.detail ? { description: result.detail } : {}),
+      })
+      return
+    }
+    const runtime = useAgentRuntimeStore.getState()
+    runtime.setSessionComposition(session.id, {
+      ...compositionForSession(session.id),
+      runtimeBindingRef: result.nativeSessionId,
+    })
+    runtime.setExternalAgentId(result.agentId)
+    runtime.setRuntime("external")
+    toast.success(t("resumeReady"))
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {origin}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => void resume()}
+            disabled={resuming}
+            aria-label={t("resumeNative")}
+            data-testid="imported-native-resume"
+          >
+            <Badge variant="outline" className="h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal">
+              {resuming ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <RotateCcwIcon className="size-3" />
+              )}
+              {t("resume")}
+            </Badge>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{t("resumeNative")}</TooltipContent>
+      </Tooltip>
+    </span>
   )
 }

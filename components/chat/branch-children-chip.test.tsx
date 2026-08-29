@@ -72,6 +72,26 @@ describe("BranchChildrenChip", () => {
     expect(screen.getByTestId("branch-children-chip")).toHaveTextContent("2 branches")
   })
 
+  it("does not present imported subagents or attached background work as branches", () => {
+    branches = [
+      branch("b1", "Plan (branch)", 2),
+      {
+        ...branch("subagent", "Explore", 3),
+        kind: "subagent",
+        importRelation: { kind: "subagent", parentCanonicalSessionId: "parent-1" },
+      },
+      {
+        ...branch("background", "Build", 4),
+        visibility: "embedded",
+        importRelation: { kind: "background", parentCanonicalSessionId: "parent-1" },
+      },
+    ]
+
+    wrap(<BranchChildrenChip sessionId="parent-1" />)
+
+    expect(screen.getByTestId("branch-children-chip")).toHaveTextContent("1 branch")
+  })
+
   it("opens the picked branch as a conversation", async () => {
     const user = userEvent.setup()
     branches = [branch("b1", "Plan (branch)", 2)]
@@ -96,6 +116,18 @@ describe("BranchPointMarker", () => {
     branches = [branch("b1", "A", 2, "m1"), branch("b2", "B", 3, "m1"), branch("b3", "C", 4, "m2")]
     wrap(<BranchPointMarker sessionId="parent-1" messageId="m1" />)
     expect(screen.getByTestId("branch-point-marker")).toHaveTextContent("2 branches from here")
+  })
+
+  it("ignores non-branch children at a matching message", () => {
+    branches = [
+      branch("b1", "A", 2, "m1"),
+      {
+        ...branch("worker", "Worker", 3, "m1"),
+        importRelation: { kind: "team-member", parentCanonicalSessionId: "parent-1" },
+      },
+    ]
+    wrap(<BranchPointMarker sessionId="parent-1" messageId="m1" />)
+    expect(screen.getByTestId("branch-point-marker")).toHaveTextContent("1 branch from here")
   })
 
   it("jumps into the most recent branch cut here", async () => {

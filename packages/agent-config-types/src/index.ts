@@ -2298,6 +2298,41 @@ export interface ChatSession {
    * catalogue so the label is localized; this is the fallback.
    */
   importSourceLabel?: string
+  /** Upstream runtime/format version recorded by a graph-aware session importer. */
+  importSourceVersion?: string
+  /** Content revision of the complete imported session graph. */
+  importSourceRevision?: string
+  /** Stable root row for reconciling children removed from a later graph snapshot. */
+  importGraphRootId?: string
+  /** Source-owned relationship disappeared; retained as a recoverable tombstone. */
+  importTombstonedAt?: number
+  /** Which side currently owns continuation of an imported session. */
+  importOwnership?: "source-mirror" | "cognia-owned" | "native-bound"
+  /** Native runtime binding retained for capability-gated resume. */
+  importRuntimeBinding?: import("./canonical-session").CanonicalSessionHeader["runtimeBinding"]
+  /** Source-native relationship that cannot be inferred from `parentSessionId` alone. */
+  importRelation?: import("./canonical-session").CanonicalSessionLineage
+  /** Last source-observed lifecycle state, including unfinished background work. */
+  importLifecycle?: import("./canonical-session").CanonicalSessionLifecycle
+  /**
+   * Durable graph payload that cannot be represented by ordinary chat turns.
+   * Kept on the imported session so task/plan/history/inter-agent state
+   * survives the import transaction and remains available to attached-session
+   * and diagnostics surfaces.
+   */
+  importCanonicalState?: Pick<
+    import("./canonical-session").CanonicalSession,
+    | "permissions"
+    | "checkpoints"
+    | "tasks"
+    | "plans"
+    | "goals"
+    | "history"
+    | "interAgentMessages"
+    | "recordedEvents"
+  >
+  /** Session-specific fidelity report retained after the import dialog closes. */
+  importLossReport?: import("./canonical-session").SessionLossReport
   /**
    * Digest of the source transcript as of the last mirrored import (message
    * count + last message identity). Compared on a re-import to tell "the source

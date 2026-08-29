@@ -57,4 +57,24 @@ describe("FidelityReport", () => {
     renderReport({ fidelity: "structured", losses: [] })
     expect(screen.queryByTestId("reverse-dormant")).toBeNull()
   })
+
+  it("shows version, relationship, background lifecycle, and honest recoverability", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <FidelityReport
+          loss={{ fidelity: "structured", losses: [] }}
+          sessionHeader={{
+            source: { version: "1.2.3" },
+            runtimeBinding: { nativeSessionId: "native-1", presetId: "codex" },
+            lineage: { kind: "background", parentCanonicalSessionId: "parent-1" },
+            lifecycle: { status: "running", background: true },
+          }}
+        />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByTestId("source-version")).toHaveTextContent("1.2.3")
+    expect(screen.getByTestId("session-relationship")).toHaveTextContent("Background")
+    expect(screen.getByTestId("session-lifecycle")).toHaveTextContent("Running · Background")
+    expect(screen.getByTestId("session-recoverability")).toHaveTextContent("codex")
+  })
 })

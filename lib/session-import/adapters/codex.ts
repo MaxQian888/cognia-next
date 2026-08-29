@@ -20,13 +20,27 @@
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
+import { redactText } from "@cognia/redact"
+import type {
+  CanonicalHistoryEvent,
+  CanonicalInterAgentMessage,
+  CanonicalRecordedEvent,
+  CanonicalSessionGoal,
+  CanonicalSessionLifecycle,
+  CanonicalSessionPlan,
+  CanonicalSessionRelationKind,
+  CanonicalSessionTask,
+  SessionLossEntry,
+} from "@cognia/agent-config-types/canonical-session"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { scanFileSummaries } from "../scan"
+import { buildImportedSessionGraph } from "../graph"
 import { importedUsageMetadata } from "../usage"
 import {
   buildMessage,
   buildSession,
   deriveTitle,
+  filePart,
   importedMessageId,
   importedSessionId,
   reasoningPart,
@@ -59,6 +73,17 @@ interface ParsedSession {
   messages: StoredMessage[]
   createdAt: number
   updatedAt: number
+  sourceVersion?: string
+  relationKind?: CanonicalSessionRelationKind
+  parentNativeSessionId?: string
+  lifecycle?: CanonicalSessionLifecycle
+  goals: CanonicalSessionGoal[]
+  plans: CanonicalSessionPlan[]
+  tasks: CanonicalSessionTask[]
+  history: CanonicalHistoryEvent[]
+  interAgentMessages: CanonicalInterAgentMessage[]
+  recordedEvents: CanonicalRecordedEvent[]
+  losses: SessionLossEntry[]
 }
 
 function tsToMs(ts: string | undefined, fallback: number): number {
@@ -147,6 +172,28 @@ function messageText(payload: Record<string, unknown>): string {
   return out.join("")
 }
 
+function messageParts(payload: Record<string, unknown>): Part[] {
+  const content = payload.content
+  if (typeof content === "string") return content ? [textPart(content)] : []
+  if (!Array.isArray(content)) return []
+  const parts: Part[] = []
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue
+    const value = block as Record<string, unknown>
+    if (typeof value.text === "string" && value.text) parts.push(textPart(value.text))
+    const url = asString(value.image_url) || asString(value.audio_url)
+    if (url) {
+      parts.push(
+        filePart({
+          mediaType: asString(value.type) === "input_audio" ? "audio/*" : "image/*",
+          url,
+        })
+      )
+    }
+  }
+  return parts
+}
+
 /** Extract reasoning text (summary or text arrays / plain string). */
 function reasoningText(payload: Record<string, unknown>): string {
   for (const key of ["summary", "content", "text"]) {
@@ -164,6 +211,50 @@ function reasoningText(payload: Record<string, unknown>): string {
   return ""
 }
 
+function nestedString(value: unknown, key: string): string {
+  if (!value || typeof value !== "object") return ""
+  const record = value as Record<string, unknown>
+  if (typeof record[key] === "string") return record[key]
+  for (const child of Object.values(record)) {
+    const found = nestedString(child, key)
+    if (found) return found
+  }
+  return ""
+}
+
+function diagnosticValue(value: unknown, depth = 0): unknown {
+  if (depth > 4) return "[truncated]"
+  if (typeof value === "string") {
+    const bounded = value.length > 1000 ? `${value.slice(0, 1000)}…` : value
+    return redactText(bounded).redacted
+  }
+  if (typeof value !== "object" || value === null) return value
+  if (Array.isArray(value))
+    return value.slice(0, 20).map((item) => diagnosticValue(item, depth + 1))
+  const out: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value).slice(0, 30)) {
+    out[key] = /token|secret|password|authorization|api[_-]?key/i.test(key)
+      ? "[redacted]"
+      : diagnosticValue(child, depth + 1)
+  }
+  return out
+}
+
+function lifecycleStatus(value: unknown): CanonicalSessionLifecycle["status"] {
+  const status = asString(value).toLowerCase()
+  if (status === "completed" || status === "complete" || status === "done") return "completed"
+  if (status === "failed" || status === "error") return "failed"
+  if (status === "cancelled" || status === "canceled") return "cancelled"
+  if (status === "interrupted") return "interrupted"
+  if (status === "waiting") return "waiting"
+  if (status === "pending") return "pending"
+  return "running"
+}
+
+function eventText(payload: Record<string, unknown>): string {
+  return asString(payload.message) || asString(payload.detail) || asString(payload.reason)
+}
+
 export function parseCodexRollout(
   content: string,
   locatorId: string,
@@ -178,6 +269,18 @@ export function parseCodexRollout(
   let createdAt = 0
   let updatedAt = 0
   let msgCounter = 0
+  let sourceVersion: string | undefined
+  let relationKind: CanonicalSessionRelationKind | undefined
+  let parentNativeSessionId: string | undefined
+  let lifecycle: CanonicalSessionLifecycle | undefined
+  const plans: CanonicalSessionPlan[] = []
+  const goals: CanonicalSessionGoal[] = []
+  const tasks: CanonicalSessionTask[] = []
+  const history: CanonicalHistoryEvent[] = []
+  const interAgentMessages: CanonicalInterAgentMessage[] = []
+  const recordedEvents: CanonicalRecordedEvent[] = []
+  const losses: SessionLossEntry[] = []
+  let eventSequence = 0
   // Codex emits token accounting as a standalone `event_msg` after each turn,
   // so we attach it to the turn's last-seen assistant message.
   let lastAssistantIndex = -1
@@ -185,13 +288,18 @@ export function parseCodexRollout(
 
   const sid = () => importedSessionId("codex", sessionId || locatorId)
 
-  for (const line of content.split("\n")) {
+  for (const [lineIndex, line] of content.split("\n").entries()) {
     const trimmed = line.trim()
     if (!trimmed) continue
     let rec: RolloutLine
     try {
       rec = JSON.parse(trimmed) as RolloutLine
     } catch {
+      losses.push({
+        path: `jsonl[${lineIndex}]`,
+        kind: "dropped",
+        detail: "Unparseable rollout record.",
+      })
       continue
     }
     const ms = tsToMs(rec.timestamp, updatedAt || Date.now())
@@ -203,6 +311,17 @@ export function parseCodexRollout(
       sessionId = asString(payload.id) || asString(payload.session_id) || sessionId
       cwd = asString(payload.cwd) || cwd
       model = asString(payload.model) || asString(payload.model_provider) || model
+      sourceVersion = asString(payload.cli_version) || sourceVersion
+      const forkedFrom = asString(payload.forked_from_id)
+      const parent =
+        asString(payload.parent_thread_id) || nestedString(payload.source, "parent_thread_id")
+      if (forkedFrom) {
+        relationKind = "fork"
+        parentNativeSessionId = forkedFrom
+      } else if (parent) {
+        relationKind = "subagent"
+        parentNativeSessionId = parent
+      }
       continue
     }
     if (rec.type === "turn_context") {
@@ -210,7 +329,8 @@ export function parseCodexRollout(
       continue
     }
     if (rec.type === "event_msg") {
-      if (asString(payload.type) === "token_count") {
+      const eventType = asString(payload.type)
+      if (eventType === "token_count") {
         const info = (
           payload.info && typeof payload.info === "object" ? payload.info : payload
         ) as Record<string, unknown>
@@ -221,6 +341,202 @@ export function parseCodexRollout(
             metadata: importedUsageMetadata(usage, model),
           }
         }
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          at: rec.timestamp,
+          event: { kind: "usage", usage: diagnosticValue(info) as Record<string, unknown> },
+        })
+        continue
+      }
+      if (eventType === "turn_started") {
+        lifecycle = { status: "running", startedAt: rec.timestamp, updatedAt: rec.timestamp }
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          turnId: asString(payload.turn_id) || undefined,
+          at: rec.timestamp,
+          event: { kind: "lifecycle", phase: "started" },
+        })
+        continue
+      }
+      if (eventType === "turn_complete") {
+        const error = payload.error
+        lifecycle = {
+          status: error ? "failed" : "completed",
+          startedAt: lifecycle?.startedAt,
+          updatedAt: rec.timestamp,
+          endedAt: rec.timestamp,
+          ...(error ? { error: JSON.stringify(diagnosticValue(error)) } : {}),
+        }
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          turnId: asString(payload.turn_id) || undefined,
+          at: rec.timestamp,
+          event: error
+            ? { kind: "failure", code: "turn_complete", message: lifecycle.error ?? "Turn failed" }
+            : { kind: "lifecycle", phase: "ended" },
+        })
+        continue
+      }
+      if (eventType === "turn_aborted") {
+        lifecycle = {
+          status: "interrupted",
+          startedAt: lifecycle?.startedAt,
+          updatedAt: rec.timestamp,
+          endedAt: rec.timestamp,
+          error: eventText(payload) || "interrupted",
+        }
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          turnId: asString(payload.turn_id) || undefined,
+          at: rec.timestamp,
+          event: { kind: "lifecycle", phase: "interrupted", detail: lifecycle.error },
+        })
+        continue
+      }
+      if (eventType === "plan_update") {
+        const entries = Array.isArray(payload.plan) ? payload.plan : []
+        plans.splice(0, plans.length, {
+          planId: asString(payload.plan_id) || `plan-${plans.length + 1}`,
+          title: asString(payload.explanation) || undefined,
+          status: entries.every(
+            (entry) =>
+              entry &&
+              typeof entry === "object" &&
+              asString((entry as Record<string, unknown>).status) === "completed"
+          )
+            ? "completed"
+            : "active",
+          steps: entries
+            .map((entry) =>
+              entry && typeof entry === "object"
+                ? asString((entry as Record<string, unknown>).step)
+                : ""
+            )
+            .filter(Boolean),
+          updatedAt: rec.timestamp,
+        })
+        continue
+      }
+      if (eventType === "goal_update") {
+        const description =
+          asString(payload.description) || asString(payload.goal) || asString(payload.objective)
+        if (description) {
+          goals.splice(0, goals.length, {
+            goalId: asString(payload.goal_id) || "goal-1",
+            description,
+            status:
+              lifecycleStatus(payload.status) === "completed"
+                ? "completed"
+                : lifecycleStatus(payload.status) === "cancelled"
+                  ? "cancelled"
+                  : lifecycleStatus(payload.status) === "failed"
+                    ? "blocked"
+                    : "active",
+            updatedAt: rec.timestamp,
+          })
+        }
+        continue
+      }
+      if (eventType === "context_compacted") {
+        history.push({
+          historyId: `compaction-${history.length + 1}`,
+          kind: "compaction",
+          at: rec.timestamp,
+        })
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          at: rec.timestamp,
+          event: { kind: "compact", trigger: "auto" },
+        })
+        continue
+      }
+      if (eventType === "thread_rolled_back") {
+        history.push({
+          historyId: `rollback-${history.length + 1}`,
+          kind: "rollback",
+          at: rec.timestamp,
+          summary: `${numOf(payload.num_turns)} turn(s) removed`,
+        })
+        continue
+      }
+      if (eventType === "collab_agent_spawn_begin" || eventType === "collab_agent_spawn_end") {
+        const taskId = asString(payload.call_id) || `collab-${tasks.length + 1}`
+        const existing = tasks.findIndex((task) => task.taskId === taskId)
+        const task: CanonicalSessionTask = {
+          taskId,
+          description: asString(payload.prompt) || undefined,
+          status:
+            eventType === "collab_agent_spawn_begin" ? "running" : lifecycleStatus(payload.status),
+          toolCallId: taskId,
+          childCanonicalSessionId: asString(payload.new_thread_id)
+            ? `canon:codex:${importedSessionId("codex", asString(payload.new_thread_id))}`
+            : undefined,
+          startedAt: existing >= 0 ? tasks[existing].startedAt : rec.timestamp,
+          endedAt:
+            eventType === "collab_agent_spawn_end" && lifecycleStatus(payload.status) !== "running"
+              ? rec.timestamp
+              : undefined,
+        }
+        if (existing >= 0) tasks[existing] = task
+        else tasks.push(task)
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          at: rec.timestamp,
+          event: {
+            kind: "subagent",
+            phase: eventType.endsWith("begin") ? "started" : "ended",
+            runtimeBinding: asString(payload.new_thread_id) || undefined,
+          },
+        })
+        continue
+      }
+      if (eventType === "warning" || eventType === "error") {
+        const text = eventText(payload)
+        if (text) {
+          messages.push(
+            buildMessage({
+              sessionId: sid(),
+              projectId,
+              index: msgCounter++,
+              role: "system",
+              parts: [textPart(text)],
+              createdAt: ms,
+            })
+          )
+        }
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          at: rec.timestamp,
+          event:
+            eventType === "warning"
+              ? { kind: "warning", code: "codex", message: text }
+              : { kind: "failure", code: "codex", message: text },
+        })
+        continue
+      }
+      if (eventType) {
+        recordedEvents.push({
+          eventId: `codex-event-${eventSequence}`,
+          sequence: eventSequence++,
+          at: rec.timestamp,
+          event: {
+            kind: "diagnostic",
+            runtime: "codex",
+            payload: { type: eventType, summary: diagnosticValue(payload) },
+          },
+        })
+        losses.push({
+          path: `event_msg.${eventType}`,
+          kind: "approximated",
+          detail: "Unknown Codex event retained as a bounded redacted diagnostic.",
+        })
       }
       continue
     }
@@ -238,17 +554,84 @@ export function parseCodexRollout(
           createdAt: ms,
         })
       )
+      history.push({
+        historyId: `compaction-${history.length + 1}`,
+        kind: "compaction",
+        at: rec.timestamp,
+        summary: note,
+      })
       continue
     }
-    if (rec.type !== "response_item") continue
+    if (rec.type !== "response_item") {
+      recordedEvents.push({
+        eventId: `codex-event-${eventSequence}`,
+        sequence: eventSequence++,
+        at: rec.timestamp,
+        event: {
+          kind: "diagnostic",
+          runtime: "codex",
+          payload: { type: rec.type || "unknown", summary: diagnosticValue(payload) },
+        },
+      })
+      losses.push({
+        path: `rollout.${rec.type || "unknown"}`,
+        kind: "approximated",
+        detail: "Unknown Codex rollout item retained as a bounded redacted diagnostic.",
+      })
+      continue
+    }
 
     const itemType = asString(payload.type)
-    if (itemType === "ghost_snapshot") continue
+    if (itemType === "ghost_snapshot") {
+      recordedEvents.push({
+        eventId: `codex-event-${eventSequence}`,
+        sequence: eventSequence++,
+        at: rec.timestamp,
+        event: {
+          kind: "diagnostic",
+          runtime: "codex",
+          payload: { type: itemType, summary: diagnosticValue(payload) },
+        },
+      })
+      losses.push({
+        path: "response_item.ghost_snapshot",
+        kind: "approximated",
+        detail: "Ghost snapshot retained as a bounded redacted diagnostic.",
+      })
+      continue
+    }
+
+    if (itemType === "agent_message") {
+      const text = messageText(payload)
+      if (!text) continue
+      const author = asString(payload.author) || sessionId || "agent"
+      const recipient = asString(payload.recipient) || undefined
+      interAgentMessages.push({
+        messageId: asString(payload.id) || `agent-message-${interAgentMessages.length + 1}`,
+        fromSessionId: author,
+        toSessionId: recipient,
+        text,
+        at: rec.timestamp,
+      })
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "system",
+          parts: [textPart(text)],
+          createdAt: ms,
+          metadata: { codexAgentMessage: { author, recipient } },
+        })
+      )
+      continue
+    }
 
     if (itemType === "message") {
       const role = asString(payload.role) === "assistant" ? "assistant" : "user"
       const text = messageText(payload)
-      if (!text) continue
+      const contentParts = messageParts(payload)
+      if (contentParts.length === 0) continue
       if (role === "user" && !firstUserText) firstUserText = text
       const phase = asString(payload.phase)
       const part =
@@ -262,14 +645,14 @@ export function parseCodexRollout(
                 source: "codex",
               },
             } as unknown as Part)
-          : textPart(text)
+          : undefined
       messages.push(
         buildMessage({
           sessionId: sid(),
           projectId,
           index: msgCounter++,
           role,
-          parts: [part],
+          parts: part ? [part] : contentParts,
           createdAt: ms,
         })
       )
@@ -291,6 +674,129 @@ export function parseCodexRollout(
         })
       )
       lastAssistantIndex = messages.length - 1
+      continue
+    }
+
+    if (itemType === "local_shell_call") {
+      const callId = asString(payload.call_id) || asString(payload.id) || `shell-${msgCounter}`
+      const part = toolPart({
+        name: "local_shell",
+        toolCallId: callId,
+        input:
+          payload.action && typeof payload.action === "object"
+            ? (payload.action as Record<string, unknown>)
+            : { action: payload.action },
+      }) as Part & Record<string, unknown>
+      part.status = asString(payload.status) || "running"
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "assistant",
+          parts: [part],
+          createdAt: ms,
+        })
+      )
+      lastAssistantIndex = messages.length - 1
+      toolIndex.set(callId, { m: lastAssistantIndex, p: 0 })
+      continue
+    }
+
+    if (itemType === "web_search_call") {
+      const callId = asString(payload.id) || `web-${msgCounter}`
+      const part = toolPart({
+        name: "web_search",
+        toolCallId: callId,
+        input:
+          payload.action && typeof payload.action === "object"
+            ? (payload.action as Record<string, unknown>)
+            : {},
+        ...(asString(payload.status) === "completed" ? { output: { status: "completed" } } : {}),
+      }) as Part & Record<string, unknown>
+      part.status = asString(payload.status) || "running"
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "assistant",
+          parts: [part],
+          createdAt: ms,
+        })
+      )
+      lastAssistantIndex = messages.length - 1
+      continue
+    }
+
+    if (itemType === "image_generation_call") {
+      const callId = asString(payload.id) || `image-${msgCounter}`
+      const result = asString(payload.result)
+      const part = toolPart({
+        name: "image_generation",
+        toolCallId: callId,
+        input: { revisedPrompt: asString(payload.revised_prompt) || undefined },
+        ...(result ? { output: { base64: result, status: asString(payload.status) } } : {}),
+        isError: asString(payload.status) === "failed",
+      }) as Part & Record<string, unknown>
+      part.status = asString(payload.status) || "completed"
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "assistant",
+          parts: [part],
+          createdAt: ms,
+        })
+      )
+      lastAssistantIndex = messages.length - 1
+      continue
+    }
+
+    if (itemType === "tool_search_call") {
+      const callId =
+        asString(payload.call_id) || asString(payload.id) || `tool-search-${msgCounter}`
+      const part = toolPart({
+        name: "tool_search",
+        toolCallId: callId,
+        input:
+          payload.arguments && typeof payload.arguments === "object"
+            ? (payload.arguments as Record<string, unknown>)
+            : { arguments: payload.arguments },
+      }) as Part & Record<string, unknown>
+      part.status = asString(payload.status) || "running"
+      messages.push(
+        buildMessage({
+          sessionId: sid(),
+          projectId,
+          index: msgCounter++,
+          role: "assistant",
+          parts: [part],
+          createdAt: ms,
+        })
+      )
+      lastAssistantIndex = messages.length - 1
+      toolIndex.set(callId, { m: lastAssistantIndex, p: 0 })
+      continue
+    }
+
+    if (itemType === "tool_search_output") {
+      const callId = asString(payload.call_id) || asString(payload.id)
+      const loc = callId ? toolIndex.get(callId) : undefined
+      const part = loc
+        ? (messages[loc.m]?.parts[loc.p] as Record<string, unknown> | undefined)
+        : undefined
+      if (loc && part) {
+        messages[loc.m].parts[loc.p] = {
+          ...part,
+          state: asString(payload.status) === "failed" ? "output-error" : "output-available",
+          ...(asString(payload.status) === "failed"
+            ? { errorText: JSON.stringify(payload.tools ?? []) }
+            : { output: payload.tools ?? [] }),
+          status: asString(payload.status),
+        } as unknown as Part
+      }
       continue
     }
 
@@ -331,7 +837,24 @@ export function parseCodexRollout(
           ? { errorText: typeof output === "string" ? output : JSON.stringify(output) }
           : { output }),
       } as unknown as Part
+      continue
     }
+
+    recordedEvents.push({
+      eventId: `codex-event-${eventSequence}`,
+      sequence: eventSequence++,
+      at: rec.timestamp,
+      event: {
+        kind: "diagnostic",
+        runtime: "codex",
+        payload: { type: itemType || "unknown", summary: diagnosticValue(payload) },
+      },
+    })
+    losses.push({
+      path: `response_item.${itemType || "unknown"}`,
+      kind: "approximated",
+      detail: "Unknown Codex response item retained as a bounded redacted diagnostic.",
+    })
   }
 
   const finalId = sid()
@@ -349,6 +872,17 @@ export function parseCodexRollout(
     messages,
     createdAt: createdAt || now,
     updatedAt: updatedAt || now,
+    sourceVersion,
+    relationKind,
+    parentNativeSessionId,
+    lifecycle,
+    goals,
+    plans,
+    tasks,
+    history,
+    interAgentMessages,
+    recordedEvents,
+    losses,
   }
 }
 
@@ -408,6 +942,8 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
   let createdAt = 0
   let updatedAt = 0
   let count = 0
+  let sourceVersion: string | undefined
+  let relationKind: CanonicalSessionRelationKind | undefined
   for (const line of content.split("\n")) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -428,6 +964,14 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
     if (rec.type === "session_meta") {
       sessionId = asString(payload.id) || asString(payload.session_id) || sessionId
       cwd = asString(payload.cwd) || cwd
+      sourceVersion = asString(payload.cli_version) || sourceVersion
+      if (asString(payload.forked_from_id)) relationKind = "fork"
+      else if (
+        asString(payload.parent_thread_id) ||
+        nestedString(payload.source, "parent_thread_id")
+      ) {
+        relationKind = "subagent"
+      }
       continue
     }
     if (rec.type === "compacted") {
@@ -457,6 +1001,8 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
     messageCount: count,
     updatedAt: updatedAt || createdAt || Date.now(),
     cwd,
+    sourceVersion: sourceVersion || codexSessionSource.verifiedVersion,
+    relationKind,
   }
 }
 
@@ -471,8 +1017,98 @@ function toConversation(parsed: ParsedSession, projectId?: string): ImportedConv
     createdAt: parsed.createdAt,
     updatedAt: parsed.updatedAt,
     seedMessages: parsed.messages,
+    kind: parsed.relationKind === "subagent" ? "subagent" : "direct",
+    suppressSeed: parsed.relationKind === "subagent",
   })
+  session.importRuntimeBinding = {
+    presetId: "codex",
+    nativeSessionId: parsed.originalSessionId,
+    cwd: parsed.cwd,
+    resumeMethod: "cli",
+    verifiedAt: codexSessionSource.verifiedAt,
+  }
+  if (parsed.relationKind && parsed.parentNativeSessionId) {
+    session.parentSessionId = importedSessionId("codex", parsed.parentNativeSessionId)
+    session.importRelation = {
+      kind: parsed.relationKind,
+      parentNativeSessionId: parsed.parentNativeSessionId,
+    }
+  }
+  if (parsed.lifecycle) session.importLifecycle = parsed.lifecycle
   return { session, messages: parsed.messages }
+}
+
+async function readRolloutContent(ref: SessionRef, input: SessionScanInput): Promise<string> {
+  if (input.pickedFiles?.length) {
+    return input.pickedFiles.find((file) => file.path === ref.locator)?.content ?? ""
+  }
+  return input.fs.readTextFile(ref.locator)
+}
+
+async function scanCodexSummaries(input: SessionScanInput): Promise<SessionSummary[]> {
+  return scanFileSummaries(
+    input,
+    codexSessionSource.scanRoots(input.home, input.roots),
+    (name) => name.toLowerCase().endsWith(".jsonl"),
+    summarizeCodexFile
+  )
+}
+
+async function parseCodexArtifacts(input: SessionScanInput): Promise<ParsedSession[]> {
+  const summaries = await scanCodexSummaries(input)
+  const parsed: ParsedSession[] = []
+  for (const summary of summaries) {
+    const content = await readRolloutContent(summary.ref, input)
+    parsed.push(parseCodexRollout(content, summary.ref.locator))
+  }
+  return parsed
+}
+
+function rootOf(selected: ParsedSession, byId: ReadonlyMap<string, ParsedSession>): ParsedSession {
+  let current = selected
+  const visited = new Set<string>()
+  while (current.parentNativeSessionId && !visited.has(current.originalSessionId)) {
+    visited.add(current.originalSessionId)
+    const parent = byId.get(current.parentNativeSessionId)
+    if (!parent) break
+    current = parent
+  }
+  return current
+}
+
+function conversationTree(
+  parsed: ParsedSession,
+  children: ReadonlyMap<string, ParsedSession[]>,
+  visited = new Set<string>()
+): ImportedConversation {
+  const conversation = toConversation(parsed)
+  if (visited.has(parsed.originalSessionId)) return conversation
+  visited.add(parsed.originalSessionId)
+  const nested = (children.get(parsed.originalSessionId) ?? []).map((child) =>
+    conversationTree(child, children, visited)
+  )
+  if (nested.length > 0) conversation.nested = nested
+  return conversation
+}
+
+function enrichCodexGraph(
+  graph: ReturnType<typeof buildImportedSessionGraph>,
+  parsedById: ReadonlyMap<string, ParsedSession>
+): void {
+  for (const node of graph.nodes) {
+    const nativeId = node.session.header.runtimeBinding?.nativeSessionId
+    const parsed = nativeId ? parsedById.get(nativeId) : undefined
+    if (!parsed) continue
+    if (parsed.goals.length > 0) node.session.goals = parsed.goals
+    if (parsed.plans.length > 0) node.session.plans = parsed.plans
+    if (parsed.tasks.length > 0) node.session.tasks = parsed.tasks
+    if (parsed.history.length > 0) node.session.history = parsed.history
+    if (parsed.interAgentMessages.length > 0) {
+      node.session.interAgentMessages = parsed.interAgentMessages
+    }
+    if (parsed.recordedEvents.length > 0) node.session.recordedEvents = parsed.recordedEvents
+    node.loss.losses.push(...parsed.losses)
+  }
 }
 
 import { codexCodec } from "@/lib/session-import/codecs/codex-codec"
@@ -482,6 +1118,8 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
   id: "codex",
   displayName: "Codex CLI",
   labelKey: "codex",
+  verifiedVersion: "0.150.1",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: ACCEPTED,
 
   // `$CODEX_HOME` relocates the whole tree; `roots` carries it (the renderer
@@ -514,21 +1152,46 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
   summarizeFile: summarizeCodexFile,
 
   async listSessions(input: SessionScanInput) {
-    return scanFileSummaries(
-      input,
-      this.scanRoots(input.home, input.roots),
-      (n) => n.toLowerCase().endsWith(".jsonl"),
-      summarizeCodexFile
+    const summaries = await scanCodexSummaries(input)
+    const parsed = await Promise.all(
+      summaries.map(async (summary) =>
+        parseCodexRollout(await readRolloutContent(summary.ref, input), summary.ref.locator)
+      )
+    )
+    const nativeIds = new Set(parsed.map((session) => session.originalSessionId))
+    return summaries.filter(
+      (_, index) =>
+        !parsed[index].parentNativeSessionId || !nativeIds.has(parsed[index].parentNativeSessionId!)
     )
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
-    let content: string
-    if (input.pickedFiles?.length) {
-      content = input.pickedFiles.find((f) => f.path === ref.locator)?.content ?? ""
-    } else {
-      content = await input.fs.readTextFile(ref.locator)
-    }
+    const content = await readRolloutContent(ref, input)
     return toConversation(parseCodexRollout(content, ref.locator))
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    const selected = parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
+    const artifacts = await parseCodexArtifacts(input)
+    if (!artifacts.some((item) => item.originalSessionId === selected.originalSessionId)) {
+      artifacts.push(selected)
+    }
+    const parsedById = new Map(artifacts.map((item) => [item.originalSessionId, item]))
+    const root = rootOf(selected, parsedById)
+    const children = new Map<string, ParsedSession[]>()
+    for (const item of artifacts) {
+      if (!item.parentNativeSessionId || !parsedById.has(item.parentNativeSessionId)) continue
+      const siblings = children.get(item.parentNativeSessionId) ?? []
+      siblings.push(item)
+      children.set(item.parentNativeSessionId, siblings)
+    }
+    const graph = buildImportedSessionGraph(conversationTree(root, children), {
+      sourceRuntime: this.id,
+      sourceVersion: root.sourceVersion || selected.sourceVersion || this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: this.codec?.importFidelity ?? "structured",
+      codec: this.codec,
+    })
+    enrichCodexGraph(graph, parsedById)
+    return graph
   },
 }

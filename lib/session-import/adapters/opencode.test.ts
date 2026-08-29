@@ -29,14 +29,15 @@ const SESSION: OpencodeSession = {
 }
 
 describe("opencodeToConversation", () => {
-  it("maps normalized parts to canonical parts and drops structural markers", () => {
+  it("maps normalized parts and keeps structural step markers", () => {
     const conv = opencodeToConversation(SESSION)
     expect(conv.session.id).toBe("import:opencode:oc-1")
     expect(conv.session.title).toBe("Refactor module")
     expect(conv.session.workingDir).toBe("/repo")
     expect(conv.messages).toHaveLength(2)
     const asstParts = conv.messages[1].parts as Array<Record<string, unknown>>
-    expect(asstParts.map((p) => p.type)).toEqual(["reasoning", "tool-edit"])
+    expect(asstParts.map((p) => p.type)).toEqual(["reasoning", "tool-edit", "text"])
+    expect(asstParts[2].text).toBe("[step started]")
     expect(asstParts[1].output).toBe("ok")
   })
 
@@ -108,7 +109,7 @@ describe("opencodeToConversation", () => {
     ])
   })
 
-  it("surfaces patch/snapshot markers (previously dropped) but still drops step markers", () => {
+  it("surfaces patch, snapshot, and step markers instead of dropping them", () => {
     const conv = opencodeToConversation({
       ...SESSION,
       messages: [
@@ -120,7 +121,11 @@ describe("opencodeToConversation", () => {
       ],
     })
     const parts = conv.messages[0].parts as Array<Record<string, unknown>>
-    expect(parts.map((p) => p.text)).toEqual(["[patch applied: a.ts]", "[snapshot]"])
+    expect(parts.map((p) => p.text)).toEqual([
+      "[patch applied: a.ts]",
+      "[snapshot]",
+      "[step finished]",
+    ])
   })
 
   it("marks an errored tool part", () => {
@@ -352,10 +357,15 @@ describe("opencodeSessionSource", () => {
     const conv = await opencodeSessionSource.parseSession(list[0].ref, input)
 
     expect(list.map((s) => s.ref.originalSessionId)).toEqual(["oc-1"])
-    expect(conv.nested?.map((nested) => nested.session.id)).toEqual([
-      "import:opencode:oc-child",
+    expect(conv.nested?.map((nested) => nested.session.id)).toEqual(["import:opencode:oc-child"])
+    expect(conv.nested?.[0].nested?.map((nested) => nested.session.id)).toEqual([
       "import:opencode:oc-grandchild",
     ])
+    expect(conv.nested?.[0].nested?.[0].session).toMatchObject({
+      parentSessionId: "import:opencode:oc-child",
+      kind: "subagent",
+      importRelation: { kind: "subagent", parentNativeSessionId: "oc-child" },
+    })
   })
 
   it("uses the newest child timestamp for the parent summary", async () => {
@@ -424,5 +434,58 @@ describe("opencodeSessionSource", () => {
     }
     const list = await opencodeSessionSource.listSessions(input)
     expect(list[0].ref.originalSessionId).toBe("oc-3")
+    expect(opencodeSessionSource).toMatchObject({
+      verifiedVersion: "1.18.25",
+      verifiedAt: "2026-08-29",
+      parseGraph: expect.any(Function),
+    })
+    const graph = await opencodeSessionSource.parseGraph!(list[0].ref, input)
+    expect(graph.nodes[0].session.header.source?.version).toBe("1.18.25")
+  })
+
+  it("preserves background jobs and structural lifecycle in canonical state", async () => {
+    const rich: OpencodeSession = {
+      ...SESSION,
+      jobs: [
+        {
+          id: "job-1",
+          status: "failed",
+          description: "index repository",
+          dependencies: ["job-0"],
+          error: "process exited",
+        },
+      ],
+      messages: [
+        {
+          role: "assistant",
+          createdAt: 1,
+          parts: [
+            { id: "compact-1", type: "compaction", text: "older turns" },
+            { id: "snapshot-1", type: "snapshot", filename: "tree.json" },
+          ],
+        },
+      ],
+    }
+    __setOpencodeReaderForTesting(async () => [rich])
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    const graph = await opencodeSessionSource.parseGraph!(
+      (await opencodeSessionSource.listSessions(input))[0].ref,
+      input
+    )
+    expect(graph.nodes[0].session.tasks?.[0]).toMatchObject({
+      taskId: "job-1",
+      status: "failed",
+      background: true,
+      dependencies: ["job-0"],
+      error: "process exited",
+    })
+    expect(graph.nodes[0].session.history?.[0]).toMatchObject({
+      historyId: "compact-1",
+      kind: "compaction",
+    })
+    expect(graph.nodes[0].session.recordedEvents?.[0].event).toMatchObject({
+      kind: "diagnostic",
+      payload: { type: "snapshot", filename: "tree.json" },
+    })
   })
 })

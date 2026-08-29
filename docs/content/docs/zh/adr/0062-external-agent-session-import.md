@@ -1,9 +1,9 @@
 ---
-title: "ADR-0062 — 外部智能体会话历史导入（Claude Code · Codex · OpenCode + 插件）"
-description: "一种可扩展的机制，将外部编码代理会话历史从磁盘导入Cognia作为连续对话。提供第一方适配器，支持Claude Code、 Codex 和 OpenCode，并开放插件扩展点，方便添加新代理而无需更换主机。记录磁盘格式研究和适配器注册表设计。"
+title: "ADR-0062 — 外部 Agent 会话历史图导入"
+description: "有损可见地导入 11 种本地编程 Agent 历史，保留关系、生命周期、后台任务、镜像同步、插件兼容与能力门控的原生恢复。"
 ---
 
-# ADR-0062 — 外部智能体会话历史导入（Claude Code · Codex · OpenCode + 插件）
+# ADR-0062 — 外部 Agent 会话历史图导入
 
 **状态**：已接受（2026-07-04）**作者**：Max Qian + Claude Opus 4.8 **构建内容**：ADR-0048（Codex支持）、ADR-0051（外部代理适配器插件类型——叠加模式在此镜像）、ADR-0009/0037规范`ChatSession`/及`StoredMessage`模型、聊天导出导入器（`lib/data/import-registry.ts`）。
 
@@ -49,9 +49,27 @@ interface AgentSessionSourceAdapter {
 - Claude Code、Codex和OpenCode历史作为一流、可连续的对话导入，由现有流水线渲染，无需更改渲染器。
 - 添加新代理是一个静态适配器（或一个调用`ctx.import.registerSessionSource`的插件）——注册表、规范目标、持久化汇、FS和UI共享。
 - 续写通过标准`branchSeed`路径，因此在第一次发送时有**PII编辑门禁**。
-- 增量/监听重新导入、声明式 `sessionImporters` 清单桥接以及子智能体树重建现已交付。仍不在范围内的是 Cursor/Cline/Gemini-CLI 第一方适配器，以及无法映射到 Cognia 规范模型的来源私有运行时状态。
+- 增量/监听重导入、声明式 `sessionImporters` manifest 桥接、图重建与 11 个 first-party source 已交付。没有公开表达的来源私有运行态会记录为明确 loss，而不是虚构 canonical 字段。
 - ADR-0107 将本会话导入器与设置、技能、子智能体、MCP、命令和记忆组合到统一迁移向导中；本注册表仍是会话导入的权威实现。
 
 ## 验证
 
 Jest（`lib/session-import`、`hooks/session-import`、`components/session-import`、`lib/plugin/api/import-api`）绿色;Rust `cargo test --lib session_import` 3/3;排版检查 / ESLint / `lint:i18n` 对等性清洁;六个项目审计员（测试间隙、I18N、静态导出、Tauri-Rust、PII-门禁、布线）都清理干净——布线审计员确认注册表、`ctx` API、对话和Rust 命令均可运行时联系。
+
+## 2026-08-29 修订 —— canonical graph 与原生恢复
+
+`CanonicalSession` 继续使用 version 1，并增加可选的来源溯源、runtime binding、lineage、lifecycle、
+更完整的 turn/tool/usage、task、plan/goal、checkpoint、历史操作与 inter-agent message。未知上游事件
+会保存为有界、脱敏 diagnostic，并生成精确 loss entry；适配器可以忽略未知字段，但不能静默丢弃未知事件。
+
+所有内建来源都实现 `parseGraph`。旧插件的 `parseSession` 仍可读取，会被包装为扁平且明确降级的图。
+registry 派生的来源集合为 Claude Code、Codex、OpenCode、Gemini CLI、Continue、Aider、Pi、
+Cursor、Cline、Copilot CLI 与 Qwen Code。
+
+重导入 digest 覆盖消息内容、parts、tool state、关系与 lifecycle。`source-mirror` 跟随 rewind 与删除，
+tombstone 消失的 child，并保留本地装饰；在 Cognia 续聊后转为 `cognia-owned`。原生恢复要求匹配
+preset 已存在、runtime 已连接且可执行、`session/resume` 经实时验证、cwd 存在且握手成功；只有之后才
+转为 `native-bound`，执行时复用已验证的 native id。系统不会自动创建 preset、凭据或命令。
+
+Cursor 云端/后台历史，以及 Kiro、Droid、DeepSeek Harness 等没有稳定公开格式的来源仍不在导入范围；
+其 runtime preset 会单独出现在自动生成的 support matrix 中。

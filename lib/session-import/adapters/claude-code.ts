@@ -16,7 +16,9 @@
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
+import { walkFiles } from "../fs"
 import { scanFileSummaries } from "../scan"
+import { buildImportedSessionGraph } from "../graph"
 import { importedUsageMetadata } from "../usage"
 import {
   extractSidechains,
@@ -30,6 +32,7 @@ import {
   buildSession,
   deriveTitle,
   filePart,
+  importedMessageId,
   importedSessionId,
   reasoningPart,
   textPart,
@@ -42,6 +45,13 @@ import type {
   SessionScanInput,
   SessionSummary,
 } from "../types"
+import type {
+  CanonicalRecordedEvent,
+  CanonicalSessionLifecycleStatus,
+  CanonicalSessionTask,
+  SessionLossEntry,
+} from "@cognia/agent-config-types/canonical-session"
+import { redactText } from "@cognia/redact"
 
 type Part = StoredMessage["parts"][number]
 
@@ -58,6 +68,8 @@ export interface ClaudeLine {
   uuid?: string
   parentUuid?: string | null
   sessionId?: string
+  /** Present in the independent transcript written for modern subagents. */
+  agentId?: string
   cwd?: string
   timestamp?: string
   isSidechain?: boolean
@@ -121,6 +133,9 @@ interface ParsedSession {
   nestedConversations: ImportedConversation[]
   createdAt: number
   updatedAt: number
+  agentId?: string
+  recordedEvents: CanonicalRecordedEvent[]
+  losses: SessionLossEntry[]
 }
 
 const ACCEPTED = [".jsonl"]
@@ -139,14 +154,41 @@ export function parseClaudeTranscript(
 ): ParsedSession {
   const lines = content.split("\n")
   const records: ClaudeLine[] = []
-  for (const line of lines) {
+  const recordedEvents: CanonicalRecordedEvent[] = []
+  const losses: SessionLossEntry[] = []
+  let eventSequence = 0
+  for (const [lineIndex, line] of lines.entries()) {
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
       records.push(JSON.parse(trimmed) as ClaudeLine)
     } catch {
-      // Skip corrupt lines (mirrors cli/src/agent/transcript.ts).
+      losses.push({
+        path: `jsonl[${lineIndex}]`,
+        kind: "dropped",
+        detail: "Unparseable Claude Code transcript record.",
+      })
     }
+  }
+
+  for (const [recordIndex, rec] of records.entries()) {
+    if (["user", "assistant", "system", "summary"].includes(rec.type ?? "")) continue
+    const redacted = redactText(JSON.stringify(rec)).redacted.slice(0, 2_000)
+    recordedEvents.push({
+      eventId: `claude-event-${eventSequence}`,
+      sequence: eventSequence++,
+      at: rec.timestamp,
+      event: {
+        kind: "diagnostic",
+        runtime: "claude-code",
+        payload: { type: rec.type ?? "unknown", summary: redacted },
+      },
+    })
+    losses.push({
+      path: `records[${recordIndex}].${rec.type ?? "unknown"}`,
+      kind: "approximated",
+      detail: "Preserved as a bounded redacted diagnostic event.",
+    })
   }
 
   // Resolve the DAG: keep only the active-leaf chain of the main thread
@@ -159,6 +201,7 @@ export function parseClaudeTranscript(
   // Metadata scan over ALL records — sessionId/cwd/model can appear on any
   // record, and updatedAt should reflect the latest activity (incl. sidechains).
   let sessionId = ""
+  let agentId = ""
   let cwd: string | undefined
   let scanModel: string | undefined
   let summary = ""
@@ -166,6 +209,7 @@ export function parseClaudeTranscript(
   let updatedAt = 0
   for (const rec of records) {
     if (rec.sessionId && !sessionId) sessionId = rec.sessionId
+    if (rec.agentId && !agentId) agentId = rec.agentId
     if (rec.cwd && !cwd) cwd = rec.cwd
     if (rec.message?.model && !scanModel) scanModel = rec.message.model
     if (rec.type === "summary" && typeof rec.summary === "string" && !summary) {
@@ -176,7 +220,8 @@ export function parseClaudeTranscript(
     updatedAt = Math.max(updatedAt, ms)
   }
 
-  const finalId = importedSessionId("claude-code", sessionId || locatorId)
+  const nativeSessionId = agentId || sessionId || locatorId
+  const finalId = importedSessionId("claude-code", nativeSessionId)
   const built = recordsToMessages(mainLinear, finalId, projectId)
 
   // Reconstruct subagents (T2a-sub): each sidechain becomes a `SubagentPart`
@@ -223,13 +268,23 @@ export function parseClaudeTranscript(
       updatedAt: completedAt,
       seedMessages: [],
     })
+    nestedSession.parentSessionId = finalId
+    nestedSession.importRelation = {
+      kind: "subagent",
+      parentToolCallId: group.spawnParentUuid ?? undefined,
+    }
+    nestedSession.importRuntimeBinding = {
+      presetId: "claude-code",
+      nativeSessionId: subagentId,
+      cwd,
+    }
     nestedConversations.push({ session: nestedSession, messages: nested.messages })
   }
 
   const title = deriveTitle(built.firstUserText || summary, "Claude Code session")
   const now = Date.now()
   return {
-    originalSessionId: sessionId || locatorId,
+    originalSessionId: nativeSessionId,
     cwd,
     model: built.model ?? scanModel,
     title,
@@ -238,6 +293,9 @@ export function parseClaudeTranscript(
     nestedConversations,
     createdAt: createdAt || now,
     updatedAt: updatedAt || now,
+    agentId: agentId || undefined,
+    recordedEvents,
+    losses,
   }
 }
 
@@ -478,6 +536,7 @@ function firstText(content: unknown): string {
  */
 export function summarizeClaudeFile(content: string, locator: string): SessionSummary | null {
   let sessionId = ""
+  let agentId = ""
   let cwd: string | undefined
   let summary = ""
   let firstUserText = ""
@@ -494,6 +553,7 @@ export function summarizeClaudeFile(content: string, locator: string): SessionSu
       continue
     }
     if (rec.sessionId && !sessionId) sessionId = rec.sessionId
+    if (rec.agentId && !agentId) agentId = rec.agentId
     if (rec.cwd && !cwd) cwd = rec.cwd
     if (rec.type === "summary" && typeof rec.summary === "string" && !summary) summary = rec.summary
     if (rec.timestamp) {
@@ -509,14 +569,31 @@ export function summarizeClaudeFile(content: string, locator: string): SessionSu
     }
   }
   if (count === 0) return null
+  const independentSubagent = isIndependentSubagentPath(locator)
   return {
-    ref: { sourceId: "claude-code", originalSessionId: sessionId || locator, locator },
+    ref: {
+      sourceId: "claude-code",
+      originalSessionId:
+        agentId || (independentSubagent ? fileStem(locator) : undefined) || sessionId || locator,
+      locator,
+    },
     title: deriveTitle(firstUserText || summary, "Claude Code session"),
     sourceId: "claude-code",
     messageCount: count,
     updatedAt: updatedAt || createdAt || Date.now(),
     cwd,
+    relationKind: independentSubagent ? "subagent" : undefined,
+    sourceVersion: claudeCodeSessionSource.verifiedVersion,
   }
+}
+
+function isIndependentSubagentPath(locator: string): boolean {
+  return locator.replace(/\\/g, "/").includes("/subagents/")
+}
+
+function fileStem(locator: string): string {
+  const name = locator.replace(/\\/g, "/").split("/").pop() ?? locator
+  return name.replace(/\.jsonl$/i, "")
 }
 
 function toConversation(parsed: ParsedSession, projectId?: string): ImportedConversation {
@@ -531,11 +608,226 @@ function toConversation(parsed: ParsedSession, projectId?: string): ImportedConv
     updatedAt: parsed.updatedAt,
     seedMessages: parsed.messages,
   })
+  session.importRuntimeBinding = {
+    presetId: "claude-code",
+    nativeSessionId: parsed.originalSessionId,
+    cwd: parsed.cwd,
+  }
   return {
     session,
     messages: parsed.messages,
     ...(parsed.nestedConversations.length > 0 ? { nested: parsed.nestedConversations } : {}),
   }
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined
+}
+
+function taskStatus(value: unknown): CanonicalSessionLifecycleStatus {
+  const status = stringValue(value)?.toLowerCase()
+  if (status === "completed" || status === "done") return "completed"
+  if (status === "failed" || status === "error") return "failed"
+  if (status === "cancelled" || status === "canceled") return "cancelled"
+  if (status === "pending") return "pending"
+  if (status === "waiting" || status === "blocked") return "waiting"
+  return "running"
+}
+
+function tasksFromTranscript(conversation: ImportedConversation): CanonicalSessionTask[] {
+  const tasks = new Map<string, CanonicalSessionTask>()
+  for (const message of conversation.messages) {
+    for (const rawPart of message.parts as Array<Record<string, unknown>>) {
+      if (!rawPart.type?.toString().startsWith("tool-")) continue
+      const toolName = rawPart.type.toString().slice(5)
+      if (!["Task", "TaskCreate", "TaskUpdate", "TaskOutput"].includes(toolName)) continue
+      const input = record(rawPart.input) ?? {}
+      const taskId =
+        stringValue(input.task_id) ||
+        stringValue(input.taskId) ||
+        stringValue(input.agent_id) ||
+        stringValue(rawPart.toolCallId)
+      if (!taskId) continue
+      const existing = tasks.get(taskId)
+      const background =
+        input.run_in_background === true || input.background === true || existing?.background
+      tasks.set(taskId, {
+        taskId,
+        description:
+          stringValue(input.description) || stringValue(input.subject) || existing?.description,
+        summary: stringValue(input.activeForm) || existing?.summary,
+        status:
+          rawPart.state === "output-error"
+            ? "failed"
+            : taskStatus(
+                input.status ?? (rawPart.state === "output-available" ? "completed" : "running")
+              ),
+        ...(background ? { background: true } : {}),
+        toolCallId: stringValue(rawPart.toolCallId) || existing?.toolCallId,
+        parentTaskId: stringValue(input.parent_task_id) || existing?.parentTaskId,
+        dependencies: Array.isArray(input.blockedBy)
+          ? input.blockedBy.filter((item): item is string => typeof item === "string")
+          : existing?.dependencies,
+      })
+    }
+  }
+  return [...tasks.values()]
+}
+
+interface ClaudeTeamSnapshot {
+  members: Array<Record<string, unknown>>
+  tasks: CanonicalSessionTask[]
+  taskOwnerById: Map<string, string>
+}
+
+async function readJsonFiles(
+  input: SessionScanInput,
+  root: string,
+  accept: (path: string) => boolean
+): Promise<Array<{ path: string; value: Record<string, unknown> }>> {
+  const values: Array<{ path: string; value: Record<string, unknown> }> = []
+  const picked = input.pickedFiles?.filter((file) => accept(file.path))
+  if (picked?.length) {
+    for (const file of picked) {
+      try {
+        const value = record(JSON.parse(file.content))
+        if (value) values.push({ path: file.path, value })
+      } catch {
+        // The graph fidelity report covers malformed optional artifacts through
+        // the missing structured state; the parent transcript remains usable.
+      }
+    }
+    return values
+  }
+  if (!(await input.fs.exists(root))) return values
+  const files = await walkFiles(input.fs, root, (name) => accept(name))
+  for (const path of files) {
+    try {
+      const value = record(JSON.parse(await input.fs.readTextFile(path)))
+      if (value) values.push({ path, value })
+    } catch {
+      // One team/task artifact must not sink the transcript import.
+    }
+  }
+  return values
+}
+
+async function loadClaudeTeamSnapshot(
+  input: SessionScanInput,
+  nativeSessionId: string,
+  cwd?: string
+): Promise<ClaudeTeamSnapshot> {
+  const base = input.roots?.claudeConfigDir || (input.home ? joinPath(input.home, ".claude") : "")
+  if (!base && !input.pickedFiles?.length) {
+    return { members: [], tasks: [], taskOwnerById: new Map() }
+  }
+  const configs = await readJsonFiles(
+    input,
+    joinPath(base, "teams"),
+    (path) => path.replace(/\\/g, "/").includes("/teams/") && path.endsWith("config.json")
+  )
+  const matching = configs.filter(({ value }) => {
+    if (stringValue(value.leadSessionId) === nativeSessionId) return true
+    if (cwd && stringValue(value.cwd) === cwd) return true
+    return Array.isArray(value.members)
+      ? value.members.some((member) => stringValue(record(member)?.sessionId) === nativeSessionId)
+      : false
+  })
+  if (matching.length === 0) return { members: [], tasks: [], taskOwnerById: new Map() }
+
+  const members = matching.flatMap(({ value }) =>
+    Array.isArray(value.members) ? value.members.map(record).filter(Boolean) : []
+  ) as Array<Record<string, unknown>>
+  const teamNames = new Set(
+    matching
+      .map(({ path, value }) => {
+        const parts = path.replace(/\\/g, "/").split("/")
+        return stringValue(value.name) || parts.at(-2)
+      })
+      .filter((name): name is string => Boolean(name))
+  )
+  const taskFiles = await readJsonFiles(
+    input,
+    joinPath(base, "tasks"),
+    (path) =>
+      path.toLowerCase().endsWith(".json") &&
+      [...teamNames].some((team) => path.replace(/\\/g, "/").includes(`/tasks/${team}/`))
+  )
+  const taskOwnerById = new Map<string, string>()
+  const tasks = taskFiles.map(({ value, path }) => {
+    const taskId = stringValue(value.id) || fileStem(path.replace(/\.json$/i, ".jsonl"))
+    const owner = stringValue(value.owner)
+    if (owner) taskOwnerById.set(taskId, owner)
+    return {
+      taskId,
+      description: stringValue(value.description) || stringValue(value.subject),
+      summary: stringValue(value.activeForm),
+      status: taskStatus(value.status),
+      background: value.background === true || undefined,
+      parentTaskId: stringValue(value.parentTaskId),
+      dependencies: Array.isArray(value.blockedBy)
+        ? value.blockedBy.filter((item): item is string => typeof item === "string")
+        : undefined,
+    }
+  })
+  return { members, tasks, taskOwnerById }
+}
+
+function addTeamMembers(
+  root: ImportedConversation,
+  snapshot: ClaudeTeamSnapshot,
+  parsed: ParsedSession
+): void {
+  const nested = root.nested ?? []
+  const existingNativeIds = new Set(
+    nested.map((child) => child.session.importRuntimeBinding?.nativeSessionId).filter(Boolean)
+  )
+  for (const member of snapshot.members) {
+    const nativeId =
+      stringValue(member.sessionId) || stringValue(member.agentId) || stringValue(member.name)
+    if (!nativeId || nativeId === parsed.originalSessionId || existingNativeIds.has(nativeId))
+      continue
+    const memberName = stringValue(member.name)
+    const memberAgentId = stringValue(member.agentId)
+    const ownedTask = snapshot.tasks.find((task) => {
+      const owner = snapshot.taskOwnerById.get(task.taskId)
+      return owner === memberName || owner === memberAgentId
+    })
+    const id = importedSessionId("claude-code", nativeId)
+    const session = buildSession({
+      id,
+      title: memberName || nativeId,
+      kind: "subagent",
+      suppressSeed: true,
+      workingDir: stringValue(member.cwd) || parsed.cwd,
+      createdAt: parsed.createdAt,
+      updatedAt: parsed.updatedAt,
+      seedMessages: [],
+    })
+    session.parentSessionId = root.session.id
+    session.importRelation = {
+      kind: "team-member",
+      parentNativeSessionId: parsed.originalSessionId,
+      ...(ownedTask ? { taskId: ownedTask.taskId } : {}),
+    }
+    session.importLifecycle = {
+      status: ownedTask?.status ?? taskStatus(member.status),
+      background: true,
+    }
+    session.importRuntimeBinding = {
+      presetId: "claude-code",
+      nativeSessionId: nativeId,
+      cwd: stringValue(member.cwd) || parsed.cwd,
+    }
+    nested.push({ session, messages: [] })
+  }
+  if (nested.length > 0) root.nested = nested
 }
 
 import { claudeCodeCodec } from "@/lib/session-import/codecs/claude-code-codec"
@@ -545,6 +837,8 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   id: "claude-code",
   displayName: "Claude Code",
   labelKey: "claude-code",
+  verifiedVersion: "2.1.251",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: ACCEPTED,
 
   // `$CLAUDE_CONFIG_DIR` relocates the whole tree; `roots` carries it (the
@@ -575,12 +869,13 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   summarizeFile: summarizeClaudeFile,
 
   async listSessions(input: SessionScanInput) {
-    return scanFileSummaries(
+    const summaries = await scanFileSummaries(
       input,
       this.scanRoots(input.home, input.roots),
       (n) => n.toLowerCase().endsWith(".jsonl"),
       summarizeClaudeFile
     )
+    return summaries.filter((summary) => summary.relationKind !== "subagent")
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
@@ -592,6 +887,120 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
       content = await input.fs.readTextFile(ref.locator)
     }
     const parsed = parseClaudeTranscript(content, ref.locator)
-    return toConversation(parsed)
+    const conversation = toConversation(parsed)
+    const childArtifacts: Array<{ content: string; locator: string }> = []
+    const addChildArtifacts = (): ImportedConversation[] => {
+      const grouped = new Map<string, ParsedSession[]>()
+      for (const artifact of childArtifacts) {
+        const child = parseClaudeTranscript(artifact.content, artifact.locator)
+        const existing = grouped.get(child.originalSessionId)
+        if (existing) existing.push(child)
+        else grouped.set(child.originalSessionId, [child])
+      }
+      return [...grouped.values()].flatMap((segments) => {
+        const ordered = segments.toSorted((a, b) => a.createdAt - b.createdAt)
+        const first = ordered[0]
+        if (!first) return []
+        const nestedId = importedSessionId("claude-code", first.originalSessionId)
+        const messages = ordered
+          .flatMap((segment) => segment.messages)
+          .map((message, index) => ({
+            ...message,
+            id: importedMessageId(nestedId, index),
+            sessionId: nestedId,
+          }))
+        if (messages.length === 0) return []
+        const nested = toConversation({
+          ...first,
+          messages,
+          nestedConversations: ordered.flatMap((segment) => segment.nestedConversations),
+          updatedAt: Math.max(...ordered.map((segment) => segment.updatedAt)),
+        })
+        nested.session.kind = "subagent"
+        nested.session.branchSeed = undefined
+        nested.session.parentSessionId = conversation.session.id
+        nested.session.importRelation = {
+          kind: "subagent",
+          parentNativeSessionId: parsed.originalSessionId,
+        }
+        nested.session.importRuntimeBinding = {
+          presetId: "claude-code",
+          nativeSessionId: first.originalSessionId,
+          cwd: first.cwd,
+        }
+        return [nested]
+      })
+    }
+
+    if (input.pickedFiles?.length) {
+      const childPrefix = `${ref.locator.replace(/\.jsonl$/i, "")}/subagents/`.replace(/\\/g, "/")
+      for (const file of input.pickedFiles) {
+        if (file.path.replace(/\\/g, "/").startsWith(childPrefix)) {
+          childArtifacts.push({ content: file.content, locator: file.path })
+        }
+      }
+    } else {
+      const childDir = joinPath(ref.locator.replace(/\.jsonl$/i, ""), "subagents")
+      if (await input.fs.exists(childDir)) {
+        const files = await walkFiles(input.fs, childDir, (name) =>
+          name.toLowerCase().endsWith(".jsonl")
+        )
+        for (const file of files) {
+          try {
+            childArtifacts.push({ content: await input.fs.readTextFile(file), locator: file })
+          } catch {
+            // Preserve the parent and other children if one transcript is corrupt.
+          }
+        }
+      }
+    }
+
+    const independent = addChildArtifacts()
+    if (independent.length > 0) {
+      conversation.nested = [...(conversation.nested ?? []), ...independent]
+    }
+    return conversation
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    const conversation = await this.parseSession(ref, input)
+    const content = input.pickedFiles?.length
+      ? (input.pickedFiles.find((file) => file.path === ref.locator)?.content ?? "")
+      : await input.fs.readTextFile(ref.locator)
+    const parsed = parseClaudeTranscript(content, ref.locator)
+    const snapshot = await loadClaudeTeamSnapshot(input, parsed.originalSessionId, parsed.cwd)
+    addTeamMembers(conversation, snapshot, parsed)
+    const transcriptTasks = tasksFromTranscript(conversation)
+    const tasks = new Map(
+      [...transcriptTasks, ...snapshot.tasks].map((task) => [task.taskId, task])
+    )
+    conversation.session.importCanonicalState = {
+      ...(conversation.session.importCanonicalState ?? {}),
+      ...(tasks.size > 0 ? { tasks: [...tasks.values()] } : {}),
+    }
+    for (const child of conversation.nested ?? []) {
+      const nativeId = child.session.importRuntimeBinding?.nativeSessionId
+      const task = nativeId ? tasks.get(nativeId) : undefined
+      if (task?.background) {
+        child.session.importRelation = {
+          ...(child.session.importRelation ?? { kind: "background" }),
+          kind: "background",
+          taskId: task.taskId,
+        }
+        child.session.importLifecycle = { status: task.status, background: true }
+      }
+    }
+    const graph = buildImportedSessionGraph(conversation, {
+      sourceRuntime: this.id,
+      sourceVersion: this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: this.codec?.importFidelity ?? "structured",
+      codec: this.codec,
+    })
+    const root = graph.nodes[0]
+    if (root) {
+      if (parsed.recordedEvents.length > 0) root.session.recordedEvents = parsed.recordedEvents
+      root.loss.losses.push(...parsed.losses)
+    }
+    return graph
   },
 }

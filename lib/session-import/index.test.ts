@@ -105,7 +105,11 @@ describe("session-import runner", () => {
 
     const counts = await importSessions(refs, input, "proj-9")
     expect(applyImportedMock).toHaveBeenCalledTimes(1)
-    expect(counts).toEqual({ sessions: 1, messages: 3, lossBySource: {} })
+    expect(counts).toMatchObject({ sessions: 1, messages: 3 })
+    expect(counts.lossBySource["p:plug"]).toMatchObject({
+      fidelity: "summary-only",
+      losses: [expect.objectContaining({ path: "graph.relationships", kind: "summarized" })],
+    })
   })
 
   it("scanAllSources collects per-source failures instead of swallowing them", async () => {
@@ -204,6 +208,154 @@ describe("session-import runner", () => {
     expect(parsed[1].messages[0].projectId).toBe("proj-Z")
   })
 
+  it("prefers a rich graph parse and projects every related session without legacy flattening", async () => {
+    const { conversationToCanonical } = jest.requireActual("./codec-types")
+    const rootConversation = {
+      session: { id: "root", title: "root", createdAt: 1, updatedAt: 2 } as never,
+      messages: [
+        { id: "root-m", sessionId: "root", role: "user", parts: [], createdAt: 1 } as never,
+      ],
+    }
+    const childConversation = {
+      session: {
+        id: "child",
+        title: "child",
+        kind: "subagent",
+        parentSessionId: "root",
+        createdAt: 1,
+        updatedAt: 2,
+      } as never,
+      messages: [
+        { id: "child-m", sessionId: "child", role: "assistant", parts: [], createdAt: 2 } as never,
+      ],
+    }
+    const rootCanonical = conversationToCanonical(rootConversation, {
+      sourceRuntime: "graph",
+      importFidelity: "structured",
+    })
+    const childCanonical = conversationToCanonical(childConversation, {
+      sourceRuntime: "graph",
+      importFidelity: "structured",
+    })
+    childCanonical.session.header.lineage = {
+      kind: "subagent",
+      parentCanonicalSessionId: rootCanonical.session.header.canonicalSessionId,
+      parentNativeSessionId: "root",
+    }
+
+    const graphSource: AgentSessionSourceAdapter = {
+      ...source("graph", 1),
+      parseSession: async () => {
+        throw new Error("legacy parser must not run")
+      },
+      parseGraph: async () => ({
+        rootCanonicalSessionId: rootCanonical.session.header.canonicalSessionId,
+        sourceRevision: "sha256:revision",
+        sourceVersion: "1.2.3",
+        nodes: [
+          { conversation: rootConversation, ...rootCanonical },
+          { conversation: childConversation, ...childCanonical },
+        ],
+      }),
+    }
+    registerSessionSource(graphSource)
+
+    const parsed = await parseSessions(
+      [{ sourceId: "graph", originalSessionId: "root", locator: "root" }],
+      input,
+      "project-rich"
+    )
+
+    expect(parsed.map((conversation) => conversation.session.id)).toEqual(["root", "child"])
+    expect(parsed[1].session).toMatchObject({
+      projectId: "project-rich",
+      importSource: "graph",
+      importSourceVersion: "1.2.3",
+      importSourceRevision: "sha256:revision",
+      parentSessionId: "root",
+      kind: "subagent",
+    })
+  })
+
+  it("retains message-less background children as attached sessions with canonical state", async () => {
+    const { conversationToCanonical } = jest.requireActual("./codec-types")
+    const rootConversation = {
+      session: { id: "root-bg", title: "root", createdAt: 1, updatedAt: 2 } as never,
+      messages: [
+        { id: "root-bg-m", sessionId: "root-bg", role: "user", parts: [], createdAt: 1 } as never,
+      ],
+    }
+    const childConversation = {
+      session: { id: "child-bg", title: "background", createdAt: 1, updatedAt: 2 } as never,
+      messages: [],
+    }
+    const rootCanonical = conversationToCanonical(rootConversation, {
+      sourceRuntime: "graph-bg",
+      importFidelity: "structured",
+    })
+    const childCanonical = conversationToCanonical(childConversation, {
+      sourceRuntime: "graph-bg",
+      importFidelity: "structured",
+    })
+    childCanonical.session.header.lineage = {
+      kind: "background",
+      parentCanonicalSessionId: rootCanonical.session.header.canonicalSessionId,
+      taskId: "task-bg",
+    }
+    childCanonical.session.header.lifecycle = {
+      status: "completed",
+      background: true,
+      startedAt: "2026-08-29T00:00:00.000Z",
+      endedAt: "2026-08-29T00:01:00.000Z",
+    }
+    childCanonical.session.tasks = [
+      { taskId: "task-bg", status: "completed", summary: "Background research complete" },
+    ]
+    childCanonical.session.plans = [{ planId: "plan-bg", steps: ["inspect", "report"] }]
+    childCanonical.session.interAgentMessages = [
+      { messageId: "iam-1", fromSessionId: "child-bg", text: "done" },
+    ]
+
+    registerSessionSource({
+      ...source("graph-bg", 1),
+      parseGraph: async () => ({
+        rootCanonicalSessionId: rootCanonical.session.header.canonicalSessionId,
+        nodes: [
+          { conversation: rootConversation, ...rootCanonical },
+          { conversation: childConversation, ...childCanonical },
+        ],
+      }),
+    })
+
+    const parsed = await parseSessions(
+      [{ sourceId: "graph-bg", originalSessionId: "root-bg", locator: "root-bg" }],
+      input
+    )
+
+    expect(parsed).toHaveLength(2)
+    expect(parsed[1]).toMatchObject({
+      session: {
+        parentSessionId: "root-bg",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        surfaceBinding: { kind: "session", sessionId: "root-bg" },
+        attachedChild: {
+          parentSessionId: "root-bg",
+          lifecycleOwnerSessionId: "root-bg",
+          status: "completed",
+          result: { summary: "Background research complete" },
+        },
+        importCanonicalState: {
+          tasks: [{ taskId: "task-bg" }],
+          plans: [{ planId: "plan-bg" }],
+          interAgentMessages: [{ messageId: "iam-1" }],
+        },
+        importLossReport: { fidelity: "structured", losses: [] },
+      },
+      messages: [],
+    })
+  })
+
   const manyRefs = (n: number) =>
     Array.from({ length: n }, (_, i) => ({
       sourceId: "p:plug",
@@ -216,7 +368,8 @@ describe("session-import runner", () => {
     const counts = await importSessions(manyRefs(5), input, undefined, { chunkSize: 2 })
     // 5 refs @ chunk 2 → flushes at 2, 4, and final 5 = 3 writes.
     expect(applyImportedMock).toHaveBeenCalledTimes(3)
-    expect(counts).toEqual({ sessions: 3, messages: 9, lossBySource: {} }) // 3 × mock {1,3}
+    expect(counts).toMatchObject({ sessions: 3, messages: 9 }) // 3 × mock {1,3}
+    expect(counts.lossBySource["p:plug"].losses).toHaveLength(5)
   })
 
   it("reports parsing then writing progress", async () => {
@@ -247,7 +400,8 @@ describe("session-import runner", () => {
     expect(seen).toBe(3) // parsing halted after the 3rd ref
     // The 3 buffered conversations are still flushed once on the way out.
     expect(applyImportedMock).toHaveBeenCalledTimes(1)
-    expect(counts).toEqual({ sessions: 1, messages: 3, lossBySource: {} })
+    expect(counts).toMatchObject({ sessions: 1, messages: 3 })
+    expect(counts.lossBySource["p:plug"].losses).toHaveLength(3)
   })
 
   it("projects canonical headers + per-source loss for codec-declaring sources (ADR-0090 P8)", async () => {
@@ -274,12 +428,20 @@ describe("session-import runner", () => {
       [{ sourceId: "codecful", originalSessionId: "codecful-0", locator: "codecful-0" }],
       input
     )
-    expect(counts.lossBySource.codecful).toMatchObject({ fidelity: "structured" })
+    expect(counts.lossBySource.codecful).toMatchObject({
+      fidelity: "contextual",
+      losses: [expect.objectContaining({ path: "graph.relationships", kind: "summarized" })],
+    })
+    expect(counts.details[0]).toMatchObject({
+      sourceId: "codecful",
+      canonicalSessionId: "canon:codecful:codecful-0",
+      loss: { fidelity: "contextual" },
+    })
     expect(putHeader).toHaveBeenCalledWith(
       expect.objectContaining({
         canonicalSessionId: "canon:codecful:codecful-0",
         sourceRuntime: "codecful",
-        importFidelity: "structured",
+        importFidelity: "contextual",
       })
     )
   })
@@ -292,7 +454,7 @@ describe("session-import runner", () => {
       signal: controller.signal,
     })
     expect(applyImportedMock).not.toHaveBeenCalled()
-    expect(counts).toEqual({ sessions: 0, messages: 0, lossBySource: {} })
+    expect(counts).toEqual({ sessions: 0, messages: 0, lossBySource: {}, details: [] })
   })
 
   describe("provenance stamping", () => {

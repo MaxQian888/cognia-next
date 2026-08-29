@@ -28,11 +28,45 @@ import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session-import"
 import { useSessionImportWatch } from "@/hooks/session-import/use-session-import-watch"
-import { getPickerOnlySources, getSessionSource, type SessionSummary } from "@/lib/session-import"
+import {
+  buildExternalSessionSupportMatrix,
+  getSessionSource,
+  type SessionImportDetail,
+  type SessionSummary,
+} from "@/lib/session-import"
 
 /** Rows shown before the first "show more", and each page-step increment. */
 const INITIAL_VISIBLE = 50
 const PAGE_STEP = 50
+
+function relationshipTree(details: SessionImportDetail[]): Array<{
+  detail: SessionImportDetail
+  depth: number
+}> {
+  const byId = new Map(details.map((detail) => [detail.canonicalSessionId, detail]))
+  const children = new Map<string, SessionImportDetail[]>()
+  for (const detail of details) {
+    const parentId = detail.lineage?.parentCanonicalSessionId
+    if (!parentId || !byId.has(parentId) || parentId === detail.canonicalSessionId) continue
+    const bucket = children.get(parentId) ?? []
+    bucket.push(detail)
+    children.set(parentId, bucket)
+  }
+  const rows: Array<{ detail: SessionImportDetail; depth: number }> = []
+  const visited = new Set<string>()
+  const visit = (detail: SessionImportDetail, depth: number) => {
+    if (visited.has(detail.canonicalSessionId)) return
+    visited.add(detail.canonicalSessionId)
+    rows.push({ detail, depth })
+    for (const child of children.get(detail.canonicalSessionId) ?? []) visit(child, depth + 1)
+  }
+  for (const detail of details) {
+    const parentId = detail.lineage?.parentCanonicalSessionId
+    if (!parentId || !byId.has(parentId)) visit(detail, 0)
+  }
+  for (const detail of details) visit(detail, 0)
+  return rows
+}
 
 export interface SessionImportDialogProps {
   trigger: React.ReactNode
@@ -93,7 +127,10 @@ export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogPr
   // Sources that can only ever be reached through the picker, named so an empty
   // scan is not mistaken for "this agent isn't installed".
   const pickerOnly = useMemo(
-    () => getPickerOnlySources().map((source) => sourceLabel(source.id)),
+    () =>
+      buildExternalSessionSupportMatrix()
+        .importSources.filter((source) => source.pickerOnly)
+        .map((source) => sourceLabel(source.sourceId)),
     // `sourceLabel` closes over `t`, which next-intl keeps stable per namespace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -209,15 +246,42 @@ export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogPr
             <p className="text-xs text-muted-foreground">
               {t("doneBody", { sessions: state.sessionsAdded, messages: state.messagesAdded })}
             </p>
-            {state.lossBySource && (
+            {state.details && state.details.length > 0 ? (
+              <div className="w-full space-y-3 pt-2 text-left">
+                {relationshipTree(state.details).map(({ detail, depth }) => (
+                  <div
+                    key={detail.canonicalSessionId}
+                    className="rounded-md border p-2"
+                    data-testid={`session-import-detail-${detail.canonicalSessionId}`}
+                    data-depth={depth}
+                    style={{ marginInlineStart: `${depth * 12}px` }}
+                  >
+                    <p className="truncate pb-1 text-xs font-medium">
+                      {detail.title ?? sourceLabel(detail.sourceId)}
+                    </p>
+                    <FidelityReport
+                      loss={detail.loss}
+                      reverseFidelity={
+                        getSessionSource(detail.sourceId)?.codec?.materialize?.fidelity
+                      }
+                      sessionHeader={{
+                        source: {
+                          ...(detail.sourceVersion ? { version: detail.sourceVersion } : {}),
+                          ...(detail.sourceRevision ? { revision: detail.sourceRevision } : {}),
+                        },
+                        ...(detail.runtimeBinding ? { runtimeBinding: detail.runtimeBinding } : {}),
+                        ...(detail.lineage ? { lineage: detail.lineage } : {}),
+                        ...(detail.lifecycle ? { lifecycle: detail.lifecycle } : {}),
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : state.lossBySource ? (
               <div className="w-full space-y-3 pt-2 text-left">
                 {Object.entries(state.lossBySource).map(([sourceId, loss]) => (
                   <div key={sourceId} className="rounded-md border p-2">
                     <p className="pb-1 text-xs font-medium">{sourceLabel(sourceId)}</p>
-                    {/* The reverse direction is declared by some codecs and
-                        called by nothing outside the conformance suite — the
-                        report says so rather than leaving the capability
-                        silently dormant. */}
                     <FidelityReport
                       loss={loss}
                       reverseFidelity={getSessionSource(sourceId)?.codec?.materialize?.fidelity}
@@ -225,7 +289,7 @@ export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogPr
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         )}
 

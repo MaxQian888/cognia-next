@@ -15,6 +15,10 @@
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { VendorRoots } from "@/lib/agent-roots"
+import type {
+  CanonicalSession,
+  SessionLossReport,
+} from "@cognia/agent-config-types/canonical-session"
 
 /** A single file the user picked (or that a scan materialized). */
 export interface PickedSessionFile {
@@ -85,10 +89,42 @@ export interface SessionSummary {
   watchRevision?: string
   /** Working directory the session ran in, when the source records it. */
   cwd?: string
+  /** Upstream format/runtime version this summary was verified against. */
+  sourceVersion?: string
+  /** Optional source-derived relationship/lifecycle preview for the picker. */
+  relationKind?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionRelationKind
+  lifecycleStatus?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionLifecycleStatus
 }
 
 /** Likelihood a batch of picked files came from this source (auto-detect). */
 export type SessionDetectVerdict = "match" | "maybe" | "no"
+
+export interface ImportedSessionGraphNode {
+  conversation: ImportedConversation
+  session: CanonicalSession
+  loss: SessionLossReport
+}
+
+/** Rich, loss-aware result used by built-ins that preserve session relationships. */
+export interface ImportedSessionGraph {
+  rootCanonicalSessionId: string
+  sourceRevision?: string
+  sourceVersion?: string
+  nodes: ImportedSessionGraphNode[]
+}
+
+/** Per-session provenance shown after import and retained independently of the aggregate. */
+export interface SessionImportDetail {
+  sourceId: string
+  canonicalSessionId: string
+  title?: string
+  sourceVersion?: string
+  sourceRevision?: string
+  runtimeBinding?: CanonicalSession["header"]["runtimeBinding"]
+  lineage?: CanonicalSession["header"]["lineage"]
+  lifecycle?: CanonicalSession["header"]["lifecycle"]
+  loss: SessionLossReport
+}
 
 /**
  * A source of importable agent session histories. First-party sources
@@ -102,6 +138,10 @@ export interface AgentSessionSourceAdapter {
   displayName: string
   /** i18n suffix under `settings.sessionImport.sources.<labelKey>`. */
   labelKey: string
+  /** Upstream release/format last verified by checked-in fixtures. */
+  verifiedVersion?: string
+  /** ISO date of the evidence pass backing `verifiedVersion`. */
+  verifiedAt?: string
   /** File extensions the picker accepts for this source (".jsonl", ".db"). */
   acceptedExtensions: string[]
   /**
@@ -137,6 +177,11 @@ export interface AgentSessionSourceAdapter {
   listSessions(input: SessionScanInput): Promise<SessionSummary[]>
   /** Parse ONE listed session into the canonical conversation shape. */
   parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation>
+  /**
+   * Optional rich parser. When present it is authoritative and `parseSession`
+   * remains only the backwards-compatible plugin/legacy surface.
+   */
+  parseGraph?(ref: SessionRef, input: SessionScanInput): Promise<ImportedSessionGraph>
   /**
    * OPTIONAL cheap summary of one file's raw content — a single pass that pulls
    * only title / count / timestamps / cwd WITHOUT building any `StoredMessage`,

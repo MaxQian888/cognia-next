@@ -396,6 +396,33 @@ describe("parseClaudeTranscript", () => {
     )
     expect(nestedTexts).toContain("SUBAGENT DONE")
   })
+
+  it("reports unknown and malformed records with bounded redacted diagnostics", () => {
+    const parsed = parseClaudeTranscript(
+      [
+        "{broken",
+        JSON.stringify({
+          type: "future-background-event",
+          timestamp: "2026-08-29T00:00:00Z",
+          apiKey: "sk-ant-must-not-survive",
+          detail: "kept",
+        }),
+      ].join("\n"),
+      "future.jsonl"
+    )
+
+    expect(parsed.losses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "jsonl[0]", kind: "dropped" }),
+        expect.objectContaining({
+          path: "records[0].future-background-event",
+          kind: "approximated",
+        }),
+      ])
+    )
+    expect(JSON.stringify(parsed.recordedEvents)).not.toContain("must-not-survive")
+    expect(JSON.stringify(parsed.recordedEvents)).toContain("kept")
+  })
 })
 
 describe("claudeCodeSessionSource", () => {
@@ -461,6 +488,167 @@ describe("claudeCodeSessionSource", () => {
     expect(conv.session.workingDir).toBe("/proj")
     expect(conv.messages).toHaveLength(2)
   })
+
+  it("attaches modern independent subagent transcripts without listing them twice", async () => {
+    const childContent = [
+      {
+        type: "user",
+        uuid: "child-u1",
+        parentUuid: null,
+        sessionId: "sess-1",
+        agentId: "agent-research",
+        cwd: "/proj",
+        timestamp: "2026-08-29T00:00:03Z",
+        message: { role: "user", content: "research the API" },
+      },
+      {
+        type: "assistant",
+        uuid: "child-a1",
+        parentUuid: "child-u1",
+        sessionId: "sess-1",
+        agentId: "agent-research",
+        timestamp: "2026-08-29T00:00:04Z",
+        message: { role: "assistant", content: [{ type: "text", text: "findings" }] },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [
+        { name: "sess-1.jsonl", path: "/p/sess-1.jsonl", content: CONTENT },
+        {
+          name: "agent-research.jsonl",
+          path: "/p/sess-1/subagents/agent-research.jsonl",
+          content: childContent,
+        },
+      ],
+    }
+
+    const list = await claudeCodeSessionSource.listSessions(input)
+    expect(list).toHaveLength(1)
+    const conversation = await claudeCodeSessionSource.parseSession(list[0].ref, input)
+    expect(conversation.nested).toHaveLength(1)
+    expect(conversation.nested?.[0].session).toMatchObject({
+      id: "import:claude-code:agent-research",
+      kind: "subagent",
+      parentSessionId: "import:claude-code:sess-1",
+      importRelation: {
+        kind: "subagent",
+        parentNativeSessionId: "sess-1",
+      },
+      importRuntimeBinding: {
+        presetId: "claude-code",
+        nativeSessionId: "agent-research",
+        cwd: "/proj",
+      },
+    })
+  })
+
+  it("merges resumed transcripts for the same independent agent", async () => {
+    const child = (suffix: string, text: string) =>
+      [
+        {
+          type: "user",
+          uuid: `u-${suffix}`,
+          parentUuid: null,
+          sessionId: "sess-1",
+          agentId: "agent-research",
+          message: { role: "user", content: text },
+        },
+        {
+          type: "assistant",
+          uuid: `a-${suffix}`,
+          parentUuid: `u-${suffix}`,
+          sessionId: "sess-1",
+          agentId: "agent-research",
+          message: { role: "assistant", content: [{ type: "text", text: `done-${suffix}` }] },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n")
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [
+        { name: "sess-1.jsonl", path: "/p/sess-1.jsonl", content: CONTENT },
+        {
+          name: "agent-research-1.jsonl",
+          path: "/p/sess-1/subagents/agent-research-1.jsonl",
+          content: child("1", "first assignment"),
+        },
+        {
+          name: "agent-research-2.jsonl",
+          path: "/p/sess-1/subagents/agent-research-2.jsonl",
+          content: child("2", "resumed assignment"),
+        },
+      ],
+    }
+
+    const conversation = await claudeCodeSessionSource.parseSession(
+      (await claudeCodeSessionSource.listSessions(input))[0].ref,
+      input
+    )
+    expect(conversation.nested).toHaveLength(1)
+    expect(conversation.nested?.[0].messages).toHaveLength(4)
+  })
+
+  it("imports Agent Teams members, dependencies, and lifecycle from team/task artifacts", async () => {
+    const input: SessionScanInput = {
+      fs,
+      home: "",
+      pickedFiles: [
+        { name: "sess-1.jsonl", path: "/p/sess-1.jsonl", content: CONTENT },
+        {
+          name: "config.json",
+          path: "/home/.claude/teams/import-team/config.json",
+          content: JSON.stringify({
+            name: "import-team",
+            leadSessionId: "sess-1",
+            members: [
+              { agentId: "lead@import-team", name: "lead", sessionId: "sess-1" },
+              {
+                agentId: "worker@import-team",
+                name: "worker",
+                sessionId: "worker-session",
+                status: "running",
+              },
+            ],
+          }),
+        },
+        {
+          name: "2.json",
+          path: "/home/.claude/tasks/import-team/2.json",
+          content: JSON.stringify({
+            id: "2",
+            subject: "Implement parser",
+            status: "in_progress",
+            owner: "worker",
+            blockedBy: ["1"],
+            background: true,
+          }),
+        },
+      ],
+    }
+
+    const ref = (await claudeCodeSessionSource.listSessions(input))[0].ref
+    const graph = await claudeCodeSessionSource.parseGraph!(ref, input)
+    expect(graph.nodes).toHaveLength(2)
+    expect(graph.nodes[0].session.tasks?.[0]).toMatchObject({
+      taskId: "2",
+      dependencies: ["1"],
+      background: true,
+      status: "running",
+    })
+    const member = graph.nodes.find(
+      (node) => node.session.header.runtimeBinding?.nativeSessionId === "worker-session"
+    )
+    expect(member?.session.header).toMatchObject({
+      lineage: { kind: "team-member", taskId: "2" },
+      lifecycle: { status: "running", background: true },
+    })
+  })
 })
 
 describe("summarizeClaudeFile (lightweight scan)", () => {
@@ -479,6 +667,20 @@ describe("summarizeClaudeFile (lightweight scan)", () => {
   it("returns null for a transcript with no user/assistant records", () => {
     const only = JSON.stringify({ type: "summary", summary: "recap" })
     expect(summarizeClaudeFile(only, "/p/x.jsonl")).toBeNull()
+  })
+
+  it("marks files under the modern subagents directory as child sessions", () => {
+    const content = JSON.stringify({
+      type: "user",
+      sessionId: "parent",
+      agentId: "agent-a",
+      message: { role: "user", content: "work" },
+    })
+    const summary = summarizeClaudeFile(content, "/p/parent/subagents/agent-a.jsonl")
+    expect(summary).toMatchObject({
+      relationKind: "subagent",
+      ref: { originalSessionId: "agent-a" },
+    })
   })
 
   it("falls back past a text-less first user turn when deriving the title", () => {

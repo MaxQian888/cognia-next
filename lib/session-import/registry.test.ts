@@ -35,9 +35,30 @@ function fakeSource(
 afterEach(() => __resetDynamicSessionSourcesForTesting())
 
 describe("session-source registry", () => {
-  it("ships the three first-party sources", () => {
+  it("ships all eleven first-party sources", () => {
     const ids = getSessionSources().map((s) => s.id)
-    expect(ids).toEqual(expect.arrayContaining(["claude-code", "codex", "opencode"]))
+    expect(ids).toEqual([
+      "claude-code",
+      "codex",
+      "opencode",
+      "gemini-cli",
+      "continue-dev",
+      "aider",
+      "pi",
+      "cursor",
+      "cline",
+      "copilot-cli",
+      "qwen-code",
+    ])
+  })
+
+  it("declares graph parsing and versioned evidence for every built-in source", () => {
+    for (const source of getSessionSources()) {
+      if (source.id.includes(":")) continue
+      expect(source.parseGraph).toEqual(expect.any(Function))
+      expect(source.verifiedVersion).toEqual(expect.any(String))
+      expect(source.verifiedAt).toBe("2026-08-29")
+    }
   })
 
   it("registers a plugin source namespaced by pluginId and disposes it", () => {

@@ -32,6 +32,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import type { ChatSession } from "@cognia/agent-config-types"
+
+function isConversationBranch(session: ChatSession): boolean {
+  if (session.importTombstonedAt || session.visibility === "embedded" || session.attachedChild) {
+    return false
+  }
+  return !session.importRelation || ["branch", "fork"].includes(session.importRelation.kind)
+}
 
 export function BranchChildrenChip({
   sessionId,
@@ -41,7 +49,9 @@ export function BranchChildrenChip({
   className?: string
 }) {
   const t = useTranslations("chat.branch")
-  const branches = useLiveQuery(() => listSessionBranches(sessionId), [sessionId]) ?? []
+  const branches = (useLiveQuery(() => listSessionBranches(sessionId), [sessionId]) ?? []).filter(
+    isConversationBranch
+  )
 
   if (branches.length === 0) return null
 
@@ -108,7 +118,9 @@ export function BranchPointMarker({
   // rather than inside the live query: one subscription per session serves
   // every message row, instead of one per row keyed by its own message id.
   const all = useLiveQuery(() => listSessionBranches(sessionId), [sessionId]) ?? []
-  const branches = all.filter((s) => s.branchedFromMessageId === messageId)
+  const branches = all.filter(
+    (session) => isConversationBranch(session) && session.branchedFromMessageId === messageId
+  )
 
   if (branches.length === 0) return null
 

@@ -18,7 +18,7 @@ it("imports structured and materializes CONTEXTUAL only", () => {
   expect(piCodec.materialize?.buildReplayPrompt(session)).toContain("user: q")
 })
 
-it("reports reasoning parts as a loss, since canonical has no slot for them", () => {
+it("preserves reasoning now that canonical turns carry it", () => {
   const withThinking = {
     session: { id: "s-pi", title: "T", createdAt: 1, updatedAt: 2 },
     messages: [
@@ -34,11 +34,11 @@ it("reports reasoning parts as a loss, since canonical has no slot for them", ()
     ],
   } as unknown as ImportedConversation
 
-  const { loss } = piCodec.toCanonical(withThinking)
-  // Pi streams thinking as first-class content, so an import that silently
-  // dropped it would understate what the transcript actually contained.
-  expect(loss.losses.length).toBeGreaterThan(0)
-  expect(loss.losses).toContainEqual(
-    expect.objectContaining({ path: expect.stringContaining("reasoning"), kind: "dropped" })
+  const { session, loss } = piCodec.toCanonical(withThinking)
+  expect(session.turns[0]).toMatchObject({ text: "answer", reasoning: "hmm" })
+  expect(loss.losses).not.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: expect.stringContaining("reasoning") }),
+    ])
   )
 })

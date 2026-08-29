@@ -246,6 +246,9 @@ export async function closeAttachedSession(
 
 export async function listAttachedSessions(parentSessionId: string): Promise<ChatSession[]> {
   return (await listSessionBranches(parentSessionId)).filter(
-    (session) => session.attachedChild?.parentSessionId === parentSessionId
+    (session) =>
+      session.attachedChild?.parentSessionId === parentSessionId &&
+      session.importTombstonedAt === undefined &&
+      session.archivedAt === undefined
   )
 }

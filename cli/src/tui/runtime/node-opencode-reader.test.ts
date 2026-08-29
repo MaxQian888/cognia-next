@@ -59,6 +59,7 @@ maybe("buildSessions (node:sqlite)", () => {
       CREATE TABLE session (id TEXT, title TEXT, data TEXT);
       CREATE TABLE message (id TEXT, session_id TEXT, role TEXT, data TEXT);
       CREATE TABLE part (id TEXT, message_id TEXT, type TEXT, data TEXT);
+      CREATE TABLE job (id TEXT, session_id TEXT, status TEXT, data TEXT);
       INSERT INTO session VALUES ('s1','Fix bug','{"directory":"/repo","time":{"created":10,"updated":20}}');
       INSERT INTO session VALUES ('s2','Child','{"parentID":"s1","time":{"created":12}}');
       -- Assistant inserted first to prove the createdAt sort reorders messages.
@@ -68,6 +69,7 @@ maybe("buildSessions (node:sqlite)", () => {
       INSERT INTO part VALUES ('p2','m2','text','{"type":"text","text":"done"}');
       INSERT INTO part VALUES ('p1','m2','text','{"type":"text","text":"first"}');
       INSERT INTO part VALUES ('p0','m1','text','{"type":"text","text":"hello"}');
+      INSERT INTO job VALUES ('j1','s1','running','{"description":"index","blockedBy":["j0"]}');
     `)
     return db
   }
@@ -101,6 +103,12 @@ maybe("buildSessions (node:sqlite)", () => {
     expect(user?.parts[0]).toMatchObject({ type: "text", text: "hello" })
     // Child sessions expose their parent id for nesting.
     expect(sessions.find((x) => x.id === "s2")?.parentId).toBe("s1")
+    expect(s.jobs?.[0]).toMatchObject({
+      id: "j1",
+      status: "running",
+      description: "index",
+      dependencies: ["j0"],
+    })
   })
 
   it("returns [] when the expected tables are missing", () => {

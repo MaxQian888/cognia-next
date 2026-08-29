@@ -576,3 +576,11 @@ spec 仍然是「这一回合怎么执行」的权威。二者只通过
   `skills.native` / `plugins.native` 只是用一个新的假声明替换旧的。
 - gate 不试图证明插件生命周期行为。启用时注册、禁用时拆除都是运行时事实；用正则声称「已验证」会被当成覆盖率。
   这部分由测试来钉住。
+
+## 2026-08-29 修订 —— 导入会话的原生恢复
+
+导入 transcript 本身不能证明来源 runtime 仍可恢复它。canonical header 可以携带 `runtimeBinding`，
+但只有四项实时检查通过后才能执行恢复：匹配 preset 已配置、runtime 已连接且可执行、协商后的扩展状态为
+`session/resume: supported`，并且记录的工作目录仍存在。随后 Cognia 执行恢复握手；只有成功才把所有权从
+`source-mirror` 改为 `native-bound`。失败会保留只读镜像并给出具体诊断。验证过的 native session id
+会保存为 session composition 的 runtime binding，并由后续 `ExternalAgentManager.execute` 复用。

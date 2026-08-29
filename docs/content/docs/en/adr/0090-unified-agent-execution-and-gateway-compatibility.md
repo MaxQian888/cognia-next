@@ -685,3 +685,13 @@ legitimate fallback is one the teammate DECLARES, and no such field exists yet.
 - The gate does not attempt to prove plugin lifecycle behaviour. Registration on
   enable and teardown on disable are runtime facts; a regex claiming to have
   verified them would read as coverage. They are pinned by tests instead.
+
+## 2026-08-29 amendment — imported native-session recovery
+
+An imported transcript is not itself proof that the source runtime can resume it. The canonical header
+may carry a `runtimeBinding`, but recovery becomes executable only after four live checks: a matching
+preset is already configured, its runtime is connected/executable, its negotiated extension state says
+`session/resume: supported`, and the recorded working directory still exists. Cognia then performs the
+resume handshake. Only success changes ownership from `source-mirror` to `native-bound`; failure leaves
+the mirror read-only with a specific diagnostic. The verified native session id is persisted as the
+session composition's runtime binding and reused by `ExternalAgentManager.execute` on later turns.

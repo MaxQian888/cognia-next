@@ -845,7 +845,7 @@ function canonicalImportEnvelopes(
           )
         }
       }
-      if (turn.usage) append(turnId, { kind: "usage", usage: turn.usage }, turn.at)
+      if (turn.usage) append(turnId, { kind: "usage", usage: { ...turn.usage } }, turn.at)
     }
   }
   for (const permission of canonical.permissions ?? []) {

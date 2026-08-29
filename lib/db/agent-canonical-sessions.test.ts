@@ -52,6 +52,7 @@ describe("agentCanonicalSessions projection", () => {
       turnCount: 1,
       importFidelity: "structured",
       lossCount: 1,
+      losses: [{ path: "turns[0].reasoning", kind: "dropped" }],
       rebuilt: true,
     })
     expect(JSON.stringify(row)).not.toContain('"text"')
@@ -63,6 +64,43 @@ describe("agentCanonicalSessions projection", () => {
 
     await deleteCanonicalSessionHeader("cs-1")
     expect(await getCanonicalSessionHeader("cs-1")).toBeUndefined()
+  })
+
+  it("retains graph provenance, lifecycle and resume metadata in the header projection", () => {
+    const rich = session("cs-rich", {
+      runtimeBinding: {
+        nativeSessionId: "native-rich",
+        presetId: "codex-app-server",
+        cwd: "/repo",
+        resumeMethod: "protocol",
+        verifiedAt: "2026-08-29T00:00:00.000Z",
+      },
+      lineage: {
+        kind: "background",
+        parentCanonicalSessionId: "cs-parent",
+        parentToolCallId: "tool-1",
+      },
+      lifecycle: { status: "running", background: true },
+      source: { version: "0.150.1", revision: "sha256:rich" },
+    })
+    const row = headerRowFromCanonical(rich, {
+      fidelity: "structured",
+      losses: [],
+    })
+
+    expect(row).toMatchObject({
+      nativeSessionId: "native-rich",
+      presetId: "codex-app-server",
+      cwd: "/repo",
+      resumeMethod: "protocol",
+      sourceRevision: "sha256:rich",
+      sourceVersion: "0.150.1",
+      relationKind: "background",
+      parentCanonicalSessionId: "cs-parent",
+      parentToolCallId: "tool-1",
+      lifecycleStatus: "running",
+      background: true,
+    })
   })
 
   it("lists by recency and filters by source runtime", async () => {

@@ -18,6 +18,7 @@ import path from "node:path"
 
 import type {
   OpencodeMessage,
+  OpencodeBackgroundJob,
   OpencodePart,
   OpencodeSession,
   OpencodeTokens,
@@ -179,6 +180,35 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
   const sessions = rowsAsMaps(db, sessionTbl)
   const messages = rowsAsMaps(db, messageTbl)
   const parts = rowsAsMaps(db, partTbl)
+  const jobTbl = tables.find((table) => {
+    const name = table.toLowerCase()
+    return name === "job" || name === "jobs" || name.includes("background_job")
+  })
+  const jobs = jobTbl ? rowsAsMaps(db, jobTbl) : []
+
+  const jobsBySession = new Map<string, OpencodeBackgroundJob[]>()
+  for (const job of jobs) {
+    const sessionId = firstStr(job, ["sessionID", "session_id", "sessionId"])
+    const id = firstStr(job, ["id", "jobID", "job_id"])
+    if (!sessionId || !id) continue
+    const value: OpencodeBackgroundJob = {
+      id,
+      status: firstStr(job, ["status", "state"]),
+      description: firstStr(job, ["description", "title", "name"]),
+      parentId: firstStr(job, ["parentID", "parent_id", "parentId"]),
+      dependencies: Array.isArray(job.dependencies)
+        ? job.dependencies.filter((item): item is string => typeof item === "string")
+        : Array.isArray(job.blockedBy)
+          ? job.blockedBy.filter((item): item is string => typeof item === "string")
+          : undefined,
+      createdAt: nestedNum(job, "time", "created", ["created", "time_created"]),
+      updatedAt: nestedNum(job, "time", "updated", ["updated", "time_updated"]),
+      error: firstStr(job, ["error", "errorText"]),
+    }
+    const grouped = jobsBySession.get(sessionId) ?? []
+    grouped.push(value)
+    jobsBySession.set(sessionId, grouped)
+  }
 
   // `SELECT *` gives table-scan order — sort parts by id (lexicographically
   // ordered ULIDs) and messages by createdAt for a deterministic transcript.
@@ -232,6 +262,7 @@ export function buildSessions(db: SqliteDb): OpencodeSession[] {
       createdAt: created,
       updatedAt: updated !== 0 ? updated : created,
       messages: msgsBySession.get(id) ?? [],
+      jobs: jobsBySession.get(id),
     })
   }
   return out

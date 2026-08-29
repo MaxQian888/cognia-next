@@ -7,6 +7,7 @@ import { isTauri } from "@/lib/tauri"
 
 /** A normalized OpenCode message part (superset of what we render). */
 export interface OpencodePart {
+  id?: string
   type: string
   text?: string
   tool?: string
@@ -25,6 +26,17 @@ export interface OpencodePart {
   url?: string
   /** Agent-delegation part: the subagent's name. */
   name?: string
+}
+
+export interface OpencodeBackgroundJob {
+  id: string
+  status?: string
+  description?: string
+  parentId?: string
+  dependencies?: string[]
+  createdAt?: number
+  updatedAt?: number
+  error?: string
 }
 
 /** Normalized per-turn token counts projected by the readers. */
@@ -58,6 +70,7 @@ export interface OpencodeSession {
   createdAt: number
   updatedAt: number
   messages: OpencodeMessage[]
+  jobs?: OpencodeBackgroundJob[]
 }
 
 /**

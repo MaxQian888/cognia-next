@@ -134,6 +134,14 @@ describe("continueDevSessionSource", () => {
     const conv = await continueDevSessionSource.parseSession(list[0].ref, input)
     expect(conv.session.id).toBe("import:continue-dev:cont-1")
     expect(conv.session.workingDir).toBe("/repo")
+    expect(continueDevSessionSource).toMatchObject({
+      verifiedVersion: "2.1.0",
+      verifiedAt: "2026-08-29",
+      parseGraph: expect.any(Function),
+    })
+    const graph = await continueDevSessionSource.parseGraph!(list[0].ref, input)
+    expect(graph.nodes).toHaveLength(1)
+    expect(graph.nodes[0].session.header.source?.version).toBe("2.1.0")
   })
 
   describe("scan roots", () => {

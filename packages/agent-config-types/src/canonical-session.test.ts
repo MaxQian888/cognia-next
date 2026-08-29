@@ -62,12 +62,147 @@ describe("computeSequenceDigest", () => {
     extraTool[1].toolCalls = [...(extraTool[1].toolCalls ?? []), { callId: "c2", toolName: "Edit" }]
     expect(computeSequenceDigest(extraTool)).not.toBe(a)
   })
+
+  it("changes when structured tool results or rich content change", () => {
+    const base = turns()
+    base[1].toolCalls![0] = {
+      ...base[1].toolCalls![0],
+      status: "completed",
+      resultText: "first",
+    }
+    const changed = structuredClone(base)
+    changed[1].toolCalls![0].resultText = "second"
+    expect(computeSequenceDigest(changed)).not.toBe(computeSequenceDigest(base))
+
+    const withFile = structuredClone(base)
+    withFile[1].parts = [
+      {
+        type: "file",
+        name: "report.md",
+        uri: "artifact://session/report.md",
+        digest: "sha256:one",
+      },
+    ]
+    const changedFile = structuredClone(withFile)
+    changedFile[1].parts![0] = {
+      type: "file",
+      name: "report.md",
+      uri: "artifact://session/report.md",
+      digest: "sha256:two",
+    }
+    expect(computeSequenceDigest(changedFile)).not.toBe(computeSequenceDigest(withFile))
+  })
 })
 
 describe("validateCanonicalSession", () => {
   it("accepts a fully-populated valid session", () => {
     expect(validateCanonicalSession(validSession())).toEqual([])
     expect(isCanonicalSession(validSession())).toBe(true)
+  })
+
+  it("accepts additive lineage, lifecycle, task, plan and recorded-event snapshots", () => {
+    const rich = validSession()
+    rich.header.runtimeBinding = {
+      nativeSessionId: "sdk-abc",
+      presetId: "claude-code",
+      cwd: "/repo",
+      resumeMethod: "protocol",
+      verifiedAt: "2026-08-29T00:00:00.000Z",
+    }
+    rich.header.lineage = {
+      kind: "background",
+      parentCanonicalSessionId: "parent-1",
+      parentNativeSessionId: "native-parent-1",
+      parentToolCallId: "tool-1",
+      taskId: "task-1",
+      rootCanonicalSessionId: "root-1",
+    }
+    rich.header.lifecycle = {
+      status: "waiting",
+      background: true,
+      startedAt: "2026-08-29T00:00:00.000Z",
+    }
+    rich.turns[1] = {
+      ...rich.turns[1],
+      reasoning: "checked the repository",
+      model: "claude-opus-5",
+      status: "completed",
+      usage: { inputTokens: 10, outputTokens: 4, cachedInputTokens: 2, reasoningTokens: 1 },
+      parts: [{ type: "custom", customType: "plan", summary: "Implement safely" }],
+      toolCalls: [
+        {
+          callId: "c1",
+          toolName: "Read",
+          status: "completed",
+          resultText: "ok",
+          startedAt: "2026-08-29T00:00:01.000Z",
+          endedAt: "2026-08-29T00:00:02.000Z",
+          parentToolCallId: "parent-tool",
+          taskId: "task-1",
+          attachments: [{ type: "file", name: "result.txt", uri: "artifact://session/result.txt" }],
+        },
+      ],
+    }
+    rich.header.sequenceDigest = computeSequenceDigest(rich.turns)
+    rich.tasks = [
+      {
+        taskId: "task-1",
+        description: "Inspect current implementation",
+        status: "waiting",
+        background: true,
+        dependencies: ["task-0"],
+        childCanonicalSessionId: "child-1",
+      },
+    ]
+    rich.plans = [{ planId: "plan-1", status: "active", steps: ["inspect", "implement"] }]
+    rich.goals = [{ goalId: "goal-1", description: "Preserve history", status: "active" }]
+    rich.history = [
+      { historyId: "h-1", kind: "rewind", at: "2026-08-29T00:00:03.000Z", toTurnId: "t1" },
+    ]
+    rich.interAgentMessages = [
+      {
+        messageId: "iam-1",
+        fromSessionId: "child-1",
+        toSessionId: "parent-1",
+        text: "done",
+      },
+    ]
+    rich.recordedEvents = [
+      {
+        eventId: "event-1",
+        sequence: 0,
+        at: "2026-08-29T00:00:04.000Z",
+        event: {
+          kind: "task",
+          phase: "updated",
+          taskId: "task-1",
+          status: "paused",
+          backgrounded: true,
+        },
+      },
+    ]
+
+    expect(validateCanonicalSession(rich)).toEqual([])
+  })
+
+  it("rejects malformed additive lifecycle and relationship fields", () => {
+    const bad = validSession()
+    bad.header.lineage = { kind: "subagent", parentCanonicalSessionId: "" }
+    bad.header.lifecycle = { status: "sleeping" as never }
+    bad.tasks = [{ taskId: "", status: "running" }]
+    bad.recordedEvents = [
+      { eventId: "", sequence: -1, event: { kind: "task-inventory", tasks: [] } },
+    ]
+
+    expect(validateCanonicalSession(bad)).toEqual(
+      expect.arrayContaining([
+        "header.lineage.parentCanonicalSessionId must be non-empty when present",
+        "header.lifecycle.status is invalid",
+        "tasks[0].taskId is required",
+        "recordedEvents[0].eventId is required",
+        "recordedEvents[0].sequence must be a non-negative integer",
+      ])
+    )
   })
 
   it("rejects header/turn/permission violations with named errors", () => {

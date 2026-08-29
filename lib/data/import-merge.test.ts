@@ -52,7 +52,7 @@ describe("mergeImportedSession (pure)", () => {
     expect(mergeImportedSession(incoming, undefined)).toBe(incoming)
   })
 
-  it("preserves the SDK link + local decorations from the existing row", () => {
+  it("preserves SDK links and local decorations while accepting source lineage", () => {
     const existing = {
       ...incoming,
       sdkSessionId: "sdk-123",
@@ -79,10 +79,22 @@ describe("mergeImportedSession (pure)", () => {
     expect(merged.manualOrder).toBe(3)
     expect(merged.manualOrderSection).toBe("pinned")
     expect(merged.archivedAt).toBe(555)
-    expect(merged.parentSessionId).toBe("import:codex:parent")
+    expect(merged.parentSessionId).toBeUndefined()
     expect(merged.branchedFromMessageId).toBe("m4")
     expect(merged.branchKind).toBe("summary")
     expect(merged.projectId).toBe("proj-x")
+  })
+
+  it("reparents a source mirror when the upstream graph changes", () => {
+    const existing = {
+      ...incoming,
+      parentSessionId: "import:codex:old-parent",
+    } as ChatSession
+    const merged = mergeImportedSession(
+      { ...incoming, parentSessionId: "import:codex:new-parent" },
+      existing
+    )
+    expect(merged.parentSessionId).toBe("import:codex:new-parent")
   })
 
   it("lets a user rename (titleAuto:false) win over the re-derived title", () => {
@@ -181,6 +193,134 @@ describe("applyImportedMerged", () => {
     expect(await db.messages.get("import:codex:s1:m2")).toBeTruthy()
   })
 
+  it("removes source-owned messages that disappeared after an upstream rewind", async () => {
+    const db = getDb()
+    await applyImportedMerged([makeConv("import:gemini-cli:rewind", {}, ["one", "two", "three"])])
+    await db.messages.put({
+      id: "local-continuation",
+      sessionId: "import:gemini-cli:rewind",
+      role: "user",
+      parts: [{ type: "text", text: "local" }] as never,
+      createdAt: 9000,
+    })
+
+    await applyImportedMerged([makeConv("import:gemini-cli:rewind", {}, ["one"])])
+
+    expect(
+      (await db.messages.where("sessionId").equals("import:gemini-cli:rewind").toArray()).map(
+        (message) => message.id
+      )
+    ).toEqual(["import:gemini-cli:rewind:m0", "local-continuation"])
+    expect(await db.chatSearchText.get("import:gemini-cli:rewind:m2")).toBeUndefined()
+  })
+
+  it("keeps native-bound imports mirrored without raising a false divergence", async () => {
+    const db = getDb()
+    await applyImportedMerged([makeConv("import:codex:native", {}, ["one"])])
+    await db.sessions.update("import:codex:native", {
+      importFrozen: true,
+      importOwnership: "native-bound",
+    })
+
+    const counts = await applyImportedMerged([
+      makeConv("import:codex:native", { importOwnership: "source-mirror" }, ["one", "two"]),
+    ])
+
+    expect(counts).toEqual({ sessions: 1, messages: 2 })
+    const session = await db.sessions.get("import:codex:native")
+    expect(session).toMatchObject({ importOwnership: "native-bound" })
+    expect(session?.importDiverged).toBeUndefined()
+    expect(await db.messages.where("sessionId").equals("import:codex:native").count()).toBe(2)
+  })
+
+  it("deduplicates native-bound file-watch echoes by native session and revision", async () => {
+    const db = getDb()
+    const sessionFields = {
+      importSourceRevision: "rev-1",
+      importRuntimeBinding: { nativeSessionId: "native-1", presetId: "codex" },
+    }
+    await applyImportedMerged([makeConv("import:codex:native-echo", sessionFields, ["one"])])
+    await db.sessions.update("import:codex:native-echo", {
+      importOwnership: "native-bound",
+      importFrozen: false,
+    })
+    const before = await db.sessions.get("import:codex:native-echo")
+
+    const counts = await applyImportedMerged([
+      makeConv("import:codex:native-echo", { ...sessionFields, importOwnership: "source-mirror" }, [
+        "one",
+      ]),
+    ])
+
+    expect(counts).toEqual({ sessions: 0, messages: 0 })
+    expect((await db.sessions.get("import:codex:native-echo"))?.transcriptRevision).toBe(
+      before?.transcriptRevision
+    )
+  })
+
+  it("treats explicit cognia-owned imports as frozen even without the legacy boolean", async () => {
+    const db = getDb()
+    await applyImportedMerged([makeConv("import:codex:owned", {}, ["one"])])
+    await db.sessions.update("import:codex:owned", {
+      importOwnership: "cognia-owned",
+      importFrozen: false,
+    })
+
+    await applyImportedMerged([makeConv("import:codex:owned", {}, ["changed"])])
+
+    expect(((await db.messages.get("import:codex:owned:m0")) as StoredMessage).parts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: "one" })])
+    )
+    expect((await db.sessions.get("import:codex:owned"))?.importDiverged).toBe(true)
+  })
+
+  it("tombstones source-owned child sessions removed from a later graph snapshot", async () => {
+    const rootId = "import:claude-code:root"
+    const childId = "import:claude-code:child"
+    await applyImportedMerged([
+      makeConv(rootId, { importGraphRootId: rootId, importOwnership: "source-mirror" }),
+      makeConv(childId, {
+        kind: "subagent",
+        parentSessionId: rootId,
+        importGraphRootId: rootId,
+        importOwnership: "source-mirror",
+        importLifecycle: { status: "completed" },
+        attachedChild: {
+          parentSessionId: rootId,
+          lifecycleOwnerSessionId: rootId,
+          context: { mode: "none" },
+          workspace: "shared",
+          status: "running",
+          createdAt: 1,
+        },
+      }),
+    ])
+
+    await applyImportedMerged([
+      makeConv(rootId, { importGraphRootId: rootId, importOwnership: "source-mirror" }),
+    ])
+
+    const tombstone = await getDb().sessions.get(childId)
+    expect(tombstone).toMatchObject({
+      importTombstonedAt: expect.any(Number),
+      archivedAt: expect.any(Number),
+      importLifecycle: { status: "cancelled" },
+      attachedChild: { status: "closed", updatedAt: expect.any(Number) },
+    })
+
+    await applyImportedMerged([
+      makeConv(rootId, { importGraphRootId: rootId, importOwnership: "source-mirror" }),
+      makeConv(childId, {
+        kind: "subagent",
+        parentSessionId: rootId,
+        importGraphRootId: rootId,
+        importOwnership: "source-mirror",
+      }),
+    ])
+    expect((await getDb().sessions.get(childId))?.importTombstonedAt).toBeUndefined()
+    expect((await getDb().sessions.get(childId))?.archivedAt).toBeUndefined()
+  })
+
   it("skips a frozen session entirely (source diverged, Cognia owns it)", async () => {
     const db = getDb()
     await applyImportedMerged([makeConv("import:codex:s1")])
@@ -260,11 +400,18 @@ describe("applyImportedMerged", () => {
 })
 
 describe("frozen-source divergence (ADR-0062)", () => {
+  it("detects same-count same-timestamp source rewrites", () => {
+    const before = makeConv("import:codex:d0", {}, ["before"]).messages
+    const after = makeConv("import:codex:d0", {}, ["after"]).messages
+    expect(after).toMatchObject([{ id: before[0].id, createdAt: before[0].createdAt }])
+    expect(importSourceDigest(after)).not.toBe(importSourceDigest(before))
+  })
+
   it("records a digest of the source on every mirrored write", async () => {
     const conv = makeConv("import:codex:d1")
     await applyImportedMerged([conv])
     const row = await getDb().sessions.get("import:codex:d1")
-    expect(row?.importSourceDigest).toBe(importSourceDigest(conv.messages))
+    expect(row?.importSourceDigest).toBe(importSourceDigest(conv.messages, conv.session))
   })
 
   it("flags a frozen row whose source moved, without touching its transcript", async () => {
@@ -319,7 +466,9 @@ describe("frozen-source divergence (ADR-0062)", () => {
     const baseline = makeConv("import:codex:d6", {}, ["hi", "yo", "more"])
     await applyImportedMerged([baseline])
     const observed = await getDb().sessions.get("import:codex:d6")
-    expect(observed?.importSourceDigest).toBe(importSourceDigest(baseline.messages))
+    expect(observed?.importSourceDigest).toBe(
+      importSourceDigest(baseline.messages, baseline.session)
+    )
     expect(observed?.importDiverged).toBeUndefined()
 
     await applyImportedMerged([makeConv("import:codex:d6", {}, ["hi", "yo", "more", "later"])])

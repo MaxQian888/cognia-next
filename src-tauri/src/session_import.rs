@@ -15,6 +15,17 @@ pub fn opencode_sessions_read(home: String) -> Result<Vec<Value>, String> {
     cognia_agent_state::session_import::read_opencode_sessions(home)
 }
 
+/// Read-only SQLite projection for Cursor, Cline, and Copilot CLI histories.
+#[tauri::command]
+pub fn external_agent_sessions_read(source: String, home: String) -> Result<Vec<Value>, String> {
+    let actual_home =
+        dirs::home_dir().ok_or_else(|| "user home directory unavailable".to_string())?;
+    if std::path::PathBuf::from(&home) != actual_home {
+        return Err("external session store root must match the current user home".into());
+    }
+    cognia_agent_state::session_import::read_external_agent_sessions(source, home)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -28,5 +39,12 @@ mod tests {
         let out = opencode_sessions_read("/nonexistent-home-xyz".to_string())
             .expect("a missing OpenCode install must not be an error");
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn external_store_command_rejects_renderer_supplied_roots() {
+        let error = external_agent_sessions_read("cursor".into(), "/nonexistent-home-xyz".into())
+            .unwrap_err();
+        assert!(error.contains("current user home"));
     }
 }

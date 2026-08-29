@@ -37,8 +37,23 @@ function conversation(): ImportedConversation {
             output: "file body",
             state: "output-available",
           },
+          {
+            type: "file",
+            filename: "report.txt",
+            mediaType: "text/plain",
+            url: "artifact://session/report.txt",
+          },
           { type: "text", text: " — done" },
         ],
+        metadata: {
+          model: "claude-opus-5",
+          usage: {
+            inputTokens: 12,
+            outputTokens: 4,
+            cacheReadInputTokens: 3,
+            reasoningTokens: 2,
+          },
+        },
       },
       {
         id: "m3",
@@ -77,6 +92,22 @@ describe("conversationToCanonical", () => {
     expect(session.turns[1]).toMatchObject({
       role: "assistant",
       text: "let me check — done",
+      reasoning: "private thinking",
+      model: "claude-opus-5",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 4,
+        cachedInputTokens: 3,
+        reasoningTokens: 2,
+      },
+      parts: [
+        {
+          type: "file",
+          name: "report.txt",
+          uri: "artifact://session/report.txt",
+          mediaType: "text/plain",
+        },
+      ],
       toolCalls: [
         {
           callId: "call-1",
@@ -96,7 +127,7 @@ describe("conversationToCanonical", () => {
     ])
   })
 
-  it("reports every drop honestly: reasoning, unknown parts, nested transcripts", () => {
+  it("preserves reasoning and reports unknown parts plus nested transcripts honestly", () => {
     const withNested = conversation()
     withNested.nested = [conversation()]
     const { loss } = conversationToCanonical(withNested, {
@@ -106,11 +137,49 @@ describe("conversationToCanonical", () => {
     expect(loss.fidelity).toBe("structured")
     expect(loss.losses).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: "turns[1].reasoning", kind: "dropped" }),
         expect.objectContaining({ path: "turns[2].parts[1]", detail: "step-start" }),
         expect.objectContaining({ path: "nested", kind: "summarized" }),
       ])
     )
+    expect(loss.losses).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "turns[1].reasoning" })])
+    )
+  })
+
+  it("carries imported runtime binding, lineage and lifecycle into the canonical header", () => {
+    const imported = conversation()
+    imported.session.importRuntimeBinding = {
+      nativeSessionId: "native-1",
+      presetId: "claude-code",
+      cwd: "/repo",
+      resumeMethod: "protocol",
+    }
+    imported.session.importRelation = {
+      kind: "background",
+      parentCanonicalSessionId: "canon:claude-code:parent",
+      parentToolCallId: "tool-1",
+    }
+    imported.session.importLifecycle = { status: "running", background: true }
+
+    const { session } = conversationToCanonical(imported, {
+      sourceRuntime: "claude-code",
+      importFidelity: "structured",
+    })
+
+    expect(session.header).toMatchObject({
+      runtimeBinding: {
+        nativeSessionId: "native-1",
+        presetId: "claude-code",
+        cwd: "/repo",
+        resumeMethod: "protocol",
+      },
+      lineage: {
+        kind: "background",
+        parentCanonicalSessionId: "canon:claude-code:parent",
+        parentToolCallId: "tool-1",
+      },
+      lifecycle: { status: "running", background: true },
+    })
   })
 
   it("same conversation ⇒ same sequence digest (deterministic across runs)", () => {

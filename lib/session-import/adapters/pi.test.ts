@@ -296,9 +296,13 @@ describe("parsePiSession", () => {
     )
     expect(result.nested).toHaveLength(1)
     expect(result.nested![0].messages[1].parts[0]).toMatchObject({ text: "alternate answer" })
-    // Nested branches use the subagent kind so they render as hidden inner
-    // transcripts rather than as top-level sessions.
-    expect(result.nested![0].session.kind).toBe("subagent")
+    // A Pi tree leaf is a user-visible branch, not a hidden subagent.
+    expect(result.nested![0].session).toMatchObject({
+      kind: "direct",
+      parentSessionId: "import:pi:sess-uuid",
+      importRelation: { kind: "branch" },
+    })
+    expect(result.nested![0].session.branchSeed).toBeDefined()
   })
 
   it("records the fork origin when the header carries one", () => {
@@ -306,9 +310,10 @@ describe("parsePiSession", () => {
       '"cwd":"/work/repo"',
       '"cwd":"/work/repo","parentSession":"/home/u/.pi/agent/sessions/--work--/orig.jsonl"'
     )
-    const { messages } = parsePiSession(REF, content)
+    const { session, messages } = parsePiSession(REF, content)
     const info = messages[0].metadata?.piImport as { forkedFrom?: string } | undefined
     expect(info?.forkedFrom).toContain("orig.jsonl")
+    expect(session.importRelation).toMatchObject({ kind: "fork" })
   })
 
   it("counts corrupt lines in the loss notes", () => {
@@ -397,19 +402,28 @@ describe("parsePiSession bashExecution", () => {
     ])
 
   /** `!command` is run by the user but Pi records it under its own role. */
-  it("renders a bash execution as an assistant turn", () => {
+  it("preserves a bash execution as a completed tool lifecycle", () => {
     const { messages } = parsePiSession(
       REF,
       withEntry({ role: "bashExecution", command: "ls -la", output: "a.ts\nb.ts" })
     )
     const last = messages.at(-1)!
     expect(last.role).toBe("assistant")
-    expect(last.parts).toMatchObject([{ type: "text", text: "ls -la\na.ts\nb.ts" }])
+    expect(last.parts).toMatchObject([
+      {
+        type: "tool-bash",
+        input: { command: "ls -la" },
+        output: "a.ts\nb.ts",
+        state: "output-available",
+      },
+    ])
   })
 
   it("omits a missing output instead of emitting a blank line", () => {
     const { messages } = parsePiSession(REF, withEntry({ role: "bashExecution", command: "pwd" }))
-    expect(messages.at(-1)!.parts).toMatchObject([{ type: "text", text: "pwd" }])
+    expect(messages.at(-1)!.parts).toMatchObject([
+      { type: "tool-bash", input: { command: "pwd" }, state: "input-available" },
+    ])
   })
 })
 

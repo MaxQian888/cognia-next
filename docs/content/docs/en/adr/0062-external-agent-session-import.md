@@ -1,9 +1,9 @@
 ---
-title: ADR-0062 — External-agent session-history import (Claude Code · Codex · OpenCode + plugins)
-description: "An extensible mechanism to import external coding-agent session histories from disk into Cognia as continuable conversations. Ships first-party adapters for Claude Code, Codex, and OpenCode, and exposes a plugin extension point so new agents can be added without a host change. Records the disk-format research and the adapter-registry design."
+title: ADR-0062 — External-agent session-history graph import
+description: "Loss-aware import of eleven local coding-agent history formats with lineage, lifecycle, background work, mirror reconciliation, plugin compatibility, and capability-gated native resume."
 ---
 
-# ADR-0062 — External-agent session-history import
+# ADR-0062 — External-agent session-history graph import
 
 **Status**: Accepted (2026-07-04)
 **Authors**: Max Qian + Claude Opus 4.8
@@ -51,9 +51,31 @@ interface AgentSessionSourceAdapter {
 - Claude Code, Codex, and OpenCode histories import as first-class, continuable conversations, rendered by the existing pipeline with no renderer changes.
 - Adding a new agent is one static adapter (or one plugin calling `ctx.import.registerSessionSource`) — the registry, canonical target, persistence sink, FS, and UI are shared.
 - Continuation flows through the standard `branchSeed` path and therefore the **PII redaction gate** on the first send.
-- Incremental/watch re-import, the declarative `sessionImporters` manifest bridge, and subagent-tree reconstruction have since shipped. Remaining out of scope: Cursor/Cline/Gemini-CLI first-party adapters and preserving source-private runtime state that has no canonical Cognia representation.
+- Incremental/watch re-import, the declarative `sessionImporters` manifest bridge, graph reconstruction, and eleven first-party sources have shipped. Source-private state with no public representation remains an explicit loss rather than a fabricated canonical field.
 - ADR-0107 composes this session importer with settings, skills, subagents, MCP, commands, and memory behind one migration wizard; this registry remains the authoritative session implementation.
 
 ## Verification
 
 Jest (`lib/session-import`, `hooks/session-import`, `components/session-import`, `lib/plugin/api/import-api`) green; Rust `cargo test --lib session_import` 3/3; typecheck / ESLint / `lint:i18n` parity clean; the six project auditors (test-gap, i18n, static-export, tauri-rust, pii-gate, wiring) clean — the wiring auditor confirms the registry, `ctx` API, dialog, and Rust command are reachable at runtime.
+
+## 2026-08-29 amendment — canonical graphs and native recovery
+
+`CanonicalSession` remains version 1 and gains optional source provenance, runtime binding, lineage,
+lifecycle, richer turns/tools/usage, tasks, plans/goals, checkpoints, history operations, and inter-agent
+messages. Unknown upstream events are retained as bounded, redacted diagnostics and produce an exact
+loss entry; adapters may ignore unknown fields but may not silently discard unknown event kinds.
+
+Every built-in now implements `parseGraph`. The legacy `parseSession` plugin contract remains readable
+and is wrapped as a flat, explicitly downgraded graph. Claude Code, Codex, OpenCode, Gemini CLI,
+Continue, Aider, Pi, Cursor, Cline, Copilot CLI, and Qwen Code are the registry-derived source set.
+
+Re-import uses a digest over message contents, parts, tool state, relationships, and lifecycle. A
+`source-mirror` follows rewinds and removals, tombstones vanished children, and preserves local
+decoration. Continuing in Cognia changes ownership to `cognia-owned`. Native resume requires an existing
+matching preset, a connected executable runtime, live-verified `session/resume`, an existing cwd, and a
+successful handshake; only then is the session marked `native-bound` and the verified native id reused
+for execution. No presets, credentials, or commands are created automatically.
+
+Cursor cloud/background history and every source without a stable public format (including Kiro, Droid,
+and DeepSeek Harness) remain outside import scope. Their runtime presets remain visible separately in the
+generated support matrix.

@@ -82,5 +82,15 @@ describe("aiderSessionSource", () => {
     const conv = await aiderSessionSource.parseSession(list[0].ref, input)
     expect(conv.session.id).toContain("import:aider:")
     expect(conv.messages).toHaveLength(2)
+    expect(aiderSessionSource).toMatchObject({
+      verifiedVersion: "0.86.2",
+      verifiedAt: "2026-08-29",
+      parseGraph: expect.any(Function),
+    })
+    const graph = await aiderSessionSource.parseGraph!(list[0].ref, input)
+    expect(graph.nodes[0].loss).toMatchObject({
+      fidelity: "contextual",
+      losses: expect.arrayContaining([expect.objectContaining({ path: "markdown" })]),
+    })
   })
 })

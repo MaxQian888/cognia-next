@@ -1,13 +1,29 @@
-import { fireEvent, render as rtlRender, screen } from "@testing-library/react"
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { toast } from "sonner"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const acknowledge = jest.fn(async (_id: string) => {})
+const resumeNative = jest.fn()
+const setRuntime = jest.fn()
+const setExternalAgentId = jest.fn()
+const setSessionComposition = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   acknowledgeImportDivergence: (id: string) => acknowledge(id),
 }))
+jest.mock("@/lib/session-import/native-resume", () => ({
+  resumeImportedSessionNative: (...args: unknown[]) => resumeNative(...args),
+}))
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  compositionForSession: () => ({ presetId: "standard" }),
+  useAgentRuntimeStore: {
+    getState: () => ({ setRuntime, setExternalAgentId, setSessionComposition }),
+  },
+}))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
@@ -15,8 +31,12 @@ jest.mock("next-intl", () => ({
 
 import { ImportedOriginChip } from "./imported-origin-chip"
 
+const toastSuccess = toast.success as jest.Mock
+const toastError = toast.error as jest.Mock
+
 // `TooltipProvider` is mounted app-wide in `app/layout.tsx`; supply it here.
-const render = (ui: React.ReactElement) => rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
+const render = (ui: React.ReactElement) =>
+  rtlRender(<TooltipProvider delayDuration={0}>{ui}</TooltipProvider>)
 
 function session(over: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -30,7 +50,15 @@ function session(over: Partial<ChatSession> = {}): ChatSession {
   } as ChatSession
 }
 
-beforeEach(() => acknowledge.mockClear())
+beforeEach(() => {
+  acknowledge.mockClear()
+  resumeNative.mockReset()
+  setRuntime.mockClear()
+  setExternalAgentId.mockClear()
+  setSessionComposition.mockClear()
+  toastSuccess.mockClear()
+  toastError.mockClear()
+})
 
 describe("ImportedOriginChip", () => {
   it("renders nothing for a native session", () => {
@@ -48,6 +76,39 @@ describe("ImportedOriginChip", () => {
     expect(screen.getByTestId("imported-origin-chip")).toHaveTextContent(
       "sessionImport.sources.claude-code"
     )
+  })
+
+  it("keeps the persisted fidelity and canonical state inspectable after import", async () => {
+    const user = userEvent.setup()
+    render(
+      <ImportedOriginChip
+        session={session({
+          importSourceVersion: "2.1.0",
+          importRelation: { kind: "background", parentCanonicalSessionId: "parent" },
+          importLifecycle: { status: "running", background: true },
+          importLossReport: {
+            fidelity: "structured",
+            losses: [{ path: "events.unknown", kind: "omitted", detail: "redacted" }],
+          },
+          importCanonicalState: {
+            tasks: [{ taskId: "task-1", status: "running" }],
+            plans: [],
+            goals: [],
+            history: [],
+            checkpoints: [],
+            interAgentMessages: [],
+            recordedEvents: [],
+            permissions: [],
+          },
+        })}
+      />
+    )
+
+    await user.hover(screen.getByTestId("imported-origin-chip"))
+    expect(await screen.findByTestId("fidelity-report")).toBeInTheDocument()
+    expect(screen.getByTestId("source-version")).toHaveTextContent("2.1.0")
+    expect(screen.getByTestId("session-relationship")).toHaveTextContent("background")
+    expect(screen.getByTestId("imported-canonical-state-summary")).toHaveTextContent('count":1')
   })
 
   it("uses the stamped label for a plugin source instead of a raw key path", () => {
@@ -82,5 +143,36 @@ describe("ImportedOriginChip", () => {
     render(<ImportedOriginChip session={session({ importDiverged: true })} />)
     fireEvent.click(screen.getByTestId("imported-diverged-chip"))
     expect(acknowledge).toHaveBeenCalledWith("import:claude-code:abc")
+  })
+
+  it("verifies native resume before selecting the external runtime", async () => {
+    resumeNative.mockResolvedValue({ ok: true, agentId: "agent-1", nativeSessionId: "native-1" })
+    const imported = session({
+      importOwnership: "source-mirror",
+      importRuntimeBinding: { nativeSessionId: "native-1", presetId: "claude-code" },
+    })
+    render(<ImportedOriginChip session={imported} />)
+    fireEvent.click(screen.getByTestId("imported-native-resume"))
+    await waitFor(() => expect(resumeNative).toHaveBeenCalledWith(imported))
+    expect(setSessionComposition).toHaveBeenCalledWith(imported.id, {
+      presetId: "standard",
+      runtimeBindingRef: "native-1",
+    })
+    expect(setExternalAgentId).toHaveBeenCalledWith("agent-1")
+    expect(setRuntime).toHaveBeenCalledWith("external")
+  })
+
+  it("keeps the current runtime when native resume verification fails", async () => {
+    resumeNative.mockResolvedValue({ ok: false, code: "cwd-missing", detail: "/gone" })
+    render(
+      <ImportedOriginChip
+        session={session({
+          importRuntimeBinding: { nativeSessionId: "native-1", presetId: "claude-code" },
+        })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("imported-native-resume"))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(setRuntime).not.toHaveBeenCalled()
   })
 })

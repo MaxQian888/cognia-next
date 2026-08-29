@@ -50,7 +50,6 @@ const PRESERVED_DECORATIONS = [
   "manualOrder",
   "manualOrderSection",
   "archivedAt",
-  "parentSessionId",
   "branchedFromMessageId",
   "branchKind",
   "projectId",
@@ -58,6 +57,7 @@ const PRESERVED_DECORATIONS = [
   // clear a flag the user has not acknowledged yet.
   "importDiverged",
   "importDivergedAt",
+  "importOwnership",
 ] as const
 
 /** Overlay the existing row's user-owned decorations onto a re-parsed session. */
@@ -78,6 +78,12 @@ export function mergeImportedSession(
     merged.title = existing.title
     merged.titleAuto = false
   }
+  // A source graph child that reappears is live again. Its archive marker was
+  // importer-owned, not a user decoration, so do not preserve it.
+  if (existing.importTombstonedAt !== undefined) {
+    delete merged.archivedAt
+    delete merged.importTombstonedAt
+  }
   return merged
 }
 
@@ -90,9 +96,67 @@ export function mergeImportedSession(
  * turns rather than rewriting them. Hashing every message body on every watch
  * event would cost far more than the question is worth.
  */
-export function importSourceDigest(messages: readonly StoredMessage[]): string {
-  const last = messages[messages.length - 1]
-  return `${messages.length}:${last?.id ?? ""}:${last?.createdAt ?? 0}`
+export function importSourceDigest(
+  messages: readonly StoredMessage[],
+  session?: Pick<ChatSession, "importRelation" | "importLifecycle" | "importSourceRevision">
+): string {
+  let hash = 0x811c9dc5
+  const feed = (value: string): void => {
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index)
+      hash = Math.imul(hash, 0x01000193) >>> 0
+    }
+  }
+  const seen = new WeakSet<object>()
+  const normalize = (value: unknown): unknown => {
+    if (!value || typeof value !== "object") return value
+    if (seen.has(value)) return "[Circular]"
+    seen.add(value)
+    if (Array.isArray(value)) return value.map(normalize)
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, normalize(item)])
+    )
+  }
+  for (const message of messages) {
+    feed(message.id)
+    feed("\u001f")
+    feed(message.role)
+    feed("\u001f")
+    feed(String(message.createdAt))
+    feed("\u001f")
+    feed(JSON.stringify(normalize(message.parts)))
+    feed("\u001f")
+    feed(JSON.stringify(normalize(message.metadata ?? null)))
+    feed("\u001e")
+  }
+  feed(
+    JSON.stringify(
+      normalize(
+        session
+          ? {
+              importRelation: session.importRelation ?? null,
+              importLifecycle: session.importLifecycle ?? null,
+              importSourceRevision: session.importSourceRevision ?? null,
+            }
+          : null
+      )
+    )
+  )
+  return `src2-${hash.toString(16).padStart(8, "0")}`
+}
+
+function isCogniaOwnedImport(session: ChatSession): boolean {
+  if (session.importOwnership === "cognia-owned") return true
+  if (session.importOwnership === "native-bound") return false
+  return session.importFrozen === true && session.importOwnership === undefined
+}
+
+function isSourceOwnedMessage(message: StoredMessage, sessionId: string): boolean {
+  if (message.metadata?.importSourceOwned === true) return true
+  // Backwards compatibility for rows imported before the explicit marker.
+  return message.id.startsWith(`${sessionId}:m`)
 }
 
 /**
@@ -122,17 +186,36 @@ export async function applyImportedMerged(
   const prepared = await Promise.all(
     conversations.map(async (conversation) => {
       const existing = await db.sessions.get(conversation.session.id)
-      if (existing?.importFrozen) {
+      if (existing && isCogniaOwnedImport(existing)) {
         // Frozen means "do not mirror", not "do not look". Comparing the cheap
         // digest is what turns a silently-ignored source edit into something the
         // user can see.
-        const digest = importSourceDigest(conversation.messages)
+        const digest = importSourceDigest(conversation.messages, conversation.session)
         if (!existing.importSourceDigest) {
+          frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: false })
+        } else if (!existing.importSourceDigest.startsWith("src2-")) {
+          // First observation after the digest upgrade establishes a new
+          // baseline; the old count/last-id digest cannot be compared safely.
           frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: false })
         } else if (existing.importSourceDigest !== digest) {
           frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: true })
         }
         return null
+      }
+      if (existing?.importOwnership === "native-bound") {
+        const incomingDigest = importSourceDigest(conversation.messages, conversation.session)
+        const sameNativeSession =
+          existing.importRuntimeBinding?.nativeSessionId !== undefined &&
+          existing.importRuntimeBinding.nativeSessionId ===
+            conversation.session.importRuntimeBinding?.nativeSessionId
+        const sameRevision =
+          existing.importSourceRevision !== undefined &&
+          existing.importSourceRevision === conversation.session.importSourceRevision
+        if (sameNativeSession && sameRevision && existing.importSourceDigest === incomingDigest) {
+          // File-watch echo of events already persisted by the resumed native
+          // runtime. Skipping it avoids a duplicate transcript revision/write.
+          return null
+        }
       }
       return {
         conversation,
@@ -140,6 +223,24 @@ export async function applyImportedMerged(
       }
     })
   )
+
+  const incomingByGraphRoot = new Map<string, Set<string>>()
+  for (const entry of prepared) {
+    const rootId = entry?.conversation.session.importGraphRootId
+    if (!entry || !rootId) continue
+    const ids = incomingByGraphRoot.get(rootId) ?? new Set<string>()
+    ids.add(entry.conversation.session.id)
+    incomingByGraphRoot.set(rootId, ids)
+  }
+  const staleGraphSessions: ChatSession[] = []
+  if (incomingByGraphRoot.size > 0) {
+    for (const row of await db.sessions.toArray()) {
+      if (!row.importGraphRootId || !incomingByGraphRoot.has(row.importGraphRootId)) continue
+      if (incomingByGraphRoot.get(row.importGraphRootId)!.has(row.id)) continue
+      if (row.importOwnership === "cognia-owned" || isCogniaOwnedImport(row)) continue
+      staleGraphSessions.push(row)
+    }
+  }
 
   await db.transaction(
     "rw",
@@ -152,16 +253,55 @@ export async function applyImportedMerged(
         const { conversation: conv } = entry
         const existing = await db.sessions.get(conv.session.id)
         // Frozen: the user continued this import in Cognia — leave it untouched.
-        if (existing?.importFrozen) continue
+        if (existing && isCogniaOwnedImport(existing)) continue
         const merged = mergeImportedSession(conv.session, existing)
+        const incomingMessageIds = new Set(entry.messages.map((message) => message.id))
+        const existingMessages = existing
+          ? await db.messages.where("sessionId").equals(conv.session.id).toArray()
+          : []
+        const staleSourceMessages = existingMessages.filter(
+          (message) =>
+            isSourceOwnedMessage(message, conv.session.id) && !incomingMessageIds.has(message.id)
+        )
+        if (staleSourceMessages.length > 0) {
+          const staleIds = staleSourceMessages.map((message) => message.id)
+          const staleRefs = await db.messageMediaRefs.where("messageId").anyOf(staleIds).toArray()
+          for (const ref of staleRefs) orphanCandidates.add(ref.hash)
+          await db.messageMediaRefs.where("messageId").anyOf(staleIds).delete()
+          await db.chatSearchText.bulkDelete(staleIds)
+          await db.messages.bulkDelete(staleIds)
+        }
         sessionRows.push({
           ...merged,
-          importSourceDigest: importSourceDigest(entry.messages),
+          importSourceDigest: importSourceDigest(entry.messages, merged),
           transcriptRevision: (existing?.transcriptRevision ?? merged.transcriptRevision ?? 0) + 1,
         })
         for (const message of entry.messages) messageRows.push(message)
       }
       if (sessionRows.length > 0) await db.sessions.bulkPut(sessionRows)
+      if (staleGraphSessions.length > 0) {
+        const tombstonedAt = Date.now()
+        for (const stale of staleGraphSessions) {
+          await db.sessions.update(stale.id, {
+            importTombstonedAt: tombstonedAt,
+            archivedAt: tombstonedAt,
+            ...(stale.attachedChild
+              ? {
+                  attachedChild: {
+                    ...stale.attachedChild,
+                    status: "closed" as const,
+                    updatedAt: tombstonedAt,
+                  },
+                }
+              : {}),
+            importLifecycle: {
+              ...(stale.importLifecycle ?? {}),
+              status: "cancelled",
+              endedAt: new Date(tombstonedAt).toISOString(),
+            },
+          })
+        }
+      }
       if (messageRows.length > 0) {
         const messageIds = messageRows.map((message) => message.id)
         const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(messageIds).toArray()

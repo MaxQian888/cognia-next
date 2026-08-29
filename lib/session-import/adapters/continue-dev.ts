@@ -12,6 +12,7 @@ import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import { walkFiles } from "../fs"
+import { buildImportedSessionGraph } from "../graph"
 import {
   buildMessage,
   buildSession,
@@ -193,6 +194,8 @@ export const continueDevSessionSource: AgentSessionSourceAdapter = {
   id: "continue-dev",
   displayName: "Continue",
   labelKey: "continue-dev",
+  verifiedVersion: "2.1.0",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: ACCEPTED,
 
   // `roots.continueDir` first — see the note on the Gemini adapter.
@@ -250,5 +253,13 @@ export const continueDevSessionSource: AgentSessionSourceAdapter = {
       content = await input.fs.readTextFile(ref.locator)
     }
     return toConversation(parseContinueSession(content, ref.locator))
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    return buildImportedSessionGraph(await this.parseSession(ref, input), {
+      sourceRuntime: this.id,
+      sourceVersion: this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: "structured",
+    })
   },
 }

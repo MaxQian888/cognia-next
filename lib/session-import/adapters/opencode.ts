@@ -14,7 +14,13 @@
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type {
+  CanonicalHistoryEvent,
+  CanonicalRecordedEvent,
+  CanonicalSessionTask,
+} from "@cognia/agent-config-types/canonical-session"
 import { importedUsageMetadata } from "../usage"
+import { buildImportedSessionGraph } from "../graph"
 import {
   buildMessage,
   buildSession,
@@ -96,6 +102,10 @@ function mapPart(part: OpencodePart): Part | null {
       return textPart("[retry]")
     case "compaction":
       return textPart(part.text ? `[context compacted: ${part.text}]` : "[context compacted]")
+    case "step-start":
+      return textPart("[step started]")
+    case "step-finish":
+      return textPart("[step finished]")
     default:
       return null
   }
@@ -169,7 +179,16 @@ export function opencodeToConversation(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     seedMessages: messages,
+    ...(session.parentId ? { kind: "subagent" } : {}),
+    suppressSeed: session.parentId !== undefined,
   })
+  if (session.parentId) {
+    built.parentSessionId = importedSessionId("opencode", session.parentId)
+    built.importRelation = {
+      kind: "subagent",
+      parentNativeSessionId: session.parentId,
+    }
+  }
   return { session: built, messages }
 }
 
@@ -306,7 +325,85 @@ function normalizeNested(obj: Record<string, unknown>): OpencodeSession | null {
     createdAt: Number(time.created ?? 0),
     updatedAt: Number(time.updated ?? time.created ?? 0),
     messages,
+    jobs: Array.isArray(obj.jobs)
+      ? obj.jobs
+          .map((job) => (job && typeof job === "object" ? job : undefined))
+          .filter(Boolean)
+          .map((job) => {
+            const value = job as Record<string, unknown>
+            return {
+              id: String(value.id ?? ""),
+              status: typeof value.status === "string" ? value.status : undefined,
+              description: typeof value.description === "string" ? value.description : undefined,
+              parentId: typeof value.parentID === "string" ? value.parentID : undefined,
+              dependencies: Array.isArray(value.dependencies)
+                ? value.dependencies.filter((item): item is string => typeof item === "string")
+                : undefined,
+              error: typeof value.error === "string" ? value.error : undefined,
+            }
+          })
+      : undefined,
   }
+}
+
+function opencodeStatus(status: string | undefined): CanonicalSessionTask["status"] {
+  if (status === "completed" || status === "done") return "completed"
+  if (status === "failed" || status === "error") return "failed"
+  if (status === "cancelled" || status === "canceled") return "cancelled"
+  if (status === "pending") return "pending"
+  if (status === "waiting" || status === "blocked") return "waiting"
+  return "running"
+}
+
+function opencodeStructuredState(session: OpencodeSession): {
+  tasks: CanonicalSessionTask[]
+  history: CanonicalHistoryEvent[]
+  recordedEvents: CanonicalRecordedEvent[]
+} {
+  const tasks = (session.jobs ?? []).map((job) => ({
+    taskId: job.id,
+    description: job.description,
+    status: opencodeStatus(job.status),
+    background: true,
+    parentTaskId: job.parentId,
+    dependencies: job.dependencies,
+    error: job.error,
+    startedAt: job.createdAt ? new Date(job.createdAt).toISOString() : undefined,
+    endedAt:
+      job.updatedAt && ["completed", "failed", "cancelled"].includes(opencodeStatus(job.status))
+        ? new Date(job.updatedAt).toISOString()
+        : undefined,
+  }))
+  const history: CanonicalHistoryEvent[] = []
+  const recordedEvents: CanonicalRecordedEvent[] = []
+  let sequence = 0
+  for (const message of session.messages) {
+    for (const part of message.parts) {
+      if (part.type === "compaction") {
+        history.push({
+          historyId: part.id || `compaction-${history.length + 1}`,
+          kind: "compaction",
+          summary: part.text,
+        })
+      }
+      if (["step-start", "step-finish", "retry", "snapshot", "patch"].includes(part.type)) {
+        recordedEvents.push({
+          eventId: part.id || `opencode-event-${sequence}`,
+          sequence: sequence++,
+          event: {
+            kind: "diagnostic",
+            runtime: "opencode",
+            payload: {
+              type: part.type,
+              ...(part.text ? { text: part.text.slice(0, 2_000) } : {}),
+              ...(part.filename ? { filename: part.filename } : {}),
+            },
+          },
+        })
+      }
+    }
+  }
+  return { tasks, history, recordedEvents }
 }
 
 function contentRevision(session: OpencodeSession, children: OpencodeSession[]): string {
@@ -419,6 +516,8 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
   id: "opencode",
   displayName: "OpenCode",
   labelKey: "opencode",
+  verifiedVersion: "1.18.25",
+  verifiedAt: "2026-08-29",
   acceptedExtensions: ACCEPTED,
 
   // The scan itself goes through the Rust SQLite reader (keyed by home), not a
@@ -477,14 +576,45 @@ export const opencodeSessionSource: AgentSessionSourceAdapter = {
         messages: [],
       })
     }
-    const conv = opencodeToConversation(found)
-    // Attach the full descendant tree as nested conversations (ADR-0062), so
-    // subagents at any depth import alongside their root without becoming
-    // orphan top-level rows. `sessionTree` protects malformed cycles.
-    const nested = sessionTree(sessions)
-      .descendantsOf(found.id)
-      .map((s) => opencodeToConversation(s))
-    if (nested.length > 0) conv.nested = nested
-    return conv
+    const importable = sessions.filter((session) => session.messages.length > 0)
+    const childrenByParent = new Map<string, OpencodeSession[]>()
+    for (const session of importable) {
+      if (!session.parentId) continue
+      const children = childrenByParent.get(session.parentId) ?? []
+      children.push(session)
+      childrenByParent.set(session.parentId, children)
+    }
+    const buildTree = (session: OpencodeSession, seen: Set<string>): ImportedConversation => {
+      const conversation = opencodeToConversation(session)
+      if (seen.has(session.id)) return conversation
+      const nextSeen = new Set(seen).add(session.id)
+      const nested = (childrenByParent.get(session.id) ?? [])
+        .filter((child) => !nextSeen.has(child.id))
+        .map((child) => buildTree(child, nextSeen))
+      if (nested.length > 0) conversation.nested = nested
+      return conversation
+    }
+    return buildTree(found, new Set())
+  },
+  async parseGraph(ref: SessionRef, input: SessionScanInput) {
+    const sessions = await collectSessions(input)
+    const graph = buildImportedSessionGraph(await this.parseSession(ref, input), {
+      sourceRuntime: this.id,
+      sourceVersion: this.verifiedVersion,
+      verifiedAt: this.verifiedAt,
+      importFidelity: this.codec?.importFidelity ?? "structured",
+      codec: this.codec,
+    })
+    const sessionById = new Map(sessions.map((session) => [session.id, session]))
+    for (const node of graph.nodes) {
+      const nativeId = node.conversation.session.id.replace(/^import:opencode:/, "")
+      const native = sessionById.get(nativeId)
+      if (!native) continue
+      const state = opencodeStructuredState(native)
+      if (state.tasks.length > 0) node.session.tasks = state.tasks
+      if (state.history.length > 0) node.session.history = state.history
+      if (state.recordedEvents.length > 0) node.session.recordedEvents = state.recordedEvents
+    }
+    return graph
   },
 }

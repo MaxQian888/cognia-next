@@ -368,6 +368,28 @@ export async function freezeImportedSession(id: string): Promise<void> {
     .equals(id)
     .modify((s) => {
       s.importFrozen = true
+      s.importOwnership = "cognia-owned"
+    })
+}
+
+/**
+ * Transfer continuation of an imported mirror to its original runtime after a
+ * successful, capability-gated resume handshake.
+ */
+export async function bindImportedSessionToNativeRuntime(
+  id: string,
+  binding: NonNullable<ChatSession["importRuntimeBinding"]>
+): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((session) => {
+      session.importRuntimeBinding = binding
+      session.importOwnership = "native-bound"
+      session.importFrozen = false
+      if (binding.nativeSessionId) session.sdkSessionId = binding.nativeSessionId
+      if (binding.cwd) session.workingDir = binding.cwd
+      session.updatedAt = Date.now()
     })
 }
 
