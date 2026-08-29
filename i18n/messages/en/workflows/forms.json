@@ -53,6 +53,11 @@
     }
   },
   "aggregate": {
+    "initialValue": {
+      "hint": "JSON seed passed as the reducer's first accumulator. Leave empty to start from nothing.",
+      "label": "Initial value",
+      "placeholder": "0"
+    },
     "keyExpression": {
       "hint": "Per-item key. $item is the current item, e.g. $item.category",
       "label": "Key expression"
@@ -634,6 +639,11 @@
       "hint": "Platform message id to forward.",
       "label": "Message id",
       "placeholder": "om_..."
+    },
+    "messageIds": {
+      "hint": "Comma-separated. Two or more are forwarded as one combined card; leave empty to forward the single id above.",
+      "label": "Message ids (merge forward)",
+      "placeholder": "id-1, id-2"
     },
     "piiGate": {
       "block": "Block sensitive data",
@@ -2438,6 +2448,10 @@
     }
   },
   "schedulerTaskUpdate": {
+    "clearEndAt": {
+      "hint": "Removes the task's end date. While on, the field above is ignored.",
+      "label": "Clear the end date"
+    },
     "configJson": {
       "hint": "Partial TaskExecutionConfig patch.",
       "label": "Config JSON"
@@ -2698,6 +2712,11 @@
     }
   },
   "systemTerminal": {
+    "args": {
+      "hint": "One per line. Appended to the command as written — quoting is yours to get right.",
+      "label": "Arguments",
+      "placeholder": "--verbose\n--out=dist"
+    },
     "command": {
       "hint": "Typed into the active dock tab (or a freshly spawned one). The shell tokenizes the line.",
       "label": "Command",
@@ -3021,6 +3040,11 @@
     }
   },
   "terminalScript": {
+    "args": {
+      "hint": "One per line. Passed to the interpreter as separate argv entries, so no shell quoting is needed.",
+      "label": "Arguments",
+      "placeholder": "--verbose\n--out=dist"
+    },
     "cwd": {
       "hint": "Optional. Defaults to the shell's resolved cwd.",
       "label": "Working directory",
@@ -3073,6 +3097,11 @@
     }
   },
   "terminalSessionRun": {
+    "args": {
+      "hint": "One per line. Appended to the command as written — quoting is yours to get right.",
+      "label": "Arguments",
+      "placeholder": "--verbose\n--out=dist"
+    },
     "command": {
       "hint": "One command line; the session's shell tokenizes it.",
       "label": "Command",
@@ -3206,6 +3235,10 @@
     }
   },
   "wait": {
+    "correlationId": {
+      "hint": "Optional. Routes the wake to this run only, when several runs wait on the same event name.",
+      "label": "Correlation key"
+    },
     "durationMs": {
       "hint": "The orchestrator pauses the run for this long before continuing.",
       "label": "Duration",
@@ -3237,6 +3270,14 @@
     "allowPrivateHosts": {
       "hint": "Permit private / loopback / link-local targets (SSRF opt-in). Leave off unless you trust the target.",
       "label": "Allow private hosts"
+    },
+    "codegenExtractShared": {
+      "hint": "Lifts logic repeated across components into shared helpers.",
+      "label": "Extract shared logic"
+    },
+    "codegenGenerateDrafts": {
+      "hint": "Emits a starter component file per detected component.",
+      "label": "Generate component drafts"
     },
     "concurrency": {
       "hint": "Number of concurrent downloads (1–32).",

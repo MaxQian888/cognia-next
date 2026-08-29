@@ -24,7 +24,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
+import {
+  Field,
+  FieldGroup,
+  readBoolean,
+  readNumber,
+  readString,
+  patchParam,
+  FieldRow,
+} from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { ConditionBuilder } from "./shared/condition-builder"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
@@ -470,6 +478,12 @@ export function SchedulerTaskJsonFields({
   idPrefix: string
 }) {
   const t = useTranslations(`workflows.forms.${namespace}`)
+  // Only the update node can clear an end date: `buildSchedulerUpdateInput`
+  // maps `clearEndAt` to `endAt: null`, and when it is set the `endAt` string
+  // is ignored entirely — so the input is disabled rather than left looking
+  // live.
+  const canClearEndAt = namespace === "schedulerTaskUpdate"
+  const clearEndAt = canClearEndAt && readBoolean(params, "clearEndAt", false)
   return (
     <>
       <Field
@@ -543,9 +557,27 @@ export function SchedulerTaskJsonFields({
         <Input
           id={`${idPrefix}-end-at`}
           value={readString(params, "endAt")}
+          disabled={clearEndAt}
           onChange={(e) => onChange(patchParam(params, "endAt", e.target.value))}
         />
       </Field>
+      {canClearEndAt ? (
+        <Field
+          label={t("clearEndAt.label")}
+          htmlFor={`${idPrefix}-clear-end-at`}
+          hint={t("clearEndAt.hint")}
+          name="clearEndAt"
+        >
+          <Switch
+            id={`${idPrefix}-clear-end-at`}
+            checked={clearEndAt}
+            onCheckedChange={(v) =>
+              onChange(patchParam(params, "clearEndAt", v === true ? true : undefined))
+            }
+            aria-label={t("clearEndAt.label")}
+          />
+        </Field>
+      ) : null}
       <Field
         label={t("onSuccessTaskIdsRaw.label")}
         htmlFor={`${idPrefix}-success-chain`}

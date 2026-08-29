@@ -21,11 +21,39 @@ import {
   FieldRow,
 } from "./shared"
 import { TerminalUnattendedFields } from "./form-support"
-import type { ConfigProps } from "./form-support"
+import type { ConfigProps, TranslationFn } from "./form-support"
 
 // ── action.system.terminal ────────────────────────────────────────────────
 // Wave 3 — config form for the integrated terminal action. Mirrors the
 // executor's input contract in `lib/workflow/nodes/terminal.ts`.
+/**
+ * One argument per line. Deliberately NOT comma-separated like the tool lists
+ * elsewhere in the inspector: a shell argument may legitimately contain a
+ * comma, and the executors either append these to the command line or spread
+ * them as argv, so a wrong split silently changes what runs.
+ */
+function ArgsField({ id, params, onChange, t }: ConfigProps & { id: string; t: TranslationFn }) {
+  const text = Array.isArray(params.args) ? (params.args as string[]).join("\n") : ""
+  return (
+    <Field label={t("args.label")} htmlFor={id} hint={t("args.hint")} name="args">
+      <Textarea
+        id={id}
+        value={text}
+        onChange={(e) => {
+          const list = e.target.value
+            .split("\n")
+            .map((v) => v.trim())
+            .filter(Boolean)
+          onChange(patchParam(params, "args", list.length > 0 ? list : undefined))
+        }}
+        rows={2}
+        className="font-mono text-xs"
+        placeholder={t("args.placeholder")}
+      />
+    </Field>
+  )
+}
+
 export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.systemTerminal")
   const command = readString(params, "command")
@@ -54,6 +82,7 @@ export function SystemTerminalConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
+      <ArgsField id="term-args" params={params} onChange={onChange} t={t} />
       <FieldRow className="gap-2">
         <Field label={t("cwd.label")} htmlFor="term-cwd" hint={t("cwd.hint")} name="cwd">
           <Input
@@ -219,6 +248,7 @@ export function TerminalSessionRunConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
+      <ArgsField id="tsrun-args" params={params} onChange={onChange} t={t} />
       <FieldRow className="gap-2">
         <Field
           label={t("timeoutSec.label")}
@@ -338,6 +368,7 @@ export function TerminalScriptConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
+      <ArgsField id="tscript-args" params={params} onChange={onChange} t={t} />
       <FieldRow className="gap-2">
         <Field
           label={t("interpreter.label")}

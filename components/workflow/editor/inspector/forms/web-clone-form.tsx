@@ -128,6 +128,30 @@ export function WebCloneConfig({ params, onChange }: ConfigProps) {
           </SelectContent>
         </Select>
       </Field>
+      {framework !== NONE ? (
+        <>
+          <Field
+            label={t("codegenGenerateDrafts.label")}
+            name="codegenGenerateDrafts"
+            hint={t("codegenGenerateDrafts.hint")}
+          >
+            <Switch
+              checked={readBoolean(params, "codegenGenerateDrafts", false)}
+              onCheckedChange={(b) => onChange(patchParam(params, "codegenGenerateDrafts", b))}
+            />
+          </Field>
+          <Field
+            label={t("codegenExtractShared.label")}
+            name="codegenExtractShared"
+            hint={t("codegenExtractShared.hint")}
+          >
+            <Switch
+              checked={readBoolean(params, "codegenExtractShared", false)}
+              onCheckedChange={(b) => onChange(patchParam(params, "codegenExtractShared", b))}
+            />
+          </Field>
+        </>
+      ) : null}
       <Field label={t("frameworkHint.label")} name="frameworkHint" hint={t("frameworkHint.hint")}>
         <Select
           value={frameworkHint}

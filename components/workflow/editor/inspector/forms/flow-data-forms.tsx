@@ -153,6 +153,18 @@ export function WaitConfig({ params, onChange }: ConfigProps) {
               onChange={(next) => onChange(patchParam(params, "timeoutMs", next))}
             />
           </Field>
+          <Field
+            label={t("correlationId.label")}
+            htmlFor="w-correlation"
+            hint={t("correlationId.hint")}
+            name="correlationId"
+          >
+            <ExpressionField
+              id="w-correlation"
+              value={readString(params, "correlationId")}
+              onChange={(v) => onChange(patchParam(params, "correlationId", v))}
+            />
+          </Field>
         </>
       )}
     </FieldGroup>
@@ -326,6 +338,12 @@ export function AggregateConfig({ params, onChange }: ConfigProps) {
   const numericOp = readString(params, "numericOp", "sum")
   const reducerExpression = readString(params, "reducerExpression")
   const needsKey = op === "group-by" || op === "dedupe"
+  // `initialValue` is `unknown`, so it is edited as JSON. Keep the raw text
+  // locally — a half-typed literal must stay visible without being pushed
+  // into params, and `undefined` (no seed) has to stay distinct from `null`.
+  const [initialValueText, setInitialValueText] = useState(() =>
+    params.initialValue === undefined ? "" : JSON.stringify(params.initialValue)
+  )
   return (
     <FieldGroup>
       <Field
@@ -414,6 +432,36 @@ export function AggregateConfig({ params, onChange }: ConfigProps) {
             rows={3}
             className="font-mono text-xs"
             placeholder={t("reducerExpression.placeholder")}
+          />
+        </Field>
+      ) : null}
+      {op === "custom" ? (
+        <Field
+          label={t("initialValue.label")}
+          htmlFor="agg-initial"
+          hint={t("initialValue.hint")}
+          name="initialValue"
+        >
+          <Textarea
+            id="agg-initial"
+            value={initialValueText}
+            onChange={(e) => {
+              const raw = e.target.value
+              setInitialValueText(raw)
+              if (raw.trim() === "") {
+                onChange(patchParam(params, "initialValue", undefined))
+                return
+              }
+              try {
+                onChange(patchParam(params, "initialValue", JSON.parse(raw)))
+              } catch {
+                // Keep the draft in the box; don't push half-typed JSON into
+                // params, where it would seed the reducer with a string.
+              }
+            }}
+            rows={2}
+            className="font-mono text-xs"
+            placeholder={t("initialValue.placeholder")}
           />
         </Field>
       ) : null}

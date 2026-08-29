@@ -17,7 +17,7 @@ jest.mock("./shared/expression-field", () => ({
   }) => <textarea id={id} value={value} onChange={(e) => onChange(e.target.value)} />,
 }))
 
-import { AggregateConfig, JoinConfig } from "./index"
+import { AggregateConfig, JoinConfig, WaitConfig } from "./index"
 
 function wrap(ui: React.ReactElement) {
   return render(
@@ -73,5 +73,86 @@ describe("JoinConfig aggregate toggle", () => {
   it("renders the nested aggregate form once enabled", () => {
     wrap(<JoinConfig params={{ aggregate: { operation: "collect" } }} onChange={jest.fn()} />)
     expect(screen.getByLabelText("Operation")).toBeInTheDocument()
+  })
+})
+
+/**
+ * `initialValue` is the seed `data.aggregate` hands its custom reducer as the
+ * first accumulator. It had no field, so a custom reducer always started from
+ * `undefined` — `(acc, item) => acc + item.n` produced NaN and there was no
+ * way to fix it from the editor.
+ */
+describe("AggregateConfig — custom reducer seed", () => {
+  it("offers the seed only for the custom operation", () => {
+    const { container, rerender } = wrap(
+      <AggregateConfig params={{ operation: "collect" }} onChange={jest.fn()} />
+    )
+    expect(container.querySelector('[data-field="initialValue"]')).toBeNull()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AggregateConfig params={{ operation: "custom" }} onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    expect(container.querySelector('[data-field="initialValue"]')).not.toBeNull()
+  })
+
+  it("parses the seed as JSON and drops it when emptied", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AggregateConfig params={{ operation: "custom" }} onChange={onChange} />
+    )
+    const box = container.querySelector('[data-field="initialValue"] textarea')!
+    fireEvent.change(box, { target: { value: "[]" } })
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ initialValue: [] }))
+
+    fireEvent.change(box, { target: { value: "" } })
+    // Absent means "no seed" and must stay distinct from a literal null.
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ initialValue: undefined }))
+  })
+
+  it("keeps half-typed JSON in the box without pushing it into params", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AggregateConfig params={{ operation: "custom" }} onChange={onChange} />
+    )
+    const box = container.querySelector(
+      '[data-field="initialValue"] textarea'
+    ) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: '{"a":' } })
+    expect(box.value).toBe('{"a":')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * `flow.wait` in event mode routes a wake by `correlationId` when several runs
+ * listen on the same event name; without a field, two runs waiting on one
+ * event could not be told apart.
+ */
+describe("WaitConfig — event correlation", () => {
+  it("shows the correlation key only in event mode", () => {
+    const { container, rerender } = wrap(
+      <WaitConfig params={{ mode: "duration" }} onChange={jest.fn()} />
+    )
+    expect(container.querySelector('[data-field="correlationId"]')).toBeNull()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <WaitConfig params={{ mode: "event" }} onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    const field = container.querySelector('[data-field="correlationId"]')
+    expect(field).not.toBeNull()
+  })
+
+  it("writes the correlation key", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(<WaitConfig params={{ mode: "event" }} onChange={onChange} />)
+    const input = container.querySelector('[data-field="correlationId"] textarea')!
+    fireEvent.change(input, { target: { value: "order-42" } })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ correlationId: "order-42" })
+    )
   })
 })

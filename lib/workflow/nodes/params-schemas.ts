@@ -927,19 +927,27 @@ const ConnectorDeleteParams = z.object({
   messageId: requiredString("required"),
 })
 
-const ConnectorForwardParams = z.object({
-  adapterId: requiredString("required"),
-  /** Single message id to forward. Use EITHER this or `messageIds`. */
-  messageId: optionalString,
-  /** Two or more message ids to merge-forward as one combined card. */
-  messageIds: z.array(z.string()).optional(),
-  /**
-   * Destination conversation key (`platform:adapterId:chatId`) or a raw
-   * platform receive id (Lark chat_id / open_id).
-   */
-  targetConversationKey: requiredString("required"),
-  piiGate: z.enum(["block", "redact"]).optional(),
-})
+const ConnectorForwardParams = z
+  .object({
+    adapterId: requiredString("required"),
+    /** Single message id to forward. Use EITHER this or `messageIds`. */
+    messageId: optionalString,
+    /** Two or more message ids to merge-forward as one combined card. */
+    messageIds: z.array(z.string()).optional(),
+    /**
+     * Destination conversation key (`platform:adapterId:chatId`) or a raw
+     * platform receive id (Lark chat_id / open_id).
+     */
+    targetConversationKey: requiredString("required"),
+    piiGate: z.enum(["block", "redact"]).optional(),
+  })
+  .refine(
+    // The executor accepts EITHER id form and fails closed when both are empty;
+    // without this the inspector let a node with neither look valid until run
+    // time.
+    (v) => Boolean(v.messageId?.trim()) || (v.messageIds?.length ?? 0) > 0,
+    { message: "required", path: ["messageId"] }
+  )
 
 const ConnectorWaitReplyParams = z.object({
   /** Conversation to listen on (composite key `platform:adapterId:chatId[:thread]`). */

@@ -1756,7 +1756,9 @@ describe("ConnectorForwardConfig", () => {
   it("patches messageId and target conversation", () => {
     const onChange = jest.fn()
     wrap(<ConnectorForwardConfig params={{}} onChange={onChange} />)
-    fireEvent.change(screen.getByLabelText(/Message id/i), { target: { value: "om_f1" } })
+    // By id, not label text: the form also offers "Message ids (merge forward)",
+    // which a substring match on "Message id" would hit as well.
+    fireEvent.change(document.getElementById("cf-message")!, { target: { value: "om_f1" } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ messageId: "om_f1" }))
     fireEvent.change(screen.getByLabelText(/Target conversation/i), {
       target: { value: "lark:a1:oc_2" },

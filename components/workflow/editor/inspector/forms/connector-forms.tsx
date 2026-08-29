@@ -283,6 +283,7 @@ export function ConnectorForwardConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.connectorForward")
   const adapterId = readString(params, "adapterId")
   const messageId = readString(params, "messageId")
+  const messageIds = Array.isArray(params.messageIds) ? (params.messageIds as string[]) : []
   const target = readString(params, "targetConversationKey")
   const piiGate = readString(params, "piiGate", "block")
   return (
@@ -299,13 +300,35 @@ export function ConnectorForwardConfig({ params, onChange }: ConfigProps) {
         htmlFor="cf-message"
         hint={t("messageId.hint")}
         name="messageId"
-        required
+        // Either id form satisfies the executor, so this stops being required
+        // the moment a merge list is present.
+        required={messageIds.length === 0}
       >
         <Input
           id="cf-message"
           value={messageId}
+          disabled={messageIds.length > 0}
           onChange={(e) => onChange(patchParam(params, "messageId", e.target.value))}
           placeholder={t("messageId.placeholder")}
+        />
+      </Field>
+      <Field
+        label={t("messageIds.label")}
+        htmlFor="cf-messages"
+        hint={t("messageIds.hint")}
+        name="messageIds"
+      >
+        <Input
+          id="cf-messages"
+          value={messageIds.join(", ")}
+          onChange={(e) => {
+            const list = e.target.value
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+            onChange(patchParam(params, "messageIds", list.length > 0 ? list : undefined))
+          }}
+          placeholder={t("messageIds.placeholder")}
         />
       </Field>
       <Field

@@ -128,3 +128,36 @@ describe("WebCloneConfig", () => {
     expect("framework" in last).toBe(false)
   })
 })
+
+/**
+ * The two codegen switches reach `frameworkCodegen` in the executor, but only
+ * when a framework is chosen (`wantsCodegen = Boolean(framework)`). They had no
+ * field at all, so component drafts and shared-logic extraction were
+ * unreachable — and showing them with no framework picked would advertise
+ * settings the executor never reads.
+ */
+describe("WebCloneConfig — framework codegen switches", () => {
+  it("hides them until a framework is chosen", () => {
+    const { container } = render(<WebCloneConfig params={{}} onChange={jest.fn()} />)
+    expect(container.querySelector('[data-field="codegenGenerateDrafts"]')).toBeNull()
+    expect(container.querySelector('[data-field="codegenExtractShared"]')).toBeNull()
+  })
+
+  it("shows and toggles them once a framework is set", () => {
+    const onChange = jest.fn()
+    const { container } = render(
+      <WebCloneConfig params={{ framework: "react" }} onChange={onChange} />
+    )
+    const drafts = container.querySelector('[data-field="codegenGenerateDrafts"] button')!
+    fireEvent.click(drafts)
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codegenGenerateDrafts: true })
+    )
+
+    const shared = container.querySelector('[data-field="codegenExtractShared"] button')!
+    fireEvent.click(shared)
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codegenExtractShared: true })
+    )
+  })
+})

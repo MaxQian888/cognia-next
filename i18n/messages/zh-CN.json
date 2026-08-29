@@ -1777,12 +1777,7 @@
   "agentMode": {
     "a2uiTemplateComponents": "{n, plural, other {# 个组件}}",
     "a2uiTemplateHide": "隐藏定义",
-    "a2uiTemplateComponents": "{n, plural, other {# 个组件}}",
-    "a2uiTemplateHide": "隐藏定义",
     "a2uiTemplatePreviewTitle": "A2UI 模板预览",
-    "a2uiTemplateShow": "显示定义",
-    "a2uiTemplateSpecNote": "模板原始定义——这是该模式保存的内容，并非实时界面。",
-    "a2uiTemplateUntitled": "未命名模板",
     "a2uiTemplateShow": "显示定义",
     "a2uiTemplateSpecNote": "模板原始定义——这是该模式保存的内容，并非实时界面。",
     "a2uiTemplateUntitled": "未命名模板",
@@ -39417,10 +39412,6 @@
       "description": "在 Anthropic 通道同时注册核心文件工具集。默认关闭——Claude Agent SDK 自带 Grep / Read / Edit / Bash，重复注册同形工具会让模型难以取舍。",
       "label": "在 Anthropic 通道启用核心文件工具"
     },
-    "coreFilesOnAnthropic": {
-      "description": "在 Anthropic 通道同时注册核心文件工具集。默认关闭——Claude Agent SDK 自带 Grep / Read / Edit / Bash，重复注册同形工具会让模型难以取舍。",
-      "label": "在 Anthropic 通道启用核心文件工具"
-    },
     "dependencyResearch": "依赖源码",
     "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
     "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
@@ -41221,6 +41212,11 @@
         }
       },
       "aggregate": {
+        "initialValue": {
+          "hint": "作为归约器首个累加值的 JSON 种子。留空则从空开始。",
+          "label": "初始值",
+          "placeholder": "0"
+        },
         "keyExpression": {
           "hint": "逐项取键。$item 为当前项，例如 $item.category",
           "label": "键表达式"
@@ -41876,6 +41872,11 @@
           "hint": "要转发的平台消息 ID。",
           "label": "消息 ID",
           "placeholder": "om_..."
+        },
+        "messageIds": {
+          "hint": "以逗号分隔。两条及以上会合并为一张卡片转发；留空则转发上方的单条 ID。",
+          "label": "消息 ID（合并转发）",
+          "placeholder": "id-1, id-2"
         },
         "piiGate": {
           "block": "阻断敏感数据",
@@ -43680,6 +43681,10 @@
         }
       },
       "schedulerTaskUpdate": {
+        "clearEndAt": {
+          "hint": "移除该任务的结束日期。开启时，上方字段会被忽略。",
+          "label": "清除结束日期"
+        },
         "configJson": {
           "hint": "局部 TaskExecutionConfig 补丁。",
           "label": "配置 JSON"
@@ -43940,6 +43945,11 @@
         }
       },
       "systemTerminal": {
+        "args": {
+          "hint": "每行一个。会原样追加到命令后，引号需自行处理。",
+          "label": "参数",
+          "placeholder": "--verbose\n--out=dist"
+        },
         "command": {
           "hint": "将输入到当前活动 dock 标签页（或新建一个），shell 自行分词。",
           "label": "命令",
@@ -44263,6 +44273,11 @@
         }
       },
       "terminalScript": {
+        "args": {
+          "hint": "每行一个。作为独立的 argv 条目传给解释器，无需 shell 引号。",
+          "label": "参数",
+          "placeholder": "--verbose\n--out=dist"
+        },
         "cwd": {
           "hint": "可选。默认为 shell 解析的工作目录。",
           "label": "工作目录",
@@ -44315,6 +44330,11 @@
         }
       },
       "terminalSessionRun": {
+        "args": {
+          "hint": "每行一个。会原样追加到命令后，引号需自行处理。",
+          "label": "参数",
+          "placeholder": "--verbose\n--out=dist"
+        },
         "command": {
           "hint": "单行命令，由会话的 shell 自行分词。",
           "label": "命令",
@@ -44448,6 +44468,10 @@
         }
       },
       "wait": {
+        "correlationId": {
+          "hint": "可选。当多个运行等待同一事件名时，用它把唤醒只路由到本次运行。",
+          "label": "关联键"
+        },
         "durationMs": {
           "hint": "编排器会把运行暂停这么长后继续。",
           "label": "时长",
@@ -44479,6 +44503,14 @@
         "allowPrivateHosts": {
           "hint": "放行私有 / 回环 / 链路本地地址（SSRF 放行）。除非信任目标，否则请保持关闭。",
           "label": "允许私有地址"
+        },
+        "codegenExtractShared": {
+          "hint": "把多个组件间重复的逻辑提取为共享辅助函数。",
+          "label": "抽取公共逻辑"
+        },
+        "codegenGenerateDrafts": {
+          "hint": "为每个识别到的组件产出一个起始组件文件。",
+          "label": "生成组件草稿"
         },
         "concurrency": {
           "hint": "并发下载数（1–32）。",
