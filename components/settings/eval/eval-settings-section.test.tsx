@@ -32,6 +32,7 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: mockSettings, save: mockSave }),
 }))
 
+import { DEFAULT_EVAL_SETTINGS, MAX_STORED_OUTPUT_CHARS } from "@/types/eval/settings"
 import { EvalSettingsSection } from "./eval-settings-section"
 
 beforeEach(() => {
@@ -229,5 +230,61 @@ describe("EvalSettingsSection", () => {
     fireEvent.change(screen.getByLabelText("defaultKLabel"), { target: { value: "abc" } })
     expect(mockSave.mock.calls.at(-1)![0].evalSettings.defaultK).toBe(1)
     await screen.findByText("saved")
+  })
+})
+
+describe("EvalSettingsSection — stored answer length", () => {
+  // `EvalSettings.maxStoredOutputChars` was the one field of the interface the
+  // page did not expose, so `resolveEvalSettings` clamped it to the default on
+  // every read and the per-case answer budget could not be changed.
+  it("renders the field with the resolved default", () => {
+    render(<EvalSettingsSection />)
+    expect(screen.getByTestId("eval-stored-output")).toHaveValue(
+      DEFAULT_EVAL_SETTINGS.maxStoredOutputChars
+    )
+  })
+
+  it("reflects a persisted value", () => {
+    mockSettings = { evalSettings: { maxStoredOutputChars: 4000 } }
+    render(<EvalSettingsSection />)
+    expect(screen.getByTestId("eval-stored-output")).toHaveValue(4000)
+  })
+
+  it("persists a new value", async () => {
+    render(<EvalSettingsSection />)
+    fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "1500" } })
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSettings: expect.objectContaining({ maxStoredOutputChars: 1500 }),
+        })
+      )
+    )
+  })
+
+  it("clamps a value above the storage ceiling", async () => {
+    render(<EvalSettingsSection />)
+    fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "999999" } })
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSettings: expect.objectContaining({
+            maxStoredOutputChars: MAX_STORED_OUTPUT_CHARS,
+          }),
+        })
+      )
+    )
+  })
+
+  it("accepts 0 (store nothing) rather than snapping back to the default", async () => {
+    render(<EvalSettingsSection />)
+    fireEvent.change(screen.getByTestId("eval-stored-output"), { target: { value: "0" } })
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evalSettings: expect.objectContaining({ maxStoredOutputChars: 0 }),
+        })
+      )
+    )
   })
 })

@@ -4,7 +4,12 @@
  * Settings → Agent 评估 — project-level eval defaults that previously had no
  * home (they could only be set per-run). Four blocks:
  *   1. Judge      — which model runs the LLM scorers + a deterministic-only kill switch.
- *   2. Run        — default k (pass^k) + default scorer selection (grouped picker).
+ *   2. Run        — default k (pass^k), default scorer selection (grouped
+ *                  picker), and how much of each answer to keep on the result
+ *                  row (`maxStoredOutputChars`: the one EvalSettings field the
+ *                  page used to omit, so `resolveEvalSettings` always clamped
+ *                  it back to the default and error analysis was stuck with
+ *                  whatever that was).
  *   3. Gate       — thresholds stamped onto brand-new datasets (collapsible).
  *   4. Cost guard — warn before an expensive run (collapsible).
  * Everything persists to `AppSettings.evalSettings` (one Dexie write); the
@@ -63,7 +68,7 @@ import {
 } from "@/components/eval/scorer-picker"
 import { ALL_SCORER_IDS } from "@/lib/ai/eval/scorers/catalog"
 import { resolveEvalSettings, EVAL_K_RANGE } from "@/lib/ai/eval/settings"
-import type { EvalSettings } from "@/types/eval/settings"
+import { MAX_STORED_OUTPUT_CHARS, type EvalSettings } from "@/types/eval/settings"
 import type { GateThresholds } from "@/types/eval/gate"
 
 /** Parse a bounded numeric field; empty string → undefined (clears the field). */
@@ -342,6 +347,31 @@ export function EvalSettingsSection() {
                 judgeAvailable={!deterministicOnly}
               />
             </div>
+          </SettingsField>
+          <SettingsField
+            label={t("storedOutputLabel")}
+            description={
+              resolved.maxStoredOutputChars === 0
+                ? t("storedOutputDisabledDescription")
+                : t("storedOutputDescription")
+            }
+          >
+            <Input
+              type="number"
+              min={0}
+              max={MAX_STORED_OUTPUT_CHARS}
+              step={500}
+              aria-label={t("storedOutputLabel")}
+              value={resolved.maxStoredOutputChars}
+              onChange={(e) =>
+                patch({
+                  maxStoredOutputChars:
+                    parseOptionalNumber(e.target.value, 0, MAX_STORED_OUTPUT_CHARS) ?? 0,
+                })
+              }
+              className="h-8 w-28"
+              data-testid="eval-stored-output"
+            />
           </SettingsField>
         </SettingsBlock>
 
