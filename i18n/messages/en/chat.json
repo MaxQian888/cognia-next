@@ -510,6 +510,7 @@
         "artifact": "artifact",
         "issue": "issue",
         "memory": "memory",
+        "message": "message",
         "plan": "plan",
         "session": "conversation"
       },

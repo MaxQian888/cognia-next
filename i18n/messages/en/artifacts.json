@@ -115,13 +115,17 @@
     "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",
     "selectionChipFileLabel": "{path} · whole file",
     "selectionChipLabel": "{title} · lines {start}-{end}",
+    "selectionChipMessageSpanLabel": "{count, plural, one {# message} other {# messages}} from “{title}”",
     "selectionChipPluginLabel": "{source}: {title}",
     "selectionChipWebLabel": "{title} · page",
     "selectionChipWholeLabel": "{title} · whole artifact",
     "selectionCommentPlaceholder": "What should change here?",
+    "selectionSpanUnavailable": "That message is no longer available, so the reference was left as it was.",
     "staleBanner": "The artifact changed since this proposal was generated. Re-diff or discard.",
     "title": "Review changes",
-    "viewChanges": "View changes"
+    "viewChanges": "View changes",
+    "widenSelectionAria": "Include more of the conversation around this message from “{title}”",
+    "widenSelectionHint": "Include one more turn on each side"
   },
   "runnable": "Runnable",
   "runtimeStates": {

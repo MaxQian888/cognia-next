@@ -43,6 +43,7 @@ import {
   ListPlusIcon,
   MessageCircleMoreIcon,
   MessagesSquareIcon,
+  MessageSquareTextIcon,
   PinIcon,
   PinOffIcon,
   Repeat2Icon,
@@ -926,14 +927,18 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 
 /**
  * One glyph per referenced record kind. A table rather than a switch because
- * `EntitySelectionKind` is the exhaustiveness anchor: adding a sixth source
- * fails to compile here until it has an icon, which is the point.
+ * `EntitySelectionKind` is the exhaustiveness anchor: adding a source fails to
+ * compile here until it has an icon, which is the point.
  */
 const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
   memory: BrainIcon,
   issue: CircleDotIcon,
   plan: ClipboardListIcon,
   session: MessagesSquareIcon,
+  // One message vs. a whole conversation: the plural glyph is `@chat:`, so the
+  // singular one has to read as a single turn or the two rows look alike in a
+  // list that mixes them.
+  message: MessageSquareTextIcon,
   artifact: ShapesIcon,
 }
 

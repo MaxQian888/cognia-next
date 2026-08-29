@@ -2,7 +2,18 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+
+const buildMessageReferenceTextMock = jest.fn()
+jest.mock("@/lib/chat/mentions/message-reference", () => {
+  const actual = jest.requireActual("@/lib/chat/mentions/message-reference")
+  return {
+    ...actual,
+    buildMessageReferenceText: (input: unknown) => buildMessageReferenceTextMock(input),
+  }
+})
+const toastErrorMock = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (m: string) => toastErrorMock(m) } }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -304,5 +315,96 @@ describe("entity chips", () => {
     )
     const badges = screen.getAllByText(/editTargetBadge/)
     expect(badges).toHaveLength(1)
+  })
+})
+
+describe("message span control", () => {
+  const msgSel = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "message" as const,
+    entityId: "s1#m1",
+    title: "Restacking",
+    snapshot: "assistant: run /stack restack",
+    comment: "",
+    ...over,
+  })
+
+  beforeEach(() => {
+    buildMessageReferenceTextMock.mockReset()
+    toastErrorMock.mockReset()
+    buildMessageReferenceTextMock.mockResolvedValue("user: before\n\nassistant: anchor")
+  })
+
+  // Only a message reference has neighbours to reach for.
+  it("offers the control on a message chip and on nothing else", () => {
+    act(() => {
+      useChatStore.getState().addContextSelection(msgSel())
+      useChatStore
+        .getState()
+        .addContextSelection(msgSel({ entityKind: "memory", entityId: "mem1" }))
+    })
+    render(<ArtifactSelectionChips />)
+    expect(screen.getAllByTestId("context-selection-widen")).toHaveLength(1)
+  })
+
+  it("widens both sides by one and re-reads the body", async () => {
+    act(() => useChatStore.getState().addContextSelection(msgSel()))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-widen"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0].span).toEqual({ before: 1, after: 1 })
+    )
+    expect(buildMessageReferenceTextMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      messageId: "m1",
+      span: { before: 1, after: 1 },
+    })
+    expect(useChatStore.getState().contextSelections[0].snapshot).toContain("assistant: anchor")
+  })
+
+  // A body carrying someone else's tool output must keep its preamble when it
+  // is rebuilt, not only when it is first staged.
+  it("re-wraps the widened body as untrusted content", async () => {
+    act(() => useChatStore.getState().addContextSelection(msgSel()))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-widen"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0].snapshot).not.toBe(
+        "user: before\n\nassistant: anchor"
+      )
+    )
+  })
+
+  it("stops offering the control once the span is at its ceiling", () => {
+    act(() =>
+      useChatStore.getState().addContextSelection(msgSel({ span: { before: 10, after: 10 } }))
+    )
+    render(<ArtifactSelectionChips />)
+    expect(screen.queryByTestId("context-selection-widen")).toBeNull()
+  })
+
+  // A chip that silently kept its old, narrower body while claiming a wider
+  // span is the failure this guards.
+  it("says so and leaves the chip alone when the message is gone", async () => {
+    buildMessageReferenceTextMock.mockResolvedValue(null)
+    act(() => useChatStore.getState().addContextSelection(msgSel()))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-widen"))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+    expect(useChatStore.getState().contextSelections[0].span).toBeUndefined()
+    expect(useChatStore.getState().contextSelections[0].snapshot).toBe(
+      "assistant: run /stack restack"
+    )
+  })
+
+  it("counts the turns in the label once widened", () => {
+    act(() =>
+      useChatStore.getState().addContextSelection(msgSel({ span: { before: 2, after: 1 } }))
+    )
+    render(<ArtifactSelectionChips />)
+    expect(screen.getByTestId("artifact-selection-chip").textContent).toContain(
+      "selectionChipMessageSpanLabel"
+    )
+    expect(screen.getByTestId("artifact-selection-chip").textContent).toContain('"count":4')
   })
 })

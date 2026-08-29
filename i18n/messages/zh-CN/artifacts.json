@@ -115,13 +115,17 @@
     "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
     "selectionChipFileLabel": "{path} · 整个文件",
     "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+    "selectionChipMessageSpanLabel": "“{title}”中的 {count} 条消息",
     "selectionChipPluginLabel": "{source}：{title}",
     "selectionChipWebLabel": "{title} · 网页",
     "selectionChipWholeLabel": "{title} · 整份产物",
     "selectionCommentPlaceholder": "这里希望怎么改？",
+    "selectionSpanUnavailable": "该消息已不存在，引用保持原样。",
     "staleBanner": "此提案生成后 Artifact 已变化，请重新比对或丢弃。",
     "title": "审阅改动",
-    "viewChanges": "查看改动"
+    "viewChanges": "查看改动",
+    "widenSelectionAria": "为“{title}”中的这条消息扩展上下文",
+    "widenSelectionHint": "前后各多包含一轮"
   },
   "runnable": "可运行",
   "runtimeStates": {

@@ -1,18 +1,15 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import type { UIMessage } from "ai"
 
 import {
   searchChatHistory,
   type ChatSearchOutcome,
   type ChatSearchQuery,
 } from "@/lib/chat/search/engine"
-import { projectSearchText } from "@/lib/chat/search/project-text"
+import { pendingSearchRows } from "@/lib/chat/search/pending-rows"
 import { drainSearchIndex, scheduleSearchIndexDrain } from "@/lib/chat/search/indexer"
 import { CONTENT_SEARCH_MIN_QUERY } from "@/lib/chat/conversation-search-scope"
-import type { ChatSearchTextRow } from "@/lib/db/chat-search-text"
-import { useChatStore } from "@/stores/chat"
 
 const EMPTY_OUTCOME: ChatSearchOutcome = {
   results: [],
@@ -30,49 +27,6 @@ export interface UseChatHistorySearchOptions extends Omit<ChatSearchQuery, "quer
 export interface UseChatHistorySearchResult extends ChatSearchOutcome {
   loading: boolean
   error: Error | null
-}
-
-function createdAtOf(message: UIMessage): number {
-  const value = (message.metadata as { createdAt?: unknown } | undefined)?.createdAt
-  return typeof value === "number" && Number.isFinite(value) ? value : Date.now()
-}
-
-/**
- * Project the open chat slices without touching Dexie.
- *
- * The idle index deliberately trails streaming writes. Searching these small
- * in-memory slices first makes the newest partial turn findable immediately;
- * the engine de-duplicates their message ids against the resident corpus.
- */
-function pendingRows(): ChatSearchTextRow[] {
-  const state = useChatStore.getState()
-  const bySession = new Map<string, readonly UIMessage[]>()
-  for (const [sessionId, slice] of Object.entries(state.sessions)) {
-    bySession.set(sessionId, slice.messages)
-  }
-  if (state.activeSessionId) {
-    bySession.set(state.activeSessionId, state.messages)
-  }
-
-  const rows: ChatSearchTextRow[] = []
-  const seen = new Set<string>()
-  for (const [sessionId, messages] of bySession) {
-    for (const message of messages) {
-      if (!message.id || seen.has(message.id)) continue
-      seen.add(message.id)
-      const text = projectSearchText(message.parts)
-      if (!text) continue
-      rows.push({
-        messageId: message.id,
-        sessionId,
-        projectId: "",
-        role: message.role,
-        createdAt: createdAtOf(message),
-        text,
-      })
-    }
-  }
-  return rows
 }
 
 /**
@@ -135,7 +89,7 @@ export function useChatHistorySearch(
             includeArchived,
             collapseBySession,
           },
-          { pendingRows }
+          { pendingRows: pendingSearchRows }
         )
       )
       .then((outcome) => {

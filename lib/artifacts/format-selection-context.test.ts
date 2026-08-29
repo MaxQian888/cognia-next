@@ -343,3 +343,55 @@ describe("entity selections", () => {
     ).toContain("Comment: does this still apply?")
   })
 })
+
+describe("a referenced message", () => {
+  const msg = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "message" as const,
+    entityId: "s1#m1",
+    title: "Restacking",
+    snapshot: "assistant: run /stack restack",
+    comment: "",
+    href: "/?session=s1&message=m1",
+    ...over,
+  })
+
+  // The assistant can hand the link back, and the app lands on the exact turn.
+  it("names where it came from", () => {
+    const out = formatContextSelectionsForLLM([msg()])
+    expect(out).toContain("/?session=s1&message=m1")
+    expect(out).toContain("A message from another conversation")
+  })
+
+  it("says how much of the conversation came with it", () => {
+    const out = formatContextSelectionsForLLM([msg({ span: { before: 2, after: 1 } })])
+    expect(out).toContain("3 turn(s) around it")
+  })
+
+  it("says nothing about turns for a bare single-message reference", () => {
+    expect(formatContextSelectionsForLLM([msg()])).not.toContain("turn(s)")
+  })
+
+  // A heading full of routes is noise the model reads past; the other kinds
+  // open a record whose own surface is the better destination.
+  it("leaves the other kinds' headings alone", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "entity",
+        entityKind: "memory",
+        entityId: "mem1",
+        title: "Prefers pnpm",
+        snapshot: "x",
+        comment: "",
+        href: "/memory",
+      },
+    ])
+    expect(out).not.toContain("/memory")
+    expect(out).toContain('Stored memory "Prefers pnpm"')
+  })
+
+  it("falls back to the plain heading when a message has no link", () => {
+    const out = formatContextSelectionsForLLM([msg({ href: undefined })])
+    expect(out).toContain('A message from another conversation "Restacking"')
+  })
+})

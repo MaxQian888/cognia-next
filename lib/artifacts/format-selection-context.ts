@@ -78,6 +78,7 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
   issue: "Issue",
   plan: "Plan",
   session: "Another conversation",
+  message: "A message from another conversation",
   artifact: "Artifact",
 }
 
@@ -100,8 +101,24 @@ function headingFor(sel: ContextSelectionRef): string {
       const truncation = sel.truncated ? " (truncated to 20,000 characters)" : ""
       return `Selection from app "${sel.sourceApp}"${sourceTitle}${truncation}:`
     }
-    case "entity":
-      return `${ENTITY_NOUNS[sel.entityKind]} "${sel.title}"${sel.subtitle ? ` (${sel.subtitle})` : ""}:`
+    case "entity": {
+      const noun = ENTITY_NOUNS[sel.entityKind]
+      const detail = sel.subtitle ? ` (${sel.subtitle})` : ""
+      // A message reference names WHERE it came from, because the assistant can
+      // hand that link back: `hooks/chat/use-message-permalink.ts` consumes
+      // `?session=&message=` and lands on the exact turn. Only this kind — the
+      // others open a record whose own surface is the better destination, and a
+      // heading full of routes is noise the model has to read past.
+      if (sel.entityKind === "message" && sel.href) {
+        const span = sel.span
+        const turns =
+          span && (span.before > 0 || span.after > 0)
+            ? ` and the ${span.before + span.after} turn(s) around it`
+            : ""
+        return `${noun}${turns}${detail} — ${sel.href}:`
+      }
+      return `${noun} "${sel.title}"${detail}:`
+    }
     case "plugin": {
       // Citations are the point of this kind: without them the assistant is
       // told some prose and cannot tell which code it describes.

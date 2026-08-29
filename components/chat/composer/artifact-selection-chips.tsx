@@ -15,8 +15,11 @@
 // nothing for a per-hunk proposal to diff them against, so offering the control
 // would promise a round trip that cannot happen.
 
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
+  ChevronsUpDownIcon,
   DatabaseIcon,
   FileDiff,
   FileCodeIcon,
@@ -30,6 +33,13 @@ import { useChatStore, useComposerContextSelections } from "@/stores/chat"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import {
+  MAX_MESSAGE_SPAN,
+  buildMessageReferenceText,
+  clampSpan,
+  parseMessageRefId,
+} from "@/lib/chat/mentions/message-reference"
+import { entitySnapshotBody } from "@/lib/chat/mentions/entity-sources"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -80,6 +90,35 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const selections = useComposerContextSelections(composerSessionId)
   const remove = useChatStore((s) => s.removeContextSelection)
   const promote = useChatStore((s) => s.promoteContextSelection)
+  const replace = useChatStore((s) => s.replaceContextSelection)
+
+  const widen = useCallback(
+    async (index: number, sel: ContextSelectionRef) => {
+      if (sel.kind !== "entity" || sel.entityKind !== "message") return
+      const parsed = parseMessageRefId(sel.entityId)
+      if (!parsed) return
+      const current = sel.span ?? { before: 0, after: 0 }
+      // One step widens BOTH sides. A reference is to an exchange, and a
+      // one-sided stepper would need two controls on a chip that has room for
+      // one — the asymmetric case is served by picking a different anchor.
+      const next = clampSpan({ before: current.before + 1, after: current.after + 1 })
+      if (next.before === current.before && next.after === current.after) return
+      const body = await buildMessageReferenceText({ ...parsed, span: next })
+      // The anchor was deleted between the pick and the widen. Saying so beats
+      // leaving a chip that silently kept its old, narrower body while claiming
+      // a wider span.
+      if (!body) {
+        toast.error(t("selectionSpanUnavailable"))
+        return
+      }
+      replace(
+        index,
+        { ...sel, span: next, snapshot: entitySnapshotBody("message", body) },
+        composerSessionId
+      )
+    },
+    [replace, composerSessionId, t]
+  )
 
   if (selections.length === 0) return null
 
@@ -131,7 +170,17 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
           source: sel.sourceLabel,
           title: sel.title,
         })
-      case "entity":
+      case "entity": {
+        // A widened `@msg:` reference is no longer "a message" — it carries the
+        // turns around it, and a chip that still said "message" would understate
+        // what is about to be sent.
+        const span = sel.span
+        if (sel.entityKind === "message" && span && (span.before > 0 || span.after > 0)) {
+          return t("selectionChipMessageSpanLabel", {
+            title: sel.title,
+            count: span.before + span.after + 1,
+          })
+        }
         // The kind noun is localized (`tEntity`), the record title is not —
         // it is the user's own text and must read back exactly as they saw it
         // in the picker.
@@ -139,6 +188,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
           kind: tEntity(sel.entityKind),
           title: sel.title,
         })
+      }
     }
   }
 
@@ -156,6 +206,13 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
         const isTarget = index === targetIndex
         const Icon = KIND_ICONS[sel.kind]
         const canPromote = showEditTarget && sel.kind === "artifact" && !isTarget
+        // Only a message reference has neighbours to reach for, and only until
+        // the span hits its ceiling — past that the control would promise a
+        // widening that `clampSpan` refuses.
+        const canWiden =
+          sel.kind === "entity" &&
+          sel.entityKind === "message" &&
+          (sel.span?.before ?? 0) < MAX_MESSAGE_SPAN
         return (
           <div
             key={`${selectionKey(sel)}:${index}`}
@@ -182,6 +239,20 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
             ) : (
               <span className="max-w-[min(280px,calc(100vw-6rem))] truncate">{label}</span>
             )}
+            {canWiden ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid="context-selection-widen"
+                aria-label={t("widenSelectionAria", { title: sel.title })}
+                title={t("widenSelectionHint")}
+                onClick={() => void widen(index, sel)}
+                className="size-5 opacity-60 transition-opacity hover:opacity-100"
+              >
+                <ChevronsUpDownIcon className="size-3" />
+              </Button>
+            ) : null}
             {showEditTarget && isTarget ? (
               <Badge
                 variant="secondary"

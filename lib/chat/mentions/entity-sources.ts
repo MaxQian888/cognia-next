@@ -30,6 +30,12 @@
 
 import type { EntitySelectionKind, EntitySelectionRef } from "@/types/artifact/artifact"
 import { truncationMarker } from "@/lib/docs-providers/limits"
+// The one place this repo already decided how short a CONTENT query may be —
+// titles match from one character, message bodies do not, because a
+// one-character scan over every turn is noise rather than a search. The module
+// is type-only at the top level, so it stays off the trigger detector's
+// runtime path.
+import { CONTENT_SEARCH_MIN_QUERY } from "@/lib/chat/conversation-search-scope"
 import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 // Statically imported even though this module is on the pure trigger
 // detector's path: `entity-cache` pulls only `lib/global-search/cache.ts`,
@@ -192,6 +198,11 @@ export function clampEntitySnapshot(text: string): string {
 const UNTRUSTED_ENTITY_KINDS: ReadonlySet<EntitySelectionKind> = new Set([
   "issue",
   "session",
+  // A single message is a slice of a conversation, so it inherits the
+  // conversation's authorship problem exactly — and more sharply, because a
+  // `@msg:` body deliberately carries the TOOL OUTPUT the transcript snapshot
+  // drops. That is the part most likely to be text the web wrote.
+  "message",
   "memory",
 ])
 
@@ -248,6 +259,38 @@ export async function searchEntityMentionCandidates(
 ): Promise<EntityMentionCandidate[]> {
   if (source.search) return source.search(query, ctx)
   return take(await loadEntityCandidates(source, ctx), query)
+}
+
+interface MessageCandidateInput {
+  sessionId: string
+  messageId: string
+  sessionTitle: string
+  role: string
+  createdAt: number
+  excerpt: string
+  refId: string
+}
+
+/**
+ * One `@msg:` row.
+ *
+ * Titled by the CONVERSATION, subtitled by the excerpt: a message has no name,
+ * and "which conversation, and roughly what was said" is what lets a person
+ * recognise the one they meant. The excerpt is the engine's own snippet, so the
+ * row reads the same as the ⌘K hit it came from.
+ */
+function messageCandidate(input: MessageCandidateInput): EntityMentionCandidate {
+  const date = new Date(input.createdAt).toISOString().slice(0, 10)
+  return {
+    entityKind: "message",
+    id: input.refId,
+    title: input.sessionTitle,
+    subtitle: `${input.role} · ${date} · ${input.excerpt}`.slice(0, 200),
+    // The permalink, so the chip opens the exact message rather than the
+    // conversation's tail — `hooks/chat/use-message-permalink.ts` consumes it.
+    href: `/?session=${encodeURIComponent(input.sessionId)}&message=${encodeURIComponent(input.messageId)}`,
+    searchText: haystack(input.sessionTitle, input.excerpt, input.role),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +424,80 @@ function registerBuiltinEntityMentionSources(): void {
     async snapshot(candidate) {
       const { getSessionTranscriptText } = await import("./entity-transcript")
       return getSessionTranscriptText(candidate.id)
+    },
+  })
+
+  registerEntityMentionSource({
+    entityKind: "message",
+    prefix: "msg:",
+    // `search`, not `load`: the corpus here is every message in the account.
+    // The ADR-0099 engine already holds a resident, tuned index of exactly that
+    // — and until now nothing in the composer used it, so `@chat:` could only
+    // match a conversation by its TITLE. Finding the conversation where a thing
+    // was discussed is the whole reason a person reaches for a reference.
+    async search(query, ctx) {
+      const { pendingSearchRows } = await import("@/lib/chat/search/pending-rows")
+      const { messageRefId } = await import("./message-reference")
+      const scope = ctx.projectId ? { projectId: ctx.projectId } : {}
+
+      // Short queries do not reach the engine: one letter would scan the whole
+      // resident haystack. The empty-query case is not a search at all — it is
+      // "the most recent messages", which the index answers directly.
+      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
+
+      if (query.length === 0) {
+        const { loadNewestChatSearchText } = await import("@/lib/db/chat-search-text")
+        const { getDb } = await import("@/lib/db/schema")
+        const rows = (await loadNewestChatSearchText(ENTITY_MENTION_RESULT_LIMIT * 3))
+          .filter((row) => !ctx.projectId || !row.projectId || row.projectId === ctx.projectId)
+          .slice(0, ENTITY_MENTION_RESULT_LIMIT)
+        const sessions = await getDb().sessions.bulkGet(rows.map((row) => row.sessionId))
+        const titles = new Map(
+          sessions.filter(Boolean).map((s) => [s!.id, s!.title || s!.id] as const)
+        )
+        return rows.map((row) =>
+          messageCandidate({
+            sessionId: row.sessionId,
+            messageId: row.messageId,
+            sessionTitle: titles.get(row.sessionId) ?? row.sessionId,
+            role: row.role,
+            createdAt: row.createdAt,
+            excerpt: row.text,
+            refId: messageRefId(row.sessionId, row.messageId),
+          })
+        )
+      }
+
+      const { searchChatHistory } = await import("@/lib/chat/search/engine")
+      const outcome = await searchChatHistory(
+        {
+          query,
+          limit: ENTITY_MENTION_RESULT_LIMIT,
+          ...scope,
+          // One hit per conversation would hide the second half of an exchange
+          // in the very conversation the user is aiming at — the opposite of
+          // what a message-level reference is for.
+          collapseBySession: false,
+        },
+        { pendingRows: pendingSearchRows }
+      )
+      return outcome.results.map((hit) =>
+        messageCandidate({
+          sessionId: hit.sessionId,
+          messageId: hit.messageId,
+          sessionTitle: hit.sessionTitle || hit.sessionId,
+          role: hit.role,
+          createdAt: hit.createdAt,
+          excerpt: hit.snippet.text,
+          refId: messageRefId(hit.sessionId, hit.messageId),
+        })
+      )
+    },
+    async snapshot(candidate) {
+      const { buildMessageReferenceText, parseMessageRefId } = await import("./message-reference")
+      const parsed = parseMessageRefId(candidate.id)
+      if (!parsed) return null
+      return buildMessageReferenceText(parsed)
     },
   })
 

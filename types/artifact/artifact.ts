@@ -85,6 +85,17 @@ interface ContextSelectionBase {
   title: string
   snapshot: string
   comment: string
+  /**
+   * Turns included around the anchor, for the kinds that have neighbours —
+   * today only `@msg:`. Absent means the reference is exactly what was picked.
+   *
+   * On the base rather than on `EntitySelectionRef` because it describes the
+   * SHAPE of the excerpt, which is the same question `ArtifactSelectionRef
+   * .range` and `FileSelectionRef.range` answer for their own kinds. The chip
+   * widens it in place and re-reads the body, so it has to travel with the
+   * selection rather than being baked into the snapshot alone.
+   */
+  span?: { before: number; after: number }
 }
 
 /**
@@ -204,8 +215,11 @@ export interface EntitySelectionRef extends ContextSelectionBase {
   href?: string
 }
 
-/** The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@artifact:` reach. */
-export type EntitySelectionKind = "memory" | "issue" | "plan" | "session" | "artifact"
+/**
+ * The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@msg:` /
+ * `@artifact:` reach.
+ */
+export type EntitySelectionKind = "memory" | "issue" | "plan" | "session" | "message" | "artifact"
 
 /**
  * Anything the user can stage as context for their next message.

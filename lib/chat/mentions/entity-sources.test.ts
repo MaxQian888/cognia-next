@@ -27,11 +27,27 @@ import type { EntitySelectionKind } from "@/types/artifact/artifact"
 const listSessionsMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({ listSessions: () => listSessionsMock() }))
 
+// Same for `@msg:`, which reaches the ADR-0099 engine rather than a table.
+const searchChatHistoryMock = jest.fn()
+jest.mock("@/lib/chat/search/engine", () => ({
+  searchChatHistory: (...args: unknown[]) => searchChatHistoryMock(...args),
+}))
+const loadNewestMock = jest.fn()
+jest.mock("@/lib/db/chat-search-text", () => ({
+  loadNewestChatSearchText: (limit: number) => loadNewestMock(limit),
+}))
+const bulkGetMock = jest.fn()
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ sessions: { bulkGet: (ids: string[]) => bulkGetMock(ids) } }),
+}))
+jest.mock("@/lib/chat/search/pending-rows", () => ({ pendingSearchRows: () => [] }))
+
 const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   memory: "memory:",
   issue: "issue:",
   plan: "plan:",
   session: "chat:",
+  message: "msg:",
   artifact: "artifact:",
 }
 
@@ -59,7 +75,7 @@ beforeEach(() => {
 })
 
 describe("entity mention registry", () => {
-  it("registers exactly the five built-in sources", () => {
+  it("registers exactly the six built-in sources", () => {
     const kinds = listEntityMentionSources().map((s) => s.entityKind)
     expect(kinds.sort()).toEqual(Object.keys(EXPECTED_PREFIXES).sort())
   })
@@ -107,7 +123,7 @@ describe("entity mention registry", () => {
   it("re-seeds only the built-ins on reset", () => {
     registerEntityMentionSource(fakeSource("custom", "custom:"))
     __resetEntityMentionSourcesForTests()
-    expect(listEntityMentionSources()).toHaveLength(5)
+    expect(listEntityMentionSources()).toHaveLength(Object.keys(EXPECTED_PREFIXES).length)
   })
 })
 
@@ -345,5 +361,135 @@ describe("@chat: candidates", () => {
       session({ id: "theirs", projectId: "q" }),
     ])
     expect((await chatCandidates({ projectId: "p" })).map((c) => c.id)).toEqual(["legacy", "mine"])
+  })
+})
+
+describe("@msg: candidates", () => {
+  const source = () => getEntityMentionSourceByPrefix("msg:")!
+
+  beforeEach(() => {
+    invalidateEntityMentionCaches()
+    searchChatHistoryMock.mockReset()
+    loadNewestMock.mockReset()
+    bulkGetMock.mockReset()
+    searchChatHistoryMock.mockResolvedValue({
+      results: [],
+      moreOlderHistory: false,
+      indexIncomplete: false,
+    })
+    loadNewestMock.mockResolvedValue([])
+    bulkGetMock.mockResolvedValue([])
+  })
+
+  const hit = (over: Record<string, unknown> = {}) => ({
+    messageId: "m1",
+    sessionId: "s1",
+    sessionTitle: "Restacking",
+    projectId: "p",
+    role: "assistant",
+    createdAt: Date.UTC(2026, 7, 20),
+    count: 1,
+    at: 0,
+    snippet: { text: "run /stack restack", positions: [] },
+    score: 1,
+    archived: false,
+    otherBranchCount: 0,
+    ...over,
+  })
+
+  // The point of the source: `@chat:` could only ever match a conversation by
+  // its TITLE, and the tuned cross-conversation index was already there.
+  it("searches message CONTENT through the ADR-0099 engine", async () => {
+    searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
+    const rows = await searchEntityMentionCandidates(source(), "restack", { projectId: "p" })
+    expect(searchChatHistoryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "restack", projectId: "p", collapseBySession: false }),
+      expect.objectContaining({ pendingRows: expect.any(Function) })
+    )
+    expect(rows).toHaveLength(1)
+  })
+
+  it("identifies a candidate by conversation AND message", async () => {
+    searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
+    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    expect(row.id).toBe("s1#m1")
+    expect(row.entityKind).toBe("message")
+  })
+
+  it("titles the row by conversation and subtitles it with the excerpt", async () => {
+    searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
+    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    expect(row.title).toBe("Restacking")
+    expect(row.subtitle).toContain("assistant")
+    expect(row.subtitle).toContain("run /stack restack")
+  })
+
+  // A conversation link would land on the tail; the reference is to one turn.
+  it("links to the message permalink, not to the conversation", async () => {
+    searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
+    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    expect(row.href).toBe("/?session=s1&message=m1")
+  })
+
+  // Below the floor the engine would scan the whole resident haystack for one
+  // letter — the same floor ⌘K applies.
+  it("does not reach the engine for a one-character query", async () => {
+    expect(await searchEntityMentionCandidates(source(), "r", {})).toEqual([])
+    expect(searchChatHistoryMock).not.toHaveBeenCalled()
+  })
+
+  // `searchChatHistory` returns nothing for an empty query by design, so
+  // "recent messages" has to come from the index directly.
+  it("offers the newest messages for an empty query", async () => {
+    loadNewestMock.mockResolvedValue([
+      { messageId: "m9", sessionId: "s9", projectId: "p", role: "user", createdAt: 0, text: "hi" },
+    ])
+    bulkGetMock.mockResolvedValue([{ id: "s9", title: "Nine" }])
+    const rows = await searchEntityMentionCandidates(source(), "", {})
+    expect(searchChatHistoryMock).not.toHaveBeenCalled()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: "s9#m9", title: "Nine" })
+  })
+
+  it("keeps the newest list inside the active workspace", async () => {
+    loadNewestMock.mockResolvedValue([
+      { messageId: "a", sessionId: "sa", projectId: "p", role: "user", createdAt: 0, text: "x" },
+      { messageId: "b", sessionId: "sb", projectId: "q", role: "user", createdAt: 0, text: "x" },
+      // Pre-isolation rows carry no workspace stamp and must stay reachable.
+      { messageId: "c", sessionId: "sc", projectId: "", role: "user", createdAt: 0, text: "x" },
+    ])
+    bulkGetMock.mockResolvedValue([])
+    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    expect(rows.map((r) => r.id)).toEqual(["sa#a", "sc#c"])
+  })
+
+  it("falls back to the session id when a conversation has no title", async () => {
+    loadNewestMock.mockResolvedValue([
+      { messageId: "m", sessionId: "s", projectId: "", role: "user", createdAt: 0, text: "x" },
+    ])
+    bulkGetMock.mockResolvedValue([undefined])
+    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    expect(row.title).toBe("s")
+  })
+
+  it("caps the offered rows", async () => {
+    searchChatHistoryMock.mockResolvedValue({
+      results: Array.from({ length: 30 }, (_, i) => hit({ messageId: `m${i}` })),
+      moreOlderHistory: false,
+    })
+    const rows = await searchEntityMentionCandidates(source(), "restack", {})
+    expect(searchChatHistoryMock.mock.calls[0][0].limit).toBe(ENTITY_MENTION_RESULT_LIMIT)
+    expect(rows).toHaveLength(30)
+  })
+})
+
+describe("untrusted wrapping for a message", () => {
+  // A `@msg:` body deliberately carries the tool OUTPUT the transcript snapshot
+  // drops — the part most likely to be text the web wrote.
+  it("wraps a referenced message", () => {
+    expect(entitySnapshotBody("message", "whatever a tool returned")).toContain(
+      "whatever a tool returned"
+    )
+    expect(entitySnapshotBody("message", "x")).not.toBe("x")
   })
 })

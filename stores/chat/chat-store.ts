@@ -743,6 +743,22 @@ interface ChatState {
   /** Remove a staged selection (by index, since snapshots can repeat). */
   removeContextSelection: (index: number, sessionId?: string | null) => void
   /**
+   * Swap a staged selection for a re-read version of itself, in place.
+   *
+   * By index and not by identity for the same reason `removeContextSelection`
+   * is: two chips can legitimately carry the same snapshot. Position is
+   * load-bearing here — the first artifact chip is the send's edit target — so
+   * this replaces rather than remove-then-add.
+   *
+   * Used when a chip's body has to be rebuilt without the user re-picking it:
+   * widening a `@msg:` span, or refreshing a snapshot whose source has changed.
+   */
+  replaceContextSelection: (
+    index: number,
+    selection: ContextSelectionRef,
+    sessionId?: string | null
+  ) => void
+  /**
    * Move a staged selection to the front, making it the send's edit target.
    *
    * Only the first *artifact* selection becomes `pendingArtifactEditTarget` —
@@ -1119,6 +1135,14 @@ export const useChatStore = create<ChatState>((set) => ({
         : patchComposerState(s, sessionId, {
             contextSelections: current.filter((_, i) => i !== index),
           })
+    }),
+  replaceContextSelection: (index, selection, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).contextSelections
+      if (index < 0 || index >= current.length) return s
+      const next = [...current]
+      next[index] = selection
+      return patchComposerState(s, sessionId, { contextSelections: next })
     }),
   promoteContextSelection: (index, sessionId) =>
     set((s) => {
