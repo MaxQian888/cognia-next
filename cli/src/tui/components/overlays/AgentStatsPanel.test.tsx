@@ -28,6 +28,7 @@ const overview: AgentStatsOverview = {
       costUsd: 0.5,
       durationMs: 0,
       reasoningTokens: 0,
+      unpricedTurns: 0,
     },
   ],
   tokensPerDay: [

@@ -58,15 +58,18 @@ describe("resolveLimitsSources", () => {
     ).toEqual(["volcengine", "anthropic"])
   })
 
+  // StepFun has BOTH a catalog descriptor (plan window) and a balance adapter,
+  // so the generic `balance` source matches too — the descriptor must still come
+  // first so the runner prefers the window and only falls through to credit.
   it("includes a built-in catalog descriptor (stepfun) ahead of the balance fallthrough", () => {
     expect(
       resolveLimitsSources({ provider: "opencode", providerKey: "stepfun" }).map((s) => s.key)
-    ).toEqual(["stepfun"])
+    ).toEqual(["stepfun", "balance"])
     expect(
       resolveLimitsSources({ provider: "opencode", baseUrl: "https://api.stepfun.com/v1" }).map(
         (s) => s.key
       )
-    ).toEqual(["stepfun"])
+    ).toEqual(["stepfun", "balance"])
   })
 
   it("lists plugin sources before the built-ins", () => {

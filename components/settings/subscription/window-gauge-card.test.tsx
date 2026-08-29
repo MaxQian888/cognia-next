@@ -33,6 +33,21 @@ describe("WindowGaugeCard", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42")
   })
 
+  it("states a week-scale reset as a weekday and time, not a 3-digit hour count", () => {
+    // The weekly / opus / sonnet gauges reset days out. "Resets in 167h 30m" is
+    // arithmetic the reader has to redo; this is the one surface that was still
+    // printing it after the Overview meters and the /usage card moved on.
+    render(
+      <WindowGaugeCard
+        meter={meter({ id: "weekly", resetAt: NOW + 7 * 24 * 60 * 60_000 })}
+        now={NOW}
+        testid="gauge-weekly"
+      />
+    )
+    expect(screen.queryByText(/Resets in \d+h/)).not.toBeInTheDocument()
+    expect(screen.getByText(/^Resets /)).toBeInTheDocument()
+  })
+
   it("shows the representative badge when flagged", () => {
     render(<WindowGaugeCard meter={meter()} now={NOW} representative />)
     expect(screen.getByText("Representative")).toBeInTheDocument()

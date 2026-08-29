@@ -134,40 +134,27 @@ describe("DiagnosticsCard", () => {
     expect(screen.queryByText(/estimated/i)).not.toBeInTheDocument()
   })
 
-  it("renders usage windows with no reset countdown and an expired window", () => {
+  // `/usage` has its own file and its own suite
+  // (`usage-diagnostics-card.test.tsx`); this only pins the dispatch.
+  it("dispatches a usage block to the usage card", () => {
     const block: UsageDiagnosticsBlock = {
       kind: "usage",
-      windows: [
-        { key: "fiveHour", utilization: 10, level: "ok", msUntilReset: null },
-        { key: "sevenDay", utilization: 99, level: "crit", msUntilReset: 0 },
+      meters: [
+        {
+          id: "session",
+          labelKey: "subscription.limits.meter.session",
+          kind: "window",
+          usedPct: 42,
+          resetAt: null,
+          status: "ok",
+        },
       ],
       fallbackPercentage: null,
       overageDisabledReason: null,
     }
     render(<DiagnosticsCard block={block} />)
-    expect(screen.getByText("10% used")).toBeInTheDocument()
-    expect(screen.getByText(/resetting/i)).toBeInTheDocument()
-    // No fallback / overage rows when both are null.
-    expect(screen.queryByText("Fallback")).not.toBeInTheDocument()
-    expect(screen.queryByText("Overage disabled")).not.toBeInTheDocument()
-  })
-
-  it("renders a usage card with utilization bars and a not-reported window", () => {
-    const block: UsageDiagnosticsBlock = {
-      kind: "usage",
-      windows: [
-        { key: "fiveHour", utilization: 42, level: "ok", msUntilReset: 4_500_000 },
-        { key: "sevenDay", utilization: null, level: null, msUntilReset: null },
-      ],
-      fallbackPercentage: 12,
-      overageDisabledReason: "spend cap reached",
-    }
-    render(<DiagnosticsCard block={block} />)
+    expect(screen.getByTestId("diagnostics-card")).toHaveAttribute("data-usage-card", "true")
     expect(screen.getByText("Subscription usage")).toBeInTheDocument()
-    expect(screen.getByTestId("usage-window-fiveHour")).toBeInTheDocument()
     expect(screen.getByText("42% used")).toBeInTheDocument()
-    expect(screen.getByText("not reported")).toBeInTheDocument()
-    expect(screen.getByText("12%")).toBeInTheDocument()
-    expect(screen.getByText("spend cap reached")).toBeInTheDocument()
   })
 })

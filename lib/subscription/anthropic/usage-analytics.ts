@@ -155,4 +155,48 @@ export function splitCountdown(ms: number): CountdownParts {
   }
 }
 
+/**
+ * How far out a reset is worth stating as a countdown. Past this, "resets in
+ * 143h 12m" is arithmetic the reader has to redo — a weekday and clock time is
+ * what they can actually plan around.
+ */
+const RESET_ABSOLUTE_THRESHOLD_MS = 24 * 60 * 60 * 1000
+
+/**
+ * How a window's reset should be phrased. Pure: the caller owns the i18n keys
+ * and the locale-aware date formatting, this only decides which of the three
+ * phrasings is honest for the distance involved.
+ */
+export type ResetDescriptor =
+  /** Reset time unknown — the window reported none. */
+  | { kind: "unknown" }
+  /** At or past the reset instant; the provider has not rolled it over yet. */
+  | { kind: "expired" }
+  /** Near enough that a countdown is the useful form. */
+  | { kind: "countdown"; hours: number; minutes: number }
+  /** Far enough out that a wall-clock instant reads better. */
+  | { kind: "absolute"; at: number }
+
+export function describeReset(resetAt: number | null | undefined, now: number): ResetDescriptor {
+  if (resetAt == null || !Number.isFinite(resetAt)) return { kind: "unknown" }
+  const remaining = resetAt - now
+  if (remaining <= 0) return { kind: "expired" }
+  if (remaining >= RESET_ABSOLUTE_THRESHOLD_MS) return { kind: "absolute", at: resetAt }
+  const parts = splitCountdown(remaining)
+  return { kind: "countdown", hours: parts.hours, minutes: parts.minutes }
+}
+
+/**
+ * `anthropic-ratelimit-unified-fallback-percentage` as a whole percent.
+ *
+ * The header is a 0–1 fraction, like every other ratio in that family
+ * (`*-utilization` reports `0.0184` for 1.84%), and the field name is the only
+ * thing that suggests otherwise. Rendering it raw printed "0%" for a real 20%
+ * fallback share. One helper so every surface reads the field the same way.
+ */
+export function fallbackPercentWhole(fraction: number | null | undefined): number | null {
+  if (fraction == null || !Number.isFinite(fraction)) return null
+  return Math.round(fraction * 100)
+}
+
 export { DAY_MS }

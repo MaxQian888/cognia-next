@@ -6,56 +6,196 @@
 
 import type { SlashContext } from "../builtin"
 import { getDb } from "@/lib/db/schema"
-import { summarizeCurrentWindow } from "@/lib/subscription/anthropic/usage-analytics"
+import { isLocalSpend } from "@/lib/db/session-usage"
+import {
+  resolveUsageWindows,
+  usageStatusFor,
+  usageWindowsStale,
+} from "@/lib/subscription/anthropic/overview-windows"
 import { latestBalanceSnapshot } from "@/lib/subscription/balance/store"
-import { listAccounts } from "@/lib/subscription/core/transport"
+import { getActiveAccount, listAccounts } from "@/lib/subscription/core/transport"
+import { queryAccountLimitsCoalesced } from "@/lib/subscription/limits/coalesce"
+import { isLimitsQueryEnabled } from "@/lib/subscription/limits/policy"
+import { latestLimitsSnapshot, recordLimitsSnapshot } from "@/lib/subscription/limits/store"
 import { syncModelsDevCatalog } from "@/lib/ai/providers/models-dev-sync"
-import { ALL_PROVIDER_IDS } from "@/types/subscription"
-import type { AccountSummary, SubscriptionUsageRow } from "@/types/subscription"
+import { buildUsageScopes, type UsageNote } from "@/lib/usage/usage-report"
+import { filterByRange } from "@/lib/usage/session-analytics"
+import { useSettingsStore } from "@/stores/settings"
+import { isTauri } from "@/lib/tauri"
+import { ALL_PROVIDER_IDS, DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS } from "@/types/subscription"
+import type { AccountSummary, ProviderLimitsRow, SubscriptionUsageRow } from "@/types/subscription"
+import type { SessionUsageRow } from "@/lib/db/session-usage"
+
+/** Widest scope the card can attribute over — 7 local days. */
+const LOCAL_SPEND_RANGE_DAYS = 7
 
 /**
- * `/usage` — Anthropic subscription quota windows (5h / 7d) from the newest
- * `subscriptionUsage` snapshot. Reuses the same pure analytics
- * (`summarizeCurrentWindow`) that drives the Settings → Subscription Usage tab.
+ * Newest passive rate-limit header sample, or `null` when Dexie has none / is
+ * unavailable (web mode without a database, a fresh install).
  */
-export async function handleUsage(ctx: SlashContext): Promise<void> {
-  const lines: string[] = ["**Subscription usage**", ""]
-  let latest: SubscriptionUsageRow | null = null
+async function readLatestHeaderSample(): Promise<SubscriptionUsageRow | null> {
   try {
     const rows = await getDb().subscriptionUsage.orderBy("fetchedAt").reverse().limit(1).toArray()
-    latest = rows[0] ?? null
+    return rows[0] ?? null
   } catch {
-    // Dexie unavailable — fall through to the empty-state hint.
+    return null
+  }
+}
+
+/**
+ * Resolve the quota-endpoint snapshot for the active Anthropic account,
+ * refreshing it first when it is missing or stale AND that exact account has
+ * opted into outbound quota queries.
+ *
+ * The refresh is deliberate: the OAuth usage endpoint is free, `/usage` is
+ * always user-invoked, and the per-account opt-in (`limitsQueryEnabledAccounts`)
+ * is the same gate the Subscription tab honours. Nothing is sent for an account
+ * that has not granted it — the command reports that as a note instead.
+ */
+async function readQuotaSnapshot(
+  notes: UsageNote[],
+  now: number
+): Promise<ProviderLimitsRow | null> {
+  if (!isTauri()) {
+    notes.push({ id: "web-mode" })
+    return null
+  }
+  let accountId: string | null = null
+  try {
+    accountId = (await getActiveAccount("anthropic")).activeAccountId ?? null
+  } catch {
+    // Keyring/IPC unavailable — indistinguishable from "no account" here.
+  }
+  if (!accountId) {
+    notes.push({ id: "no-account" })
+    return null
   }
 
-  const summary = summarizeCurrentWindow(latest)
-  if (!summary) {
-    lines.push(
-      "- No Anthropic usage captured yet. Usage is read from API rate-limit " +
-        "headers — send a turn on a Claude Pro/Max subscription account first."
-    )
-    ctx.pushSystemMessage(lines.join("\n"))
-    return
+  let snapshot: ProviderLimitsRow | null = null
+  try {
+    snapshot = await latestLimitsSnapshot("anthropic", accountId)
+  } catch {
+    // Dexie read failed; a refresh below may still produce a snapshot.
+  }
+
+  const enabledAccounts = useSettingsStore.getState().settings?.limitsQueryEnabledAccounts
+  const queryEnabled = isLimitsQueryEnabled(enabledAccounts, "anthropic", accountId)
+  const stale = usageWindowsStale({ fetchedAt: snapshot?.fetchedAt ?? null }, now)
+
+  if (!queryEnabled) {
+    if (!snapshot) notes.push({ id: "query-disabled" })
+    return snapshot
+  }
+  if (!stale) return snapshot
+
+  try {
+    const fresh = await queryAccountLimitsCoalesced("anthropic", accountId)
+    if (fresh) snapshot = await recordLimitsSnapshot(fresh)
+  } catch (err) {
+    notes.push({ id: "quota-error", detail: err instanceof Error ? err.message : String(err) })
+  }
+  return snapshot
+}
+
+/**
+ * Local `sessionUsage` rows for the widest attribution scope. Imported rows are
+ * dropped: that spend was paid on another machine (often by another account),
+ * and blending it in would present someone else's tokens as this plan's usage.
+ */
+async function readLocalSpend(
+  notes: UsageNote[],
+  now: number,
+  sessionId: string | null
+): Promise<{ calendar: SessionUsageRow[]; session: SessionUsageRow[] } | null> {
+  try {
+    const all = (await getDb().sessionUsage.toArray()).filter(isLocalSpend)
+    return {
+      calendar: filterByRange(all, LOCAL_SPEND_RANGE_DAYS, now),
+      // Deliberately NOT date-filtered: a chat older than the calendar window is
+      // still the session the user is looking at, and its own tab reporting
+      // "no recorded turns" would be a lie about a conversation on screen.
+      session: sessionId ? all.filter((r) => r.sessionId === sessionId) : [],
+    }
+  } catch {
+    notes.push({ id: "local-spend-unavailable" })
+    return null
+  }
+}
+
+/**
+ * `/usage` — the plan's quota windows plus the local spend that explains them.
+ *
+ * Quota comes from `resolveUsageWindows`, the same fuse the Subscription
+ * Overview uses: the free OAuth usage endpoint (session / weekly / weekly_opus /
+ * weekly_sonnet + the pay-as-you-go meter) when it is the newer reading, and the
+ * passive `anthropic-ratelimit-*` header sample otherwise. Attribution comes
+ * from this machine's `sessionUsage` rows, precomputed for every scope the card
+ * offers so switching scope never re-reads a database that has moved on.
+ *
+ * The command never fails: each plane degrades to a note explaining exactly what
+ * is missing, and a card with only one plane is still worth rendering.
+ */
+export async function handleUsage(ctx: SlashContext): Promise<void> {
+  const now = Date.now()
+  const notes: UsageNote[] = []
+
+  const [quota, headers, localRows] = await Promise.all([
+    readQuotaSnapshot(notes, now),
+    readLatestHeaderSample(),
+    readLocalSpend(notes, now, ctx.activeSessionId),
+  ])
+
+  if (quota?.error) notes.push({ id: "quota-error", detail: quota.error })
+
+  const warnThresholdPct =
+    useSettingsStore.getState().settings?.subscriptionSettings?.warnThresholdPct ??
+    DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS.warnThresholdPct
+  const resolved = resolveUsageWindows(quota, headers, { warnThresholdPct })
+
+  if (resolved.source !== null && usageWindowsStale(resolved, now)) {
+    notes.push({ id: "stale" })
+  }
+
+  const scopes =
+    localRows === null
+      ? undefined
+      : buildUsageScopes({
+          rows: localRows.calendar,
+          sessionRows: localRows.session,
+          sessionId: ctx.activeSessionId,
+          now,
+        })
+  if (localRows !== null && localRows.calendar.length === 0 && localRows.session.length === 0) {
+    notes.push({ id: "no-local-spend" })
   }
 
   ctx.pushSystemMessage({
     kind: "usage",
-    windows: [
-      {
-        key: "fiveHour",
-        utilization: summary.fiveHour?.utilization ?? null,
-        level: summary.fiveHour?.level ?? null,
-        msUntilReset: summary.fiveHour?.msUntilReset ?? null,
-      },
-      {
-        key: "sevenDay",
-        utilization: summary.sevenDay?.utilization ?? null,
-        level: summary.sevenDay?.level ?? null,
-        msUntilReset: summary.sevenDay?.msUntilReset ?? null,
-      },
-    ],
-    fallbackPercentage: summary.fallbackPercentage,
-    overageDisabledReason: summary.overageDisabledReason,
+    meters: resolved.windows,
+    extras: resolved.extras,
+    source: resolved.source,
+    fetchedAt: resolved.fetchedAt,
+    // A status is always resolvable: `usageStatusFor` returns the header
+    // sample's own unified status when headers won the fuse, and otherwise
+    // derives one from the worst meter. Passing `resolved.headerStatus`
+    // straight through would have left the pill permanently blank for anyone
+    // with the (free, actively refreshed) usage endpoint enabled — i.e. for
+    // exactly the configuration this command steers people into.
+    status: resolved.source === null ? null : usageStatusFor(resolved),
+    // The next three are things ONLY the rate-limit headers report — the usage
+    // endpoint has no field for any of them. `resolveUsageWindows` nulls them
+    // whenever the endpoint wins, which is correct for *window* metadata (a
+    // stale claim beside a fresh meter misleads) but would mean these three can
+    // never be shown at all. They are read from the newest header sample
+    // directly, so "the endpoint had fresher windows" does not silently become
+    // "your org has no overage restriction".
+    representativeClaim: headers?.representativeClaim ?? null,
+    fallbackPercentage: headers?.fallbackPercentage ?? null,
+    overageDisabledReason: headers?.overageDisabledReason ?? null,
+    scopes,
+    hasSession: !!ctx.activeSessionId,
+    notes,
+    generatedAt: now,
   })
 }
 

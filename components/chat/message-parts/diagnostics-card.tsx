@@ -10,19 +10,21 @@
  * The context-window bar reuses `ContextWindowHeader` from the composer
  * indicator so the visual language (green → amber → red fill + auto-compact
  * marker) matches the live read-out under the composer.
+ *
+ * `/usage` outgrew a shared file — it fuses plan quota with local spend
+ * attribution and carries its own scope/axis state — so it lives in
+ * `usage-diagnostics-card.tsx` and is dispatched to from here.
  */
 
 import { useTranslations } from "next-intl"
-import { CoinsIcon, GaugeIcon, MessagesSquareIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { CoinsIcon, MessagesSquareIcon } from "lucide-react"
+import { Surface } from "@/components/surface/surface"
 import { ContextWindowHeader, UsageRow } from "@/components/chat/context-usage-indicator"
-import { splitCountdown, type UsageLevel } from "@/lib/subscription/anthropic/usage-analytics"
+import { UsageDiagnosticsCard } from "@/components/chat/message-parts/usage-diagnostics-card"
 import type {
   ContextDiagnosticsBlock,
   CostDiagnosticsBlock,
   SystemMessageBlock,
-  UsageDiagnosticsBlock,
-  UsageWindowStat,
 } from "@/lib/slash-commands/system-blocks"
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact" })
@@ -32,16 +34,10 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 })
 
-const USAGE_LEVEL_FILL: Record<UsageLevel, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-red-500",
-}
-
 export function DiagnosticsCard({ block }: { block: SystemMessageBlock }) {
   if (block.kind === "context") return <ContextCard block={block} />
   if (block.kind === "cost") return <CostCard block={block} />
-  return <UsageCard block={block} />
+  return <UsageDiagnosticsCard block={block} />
 }
 
 function CardShell({
@@ -54,9 +50,11 @@ function CardShell({
   children: React.ReactNode
 }) {
   return (
-    <div
+    <Surface
+      layer="raised"
+      radius="stage"
       data-testid="diagnostics-card"
-      className="not-prose my-1 w-full max-w-md space-y-3 rounded-xl border bg-muted/30 p-3"
+      className="not-prose my-1 w-full max-w-md space-y-3 border p-3 [--surface-bg:color-mix(in_oklch,var(--muted)_30%,transparent)]"
     >
       <div className="flex items-center gap-2 text-sm font-medium">
         <span className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -65,7 +63,7 @@ function CardShell({
         {title}
       </div>
       {children}
-    </div>
+    </Surface>
   )
 }
 
@@ -165,61 +163,5 @@ function CostCard({ block }: { block: CostDiagnosticsBlock }) {
         </div>
       ) : null}
     </CardShell>
-  )
-}
-
-function UsageCard({ block }: { block: UsageDiagnosticsBlock }) {
-  const t = useTranslations("chat.diagnostics")
-  return (
-    <CardShell icon={<GaugeIcon className="size-3.5" />} title={t("usageTitle")}>
-      <div className="space-y-3">
-        {block.windows.map((w) => (
-          <UsageWindowBar key={w.key} window={w} />
-        ))}
-      </div>
-      {block.fallbackPercentage != null ? (
-        <UsageRow label={t("fallback")} slot={`${block.fallbackPercentage}%`} />
-      ) : null}
-      {block.overageDisabledReason ? (
-        <UsageRow label={t("overageDisabled")} slot={block.overageDisabledReason} />
-      ) : null}
-      <p className="text-[11px] text-muted-foreground">{t("usageFooter")}</p>
-    </CardShell>
-  )
-}
-
-function UsageWindowBar({ window: w }: { window: UsageWindowStat }) {
-  const t = useTranslations("chat.diagnostics")
-  const label = w.key === "fiveHour" ? t("fiveHour") : t("sevenDay")
-  if (w.utilization == null || w.level == null) {
-    return (
-      <div className="space-y-1">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">{label}</span>
-          <span className="text-muted-foreground">{t("notReported")}</span>
-        </div>
-      </div>
-    )
-  }
-  const pct = Math.min(100, Math.max(0, w.utilization))
-  let reset = ""
-  if (w.msUntilReset != null) {
-    const c = splitCountdown(w.msUntilReset)
-    reset = c.expired ? t("resetting") : t("resetsIn", { hours: c.hours, minutes: c.minutes })
-  }
-  return (
-    <div className="space-y-1" data-testid={`usage-window-${w.key}`} data-level={w.level}>
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono">{t("windowUsed", { pct: pct.toFixed(0) })}</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded bg-muted">
-        <div
-          className={cn("h-full rounded transition-all duration-500", USAGE_LEVEL_FILL[w.level])}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {reset ? <p className="text-[10px] text-muted-foreground">{reset}</p> : null}
-    </div>
   )
 }

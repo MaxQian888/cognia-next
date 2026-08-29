@@ -9,9 +9,9 @@ import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useCountUp } from "@/hooks/usage/use-count-up"
+import { useResetLabel } from "@/hooks/usage/use-reset-label"
 
 import { QuotaBar } from "./quota-bar"
 
@@ -69,16 +69,14 @@ export function WindowGaugeCard({ meter, now, representative, testid }: WindowGa
   const { reduce } = useFlowMotion()
   const displayPct = Math.round(useCountUp(rawPct ?? 0, { disabled: reduce, durationMs: 500 }))
 
-  const countdown =
-    meter.resetAt == null
-      ? t("resetUnknown")
-      : (() => {
-          const parts = splitCountdown(meter.resetAt - now)
-          if (parts.expired) return t("resetExpired")
-          return parts.hours > 0
-            ? t("resetsInHm", { hours: parts.hours, minutes: parts.minutes })
-            : t("resetsInM", { minutes: parts.minutes })
-        })()
+  // Same phrasing as the Overview meters and the in-transcript /usage card:
+  // a countdown while the reset is near, a weekday + clock time once it is a
+  // day or more out. The weekly / opus / sonnet gauges here were the surface
+  // still printing three-digit hour counts nobody could act on.
+  const resetLabel = useResetLabel(meter.resetAt, now, {
+    namespace: "subscription.usage.window",
+  })
+  const countdown = resetLabel ?? t("resetUnknown")
 
   return (
     <div className="space-y-2 rounded-lg border p-4" data-testid={testid}>

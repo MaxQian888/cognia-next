@@ -1,10 +1,15 @@
 import type { SlashContext } from "../builtin"
-import type { SubscriptionUsageRow } from "@/types/subscription"
+import type { ProviderLimitsRow, SubscriptionUsageRow } from "@/types/subscription"
+import type { SessionUsageRow } from "@/lib/db/session-usage"
+import { useSettingsStore } from "@/stores/settings"
+import { isTauri } from "@/lib/tauri"
 
 // ── Mocks for the data sources the handlers reuse ──────────────────────────
 
 let usageRows: SubscriptionUsageRow[] = []
 let usageThrows = false
+let sessionUsageRows: SessionUsageRow[] = []
+let sessionUsageThrows = false
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     subscriptionUsage: {
@@ -19,12 +24,38 @@ jest.mock("@/lib/db/schema", () => ({
         }),
       }),
     },
+    sessionUsage: {
+      toArray: async () => {
+        if (sessionUsageThrows) throw new Error("no dexie")
+        return sessionUsageRows
+      },
+    },
   }),
+}))
+
+// The quota plane. `/usage` reads the newest stored snapshot and refreshes it
+// through the coalescer when it is stale AND the account opted in.
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => true),
+}))
+
+const getActiveAccountMock = jest.fn()
+const latestLimitsSnapshotMock = jest.fn()
+const recordLimitsSnapshotMock = jest.fn()
+const queryAccountLimitsCoalescedMock = jest.fn()
+jest.mock("@/lib/subscription/limits/store", () => ({
+  latestLimitsSnapshot: (...a: unknown[]) => latestLimitsSnapshotMock(...a),
+  recordLimitsSnapshot: (...a: unknown[]) => recordLimitsSnapshotMock(...a),
+}))
+jest.mock("@/lib/subscription/limits/coalesce", () => ({
+  queryAccountLimitsCoalesced: (...a: unknown[]) => queryAccountLimitsCoalescedMock(...a),
 }))
 
 const listAccountsMock = jest.fn()
 jest.mock("@/lib/subscription/core/transport", () => ({
   listAccounts: (...a: unknown[]) => listAccountsMock(...a),
+  getActiveAccount: (...a: unknown[]) => getActiveAccountMock(...a),
 }))
 
 const latestBalanceSnapshotMock = jest.fn()
@@ -63,100 +94,314 @@ beforeEach(() => {
   jest.clearAllMocks()
   usageRows = []
   usageThrows = false
+  sessionUsageRows = []
+  sessionUsageThrows = false
+  ;(isTauri as jest.Mock).mockReturnValue(true)
   listAccountsMock.mockResolvedValue([])
   latestBalanceSnapshotMock.mockResolvedValue(null)
+  getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-1", env: [] })
+  latestLimitsSnapshotMock.mockResolvedValue(null)
+  recordLimitsSnapshotMock.mockImplementation(async (snap: ProviderLimitsRow) => snap)
+  queryAccountLimitsCoalescedMock.mockResolvedValue(null)
+  useSettingsStore.setState({
+    settings: { limitsQueryEnabledAccounts: ["anthropic:acc-1"] } as never,
+  })
+})
+
+afterEach(() => {
+  useSettingsStore.setState({ settings: null as never })
 })
 
 // ── /usage ─────────────────────────────────────────────────────────────────
 
+type UsageBlock = Extract<Pushed, { kind: "usage" }>
+
+const NOW = Date.now()
+
+function limitsSnapshot(overrides: Partial<ProviderLimitsRow> = {}): ProviderLimitsRow {
+  return {
+    provider: "anthropic",
+    accountId: "acc-1",
+    fetchedAt: NOW,
+    meters: [
+      {
+        id: "session",
+        labelKey: "subscription.limits.meter.session",
+        kind: "window",
+        usedPct: 11,
+        resetAt: NOW + 3_600_000,
+        status: "ok",
+      },
+      {
+        id: "weekly_opus",
+        labelKey: "subscription.limits.meter.weekly_opus",
+        kind: "window",
+        usedPct: 4,
+        resetAt: NOW + 86_400_000,
+        status: "ok",
+      },
+      {
+        id: "overage",
+        labelKey: "subscription.limits.meter.overage",
+        kind: "balance",
+        usedPct: 20,
+        remaining: 80,
+        currency: "USD",
+        status: "ok",
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function sessionRow(overrides: Partial<SessionUsageRow> = {}): SessionUsageRow {
+  return {
+    messageId: `m-${Math.random()}`,
+    sessionId: "s1",
+    at: Date.now(),
+    model: "claude-opus-5",
+    providerId: "anthropic",
+    inputTokens: 100,
+    outputTokens: 50,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 1,
+    durationMs: 1000,
+    costSource: "sdk",
+    costKnown: true,
+    surface: "chat",
+    ...overrides,
+  }
+}
+
 describe("handleUsage", () => {
-  it("reports the empty state when no usage snapshot exists", async () => {
+  it("pushes a usage block even when nothing at all could be read", async () => {
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    expect(pushed.join("\n")).toMatch(/No Anthropic usage captured yet/)
+    const block = pushed[0] as UsageBlock
+    expect(block.kind).toBe("usage")
+    expect(block.meters).toEqual([])
+    // The card is still worth rendering; the notes say why it is empty.
+    expect(block.notes?.map((n) => n.id)).toContain("no-local-spend")
   })
 
-  it("renders 5h/7d windows with utilization and reset countdown", async () => {
-    const now = Date.now()
+  it("prefers the usage-endpoint snapshot, keeping windows and balances apart", async () => {
+    latestLimitsSnapshotMock.mockResolvedValue(limitsSnapshot())
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    const block = pushed[0] as UsageBlock
+    expect(block.source).toBe("endpoint")
+    expect(block.meters?.map((m) => m.id)).toEqual(["session", "weekly_opus"])
+    expect(block.extras?.map((m) => m.id)).toEqual(["overage"])
+  })
+
+  it("falls back to the passive header sample when no endpoint snapshot exists", async () => {
     usageRows = [
       {
-        fetchedAt: now,
+        fetchedAt: NOW,
         source: "passive",
-        status: "allowed",
-        representativeClaim: null,
-        fallbackPercentage: 12,
-        fiveHour: { utilization: 0.42, resetAt: now + 3_600_000 + 1_500_000 },
-        sevenDay: { utilization: 0.95, resetAt: now + 86_400_000 },
+        status: "allowed_warning",
+        representativeClaim: "five_hour",
+        fallbackPercentage: 0.2,
+        fiveHour: { utilization: 0.42, resetAt: NOW + 5_100_000 },
+        sevenDay: { utilization: 0.95, resetAt: NOW + 86_400_000 },
         overageDisabledReason: "spend cap reached",
         rawHeaders: {},
       } as unknown as SubscriptionUsageRow,
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
-    expect(block.kind).toBe("usage")
-    const five = block.windows.find((w) => w.key === "fiveHour")!
-    const seven = block.windows.find((w) => w.key === "sevenDay")!
-    expect(five.utilization).toBe(42)
-    expect(seven.utilization).toBe(95)
-    expect(seven.level).toBe("warn")
-    // 5h resets ~1h15m out → still a positive countdown.
-    expect(five.msUntilReset).toBeGreaterThan(3_600_000)
-    expect(block.fallbackPercentage).toBe(12)
+    const block = pushed[0] as UsageBlock
+    expect(block.source).toBe("headers")
+    expect(block.meters?.find((m) => m.id === "session")?.usedPct).toBe(42)
+    expect(block.meters?.find((m) => m.id === "weekly")?.status).toBe("warn")
+    // Header-only metadata is only trustworthy when headers won the fuse.
+    expect(block.status).toBe("allowed_warning")
+    expect(block.representativeClaim).toBe("five_hour")
+    expect(block.fallbackPercentage).toBe(0.2)
     expect(block.overageDisabledReason).toBe("spend cap reached")
   })
 
-  it("reports a null utilization when a window is absent", async () => {
+  it("still resolves a status when the endpoint wins and reports none", async () => {
+    // The usage endpoint has no unified-status field, so `resolveUsageWindows`
+    // nulls `headerStatus` whenever it wins — which, because this command
+    // actively refreshes the endpoint, is nearly always. Passing that through
+    // left the card's status pill permanently blank; the severity of the worst
+    // meter is the honest substitute.
+    latestLimitsSnapshotMock.mockResolvedValue(
+      limitsSnapshot({
+        meters: [
+          {
+            id: "weekly",
+            labelKey: "subscription.limits.meter.weekly",
+            kind: "window",
+            usedPct: 96,
+            resetAt: NOW + 86_400_000,
+            status: "warn",
+          },
+        ],
+      })
+    )
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    const block = pushed[0] as UsageBlock
+    expect(block.source).toBe("endpoint")
+    expect(block.status).toBe("allowed_warning")
+  })
+
+  it("reports no status at all when neither source produced a reading", async () => {
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect((pushed[0] as UsageBlock).status).toBeNull()
+  })
+
+  it("keeps the header-only facts even when the endpoint wins the windows", async () => {
+    // Representative claim, fallback buffer and the overage-disabled reason are
+    // reported ONLY by the rate-limit headers. "The endpoint had fresher
+    // windows" must not silently become "your org has no overage restriction".
+    latestLimitsSnapshotMock.mockResolvedValue(limitsSnapshot())
     usageRows = [
       {
-        fetchedAt: Date.now(),
+        fetchedAt: NOW - 60_000,
         source: "passive",
         status: "allowed",
-        representativeClaim: null,
-        fallbackPercentage: null,
-        overageDisabledReason: null,
-        fiveHour: null,
+        representativeClaim: "seven_day",
+        fallbackPercentage: 0.2,
+        fiveHour: { utilization: 0.1, resetAt: NOW + 3_600_000 },
         sevenDay: null,
+        overageDisabledReason: "org_level_disabled",
         rawHeaders: {},
       } as unknown as SubscriptionUsageRow,
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
-    const five = block.windows.find((w) => w.key === "fiveHour")!
-    expect(five.utilization).toBeNull()
-    expect(five.level).toBeNull()
+    const block = pushed[0] as UsageBlock
+    expect(block.source).toBe("endpoint")
+    expect(block.representativeClaim).toBe("seven_day")
+    expect(block.fallbackPercentage).toBe(0.2)
+    expect(block.overageDisabledReason).toBe("org_level_disabled")
   })
 
-  it("surfaces an expired countdown as a non-positive msUntilReset", async () => {
-    const now = Date.now()
-    usageRows = [
-      {
-        fetchedAt: now,
-        source: "passive",
-        status: "allowed",
-        representativeClaim: null,
-        fallbackPercentage: null,
-        overageDisabledReason: null,
-        fiveHour: { utilization: 0.5, resetAt: now - 1000 },
-        sevenDay: null,
-        rawHeaders: {},
-      } as unknown as SubscriptionUsageRow,
+  it("refreshes a stale snapshot through the coalescer and persists it", async () => {
+    latestLimitsSnapshotMock.mockResolvedValue(limitsSnapshot({ fetchedAt: NOW - 3_600_000 }))
+    queryAccountLimitsCoalescedMock.mockResolvedValue(limitsSnapshot({ fetchedAt: NOW }))
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledWith("anthropic", "acc-1")
+    expect(recordLimitsSnapshotMock).toHaveBeenCalled()
+    expect((pushed[0] as UsageBlock).fetchedAt).toBe(NOW)
+  })
+
+  it("does not refresh a snapshot that is still fresh", async () => {
+    latestLimitsSnapshotMock.mockResolvedValue(limitsSnapshot())
+    const { ctx } = makeCtx()
+    await handleUsage(ctx)
+    expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
+  })
+
+  it("sends nothing outbound for an account that has not opted into quota queries", async () => {
+    useSettingsStore.setState({ settings: { limitsQueryEnabledAccounts: [] } as never })
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
+    expect((pushed[0] as UsageBlock).notes?.map((n) => n.id)).toContain("query-disabled")
+  })
+
+  it("notes web mode instead of attempting a keyring read", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(getActiveAccountMock).not.toHaveBeenCalled()
+    expect((pushed[0] as UsageBlock).notes?.map((n) => n.id)).toContain("web-mode")
+  })
+
+  it("notes a missing account rather than querying for one that isn't there", async () => {
+    getActiveAccountMock.mockResolvedValue({ env: [] })
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
+    expect((pushed[0] as UsageBlock).notes?.map((n) => n.id)).toContain("no-account")
+  })
+
+  it("carries a failed quota query through as a note, not a thrown command", async () => {
+    latestLimitsSnapshotMock.mockResolvedValue(null)
+    queryAccountLimitsCoalescedMock.mockRejectedValue(new Error("429 Too Many Requests"))
+    const { ctx, pushed } = makeCtx()
+    await expect(handleUsage(ctx)).resolves.toBeUndefined()
+    const note = (pushed[0] as UsageBlock).notes?.find((n) => n.id === "quota-error")
+    expect(note?.detail).toContain("429")
+  })
+
+  it("marks a snapshot older than the freshness budget as stale", async () => {
+    // Opted out, so the stale snapshot is rendered rather than refreshed.
+    useSettingsStore.setState({ settings: { limitsQueryEnabledAccounts: [] } as never })
+    latestLimitsSnapshotMock.mockResolvedValue(limitsSnapshot({ fetchedAt: NOW - 3_600_000 }))
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect((pushed[0] as UsageBlock).notes?.map((n) => n.id)).toContain("stale")
+  })
+
+  it("precomputes every attribution scope, session-scoped to the active chat", async () => {
+    sessionUsageRows = [
+      sessionRow({ sessionId: "s1" }),
+      sessionRow({ sessionId: "other", surface: "workflow" }),
     ]
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    const block = pushed[0] as Extract<Pushed, { kind: "usage" }>
-    const five = block.windows.find((w) => w.key === "fiveHour")!
-    expect(five.msUntilReset).toBe(0)
+    const block = pushed[0] as UsageBlock
+    expect(block.hasSession).toBe(true)
+    expect(block.scopes?.map((s) => s.key)).toEqual(["session", "today", "week"])
+    expect(block.scopes?.[0].totals.turns).toBe(1)
+    expect(block.scopes?.[1].totals.turns).toBe(2)
+    expect(block.scopes?.[1].surfaces.map((s) => s.surface).sort()).toEqual(["chat", "workflow"])
   })
 
-  it("degrades gracefully when the Dexie read throws", async () => {
+  it("excludes imported spend, which was paid on another machine", async () => {
+    sessionUsageRows = [
+      sessionRow({ sessionId: "s1" }),
+      sessionRow({ sessionId: "s1", imported: true }),
+    ]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect((pushed[0] as UsageBlock).scopes?.[0].totals.turns).toBe(1)
+  })
+
+  it("does not truncate the active session's own scope to the calendar window", async () => {
+    // A long-running chat can be older than seven days. Deriving its tab from
+    // the calendar rows made it report "no recorded turns" for the very
+    // conversation on screen.
+    sessionUsageRows = [sessionRow({ sessionId: "s1", at: Date.now() - 30 * 86_400_000 })]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    const block = pushed[0] as UsageBlock
+    expect(block.scopes?.[0].totals.turns).toBe(1)
+    // The calendar scopes stay bounded — only the session tab is unbounded.
+    expect(block.scopes?.[2].totals.turns).toBe(0)
+    expect(block.notes?.map((n) => n.id)).not.toContain("no-local-spend")
+  })
+
+  it("drops rows older than the widest scope", async () => {
+    sessionUsageRows = [sessionRow({ at: Date.now() - 30 * 86_400_000 })]
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    expect((pushed[0] as UsageBlock).scopes?.[2].totals.turns).toBe(0)
+  })
+
+  it("degrades to a note when the local usage table cannot be read", async () => {
+    sessionUsageThrows = true
+    const { ctx, pushed } = makeCtx()
+    await handleUsage(ctx)
+    const block = pushed[0] as UsageBlock
+    expect(block.scopes).toBeUndefined()
+    expect(block.notes?.map((n) => n.id)).toContain("local-spend-unavailable")
+  })
+
+  it("still pushes a block when the header read throws", async () => {
     usageThrows = true
     const { ctx, pushed } = makeCtx()
     await handleUsage(ctx)
-    // The throw is swallowed → empty-state hint, single message, no crash.
     expect(pushed.length).toBe(1)
-    expect(pushed[0]).toMatch(/No Anthropic usage captured yet/)
+    expect((pushed[0] as UsageBlock).kind).toBe("usage")
   })
 })
 

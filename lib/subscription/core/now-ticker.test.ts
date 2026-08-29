@@ -10,13 +10,34 @@ describe("subscriptionNowTicker", () => {
     jest.useRealTimers()
   })
 
-  it("seeds the snapshot on the first subscribe so the first paint is correct", () => {
+  it("seeds the snapshot on the first READ so the first paint is correct", () => {
+    // React reads the snapshot during the initial render and only subscribes
+    // afterwards, in an effect. Seeding on subscribe therefore handed that
+    // first render a clock of 0 — and a countdown resolved against epoch 0
+    // renders as a 1970 date, not as an obviously-missing value.
     jest.setSystemTime(1_000_000)
-    expect(subscriptionNowTicker.getSnapshot()).toBe(0)
+    expect(subscriptionNowTicker.getSnapshot()).toBe(1_000_000)
 
     const unsubscribe = subscriptionNowTicker.subscribe(() => {})
     expect(subscriptionNowTicker.getSnapshot()).toBe(1_000_000)
     unsubscribe()
+  })
+
+  it("returns a stable snapshot across reads within one render", () => {
+    jest.setSystemTime(1_000_000)
+    const first = subscriptionNowTicker.getSnapshot()
+    jest.setSystemTime(2_000_000)
+    // The store contract requires a cached value: re-reading the wall clock
+    // here would make every render see a new snapshot and loop forever.
+    expect(subscriptionNowTicker.getSnapshot()).toBe(first)
+  })
+
+  it("re-seeds after a reset", () => {
+    jest.setSystemTime(1_000_000)
+    expect(subscriptionNowTicker.getSnapshot()).toBe(1_000_000)
+    subscriptionNowTicker.resetForTests()
+    jest.setSystemTime(3_000_000)
+    expect(subscriptionNowTicker.getSnapshot()).toBe(3_000_000)
   })
 
   it("notifies every subscriber from ONE interval", () => {

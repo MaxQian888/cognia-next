@@ -14,7 +14,7 @@
  * `components/settings/subscription/tabs/usage-tab.tsx`.
  */
 
-import type { SessionUsageRow } from "@/lib/db/session-usage"
+import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
 import type { DailyUsage } from "@/types/system/usage"
 import type { ModelPricing } from "@cognia/provider-types/provider"
 import {
@@ -178,6 +178,76 @@ export interface ModelUsageRow {
    * this model's turns. 0 when the model / provider never broke them out.
    */
   reasoningTokens: number
+  /**
+   * Turns whose cost could not be priced by any layer. `costUsd` for those
+   * turns contributed 0, so a bucket with `unpricedTurns > 0` is a LOWER BOUND
+   * on real spend and must be rendered as such (a "≥" marker or a footnote) —
+   * never as a settled figure. 0 means every turn in the bucket was priced.
+   */
+  unpricedTurns: number
+}
+
+/** One usage bucket keyed by producing surface (chat / workflow / agent-team / …). */
+export interface SurfaceUsageRow extends Omit<ModelUsageRow, "model"> {
+  /** Producing surface; legacy rows with no `surface` are counted as `chat`. */
+  surface: UsageSurface
+}
+
+/** Fields every bucket accumulates, independent of the grouping axis. */
+type UsageBucket = Omit<ModelUsageRow, "model">
+
+function emptyBucket(): UsageBucket {
+  return {
+    turns: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd: 0,
+    durationMs: 0,
+    reasoningTokens: 0,
+    unpricedTurns: 0,
+  }
+}
+
+/**
+ * Group rows onto an arbitrary key and sum the billable quantities. The one
+ * accumulator behind {@link aggregateByModel} and {@link aggregateBySurface} —
+ * two axes over the same rows must never disagree about what a turn cost.
+ *
+ * Ordering is left to the caller: the natural sort differs per axis (cost for
+ * models, cost-then-name for surfaces) and sorting here would force every
+ * caller through a second pass.
+ */
+export function aggregateBucketsBy<K>(
+  rows: readonly SessionUsageRow[],
+  keyOf: (row: SessionUsageRow) => K,
+  resolve: PricingResolver = resolveModelPricingUsd
+): Map<K, UsageBucket> {
+  const map = new Map<K, UsageBucket>()
+  for (const r of rows) {
+    const key = keyOf(r)
+    const slot = map.get(key) ?? emptyBucket()
+    const cost = effectiveCostUsdDetailed(r, resolve)
+    slot.turns += 1
+    slot.inputTokens += r.inputTokens
+    slot.outputTokens += r.outputTokens
+    slot.cacheReadTokens += r.cacheReadTokens
+    slot.cacheCreationTokens += r.cacheCreationTokens
+    slot.costUsd += cost.cost
+    slot.durationMs += r.durationMs
+    slot.reasoningTokens += r.reasoningTokens ?? 0
+    if (!cost.known) slot.unpricedTurns += 1
+    map.set(key, slot)
+  }
+  return map
+}
+
+/** Total billable tokens in a bucket — the cost-independent ranking signal. */
+export function bucketTokens(
+  b: Pick<UsageBucket, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheCreationTokens">
+): number {
+  return b.inputTokens + b.outputTokens + b.cacheReadTokens + b.cacheCreationTokens
 }
 
 /** Bucket rows by model, descending by cost (ties: total tokens, then name). */
@@ -185,38 +255,39 @@ export function aggregateByModel(
   rows: readonly SessionUsageRow[],
   resolve: PricingResolver = resolveModelPricingUsd
 ): ModelUsageRow[] {
-  const map = new Map<string, ModelUsageRow>()
-  for (const r of rows) {
-    const model = r.model ?? "(unknown)"
-    const slot =
-      map.get(model) ??
-      ({
-        model,
-        turns: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        costUsd: 0,
-        durationMs: 0,
-        reasoningTokens: 0,
-      } satisfies ModelUsageRow)
-    slot.turns += 1
-    slot.inputTokens += r.inputTokens
-    slot.outputTokens += r.outputTokens
-    slot.cacheReadTokens += r.cacheReadTokens
-    slot.cacheCreationTokens += r.cacheCreationTokens
-    slot.costUsd += effectiveCostUsd(r, resolve)
-    slot.durationMs += r.durationMs
-    slot.reasoningTokens += r.reasoningTokens ?? 0
-    map.set(model, slot)
-  }
-  return [...map.values()].sort(
-    (a, b) =>
-      b.costUsd - a.costUsd ||
-      b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens) ||
-      a.model.localeCompare(b.model)
-  )
+  const map = aggregateBucketsBy(rows, (r) => r.model ?? "(unknown)", resolve)
+  return [...map.entries()]
+    .map(([model, bucket]) => ({ model, ...bucket }))
+    .sort(
+      (a, b) =>
+        b.costUsd - a.costUsd ||
+        b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens) ||
+        a.model.localeCompare(b.model)
+    )
+}
+
+/**
+ * Bucket rows by producing surface, descending by cost (ties: total tokens,
+ * then surface name). Legacy rows carry no `surface` and are counted as
+ * `"chat"` — the same default every other reader applies.
+ *
+ * This is the honest answer to "what is using my quota": chat, an agent team,
+ * a scheduled workflow and a connector auto-reply all draw on the same plan,
+ * and only this axis separates them.
+ */
+export function aggregateBySurface(
+  rows: readonly SessionUsageRow[],
+  resolve: PricingResolver = resolveModelPricingUsd
+): SurfaceUsageRow[] {
+  const map = aggregateBucketsBy(rows, (r) => (r.surface ?? "chat") as UsageSurface, resolve)
+  return [...map.entries()]
+    .map(([surface, bucket]) => ({ surface, ...bucket }))
+    .sort(
+      (a, b) =>
+        b.costUsd - a.costUsd ||
+        bucketTokens(b) - bucketTokens(a) ||
+        a.surface.localeCompare(b.surface)
+    )
 }
 
 /**

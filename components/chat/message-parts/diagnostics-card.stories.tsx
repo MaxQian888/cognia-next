@@ -7,6 +7,8 @@ import type {
   DiagnosticsWindow,
   UsageDiagnosticsBlock,
 } from "@/lib/slash-commands/system-blocks"
+import { buildUsageScope } from "@/lib/usage/usage-report"
+import type { SessionUsageRow } from "@/lib/db/session-usage"
 
 const window: DiagnosticsWindow = {
   used: 92_000,
@@ -59,8 +61,134 @@ export const Cost: Story = {
   },
 }
 
-// /usage — Anthropic subscription quota windows (one reported, one not).
+// /usage — the full card: fused quota windows (including the per-model weekly
+// tiers only the usage endpoint reports), a pay-as-you-go meter, and local spend
+// attributed across scopes.
+const NOW = new Date("2026-08-29T12:00:00Z").getTime()
+const HOUR = 3_600_000
+
+function usageRow(overrides: Partial<SessionUsageRow> = {}): SessionUsageRow {
+  return {
+    messageId: `m-${Math.random()}`,
+    sessionId: "s1",
+    at: NOW,
+    model: "claude-opus-5",
+    providerId: "anthropic",
+    inputTokens: 1_400,
+    outputTokens: 5_500,
+    cacheCreationTokens: 1_100_000,
+    cacheReadTokens: 244_000_000,
+    costUsd: 86.79,
+    durationMs: 137_000,
+    costSource: "sdk",
+    costKnown: true,
+    surface: "chat",
+    ...overrides,
+  }
+}
+
 export const Usage: Story = {
+  args: {
+    block: {
+      kind: "usage",
+      meters: [
+        {
+          id: "session",
+          labelKey: "subscription.limits.meter.session",
+          kind: "window",
+          usedPct: 11,
+          resetAt: NOW + 2 * HOUR + 41 * 60_000,
+          status: "ok",
+        },
+        {
+          id: "weekly",
+          labelKey: "subscription.limits.meter.weekly",
+          kind: "window",
+          usedPct: 82,
+          resetAt: NOW + 3 * 24 * HOUR,
+          status: "warn",
+        },
+        {
+          id: "weekly_opus",
+          labelKey: "subscription.limits.meter.weekly_opus",
+          kind: "window",
+          usedPct: 0,
+          resetAt: NOW + 3 * 24 * HOUR,
+          status: "ok",
+        },
+      ],
+      extras: [
+        {
+          id: "overage",
+          labelKey: "subscription.limits.meter.overage",
+          kind: "balance",
+          usedPct: 40,
+          used: 40,
+          total: 100,
+          remaining: 60,
+          currency: "USD",
+          status: "ok",
+        },
+      ],
+      source: "endpoint",
+      fetchedAt: NOW - 60_000,
+      status: null,
+      representativeClaim: "five_hour",
+      fallbackPercentage: 0.2,
+      overageDisabledReason: null,
+      scopes: [
+        buildUsageScope("session", [usageRow()]),
+        buildUsageScope("today", [
+          usageRow(),
+          usageRow({ surface: "agent-team", costUsd: 12, model: "claude-sonnet-5" }),
+          usageRow({ surface: "workflow", costUsd: 3, model: "claude-haiku-4-5" }),
+        ]),
+        buildUsageScope("week", [
+          usageRow(),
+          usageRow({ surface: "agent-team", costUsd: 12, model: "claude-sonnet-5" }),
+          usageRow({ surface: "workflow", costUsd: 3, model: "claude-haiku-4-5" }),
+          usageRow({ surface: "ocr", costUsd: 0, costSource: "unknown", costKnown: false }),
+        ]),
+      ],
+      hasSession: true,
+      notes: [],
+      generatedAt: NOW,
+    } satisfies UsageDiagnosticsBlock,
+  },
+}
+
+// Every plane degraded at once: no desktop keychain, no account, no local rows.
+export const UsageDegraded: Story = {
+  args: {
+    block: {
+      kind: "usage",
+      meters: [],
+      extras: [],
+      source: null,
+      fetchedAt: null,
+      status: null,
+      representativeClaim: null,
+      fallbackPercentage: null,
+      overageDisabledReason: null,
+      scopes: [
+        buildUsageScope("session", []),
+        buildUsageScope("today", []),
+        buildUsageScope("week", []),
+      ],
+      hasSession: false,
+      notes: [
+        { id: "web-mode" },
+        { id: "no-account" },
+        { id: "no-local-spend" },
+        { id: "quota-error", detail: "429 Too Many Requests" },
+      ],
+      generatedAt: NOW,
+    } satisfies UsageDiagnosticsBlock,
+  },
+}
+
+// A v1 block, as recorded before the block carried fused meters.
+export const UsageLegacyBlock: Story = {
   args: {
     block: {
       kind: "usage",
@@ -68,7 +196,7 @@ export const Usage: Story = {
         { key: "fiveHour", utilization: 72, level: "warn", msUntilReset: 1000 * 60 * 95 },
         { key: "sevenDay", utilization: null, level: null, msUntilReset: null },
       ],
-      fallbackPercentage: 12,
+      fallbackPercentage: 0.12,
       overageDisabledReason: null,
     } satisfies UsageDiagnosticsBlock,
   },

@@ -18,7 +18,9 @@ import { useSyncExternalStore } from "react"
  *
  * `useSyncExternalStore`-shaped and refcounted: the interval starts on the
  * first subscriber and stops on the last, so StrictMode's mount→unmount→mount
- * never leaks a timer. This is a DATA refresh (the wall clock), not motion, so
+ * never leaks a timer. The clock itself is seeded on the first `getSnapshot`
+ * rather than on the first `subscribe`, because React reads the snapshot one
+ * render before it subscribes. This is a DATA refresh (the wall clock), not motion, so
  * it keeps ticking under `prefers-reduced-motion` — a frozen clock is a bug,
  * not an accessibility win.
  */
@@ -65,6 +67,14 @@ export const subscriptionNowTicker: SubscriptionNowTicker = {
     }
   },
   getSnapshot(): number {
+    // Seed on FIRST READ, not on first subscribe. `useSyncExternalStore` calls
+    // this during the initial render, while `subscribe` only runs afterwards in
+    // an effect — so a cold ticker used to hand that first render a clock of 0.
+    // Consumers then dated every quota reset to 1970 + the remaining time for
+    // one frame, which is a plausible-looking wrong answer, not an obvious one.
+    // Assigning here is safe because it caches: every later call in the same
+    // render returns the same number, which is all the store contract requires.
+    if (now === 0) now = Date.now()
     return now
   },
   getServerSnapshot(): number {

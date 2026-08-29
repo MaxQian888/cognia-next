@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+`/usage` now answers both halves of the question. The card fuses the free Claude usage endpoint with the passive rate-limit header samples, so it shows every quota window — 5-hour, weekly, and the per-model weekly tiers (Opus/Sonnet) the header path cannot see at all — plus the pay-as-you-go overage meter, the fallback buffer, the representative window and the unified rate-limit status. Alongside it, local spend recorded on this machine is attributed across three precomputed scopes (this session / today / last 7 days), groupable by producing surface (chat, agent team, workflow, connector, …) or by model, with cost, active time, cache-hit rate and the contributing-factor insights. Costs no pricing layer knew render as "—" or a "≥" lower bound rather than as $0.00, imported spend is excluded, and every degraded case (web mode, no account, quota queries off, a failed or stale query, no local history) is stated instead of shown as an empty card. Quota windows that reset more than a day out now read as a weekday and time ("Resets Mon 8:00 AM") everywhere meters are shown, instead of an unusable three-digit hour count.

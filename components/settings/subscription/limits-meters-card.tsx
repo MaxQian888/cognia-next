@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useCountUp } from "@/hooks/usage/use-count-up"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
-import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
+import { useResetLabel } from "@/hooks/usage/use-reset-label"
 
 import { QuotaBar } from "./quota-bar"
 
@@ -90,25 +90,24 @@ export function MeterRow({
     figure = t("noValue")
   }
 
-  const reset =
-    meter.kind === "window" && meter.resetAt != null
-      ? (() => {
-          const parts = splitCountdown(meter.resetAt - now)
-          if (parts.expired) return t("resetExpired")
-          return parts.hours > 0
-            ? t("resetsInHm", { hours: parts.hours, minutes: parts.minutes })
-            : t("resetsInM", { minutes: parts.minutes })
-        })()
-      : null
+  // Shared with the `/usage` card: a countdown while the reset is near, a
+  // weekday + clock time once it is a day or more out (the weekly windows used
+  // to render as an unreadable three-digit hour count).
+  const resetLabel = useResetLabel(meter.kind === "window" ? meter.resetAt : null, now)
 
+  // Reset sits on the header line, not under the bar: below it, a row's reset
+  // reads as a caption for the NEXT meter's title, which is exactly how a
+  // stack of three windows became unparseable.
   return (
     <div className="space-y-1" data-testid={`limits-meter-${accountId}-${meter.id}`}>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs tabular-nums text-muted-foreground">{figure}</span>
+        <span className="min-w-0 truncate text-sm font-medium">{label}</span>
+        <span className="flex shrink-0 items-baseline gap-2 text-xs text-muted-foreground">
+          {resetLabel ? <span className="truncate">{resetLabel}</span> : null}
+          <span className="tabular-nums">{figure}</span>
+        </span>
       </div>
       <QuotaBar pct={pct} status={meter.status} label={label} />
-      {reset && <p className="text-xs text-muted-foreground">{reset}</p>}
     </div>
   )
 }

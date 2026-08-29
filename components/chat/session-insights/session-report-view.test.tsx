@@ -34,6 +34,7 @@ function report(over: Partial<SessionReport> = {}): SessionReport {
         costUsd: 0.25,
         durationMs: 10_000,
         reasoningTokens: 120,
+        unpricedTurns: 0,
       },
     ],
     toolCounts: { Read: 2 },
@@ -114,6 +115,7 @@ describe("SessionReportView", () => {
               costUsd: 0.01,
               durationMs: 2000,
               reasoningTokens: 0,
+              unpricedTurns: 0,
             },
             {
               model: "m-untimed",
@@ -125,6 +127,7 @@ describe("SessionReportView", () => {
               costUsd: 0.01,
               durationMs: 0, // no duration → no per-model throughput suffix
               reasoningTokens: 0,
+              unpricedTurns: 0,
             },
           ],
         })}

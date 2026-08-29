@@ -7,6 +7,9 @@
 
 import type { ContextLevel } from "@/lib/claude/usage"
 import type { UsageLevel } from "@/lib/subscription/anthropic/usage-analytics"
+import type { UsageWindowsSource } from "@/lib/subscription/anthropic/overview-windows"
+import type { UsageNote, UsageScopeReport } from "@/lib/usage/usage-report"
+import type { LimitsMeter, RepresentativeClaim, UsageStatus } from "@/types/subscription"
 
 /** UI message part type carrying a {@link SystemMessageBlock}. */
 export const DIAGNOSTICS_PART_TYPE = "data-diagnostics" as const
@@ -56,7 +59,15 @@ export interface CostDiagnosticsBlock {
   window?: DiagnosticsWindow
 }
 
-/** One Anthropic subscription quota window (5h / 7d). */
+/**
+ * One Anthropic subscription quota window, as the FIRST version of the `/usage`
+ * block recorded it. Only the two header-derived windows existed then.
+ *
+ * Still read, never written: transcripts persist their message parts, so a card
+ * rendered from a chat that ran before the block gained `meters` must keep
+ * working. New blocks carry {@link UsageDiagnosticsBlock.meters} instead, which
+ * also covers the per-model weekly tiers the header path cannot see.
+ */
 export interface UsageWindowStat {
   key: "fiveHour" | "sevenDay"
   /** Whole-percent utilization, or null when the window wasn't reported. */
@@ -65,12 +76,46 @@ export interface UsageWindowStat {
   msUntilReset: number | null
 }
 
-/** `/usage` — Anthropic subscription quota windows. */
+/**
+ * `/usage` — plan quota plus the local spend that explains it.
+ *
+ * The two planes are deliberately separate fields (see `lib/usage/usage-report.ts`):
+ * `meters`/`extras` are the provider's accounting of the plan, `scopes` is what
+ * this install recorded. Neither is derivable from the other.
+ *
+ * Every field below `overageDisabledReason` is optional because a persisted v1
+ * block has none of them; the renderer treats absent as "this block predates
+ * the field", not as "measured zero".
+ */
 export interface UsageDiagnosticsBlock {
   kind: "usage"
-  windows: UsageWindowStat[]
+  /** @deprecated v1 shape. Present only on blocks recorded before `meters`. */
+  windows?: UsageWindowStat[]
+  /**
+   * Fused quota windows — session / weekly / weekly_opus / weekly_sonnet, plus
+   * any tier the provider added that we don't model yet (those carry a raw
+   * `label` and no `labelKey`). Empty when no quota reading was available.
+   */
+  meters?: LimitsMeter[]
+  /** Non-window meters from the same snapshot (pay-as-you-go overage). */
+  extras?: LimitsMeter[]
+  /** Which snapshot won the fuse, or null when neither was available. */
+  source?: UsageWindowsSource | null
+  /** When the winning snapshot was taken (epoch ms). */
+  fetchedAt?: number | null
+  /** Unified rate-limit status; only set when the header sample is the source. */
+  status?: UsageStatus | null
+  representativeClaim?: RepresentativeClaim | null
   fallbackPercentage: number | null
   overageDisabledReason: string | null
+  /** Precomputed local-spend attribution, narrowest scope first. */
+  scopes?: UsageScopeReport[]
+  /** Whether an active chat session scoped the first entry of `scopes`. */
+  hasSession?: boolean
+  /** Non-fatal explanations for anything missing or degraded. */
+  notes?: UsageNote[]
+  /** Command-time clock, so reset countdowns render against a fixed origin. */
+  generatedAt?: number
 }
 
 export type SystemMessageBlock =

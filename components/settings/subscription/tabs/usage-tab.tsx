@@ -108,8 +108,12 @@ import { useCountUp } from "@/hooks/usage/use-count-up"
 import { MotionCollapse, MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import type { UsageDisplayMode } from "@/types/appearance"
 import type { LimitsMeter, ProviderId } from "@/types/subscription"
-import { buildUtilizationSeries } from "@/lib/subscription/anthropic/usage-analytics"
+import {
+  buildUtilizationSeries,
+  fallbackPercentWhole,
+} from "@/lib/subscription/anthropic/usage-analytics"
 import { resolveUsageWindows } from "@/lib/subscription/anthropic/overview-windows"
+import { surfaceLabelKey } from "@/lib/usage/usage-surface-labels"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import {
   aggregateByDay,
@@ -472,7 +476,7 @@ function UsageToolbar({
                 data-testid={`usage-surface-${s}`}
                 aria-pressed={surface === s}
               >
-                {t(`surface.${s === "agent-team" ? "agentTeam" : s}`)}
+                {t(`surface.${s === "all" ? "all" : surfaceLabelKey(s)}`)}
               </Button>
             ))}
           </div>
@@ -776,7 +780,7 @@ function CurrentWindowCard({
           </div>
           {resolved.fallbackPercentage != null && (
             <SettingsAlert>
-              {t("fallback", { pct: Math.round(resolved.fallbackPercentage) })}
+              {t("fallback", { pct: fallbackPercentWhole(resolved.fallbackPercentage) ?? 0 })}
             </SettingsAlert>
           )}
           {resolved.overageDisabledReason && (

@@ -6,11 +6,15 @@ import userEvent from "@testing-library/user-event"
 
 import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
+import { isTauri } from "@/lib/tauri"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
-const isTauriMock = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+// The mock function is created INSIDE the factory: `jest.mock` is hoisted above
+// the imports, and something in this suite's module graph calls `isTauri()`
+// while it is still loading (settings-store → tts keyring → keyring-store), so
+// a `const` declared out here is still in its temporal dead zone by then.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
 // Stub the share-card dialog — its ShareLinkDialog/html2canvas-pro stack is
 // covered by usage-share-dialog.test.tsx and would drag stores into this
@@ -134,7 +138,7 @@ function setup({
 
 beforeEach(() => {
   jest.clearAllMocks()
-  isTauriMock.mockReturnValue(true)
+  ;(isTauri as jest.Mock).mockReturnValue(true)
   useAccountsMock.mockReturnValue({ accounts: [], activeAccountId: null })
   useProviderLimitsMock.mockReturnValue({
     snapshot: null,
@@ -147,7 +151,7 @@ beforeEach(() => {
 
 describe("SubscriptionUsageTab", () => {
   it("shows the web-mode banner outside Tauri", () => {
-    isTauriMock.mockReturnValue(false)
+    ;(isTauri as jest.Mock).mockReturnValue(false)
     setup()
     render(<SubscriptionUsageTab />)
     expect(screen.getByTestId("usage-web-banner")).toBeInTheDocument()
