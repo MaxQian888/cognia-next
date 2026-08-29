@@ -51,7 +51,12 @@ export interface SiteVersionsTabProps {
   artifacts: ReadonlyMap<string, Pick<SiteArtifactRow, "size" | "fileCount">>
   uploadGate: SiteGate
   deployGate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   onUpload: (version: SiteVersionRow) => void
   onDeploy: (version: SiteVersionRow) => void
 }
@@ -63,7 +68,7 @@ export function SiteVersionsTab({
   artifacts,
   uploadGate,
   deployGate,
-  busy,
+  isBusy,
   onUpload,
   onDeploy,
 }: SiteVersionsTabProps) {
@@ -185,7 +190,7 @@ export function SiteVersionsTab({
                     <Button
                       type="button"
                       size="sm"
-                      disabled={busy || !deployGate.allowed}
+                      disabled={isBusy(`deploy:${version.id}`) || !deployGate.allowed}
                       title={deployGate.title}
                       onClick={() => onDeploy(version)}
                       data-testid={`site-version-deploy-${version.id}`}
@@ -198,7 +203,7 @@ export function SiteVersionsTab({
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={busy || !uploadGate.allowed}
+                      disabled={isBusy(`upload:${version.id}`) || !uploadGate.allowed}
                       title={uploadGate.title}
                       onClick={() => onUpload(version)}
                       data-testid={`site-version-upload-${version.id}`}

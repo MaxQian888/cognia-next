@@ -76,7 +76,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteVersionsTab>> 
       artifacts={new Map()}
       uploadGate={allowed}
       deployGate={allowed}
-      busy={false}
+      isBusy={() => false}
       onUpload={onUpload}
       onDeploy={onDeploy}
       {...props}

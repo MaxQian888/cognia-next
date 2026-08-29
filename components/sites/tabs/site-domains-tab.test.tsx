@@ -59,7 +59,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteDomainsTab>> =
       site={site()}
       resources={[]}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       {...handlers}
       {...props}
     />

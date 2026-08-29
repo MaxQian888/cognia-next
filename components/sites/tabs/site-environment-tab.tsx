@@ -46,11 +46,21 @@ import type { SiteEnvironmentRevisionRow } from "@/types/sites"
 export interface SiteEnvironmentTabProps {
   environments: readonly SiteEnvironmentRevisionRow[]
   gate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   onSave: (input: { variables: Record<string, string>; secrets: Record<string, string> }) => void
 }
 
-export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnvironmentTabProps) {
+export function SiteEnvironmentTab({
+  environments,
+  gate,
+  isBusy,
+  onSave,
+}: SiteEnvironmentTabProps) {
   const t = useTranslations("sites")
   const format = useFormatter()
   const now = useNow()
@@ -89,7 +99,7 @@ export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnv
           <Button
             type="button"
             size="sm"
-            disabled={busy || !gate.allowed}
+            disabled={isBusy("environment") || !gate.allowed}
             title={gate.title}
             onClick={() => beginEdit(undefined)}
             data-testid="site-environment-edit"
@@ -118,7 +128,7 @@ export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnv
                 type="button"
                 onClick={() => beginEdit(revision)}
                 data-testid={`site-environment-revision-${revision.id}`}
-                disabled={busy || !gate.allowed}
+                disabled={isBusy("environment") || !gate.allowed}
                 title={gate.title}
                 className={cn(
                   "w-full rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/50 disabled:opacity-60 motion-reduce:transition-none",
@@ -158,7 +168,7 @@ export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnv
                   size="xs"
                   variant="outline"
                   className="ml-auto"
-                  disabled={busy || !gate.allowed}
+                  disabled={isBusy("environment") || !gate.allowed}
                   title={gate.title}
                   onClick={() => beginEdit(current)}
                   data-testid="site-environment-edit"
@@ -272,7 +282,7 @@ export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnv
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || !gate.allowed}
+                disabled={isBusy("environment") || !gate.allowed}
                 title={gate.title}
                 onClick={() =>
                   onSave({ variables: draftVariables, secrets: kvRowsToObject(secretRows) })
@@ -285,7 +295,7 @@ export function SiteEnvironmentTab({ environments, gate, busy, onSave }: SiteEnv
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={busy}
+                disabled={isBusy("environment")}
                 onClick={() => setEditing(false)}
               >
                 {t("actions.cancelEdit")}

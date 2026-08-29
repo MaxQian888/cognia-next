@@ -58,7 +58,12 @@ export interface SiteDomainsTabProps {
   site: SiteProjectRow
   resources: readonly SiteResourceRow[]
   gate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   onAddDomain: (hostname: string) => void
   onRemoveDomain: (resourceId: string) => void
   onSaveProviderConfig: (patch: { zoneId?: string; accessTeamName?: string }) => void
@@ -69,7 +74,7 @@ export function SiteDomainsTab({
   site,
   resources,
   gate,
-  busy,
+  isBusy,
   onAddDomain,
   onRemoveDomain,
   onSaveProviderConfig,
@@ -148,7 +153,7 @@ export function SiteDomainsTab({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || !gate.allowed}
+              disabled={isBusy("provider-config") || !gate.allowed}
               title={gate.title}
               onClick={() => onSaveProviderConfig({ zoneId, accessTeamName })}
               data-testid="site-save-provider-config"
@@ -176,7 +181,7 @@ export function SiteDomainsTab({
             <Button
               type="button"
               size="sm"
-              disabled={busy || !gate.allowed || !hostname.trim() || zoneMissing}
+              disabled={isBusy("domain") || !gate.allowed || !hostname.trim() || zoneMissing}
               title={zoneMissing ? t("provider.zoneIdRequired") : gate.title}
               onClick={() => onAddDomain(hostname.trim())}
               data-testid="site-add-domain"
@@ -213,7 +218,7 @@ export function SiteDomainsTab({
                 size="icon-xs"
                 variant="ghost"
                 aria-label={t("actions.remove")}
-                disabled={busy || !gate.allowed}
+                disabled={isBusy(`remove:${row.id}`) || !gate.allowed}
                 title={gate.title}
                 onClick={() => onRemoveDomain(row.id)}
               >
@@ -320,7 +325,7 @@ export function SiteDomainsTab({
             <Button
               type="button"
               size="sm"
-              disabled={busy || !gate.allowed}
+              disabled={isBusy("access") || !gate.allowed}
               title={gate.title}
               onClick={() => onApplyAccess(compilePolicy(), accessHostname)}
               data-testid="site-apply-access"

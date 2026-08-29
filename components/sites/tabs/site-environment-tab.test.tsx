@@ -66,7 +66,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteEnvironmentTab
     <SiteEnvironmentTab
       environments={[revision({ id: "e1", variables: { API_ORIGIN: "https://api.example.com" } })]}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={onSave}
       {...props}
     />

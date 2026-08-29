@@ -277,12 +277,15 @@ export function useSitePublishActions({
     [run, service, requireSite]
   )
 
+  // Takedown and restore change what every other control acts on — a domain
+  // form or a deploy button aimed at a Site that is mid-takedown is a click
+  // that will fail — so they hold the console rather than just their own key.
   const takeDown = useCallback(() => {
-    void run("takedown", () => service().takeDown(requireSite().id))
+    void run("takedown", () => service().takeDown(requireSite().id), { exclusive: true })
   }, [run, service, requireSite])
 
   const restore = useCallback(() => {
-    void run("restore", () => service().restore(requireSite().id))
+    void run("restore", () => service().restore(requireSite().id), { exclusive: true })
   }, [run, service, requireSite])
 
   const reconcile = useCallback(

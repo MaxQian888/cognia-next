@@ -35702,7 +35702,8 @@
         "requires-deployer": "Requires deployer access to this Site",
         "requires-desktop": "Available in the Cognia desktop app",
         "requires-editor": "Requires editor access to this Site",
-        "requires-owner": "Only the Site owner can do this"
+        "requires-owner": "Only the Site owner can do this",
+        "requires-wrangler": "Install the wrangler CLI to upload a version"
       }
     },
     "lifecycle": {

@@ -55,7 +55,12 @@ export interface SiteOverviewHeaderProps {
   actorAccountId: string
   gate: SiteGate
   metadataGate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   onTakeDown: () => void
   onRestore: () => void
   onPurge: () => void
@@ -70,7 +75,7 @@ export function SiteOverviewHeader({
   actorAccountId,
   gate,
   metadataGate,
-  busy,
+  isBusy,
   onTakeDown,
   onRestore,
   onPurge,
@@ -115,7 +120,7 @@ export function SiteOverviewHeader({
               type="button"
               variant="outline"
               size="sm"
-              disabled={busy || !gate.allowed}
+              disabled={isBusy("takedown") || !gate.allowed}
               title={gate.title}
               onClick={onTakeDown}
               data-testid="site-take-down"
@@ -129,7 +134,7 @@ export function SiteOverviewHeader({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={busy || !gate.allowed}
+                disabled={isBusy("restore") || !gate.allowed}
                 title={gate.title}
                 onClick={onRestore}
                 data-testid="site-restore"
@@ -140,7 +145,7 @@ export function SiteOverviewHeader({
                 type="button"
                 variant="destructive"
                 size="sm"
-                disabled={busy || !gate.allowed}
+                disabled={isBusy("purge") || !gate.allowed}
                 title={gate.title}
                 onClick={onPurge}
                 data-testid="site-purge"
@@ -155,7 +160,7 @@ export function SiteOverviewHeader({
               type="button"
               variant="destructive"
               size="sm"
-              disabled={busy || !metadataGate.allowed}
+              disabled={isBusy("delete-metadata") || !metadataGate.allowed}
               title={metadataGate.title}
               onClick={onDeleteMetadata}
               data-testid="site-delete-metadata"

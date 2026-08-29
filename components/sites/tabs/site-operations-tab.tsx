@@ -52,7 +52,12 @@ export interface SiteOperationsTabProps {
   resources: readonly SiteResourceRow[]
   deployments: readonly SiteDeploymentRow[]
   gate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   /** Last query result, already unwrapped by the console. */
   result: unknown
   onQuery: (query: SiteObservabilityQuery) => void
@@ -67,7 +72,7 @@ export function SiteOperationsTab({
   resources,
   deployments,
   gate,
-  busy,
+  isBusy,
   result,
   onQuery,
   onClearResult,
@@ -142,7 +147,7 @@ export function SiteOperationsTab({
               type="button"
               size="sm"
               className="ml-auto"
-              disabled={busy || !gate.allowed}
+              disabled={isBusy(segment) || !gate.allowed}
               title={gate.title}
               onClick={() => runQuery(segment === "logs" ? "logs" : "analytics")}
               data-testid={`site-run-${segment}`}
@@ -158,7 +163,7 @@ export function SiteOperationsTab({
           operations={operations}
           onRefresh={onRefreshOperation}
           onCancel={onCancelOperation}
-          refreshDisabled={busy || !gate.allowed}
+          refreshDisabled={!gate.allowed}
           refreshTitle={gate.title}
         />
       ) : (

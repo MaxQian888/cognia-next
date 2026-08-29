@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useSiteActionGate } from "@/hooks/sites/use-site-action-gate"
+import { useSiteActionGate, type SiteGate } from "@/hooks/sites/use-site-action-gate"
 import { useSiteArtifactSummaries } from "@/hooks/sites/use-site-artifact-summaries"
 import { useSiteActions } from "@/hooks/sites/use-site-actions"
 import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
@@ -75,7 +75,7 @@ export function SitesConsole() {
 
   const live = useSiteLiveData(pinnedId)
   const site = live.sites.find((row) => row.id === live.selectedId) ?? null
-  const { busy, run, service } = useSiteActions(actorAccountId)
+  const { isBusy, run, service } = useSiteActions(actorAccountId)
   const gate = useSiteActionGate(site, actorAccountId)
   const manifest = useSiteHostingManifest(site)
   const preview = useSitePreviewSession(site?.id ?? null)
@@ -96,6 +96,23 @@ export function SitesConsole() {
 
   const retention = useMemo(() => purgeRetentionReport(live.resources), [live.resources])
 
+  const deployGate = gate("provider", "deploy")
+  // Upload and deploy are not the same permission-and-host question. Deploy is
+  // a provider API call; upload additionally shells out to wrangler on this
+  // machine. The console used to pass `deployGate` for both, so the two-prop
+  // API on the versions tab was a lie and a missing wrangler surfaced only as a
+  // failed click. Declared above the mobile branch — hooks cannot sit behind a
+  // conditional return.
+  const uploadGate = useMemo<SiteGate>(() => {
+    if (!deployGate.allowed) return deployGate
+    if (publish.wrangler?.ready) return deployGate
+    return {
+      allowed: false,
+      reason: "requires-wrangler",
+      title: t("host.reason.requires-wrangler"),
+    }
+  }, [deployGate, publish.wrangler, t])
+
   if (platform === "mobile") {
     return (
       <Alert className="m-6" data-testid="sites-mobile-notice">
@@ -107,7 +124,6 @@ export function SitesConsole() {
   }
 
   const providerGate = gate("provider", "manage")
-  const deployGate = gate("provider", "deploy")
   const buildGate = gate("build", "edit")
   const previewGate = gate("preview", "edit")
   const filesystemGate = gate("filesystem", "edit")
@@ -117,13 +133,18 @@ export function SitesConsole() {
     const action = confirmation
     setConfirmation(null)
     if (!action || !site) return
-    void run(action, async () => {
-      if (action === "purge") await service().purge(site.id)
-      else {
-        await deleteSiteProjectMetadata(site.id)
-        setPinnedId(null)
-      }
-    })
+    void run(
+      action,
+      async () => {
+        if (action === "purge") await service().purge(site.id)
+        else {
+          await deleteSiteProjectMetadata(site.id)
+          setPinnedId(null)
+        }
+      },
+      // Purge and metadata deletion change what every other control acts on.
+      { exclusive: true }
+    )
   }
 
   const runObservability = (query: SiteObservabilityQuery) => {
@@ -183,7 +204,7 @@ export function SitesConsole() {
                 id: "reconcile",
                 label: t("actions.reconcile"),
                 icon: RefreshCwIcon,
-                disabled: !site || busy !== null || !providerGate.allowed,
+                disabled: !site || isBusy("reconcile") || !providerGate.allowed,
                 onSelect: () => publish.reconcile(setObservabilityResult),
               },
             ]}
@@ -237,7 +258,7 @@ export function SitesConsole() {
               actorAccountId={actorAccountId}
               gate={providerGate}
               metadataGate={metadataGate}
-              busy={busy !== null}
+              isBusy={isBusy}
               onTakeDown={publish.takeDown}
               onRestore={publish.restore}
               onPurge={() => setConfirmation("purge")}
@@ -254,7 +275,7 @@ export function SitesConsole() {
                   manifest={manifest}
                   wrangler={publish.wrangler}
                   previewUrl={preview.url}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   providerGate={providerGate}
                   buildGate={buildGate}
                   previewGate={previewGate}
@@ -280,9 +301,9 @@ export function SitesConsole() {
                   deployments={live.deployments}
                   resources={live.resources}
                   artifacts={artifacts}
-                  uploadGate={deployGate}
+                  uploadGate={uploadGate}
                   deployGate={deployGate}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   onUpload={publish.upload}
                   onDeploy={publish.deploy}
                 />
@@ -294,7 +315,7 @@ export function SitesConsole() {
                 <SiteEnvironmentTab
                   environments={live.environments}
                   gate={buildGate}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   onSave={publish.saveEnvironment}
                 />
               </div>
@@ -306,7 +327,7 @@ export function SitesConsole() {
                   site={site}
                   resources={live.resources}
                   gate={providerGate}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   onAddDomain={publish.addDomain}
                   onRemoveDomain={publish.removeDomain}
                   onSaveProviderConfig={(patch) =>
@@ -324,7 +345,7 @@ export function SitesConsole() {
                 <SiteResourcesTab
                   resources={live.resources}
                   gate={providerGate}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   onReconcile={() => publish.reconcile(setObservabilityResult)}
                 />
               </div>
@@ -338,7 +359,7 @@ export function SitesConsole() {
                   resources={live.resources}
                   deployments={live.deployments}
                   gate={providerGate}
-                  busy={busy !== null}
+                  isBusy={isBusy}
                   result={observabilityResult}
                   onQuery={runObservability}
                   onClearResult={() => setObservabilityResult(undefined)}

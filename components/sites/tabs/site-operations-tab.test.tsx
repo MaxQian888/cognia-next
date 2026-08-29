@@ -74,7 +74,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteOperationsTab>
       resources={[]}
       deployments={[]}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       result={undefined}
       onQuery={onQuery}
       onClearResult={onClearResult}

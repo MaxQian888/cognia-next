@@ -39,7 +39,12 @@ import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
 export interface SiteManifestEditorProps {
   manifest: SiteHostingManifestController
   gate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   /** Runs the write through the console's shared busy/toast runner. */
   onSave: (text: string, extraFiles?: readonly SiteScaffoldFile[]) => void
 }
@@ -49,7 +54,7 @@ interface DraftValidation {
   error?: string
 }
 
-export function SiteManifestEditor({ manifest, gate, busy, onSave }: SiteManifestEditorProps) {
+export function SiteManifestEditor({ manifest, gate, isBusy, onSave }: SiteManifestEditorProps) {
   const t = useTranslations("sites")
   const [draft, setDraft] = useState(manifest.text)
   const [seededFrom, setSeededFrom] = useState(manifest.text)
@@ -62,7 +67,7 @@ export function SiteManifestEditor({ manifest, gate, busy, onSave }: SiteManifes
   const [scaffolding, setScaffolding] = useState(false)
 
   const state = manifest.state
-  const disabled = busy || !gate.allowed
+  const disabled = isBusy("manifest") || !gate.allowed
 
   // Re-seed when the file on disk changes underneath the editor (first read,
   // reload, or a save that rewrote it). This is React's "adjust state when
@@ -175,7 +180,7 @@ export function SiteManifestEditor({ manifest, gate, busy, onSave }: SiteManifes
             type="button"
             size="xs"
             variant="ghost"
-            disabled={busy}
+            disabled={isBusy("manifest")}
             onClick={() => void manifest.refresh()}
           >
             <RefreshCwIcon aria-hidden className="size-3" />

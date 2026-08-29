@@ -75,7 +75,7 @@ it("explains itself instead of rendering an editor with no filesystem", () => {
     <SiteManifestEditor
       manifest={controller({ state: { status: "unsupported" }, ready: false, text: "" })}
       gate={blocked}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )
@@ -102,7 +102,7 @@ it("offers a scaffold when there is no manifest yet", async () => {
         scaffold,
       })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )
@@ -133,7 +133,7 @@ it("labels an unrecognized project as a template that needs review", async () =>
         })),
       })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )
@@ -144,7 +144,14 @@ it("labels an unrecognized project as a template that needs review", async () =>
 it("blocks saving a draft the real parser rejects", async () => {
   const user = userEvent.setup()
   const onSave = jest.fn()
-  render(<SiteManifestEditor manifest={controller()} gate={allowed} busy={false} onSave={onSave} />)
+  render(
+    <SiteManifestEditor
+      manifest={controller()}
+      gate={allowed}
+      isBusy={() => false}
+      onSave={onSave}
+    />
+  )
 
   const save = screen.getByTestId("site-manifest-save")
   expect(save).toBeEnabled()
@@ -178,7 +185,7 @@ it("saves the draft together with any scaffolded companion files", async () => {
         })),
       })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={onSave}
     />
   )
@@ -205,7 +212,7 @@ it("shows the parser message for a manifest already broken on disk", () => {
         text: '{"schemaVersion": 2}',
       })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )
@@ -216,7 +223,12 @@ it("shows the parser message for a manifest already broken on disk", () => {
 
 it("renders read-only with the gate reason when the host cannot write", () => {
   render(
-    <SiteManifestEditor manifest={controller()} gate={blocked} busy={false} onSave={jest.fn()} />
+    <SiteManifestEditor
+      manifest={controller()}
+      gate={blocked}
+      isBusy={() => false}
+      onSave={jest.fn()}
+    />
   )
   expect(screen.getByTestId("site-manifest-source")).toHaveAttribute("readonly")
   expect(screen.getByTestId("site-manifest-save")).toBeDisabled()
@@ -234,7 +246,7 @@ it("re-indents a valid draft in place", async () => {
         text: compact,
       })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )
@@ -249,7 +261,7 @@ it("re-reads from disk on demand", async () => {
     <SiteManifestEditor
       manifest={controller({ refresh })}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onSave={jest.fn()}
     />
   )

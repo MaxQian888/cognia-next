@@ -67,7 +67,7 @@ jest.mock("@/hooks/sites/use-site-publish-actions", () => ({
 const purge = jest.fn(async () => undefined)
 jest.mock("@/hooks/sites/use-site-actions", () => ({
   useSiteActions: () => ({
-    busy: null,
+    busyKeys: new Set<string>(),
     isBusy: () => false,
     service: () => ({ purge }),
     run: jest.fn(async (_key: string, action: () => Promise<unknown>) => action()),
@@ -246,4 +246,48 @@ it("reports what a purge would keep before confirming it", async () => {
 
   await user.click(screen.getByText("actions.confirmPurge"))
   expect(purge).toHaveBeenCalledWith("site_1")
+})
+
+describe("upload vs deploy gating", () => {
+  const readyVersion = {
+    id: "ver_1",
+    siteId: "site_1",
+    sequence: 1,
+    status: "ready" as const,
+    environmentRevisionId: "env_1",
+    source: { commitSha: "abcdef1", dirty: false, lockfileDigest: "lock", inputDigest: "in" },
+    build: {
+      command: '["build"]',
+      runtime: "node@24",
+      packageManager: "pnpm@10",
+      compatibilityDate: "2026-01-01",
+      compatibilityFlags: [],
+      routes: [],
+      bindings: [],
+    },
+    artifactDigest: "sha-1",
+    createdAt: 1,
+  }
+
+  it("blocks upload on a host with no wrangler while deploy stays a provider question", () => {
+    // The console used to pass `deployGate` for both, so the versions tab's
+    // two-prop API was a lie and a missing wrangler surfaced only as a click
+    // that failed.
+    publishActions.wrangler = { path: null, version: null, ready: false }
+    useSiteLiveDataMock.mockReturnValue(liveData({ versions: [readyVersion] }))
+    render(<SitesConsole />)
+    fireEvent.mouseDown(screen.getByTestId("sites-tab-versions"))
+
+    const upload = screen.getByTestId("site-version-upload-ver_1")
+    expect(upload).toBeDisabled()
+    expect(upload).toHaveAttribute("title", "host.reason.requires-wrangler")
+  })
+
+  it("allows upload once wrangler resolves", () => {
+    publishActions.wrangler = { path: "/bin/wrangler", version: "3", ready: true }
+    useSiteLiveDataMock.mockReturnValue(liveData({ versions: [readyVersion] }))
+    render(<SitesConsole />)
+    fireEvent.mouseDown(screen.getByTestId("sites-tab-versions"))
+    expect(screen.getByTestId("site-version-upload-ver_1")).toBeEnabled()
+  })
 })

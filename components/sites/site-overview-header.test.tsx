@@ -94,7 +94,7 @@ function renderHeader(props: Partial<React.ComponentProps<typeof SiteOverviewHea
       actorAccountId="owner"
       gate={allowed}
       metadataGate={allowed}
-      busy={false}
+      isBusy={() => false}
       {...handlers}
       {...props}
     />
@@ -212,7 +212,7 @@ it("gates provider lifecycle actions but keeps metadata deletion on its own gate
       actorAccountId="owner"
       gate={blocked}
       metadataGate={allowed}
-      busy={false}
+      isBusy={() => false}
       onTakeDown={jest.fn()}
       onRestore={jest.fn()}
       onPurge={jest.fn()}

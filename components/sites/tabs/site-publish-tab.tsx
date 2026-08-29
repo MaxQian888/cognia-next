@@ -58,7 +58,12 @@ export interface SitePublishTabProps {
   manifest: SiteHostingManifestController
   wrangler: WranglerDetection | null
   previewUrl: string | null
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   providerGate: SiteGate
   buildGate: SiteGate
   previewGate: SiteGate
@@ -83,7 +88,7 @@ export function SitePublishTab({
   manifest,
   wrangler,
   previewUrl,
-  busy,
+  isBusy,
   providerGate,
   buildGate,
   previewGate,
@@ -144,7 +149,7 @@ export function SitePublishTab({
           <Button
             type="button"
             size="sm"
-            disabled={busy || !providerGate.allowed || !token}
+            disabled={isBusy("token") || !providerGate.allowed || !token}
             title={providerGate.title}
             onClick={() => {
               onSaveToken(token)
@@ -169,7 +174,7 @@ export function SitePublishTab({
         <SiteManifestEditor
           manifest={manifest}
           gate={filesystemGate}
-          busy={busy}
+          isBusy={isBusy}
           onSave={onSaveManifest}
         />
       </SitePublishStep>
@@ -241,7 +246,7 @@ export function SitePublishTab({
             type="button"
             size="sm"
             variant="outline"
-            disabled={busy || !buildGate.allowed || !manifest.ready}
+            disabled={isBusy("provision") || !buildGate.allowed || !manifest.ready}
             title={buildGate.title}
             onClick={onProvision}
             data-testid="site-provision"
@@ -251,7 +256,7 @@ export function SitePublishTab({
           <Button
             type="button"
             size="sm"
-            disabled={busy || !buildGate.allowed || !manifest.ready}
+            disabled={isBusy("build") || !buildGate.allowed || !manifest.ready}
             title={buildGate.title}
             onClick={() =>
               onBuild({
@@ -287,7 +292,7 @@ export function SitePublishTab({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || !previewGate.allowed}
+              disabled={isBusy("stop-preview") || !previewGate.allowed}
               title={previewGate.title}
               onClick={onStopPreview}
               data-testid="site-stop-preview"
@@ -300,7 +305,7 @@ export function SitePublishTab({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || !previewGate.allowed || !manifest.ready}
+              disabled={isBusy("preview") || !previewGate.allowed || !manifest.ready}
               title={previewGate.title}
               onClick={onStartPreview}
               data-testid="site-start-preview"
@@ -347,7 +352,7 @@ export function SitePublishTab({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={busy || !deployGate.allowed}
+                disabled={isBusy("wrangler") || !deployGate.allowed}
                 title={deployGate.title}
                 onClick={onRedetectWrangler}
                 data-testid="site-redetect-wrangler"

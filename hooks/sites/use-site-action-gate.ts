@@ -41,6 +41,8 @@ export type SiteActionCapability = "provider" | "build" | "preview" | "filesyste
 export type SiteGateReason =
   | "ok"
   | "requires-desktop"
+  /** The host has no wrangler binary — upload cannot run, deploy still can. */
+  | "requires-wrangler"
   | "requires-access"
   | "requires-owner"
   | "requires-editor"

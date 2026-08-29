@@ -90,7 +90,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SitePublishTab>> =
       manifest={manifest(true)}
       wrangler={{ path: "/usr/bin/wrangler", version: "3.90.0", ready: true }}
       previewUrl={null}
-      busy={false}
+      isBusy={() => false}
       providerGate={allowed}
       buildGate={allowed}
       previewGate={allowed}

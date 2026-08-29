@@ -34,7 +34,7 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteResourcesTab>>
     <SiteResourcesTab
       resources={[resource({ id: "w1", kind: "worker", displayName: "docs" })]}
       gate={allowed}
-      busy={false}
+      isBusy={() => false}
       onReconcile={onReconcile}
       {...props}
     />

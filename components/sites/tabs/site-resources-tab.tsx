@@ -32,11 +32,16 @@ import {
 export interface SiteResourcesTabProps {
   resources: readonly SiteResourceRow[]
   gate: SiteGate
-  busy: boolean
+  /**
+   * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
+   * that action is in flight or an exclusive lifecycle action is running; a
+   * build no longer disables unrelated controls.
+   */
+  isBusy: (key?: string) => boolean
   onReconcile: () => void
 }
 
-export function SiteResourcesTab({ resources, gate, busy, onReconcile }: SiteResourcesTabProps) {
+export function SiteResourcesTab({ resources, gate, isBusy, onReconcile }: SiteResourcesTabProps) {
   const t = useTranslations("sites")
   const groups = useMemo(() => groupResourcesByKind(resources), [resources])
   const retention = useMemo(() => purgeRetentionReport(resources), [resources])
@@ -73,7 +78,7 @@ export function SiteResourcesTab({ resources, gate, busy, onReconcile }: SiteRes
           size="xs"
           variant="outline"
           className="ml-auto"
-          disabled={busy || !gate.allowed}
+          disabled={isBusy("reconcile") || !gate.allowed}
           title={gate.title}
           onClick={onReconcile}
           data-testid="site-reconcile"

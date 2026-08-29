@@ -161,7 +161,8 @@
       "requires-deployer": "需要该站点的部署者权限",
       "requires-desktop": "需要在 Cognia 桌面端中操作",
       "requires-editor": "需要该站点的编辑者权限",
-      "requires-owner": "只有站点所有者可以执行"
+      "requires-owner": "只有站点所有者可以执行",
+      "requires-wrangler": "需要先安装 wrangler CLI 才能上传版本"
     }
   },
   "lifecycle": {
