@@ -146,6 +146,14 @@ import type { CollabIssueMirrorRow } from "./collab-issue-mirror-types"
 import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
 import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
 import type { CollabRunMirrorRow } from "./collab-run-mirror-types"
+import type {
+  CollabChatApprovalMirrorRow,
+  CollabChatEventMirrorRow,
+  CollabChatInviteMirrorRow,
+  CollabChatMembershipMirrorRow,
+  CollabChatSessionMirrorRow,
+  CollabChatSyncStateRow,
+} from "./collab-chat-mirror-types"
 import type { BrowserSubmissionRow } from "./browser-submissions-types"
 import type { ThreadHandoffTicket } from "@cognia/agent-config-types/thread-handoff"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
@@ -4922,6 +4930,19 @@ export class CogniaDB extends Dexie {
         "&id, sessionId, projectId, messageId, type, updatedAt, [sessionId+updatedAt], [projectId+updatedAt]",
       artifactVersions: "&id, artifactId, projectId, [artifactId+version], createdAt",
     })
+
+    // v207 — server-authoritative shared-chat mirrors. Every table is a
+    // rebuildable cache; authorization remains on the collaboration server.
+    this.version(207).stores({
+      collabChatSessions:
+        "&id, orgId, workspaceId, [orgId+workspaceId], status, updatedAt, fetchedAt",
+      collabChatMemberships:
+        "&[sessionId+userId], sessionId, userId, orgId, role, updatedAt, fetchedAt",
+      collabChatEvents: "&id, sessionId, orgId, [sessionId+sequence], sequence, fetchedAt",
+      collabChatInvites: "&id, sessionId, orgId, status, expiresAt, fetchedAt",
+      collabChatApprovals: "&id, sessionId, orgId, runId, status, expiresAt, fetchedAt",
+      collabChatSyncStates: "&sessionId, orgId, updatedAt",
+    })
   }
 
   // v206 — artifacts + their version history (ADR-0158). Authoritative; the
@@ -4959,6 +4980,13 @@ export class CogniaDB extends Dexie {
   // caches; see `lib/db/collab-plan-mirror.ts` and `lib/db/collab-run-mirror.ts`.
   collabPlans!: Table<CollabPlanMirrorRow, string>
   collabRuns!: Table<CollabRunMirrorRow, string>
+  // v207 — shared-chat server projections. Never authoritative for access.
+  collabChatSessions!: Table<CollabChatSessionMirrorRow, string>
+  collabChatMemberships!: Table<CollabChatMembershipMirrorRow, [string, string]>
+  collabChatEvents!: Table<CollabChatEventMirrorRow, string>
+  collabChatInvites!: Table<CollabChatInviteMirrorRow, string>
+  collabChatApprovals!: Table<CollabChatApprovalMirrorRow, string>
+  collabChatSyncStates!: Table<CollabChatSyncStateRow, string>
   // v199 — Browser Companion submission side-notes. See
   // `lib/db/browser-submissions.ts`.
   browserSubmissions!: Table<BrowserSubmissionRow, string>

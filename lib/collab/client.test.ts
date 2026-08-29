@@ -304,4 +304,53 @@ describe("CollabClient", () => {
       authoritative: { id: "iss_1", revision: 5 },
     })
   })
+
+  it("uses explicit shared-session membership routes and never puts a grant in the URL", async () => {
+    const calls: Call[] = []
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        if (url.endsWith("/grants"))
+          return jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+        return jsonResponse([])
+      },
+      now: () => 0,
+    })
+
+    await client.listSharedSessions(ORG, "workspace one")
+    const call = calls.at(-1)!
+    expect(call.url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/workspaces/workspace%20one/chat-sessions`
+    )
+    expect(call.url).not.toContain("grant-1")
+    expect(grantHeader(call)).toBe("Bearer grant-1")
+  })
+
+  it("opens realtime chat with a one-time subprotocol ticket", async () => {
+    const sockets: { url: string; protocols: string[] }[] = []
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse({ ticket: "st_one_time", expiresAt: 30_000 }),
+      now: () => 0,
+      webSocketFactory: (url, protocols) => {
+        sockets.push({ url, protocols })
+        return {} as WebSocket
+      },
+    })
+
+    await client.openSessionStream(ORG, "ses_1")
+    expect(sockets).toEqual([
+      {
+        url: `wss://collab.test/v1/orgs/${ORG}/chat-sessions/ses_1/stream`,
+        protocols: ["cognia.chat.v1", "st_one_time"],
+      },
+    ])
+    expect(sockets[0].url).not.toContain("st_one_time")
+  })
 })

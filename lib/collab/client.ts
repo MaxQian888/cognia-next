@@ -26,6 +26,13 @@ import type { PlanStatus } from "@/types/agent/plan"
 import type { OrgRole, WorkspaceRole } from "@/types/identity"
 import type { IssuePriority, IssueRunArtifact, IssueRunStatus, IssueStatus } from "@/types/issues"
 import type { CollabIssueActor } from "@/types/issues/collab"
+import type {
+  RunLease,
+  SessionEvent,
+  SessionMembership,
+  SessionRole,
+  SharedSession,
+} from "@cognia/agent-config-types"
 
 /** One issue as the collaboration plane returns it. */
 export interface CollabIssue {
@@ -252,6 +259,8 @@ export interface CollabClientOptions {
   fetchImpl: CollabFetch
   /** Injectable so the grant cache can be tested without waiting. */
   now?: () => number
+  /** Injectable so realtime behavior can be verified outside a browser. */
+  webSocketFactory?: (url: string, protocols: string[]) => WebSocket
 }
 
 export interface CollabIdentity {
@@ -272,6 +281,7 @@ export class CollabClient {
   private readonly accessToken: () => Promise<string | null>
   private readonly fetchImpl: CollabFetch
   private readonly now: () => number
+  private readonly webSocketFactory: (url: string, protocols: string[]) => WebSocket
   /** Cached per org: a grant is scoped to one, so one slot would thrash. */
   private readonly grants = new Map<string, MintedGrant>()
 
@@ -280,6 +290,8 @@ export class CollabClient {
     this.accessToken = options.accessToken
     this.fetchImpl = options.fetchImpl
     this.now = options.now ?? (() => Date.now())
+    this.webSocketFactory =
+      options.webSocketFactory ?? ((url, protocols) => new WebSocket(url, protocols))
   }
 
   /** Drop a cached grant, e.g. after signing out. */
@@ -341,6 +353,144 @@ export class CollabClient {
     return this.json<CollabWorkspaceMember[]>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/members`
+    )
+  }
+
+  async listSharedSessions(orgId: string, workspaceId: string): Promise<SharedSession[]> {
+    return this.json<SharedSession[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/chat-sessions`
+    )
+  }
+
+  async createSharedSession(
+    orgId: string,
+    workspaceId: string,
+    input: { title: string; operationId: string; importing?: boolean }
+  ): Promise<SharedSession> {
+    return this.json<SharedSession>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/chat-sessions`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async getSharedSession(orgId: string, sessionId: string): Promise<SharedSession> {
+    return this.json<SharedSession>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}`
+    )
+  }
+
+  async updateSharedSession(
+    orgId: string,
+    sessionId: string,
+    input: {
+      title?: string
+      status?: SharedSession["status"]
+      operationId: string
+      baseRevision: number
+    }
+  ): Promise<SharedSession> {
+    return this.json<SharedSession>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  async listSessionMembers(orgId: string, sessionId: string): Promise<SessionMembership[]> {
+    return this.json<SessionMembership[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/members`
+    )
+  }
+
+  async putSessionMember(
+    orgId: string,
+    sessionId: string,
+    input: { userId: string; role: SessionRole; approver?: boolean; guest?: boolean }
+  ): Promise<SessionMembership> {
+    return this.json<SessionMembership>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/members`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async updateSessionMember(
+    orgId: string,
+    sessionId: string,
+    userId: string,
+    input: { role: SessionRole; approver?: boolean; guest?: boolean }
+  ): Promise<SessionMembership> {
+    return this.json<SessionMembership>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  async removeSessionMember(orgId: string, sessionId: string, userId: string): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async listSessionEvents(
+    orgId: string,
+    sessionId: string,
+    afterSequence = 0
+  ): Promise<SessionEvent[]> {
+    return this.json<SessionEvent[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/events?afterSequence=${afterSequence}`
+    )
+  }
+
+  async appendSessionEvent(
+    orgId: string,
+    sessionId: string,
+    input: {
+      id?: string
+      kind: "message.created" | "message.corrected" | "message.redacted" | "run.steered"
+      payload: Record<string, unknown>
+      operationId: string
+      actorLabel?: string
+    }
+  ): Promise<SessionEvent> {
+    return this.json<SessionEvent>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/events`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async openSessionStream(orgId: string, sessionId: string): Promise<WebSocket> {
+    const { ticket } = await this.json<{ ticket: string; expiresAt: number }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/stream-tickets`,
+      { method: "POST", body: "{}" }
+    )
+    const url = new URL(
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/stream`,
+      this.baseUrl
+    )
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+    return this.webSocketFactory(url.toString(), ["cognia.chat.v1", ticket])
+  }
+
+  async acquireSessionRunLease(
+    orgId: string,
+    sessionId: string,
+    input: { runId: string; deviceId: string; operationId: string }
+  ): Promise<{ lease: RunLease; token: string }> {
+    return this.json<{ lease: RunLease; token: string }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases`,
+      { method: "POST", body: JSON.stringify(input) }
     )
   }
 
@@ -526,6 +676,7 @@ async function readJson<T>(response: Response): Promise<T> {
     }
     throw new CollabError(response.status, message)
   }
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
 

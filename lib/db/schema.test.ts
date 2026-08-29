@@ -777,6 +777,21 @@ describe("getDb", () => {
     expect(db.collabRuns.schema.indexes.map((index) => index.name)).not.toContain("artifacts")
   })
 
+  it("v207 opens server-authoritative shared-chat mirrors", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(207)
+    expect(db.collabChatSessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["orgId", "workspaceId", "[orgId+workspaceId]"])
+    )
+    expect(db.collabChatMemberships.schema.primKey.name).toBe("[sessionId+userId]")
+    expect(db.collabChatEvents.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sessionId", "[sessionId+sequence]"])
+    )
+    expect(db.collabChatSyncStates.schema.primKey.name).toBe("sessionId")
+  })
+
   it("v196 indexes the external subject the IM plane resolves people by", async () => {
     const db = getDb()
     await db.open()
