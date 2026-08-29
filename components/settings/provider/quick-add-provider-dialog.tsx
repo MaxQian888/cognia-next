@@ -33,6 +33,7 @@ import {
 } from "@cognia/provider-types/built-in-provider-catalog"
 import { getCustomProviderReadiness } from "./provider-readiness"
 import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 export type { BuiltInProviderQuickAddPreset as QuickAddPreset } from "@cognia/provider-types/built-in-provider-catalog"
 export const QUICK_ADD_PRESETS: QuickAddPreset[] = buildQuickAddProviderPresets()
@@ -103,6 +104,8 @@ export function QuickAddProviderDialog({
   const [selectedPreset, setSelectedPreset] = useState<QuickAddPreset | null>(null)
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const {
@@ -340,7 +343,9 @@ export function QuickAddProviderDialog({
                     variant="ghost"
                     size="icon"
                     className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowKey(!showKey)}
+                    onClick={() =>
+                      showKey ? setShowKey(false) : void revealSecret(() => setShowKey(true))
+                    }
                   >
                     {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>

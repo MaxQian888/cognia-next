@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { SearchApiKeyRotationStrategy } from "@cognia/web-search/types"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 const STRATEGIES: { value: SearchApiKeyRotationStrategy; labelKey: string }[] = [
   { value: "round-robin", labelKey: "strategyRoundRobin" },
@@ -53,6 +54,8 @@ export function ApiKeyPoolInput({
   const t = useTranslations("searchSettings")
   const [draft, setDraft] = useState("")
   const [reveal, setReveal] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
 
   const addKey = () => {
     const value = draft.trim()
@@ -114,7 +117,7 @@ export function ApiKeyPoolInput({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              onClick={() => setReveal((r) => !r)}
+              onClick={() => (reveal ? setReveal(false) : void revealSecret(() => setReveal(true)))}
               aria-label={reveal ? t("hideKeys") : t("showKeys")}
             >
               {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}

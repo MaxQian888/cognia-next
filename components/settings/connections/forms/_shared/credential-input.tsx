@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
 import { PENDING_NO_CODE, credentialConsentCode } from "@/lib/connectors/credential-lease"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /** @see the module docblock — each value implies a different meaning for an empty input. */
 export type CredentialFieldStatus =
@@ -111,6 +112,8 @@ export function CredentialInput({
 }: CredentialInputProps) {
   const t = useTranslations("settings.connections.credentialField")
   const [revealed, setRevealed] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
 
   const statusId = `${id}-status`
   const loading = status === "loading"
@@ -147,7 +150,9 @@ export function CredentialInput({
               <InputGroupButton
                 type="button"
                 size="icon-xs"
-                onClick={() => setRevealed((prev) => !prev)}
+                onClick={() =>
+                  revealed ? setRevealed(false) : void revealSecret(() => setRevealed(true))
+                }
                 disabled={!canReveal || disabled}
                 aria-label={revealed ? t("hideAria") : t("revealAria")}
                 aria-pressed={revealed}

@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { ProbeOutcome } from "@/lib/ocr/probe"
 import type { OcrProviderShellSupport } from "@/types/ocr"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 interface OcrConfigTabProps {
   providerId: string
@@ -145,6 +146,8 @@ interface CredentialRowProps {
 function CredentialRow({ providerId, credentialKey, value, onChange }: CredentialRowProps) {
   const t = useTranslations()
   const [reveal, setReveal] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const labelKey = `ocr.credentials.${credentialKey}` as const
   const label = useMemo(() => {
     // `t.has` is non-standard but our jest-mock + next-intl runtime both
@@ -178,7 +181,7 @@ function CredentialRow({ providerId, credentialKey, value, onChange }: Credentia
           size="icon"
           className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
           aria-label={showHideLabel}
-          onClick={() => setReveal((prev) => !prev)}
+          onClick={() => (reveal ? setReveal(false) : void revealSecret(() => setReveal(true)))}
         >
           {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
         </Button>

@@ -63,6 +63,7 @@ import type { ExternalBridgeSettings } from "@/types/wiki"
 
 import { NumberRow } from "../../common/number-row"
 import { DEFAULT_BRIDGE_HTTP_PORT, resolveSidecarPath } from "../bridge-runtime"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /** How often the Rust server status is re-read while the panel is visible. */
 const STATUS_POLL_MS = 3000
@@ -75,6 +76,8 @@ export interface BridgeServerPanelProps {
 export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps) {
   const t = useTranslations("settings.externalBridge")
   const [showToken, setShowToken] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const [busy, setBusy] = useState(false)
   const [rotateConfirming, setRotateConfirming] = useState(false)
   const [revokeConfirming, setRevokeConfirming] = useState(false)
@@ -383,7 +386,9 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setShowToken((s) => !s)}
+              onClick={() =>
+                showToken ? setShowToken(false) : void revealSecret(() => setShowToken(true))
+              }
               disabled={!(hostManaged ? oneTimeCredential : settings.bearerToken)}
             >
               {showToken ? t("server.hide") : t("server.show")}

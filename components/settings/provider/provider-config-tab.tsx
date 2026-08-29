@@ -80,6 +80,7 @@ import { DeploymentCertificationPanel } from "./deployment-certification-panel"
 import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
 import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -544,6 +545,8 @@ export function ProviderConfigTab({
 }: ProviderConfigTabProps) {
   const t = useTranslations("providers")
   const [showApiKey, setShowApiKey] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
 
   const handleTest = useCallback(async () => {
     await onTestConnection()
@@ -691,7 +694,11 @@ export function ProviderConfigTab({
                     variant="ghost"
                     size="icon"
                     className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-                    onClick={() => setShowApiKey((prev) => !prev)}
+                    onClick={() =>
+                      showApiKey
+                        ? setShowApiKey(false)
+                        : void revealSecret(() => setShowApiKey(true))
+                    }
                     title={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
                     aria-label={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
                     type="button"

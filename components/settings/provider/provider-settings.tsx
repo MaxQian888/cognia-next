@@ -104,6 +104,7 @@ import {
   getVisibleRetryFailedCustomProviderIds,
 } from "./provider-readiness"
 import { nextActionKey } from "./provider-setup-checklist"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /** Rail width bounds (px). The default matches the previous fixed column. */
 const RAIL_MIN_WIDTH = 240
@@ -226,6 +227,8 @@ function CustomProviderInlineConfig({
 }) {
   const t = useTranslations("providers")
   const [showKey, setShowKey] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   // Draft-buffered like the built-in tab: no `customProviders` row rewrite per
   // keystroke, and no character drops while the async write is in flight.
   const apiKeyField = useDraftField(cp.apiKey ?? "", onApiKeyChange, { identity: cp.id })
@@ -334,7 +337,9 @@ function CustomProviderInlineConfig({
               variant="ghost"
               size="icon"
               className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-              onClick={() => setShowKey((prev) => !prev)}
+              onClick={() =>
+                showKey ? setShowKey(false) : void revealSecret(() => setShowKey(true))
+              }
               type="button"
               aria-label={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
               title={showKey ? t("configTab.hideKey") : t("configTab.showKey")}

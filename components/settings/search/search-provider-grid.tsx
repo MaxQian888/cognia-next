@@ -22,6 +22,7 @@ import {
 import { testProviderConnection } from "@cognia/web-search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
 import { createLogger } from "@cognia/logging"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 const log = createLogger("settings.search.providers")
 
@@ -53,6 +54,8 @@ export function SearchProviderGrid() {
         boolean
       >
   )
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const [testStates, setTestStates] = useState<Record<SearchProviderType, ProviderTestState>>(
     () =>
       Object.fromEntries(
@@ -101,9 +104,18 @@ export function SearchProviderGrid() {
     setExpandedProviders((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
 
-  const toggleKey = useCallback((id: SearchProviderType) => {
-    setShowKeys((prev) => ({ ...prev, [id]: !prev[id] }))
-  }, [])
+  // Revealing a stored key routes through the Settings → Security gate;
+  // re-masking never does.
+  const toggleKey = useCallback(
+    (id: SearchProviderType) => {
+      setShowKeys((prev) => {
+        if (prev[id]) return { ...prev, [id]: false }
+        void revealSecret(() => setShowKeys((cur) => ({ ...cur, [id]: true })))
+        return prev
+      })
+    },
+    [revealSecret]
+  )
 
   const handleTestConnection = useCallback(
     async (providerId: SearchProviderType) => {

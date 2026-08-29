@@ -40,6 +40,7 @@ import {
   discoverOpenAICompatibleModels,
 } from "@cognia/provider-core/providers/model-discovery"
 import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: "",
@@ -84,6 +85,8 @@ export function CustomProviderDialog({
   const [baseURL, setBaseURL] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const [models, setModels] = useState<string[]>([])
   const [newModel, setNewModel] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
@@ -468,7 +471,9 @@ export function CustomProviderDialog({
                   variant="ghost"
                   size="icon"
                   className="absolute right-0 top-0 h-full"
-                  onClick={() => setShowKey(!showKey)}
+                  onClick={() =>
+                    showKey ? setShowKey(false) : void revealSecret(() => setShowKey(true))
+                  }
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>

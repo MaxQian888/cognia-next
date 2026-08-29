@@ -148,6 +148,9 @@ export function SearchProviderCard({
                 <div className="relative flex-1">
                   <Input
                     id={`${providerId}-key`}
+                    // secret-reveal-gate: components/settings/search/search-provider-grid.tsx
+                    // This card is presentational — `onToggleKey` is owned by the
+                    // grid, which routes the reveal through `useSecretReveal`.
                     type={showKey ? "text" : "password"}
                     placeholder={config.apiKeyPlaceholder}
                     value={settings?.apiKey ?? ""}

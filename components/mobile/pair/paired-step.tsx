@@ -29,6 +29,8 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useSettingsStore } from "@/stores/settings"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { usePlatform } from "@/hooks/use-platform"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { companionCredentialBook } from "@/lib/companion/credential-book"
@@ -66,6 +68,13 @@ export function PairedStep({
 }: PairedStepProps) {
   const t = useTranslations("mobile.pair")
   const guard = useBiometricGuard()
+  // Settings → Security → "Require biometrics to sign out". `useCompanionSignOut`
+  // has always honoured this flag; this second sign-out path prompted
+  // unconditionally, so switching the row off silently only worked on one of
+  // the two surfaces that sign a companion out.
+  const requireBiometricForSignOut =
+    useSettingsStore((s) => s.settings?.biometricRequiredFor?.signOut) ??
+    DEFAULT_BIOMETRIC_GUARD.signOut
   const platform = usePlatform()
 
   const [lastHeartbeatMs, setLastHeartbeatMs] = useState<number>(() => Date.now())
@@ -126,13 +135,7 @@ export function PairedStep({
 
   const onSignOut = useCallback(async () => {
     setSignOutError(null)
-    const out = await guard(
-      {
-        reason: t("signOutReason"),
-        title: t("signOutTitle"),
-        description: t("signOutDescription"),
-      },
-      async () => {
+    const performSignOut = async () => {
         const accountId =
           getActiveRuntimeTargetContext()?.accountId ??
           (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : null)
@@ -160,7 +163,26 @@ export function PairedStep({
           platform: platform === "web" ? "web" : "mobile",
           ...(fallbackHostId ? { fallbackHostId } : {}),
         })
+    }
+
+    if (!requireBiometricForSignOut) {
+      try {
+        await performSignOut()
+      } catch (err) {
+        setSignOutError(err instanceof Error ? err.message : String(err))
+        return
       }
+      onAfterSignOut()
+      return
+    }
+
+    const out = await guard(
+      {
+        reason: t("signOutReason"),
+        title: t("signOutTitle"),
+        description: t("signOutDescription"),
+      },
+      performSignOut
     )
     if (out.kind === "blocked") {
       if (out.reason !== "cancelled") {
@@ -169,7 +191,7 @@ export function PairedStep({
       return
     }
     onAfterSignOut()
-  }, [guard, onAfterSignOut, platform, t])
+  }, [guard, onAfterSignOut, platform, requireBiometricForSignOut, t])
 
   // Explicit label — `constructor.name` gets mangled by production minifiers.
   // Duck-typed on `onTierChange` (CompanionTransport-only) like the

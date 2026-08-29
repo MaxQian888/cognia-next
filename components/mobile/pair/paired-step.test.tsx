@@ -32,11 +32,20 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+const guardCalls: unknown[] = []
 jest.mock("@/hooks/use-biometric-guard", () => ({
-  useBiometricGuard: () => async (_opts: unknown, action: () => Promise<void>) => {
+  useBiometricGuard: () => async (opts: unknown, action: () => Promise<void>) => {
+    guardCalls.push(opts)
     await action()
     return { kind: "ok" as const }
   },
+}))
+
+// Settings → Security → "Require biometrics to sign out".
+const biometricPolicy: { value: { signOut?: boolean } | undefined } = { value: undefined }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
+    selector({ settings: { biometricRequiredFor: biometricPolicy.value } }),
 }))
 
 jest.mock("next-intl", () => ({
@@ -178,5 +187,34 @@ describe("<PairedStep />", () => {
       hostId: "host-a",
       platform: "mobile",
     })
+  })
+})
+
+describe("<PairedStep /> — Settings → Security → signOut", () => {
+  // `useCompanionSignOut` has always honoured this flag; this second sign-out
+  // path prompted unconditionally, so the row only governed one of the two
+  // surfaces that sign a companion out.
+  beforeEach(() => {
+    guardCalls.length = 0
+    biometricPolicy.value = undefined
+  })
+
+  it("prompts by default (the shipped policy has the row on)", async () => {
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    await waitFor(() => expect(removeHost).toHaveBeenCalled())
+    expect(guardCalls).toHaveLength(1)
+  })
+
+  it("skips the prompt when the row is switched off, and still signs out", async () => {
+    biometricPolicy.value = { signOut: false }
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    await waitFor(() => expect(onAfterSignOut).toHaveBeenCalled())
+    expect(guardCalls).toHaveLength(0)
+    expect(removeHost).toHaveBeenCalled()
   })
 })

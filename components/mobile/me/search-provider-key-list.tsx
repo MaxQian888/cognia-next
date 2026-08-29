@@ -28,6 +28,7 @@ import {
   type SearchProviderType,
 } from "@cognia/web-search/types"
 import { useSettingsStore } from "@/stores/settings"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 const PROVIDER_IDS = Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]
 
@@ -41,6 +42,10 @@ export function SearchProviderKeyList() {
   const setSearchProviderSettings = useSettingsStore((s) => s.setSearchProviderSettings)
 
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+
+  // Settings → Security → "Require biometrics to reveal secrets".
+
+  const revealSecret = useSecretReveal()
 
   return (
     <section className="flex flex-col gap-2" data-testid="me-section-search-keys">
@@ -96,7 +101,11 @@ export function SearchProviderKeyList() {
                   variant="ghost"
                   size="icon"
                   className="absolute right-0 top-0 h-full"
-                  onClick={() => setRevealed((r) => ({ ...r, [id]: !show }))}
+                  onClick={() =>
+                    show
+                      ? setRevealed((r) => ({ ...r, [id]: false }))
+                      : void revealSecret(() => setRevealed((r) => ({ ...r, [id]: true })))
+                  }
                   aria-label={t("revealKeyAria", { name: config.name })}
                   data-testid={`search-key-reveal-${id}`}
                 >

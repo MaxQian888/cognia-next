@@ -33,6 +33,8 @@ import {
   setRemoteControlAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useSettingsStore } from "@/stores/settings"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useRemoteTerminalGrantToggle } from "@/hooks/companion/use-remote-terminal-grant"
 import { isTauri, transport } from "@/lib/tauri"
 
@@ -58,6 +60,16 @@ export interface DeviceGrantActions {
 
 export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): DeviceGrantActions {
   const guard = useBiometricGuard()
+  // Settings → Security → "Require biometrics to delete a pairing". `revoke`
+  // used to prompt unconditionally, so switching the row off changed nothing —
+  // the only surface that reads the flag is the settings page that writes it.
+  //
+  // Only `revoke` is keyed on the policy. The capability toggles below have no
+  // row in that panel and stay gated unconditionally: handing a remote device
+  // control of this machine is not a preference the panel offers to waive.
+  const requireBiometricForRevoke =
+    useSettingsStore((s) => s.settings?.biometricRequiredFor?.deletePairing) ??
+    DEFAULT_BIOMETRIC_GUARD.deletePairing
   const t = useTranslations("mobile.companion.paired")
   const tRev = useTranslations("mobile.companion.revoke")
   const tPause = useTranslations("mobile.companion.pause")
@@ -232,16 +244,23 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
 
   const revoke = useCallback(
     async (deviceId: string, label: string) => {
+      const doRevoke = async () => {
+        await revokePairedDevice(deviceId)
+        await hostCall("companion_revoke_device", { deviceId })
+      }
+      if (!requireBiometricForRevoke) {
+        await doRevoke()
+        await notifyChanged()
+        toast.success(tRev("successToast"))
+        return
+      }
       const result = await guard(
         {
           reason: tRev("reason", { label }),
           title: tRev("title"),
           description: tRev("description"),
         },
-        async () => {
-          await revokePairedDevice(deviceId)
-          await hostCall("companion_revoke_device", { deviceId })
-        }
+        doRevoke
       )
       if (result.kind === "blocked") {
         if (result.reason === "cancelled") return
@@ -251,7 +270,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       await notifyChanged()
       toast.success(tRev("successToast"))
     },
-    [guard, notifyChanged, tRev]
+    [guard, notifyChanged, requireBiometricForRevoke, tRev]
   )
 
   return {

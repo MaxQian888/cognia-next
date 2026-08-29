@@ -50,12 +50,20 @@ jest.mock("@/hooks/companion/use-remote-terminal-grant", () => ({
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+// Settings → Security → "Require biometrics to delete a pairing".
+const biometricPolicy: { value: { deletePairing?: boolean } | undefined } = { value: undefined }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
+    selector({ settings: { biometricRequiredFor: biometricPolicy.value } }),
+}))
+
 function actions(onChanged = jest.fn()) {
   const { result } = renderHook(() => useDeviceGrantActions(onChanged))
   return { actions: result.current, onChanged }
 }
 
 beforeEach(() => {
+  biometricPolicy.value = undefined
   hostCalls.length = 0
   guardCalls.length = 0
   guardResult = { kind: "allowed" }
@@ -194,5 +202,45 @@ describe("change notification", () => {
     const { actions: a, onChanged } = actions()
     await a.toggleRemoteControl("d1", "Phone", true)
     expect(onChanged).not.toHaveBeenCalled()
+  })
+})
+
+describe("useDeviceGrantActions — Settings → Security → deletePairing", () => {
+  // `revoke` used to prompt for biometrics unconditionally, so the settings row
+  // governed nothing: the only file that read the flag was the page writing it.
+  it("prompts by default (the shipped policy has the row on)", async () => {
+    const { actions: a } = actions()
+    await a.revoke("d1", "Phone")
+    expect(guardCalls).toHaveLength(1)
+    expect(db.revokePairedDevice).toHaveBeenCalledWith("d1")
+  })
+
+  it("skips the prompt when the row is switched off", async () => {
+    biometricPolicy.value = { deletePairing: false }
+    const { actions: a } = actions()
+    await a.revoke("d1", "Phone")
+    expect(guardCalls).toHaveLength(0)
+    expect(db.revokePairedDevice).toHaveBeenCalledWith("d1")
+  })
+
+  it("still revokes on the host and notifies when the prompt is skipped", async () => {
+    biometricPolicy.value = { deletePairing: false }
+    const onChanged = jest.fn()
+    const { actions: a } = actions(onChanged)
+    await a.revoke("d1", "Phone")
+    expect(hostCalls).toContainEqual({
+      name: "companion_revoke_device",
+      args: { deviceId: "d1" },
+    })
+    expect(onChanged).toHaveBeenCalled()
+  })
+
+  it("keeps the capability toggles gated regardless of the row", async () => {
+    // Those rows do not exist in the security panel; handing a remote device
+    // control of this machine is not a preference it offers to waive.
+    biometricPolicy.value = { deletePairing: false }
+    const { actions: a } = actions()
+    await a.toggleRemoteControl("d1", "Phone", true)
+    expect(guardCalls).toHaveLength(1)
   })
 })

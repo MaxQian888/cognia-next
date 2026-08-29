@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { useSettingsStore } from "@/stores/settings"
 import { HOST_KEY_PRESENT, type KeyringProviderId } from "@/lib/tts/keyring"
 import { loggers } from "@cognia/logging"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 interface Props {
   provider: KeyringProviderId
@@ -35,6 +36,8 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
 
   const [draft, setDraft] = useState(stored)
   const [show, setShow] = useState(false)
+  // Settings → Security → "Require biometrics to reveal secrets".
+  const revealSecret = useSecretReveal()
   const [busy, setBusy] = useState(false)
 
   // Provider keys are loaded lazily (not at app boot). The speech settings UI
@@ -108,7 +111,7 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
           type="button"
           variant="outline"
           size="icon"
-          onClick={() => setShow((s) => !s)}
+          onClick={() => (show ? setShow(false) : void revealSecret(() => setShow(true)))}
           aria-label={show ? t("hideKey") : t("showKey")}
         >
           {show ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
