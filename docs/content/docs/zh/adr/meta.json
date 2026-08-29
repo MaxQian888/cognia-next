@@ -1,5 +1,5 @@
 {
-  "title": "\u67b6\u6784\u51b3\u7b56\u8bb0\u5f55",
+  "title": "架构决策记录",
   "pages": [
     "index",
     "0001-backup-schema-v3",
@@ -155,6 +155,7 @@
     "0153-the-host-obtains-the-confirmation",
     "0154-browser-companion",
     "0155-plugins-reach-the-host-through-one-door",
-    "0156-every-in-tree-plugin-is-a-third-party-plugin"
+    "0156-every-in-tree-plugin-is-a-third-party-plugin",
+    "0157-references-and-result-reuse"
   ]
 }
