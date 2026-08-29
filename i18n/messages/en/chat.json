@@ -60,6 +60,7 @@
     "copyAria": "Copy artifact content",
     "download": "Download",
     "downloadAria": "Download artifact",
+    "downloadFailed": "Couldn't save the artifact",
     "expand": "Expand preview",
     "openInCanvas": "Open in canvas",
     "openInCanvasAria": "Open artifact in canvas"

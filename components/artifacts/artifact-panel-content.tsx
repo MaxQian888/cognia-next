@@ -120,6 +120,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     handleCopy,
     handleDownload,
     handleDownloadAs,
+    exportFormats,
+    handleExportAs,
     handleOpenInNewTab,
     handleRevealInExplorer,
     handleSaveToProject,
@@ -292,17 +294,27 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
           ))}
           {activeArtifact ? (
             <>
+              {/*
+                Driven by the adapter table rather than hard-coded, so a type
+                that cannot produce a PNG never offers one. `raw` is omitted:
+                it is what the toolbar's own download button already does.
+              */}
+              {exportFormats
+                .filter((format) => format !== "raw")
+                .map((format) => (
+                  <DropdownMenuItem
+                    key={format}
+                    data-testid={`artifact-export-${format}`}
+                    onClick={() => void handleExportAs(format)}
+                  >
+                    {t(`exportAs.${format}`)}
+                  </DropdownMenuItem>
+                ))}
               <DropdownMenuItem
                 data-testid="artifact-download-docx"
                 onClick={() => void handleDownloadAs("docx")}
               >
                 {t("downloadAsWord")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="artifact-download-pdf"
-                onClick={() => void handleDownloadAs("pdf")}
-              >
-                {t("downloadAsPdf")}
               </DropdownMenuItem>
             </>
           ) : null}

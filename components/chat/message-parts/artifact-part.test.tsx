@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ArtifactPart } from "./artifact-part"
 import type { ArtifactPart as ArtifactPartType } from "@/lib/claude/parts-extensions"
 import type { Artifact } from "@/types"
@@ -19,6 +19,14 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
 jest.mock("@/lib/artifacts/reveal", () => ({
   revealArtifactInWorkspace: (...args: unknown[]) => mockRevealArtifact(...args),
 }))
+
+const mockExportArtifact = jest.fn()
+jest.mock("@/lib/artifacts/export", () => ({
+  exportArtifact: (...args: unknown[]) => mockExportArtifact(...args),
+}))
+
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => mockToastError(...a) } }))
 
 jest.mock("@/hooks/ui/use-copy", () => ({
   useCopy: () => ({ copy: mockCopy, copied: false, isCopying: false }),
@@ -118,31 +126,42 @@ describe("ArtifactPart", () => {
     expect(mockCopy).toHaveBeenCalledWith("copy-me")
   })
 
-  it("downloads a blob when the download action fires", () => {
+  it("saves through the shared exporter, honouring the artifact's export contract", async () => {
+    // The hand-rolled version this replaces forced `text/plain` and built the
+    // extension from `artifact.type`, so a chart downloaded as `chart.chart`.
+    // It also used an `<a download>` anchor, which no-ops in a mobile WebView.
     mockArtifacts["art-1"] = createArtifactRow({
       content: "download-payload",
       title: "my-file",
       language: "typescript",
     })
-    const createObjectURL = jest.fn().mockReturnValue("blob:fake")
-    const revokeObjectURL = jest.fn()
-    const originalCreate = (URL as unknown as { createObjectURL?: unknown }).createObjectURL
-    const originalRevoke = (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL
-    Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true })
-    Object.defineProperty(URL, "revokeObjectURL", { value: revokeObjectURL, configurable: true })
+    mockExportArtifact.mockResolvedValue({ kind: "saved", location: "/tmp/my-file.ts" })
     const createElementSpy = jest.spyOn(document, "createElement")
 
     render(<ArtifactPart part={createPart()} />)
     fireEvent.click(screen.getByTestId("artifact-part-download"))
+    await waitFor(() => expect(mockExportArtifact).toHaveBeenCalled())
 
-    const anchorCalls = createElementSpy.mock.calls.filter(([tag]) => tag === "a")
-    expect(anchorCalls.length).toBeGreaterThanOrEqual(1)
-    expect(createObjectURL).toHaveBeenCalled()
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake")
+    const [artifact, format] = mockExportArtifact.mock.calls[0]
+    expect(artifact).toMatchObject({ id: "art-1" })
+    // Never a rasterisation: a one-click download stays the source.
+    expect(["raw", "html", "svg"]).toContain(format)
+    expect(createElementSpy.mock.calls.filter(([tag]) => tag === "a")).toHaveLength(0)
 
     createElementSpy.mockRestore()
-    Object.defineProperty(URL, "createObjectURL", { value: originalCreate, configurable: true })
-    Object.defineProperty(URL, "revokeObjectURL", { value: originalRevoke, configurable: true })
+  })
+
+  it("surfaces a failed save instead of failing silently", async () => {
+    mockArtifacts["art-1"] = createArtifactRow()
+    mockExportArtifact.mockResolvedValue({ kind: "error", message: "disk full" })
+    render(<ArtifactPart part={createPart()} />)
+    fireEvent.click(screen.getByTestId("artifact-part-download"))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ description: "disk full" })
+      )
+    )
   })
 
   it("does not invoke clipboard or download when the artifact is missing", () => {

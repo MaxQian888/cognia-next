@@ -13,6 +13,18 @@ jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() } },
 }))
 
+const saveExportMock = jest.fn()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (opts: unknown) => saveExportMock(opts),
+}))
+
+const exportArtifactMock = jest.fn()
+jest.mock("@/lib/artifacts/export", () => ({
+  exportArtifact: (...a: unknown[]) => exportArtifactMock(...a),
+  artifactExportFilename: (artifact: { title: string }, format: string) =>
+    `${artifact.title}.${format}`,
+}))
+
 function makeDoc(overrides: Partial<CanvasDocument> = {}): CanvasDocument {
   const now = new Date("2026-07-07T00:00:00.000Z")
   return {
@@ -44,26 +56,37 @@ describe("extensionForLanguage", () => {
 })
 
 describe("getCanvasExportFormats", () => {
-  it("offers only raw for a markdown document", () => {
-    expect(getCanvasExportFormats(makeDoc())).toEqual(["raw"])
+  it("offers raw plus pdf for a markdown document", () => {
+    // A markdown document projects onto the `document` artifact type, whose
+    // PDF is laid-out text rather than a picture.
+    expect(getCanvasExportFormats(makeDoc())).toEqual(["raw", "pdf"])
   })
 
-  it("offers raw + html for an html document", () => {
+  it("offers the full rendered set for an html document", () => {
     expect(getCanvasExportFormats(makeDoc({ language: "html", type: "code" }))).toEqual([
       "raw",
       "html",
+      "png",
+      "pdf",
     ])
   })
 
-  it("offers raw + svg for an svg document", () => {
+  it("offers the full rendered set for an svg document", () => {
     expect(getCanvasExportFormats(makeDoc({ language: "svg", type: "code" }))).toEqual([
       "raw",
       "svg",
+      "png",
+      "pdf",
     ])
   })
 
-  it("offers only raw for non-previewable code", () => {
-    expect(getCanvasExportFormats(makeDoc({ language: "python", type: "code" }))).toEqual(["raw"])
+  it("offers raw + pdf for non-previewable code", () => {
+    // Code has no raster path (a screenshot of code is worse than the code),
+    // but its PDF is selectable text.
+    expect(getCanvasExportFormats(makeDoc({ language: "python", type: "code" }))).toEqual([
+      "raw",
+      "pdf",
+    ])
   })
 })
 
@@ -105,58 +128,64 @@ describe("buildCanvasExportPayload", () => {
 })
 
 describe("exportCanvasDocument", () => {
-  let created: HTMLAnchorElement[]
-  let createSpy: jest.SpyInstance
-
   beforeEach(() => {
-    created = []
-    const realCreate = document.createElement.bind(document)
-    createSpy = jest
-      .spyOn(document, "createElement")
-      .mockImplementation((tag: string, ...rest: unknown[]) => {
-        const el = realCreate(tag as "a", ...(rest as [])) as HTMLElement
-        if (tag === "a") {
-          jest.spyOn(el as HTMLAnchorElement, "click").mockImplementation(() => {})
-          created.push(el as HTMLAnchorElement)
-        }
-        return el
-      })
+    saveExportMock.mockReset().mockResolvedValue({ kind: "saved", location: "/tmp/x" })
+    exportArtifactMock.mockReset().mockResolvedValue({ kind: "saved", location: "/tmp/x" })
   })
 
-  afterEach(() => {
-    createSpy.mockRestore()
-    // Reset any URL mocks set within a test.
-    delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL
-    delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL
-  })
-
-  it("triggers a download via an object URL and returns the filename", () => {
-    const createObjectURL = jest.fn(() => "blob:mock-url")
-    const revokeObjectURL = jest.fn()
-    ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL
-    ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectURL
-
-    const filename = exportCanvasDocument(makeDoc({ title: "Report", language: "markdown" }), "raw")
-
+  it("hands a text format to the cross-platform saver and returns the filename", async () => {
+    // The `<a download>` anchor this replaces silently no-ops inside a mobile
+    // WebView, so Canvas exports vanished on Capacitor exactly as artifact
+    // exports used to.
+    const filename = await exportCanvasDocument(
+      makeDoc({ title: "Report", language: "markdown" }),
+      "raw"
+    )
     expect(filename).toBe("Report.md")
-    expect(created).toHaveLength(1)
-    expect(created[0].download).toBe("Report.md")
-    expect(created[0].getAttribute("href")).toBe("blob:mock-url")
-    expect(createObjectURL).toHaveBeenCalledTimes(1)
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url")
+    expect(saveExportMock).toHaveBeenCalledWith({
+      filename: "Report.md",
+      data: "hello world",
+      mimeType: "text/plain",
+    })
+    expect(exportArtifactMock).not.toHaveBeenCalled()
   })
 
-  it("falls back to a data URL when createObjectURL is unavailable", () => {
-    // No URL.createObjectURL set (deleted in afterEach of prior test / default).
-    const filename = exportCanvasDocument(makeDoc({ language: "html", type: "code" }), "html")
-    expect(filename).toBe("My-Doc.html")
-    expect(created[0].getAttribute("href")).toMatch(/^data:text\/html/)
+  it("routes a rendered format through the shared artifact exporter", async () => {
+    // A Canvas svg document and an svg artifact must produce the same image.
+    const filename = await exportCanvasDocument(
+      makeDoc({ title: "Diagram", language: "svg", type: "code" }),
+      "png"
+    )
+    expect(exportArtifactMock).toHaveBeenCalledWith(expect.objectContaining({ type: "svg" }), "png")
+    expect(filename).toBe("Diagram.png")
+    expect(saveExportMock).not.toHaveBeenCalled()
   })
 
-  it("returns null and does not download for an unsupported format", () => {
-    const filename = exportCanvasDocument(makeDoc(), "png")
-    expect(filename).toBeNull()
-    expect(created).toHaveLength(0)
+  it("returns null for a format outside the contract", async () => {
+    // `html` is not offered for a markdown document.
+    expect(await exportCanvasDocument(makeDoc(), "html")).toBe("My-Doc.html")
+    saveExportMock.mockClear()
+    // A format that is in no adapter at all is refused outright.
+    expect(await exportCanvasDocument(makeDoc(), "unknown" as never)).toBeNull()
+    expect(saveExportMock).not.toHaveBeenCalled()
+  })
+
+  it("returns null when the user cancels the save dialog", async () => {
+    saveExportMock.mockResolvedValue({ kind: "cancelled" })
+    expect(await exportCanvasDocument(makeDoc(), "raw")).toBeNull()
+  })
+
+  it("returns null rather than throwing when a render fails", async () => {
+    exportArtifactMock.mockRejectedValue(new Error("no preview"))
+    expect(await exportCanvasDocument(makeDoc({ language: "svg", type: "code" }), "png")).toBeNull()
+  })
+
+  it("returns null when the document has no visual projection to render", async () => {
+    // Plain python has no artifact type with a raster path.
+    expect(
+      await exportCanvasDocument(makeDoc({ language: "python", type: "code" }), "png")
+    ).toBeNull()
+    expect(exportArtifactMock).not.toHaveBeenCalled()
   })
 })
 

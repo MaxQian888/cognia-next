@@ -31,14 +31,22 @@ import { getSession } from "@/lib/db/sessions"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writer"
 import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
-import { getArtifactExtension, canPreview } from "@/lib/artifacts"
+import { canPreview } from "@/lib/artifacts"
 import { loggers } from "@cognia/logging"
-import { getPreferredArtifactExportFormat } from "@/components/artifacts/runtime-adapters"
-import type { Artifact, ArtifactAuthoringOrigin, ArtifactWorkspaceReturnContext } from "@/types"
-
-function getExtension(artifact: Artifact): string {
-  return getArtifactExtension(artifact.type, artifact.language)
-}
+import {
+  getArtifactExportFormats,
+  getPreferredArtifactExportFormat,
+} from "@/components/artifacts/runtime-adapters"
+import {
+  artifactExportFilename,
+  exportArtifact,
+  renderArtifactExport,
+} from "@/lib/artifacts/export"
+import type {
+  ArtifactAuthoringOrigin,
+  ArtifactExportFormat,
+  ArtifactWorkspaceReturnContext,
+} from "@/types"
 
 type ArtifactPanelAction =
   | "modeTabs"
@@ -298,42 +306,54 @@ export function useArtifactPanelState() {
     }
   }
 
+  /**
+   * One-click download. Always the *source* format
+   * (`getPreferredArtifactExportFormat` never returns png/pdf) — a default
+   * download must not silently become a rasterisation.
+   */
   const handleDownload = async () => {
-    if (activeArtifact) {
-      const preferredFormat = getPreferredArtifactExportFormat(activeArtifact)
-      const extension =
-        preferredFormat === "html"
-          ? "html"
-          : preferredFormat === "svg"
-            ? "svg"
-            : getExtension(activeArtifact)
-      const mimeType =
-        preferredFormat === "html"
-          ? "text/html"
-          : preferredFormat === "svg"
-            ? "image/svg+xml"
-            : activeArtifact.type === "jupyter"
-              ? "application/json"
-              : "text/plain"
-      const filename = `${activeArtifact.title}.${extension}`
-      try {
-        // Cross-platform saver — the prior `<a download>` path silently no-ops
-        // inside a mobile WebView, so artifact exports vanished on Capacitor.
-        const outcome = await saveExport({ filename, data: activeArtifact.content, mimeType })
-        if (outcome.kind === "error") throw new Error(outcome.message)
-        if (outcome.kind === "saved" && isDesktop) {
-          setLastDownloadPath(outcome.location)
-        }
-        loggers.ui.info("artifacts.action.download", {
-          artifactId: activeArtifact.id,
-          format: preferredFormat ?? extension,
-        })
-      } catch (error) {
-        loggers.ui.error("artifacts.action.download-failed", error, {
-          artifactId: activeArtifact.id,
-        })
-        throw error
+    if (!activeArtifact) return
+    const preferredFormat = getPreferredArtifactExportFormat(activeArtifact)
+    try {
+      // Cross-platform saver — the prior `<a download>` path silently no-ops
+      // inside a mobile WebView, so artifact exports vanished on Capacitor.
+      const outcome = await exportArtifact(activeArtifact, preferredFormat)
+      if (outcome.kind === "error") throw new Error(outcome.message)
+      if (outcome.kind === "saved" && isDesktop) {
+        setLastDownloadPath(outcome.location)
       }
+      loggers.ui.info("artifacts.action.download", {
+        artifactId: activeArtifact.id,
+        format: preferredFormat,
+      })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.download-failed", error, {
+        artifactId: activeArtifact.id,
+      })
+      throw error
+    }
+  }
+
+  /** Every format the active artifact's adapter actually offers. */
+  const exportFormats = activeArtifact ? getArtifactExportFormats(activeArtifact) : []
+
+  /**
+   * Explicit "export as <format>" — the menu's path, so png / pdf / svg are
+   * reachable here even though `handleDownload` will never pick them.
+   */
+  const handleExportAs = async (format: ArtifactExportFormat) => {
+    if (!activeArtifact) return
+    try {
+      const outcome = await exportArtifact(activeArtifact, format)
+      if (outcome.kind === "error") throw new Error(outcome.message)
+      if (outcome.kind === "saved" && isDesktop) setLastDownloadPath(outcome.location)
+      loggers.ui.info("artifacts.action.export-as", { artifactId: activeArtifact.id, format })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.export-as-failed", error, {
+        artifactId: activeArtifact.id,
+        format,
+      })
+      throw error
     }
   }
 
@@ -343,11 +363,17 @@ export function useArtifactPanelState() {
   const handleDownloadAs = async (format: DocFormat) => {
     if (!activeArtifact) return
     try {
-      const outcome = await saveGeneratedDocument({
-        title: activeArtifact.title,
-        markdown: activeArtifact.content,
-        format,
-      })
+      // `pdf` goes through the artifact exporter so there is exactly one PDF
+      // path (it decides text-layout vs raster by artifact type). `docx` is not
+      // an `ArtifactExportFormat` and keeps the document writer directly.
+      const outcome =
+        format === "pdf"
+          ? await exportArtifact(activeArtifact, "pdf")
+          : await saveGeneratedDocument({
+              title: activeArtifact.title,
+              markdown: activeArtifact.content,
+              format,
+            })
       if (outcome.kind === "error") throw new Error(outcome.message)
       if (outcome.kind === "saved" && isDesktop) setLastDownloadPath(outcome.location)
       loggers.ui.info("artifacts.action.download-as", { artifactId: activeArtifact.id, format })
@@ -406,12 +432,15 @@ export function useArtifactPanelState() {
       },
       useProjectStore.getState().projects
     )
-    const filename = `${activeArtifact.title}.${getExtension(activeArtifact)}`
+    // Save-into-workspace is always the source text: the point is to drop a
+    // file the agent can then read and edit, not a picture of one.
+    const rendered = await renderArtifactExport(activeArtifact, "raw")
+    const filename = artifactExportFilename(activeArtifact, "raw")
     try {
       const outcome = await saveExport({
         filename,
-        data: activeArtifact.content,
-        mimeType: "text/plain",
+        data: rendered.data,
+        mimeType: rendered.mimeType,
         defaultDirectory: root ?? undefined,
       })
       if (outcome.kind === "error") throw new Error(outcome.message)
@@ -548,6 +577,8 @@ export function useArtifactPanelState() {
     handleCopy,
     handleDownload,
     handleDownloadAs,
+    exportFormats,
+    handleExportAs,
     handleOpenInNewTab,
     handleRevealInExplorer,
     handleSaveToProject,

@@ -24,6 +24,9 @@ import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { Button } from "@/components/ui/button"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { revealArtifactInWorkspace } from "@/lib/artifacts/reveal"
+import { exportArtifact } from "@/lib/artifacts/export"
+import { getPreferredArtifactExportFormat } from "@/components/artifacts/runtime-adapters"
+import { toast } from "sonner"
 import { useCopy } from "@/hooks/ui/use-copy"
 import type { ArtifactPart as ArtifactPartType } from "@/lib/claude/parts-extensions"
 import { ChevronDownIcon, ChevronUpIcon, ExternalLinkIcon, FileWarningIcon } from "lucide-react"
@@ -44,16 +47,22 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
     revealArtifactInWorkspace(part.artifactId)
   }, [part.artifactId])
 
-  const handleDownload = useCallback(() => {
+  // Goes through the shared exporter, which is what the dock's own download
+  // button uses. The hand-rolled version this replaces ignored the artifact's
+  // export contract entirely: it forced `text/plain` and built the extension
+  // from `artifact.type`, so a chart downloaded as `chart.chart`. It also used
+  // an `<a download>` anchor, which silently no-ops inside a mobile WebView.
+  const handleDownload = useCallback(async () => {
     if (!artifact) return
-    const blob = new Blob([artifact.content], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${artifact.title || "artifact"}.${artifact.language || artifact.type || "txt"}`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [artifact])
+    try {
+      const outcome = await exportArtifact(artifact, getPreferredArtifactExportFormat(artifact))
+      if (outcome.kind === "error") throw new Error(outcome.message)
+    } catch (error) {
+      toast.error(t("downloadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [artifact, t])
 
   const handleCopy = useCallback(() => {
     if (!artifact) return
@@ -102,7 +111,7 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
           <ArtifactAction
             tooltip={t("download")}
             label={t("downloadAria")}
-            onClick={handleDownload}
+            onClick={() => void handleDownload()}
             data-testid="artifact-part-download"
           >
             <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />

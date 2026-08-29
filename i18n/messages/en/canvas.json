@@ -140,9 +140,12 @@
     "copyFailed": "Couldn't copy to clipboard",
     "downloaded": "Downloaded {filename}",
     "formatHtml": "Download as HTML",
+    "formatPdf": "PDF",
+    "formatPng": "PNG image",
     "formatRaw": "Download source",
     "formatSvg": "Download as SVG",
-    "label": "Export document"
+    "label": "Export document",
+    "renderFailed": "Couldn't render the document"
   },
   "filtered": "filtered",
   "filteredSuffix": "(filtered)",

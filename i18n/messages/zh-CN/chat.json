@@ -60,6 +60,7 @@
     "copyAria": "复制 artifact 内容",
     "download": "下载",
     "downloadAria": "下载 artifact",
+    "downloadFailed": "无法保存该 artifact",
     "expand": "展开预览",
     "openInCanvas": "在画布中打开",
     "openInCanvasAria": "在画布中打开 artifact"

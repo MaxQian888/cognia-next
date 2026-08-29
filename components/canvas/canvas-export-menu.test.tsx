@@ -37,7 +37,7 @@ jest.mock("@/components/ui/tooltip", () => ({
 // Self-contained factories (no outer refs) to avoid the jest.mock hoisting TDZ.
 jest.mock("@/lib/canvas/document-export", () => ({
   getCanvasExportFormats: jest.fn(() => ["raw", "html"]),
-  exportCanvasDocument: jest.fn(() => "Doc.md"),
+  exportCanvasDocument: jest.fn(async () => "Doc.md"),
   copyCanvasDocumentToClipboard: jest.fn(async () => true),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -128,21 +128,38 @@ describe("CanvasExportMenu", () => {
     expect(screen.getByTestId("canvas-export-trigger")).toHaveClass("custom-trigger")
   })
 
-  it("skips formats it can't serialize (e.g. png)", () => {
-    mockFormats.mockReturnValueOnce(["raw", "png"])
+  it("offers every format the export contract declares, including the rendered ones", () => {
+    mockFormats.mockReturnValueOnce(["raw", "png", "pdf"])
     const id = seedDoc()
     render(<CanvasExportMenu documentId={id} />)
     expect(screen.getByText("Download source")).toBeInTheDocument()
-    // png has no serializer entry → no menu item is rendered for it.
-    expect(screen.queryByText(/png/i)).not.toBeInTheDocument()
+    expect(screen.getByText("PNG image")).toBeInTheDocument()
+    expect(screen.getByText("PDF")).toBeInTheDocument()
   })
 
   it("does not toast when the export produces no file", async () => {
     const user = userEvent.setup()
-    mockExport.mockReturnValueOnce(null)
+    mockExport.mockResolvedValueOnce(null)
     const id = seedDoc()
     render(<CanvasExportMenu documentId={id} />)
     await user.click(screen.getByText("Download source"))
     expect(mockToast.success).not.toHaveBeenCalled()
+  })
+
+  it("reports a failed render, which a cancelled text save must not do", async () => {
+    // `null` means unsupported / failed / cancelled. For a text format that is
+    // usually "the user closed the save dialog" — no error belongs there. For a
+    // rendered format it means the render itself did not produce a file.
+    const user = userEvent.setup()
+    mockFormats.mockReturnValue(["raw", "png"])
+    mockExport.mockResolvedValue(null)
+    const id = seedDoc()
+    render(<CanvasExportMenu documentId={id} />)
+
+    await user.click(screen.getByText("Download source"))
+    expect(mockToast.error).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText("PNG image"))
+    expect(mockToast.error).toHaveBeenCalledWith("Couldn't render the document")
   })
 })

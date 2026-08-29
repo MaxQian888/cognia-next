@@ -3,6 +3,13 @@
  * (iframe / inline renderer / jupyter), the iframe sandbox attribute it
  * needs, and the export formats it supports.
  *
+ * `exportFormats` is a contract, not a wish list: every format named here must
+ * have a renderer in `lib/artifacts/export/`, and
+ * `runtime-adapters.test.ts` fails if one does not. `png` and `pdf` sat in
+ * `ArtifactExportFormat` unclaimed by any adapter for a long time while the
+ * resident routing prompt (ADR-0139) told the model chart artifacts were
+ * "exportable" on every send.
+ *
  * The `authoring` block this table used to carry is gone. It described a
  * Designer subsystem cognia-next never had: `fullDesigner` had no readers at
  * all, and `embeddedDesigner` had exactly one — a gate on whether to mount a
@@ -28,54 +35,61 @@ export const ARTIFACT_RUNTIME_ADAPTERS: Record<ArtifactType, ArtifactRuntimeAdap
     type: "code",
     transport: "renderer",
     rendererType: "code",
-    exportFormats: ["raw"],
+    // No `png`: a screenshot of code is strictly worse than the code, and the
+    // PDF path lays it out as selectable text rather than a picture.
+    exportFormats: ["raw", "pdf"],
   },
   document: {
     type: "document",
     transport: "renderer",
     rendererType: "document",
-    exportFormats: ["raw"],
+    exportFormats: ["raw", "pdf"],
   },
   svg: {
     type: "svg",
     transport: "iframe",
     sandbox: "allow-same-origin",
-    exportFormats: ["raw", "svg"],
+    exportFormats: ["raw", "svg", "png", "pdf"],
   },
   html: {
     type: "html",
     transport: "iframe",
     sandbox: "allow-same-origin",
-    exportFormats: ["raw", "html"],
+    exportFormats: ["raw", "html", "png", "pdf"],
   },
   react: {
     type: "react",
     transport: "iframe",
     sandbox: "allow-scripts",
+    // The raster path re-renders the SOURCE in an off-screen frame, so what a
+    // React artifact captures is its unexecuted markup — usually close to
+    // nothing. `raw` only, until the offline React runtime lands.
     exportFormats: ["raw"],
   },
   mermaid: {
     type: "mermaid",
     transport: "renderer",
     rendererType: "mermaid",
-    exportFormats: ["raw"],
+    exportFormats: ["raw", "png", "pdf"],
   },
   chart: {
     type: "chart",
     transport: "renderer",
     rendererType: "chart",
-    exportFormats: ["raw"],
+    exportFormats: ["raw", "png", "pdf"],
   },
   math: {
     type: "math",
     transport: "renderer",
     rendererType: "math",
-    exportFormats: ["raw"],
+    exportFormats: ["raw", "png", "pdf"],
   },
   jupyter: {
     type: "jupyter",
     transport: "jupyter",
-    exportFormats: ["raw"],
+    // The jupyter transport has no raster path at all; `pdf` goes through the
+    // text writer, which reads the notebook JSON as markdown.
+    exportFormats: ["raw", "pdf"],
   },
 }
 

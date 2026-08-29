@@ -9,7 +9,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { Copy, Download, FileCode2, FileDown } from "lucide-react"
+import { Copy, Download, FileCode2, FileDown, FileText, ImageIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,13 +35,16 @@ interface CanvasExportMenuProps {
 
 const FORMAT_META: Record<
   ArtifactExportFormat,
-  { labelKey: "formatRaw" | "formatHtml" | "formatSvg"; icon: typeof FileDown } | undefined
+  {
+    labelKey: "formatRaw" | "formatHtml" | "formatSvg" | "formatPng" | "formatPdf"
+    icon: typeof FileDown
+  }
 > = {
   raw: { labelKey: "formatRaw", icon: FileDown },
   html: { labelKey: "formatHtml", icon: FileCode2 },
   svg: { labelKey: "formatSvg", icon: FileCode2 },
-  png: undefined,
-  pdf: undefined,
+  png: { labelKey: "formatPng", icon: ImageIcon },
+  pdf: { labelKey: "formatPdf", icon: FileText },
 }
 
 export function CanvasExportMenu({ documentId, className }: CanvasExportMenuProps) {
@@ -50,9 +53,13 @@ export function CanvasExportMenu({ documentId, className }: CanvasExportMenuProp
 
   const formats = doc ? getCanvasExportFormats(doc) : []
 
-  const handleExport = (target: CanvasDocument, format: ArtifactExportFormat) => {
-    const filename = exportCanvasDocument(target, format)
+  // `png` / `pdf` render before they save, so this is async now. A `null`
+  // filename means "unsupported, failed, or the user cancelled the save
+  // dialog" — none of which is a success worth a toast.
+  const handleExport = async (target: CanvasDocument, format: ArtifactExportFormat) => {
+    const filename = await exportCanvasDocument(target, format)
     if (filename) toast.success(t("downloaded", { filename }))
+    else if (format === "png" || format === "pdf") toast.error(t("renderFailed"))
   }
 
   const handleCopy = async (target: CanvasDocument) => {
@@ -85,10 +92,9 @@ export function CanvasExportMenu({ documentId, className }: CanvasExportMenuProp
           <>
             {formats.map((format) => {
               const meta = FORMAT_META[format]
-              if (!meta) return null
               const Icon = meta.icon
               return (
-                <DropdownMenuItem key={format} onClick={() => handleExport(doc, format)}>
+                <DropdownMenuItem key={format} onClick={() => void handleExport(doc, format)}>
                   <Icon className="mr-2 size-3.5" />
                   {t(meta.labelKey)}
                 </DropdownMenuItem>

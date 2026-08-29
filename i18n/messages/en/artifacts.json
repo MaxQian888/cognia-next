@@ -49,6 +49,12 @@
   "duplicate": "Duplicate",
   "editInCanvas": "Edit in Canvas",
   "exitFullscreen": "Exit Fullscreen",
+  "exportAs": {
+    "html": "Export as HTML",
+    "pdf": "Export as PDF",
+    "png": "Export as PNG",
+    "svg": "Export as SVG"
+  },
   "filterByRuntime": "Filter by runtime",
   "filterByType": "Filter by type",
   "fullscreen": "Fullscreen",

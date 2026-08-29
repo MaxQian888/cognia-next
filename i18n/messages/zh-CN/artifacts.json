@@ -49,6 +49,12 @@
   "duplicate": "复制",
   "editInCanvas": "在画布中编辑",
   "exitFullscreen": "退出全屏",
+  "exportAs": {
+    "html": "导出为 HTML",
+    "pdf": "导出为 PDF",
+    "png": "导出为 PNG",
+    "svg": "导出为 SVG"
+  },
   "filterByRuntime": "按运行时筛选",
   "filterByType": "按类型筛选",
   "fullscreen": "全屏",

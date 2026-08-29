@@ -108,6 +108,8 @@ function setState(overrides: Record<string, unknown>) {
     handleRevealInExplorer: jest.fn(),
     handleSaveToProject: jest.fn(),
     handleDownloadAs: jest.fn(),
+    exportFormats: ["raw"],
+    handleExportAs: jest.fn(),
     ...overrides,
   })
 }

@@ -226,7 +226,7 @@ describe("useArtifactPanelState", () => {
       expect.objectContaining({
         filename: `${a.title}.html`,
         data: a.content,
-        mimeType: "text/html",
+        mimeType: "text/html;charset=utf-8",
       })
     )
   })

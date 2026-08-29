@@ -24,6 +24,7 @@ import {
 import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { registerArtifactPreviewNode } from "@/lib/artifacts/preview-registry"
 import type { ArtifactRuntimeHealth } from "@/types/artifact/artifact"
 import type { Artifact, PreviewErrorBoundaryProps, PreviewErrorBoundaryState } from "@/types"
 import {
@@ -120,6 +121,21 @@ function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
 export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  // `chart` / `mermaid` / `math` draw as live React in this tree, so the only
+  // way to rasterise them is to hand html2canvas the mounted node. Registering
+  // it here is what makes "export as PNG" possible for those types at all —
+  // there is no serialisable source to re-render off-screen the way html and
+  // svg can be. Iframe transports do not register: the exporter re-renders
+  // their source instead (`lib/artifacts/export/raster.ts`).
+  const registerRendererNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return undefined
+      // React 19 ref-callback cleanup: the disposer runs on unmount, so a
+      // detached node can never be handed to the exporter.
+      return registerArtifactPreviewNode(artifact.id, node)
+    },
+    [artifact.id]
+  )
   const diagramThemeVariables = useThemeCssVars(
     DIAGRAM_DESIGN_THEME_KEYS,
     DIAGRAM_DESIGN_THEME_DEFAULTS
@@ -304,7 +320,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   if (renderPlan.owner === "plugin" && renderPlan.pluginRenderer) {
     return (
       <PreviewErrorBoundary errorMessage={t("previewFailed")}>
-        <div className={cn("relative h-full w-full overflow-auto bg-background", className)}>
+        <div
+          ref={registerRendererNode}
+          className={cn("relative h-full w-full overflow-auto bg-background", className)}
+        >
           <RuntimeHealthBadge state={runtimeHealth} />
           <PluginArtifactRendererHost
             artifact={artifact}
@@ -325,7 +344,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   if (renderPlan.owner === "builtin" && adapter.rendererType !== "chart") {
     return (
       <PreviewErrorBoundary errorMessage={t("previewFailed")}>
-        <div className={cn("relative h-full w-full overflow-auto bg-background", className)}>
+        <div
+          ref={registerRendererNode}
+          className={cn("relative h-full w-full overflow-auto bg-background", className)}
+        >
           <RuntimeHealthBadge state={runtimeHealth} />
           <ArtifactRenderer
             type={adapter.rendererType || artifact.type}
@@ -341,7 +363,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   if (renderPlan.owner === "builtin" && adapter.rendererType === "chart") {
     return (
       <PreviewErrorBoundary errorMessage={t("previewFailed")}>
-        <div className={cn("relative h-full w-full overflow-auto bg-background p-4", className)}>
+        <div
+          ref={registerRendererNode}
+          className={cn("relative h-full w-full overflow-auto bg-background p-4", className)}
+        >
           <RuntimeHealthBadge state={runtimeHealth} />
           <ArtifactRenderer
             type="chart"

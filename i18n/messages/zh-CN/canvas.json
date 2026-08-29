@@ -140,9 +140,12 @@
     "copyFailed": "复制到剪贴板失败",
     "downloaded": "已下载 {filename}",
     "formatHtml": "下载为 HTML",
+    "formatPdf": "PDF",
+    "formatPng": "PNG 图片",
     "formatRaw": "下载源文件",
     "formatSvg": "下载为 SVG",
-    "label": "导出文档"
+    "label": "导出文档",
+    "renderFailed": "无法渲染该文档"
   },
   "filtered": "已过滤",
   "filteredSuffix": "（已筛选）",
