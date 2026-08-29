@@ -211,3 +211,48 @@ describe("section-keys", () => {
 // Type-level guard: NON_PREFERENCE_KEYS must be AppSettings keys.
 const _typecheck: (keyof AppSettings)[] = [...NON_PREFERENCE_KEYS]
 void _typecheck
+
+describe("section ids match the navigation", () => {
+  // The standalone `providers` / `profile` sections were merged into
+  // `ai-connections` / `account`, and this map kept the retired ids — so the
+  // default landing section answered `undefined` and rendered no reset button.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { SETTINGS_NAV } = require("@/components/settings/settings-nav-config") as {
+    SETTINGS_NAV: { id: string }[]
+  }
+  const navIds = new Set(SETTINGS_NAV.map((n) => n.id))
+
+  it("scans a non-empty navigation", () => {
+    expect(navIds.size).toBeGreaterThan(20)
+  })
+
+  it("keys every owned-key entry on a section the sidebar can actually show", () => {
+    const stale = Object.keys(SECTION_OWNED_KEYS).filter((id) => !navIds.has(id))
+    expect(stale).toEqual([])
+  })
+
+  it("keys every reset-exclusion on a navigable section too", () => {
+    const stale = Object.keys(RESET_EXCLUDE).filter((id) => !navIds.has(id))
+    expect(stale).toEqual([])
+  })
+
+  it("maps every key back to a navigable section", () => {
+    const keys = Object.values(SECTION_OWNED_KEYS).flat() as (keyof AppSettings)[]
+    expect(keys.length).toBeGreaterThan(0)
+    const unreachable = keys
+      .map((k) => keyToSection(k))
+      .filter((id): id is string => Boolean(id) && !navIds.has(id as string))
+    expect(unreachable).toEqual([])
+  })
+
+  it("gives the default landing section a reset affordance", () => {
+    expect(resetKeysForSection("ai-connections")).toEqual(
+      expect.arrayContaining(["providerSettings", "customProviders"])
+    )
+  })
+
+  it("still resolves a retired id from an old deep link", () => {
+    expect(resetKeysForSection("providers" as never)).toEqual(resetKeysForSection("ai-connections"))
+    expect(resetKeysForSection("profile" as never)).toEqual(resetKeysForSection("account"))
+  })
+})

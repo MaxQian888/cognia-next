@@ -88,3 +88,20 @@ describe("ChangedSettingsDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
+
+describe("ChangedSettingsDialog — group headings resolve to a nav label", () => {
+  // `keyToSection` used to answer with the retired `providers` / `profile`
+  // ids, which are absent from `SETTINGS_NAV` — so the heading fell through to
+  // rendering the raw section id as user-facing text.
+  it("labels a provider change with the ai-connections tab key, not a raw id", () => {
+    // `routingFallbackEnabled` is an ai-connections key that lives in DEFAULTS,
+    // so flipping it produces a real diff row.
+    mockSettings = { ...DEFAULTS, routingFallbackEnabled: !DEFAULTS.routingFallbackEnabled }
+    render(<ChangedSettingsDialog open onOpenChange={() => {}} />)
+    const headings = screen
+      .getAllByTestId("changed-group")
+      .map((g) => g.querySelector("h3")?.textContent ?? "")
+    expect(headings).toContain("tabs.aiConnections")
+    expect(headings).not.toContain("providers")
+  })
+})

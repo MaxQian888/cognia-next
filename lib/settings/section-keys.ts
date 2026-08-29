@@ -50,7 +50,14 @@ export const NON_PREFERENCE_KEYS = [
  */
 export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSettings)[]>> = {
   tools: ["alwaysAllowTools", "builtinTools", "webTools", "selfInvokeTools", "toolFilter"],
-  providers: [
+  // Keyed on the id the NAV uses. The standalone `providers` / `profile`
+  // sections were merged into `ai-connections` / `account`, and this map kept
+  // the retired ids — so `resetKeysForSection("ai-connections")` answered
+  // `undefined` and the most-visited settings page (it is also
+  // `DEFAULT_SECTION`) silently had no reset button at all, while
+  // `keyToSection` handed the finder a section id the sidebar cannot show.
+  // `SECTION_ID_ALIASES` below keeps the old ids resolving.
+  "ai-connections": [
     "routingFallbackEnabled",
     "providerSettings",
     "customProviders",
@@ -225,7 +232,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   lsp: ["lsp"],
   ocr: ["ocrSettings"],
   "source-control": ["gitSettings"],
-  profile: ["profile"],
+  account: ["profile"],
   conversation: [
     "conversationTitle",
     "conversationTimeline",
@@ -262,6 +269,24 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
 }
 
 /** Reverse index: AppSettings key → the section that owns it (first match). */
+/**
+ * Retired section ids → the section that absorbed them. `?section=` is a public
+ * deep-link contract (`DEPRECATED_REDIRECT` in `settings-shell.tsx` rewrites
+ * the URL), so a caller holding an old id still resolves here rather than
+ * falling through to "this section owns nothing".
+ */
+export const SECTION_ID_ALIASES: Record<string, SettingsSectionId> = {
+  providers: "ai-connections",
+  "api-key": "ai-connections",
+  profile: "account",
+  general: "agent-runtime",
+}
+
+/** Resolve a possibly-retired section id to the one that owns its keys. */
+function canonicalSection(sectionId: SettingsSectionId): SettingsSectionId {
+  return SECTION_ID_ALIASES[sectionId] ?? sectionId
+}
+
 const KEY_TO_SECTION: Partial<Record<keyof AppSettings, SettingsSectionId>> = (() => {
   const out: Partial<Record<keyof AppSettings, SettingsSectionId>> = {}
   for (const [section, keys] of Object.entries(SECTION_OWNED_KEYS) as [
@@ -295,9 +320,10 @@ export const RESET_EXCLUDE: Partial<Record<SettingsSectionId, (keyof AppSettings
 export function resetKeysForSection(
   sectionId: SettingsSectionId
 ): (keyof AppSettings)[] | undefined {
-  const owned = SECTION_OWNED_KEYS[sectionId]
+  const canonical = canonicalSection(sectionId)
+  const owned = SECTION_OWNED_KEYS[canonical]
   if (!owned) return undefined
-  const excluded = RESET_EXCLUDE[sectionId]
+  const excluded = RESET_EXCLUDE[canonical]
   if (!excluded || excluded.length === 0) return owned
   const filtered = owned.filter((k) => !excluded.includes(k))
   return filtered.length > 0 ? filtered : undefined
