@@ -531,6 +531,34 @@
         "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。",
         "label": "数字分身 RAG"
       }
+    },
+    "artifact": {
+      "create": {
+        "label": "创建 Artifact",
+        "description": "把内容存成一个新的 artifact —— 图表、文档、代码、SVG、HTML 或图示。"
+      },
+      "update": {
+        "label": "更新 Artifact",
+        "description": "写入新内容，旧内容留作一个版本。遵守「应用前先审阅」设置。"
+      },
+      "get": {
+        "label": "读取 Artifact",
+        "description": "完整读取某个 artifact，或列出会话里的全部 artifact。"
+      },
+      "export": {
+        "label": "导出 Artifact",
+        "description": "把 artifact 渲染成字节 —— 源码、PNG 或 PDF —— 交给后续步骤写盘或发送。图表栅格化需要其预览在屏幕上。"
+      }
+    },
+    "canvas": {
+      "create": {
+        "label": "创建画布文档",
+        "description": "用给定内容新建一个可编辑的画布文档。"
+      },
+      "get": {
+        "label": "读取画布文档",
+        "description": "完整读取某个画布文档，或列出会话里的全部文档。"
+      }
     }
   },
   "ai": {

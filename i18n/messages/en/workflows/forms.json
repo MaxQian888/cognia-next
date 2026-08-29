@@ -3287,5 +3287,79 @@
       "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
       "label": "Source workflow (optional)"
     }
+  },
+  "artifact": {
+    "title": {
+      "label": "Title",
+      "hint": "Shown on the artifact card and used for the export filename.",
+      "placeholder": "Q3 revenue by region"
+    },
+    "type": {
+      "label": "Type",
+      "hint": "Decides how the artifact renders and which export formats it offers.",
+      "placeholder": "Pick a type"
+    },
+    "content": {
+      "label": "Content",
+      "hint": "The artifact body. Usually an expression referring to an earlier step."
+    },
+    "newContent": {
+      "hint": "Replaces the body. The previous content is kept as a version."
+    },
+    "language": {
+      "label": "Language",
+      "hint": "Syntax highlighting for code and document artifacts."
+    },
+    "chartType": {
+      "label": "Chart type",
+      "hint": "Only read for chart artifacts."
+    },
+    "sessionId": {
+      "label": "Conversation",
+      "hint": "Which conversation's dock this belongs in. Leave empty for a scheduled run that has no conversation."
+    },
+    "artifactId": {
+      "label": "Artifact",
+      "hint": "The id of the artifact to act on."
+    },
+    "readArtifactId": {
+      "hint": "Leave empty to list the conversation's artifacts instead of reading one."
+    },
+    "renameTitle": {
+      "hint": "Leave empty to keep the current title."
+    },
+    "changeDescription": {
+      "label": "Change note",
+      "hint": "Recorded on the version this update creates.",
+      "placeholder": "Refreshed with September numbers"
+    },
+    "query": {
+      "label": "Title filter",
+      "hint": "Only used when listing: keeps artifacts whose title contains this text.",
+      "placeholder": "revenue"
+    },
+    "format": {
+      "label": "Format",
+      "hint": "The step returns the bytes rather than saving them — a save dialog would park an unattended run. PNG and PDF of a chart need its preview on screen."
+    },
+    "documentId": {
+      "label": "Canvas document",
+      "hint": "Leave empty to list the conversation's documents instead of reading one."
+    },
+    "canvasTitle": {
+      "hint": "Shown in the Canvas document list."
+    },
+    "canvasLanguage": {
+      "hint": "Required: it selects the editor's syntax mode."
+    },
+    "canvasContent": {
+      "hint": "The document's starting content. May be empty."
+    },
+    "docType": {
+      "label": "Document type",
+      "hint": "Code gets an editor with syntax modes; text gets prose editing.",
+      "code": "Code",
+      "text": "Text"
+    }
   }
 }

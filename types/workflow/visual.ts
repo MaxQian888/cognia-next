@@ -181,6 +181,16 @@ export type WorkflowNodeKind =
   | "action.site.deploy"
   | "action.site.rollback"
   | "action.site.status"
+  // Artifacts + Canvas (ADR-0139 surfaces, ADR-0158 storage). A flow can mint
+  // an artifact, revise it, read it back and render it to bytes; deleting one,
+  // and writing into an open Canvas buffer, stay out — see
+  // `lib/workflow/nodes/artifacts/index.ts`.
+  | "action.artifact.create"
+  | "action.artifact.update"
+  | "action.artifact.get"
+  | "action.artifact.export"
+  | "action.canvas.create"
+  | "action.canvas.get"
   | "action.git.push"
   | "action.git.branch"
   // Stacked branches (ADR — stacks as first-class). Local git only: publishing
@@ -432,6 +442,12 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.site.deploy",
   "action.site.rollback",
   "action.site.status",
+  "action.artifact.create",
+  "action.artifact.update",
+  "action.artifact.get",
+  "action.artifact.export",
+  "action.canvas.create",
+  "action.canvas.get",
   "action.git.push",
   "action.git.branch",
   "action.stack.list",

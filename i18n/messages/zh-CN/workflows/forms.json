@@ -3287,5 +3287,79 @@
       "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
       "label": "来源工作流（可选）"
     }
+  },
+  "artifact": {
+    "title": {
+      "label": "标题",
+      "hint": "显示在 artifact 卡片上，也用作导出文件名。",
+      "placeholder": "Q3 各地区营收"
+    },
+    "type": {
+      "label": "类型",
+      "hint": "决定 artifact 如何渲染，以及提供哪些导出格式。",
+      "placeholder": "选择类型"
+    },
+    "content": {
+      "label": "内容",
+      "hint": "artifact 正文。通常是引用前一步结果的表达式。"
+    },
+    "newContent": {
+      "hint": "替换正文。原内容会保留为一个版本。"
+    },
+    "language": {
+      "label": "语言",
+      "hint": "代码与文档类 artifact 的语法高亮。"
+    },
+    "chartType": {
+      "label": "图表类型",
+      "hint": "仅对 chart 类型生效。"
+    },
+    "sessionId": {
+      "label": "会话",
+      "hint": "归属于哪个会话的 dock。定时任务没有会话时留空即可。"
+    },
+    "artifactId": {
+      "label": "Artifact",
+      "hint": "要操作的 artifact id。"
+    },
+    "readArtifactId": {
+      "hint": "留空则列出会话里的 artifact，而不是读取单个。"
+    },
+    "renameTitle": {
+      "hint": "留空则保持原标题。"
+    },
+    "changeDescription": {
+      "label": "变更说明",
+      "hint": "记录在本次更新产生的版本上。",
+      "placeholder": "更新为 9 月数据"
+    },
+    "query": {
+      "label": "标题过滤",
+      "hint": "仅在列出时使用：只保留标题包含该文本的 artifact。",
+      "placeholder": "营收"
+    },
+    "format": {
+      "label": "格式",
+      "hint": "该步骤返回字节而不落盘 —— 保存对话框会让无人值守的运行卡住。图表的 PNG 与 PDF 需要其预览在屏幕上。"
+    },
+    "documentId": {
+      "label": "画布文档",
+      "hint": "留空则列出会话里的文档，而不是读取单个。"
+    },
+    "canvasTitle": {
+      "hint": "显示在画布文档列表里。"
+    },
+    "canvasLanguage": {
+      "hint": "必填：它决定编辑器的语法模式。"
+    },
+    "canvasContent": {
+      "hint": "文档的初始内容，可以为空。"
+    },
+    "docType": {
+      "label": "文档类型",
+      "hint": "code 使用带语法模式的编辑器，text 用于散文编辑。",
+      "code": "代码",
+      "text": "文本"
+    }
   }
 }

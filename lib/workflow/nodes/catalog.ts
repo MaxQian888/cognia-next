@@ -868,6 +868,55 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Activity",
     keywords: ["site", "status", "url", "version", "health"],
   },
+  // ── Artifacts + Canvas ──
+  //
+  // Six kinds, not nine. No `delete`: an unattended DAG that removes a user's
+  // saved output is a consent problem, and the dock has the button. No
+  // `canvas.update`: a Canvas document is an editor buffer whose authoritative
+  // copy is `editorRef.current.getValue()`, so a background write either stages
+  // a diff nobody is there to accept or overwrites what someone is typing. No
+  // `canvas.open`: revealing a panel means nothing in a headless run.
+  //
+  // None are `desktopOnly`: the artifact store and its Dexie tables exist in
+  // every shell.
+  "action.artifact.create": {
+    label: "Create artifact",
+    description: "Save content as a new artifact — chart, document, code, SVG, HTML or diagram.",
+    iconName: "FilePlus2",
+    keywords: ["artifact", "create", "chart", "document", "canvas"],
+  },
+  "action.artifact.update": {
+    label: "Update artifact",
+    description:
+      'Write new content to an artifact, keeping the old one as a version. Honours "Review before apply".',
+    iconName: "FilePen",
+    keywords: ["artifact", "update", "revise", "version"],
+  },
+  "action.artifact.get": {
+    label: "Read artifact",
+    description: "Read one artifact in full, or list the artifacts in a conversation.",
+    iconName: "FileSearch",
+    keywords: ["artifact", "read", "get", "list", "search"],
+  },
+  "action.artifact.export": {
+    label: "Export artifact",
+    description:
+      "Render an artifact to bytes — source, PNG or PDF — for a later step to write or send. Rasterising a chart needs its preview on screen.",
+    iconName: "FileDown",
+    keywords: ["artifact", "export", "png", "pdf", "render", "download"],
+  },
+  "action.canvas.create": {
+    label: "Create Canvas document",
+    description: "Open a new editable Canvas document with the given content.",
+    iconName: "SquarePen",
+    keywords: ["canvas", "create", "document", "editor"],
+  },
+  "action.canvas.get": {
+    label: "Read Canvas document",
+    description: "Read one Canvas document in full, or list the documents in a conversation.",
+    iconName: "BookOpen",
+    keywords: ["canvas", "read", "get", "list", "document"],
+  },
   "action.git.push": {
     label: "Git push",
     description: "Push commits to a remote (optionally set upstream).",

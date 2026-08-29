@@ -30731,6 +30731,7 @@
       },
       "breakdown": {
         "categories": {
+          "artifact": "Artifacts",
           "backupHistory": "备份历史",
           "canvas": "画布文档",
           "character": "角色",
@@ -30819,7 +30820,7 @@
           "title": "Agent 团队工作区"
         },
         "artifacts": {
-          "body": "生成产物、版本历史、画布文档与分析结果。",
+          "body": "生成产物及其完整版本历史。",
           "importBody": "恢复你的生成产物及历史。",
           "importTitle": "导入 Artifacts",
           "title": "Artifacts"
@@ -35718,8 +35719,8 @@
       "noStdout": "标准输出没有任何内容。",
       "open": "构建日志",
       "phase": {
-        "install": "安装",
         "build": "构建",
+        "install": "安装",
         "package": "打包"
       },
       "stderr": "标准错误",
@@ -41273,6 +41274,80 @@
         "add": "添加",
         "removeItem": "移除第 {index} 项"
       },
+      "artifact": {
+        "artifactId": {
+          "hint": "要操作的 artifact id。",
+          "label": "Artifact"
+        },
+        "canvasContent": {
+          "hint": "文档的初始内容，可以为空。"
+        },
+        "canvasLanguage": {
+          "hint": "必填：它决定编辑器的语法模式。"
+        },
+        "canvasTitle": {
+          "hint": "显示在画布文档列表里。"
+        },
+        "changeDescription": {
+          "hint": "记录在本次更新产生的版本上。",
+          "label": "变更说明",
+          "placeholder": "更新为 9 月数据"
+        },
+        "chartType": {
+          "hint": "仅对 chart 类型生效。",
+          "label": "图表类型"
+        },
+        "content": {
+          "hint": "artifact 正文。通常是引用前一步结果的表达式。",
+          "label": "内容"
+        },
+        "docType": {
+          "code": "代码",
+          "hint": "code 使用带语法模式的编辑器，text 用于散文编辑。",
+          "label": "文档类型",
+          "text": "文本"
+        },
+        "documentId": {
+          "hint": "留空则列出会话里的文档，而不是读取单个。",
+          "label": "画布文档"
+        },
+        "format": {
+          "hint": "该步骤返回字节而不落盘 —— 保存对话框会让无人值守的运行卡住。图表的 PNG 与 PDF 需要其预览在屏幕上。",
+          "label": "格式"
+        },
+        "language": {
+          "hint": "代码与文档类 artifact 的语法高亮。",
+          "label": "语言"
+        },
+        "newContent": {
+          "hint": "替换正文。原内容会保留为一个版本。"
+        },
+        "query": {
+          "hint": "仅在列出时使用：只保留标题包含该文本的 artifact。",
+          "label": "标题过滤",
+          "placeholder": "营收"
+        },
+        "readArtifactId": {
+          "hint": "留空则列出会话里的 artifact，而不是读取单个。"
+        },
+        "renameTitle": {
+          "hint": "留空则保持原标题。"
+        },
+        "sessionId": {
+          "hint": "归属于哪个会话的 dock。定时任务没有会话时留空即可。",
+          "label": "会话"
+        },
+        "title": {
+          "hint": "显示在 artifact 卡片上，也用作导出文件名。",
+          "label": "标题",
+          "placeholder": "Q3 各地区营收"
+        },
+        "type": {
+          "hint": "决定 artifact 如何渲染，以及提供哪些导出格式。",
+          "label": "类型",
+          "placeholder": "选择类型"
+        }
+      },
       "branch": {
         "condition": {
           "hint": "表达式，求值为真值则走真分支。支持 '{{ }}' 表达式。",
@@ -41819,48 +41894,48 @@
         }
       },
       "editor": {
-        "root": {
-          "label": "Pro IDE 工作区",
-          "hint": "可选。默认使用当前已打开的 Pro IDE。支持 '{{ }}' 表达式。",
-          "placeholder": "/Users/me/my-project"
-        },
         "autoStart": {
-          "label": "需要时启动 IDE",
-          "hint": "当该工作区的 code-server 尚未运行时将其启动。默认关闭——首次启动可能需要下载较大的二进制文件。"
+          "hint": "当该工作区的 code-server 尚未运行时将其启动。默认关闭——首次启动可能需要下载较大的二进制文件。",
+          "label": "需要时启动 IDE"
         },
         "path": {
-          "label": "文件路径",
           "hint": "必填。可为绝对路径，或相对于上面的工作区。支持 '{{ }}' 表达式。",
+          "label": "文件路径",
           "placeholder": "src/index.ts"
         },
         "position": {
-          "line": {
-            "label": "行",
-            "hint": "可选，从 1 开始的行号。",
-            "placeholder": "42"
-          },
           "column": {
             "label": "列",
             "placeholder": "1"
+          },
+          "line": {
+            "hint": "可选，从 1 开始的行号。",
+            "label": "行",
+            "placeholder": "42"
+          }
+        },
+        "root": {
+          "hint": "可选。默认使用当前已打开的 Pro IDE。支持 '{{ }}' 表达式。",
+          "label": "Pro IDE 工作区",
+          "placeholder": "/Users/me/my-project"
+        },
+        "saveAll": {
+          "path": {
+            "hint": "可选。留空表示刷新所有未保存的缓冲区。支持 '{{ }}' 表达式。",
+            "label": "仅此文件",
+            "placeholder": "src/index.ts"
           }
         },
         "showDiff": {
           "content": {
-            "label": "建议的内容",
             "hint": "必填。与磁盘上的文件并排展示，不会写入磁盘。留空表示建议清空该文件。",
+            "label": "建议的内容",
             "placeholder": "完整的建议文件内容"
           },
           "title": {
-            "label": "对比标题",
             "hint": "可选，对比标签页的标题。支持 '{{ }}' 表达式。",
+            "label": "对比标题",
             "placeholder": "建议的修复"
-          }
-        },
-        "saveAll": {
-          "path": {
-            "label": "仅此文件",
-            "hint": "可选。留空表示刷新所有未保存的缓冲区。支持 '{{ }}' 表达式。",
-            "placeholder": "src/index.ts"
           }
         }
       },
@@ -44332,6 +44407,34 @@
             "label": "请求审批"
           }
         },
+        "artifact": {
+          "create": {
+            "description": "把内容存成一个新的 artifact —— 图表、文档、代码、SVG、HTML 或图示。",
+            "label": "创建 Artifact"
+          },
+          "export": {
+            "description": "把 artifact 渲染成字节 —— 源码、PNG 或 PDF —— 交给后续步骤写盘或发送。图表栅格化需要其预览在屏幕上。",
+            "label": "导出 Artifact"
+          },
+          "get": {
+            "description": "完整读取某个 artifact，或列出会话里的全部 artifact。",
+            "label": "读取 Artifact"
+          },
+          "update": {
+            "description": "写入新内容，旧内容留作一个版本。遵守「应用前先审阅」设置。",
+            "label": "更新 Artifact"
+          }
+        },
+        "canvas": {
+          "create": {
+            "description": "用给定内容新建一个可编辑的画布文档。",
+            "label": "创建画布文档"
+          },
+          "get": {
+            "description": "完整读取某个画布文档，或列出会话里的全部文档。",
+            "label": "读取画布文档"
+          }
+        },
         "character": {
           "create": {
             "description": "新建一个角色（员工）。",
@@ -44395,29 +44498,29 @@
           }
         },
         "editor": {
+          "applyEdit": {
+            "description": "把已写入磁盘的文件反映为可撤销的编辑器内改动，而不是一次生硬的外部重载。磁盘始终是真相源。",
+            "label": "在编辑器中反映改动"
+          },
           "open": {
-            "label": "在编辑器中打开",
-            "description": "在 Pro IDE 中打开文件并定位到指定行。默认使用当前绑定的 Pro IDE 工作区。"
-          },
-          "reveal": {
-            "label": "在编辑器资源管理器中定位",
-            "description": "在 Pro IDE 的文件资源管理器中定位某个路径，但不打开它。"
-          },
-          "showDiff": {
-            "label": "展示差异以供审阅",
-            "description": "在 Pro IDE 原生差异视图中，将建议内容与磁盘上的文件并排展示。建议内容只存在于内存中，绝不写入磁盘。"
+            "description": "在 Pro IDE 中打开文件并定位到指定行。默认使用当前绑定的 Pro IDE 工作区。",
+            "label": "在编辑器中打开"
           },
           "readActive": {
-            "label": "读取当前编辑器",
-            "description": "读取用户正在查看的内容：聚焦的文件、选区、选中文本、诊断信息、已打开的编辑器。进入运行上下文前会经过 PII 筛查。"
+            "description": "读取用户正在查看的内容：聚焦的文件、选区、选中文本、诊断信息、已打开的编辑器。进入运行上下文前会经过 PII 筛查。",
+            "label": "读取当前编辑器"
           },
-          "applyEdit": {
-            "label": "在编辑器中反映改动",
-            "description": "把已写入磁盘的文件反映为可撤销的编辑器内改动，而不是一次生硬的外部重载。磁盘始终是真相源。"
+          "reveal": {
+            "description": "在 Pro IDE 的文件资源管理器中定位某个路径，但不打开它。",
+            "label": "在编辑器资源管理器中定位"
           },
           "saveAll": {
-            "label": "保存编辑器缓冲区",
-            "description": "把 Pro IDE 中未保存的缓冲区刷入磁盘，使后续步骤读到的正是用户当前看到的内容。用 'path' 可只保存单个文件。"
+            "description": "把 Pro IDE 中未保存的缓冲区刷入磁盘，使后续步骤读到的正是用户当前看到的内容。用 'path' 可只保存单个文件。",
+            "label": "保存编辑器缓冲区"
+          },
+          "showDiff": {
+            "description": "在 Pro IDE 原生差异视图中，将建议内容与磁盘上的文件并排展示。建议内容只存在于内存中，绝不写入磁盘。",
+            "label": "展示差异以供审阅"
           }
         },
         "git": {
@@ -44992,18 +45095,6 @@
         }
       },
       "knowledge": {
-        "source": {
-          "description": "创建或增量更新具有稳定标识的知识库来源。",
-          "label": "知识来源"
-        },
-        "parse": {
-          "description": "将一个已持久化来源解析为受保护的运行级产物。",
-          "label": "解析知识"
-        },
-        "transform": {
-          "description": "在分块前规范化解析内容并执行 PII 脱敏。",
-          "label": "转换知识"
-        },
         "chunk": {
           "description": "创建包含稳定位置元数据的格式感知知识分块。",
           "label": "知识分块"
@@ -45016,6 +45107,10 @@
           "description": "在发布前校验向量数量和维度。",
           "label": "校验知识索引"
         },
+        "parse": {
+          "description": "将一个已持久化来源解析为受保护的运行级产物。",
+          "label": "解析知识"
+        },
         "publish": {
           "description": "原子发布经过校验的不可变索引修订。",
           "label": "发布知识修订"
@@ -45023,6 +45118,14 @@
         "retrieve": {
           "description": "从冻结的知识库修订中检索经过 ACL 过滤的知识分块。",
           "label": "检索知识"
+        },
+        "source": {
+          "description": "创建或增量更新具有稳定标识的知识库来源。",
+          "label": "知识来源"
+        },
+        "transform": {
+          "description": "在分块前规范化解析内容并执行 PII 脱敏。",
+          "label": "转换知识"
         }
       },
       "ocr": {

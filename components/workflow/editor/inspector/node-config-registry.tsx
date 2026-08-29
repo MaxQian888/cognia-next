@@ -27,6 +27,14 @@ import {
   SiteStatusConfig,
 } from "./forms/site-forms"
 import {
+  ArtifactCreateConfig,
+  ArtifactExportConfig,
+  ArtifactGetConfig,
+  ArtifactUpdateConfig,
+  CanvasCreateConfig,
+  CanvasGetConfig,
+} from "./forms/artifact-forms"
+import {
   StackListConfig,
   StackParentConfig,
   StackPushConfig,
@@ -314,6 +322,12 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.site.deploy": SiteDeployConfig,
   "action.site.rollback": SiteRollbackConfig,
   "action.site.status": SiteStatusConfig,
+  "action.artifact.create": ArtifactCreateConfig,
+  "action.artifact.update": ArtifactUpdateConfig,
+  "action.artifact.get": ArtifactGetConfig,
+  "action.artifact.export": ArtifactExportConfig,
+  "action.canvas.create": CanvasCreateConfig,
+  "action.canvas.get": CanvasGetConfig,
   "action.git.push": GitPushConfig,
   "action.git.branch": GitBranchConfig,
   // Stacked branches

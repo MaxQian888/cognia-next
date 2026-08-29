@@ -2061,6 +2061,44 @@ export const PARAMS_SCHEMAS = {
   }),
   "action.site.rollback": z.object({ siteId: z.string() }),
   "action.site.status": z.object({ siteId: z.string() }),
+  "action.artifact.create": z.object({
+    title: z.string(),
+    type: z.string(),
+    content: z.string(),
+    language: z.string().optional(),
+    /** Only meaningful for `type: "chart"`; ignored otherwise. */
+    chartType: z.string().optional(),
+    /** Omitted binds the artifact to no conversation, which a schedule wants. */
+    sessionId: z.string().optional(),
+  }),
+  "action.artifact.update": z.object({
+    artifactId: z.string(),
+    content: z.string(),
+    title: z.string().optional(),
+    changeDescription: z.string().optional(),
+    sessionId: z.string().optional(),
+  }),
+  "action.artifact.get": z.object({
+    /** Omitted lists the conversation's artifacts, optionally filtered by `query`. */
+    artifactId: z.string().optional(),
+    query: z.string().optional(),
+    sessionId: z.string().optional(),
+  }),
+  "action.artifact.export": z.object({
+    artifactId: z.string(),
+    format: z.enum(["raw", "html", "svg", "png", "pdf"]).optional(),
+  }),
+  "action.canvas.create": z.object({
+    title: z.string(),
+    language: z.string(),
+    content: z.string().optional(),
+    type: z.enum(["code", "text"]).optional(),
+    sessionId: z.string().optional(),
+  }),
+  "action.canvas.get": z.object({
+    documentId: z.string().optional(),
+    sessionId: z.string().optional(),
+  }),
   "action.git.push": z.object({
     repoPath: z.string().optional(),
     remote: z.string().optional(),

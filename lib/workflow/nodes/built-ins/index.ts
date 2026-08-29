@@ -49,3 +49,6 @@ import "../mobile/executors"
 // this repo's most recurrent defect; `executor-coverage.test.ts` fails without
 // this line.
 import "../sites"
+// Artifact + Canvas actions. A registry nobody registers into is this repo's
+// most recurrent defect; `executor-coverage.test.ts` fails without this line.
+import "../artifacts"

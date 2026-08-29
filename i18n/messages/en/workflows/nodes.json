@@ -531,6 +531,34 @@
         "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
         "label": "Twin RAG"
       }
+    },
+    "artifact": {
+      "create": {
+        "label": "Create artifact",
+        "description": "Save content as a new artifact — chart, document, code, SVG, HTML or diagram."
+      },
+      "update": {
+        "label": "Update artifact",
+        "description": "Write new content to an artifact, keeping the old one as a version. Honours “Review before apply”."
+      },
+      "get": {
+        "label": "Read artifact",
+        "description": "Read one artifact in full, or list the artifacts in a conversation."
+      },
+      "export": {
+        "label": "Export artifact",
+        "description": "Render an artifact to bytes — source, PNG or PDF — for a later step to write or send. Rasterising a chart needs its preview on screen."
+      }
+    },
+    "canvas": {
+      "create": {
+        "label": "Create Canvas document",
+        "description": "Open a new editable Canvas document with the given content."
+      },
+      "get": {
+        "label": "Read Canvas document",
+        "description": "Read one Canvas document in full, or list the documents in a conversation."
+      }
     }
   },
   "ai": {
