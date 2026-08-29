@@ -39400,6 +39400,10 @@
     "codeGraphDesc": "Structural code intelligence over a tree-sitter symbol graph (codegraph_search / node / callers / callees / impact / context / explore / files). Sub-millisecond queries grep can't answer: where a symbol is defined, who calls it, and blast radius. Read-only; desktop only.",
     "coreFiles": "Core file tools",
     "coreFilesDesc": "Full coding-agent toolkit for non-Anthropic models: search, read, patch, shell, waitable background commands, and structured session tasks with dependencies. Read-only tools run freely; filesystem and shell mutations require per-call approval.",
+    "coreFilesOnAnthropic": {
+      "description": "Also register the core file suite on the Anthropic channel. Off by default — the Claude Agent SDK ships its own Grep / Read / Edit / Bash, and a second set of the same shape confuses the model.",
+      "label": "Core file tools on Anthropic"
+    },
     "dependencyResearch": "Dependency source",
     "dependencyResearchDesc": "Clone a dependency's source repository into an ignored .cognia/clonedeps/ workspace (clone_dep_source / list_cloned_deps) so the agent can read library internals. HTTPS only, idempotent, no build scripts run. Desktop only.",
     "description": "Per-category toggles for the in-process cognia-tools MCP server. Each category exposes a different set of tools to the agent.",
@@ -41164,6 +41168,15 @@
           "hint": "Used when no character is selected.",
           "label": "System prompt"
         },
+        "temperature": {
+          "hint": "0–2. Leave empty to use the provider's own default.",
+          "label": "Temperature",
+          "placeholder": "Provider default"
+        },
+        "timeoutMs": {
+          "hint": "How long one turn may run before the step aborts. Defaults to 10 minutes.",
+          "label": "Turn timeout"
+        },
         "toolsEnabled": {
           "hint": "Use the desktop sidecar's tool pipeline. Off = plain completion.",
           "label": "Enable tools"
@@ -41479,6 +41492,10 @@
           "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
           "label": "Base URL (optional)",
           "placeholder": "https://api.openai.com/v1"
+        },
+        "characterId": {
+          "hint": "Optional. When the character has a twin, its retrieved context is prepended to the system prompt.",
+          "label": "Twin-bound character"
         },
         "headersJson": {
           "hint": "Static provider headers as a JSON object. Values must be strings.",
@@ -44085,6 +44102,22 @@
         }
       },
       "teamTaskDispatch": {
+        "access": {
+          "hint": "Whether the teammate may write to the workspace or only read it.",
+          "label": "Workspace access",
+          "read": "Read only",
+          "write": "Read and write"
+        },
+        "assignedTo": {
+          "hint": "Teammate id. The pool claims this one when it is free, else falls back to round-robin.",
+          "label": "Preferred teammate",
+          "placeholder": "teammate id"
+        },
+        "dependencies": {
+          "hint": "Comma-separated task ids. Their results are read off the blackboard and prepended to this teammate's prompt.",
+          "label": "Depends on tasks",
+          "placeholder": "task-1, task-2"
+        },
         "description": {
           "label": "Description",
           "placeholder": "Detailed instructions for the assigned teammate."
@@ -44093,10 +44126,26 @@
           "hint": "What a successful result looks like — used to validate the teammate's output.",
           "label": "Expected output (optional)"
         },
+        "fileOwnership": {
+          "hint": "Comma-separated paths this task owns, so two teammates do not edit the same file.",
+          "label": "Owned files",
+          "placeholder": "src/a.ts, src/b.ts"
+        },
+        "repositoryId": {
+          "hint": "Optional. Binds the task to one repository when the team spans several.",
+          "label": "Repository"
+        },
         "taskId": {
           "hint": "Stable identifier for the dispatched task.",
           "label": "Task id",
           "placeholder": "task_..."
+        },
+        "taskKind": {
+          "code": "Code",
+          "general": "General",
+          "hint": "Selects the prompt shape the teammate is dispatched with.",
+          "label": "Task kind",
+          "ui": "UI"
         },
         "teamId": {
           "label": "Team"

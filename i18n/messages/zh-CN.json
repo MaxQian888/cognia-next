@@ -39400,6 +39400,10 @@
     "codeGraphDesc": "基于 tree-sitter 符号图谱的结构化代码智能（codegraph_search / node / callers / callees / impact / context / explore / files）。提供 grep 无法回答的亚毫秒级查询：符号定义位置、谁在调用它、影响范围。只读；仅桌面端。",
     "coreFiles": "核心文件工具",
     "coreFilesDesc": "面向非 Anthropic 模型的完整编码 Agent 工具集：搜索、读取、补丁、Shell、可等待的后台命令，以及带依赖关系的结构化会话任务。只读工具自由运行；文件系统和 Shell 变更需逐次审批。",
+    "coreFilesOnAnthropic": {
+      "description": "在 Anthropic 通道同时注册核心文件工具集。默认关闭——Claude Agent SDK 自带 Grep / Read / Edit / Bash，重复注册同形工具会让模型难以取舍。",
+      "label": "在 Anthropic 通道启用核心文件工具"
+    },
     "dependencyResearch": "依赖源码",
     "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
     "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
@@ -41164,6 +41168,15 @@
           "hint": "未选择角色时使用。",
           "label": "系统提示词"
         },
+        "temperature": {
+          "hint": "0–2。留空则使用服务商自身的默认值。",
+          "label": "温度",
+          "placeholder": "服务商默认"
+        },
+        "timeoutMs": {
+          "hint": "单轮最长运行时间，超时即中止该步骤。默认 10 分钟。",
+          "label": "单轮超时"
+        },
         "toolsEnabled": {
           "hint": "使用桌面 sidecar 的工具管线。关闭 = 纯文本补全。",
           "label": "启用工具"
@@ -41479,6 +41492,10 @@
           "hint": "用于代理或自建 OpenAI 兼容端点。",
           "label": "Base URL（可选）",
           "placeholder": "https://api.openai.com/v1"
+        },
+        "characterId": {
+          "hint": "可选。当该角色绑定了数字分身时，其检索到的上下文会前置到系统提示中。",
+          "label": "绑定分身的角色"
         },
         "headersJson": {
           "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
@@ -44085,6 +44102,22 @@
         }
       },
       "teamTaskDispatch": {
+        "access": {
+          "hint": "该队友是可写工作区，还是只读。",
+          "label": "工作区权限",
+          "read": "只读",
+          "write": "读写"
+        },
+        "assignedTo": {
+          "hint": "队友 ID。该队友空闲时优先领取，否则回退到轮询分配。",
+          "label": "优先队友",
+          "placeholder": "队友 ID"
+        },
+        "dependencies": {
+          "hint": "以逗号分隔的任务 ID。其结果会从共享看板读出并前置到该队友的提示中。",
+          "label": "依赖任务",
+          "placeholder": "task-1, task-2"
+        },
         "description": {
           "label": "描述",
           "placeholder": "分配给成员的详细说明。"
@@ -44093,10 +44126,26 @@
           "hint": "成功结果的样子——用于校验成员的输出。",
           "label": "期望产出（可选）"
         },
+        "fileOwnership": {
+          "hint": "以逗号分隔的路径，声明该任务拥有这些文件，避免两名队友改同一个文件。",
+          "label": "归属文件",
+          "placeholder": "src/a.ts, src/b.ts"
+        },
+        "repositoryId": {
+          "hint": "可选。当团队跨多个仓库时，将该任务绑定到其中一个。",
+          "label": "仓库"
+        },
         "taskId": {
           "hint": "派发任务的稳定标识。",
           "label": "任务 id",
           "placeholder": "task_..."
+        },
+        "taskKind": {
+          "code": "代码",
+          "general": "通用",
+          "hint": "决定派发给队友时使用的提示形态。",
+          "label": "任务类型",
+          "ui": "界面"
         },
         "teamId": {
           "label": "团队"

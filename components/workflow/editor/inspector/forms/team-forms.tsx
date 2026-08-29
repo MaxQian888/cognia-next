@@ -21,10 +21,18 @@ import {
   FieldRow,
 } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
+import { DurationField } from "./shared/duration-field"
 import { CharacterPicker, TeamPicker, TwinPicker } from "./shared/entity-picker"
 import { TypedOutputFields } from "./output-schema-field"
 import { PET_INTERACTION_KINDS, PiiGateField, clampNumberInput } from "./form-support"
 import type { ConfigProps } from "./form-support"
+
+/**
+ * Mirrors `DEFAULT_TIMEOUT_MS` in `lib/workflow/nodes/actions/agent-turn.ts`.
+ * Duplicated rather than imported so the inspector bundle does not pull the
+ * executor (and its sidecar imports) into the editor chunk.
+ */
+const AGENT_TURN_DEFAULT_TIMEOUT_MS = 600_000
 
 // ── action.character.send ─────────────────────────────────────────────────
 export function CharacterSendConfig({ params, onChange }: ConfigProps) {
@@ -472,6 +480,12 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   const requireTools = readBoolean(params, "requireTools", false)
   const cwd = readString(params, "cwd")
   const piiGate = readString(params, "piiGate", "block")
+  // Absent `temperature` means "whatever the provider defaults to" — the
+  // executor forwards `undefined` untouched — so the box stays empty rather
+  // than inventing a number the node is not actually sending.
+  const temperature = typeof params.temperature === "number" ? String(params.temperature) : ""
+  // `timeoutMs` does have a concrete executor fallback, so show it.
+  const timeoutMs = readNumber(params, "timeoutMs", AGENT_TURN_DEFAULT_TIMEOUT_MS)
   return (
     <FieldGroup>
       <Field label={t("prompt.label")} htmlFor="at-prompt" name="prompt" required>
@@ -589,6 +603,55 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <FieldRow>
+        <Field
+          label={t("temperature.label")}
+          htmlFor="at-temp"
+          hint={t("temperature.hint")}
+          name="temperature"
+        >
+          <Input
+            id="at-temp"
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={temperature}
+            placeholder={t("temperature.placeholder")}
+            onChange={(e) => {
+              const raw = e.target.value
+              if (raw === "") {
+                onChange(patchParam(params, "temperature", undefined))
+                return
+              }
+              const parsed = Number(raw)
+              if (Number.isNaN(parsed)) return
+              onChange(patchParam(params, "temperature", Math.min(2, Math.max(0, parsed))))
+            }}
+          />
+        </Field>
+        <Field
+          label={t("timeoutMs.label")}
+          htmlFor="at-timeout"
+          hint={t("timeoutMs.hint")}
+          name="timeoutMs"
+        >
+          <DurationField
+            id="at-timeout"
+            value={timeoutMs}
+            onChange={(ms) =>
+              onChange(
+                patchParam(
+                  params,
+                  "timeoutMs",
+                  // Keep inside the schema's 1s..1h window.
+                  Math.min(3_600_000, Math.max(1000, ms))
+                )
+              )
+            }
+          />
+        </Field>
+      </FieldRow>
       <PiiGateField id="at-pii" value={piiGate} params={params} onChange={onChange} t={t} />
       <TypedOutputFields params={params} onChange={onChange} idPrefix="at" />
     </FieldGroup>
@@ -847,6 +910,28 @@ export function TeamTaskDispatchConfig({ params, onChange }: ConfigProps) {
   const title = readString(params, "title")
   const description = readString(params, "description")
   const expectedOutput = readString(params, "expectedOutput")
+  const assignedTo = readString(params, "assignedTo")
+  const dependencies = Array.isArray(params.dependencies)
+    ? (params.dependencies as string[]).join(", ")
+    : ""
+  // `access` / `taskKind` / `repositoryId` / `fileOwnership` are what
+  // `synthesizeTeamWorkflow` stamps onto a task when an agent team is turned
+  // into a workflow. They decide whether the teammate may write, which prompt
+  // shape it gets, and which files it owns — so an author opening that
+  // workflow has to be able to see and change them.
+  const access = readString(params, "access", "write")
+  const taskKind = readString(params, "taskKind", "code")
+  const repositoryId = readString(params, "repositoryId")
+  const fileOwnership = Array.isArray(params.fileOwnership)
+    ? (params.fileOwnership as string[]).join(", ")
+    : ""
+  const patchList = (key: string, raw: string) => {
+    const list = raw
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+    onChange(patchParam(params, key, list.length > 0 ? list : undefined))
+  }
   return (
     <FieldGroup>
       <Field label={t("teamId.label")} htmlFor="ttd-team" name="teamId" required>
@@ -898,6 +983,92 @@ export function TeamTaskDispatchConfig({ params, onChange }: ConfigProps) {
           rows={2}
           value={expectedOutput}
           onChange={(e) => onChange(patchParam(params, "expectedOutput", e.target.value))}
+        />
+      </Field>
+      <FieldRow>
+        <Field
+          label={t("assignedTo.label")}
+          htmlFor="ttd-assigned"
+          hint={t("assignedTo.hint")}
+          name="assignedTo"
+        >
+          <Input
+            id="ttd-assigned"
+            value={assignedTo}
+            onChange={(e) => onChange(patchParam(params, "assignedTo", e.target.value))}
+            placeholder={t("assignedTo.placeholder")}
+          />
+        </Field>
+        <Field
+          label={t("dependencies.label")}
+          htmlFor="ttd-deps"
+          hint={t("dependencies.hint")}
+          name="dependencies"
+        >
+          <Input
+            id="ttd-deps"
+            value={dependencies}
+            onChange={(e) => patchList("dependencies", e.target.value)}
+            placeholder={t("dependencies.placeholder")}
+          />
+        </Field>
+      </FieldRow>
+      <FieldRow>
+        <Field label={t("access.label")} htmlFor="ttd-access" hint={t("access.hint")} name="access">
+          <Select value={access} onValueChange={(v) => onChange(patchParam(params, "access", v))}>
+            <SelectTrigger id="ttd-access">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="read">{t("access.read")}</SelectItem>
+              <SelectItem value="write">{t("access.write")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("taskKind.label")}
+          htmlFor="ttd-kind"
+          hint={t("taskKind.hint")}
+          name="taskKind"
+        >
+          <Select
+            value={taskKind}
+            onValueChange={(v) => onChange(patchParam(params, "taskKind", v))}
+          >
+            <SelectTrigger id="ttd-kind">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="code">{t("taskKind.code")}</SelectItem>
+              <SelectItem value="ui">{t("taskKind.ui")}</SelectItem>
+              <SelectItem value="general">{t("taskKind.general")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldRow>
+      <Field
+        label={t("repositoryId.label")}
+        htmlFor="ttd-repo"
+        hint={t("repositoryId.hint")}
+        name="repositoryId"
+      >
+        <Input
+          id="ttd-repo"
+          value={repositoryId}
+          onChange={(e) => onChange(patchParam(params, "repositoryId", e.target.value))}
+        />
+      </Field>
+      <Field
+        label={t("fileOwnership.label")}
+        htmlFor="ttd-files"
+        hint={t("fileOwnership.hint")}
+        name="fileOwnership"
+      >
+        <Input
+          id="ttd-files"
+          value={fileOwnership}
+          onChange={(e) => patchList("fileOwnership", e.target.value)}
+          placeholder={t("fileOwnership.placeholder")}
         />
       </Field>
     </FieldGroup>

@@ -304,3 +304,30 @@ describe("AiEmbedConfig — provider (B3)", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "k" }))
   })
 })
+
+/**
+ * The twin-bound `characterId` is honoured only by the v2 `ai.prompt`
+ * executor (`ai-prompt-v2.ts` injects the character's twin context into the
+ * system prompt). It had no field at all, so twin grounding was unreachable;
+ * rendering it on a v1 node would be the same bug in reverse, since v1 drops
+ * the param on the floor.
+ */
+describe("AiPromptConfig — twin-bound character", () => {
+  it("offers the character picker on a v2 node", () => {
+    const onChange = jest.fn()
+    const { container } = wrap(
+      <AiPromptConfig params={{ userPrompt: "x" }} onChange={onChange} typeVersion={2} />
+    )
+    const field = container.querySelector('[data-field="characterId"]')
+    expect(field).not.toBeNull()
+    fireEvent.change(field!.querySelector("input")!, { target: { value: "char-1" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ characterId: "char-1" }))
+  })
+
+  it("hides it on a v1 node, whose executor ignores the param", () => {
+    const { container } = wrap(
+      <AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={1} />
+    )
+    expect(container.querySelector('[data-field="characterId"]')).toBeNull()
+  })
+})

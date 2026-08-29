@@ -417,6 +417,13 @@ const TeamTaskDispatchParams = z.object({
   expectedOutput: optionalString,
   assignedTo: optionalString,
   dependencies: z.array(z.string()).optional(),
+  // Written by `synthesizeTeamWorkflow` and read by the executor when it calls
+  // `dispatchTeammate`; they were absent here, so an author opening a
+  // synthesized workflow got neither validation nor a field for them.
+  access: z.enum(["read", "write"]).optional(),
+  taskKind: z.enum(["general", "code", "ui"]).optional(),
+  repositoryId: optionalString,
+  fileOwnership: z.array(z.string()).optional(),
 })
 
 // Synthesizer-emitted review node (ADR-0071): one per task when

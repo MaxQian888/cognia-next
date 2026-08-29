@@ -21,7 +21,7 @@ import {
   FieldRow,
 } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
-import { SubworkflowPicker } from "./shared/entity-picker"
+import { CharacterPicker, SubworkflowPicker } from "./shared/entity-picker"
 import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
 import { getTransformersCapabilities } from "@cognia/transformers-runtime/capabilities"
 import { TRANSFORMERS_MODEL_PRESETS } from "@cognia/transformers-runtime/models"
@@ -51,6 +51,7 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
   const temperature = readNumber(params, "temperature", 0.7)
   const responseFormat = readString(params, "responseFormat") || "text"
   const jsonSchema = readString(params, "jsonSchema")
+  const characterId = readString(params, "characterId")
   return (
     <FieldGroup>
       {v2 ? (
@@ -92,6 +93,20 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
           t={t}
           allowOff
         />
+      ) : null}
+      {v2 ? (
+        <Field
+          label={t("characterId.label")}
+          htmlFor="ai-character"
+          hint={t("characterId.hint")}
+          name="characterId"
+        >
+          <CharacterPicker
+            id="ai-character"
+            value={characterId}
+            onChange={(v) => onChange(patchParam(params, "characterId", v))}
+          />
+        </Field>
       ) : null}
       <Field label={t("systemPrompt.label")} htmlFor="ai-system" name="systemPrompt">
         <ExpressionField
