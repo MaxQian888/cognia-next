@@ -5,6 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { CharacterDetailSheet } from "./character-detail-sheet"
 import type { Character } from "@cognia/agent-config-types"
+import { transport } from "@/lib/tauri"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -23,8 +25,13 @@ const enqueueMock = jest.fn(async (_e: unknown) => undefined)
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (e: unknown) => enqueueMock(e),
 }))
+jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/tauri/admin-lease", () => ({ issueHostAdminLease: jest.fn() }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+
+const callMock = transport.call as jest.Mock
+const issueLeaseMock = issueHostAdminLease as jest.Mock
 
 const mkChar = (p: Partial<Character> = {}): Character => ({
   id: "c1",
@@ -41,6 +48,10 @@ beforeEach(() => {
   updateCharacterMock.mockClear()
   deleteCharacterMock.mockClear()
   enqueueMock.mockClear()
+  callMock.mockReset()
+  callMock.mockResolvedValue(undefined)
+  issueLeaseMock.mockReset()
+  issueLeaseMock.mockResolvedValue({ token: "lease-1" })
 })
 
 describe("CharacterDetailSheet", () => {
@@ -92,9 +103,24 @@ describe("CharacterDetailSheet", () => {
     render(<CharacterDetailSheet open character={mkChar()} onOpenChange={onOpenChange} />)
     fireEvent.click(screen.getByTestId("character-delete"))
     await waitFor(() => expect(deleteCharacterMock).toHaveBeenCalledWith("c1"))
-    expect(enqueueMock).toHaveBeenCalledWith(
+    expect(issueLeaseMock).toHaveBeenCalledWith(["character_delete"])
+    expect(callMock).toHaveBeenCalledWith("character_delete", {
+      id: "c1",
+      adminLease: "lease-1",
+    })
+    expect(enqueueMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ command: "character_delete" })
     )
+  })
+
+  it("keeps the local character when the Host rejects deletion", async () => {
+    callMock.mockRejectedValueOnce(new Error("approval denied"))
+    render(<CharacterDetailSheet open character={mkChar()} onOpenChange={() => undefined} />)
+
+    fireEvent.click(screen.getByTestId("character-delete"))
+
+    await waitFor(() => expect(callMock).toHaveBeenCalled())
+    expect(deleteCharacterMock).not.toHaveBeenCalled()
   })
 
   it("hides the delete button for built-in characters", () => {

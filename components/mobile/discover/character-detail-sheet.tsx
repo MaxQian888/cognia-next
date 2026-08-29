@@ -5,11 +5,9 @@
  *
  * Bottom sheet with the minimum fields needed to create or edit a
  * character on a phone screen — name, description, system prompt,
- * default model, avatar emoji, twin binding. Persists optimistically to
- * the local Dexie via the existing `createCharacter` /
- * `updateCharacter` / `deleteCharacter` helpers and enqueues the mirror
- * write through the mobile outbound queue so the desktop receives the
- * mutation as soon as the device is online.
+ * default model, avatar emoji, twin binding. Creates and updates use the
+ * durable mirror queue. Destructive deletes require an immediate Host approval
+ * and only remove the local row after the Host confirms the deletion.
  */
 
 import { useState } from "react"
@@ -32,6 +30,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { transport } from "@/lib/tauri"
+import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import type { Character } from "@cognia/agent-config-types"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
@@ -136,12 +136,12 @@ export function CharacterDetailSheet({ open, character, onOpenChange }: Characte
     }
     setBusy(true)
     try {
-      await deleteCharacter(character.id)
-      await enqueue({
-        command: "character_delete",
-        payload: { id: character.id },
-        label: t("queueLabelDelete", { name: character.name }),
+      const lease = await issueHostAdminLease(["character_delete"])
+      await transport.call("character_delete", {
+        id: character.id,
+        adminLease: lease.token,
       })
+      await deleteCharacter(character.id)
       toast.success(t("deleted"))
       onOpenChange(false)
     } catch (err) {
