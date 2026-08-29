@@ -27,6 +27,10 @@ import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds } from "@/lib/data-governance/table-catalog"
 import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-service"
+import {
+  SITE_ARTIFACT_GC_DEFAULTS,
+  collectUnreferencedSiteArtifacts,
+} from "@/lib/sites/artifact-gc"
 
 const MS_PER_DAY = 86_400_000
 /** Re-sweep cadence — once per day matches the resolution of `traceRetentionDays`. */
@@ -45,6 +49,22 @@ export interface RetentionTarget {
 /** The tables the sweeper manages. Extensible — add a `{ id, prune }` entry to
  * bring another unbounded table under the same time-window policy. */
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  // Sites build archives (ADR-0084). The cutoff carries the configured window;
+  // the reference rules — serving deployments, the rollback target, anything
+  // behind an unfinished operation — are the collector's own and are not
+  // negotiable by a setting.
+  siteArtifacts: {
+    policy: "configured-window",
+    prune: async (cutoff) => {
+      const now = Date.now()
+      const report = await collectUnreferencedSiteArtifacts({
+        now,
+        keepDays: Math.max(0, (now - cutoff) / MS_PER_DAY),
+        keepReadyVersionsPerSite: SITE_ARTIFACT_GC_DEFAULTS.keepReadyVersionsPerSite,
+      })
+      return report.deletedDigests.length
+    },
+  },
   agentTraces: {
     policy: "configured-window",
     prune: (cutoff) => pruneAgentTraces(cutoff),

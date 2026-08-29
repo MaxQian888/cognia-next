@@ -102,6 +102,15 @@ export interface SiteVersionRow {
   artifactSize?: number
   /** File count of the archive at {@link artifactDigest}. See {@link artifactSize}. */
   artifactFileCount?: number
+  /**
+   * When retention deleted this version's archive bytes.
+   *
+   * The version stays `ready` — it really did build, and its provenance is
+   * still the record ADR-0084 wants — but it can no longer be uploaded, so the
+   * console says so rather than offering a button that fails on a missing
+   * archive. See `lib/sites/artifact-gc.ts`.
+   */
+  artifactCollectedAt?: number
   failureMessage?: string
   createdAt: number
   completedAt?: number

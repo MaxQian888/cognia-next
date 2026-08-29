@@ -169,6 +169,40 @@ export async function putSiteArtifact(
   return row
 }
 
+/**
+ * Every stored digest, as primary keys only.
+ *
+ * `toArray()` here would structured-clone every archive in the table — the
+ * retention sweep enumerates precisely so it can decide what NOT to read.
+ */
+export async function listSiteArtifactDigests(): Promise<string[]> {
+  return (await getDb().siteArtifacts.orderBy("createdAt").primaryKeys()) as string[]
+}
+
+/** Delete archives by digest. The caller owns the reference check. */
+export async function deleteSiteArtifacts(digests: readonly string[]): Promise<number> {
+  if (digests.length === 0) return 0
+  await getDb().siteArtifacts.bulkDelete([...digests])
+  return digests.length
+}
+
+/**
+ * Record that retention took this version's archive.
+ *
+ * A narrow writer on purpose: `completeSiteVersion` refuses to touch a finished
+ * version, which is the invariant that makes versions immutable. This changes
+ * one field that describes local storage, not the build.
+ */
+export async function markSiteVersionArtifactCollected(
+  versionId: string,
+  now = Date.now()
+): Promise<void> {
+  const db = getDb()
+  const version = await db.siteVersions.get(versionId)
+  if (!version || version.artifactCollectedAt !== undefined) return
+  await db.siteVersions.put({ ...version, artifactCollectedAt: now })
+}
+
 export async function getSiteArtifact(digest: string): Promise<SiteArtifactRow | undefined> {
   const row = await getDb().siteArtifacts.get(digest.toLowerCase())
   return row ? normalizeArtifactBytes(row) : undefined

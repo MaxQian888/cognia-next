@@ -17,10 +17,15 @@ import { LayersIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { groupResourcesByKind, purgeRetentionReport } from "@/lib/sites/console-model"
+import { formatBytesCompact } from "@/lib/observability/format-utils"
+import {
+  groupResourcesByKind,
+  purgeRetentionReport,
+  siteArtifactStorage,
+} from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
-import type { SiteResourceRow } from "@/types/sites"
+import type { SiteResourceRow, SiteVersionRow } from "@/types/sites"
 import {
   SITE_OWNERSHIP_STRIPE,
   SITE_RESOURCE_FACE,
@@ -31,6 +36,8 @@ import {
 
 export interface SiteResourcesTabProps {
   resources: readonly SiteResourceRow[]
+  /** Drives the local archive footprint; ADR-0084's retention made visible. */
+  versions: readonly SiteVersionRow[]
   gate: SiteGate
   /**
    * Per-key busy predicate from `useSiteActions`. `isBusy(key)` is true while
@@ -39,31 +46,76 @@ export interface SiteResourcesTabProps {
    */
   isBusy: (key?: string) => boolean
   onReconcile: () => void
+  /** Runs artifact retention now instead of waiting for the daily sweep. */
+  onReclaim: () => void
 }
 
-export function SiteResourcesTab({ resources, gate, isBusy, onReconcile }: SiteResourcesTabProps) {
+export function SiteResourcesTab({
+  resources,
+  versions,
+  gate,
+  isBusy,
+  onReconcile,
+  onReclaim,
+}: SiteResourcesTabProps) {
   const t = useTranslations("sites")
   const groups = useMemo(() => groupResourcesByKind(resources), [resources])
   const retention = useMemo(() => purgeRetentionReport(resources), [resources])
+  const storage = useMemo(() => siteArtifactStorage(versions), [versions])
+
+  const storageRow = (
+    <div
+      className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs"
+      data-testid="site-artifact-storage"
+    >
+      <span className="font-medium">{t("storage.title")}</span>
+      <span className="tabular-nums">
+        {t("storage.used", { size: formatBytesCompact(storage.bytes), count: storage.stored })}
+      </span>
+      {storage.collected > 0 ? (
+        <span className="text-muted-foreground">
+          {t("storage.collected", { count: storage.collected })}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {t("storage.description")}
+      </span>
+      <Button
+        type="button"
+        size="xs"
+        variant="outline"
+        disabled={isBusy("reclaim") || storage.stored === 0}
+        onClick={onReclaim}
+        data-testid="site-reclaim-artifacts"
+      >
+        {t("storage.reclaim")}
+      </Button>
+    </div>
+  )
 
   if (resources.length === 0) {
     return (
-      <Empty role="status" className="gap-3 px-4 py-12" data-testid="site-resources-empty">
-        <EmptyHeader>
-          <EmptyMedia variant="icon" className="bg-primary/10 text-primary">
-            <LayersIcon aria-hidden />
-          </EmptyMedia>
-          <EmptyTitle className="text-sm">{t("resources.title")}</EmptyTitle>
-          <EmptyDescription className="max-w-[22rem] text-xs">
-            {t("resources.empty")}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="space-y-3" data-testid="site-resources-tab-empty">
+        {storageRow}
+        <Empty role="status" className="gap-3 px-4 py-12" data-testid="site-resources-empty">
+          <EmptyHeader>
+            <EmptyMedia variant="icon" className="bg-primary/10 text-primary">
+              <LayersIcon aria-hidden />
+            </EmptyMedia>
+            <EmptyTitle className="text-sm">{t("resources.title")}</EmptyTitle>
+            <EmptyDescription className="max-w-[22rem] text-xs">
+              {t("resources.empty")}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     )
   }
 
   return (
     <div className="space-y-3" data-testid="site-resources-tab">
+      {storageRow}
+
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs">
         <span className="font-medium">{t("resources.retention.title")}</span>
         <span className="text-warning" data-testid="site-purge-scope-deleted">

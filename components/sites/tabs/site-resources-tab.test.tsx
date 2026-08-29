@@ -6,7 +6,7 @@ jest.mock("next-intl", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 
-import type { SiteResourceKind, SiteResourceRow } from "@/types/sites"
+import type { SiteResourceKind, SiteResourceRow, SiteVersionRow } from "@/types/sites"
 import { SiteResourcesTab } from "./site-resources-tab"
 
 function resource(
@@ -30,16 +30,19 @@ const blocked = { allowed: false, reason: "requires-desktop" as const, title: "D
 
 function renderTab(props: Partial<React.ComponentProps<typeof SiteResourcesTab>> = {}) {
   const onReconcile = jest.fn()
+  const onReclaim = jest.fn()
   render(
     <SiteResourcesTab
       resources={[resource({ id: "w1", kind: "worker", displayName: "docs" })]}
+      versions={[]}
       gate={allowed}
       isBusy={() => false}
       onReconcile={onReconcile}
+      onReclaim={onReclaim}
       {...props}
     />
   )
-  return { onReconcile }
+  return { onReconcile, onReclaim }
 }
 
 it("says so when nothing has been provisioned", () => {
@@ -130,4 +133,78 @@ it("reconciles provider state, gated", async () => {
   renderTab({ gate: blocked })
   const buttons = screen.getAllByTestId("site-reconcile")
   expect(buttons[buttons.length - 1]).toBeDisabled()
+})
+
+describe("local archive footprint", () => {
+  function version(overrides: Partial<SiteVersionRow> & Pick<SiteVersionRow, "id">) {
+    return {
+      siteId: "site_1",
+      sequence: 1,
+      status: "ready",
+      environmentRevisionId: "env_1",
+      source: { commitSha: "abc", dirty: false, lockfileDigest: "l", inputDigest: "i" },
+      build: {
+        command: "[]",
+        runtime: "node@24",
+        packageManager: "pnpm@10",
+        compatibilityDate: "2026-01-01",
+        compatibilityFlags: [],
+        routes: [],
+        bindings: [],
+      },
+      artifactDigest: `d-${overrides.id}`,
+      artifactSize: 1_048_576,
+      artifactFileCount: 4,
+      createdAt: 1,
+      ...overrides,
+    } as SiteVersionRow
+  }
+
+  it("reports what the surviving archives occupy on this machine", () => {
+    // ADR-0084 requires artifact retention; this is the number that makes it
+    // legible before the sweep runs.
+    renderTab({ versions: [version({ id: "v1" }), version({ id: "v2", sequence: 2 })] })
+    expect(screen.getByTestId("site-artifact-storage")).toHaveTextContent(
+      'storage.used:{"size":"2.0MB","count":2}'
+    )
+  })
+
+  it("counts a shared digest once — artifacts are content-addressed", () => {
+    renderTab({
+      versions: [
+        version({ id: "v1", artifactDigest: "same" }),
+        version({ id: "v2", sequence: 2, artifactDigest: "same" }),
+      ],
+    })
+    expect(screen.getByTestId("site-artifact-storage")).toHaveTextContent(
+      'storage.used:{"size":"1.0MB","count":2}'
+    )
+  })
+
+  it("separates archives retention already took", () => {
+    renderTab({
+      versions: [version({ id: "v1" }), version({ id: "v2", sequence: 2, artifactCollectedAt: 9 })],
+    })
+    const row = screen.getByTestId("site-artifact-storage")
+    expect(row).toHaveTextContent('storage.used:{"size":"1.0MB","count":1}')
+    expect(row).toHaveTextContent('storage.collected:{"count":1}')
+  })
+
+  it("offers a manual sweep, and refuses one when nothing is stored", async () => {
+    const user = userEvent.setup()
+    const { onReclaim } = renderTab({ versions: [version({ id: "v1" })] })
+    await user.click(screen.getByTestId("site-reclaim-artifacts"))
+    expect(onReclaim).toHaveBeenCalled()
+  })
+
+  it("disables the sweep when this Site has no archives at all", () => {
+    renderTab({ versions: [] })
+    expect(screen.getByTestId("site-reclaim-artifacts")).toBeDisabled()
+  })
+
+  it("shows the footprint even before anything is provisioned", () => {
+    renderTab({ resources: [], versions: [version({ id: "v1" })] })
+    expect(screen.getByTestId("site-artifact-storage")).toBeInTheDocument()
+    expect(screen.getByTestId("site-resources-empty")).toBeInTheDocument()
+  })
 })

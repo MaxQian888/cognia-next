@@ -35921,6 +35921,15 @@
         "title": "Publish"
       }
     },
+    "storage": {
+      "collected": "{count, plural, =1 {# pruned} other {# pruned}}",
+      "description": "Build outputs are kept on this machine. Retention preserves anything a deployment, an unfinished operation, or the rollback window needs.",
+      "nothingToReclaim": "Nothing to reclaim — every archive is still referenced",
+      "reclaim": "Reclaim space",
+      "reclaimed": "Freed {size} from {count, plural, =1 {# archive} other {# archives}}",
+      "title": "Local archives",
+      "used": "{size} across {count, plural, =1 {# build} other {# builds}}"
+    },
     "subtitle": "Build, preview, and publish from Cognia",
     "summary": {
       "live": "{count} live",
@@ -35937,6 +35946,7 @@
     "title": "Sites",
     "versions": {
       "artifact": "{size} · {count, plural, one {# file} other {# files}}",
+      "artifactCollected": "Archive pruned by retention — rebuild to publish this again",
       "bindings": "Bindings",
       "deploymentFailure": "Deployment failure",
       "description": "Every immutable version, including builds that failed.",

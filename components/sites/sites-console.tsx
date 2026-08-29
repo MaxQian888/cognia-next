@@ -343,9 +343,11 @@ export function SitesConsole() {
               <div className="mx-auto max-w-5xl p-4">
                 <SiteResourcesTab
                   resources={live.resources}
+                  versions={live.versions}
                   gate={providerGate}
                   isBusy={isBusy}
                   onReconcile={() => publish.reconcile(setObservabilityResult)}
+                  onReclaim={publish.reclaimArtifacts}
                 />
               </div>
             </TabsContent>

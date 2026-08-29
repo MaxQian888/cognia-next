@@ -122,6 +122,7 @@ describe("pruneRetainedTables", () => {
       { id: "workSubmissions", removed: 0 },
       { id: "ocrResults", removed: 0 },
       { id: "workflowAppData", removed: 0 },
+      { id: "siteArtifacts", removed: 0 },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
   })

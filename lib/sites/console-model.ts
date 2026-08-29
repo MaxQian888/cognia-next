@@ -361,6 +361,43 @@ export function groupResourcesByKind(resources: readonly SiteResourceRow[]): Sit
   return groups
 }
 
+export interface SiteArtifactStorage {
+  /** Bytes this Site's surviving archives occupy in IndexedDB. */
+  bytes: number
+  /** Versions that still hold their archive. */
+  stored: number
+  /** Versions whose archive retention already took. */
+  collected: number
+}
+
+/**
+ * Local archive footprint, from the summary denormalized onto each version.
+ *
+ * ADR-0084 requires artifact retention; this is the number that makes it
+ * legible before the sweep runs. Deliberately derived from `siteVersions` — the
+ * whole point of the denormalized size is that nothing has to open
+ * `siteArtifacts` to answer this.
+ */
+export function siteArtifactStorage(versions: readonly SiteVersionRow[]): SiteArtifactStorage {
+  let bytes = 0
+  let stored = 0
+  let collected = 0
+  const counted = new Set<string>()
+  for (const version of versions) {
+    if (!version.artifactDigest) continue
+    if (version.artifactCollectedAt !== undefined) {
+      collected += 1
+      continue
+    }
+    stored += 1
+    // Content-addressed: two versions with identical output share one row.
+    if (counted.has(version.artifactDigest)) continue
+    counted.add(version.artifactDigest)
+    bytes += version.artifactSize ?? 0
+  }
+  return { bytes, stored, collected }
+}
+
 export interface SitePurgeRetentionReport {
   /** Managed resources purge will actually delete at the provider. */
   purgeable: SiteResourceRow[]

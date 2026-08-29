@@ -11,6 +11,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 
 import { cancelSiteOperation, getSiteOperation } from "@/lib/db/sites"
+import {
+  SITE_ARTIFACT_GC_DEFAULTS,
+  collectUnreferencedSiteArtifacts,
+} from "@/lib/sites/artifact-gc"
 import { uploadSiteVersion } from "@/lib/sites/publish-version"
 import { buildAndSaveSiteVersion } from "@/lib/sites/build-version"
 import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
@@ -76,6 +80,8 @@ export interface SitePublishActions {
   takeDown: () => void
   restore: () => void
   reconcile: (onResult: (value: unknown) => void) => void
+  /** Run artifact retention now instead of waiting for the daily sweep. */
+  reclaimArtifacts: () => void
   refreshOperation: (operationId: string) => void
   cancelOperation: (operationId: string) => void
 }
@@ -245,10 +251,27 @@ export function useSitePublishActions({
 
   const deploy = useCallback(
     (version: SiteVersionRow) => {
-      void run(`deploy:${version.id}`, () => service().deployVersion(requireSite().id, version.id))
+      void run(`deploy:${version.id}`, async () => {
+        const deployment = await service().deployVersion(requireSite().id, version.id)
+        // A deploy is what supersedes an older version, so it is the moment the
+        // rollback window moves and something can genuinely be released. Never
+        // fatal: the daily sweeper covers a failure here.
+        await collectUnreferencedSiteArtifacts({
+          now: Date.now(),
+          ...SITE_ARTIFACT_GC_DEFAULTS,
+        }).catch(() => undefined)
+        return deployment
+      })
     },
     [run, service, requireSite]
   )
+
+  const reclaimArtifacts = useCallback(() => {
+    void run("reclaim", async () => {
+      requireSite()
+      return collectUnreferencedSiteArtifacts({ now: Date.now(), ...SITE_ARTIFACT_GC_DEFAULTS })
+    })
+  }, [run, requireSite])
 
   const addDomain = useCallback(
     (hostname: string) => {
@@ -334,6 +357,7 @@ export function useSitePublishActions({
     takeDown,
     restore,
     reconcile,
+    reclaimArtifacts,
     refreshOperation,
     cancelOperation,
   }

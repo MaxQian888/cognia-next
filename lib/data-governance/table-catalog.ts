@@ -300,6 +300,7 @@ export const CORE_TABLE_NAMES = [
   "templateMigrationJournal",
   "templatePackages",
   "terminalHistory",
+  "threadHandoffTickets",
   "toolRoutes",
   "traceAnnotations",
   "transportProfiles",
@@ -690,6 +691,12 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
 
 const LARGE_TABLES = new Set<CoreTableName>([
   "a2uiEventHistory",
+  // Complete build outputs as `Uint8Array` — the single largest row shape in
+  // the app. Bounded by `lib/sites/artifact-gc.ts`, not by row count.
+  "siteArtifacts",
+  // Several rows per operation, several operations per build, kept for the
+  // life of the Site.
+  "siteOperationEvents",
   "agentTeamTrajectory",
   "automationAuditLog",
   "browserRecordings",
@@ -782,6 +789,21 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  siteArtifacts: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "siteArtifacts",
+    reason:
+      "ADR-0084 requires artifact retention to preserve every version referenced by a deployment or an unfinished operation. The central sweeper prunes archives outside that set, outside the per-Site rollback window, and older than the window.",
+  },
+  siteOperationEvents: {
+    mode: "cap",
+    maxRows: 20_000,
+    enforcement: "domain",
+    reason:
+      "The durable operation journal. Trimmed with its owning Site by `deleteSiteProjectMetadata`; the cap bounds a profile that never deletes a Site.",
+  },
   connectorAudit: {
     mode: "ttl",
     days: 30,
@@ -847,6 +869,18 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     enforcement: "central",
     executorId: "ocrResults",
     reason: "The storage retention sweeper prunes cached OCR output through the createdAt index.",
+  },
+  // The expiry sweep (`sweepExpiredThreadHandoffTickets`) RETIRES a stranded
+  // ticket — it rewrites `state` to `aborted` and appends to `history`. It
+  // never deletes, and nothing else does either, so the journal is permanent
+  // by construction. Declared explicitly because the inherited default says
+  // "retained until an explicit domain delete" and this table has no such
+  // delete to wait for.
+  threadHandoffTickets: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Two-role cross-host handoff journal (ADR-0103). Expired tickets are retired in place by the sweep, not removed; rows leave only with the owning account database.",
   },
   hostDispatchQueue: {
     mode: "ttl",

@@ -2,6 +2,7 @@ import "fake-indexeddb/auto"
 
 import { CogniaDB } from "@/lib/db/schema"
 import {
+  COMPANION_SYNC_PROTOCOL_TABLE_NAMES,
   COMPANION_SYNC_TABLES,
   CORE_TABLE_NAMES,
   DATA_TABLE_CATALOG,
@@ -19,7 +20,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(316)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(317)
     db.close()
   })
 
@@ -80,6 +81,7 @@ describe("DataTableCatalog", () => {
       "workSubmissions",
       "ocrResults",
       "workflowAppData",
+      "siteArtifacts",
     ])
     expect(policyForTable("ocrResults")?.retentionPolicy).toMatchObject({
       mode: "ttl",
@@ -203,5 +205,43 @@ describe("DataTableCatalog", () => {
       cleanupPolicy: "protected",
     })
     expect(COMPANION_SYNC_TABLES.has("issueRuns")).toBe(false)
+  })
+})
+
+describe("thread-handoff journal", () => {
+  it("is device-local, out of companion sync, and honest that nothing deletes it", () => {
+    // The sweep retires an expired ticket in place (state -> aborted) rather
+    // than removing it, and no delete path exists. A `ttl` or `cap` claim here
+    // would describe a sweeper this table does not have.
+    expect(policyForTable("threadHandoffTickets")).toMatchObject({
+      role: "authoritative",
+      backupPolicy: { mode: "device-local" },
+      syncPolicy: { mode: "none" },
+      retentionPolicy: { mode: "permanent", enforcement: "explicit-delete" },
+      cleanupPolicy: "protected",
+    })
+    expect(policyForTable("threadHandoffTickets").retentionPolicy.reason).toMatch(
+      /retired in place/
+    )
+    expect(COMPANION_SYNC_TABLES.has("threadHandoffTickets")).toBe(false)
+  })
+})
+
+describe("the sync_pull request contract mirrors this catalogue", () => {
+  // `protocol/companion-request-schemas.json` is hand-written and gates the
+  // request before it ever reaches the Host, so a name missing from its enum
+  // is a 422 for a table the Host serves perfectly well — which is how
+  // `plans`, `connectorDrafts` and `outboundQueue` became unpullable while
+  // `sync_list_tables` kept advertising all 25.
+  it("allows exactly the tables this catalogue declares syncable", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const catalog = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol/companion-request-schemas.json"), "utf8")
+    ) as {
+      commands: Record<string, { properties: { table: { enum: string[] } } }>
+    }
+    const declared = catalog.commands.sync_pull.properties.table.enum
+    expect([...declared].sort()).toEqual([...COMPANION_SYNC_PROTOCOL_TABLE_NAMES].sort())
   })
 })

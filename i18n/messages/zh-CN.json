@@ -35921,6 +35921,15 @@
         "title": "发布"
       }
     },
+    "storage": {
+      "collected": "已回收 {count} 个",
+      "description": "构建产物保存在本机。保留策略会保住部署中、未完成操作涉及、以及回滚窗口内的所有产物。",
+      "nothingToReclaim": "无可回收内容——所有产物仍被引用",
+      "reclaim": "回收空间",
+      "reclaimed": "已从 {count} 个产物中释放 {size}",
+      "title": "本机产物",
+      "used": "{size}，共 {count} 个构建"
+    },
     "subtitle": "在 Cognia 中构建、预览与发布",
     "summary": {
       "live": "{count} 个运行中",
@@ -35937,6 +35946,7 @@
     "title": "站点",
     "versions": {
       "artifact": "{size} · {count} 个文件",
+      "artifactCollected": "产物已被保留策略回收——需要重新构建才能再次发布",
       "bindings": "资源绑定",
       "deploymentFailure": "部署失败原因",
       "description": "全部不可变版本，包含构建失败的版本。",
