@@ -22,7 +22,7 @@ path = "src/bin/bootstrap.rs"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 clap = { version = "4", features = ["derive", "env"] }
 cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["grants", "oidc"] }
 deadpool-postgres = "0.14"
@@ -31,6 +31,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }

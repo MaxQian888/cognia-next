@@ -55,6 +55,9 @@
 
 pub mod api;
 pub mod auth;
+pub mod chat;
+pub mod chat_api;
+pub mod chat_store;
 pub mod model;
 pub mod store;
 

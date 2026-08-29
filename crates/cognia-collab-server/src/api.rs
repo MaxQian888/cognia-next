@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
+use crate::chat_api::ChatHub;
+use crate::chat_store::{ChatStore, InMemoryChatStore};
 use crate::model::{
     ActorError, ActorKind, ArtifactError, CollabActor, Issue, IssueEvent, IssuePriority,
     IssueStatus, Plan, PlanStatus, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind,
@@ -45,6 +47,8 @@ const LOGTO_PROVIDER: &str = "logto";
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn Store>,
+    pub chat_store: Arc<dyn ChatStore>,
+    pub chat_hub: Arc<ChatHub>,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -56,6 +60,8 @@ impl AppState {
     pub fn new(store: Arc<dyn Store>, signer: GrantSigner, oidc: Arc<dyn Authenticator>) -> Self {
         Self {
             store,
+            chat_store: Arc::new(InMemoryChatStore::new()),
+            chat_hub: Arc::new(ChatHub::default()),
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -65,6 +71,11 @@ impl AppState {
                     .unwrap_or_default()
             }),
         }
+    }
+
+    pub fn with_chat_store(mut self, chat_store: Arc<dyn ChatStore>) -> Self {
+        self.chat_store = chat_store;
+        self
     }
 }
 
@@ -94,6 +105,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/orgs/{org_id}/runs", get(list_runs).post(create_run))
         .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run))
+        .merge(crate::chat_api::routes())
         .with_state(state)
 }
 
@@ -102,14 +114,14 @@ pub fn router(state: AppState) -> Router {
 struct HealthResponse {
     status: &'static str,
     collab_protocol_version: u32,
-    features: [&'static str; 3],
+    features: [&'static str; 4],
 }
 
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
-        collab_protocol_version: 1,
-        features: ["issue-writes", "plan-writes", "run-writes"],
+        collab_protocol_version: 2,
+        features: ["issue-writes", "plan-writes", "run-writes", "shared-chat"],
     })
 }
 

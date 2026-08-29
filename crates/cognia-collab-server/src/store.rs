@@ -1173,6 +1173,9 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0004_write_concurrency.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0005_shared_chat.sql"))
+            .await?;
         Ok(())
     }
 
@@ -1295,7 +1298,7 @@ impl PgStore {
     /// tenant's scope into the next request — and because the bind and the
     /// query share a transaction, there is no window in which a statement runs
     /// unscoped.
-    async fn scoped<'a>(
+    pub(crate) async fn scoped<'a>(
         &self,
         client: &'a mut deadpool_postgres::Client,
         org_id: &str,
@@ -1311,7 +1314,7 @@ impl PgStore {
         Ok(transaction)
     }
 
-    async fn client(&self) -> Result<deadpool_postgres::Client, StoreError> {
+    pub(crate) async fn client(&self) -> Result<deadpool_postgres::Client, StoreError> {
         self.pool
             .get()
             .await

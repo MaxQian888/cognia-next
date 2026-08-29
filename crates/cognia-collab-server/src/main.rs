@@ -62,8 +62,8 @@ async fn main() -> anyhow::Result<()> {
         jwks_ttl: std::time::Duration::from_secs(args.jwks_ttl_seconds),
     })?;
 
-    let store = PgStore::connect(&args.database_url, args.db_max_connections).await?;
-    let state = AppState::new(Arc::new(store), signer, Arc::new(oidc));
+    let store = Arc::new(PgStore::connect(&args.database_url, args.db_max_connections).await?);
+    let state = AppState::new(store.clone(), signer, Arc::new(oidc)).with_chat_store(store);
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     tracing::info!(bind = %args.bind, "collaboration plane listening");
