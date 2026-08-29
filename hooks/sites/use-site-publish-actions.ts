@@ -21,7 +21,12 @@ import { startSitePreview, stopSitePreview } from "@/lib/sites/preview"
 import type { WranglerDetection } from "@/lib/sites/wrangler-detect"
 import { latestEnvironmentRevision } from "@/lib/sites/console-model"
 import type { SiteScaffoldFile } from "@/lib/sites/manifest-scaffold"
-import type { SiteProjectRow, SiteVersionRow, SiteVisitorPolicy } from "@/types/sites"
+import type {
+  SiteProjectRow,
+  SiteSecretEdit,
+  SiteVersionRow,
+  SiteVisitorPolicy,
+} from "@/types/sites"
 import {
   deriveStepStates,
   type SiteLiveData,
@@ -65,7 +70,7 @@ export interface SitePublishActions {
   saveManifest: (text: string, extraFiles?: readonly SiteScaffoldFile[]) => void
   saveEnvironment: (input: {
     variables: Record<string, string>
-    secrets: Record<string, string>
+    secrets: readonly SiteSecretEdit[]
   }) => void
   provision: () => void
   build: (inputs: SiteBuildInputs) => void
@@ -178,7 +183,7 @@ export function useSitePublishActions({
   )
 
   const saveEnvironment = useCallback(
-    (input: { variables: Record<string, string>; secrets: Record<string, string> }) => {
+    (input: { variables: Record<string, string>; secrets: readonly SiteSecretEdit[] }) => {
       void run("environment", () =>
         service().saveEnvironment({ siteId: requireSite().id, ...input })
       )

@@ -64,7 +64,13 @@ function renderTab(props: Partial<React.ComponentProps<typeof SiteEnvironmentTab
   const onSave = jest.fn()
   render(
     <SiteEnvironmentTab
-      environments={[revision({ id: "e1", variables: { API_ORIGIN: "https://api.example.com" } })]}
+      environments={[
+        revision({
+          id: "e1",
+          variables: { API_ORIGIN: "https://api.example.com" },
+          secretRefs: [{ key: "API_TOKEN", credentialId: "c1", revision: "r1" }],
+        }),
+      ]}
       gate={allowed}
       isBusy={() => false}
       onSave={onSave}
@@ -123,22 +129,87 @@ it("shows what the save would change before writing it", async () => {
   const diff = screen.getByTestId("site-environment-diff")
   expect(diff).toHaveTextContent('environment.diff.added:{"count":1}')
   expect(diff).toHaveTextContent('environment.diff.removed:{"count":1}')
-  expect(screen.getByText("environment.overwriteWarning")).toBeInTheDocument()
+  // The secret half of the diff answers the question the old warning could
+  // only gesture at: which of my secrets survive this save.
+  expect(diff).toHaveTextContent('environment.secretDiff.kept:{"count":1}')
+  expect(diff).toHaveTextContent('environment.secretDiff.removed:{"count":0}')
 })
 
-it("saves the edited variables and secrets", async () => {
+it("keeps every stored secret when only a variable changes", async () => {
+  // The bug this replaces: the secrets grid opened empty, `saveEnvironment`
+  // rebuilt the reference list from it, and a variable edit silently deleted
+  // every configured secret from the new revision.
   const user = userEvent.setup()
   const { onSave } = renderTab()
   await user.click(screen.getByTestId("site-environment-edit"))
-  // Paste rather than type: the harness re-derives rows on every keystroke, so
-  // character-by-character entry through a `key=value` textarea is unstable.
-  await user.click(screen.getByTestId("kv-input-environment.secrets"))
-  await user.paste("API_TOKEN=abc")
   await user.click(screen.getByTestId("site-environment-save"))
 
   expect(onSave).toHaveBeenCalledWith({
     variables: { API_ORIGIN: "https://api.example.com" },
-    secrets: { API_TOKEN: "abc" },
+    secrets: [{ key: "API_TOKEN", action: "keep" }],
+  })
+})
+
+it("replaces one secret without touching the others", async () => {
+  const user = userEvent.setup()
+  const { onSave } = renderTab({
+    environments: [
+      revision({
+        id: "e1",
+        variables: { API_ORIGIN: "https://api.example.com" },
+        secretRefs: [
+          { key: "API_TOKEN", credentialId: "c1", revision: "r1" },
+          { key: "DB_PASSWORD", credentialId: "c2", revision: "r2" },
+        ],
+      }),
+    ],
+  })
+  await user.click(screen.getByTestId("site-environment-edit"))
+  await user.click(screen.getByTestId("site-secret-replace-API_TOKEN"))
+  await user.type(screen.getByLabelText('environment.secretAction.set:{"key":"API_TOKEN"}'), "new")
+  await user.click(screen.getByTestId("site-environment-save"))
+
+  expect(onSave).toHaveBeenCalledWith({
+    variables: { API_ORIGIN: "https://api.example.com" },
+    secrets: [
+      { key: "API_TOKEN", action: "set", value: "new" },
+      { key: "DB_PASSWORD", action: "keep" },
+    ],
+  })
+})
+
+it("removes a secret only when the user says so, and can undo it", async () => {
+  const user = userEvent.setup()
+  const { onSave } = renderTab()
+  await user.click(screen.getByTestId("site-environment-edit"))
+  await user.click(screen.getByTestId("site-secret-remove-API_TOKEN"))
+  expect(screen.getByTestId("site-environment-diff")).toHaveTextContent(
+    'environment.secretDiff.removed:{"count":1}'
+  )
+
+  await user.click(screen.getByTestId("site-secret-keep-API_TOKEN"))
+  await user.click(screen.getByTestId("site-environment-save"))
+  expect(onSave).toHaveBeenCalledWith({
+    variables: { API_ORIGIN: "https://api.example.com" },
+    secrets: [{ key: "API_TOKEN", action: "keep" }],
+  })
+})
+
+it("adds a new secret", async () => {
+  const user = userEvent.setup()
+  const { onSave } = renderTab()
+  await user.click(screen.getByTestId("site-environment-edit"))
+  await user.type(screen.getByLabelText("environment.secretAction.newKey"), "NEW_TOKEN")
+  await user.click(screen.getByTestId("site-secret-add"))
+  await user.type(screen.getByLabelText('environment.secretAction.set:{"key":"NEW_TOKEN"}'), "v")
+  await user.click(screen.getByTestId("site-environment-save"))
+
+  expect(onSave).toHaveBeenCalledWith({
+    variables: { API_ORIGIN: "https://api.example.com" },
+    secrets: [
+      { key: "API_TOKEN", action: "keep" },
+      { key: "NEW_TOKEN", action: "set", value: "v" },
+    ],
   })
 })
 

@@ -149,10 +149,25 @@
     "history": "Revision history",
     "noRevision": "No environment revision yet.",
     "noSecretRefs": "No secrets in this revision.",
-    "overwriteWarning": "Saving replaces the whole variable set; anything missing here is removed.",
     "revision": "Revision",
     "revisionLabel": "Revision {sequence}",
     "savedAt": "Saved {when}",
+    "secretAction": {
+      "add": "Add secret",
+      "keep": "Keep",
+      "keptHint": "kept from the current revision",
+      "newKey": "New secret key",
+      "remove": "Remove",
+      "removedHint": "will be removed",
+      "replace": "Replace",
+      "set": "New value for {key}"
+    },
+    "secretDiff": {
+      "added": "{count} added",
+      "kept": "{count} kept",
+      "removed": "{count} removed",
+      "replaced": "{count} replaced"
+    },
     "secretRefs": "Secret references",
     "secretValueHidden": "Values stay in this host's OS keyring and are never shown.",
     "secrets": "Secrets",

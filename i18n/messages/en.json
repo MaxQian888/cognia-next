@@ -3413,6 +3413,12 @@
     "duplicate": "Duplicate",
     "editInCanvas": "Edit in Canvas",
     "exitFullscreen": "Exit Fullscreen",
+    "exportAs": {
+      "html": "Export as HTML",
+      "pdf": "Export as PDF",
+      "png": "Export as PNG",
+      "svg": "Export as SVG"
+    },
     "filterByRuntime": "Filter by runtime",
     "filterByType": "Filter by type",
     "fullscreen": "Fullscreen",
@@ -3473,13 +3479,17 @@
       "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",
       "selectionChipFileLabel": "{path} · whole file",
       "selectionChipLabel": "{title} · lines {start}-{end}",
+      "selectionChipMessageSpanLabel": "{count, plural, one {# message} other {# messages}} from “{title}”",
       "selectionChipPluginLabel": "{source}: {title}",
       "selectionChipWebLabel": "{title} · page",
       "selectionChipWholeLabel": "{title} · whole artifact",
       "selectionCommentPlaceholder": "What should change here?",
+      "selectionSpanUnavailable": "That message is no longer available, so the reference was left as it was.",
       "staleBanner": "The artifact changed since this proposal was generated. Re-diff or discard.",
       "title": "Review changes",
-      "viewChanges": "View changes"
+      "viewChanges": "View changes",
+      "widenSelectionAria": "Include more of the conversation around this message from “{title}”",
+      "widenSelectionHint": "Include one more turn on each side"
     },
     "runnable": "Runnable",
     "runtimeStates": {
@@ -4468,9 +4478,12 @@
       "copyFailed": "Couldn't copy to clipboard",
       "downloaded": "Downloaded {filename}",
       "formatHtml": "Download as HTML",
+      "formatPdf": "PDF",
+      "formatPng": "PNG image",
       "formatRaw": "Download source",
       "formatSvg": "Download as SVG",
-      "label": "Export document"
+      "label": "Export document",
+      "renderFailed": "Couldn't render the document"
     },
     "filtered": "filtered",
     "filteredSuffix": "(filtered)",
@@ -4555,6 +4568,10 @@
       "suggestionsEmpty": "No suggestions yet. Use the Suggest action to generate improvements."
     },
     "participants": "Participants",
+    "performanceMode": {
+      "large": "Large document ({lines, number} lines) — minimap, folding and occurrence highlighting are off to keep typing responsive.",
+      "veryLarge": "Very large document ({lines, number} lines) — minimap, folding, sticky scroll and word wrap are off to keep typing responsive."
+    },
     "pin": "Pin",
     "pinned": "Pinned",
     "pressKeys": "Press keys…",
@@ -4885,6 +4902,7 @@
       "copyAria": "Copy artifact content",
       "download": "Download",
       "downloadAria": "Download artifact",
+      "downloadFailed": "Couldn't save the artifact",
       "expand": "Expand preview",
       "openInCanvas": "Open in canvas",
       "openInCanvasAria": "Open artifact in canvas"
@@ -4954,7 +4972,9 @@
     "canvasInline": {
       "collapsePreview": "Collapse preview",
       "expandPreview": "Expand preview",
-      "openInCanvas": "Open in canvas"
+      "openInCanvas": "Open in canvas",
+      "subtitle": "Canvas · {type}",
+      "subtitleWithLanguage": "Canvas · {type} · {language}"
     },
     "characterMissing": {
       "action": {
@@ -5335,6 +5355,7 @@
           "artifact": "artifact",
           "issue": "issue",
           "memory": "memory",
+          "message": "message",
           "plan": "plan",
           "session": "conversation"
         },
@@ -5371,6 +5392,22 @@
         "searchPlaceholder": "Search commands…",
         "searching": "Searching…",
         "searchingShort": "searching…",
+        "shell": {
+          "argumentKind": "argument",
+          "builtinKind": "builtin",
+          "commandKind": "command",
+          "commandNotFound": "Command not found: {name}",
+          "diagnosticsLabel": "Shell command problems",
+          "directoryKind": "directory",
+          "incompleteSyntax": "Unclosed quote — the command is incomplete.",
+          "noHost": "Connect a Host to inspect files or run commands.",
+          "noMatches": "No completions for “{query}”.",
+          "optionKind": "option",
+          "pathKind": "file",
+          "runsUnder": "Runs under {shell}",
+          "shellUnavailable": "{shell} isn’t available on the connected Host — commands can’t run.",
+          "unsupportedShell": "Running commands with {shell} isn’t supported."
+        },
         "skillTitle": "Enable a skill",
         "slashTitle": "Slash command",
         "suggestionCount": "{count, plural, one {# option} other {# options}}",
@@ -5433,10 +5470,14 @@
       "sendSteerTooltip": "Send as a follow-up to the running turn",
       "sendTooltip": "Send",
       "shell": {
+        "consentRequired": "`$ {cmd}` didn’t run — the Host needs someone to approve remote command execution on it first.",
         "failed": "`$ {cmd}` failed: {error}",
         "interactiveRoutedToTerminal": "`$ {cmd}` needs a terminal — opened it in the integrated terminal.",
         "needsCwd": "Set a working directory before running shell commands.",
-        "runningHint": "Running `$ {cmd}` in `{cwd}`…"
+        "noHost": "`$ {cmd}` didn’t run — connect a Host to run shell commands.",
+        "runningHint": "Running `$ {cmd}` in `{cwd}`…",
+        "shellUnavailable": "`$ {cmd}` didn’t run — {shell} isn’t available on the connected Host.",
+        "unsupportedShell": "`$ {cmd}` didn’t run — running commands with {shell} isn’t supported."
       },
       "skills": {
         "enabled": "Enabled skill \"{name}\"."
@@ -9144,6 +9185,7 @@
       "checkCommandAndArgs": "Check the agent's command and startup arguments.",
       "checkDiagnosticsAndRetry": "Check the run diagnostics, then retry with a narrower request.",
       "completeSetupThenRetry": "Finish this agent's setup, then retry the connection.",
+      "contactAdministrator": "The limit is set by whoever deployed this Codex; ask them to widen it.",
       "createNewSession": "Start a new session when resume and fork aren't available.",
       "inspectHealthEndpoint": "Check the agent's health endpoint and logs.",
       "reconnectAndRetry": "Reconnect, then retry.",
@@ -9152,6 +9194,7 @@
       "retryAfterReconnect": "Retry after reconnecting.",
       "selectLocalSurface": "Pick a locally executable surface to connect to directly.",
       "switchToAcp": "Switch the agent's protocol to ACP.",
+      "useAllowedSandboxOrApproval": "Choose a sandbox mode or approval policy this Codex's managed configuration permits.",
       "useDesktopRuntime": "Run Cognia as the desktop app — stdio transport needs it.",
       "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
       "useSupportedOperations": "Stick to the operations this endpoint supports."
@@ -10829,9 +10872,11 @@
         "account": "Account",
         "managedPolicy": "Managed policy",
         "managedPolicyApproval": "approval: {value}",
+        "managedPolicyForbidsAll": "This Codex's managed configuration permits nothing on the axes Cognia sends, so every request is refused before it leaves.",
         "managedPolicyNone": "This Codex declares no managed limits.",
         "managedPolicyProfile": "profile: {value}",
         "managedPolicySandbox": "sandbox: {value}",
+        "managedPolicyUnread": "The managed limits have not been read yet. Refresh to ask again.",
         "managedPolicyUnsupported": "This Codex has no managed-policy surface, so no limits can be read. That is not the same as having none.",
         "mcpServers": "MCP servers",
         "noMcpServers": "No MCP servers configured.",
@@ -16799,7 +16844,8 @@
         "body": {
           "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
           "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
-          "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help."
+          "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
+          "vaultLockedPending": "Your local account is locked, so this browser cannot store the device key yet. Nothing has been sent — the invitation in the field is still valid. Unlock your account, then submit it again."
         },
         "copyDiagnostics": "Copy diagnostics",
         "diagnosticsCopied": "Diagnostics copied",
@@ -16814,7 +16860,7 @@
           "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
           "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
           "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
-          "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
+          "unlockAccount": "Sign in to your local account with its password, then pair again.",
           "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
           "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin."
         },
@@ -16870,6 +16916,8 @@
         "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
         "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
         "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
+        "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
+        "403Spent": "The Host refused the invitation itself — it has expired or was already redeemed. Issue a new one; re-sending this string cannot work.",
         "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
         "generic": "Pairing failed (HTTP {status})."
       },
@@ -35628,8 +35676,8 @@
       "noStdout": "Nothing was written to stdout.",
       "open": "Build log",
       "phase": {
-        "install": "Install",
         "build": "Build",
+        "install": "Install",
         "package": "Package"
       },
       "stderr": "stderr",
@@ -35690,10 +35738,25 @@
       "history": "Revision history",
       "noRevision": "No environment revision yet.",
       "noSecretRefs": "No secrets in this revision.",
-      "overwriteWarning": "Saving replaces the whole variable set; anything missing here is removed.",
       "revision": "Revision",
       "revisionLabel": "Revision {sequence}",
       "savedAt": "Saved {when}",
+      "secretAction": {
+        "add": "Add secret",
+        "keep": "Keep",
+        "keptHint": "kept from the current revision",
+        "newKey": "New secret key",
+        "remove": "Remove",
+        "removedHint": "will be removed",
+        "replace": "Replace",
+        "set": "New value for {key}"
+      },
+      "secretDiff": {
+        "added": "{count} added",
+        "kept": "{count} kept",
+        "removed": "{count} removed",
+        "replaced": "{count} replaced"
+      },
       "secretRefs": "Secret references",
       "secretValueHidden": "Values stay in this host's OS keyring and are never shown.",
       "secrets": "Secrets",

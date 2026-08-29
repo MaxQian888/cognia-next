@@ -17,6 +17,7 @@ import {
   getSiteResource,
   getSiteVersion,
   listSiteDeployments,
+  listSiteEnvironmentRevisions,
   listSiteOperations,
   listSiteResources,
   markSiteDeploymentActive,
@@ -34,6 +35,7 @@ import { createLocalKeyringStore, type KeyringStore } from "@/lib/credentials/ke
 import { sha256Hex } from "@/lib/share/hash"
 import { writeTextFile } from "@/lib/file/file-operations"
 import { assertSiteAuthoringCapability } from "@/lib/sites/authoring-policy"
+import { latestEnvironmentRevision } from "@/lib/sites/console-model"
 import type { SiteHostingManifest } from "@/lib/sites/manifest"
 import type {
   SiteEnvironmentRevisionRow,
@@ -41,6 +43,8 @@ import type {
   SiteProjectRow,
   SiteResourceKind,
   SiteResourceRow,
+  SiteSecretEdit,
+  SiteSecretReference,
   SiteVisitorPolicy,
 } from "@/types/sites"
 import {
@@ -282,38 +286,63 @@ export class CloudflareSitesService {
     await this.deps.keyring.save(providerTokenKey(site.id), token)
   }
 
+  /**
+   * Write a new environment revision.
+   *
+   * `secrets` is a list of edits, not a value map, because the editor cannot
+   * seed itself from the keyring: a secret's value is unreadable by design. The
+   * previous shape took only newly typed values, so saving a variable change
+   * dropped every configured secret from the new revision and the next publish
+   * pushed a worker without them. A `keep` carries the previous reference
+   * forward verbatim — `credentialId` is revision-scoped and old entries are
+   * never deleted, so both revisions stay resolvable.
+   */
   async saveEnvironment(input: {
     siteId: string
     variables: Record<string, string>
-    secrets: Record<string, string>
+    secrets: readonly SiteSecretEdit[]
   }): Promise<SiteEnvironmentRevisionRow> {
     const site = await requiredSite(input.siteId)
     assertSiteAuthoringCapability(site.authoringPolicy, this.deps.actorAccountId, "edit")
+    const edits = input.secrets.filter((edit) => edit.action !== "remove")
     const variableKeys = Object.keys(input.variables)
-    const secretKeys = Object.keys(input.secrets)
+    const secretKeys = edits.map((edit) => edit.key)
     const keys = [...variableKeys, ...secretKeys]
     if (new Set(keys).size !== keys.length)
       throw new Error("environment key cannot be both plain and secret")
     if (keys.some((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) {
       throw new Error("environment keys must be JavaScript identifiers")
     }
+
+    const previous = latestEnvironmentRevision(await listSiteEnvironmentRevisions(site.id))
+    const carried = new Map(previous?.secretRefs.map((ref) => [ref.key, ref]) ?? [])
     const revisionId = this.deps.newId("siteenv")
-    const secretRefs = secretKeys.sort().map((key) => ({
-      key,
-      credentialId: `environment:${site.id}:${revisionId}:${key}`,
-      revision: this.deps.newId("secret"),
-    }))
+
+    const secretRefs: SiteSecretReference[] = []
+    const minted: Array<{ credentialId: string; value: string }> = []
+    for (const edit of [...edits].sort((left, right) => left.key.localeCompare(right.key))) {
+      if (edit.action === "keep") {
+        const existing = carried.get(edit.key)
+        if (!existing) throw new Error(`no stored secret to keep for ${edit.key}`)
+        secretRefs.push(existing)
+        continue
+      }
+      const credentialId = `environment:${site.id}:${revisionId}:${edit.key}`
+      secretRefs.push({ key: edit.key, credentialId, revision: this.deps.newId("secret") })
+      minted.push({ credentialId, value: edit.value })
+    }
+
     const saved: string[] = []
     try {
-      for (const reference of secretRefs) {
-        await this.deps.keyring.save(reference.credentialId, input.secrets[reference.key])
-        saved.push(reference.credentialId)
+      for (const credential of minted) {
+        await this.deps.keyring.save(credential.credentialId, credential.value)
+        saved.push(credential.credentialId)
       }
       return await this.runOperation({
         site,
         type: "environment",
         idempotencyKey: `environment:${site.id}:${revisionId}`,
-        payload: { variables: input.variables, secretKeys, secretRefs },
+        payload: { variables: input.variables, secretKeys: secretKeys.sort(), secretRefs },
         action: () =>
           createSiteEnvironmentRevision({
             id: revisionId,

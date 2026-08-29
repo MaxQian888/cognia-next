@@ -23,6 +23,7 @@ import type {
   SiteOperationRow,
   SiteResourceKind,
   SiteProjectRow,
+  SiteSecretEdit,
   SiteResourceRow,
   SiteVersionRow,
   SiteVersionStatus,
@@ -537,6 +538,46 @@ export function environmentRevisionDiff(
   }
   const removed = Object.keys(before).filter((key) => !Object.hasOwn(next, key))
   return { added: added.sort(), changed: changed.sort(), removed: removed.sort() }
+}
+
+export interface SiteSecretDiff {
+  kept: string[]
+  replaced: string[]
+  removed: string[]
+  added: string[]
+}
+
+/**
+ * What the secret edits would do to the current revision.
+ *
+ * Separate from the variable diff because the two answer different questions:
+ * a variable's value is visible and comparable, a secret's is not — all the
+ * user can be shown is which of their keys survive, rotate, or go.
+ */
+export function secretRevisionDiff(
+  previous: SiteEnvironmentRevisionRow | undefined,
+  edits: readonly SiteSecretEdit[]
+): SiteSecretDiff {
+  const before = new Set(previous?.secretRefs.map((ref) => ref.key) ?? [])
+  const diff: SiteSecretDiff = { kept: [], replaced: [], removed: [], added: [] }
+  for (const edit of edits) {
+    if (edit.action === "keep") diff.kept.push(edit.key)
+    else if (edit.action === "remove") diff.removed.push(edit.key)
+    else if (before.has(edit.key)) diff.replaced.push(edit.key)
+    else diff.added.push(edit.key)
+  }
+  // A key present before and named by no edit is dropped by omission — the
+  // failure mode this whole model exists to make impossible to do silently.
+  for (const key of before) {
+    if (!edits.some((edit) => edit.key === key)) diff.removed.push(key)
+  }
+  for (const list of Object.values(diff)) list.sort()
+  return diff
+}
+
+/** True when the secret edits change nothing. */
+export function secretDiffIsEmpty(diff: SiteSecretDiff): boolean {
+  return diff.replaced.length === 0 && diff.removed.length === 0 && diff.added.length === 0
 }
 
 /** True when the diff would change nothing — the save button can say so. */

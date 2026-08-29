@@ -41,6 +41,25 @@ export interface SiteProjectRow {
   updatedAt: number
 }
 
+/**
+ * What to do with one secret when saving an environment revision.
+ *
+ * `saveEnvironment` replaces the whole variable set and rebuilt `secretRefs`
+ * from only the newly typed secrets, while the editor could never seed itself
+ * with values it cannot read back from the keyring. So changing a single
+ * variable silently dropped every configured secret from the new revision, and
+ * the deployed worker lost them on the next publish. Carrying a reference
+ * forward is safe: `credentialId` is revision-scoped and old keyring entries
+ * are never deleted, so an earlier revision stays redeployable too.
+ */
+export type SiteSecretEdit =
+  /** Reuse the previous revision's reference verbatim. */
+  | { key: string; action: "keep" }
+  /** Store a new value under a new revision-scoped credential id. */
+  | { key: string; action: "set"; value: string }
+  /** Drop the key from the new revision. The old keyring entry stays. */
+  | { key: string; action: "remove" }
+
 export interface SiteSecretReference {
   key: string
   credentialId: string

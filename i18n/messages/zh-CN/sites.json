@@ -149,10 +149,25 @@
     "history": "修订历史",
     "noRevision": "还没有环境修订。",
     "noSecretRefs": "该修订没有密钥。",
-    "overwriteWarning": "保存会整体替换变量集合，这里没有的变量将被移除。",
     "revision": "修订",
     "revisionLabel": "修订 {sequence}",
     "savedAt": "{when}保存",
+    "secretAction": {
+      "add": "新增密钥",
+      "keep": "保留",
+      "keptHint": "沿用当前版本",
+      "newKey": "新密钥名",
+      "remove": "移除",
+      "removedHint": "将被移除",
+      "replace": "替换",
+      "set": "{key} 的新值"
+    },
+    "secretDiff": {
+      "added": "新增 {count} 个",
+      "kept": "保留 {count} 个",
+      "removed": "移除 {count} 个",
+      "replaced": "替换 {count} 个"
+    },
     "secretRefs": "密钥引用",
     "secretValueHidden": "密钥值只保存在本机系统密钥环中，不会显示。",
     "secrets": "密钥",

@@ -158,7 +158,9 @@ async function readyVersion(secret = true) {
   const environment = await service.saveEnvironment({
     siteId: "site_1",
     variables: { API_ORIGIN: "https://api.example.com" },
-    secrets: secret ? { API_TOKEN: "environment-secret" } : {},
+    secrets: secret
+      ? [{ key: "API_TOKEN", action: "set" as const, value: "environment-secret" }]
+      : [],
   })
   await createSiteVersionDraft({
     id: "version_1",
@@ -231,7 +233,7 @@ it("captures immutable environment revisions with secret references, never value
   const revision = await service.saveEnvironment({
     siteId: "site_1",
     variables: { PUBLIC_VALUE: "visible" },
-    secrets: { PRIVATE_VALUE: "hidden" },
+    secrets: [{ key: "PRIVATE_VALUE", action: "set", value: "hidden" }],
   })
 
   expect(revision.variables).toEqual({ PUBLIC_VALUE: "visible" })
@@ -713,11 +715,11 @@ it("rejects invalid provider, environment, binding, domain, and lifecycle inputs
     service.saveEnvironment({
       siteId: "site_1",
       variables: { DUPLICATE: "plain" },
-      secrets: { DUPLICATE: "secret" },
+      secrets: [{ key: "DUPLICATE", action: "set", value: "secret" }],
     })
   ).rejects.toThrow("environment key cannot be both plain and secret")
   await expect(
-    service.saveEnvironment({ siteId: "site_1", variables: { "not-valid": "x" }, secrets: {} })
+    service.saveEnvironment({ siteId: "site_1", variables: { "not-valid": "x" }, secrets: [] })
   ).rejects.toThrow("environment keys must be JavaScript identifiers")
 
   await configureToken()
@@ -733,4 +735,89 @@ it("rejects invalid provider, environment, binding, domain, and lifecycle inputs
     "Site custom domain not found"
   )
   await expect(service.purge("site_1")).rejects.toThrow("Site must be taken down before purge")
+})
+
+it("carries a kept secret forward instead of dropping it", async () => {
+  // The bug this replaces: `saveEnvironment` rebuilt `secretRefs` from only the
+  // newly typed values, and the editor cannot seed itself from the keyring. So
+  // changing one variable silently removed every configured secret from the new
+  // revision, and the next publish pushed a worker without them.
+  const first = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: { API_ORIGIN: "https://api.example.com" },
+    secrets: [
+      { key: "API_TOKEN", action: "set", value: "token-value" },
+      { key: "DB_PASSWORD", action: "set", value: "db-value" },
+    ],
+  })
+
+  const second = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: { API_ORIGIN: "https://api2.example.com" },
+    secrets: [
+      { key: "API_TOKEN", action: "keep" },
+      { key: "DB_PASSWORD", action: "keep" },
+    ],
+  })
+
+  expect(second.secretRefs.map((ref) => ref.key)).toEqual(["API_TOKEN", "DB_PASSWORD"])
+  // Verbatim: the old credential ids still resolve, so the earlier revision
+  // stays redeployable too.
+  expect(second.secretRefs).toEqual(first.secretRefs)
+  for (const reference of second.secretRefs) {
+    expect(keyring.values.get(reference.credentialId)).toBeDefined()
+  }
+})
+
+it("replaces one secret while keeping the others", async () => {
+  const first = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: {},
+    secrets: [
+      { key: "API_TOKEN", action: "set", value: "old" },
+      { key: "DB_PASSWORD", action: "set", value: "db" },
+    ],
+  })
+  const second = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: {},
+    secrets: [
+      { key: "API_TOKEN", action: "set", value: "new" },
+      { key: "DB_PASSWORD", action: "keep" },
+    ],
+  })
+
+  const rotated = second.secretRefs.find((ref) => ref.key === "API_TOKEN")!
+  const kept = second.secretRefs.find((ref) => ref.key === "DB_PASSWORD")!
+  expect(keyring.values.get(rotated.credentialId)).toBe("new")
+  expect(kept).toEqual(first.secretRefs.find((ref) => ref.key === "DB_PASSWORD"))
+  // The superseded entry stays so the earlier revision still resolves.
+  expect(
+    keyring.values.get(first.secretRefs.find((r) => r.key === "API_TOKEN")!.credentialId)
+  ).toBe("old")
+})
+
+it("removes a secret from the new revision without breaking the old one", async () => {
+  const first = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: {},
+    secrets: [{ key: "API_TOKEN", action: "set", value: "value" }],
+  })
+  const second = await service.saveEnvironment({
+    siteId: "site_1",
+    variables: {},
+    secrets: [{ key: "API_TOKEN", action: "remove" }],
+  })
+  expect(second.secretRefs).toEqual([])
+  expect(keyring.values.get(first.secretRefs[0].credentialId)).toBe("value")
+})
+
+it("refuses to keep a secret no previous revision holds", async () => {
+  await expect(
+    service.saveEnvironment({
+      siteId: "site_1",
+      variables: {},
+      secrets: [{ key: "GHOST", action: "keep" }],
+    })
+  ).rejects.toThrow(/no stored secret to keep for GHOST/)
 })

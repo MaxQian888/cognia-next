@@ -20,6 +20,8 @@ import {
   siteObservabilityHostname,
   siteProductionUrl,
   siteRoleCapabilities,
+  secretDiffIsEmpty,
+  secretRevisionDiff,
   siteViewerRole,
   sortEnvironmentRevisions,
 } from "./console-model"
@@ -445,5 +447,64 @@ describe("visitor access", () => {
     expect(siteAccessTeamMissing({ mode: "private" }, {})).toBe(true)
     expect(siteAccessTeamMissing({ mode: "public" }, {})).toBe(false)
     expect(siteAccessTeamMissing({ mode: "private" }, { accessTeamName: "acme" })).toBe(false)
+  })
+})
+
+describe("secretRevisionDiff", () => {
+  const previous = {
+    id: "e1",
+    siteId: "site_1",
+    sequence: 1,
+    variables: {},
+    secretRefs: [
+      { key: "API_TOKEN", credentialId: "c1", revision: "r1" },
+      { key: "DB_PASSWORD", credentialId: "c2", revision: "r2" },
+    ],
+    createdAt: 1,
+  }
+
+  it("labels each edit by what it does to the stored set", () => {
+    expect(
+      secretRevisionDiff(previous, [
+        { key: "API_TOKEN", action: "keep" },
+        { key: "DB_PASSWORD", action: "set", value: "x" },
+        { key: "NEW", action: "set", value: "y" },
+      ])
+    ).toEqual({ kept: ["API_TOKEN"], replaced: ["DB_PASSWORD"], added: ["NEW"], removed: [] })
+  })
+
+  it("counts a stored key named by no edit as removed", () => {
+    // Dropping by omission is exactly the silent wipe this model prevents; the
+    // diff has to show it rather than let it pass as "unchanged".
+    expect(secretRevisionDiff(previous, [{ key: "API_TOKEN", action: "keep" }]).removed).toEqual([
+      "DB_PASSWORD",
+    ])
+  })
+
+  it("treats an explicit removal and an omission the same way", () => {
+    expect(
+      secretRevisionDiff(previous, [
+        { key: "API_TOKEN", action: "keep" },
+        { key: "DB_PASSWORD", action: "remove" },
+      ]).removed
+    ).toEqual(["DB_PASSWORD"])
+  })
+
+  it("is empty only when every stored key is kept and nothing is added", () => {
+    const untouched = secretRevisionDiff(previous, [
+      { key: "API_TOKEN", action: "keep" },
+      { key: "DB_PASSWORD", action: "keep" },
+    ])
+    expect(secretDiffIsEmpty(untouched)).toBe(true)
+    expect(secretDiffIsEmpty(secretRevisionDiff(previous, []))).toBe(false)
+  })
+
+  it("treats every edit as an addition when there is no previous revision", () => {
+    expect(secretRevisionDiff(undefined, [{ key: "NEW", action: "set", value: "v" }])).toEqual({
+      kept: [],
+      replaced: [],
+      added: ["NEW"],
+      removed: [],
+    })
   })
 })

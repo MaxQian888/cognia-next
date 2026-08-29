@@ -3413,6 +3413,12 @@
     "duplicate": "复制",
     "editInCanvas": "在画布中编辑",
     "exitFullscreen": "退出全屏",
+    "exportAs": {
+      "html": "导出为 HTML",
+      "pdf": "导出为 PDF",
+      "png": "导出为 PNG",
+      "svg": "导出为 SVG"
+    },
     "filterByRuntime": "按运行时筛选",
     "filterByType": "按类型筛选",
     "fullscreen": "全屏",
@@ -3473,13 +3479,17 @@
       "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
       "selectionChipFileLabel": "{path} · 整个文件",
       "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+      "selectionChipMessageSpanLabel": "“{title}”中的 {count} 条消息",
       "selectionChipPluginLabel": "{source}：{title}",
       "selectionChipWebLabel": "{title} · 网页",
       "selectionChipWholeLabel": "{title} · 整份产物",
       "selectionCommentPlaceholder": "这里希望怎么改？",
+      "selectionSpanUnavailable": "该消息已不存在，引用保持原样。",
       "staleBanner": "此提案生成后 Artifact 已变化，请重新比对或丢弃。",
       "title": "审阅改动",
-      "viewChanges": "查看改动"
+      "viewChanges": "查看改动",
+      "widenSelectionAria": "为“{title}”中的这条消息扩展上下文",
+      "widenSelectionHint": "前后各多包含一轮"
     },
     "runnable": "可运行",
     "runtimeStates": {
@@ -4468,9 +4478,12 @@
       "copyFailed": "复制到剪贴板失败",
       "downloaded": "已下载 {filename}",
       "formatHtml": "下载为 HTML",
+      "formatPdf": "PDF",
+      "formatPng": "PNG 图片",
       "formatRaw": "下载源文件",
       "formatSvg": "下载为 SVG",
-      "label": "导出文档"
+      "label": "导出文档",
+      "renderFailed": "无法渲染该文档"
     },
     "filtered": "已过滤",
     "filteredSuffix": "（已筛选）",
@@ -4555,6 +4568,10 @@
       "suggestionsEmpty": "暂无建议。使用 Suggest 功能生成改进建议。"
     },
     "participants": "参与者",
+    "performanceMode": {
+      "large": "大文档（{lines, number} 行）—— 已关闭缩略图、折叠与同名高亮，以保持输入流畅。",
+      "veryLarge": "超大文档（{lines, number} 行）—— 已关闭缩略图、折叠、粘性滚动与自动换行，以保持输入流畅。"
+    },
     "pin": "置顶",
     "pinned": "已置顶",
     "pressKeys": "按下按键…",
@@ -4885,6 +4902,7 @@
       "copyAria": "复制 artifact 内容",
       "download": "下载",
       "downloadAria": "下载 artifact",
+      "downloadFailed": "无法保存该 artifact",
       "expand": "展开预览",
       "openInCanvas": "在画布中打开",
       "openInCanvasAria": "在画布中打开 artifact"
@@ -4954,7 +4972,9 @@
     "canvasInline": {
       "collapsePreview": "折叠预览",
       "expandPreview": "展开预览",
-      "openInCanvas": "在画布中打开"
+      "openInCanvas": "在画布中打开",
+      "subtitle": "画布 · {type}",
+      "subtitleWithLanguage": "画布 · {type} · {language}"
     },
     "characterMissing": {
       "action": {
@@ -5335,6 +5355,7 @@
           "artifact": "产物",
           "issue": "Issue",
           "memory": "记忆",
+          "message": "消息",
           "plan": "计划",
           "session": "会话"
         },
@@ -5371,6 +5392,22 @@
         "searchPlaceholder": "搜索命令…",
         "searching": "搜索中…",
         "searchingShort": "搜索中…",
+        "shell": {
+          "argumentKind": "参数",
+          "builtinKind": "内建命令",
+          "commandKind": "命令",
+          "commandNotFound": "找不到命令：{name}",
+          "diagnosticsLabel": "shell 命令问题",
+          "directoryKind": "目录",
+          "incompleteSyntax": "引号未闭合 — 命令尚不完整。",
+          "noHost": "连接主机后即可查看文件或执行命令。",
+          "noMatches": "没有与“{query}”匹配的补全。",
+          "optionKind": "选项",
+          "pathKind": "文件",
+          "runsUnder": "使用 {shell} 运行",
+          "shellUnavailable": "已连接的主机上没有 {shell} — 无法执行命令。",
+          "unsupportedShell": "暂不支持使用 {shell} 执行命令。"
+        },
         "skillTitle": "启用技能",
         "slashTitle": "斜杠命令",
         "suggestionCount": "{count} 个选项",
@@ -5433,10 +5470,14 @@
       "sendSteerTooltip": "作为补充发送给当前回合",
       "sendTooltip": "发送",
       "shell": {
+        "consentRequired": "`$ {cmd}` 未执行 —— 需要先在主机上有人批准远程执行命令。",
         "failed": "`$ {cmd}` 执行失败：{error}",
         "interactiveRoutedToTerminal": "`$ {cmd}` 需要终端 — 已在集成终端中打开。",
         "needsCwd": "运行 shell 命令前请先设置工作目录。",
-        "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…"
+        "noHost": "`$ {cmd}` 未执行 — 请先连接主机再运行 shell 命令。",
+        "runningHint": "在 `{cwd}` 中执行 `$ {cmd}`…",
+        "shellUnavailable": "`$ {cmd}` 未执行 — 已连接的主机上没有 {shell}。",
+        "unsupportedShell": "`$ {cmd}` 未执行 — 暂不支持使用 {shell} 执行命令。"
       },
       "skills": {
         "enabled": "已启用技能「{name}」。"
@@ -9144,6 +9185,7 @@
       "checkCommandAndArgs": "检查智能体的启动命令和参数。",
       "checkDiagnosticsAndRetry": "查看运行诊断，然后缩小请求范围后重试。",
       "completeSetupThenRetry": "完成该智能体的配置，然后重试连接。",
+      "contactAdministrator": "该限制由部署此 Codex 的人设定，请联系他们放宽。",
       "createNewSession": "当恢复和分叉不可用时，请新建一个会话。",
       "inspectHealthEndpoint": "检查智能体的健康检查接口和日志。",
       "reconnectAndRetry": "重新连接后再试。",
@@ -9152,6 +9194,7 @@
       "retryAfterReconnect": "重新连接后重试。",
       "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
       "switchToAcp": "将该智能体的协议切换为 ACP。",
+      "useAllowedSandboxOrApproval": "改用此 Codex 受管配置允许的沙盒模式或审批策略。",
       "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
       "useOfficialWorkflow": "请使用该产品自身的官方流程。",
       "useSupportedOperations": "请仅使用该端点支持的操作。"
@@ -10829,9 +10872,11 @@
         "account": "账号",
         "managedPolicy": "受管策略",
         "managedPolicyApproval": "审批：{value}",
+        "managedPolicyForbidsAll": "此 Codex 的受管配置在 Cognia 会发送的各项上都不允许任何取值，因此每个请求在发出前都会被拒绝。",
         "managedPolicyNone": "此 Codex 未声明任何受管限制。",
         "managedPolicyProfile": "配置档：{value}",
         "managedPolicySandbox": "沙盒：{value}",
+        "managedPolicyUnread": "尚未读取受管限制。点击刷新重新询问。",
         "managedPolicyUnsupported": "此 Codex 没有受管策略接口，无法读取限制。这与「没有限制」并不是一回事。",
         "mcpServers": "MCP 服务器",
         "noMcpServers": "未配置 MCP 服务器。",
@@ -16799,7 +16844,8 @@
         "body": {
           "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。",
           "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
-          "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。"
+          "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。",
+          "vaultLockedPending": "本地账户已锁定，因此当前浏览器还无法保存设备密钥。请求尚未发出——输入框里的邀请码依然有效。解锁账户后再提交一次即可。"
         },
         "copyDiagnostics": "复制诊断信息",
         "diagnosticsCopied": "诊断信息已复制",
@@ -16814,7 +16860,7 @@
           "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
           "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
           "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
-          "unlockAccount": "用密码登录本地账户后再配对。开发环境下可用 NEXT_PUBLIC_ACCOUNT_GATE=1 启动，以便出现解锁界面。",
+          "unlockAccount": "用密码登录本地账户后再配对。",
           "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
           "useLoopbackInvitation": "改用 {loopback} 生成邀请码，而不是 {host}。局域网地址使用自签名证书，只有原生 App 才能固定校验。"
         },
@@ -16870,6 +16916,8 @@
         "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
         "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
         "404": "服务器未暴露配对接口，请确认桌面运行的是开启 Companion 的 cognia v0.2+。",
+        "403Identity": "Host 拒绝了这个账户——它记录的绑定或租户与本设备对不上。用同一个账户再发一份邀请也会被同样拒绝。",
+        "403Spent": "Host 拒绝的是这份邀请本身——它已过期或已被用掉。请重新签发一份；再发同一串是不可能成功的。",
         "5xx": "服务器错误（HTTP {status}），请查看桌面日志后重试。",
         "generic": "配对失败（HTTP {status}）。"
       },
@@ -35628,8 +35676,8 @@
       "noStdout": "标准输出没有任何内容。",
       "open": "构建日志",
       "phase": {
-        "install": "安装",
         "build": "构建",
+        "install": "安装",
         "package": "打包"
       },
       "stderr": "标准错误",
@@ -35690,10 +35738,25 @@
       "history": "修订历史",
       "noRevision": "还没有环境修订。",
       "noSecretRefs": "该修订没有密钥。",
-      "overwriteWarning": "保存会整体替换变量集合，这里没有的变量将被移除。",
       "revision": "修订",
       "revisionLabel": "修订 {sequence}",
       "savedAt": "{when}保存",
+      "secretAction": {
+        "add": "新增密钥",
+        "keep": "保留",
+        "keptHint": "沿用当前版本",
+        "newKey": "新密钥名",
+        "remove": "移除",
+        "removedHint": "将被移除",
+        "replace": "替换",
+        "set": "{key} 的新值"
+      },
+      "secretDiff": {
+        "added": "新增 {count} 个",
+        "kept": "保留 {count} 个",
+        "removed": "移除 {count} 个",
+        "replaced": "替换 {count} 个"
+      },
       "secretRefs": "密钥引用",
       "secretValueHidden": "密钥值只保存在本机系统密钥环中，不会显示。",
       "secrets": "密钥",

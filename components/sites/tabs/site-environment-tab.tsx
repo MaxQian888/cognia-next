@@ -17,6 +17,7 @@ import { useTranslations, useFormatter, useNow } from "next-intl"
 import { KeyRoundIcon, PencilIcon, VariableIcon } from "lucide-react"
 
 import { KvEditor } from "@/components/settings/mcp/kv-editor"
+import { SiteSecretEditor } from "../site-secret-editor"
 import {
   kvRowsToObject,
   objectToKvRows,
@@ -37,11 +38,13 @@ import {
   environmentDiffIsEmpty,
   environmentRevisionDiff,
   latestEnvironmentRevision,
+  secretDiffIsEmpty,
+  secretRevisionDiff,
   sortEnvironmentRevisions,
 } from "@/lib/sites/console-model"
 import { cn } from "@/lib/utils"
 import type { SiteGate } from "@/hooks/sites/use-site-action-gate"
-import type { SiteEnvironmentRevisionRow } from "@/types/sites"
+import type { SiteEnvironmentRevisionRow, SiteSecretEdit } from "@/types/sites"
 
 export interface SiteEnvironmentTabProps {
   environments: readonly SiteEnvironmentRevisionRow[]
@@ -52,7 +55,7 @@ export interface SiteEnvironmentTabProps {
    * build no longer disables unrelated controls.
    */
   isBusy: (key?: string) => boolean
-  onSave: (input: { variables: Record<string, string>; secrets: Record<string, string> }) => void
+  onSave: (input: { variables: Record<string, string>; secrets: readonly SiteSecretEdit[] }) => void
 }
 
 export function SiteEnvironmentTab({
@@ -70,18 +73,25 @@ export function SiteEnvironmentTab({
 
   const [editing, setEditing] = useState(false)
   const [variableRows, setVariableRows] = useState<KvRow[]>([])
-  const [secretRows, setSecretRows] = useState<KvRow[]>([])
+  const [secretEdits, setSecretEdits] = useState<readonly SiteSecretEdit[]>([])
 
   const beginEdit = (revision: SiteEnvironmentRevisionRow | undefined) => {
     // Seed from the revision so an untouched save is a no-op instead of a wipe.
+    // Secrets seed as `keep`: their values are unreadable, and the previous
+    // editor's empty grid is precisely how a variable change used to delete
+    // every one of them.
     setVariableRows(objectToKvRows(revision?.variables ?? {}))
-    setSecretRows([])
+    setSecretEdits(
+      (revision?.secretRefs ?? []).map((reference) => ({ key: reference.key, action: "keep" }))
+    )
     setEditing(true)
   }
 
+  const storedKeys = (current?.secretRefs ?? []).map((reference) => reference.key)
   const draftVariables = kvRowsToObject(variableRows)
   const diff = environmentRevisionDiff(current, draftVariables)
-  const unchanged = environmentDiffIsEmpty(diff) && secretRows.length === 0
+  const secretDiff = secretRevisionDiff(current, secretEdits)
+  const unchanged = environmentDiffIsEmpty(diff) && secretDiffIsEmpty(secretDiff)
 
   if (!current && !editing) {
     return (
@@ -246,16 +256,12 @@ export function SiteEnvironmentTab({
               keyPlaceholder="API_ORIGIN"
               valuePlaceholder="https://api.example.com"
             />
-            <KvEditor
-              label={t("environment.secrets")}
-              rows={secretRows}
-              onChange={setSecretRows}
-              keyPlaceholder="API_TOKEN"
-              valuePlaceholder="secret-value"
-              maskValues
+            <SiteSecretEditor
+              storedKeys={storedKeys}
+              edits={secretEdits}
+              onChange={setSecretEdits}
+              disabled={isBusy("environment") || !gate.allowed}
             />
-
-            <p className="text-xs text-warning">{t("environment.overwriteWarning")}</p>
 
             <div
               className="flex flex-wrap items-center gap-2 text-xs"
@@ -274,6 +280,21 @@ export function SiteEnvironmentTab({
                   <span className="text-destructive">
                     {t("environment.diff.removed", { count: diff.removed.length })}
                   </span>
+                  <span aria-hidden className="text-muted-foreground/50">
+                    ·
+                  </span>
+                  <span className="text-muted-foreground">
+                    {t("environment.secretDiff.kept", { count: secretDiff.kept.length })}
+                  </span>
+                  <span className="text-info">
+                    {t("environment.secretDiff.replaced", { count: secretDiff.replaced.length })}
+                  </span>
+                  <span className="text-success">
+                    {t("environment.secretDiff.added", { count: secretDiff.added.length })}
+                  </span>
+                  <span className="text-destructive">
+                    {t("environment.secretDiff.removed", { count: secretDiff.removed.length })}
+                  </span>
                 </>
               )}
             </div>
@@ -284,9 +305,7 @@ export function SiteEnvironmentTab({
                 size="sm"
                 disabled={isBusy("environment") || !gate.allowed}
                 title={gate.title}
-                onClick={() =>
-                  onSave({ variables: draftVariables, secrets: kvRowsToObject(secretRows) })
-                }
+                onClick={() => onSave({ variables: draftVariables, secrets: secretEdits })}
                 data-testid="site-environment-save"
               >
                 {t("actions.saveEnvironment")}
