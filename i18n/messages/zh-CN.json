@@ -45386,6 +45386,7 @@
         "folderList": "服务器文件夹",
         "go": "前往",
         "loadError": "无法打开此文件夹，请检查路径和服务器连接。",
+        "loadRefused": "主机拒绝了这个路径，它只允许浏览自己的工作区根目录之内。",
         "loading": "正在加载文件夹…",
         "openFolder": "打开 {name}",
         "pathLabel": "服务器路径",

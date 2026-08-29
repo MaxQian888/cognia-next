@@ -26,6 +26,40 @@ interface Props {
   onSelect: (path: string) => void
 }
 
+/**
+ * Why a listing failed — the Host refusing the path is not the same problem as
+ * the Host being unreachable.
+ *
+ * Both used to render "This folder could not be opened. Check the path and
+ * server connection.", which sends the user to debug a connection that is
+ * working. A headless Host confines browsing to its workspaces root
+ * (`COGNIA_WORKSPACES_DIR`, default `<data dir>/workspaces`) and answers
+ * anything outside it with a non-retryable refusal that names that root — so
+ * the one fact that resolves the situation was being thrown away.
+ */
+interface LoadFailure {
+  kind: "refused" | "unreachable"
+  /** The Host's own words, when it gave any. */
+  detail: string | null
+}
+
+/**
+ * A Host refusal is shape-checked, not `instanceof`-checked: the error crosses
+ * a module boundary, and every companion error carries `code` + `retryable`.
+ * `retryable: false` is the Host saying "this will not work however many times
+ * you ask" — which is exactly the distinction the UI needs to draw.
+ */
+function classifyLoadFailure(error: unknown): LoadFailure {
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { code?: unknown; retryable?: unknown }
+    if (typeof candidate.code === "string" && candidate.retryable === false) {
+      const message = error instanceof Error ? error.message.trim() : ""
+      return { kind: "refused", detail: message || null }
+    }
+  }
+  return { kind: "unreachable", detail: null }
+}
+
 function parentDirectory(path: string): string | null {
   const trimmed = path.replace(/[\\/]+$/, "")
   if (!trimmed || trimmed === "/" || /^[A-Za-z]:$/.test(trimmed)) return null
@@ -43,7 +77,7 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
   const [pathDraft, setPathDraft] = useState("")
   const [directories, setDirectories] = useState<WorkspaceEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadFailure, setLoadFailure] = useState<LoadFailure | null>(null)
 
   const loadPath = useCallback(async (path: string) => {
     const normalized = path.trim()
@@ -51,15 +85,15 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
     const requestId = ++requestIdRef.current
     setPathDraft(normalized)
     setLoading(true)
-    setLoadFailed(false)
+    setLoadFailure(null)
     try {
       const entries = await listWorkspaceDir(normalized)
       if (requestId !== requestIdRef.current) return
       setCurrentPath(normalized)
       setDirectories(entries.filter((entry) => entry.isDir))
-    } catch {
+    } catch (error) {
       if (requestId !== requestIdRef.current) return
-      setLoadFailed(true)
+      setLoadFailure(classifyLoadFailure(error))
     } finally {
       if (requestId === requestIdRef.current) setLoading(false)
     }
@@ -72,8 +106,8 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
       try {
         const startPath = initialPath?.trim() || (await defaultExportDir())
         if (!cancelled) await loadPath(startPath)
-      } catch {
-        if (!cancelled) setLoadFailed(true)
+      } catch (error) {
+        if (!cancelled) setLoadFailure(classifyLoadFailure(error))
       }
     })()
     return () => {
@@ -134,9 +168,16 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
                 <Loader2Icon className="size-4 animate-spin" />
                 {t("loading")}
               </div>
-            ) : loadFailed ? (
-              <div className="flex h-64 items-center justify-center px-6 text-center text-sm text-destructive">
-                {t("loadError")}
+            ) : loadFailure ? (
+              <div className="flex h-64 flex-col items-center justify-center gap-1.5 px-6 text-center text-sm">
+                <span className="text-destructive">
+                  {loadFailure.kind === "refused" ? t("loadRefused") : t("loadError")}
+                </span>
+                {loadFailure.detail ? (
+                  <span className="font-mono text-xs break-all text-muted-foreground">
+                    {loadFailure.detail}
+                  </span>
+                ) : null}
               </div>
             ) : directories.length === 0 ? (
               <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">

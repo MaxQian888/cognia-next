@@ -65,3 +65,47 @@ it("shows an actionable error when the host cannot list a path", async () => {
 
   expect(await screen.findByText("loadError")).toBeInTheDocument()
 })
+
+it("says the Host refused the path, and quotes it, instead of blaming the connection", async () => {
+  // A headless Host confines browsing to `COGNIA_WORKSPACES_DIR`, so anything
+  // outside it comes back as a non-retryable refusal whose message names the
+  // allowed root. Rendering "check the path and server connection" for that
+  // sends the user to debug a connection that is working, and throws away the
+  // one fact that resolves it.
+  const refusal = Object.assign(
+    new Error(
+      'workspace root denied: cwd "/Users/me/code" escapes the workspaces root "/srv/workspaces"'
+    ),
+    { code: "remote_control_forbidden", retryable: false }
+  )
+  listWorkspaceDirMock.mockRejectedValue(refusal)
+
+  render(<WorkspaceFolderPicker open onOpenChange={jest.fn()} onSelect={jest.fn()} />)
+
+  expect(await screen.findByText("loadRefused")).toBeInTheDocument()
+  expect(screen.getByText(/escapes the workspaces root/)).toBeInTheDocument()
+  expect(screen.queryByText("loadError")).not.toBeInTheDocument()
+})
+
+it("keeps the generic message for a retryable transport failure", async () => {
+  const blip = Object.assign(new Error("network"), { code: "network", retryable: true })
+  listWorkspaceDirMock.mockRejectedValue(blip)
+
+  render(<WorkspaceFolderPicker open onOpenChange={jest.fn()} onSelect={jest.fn()} />)
+
+  expect(await screen.findByText("loadError")).toBeInTheDocument()
+  expect(screen.queryByText("loadRefused")).not.toBeInTheDocument()
+})
+
+it("reports a refusal raised while resolving the starting path", async () => {
+  defaultExportDirMock.mockRejectedValue(
+    Object.assign(new Error("no default directory on this host"), {
+      code: "unknown_command",
+      retryable: false,
+    })
+  )
+
+  render(<WorkspaceFolderPicker open onOpenChange={jest.fn()} onSelect={jest.fn()} />)
+
+  expect(await screen.findByText("loadRefused")).toBeInTheDocument()
+})

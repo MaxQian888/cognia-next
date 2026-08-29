@@ -45386,6 +45386,7 @@
         "folderList": "Server folders",
         "go": "Go",
         "loadError": "This folder could not be opened. Check the path and server connection.",
+        "loadRefused": "The Host refused this path. It only browses inside its own workspaces root.",
         "loading": "Loading folders…",
         "openFolder": "Open {name}",
         "pathLabel": "Server path",
