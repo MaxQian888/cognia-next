@@ -169,6 +169,7 @@ describe("pinnedSiteArtifactDigests", () => {
 describe("collectUnreferencedSiteArtifacts", () => {
   function deps(overrides: Partial<SiteArtifactGcDeps> = {}) {
     const deleteArtifacts = jest.fn(async (digests: readonly string[]) => digests.length)
+    const deleteBuildLogs = jest.fn(async (ids: readonly string[]) => ids.length)
     const markCollected = jest.fn(async () => undefined)
     const base = {
       listProjects: jest.fn(async () => [{ id: "site_1" }]),
@@ -180,10 +181,11 @@ describe("collectUnreferencedSiteArtifacts", () => {
       listOperations: jest.fn(async () => []),
       listDigests: jest.fn(async () => ["d-v1", "d-v2"]),
       deleteArtifacts,
+      deleteBuildLogs,
       markCollected,
       ...overrides,
     } as unknown as SiteArtifactGcDeps
-    return { deps: base, deleteArtifacts, markCollected }
+    return { deps: base, deleteArtifacts, deleteBuildLogs, markCollected }
   }
 
   it("deletes the unreferenced archives and marks their versions collected", async () => {
@@ -198,6 +200,18 @@ describe("collectUnreferencedSiteArtifacts", () => {
     expect(report.bytesFreed).toBe(1000)
     expect(report.retainedRecent).toBe(1)
     expect(report.scanned).toBe(2)
+  })
+
+  it("takes the build output with the archive it explains", async () => {
+    // A version that can no longer be republished does not need half a
+    // megabyte of its compiler's stdout kept forever.
+    const { deps: d, deleteBuildLogs } = deps()
+    const report = await collectUnreferencedSiteArtifacts(
+      { ...INPUT, keepReadyVersionsPerSite: 1 },
+      d
+    )
+    expect(deleteBuildLogs).toHaveBeenCalledWith(["v1"])
+    expect(report.buildLogsDeleted).toBe(1)
   })
 
   it("counts every scanned digest exactly once across the three buckets", async () => {

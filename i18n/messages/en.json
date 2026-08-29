@@ -35617,6 +35617,28 @@
       "runtime": "Runtime snapshot",
       "title": "Confined build and local preview"
     },
+    "buildLog": {
+      "command": "Command",
+      "copy": "Copy output",
+      "duration": "{seconds}s",
+      "empty": "This build recorded no output.",
+      "exitCode": "exit {code}",
+      "loading": "Loading build output…",
+      "noStderr": "Nothing was written to stderr.",
+      "noStdout": "Nothing was written to stdout.",
+      "open": "Build log",
+      "phase": {
+        "install": "Install",
+        "build": "Build",
+        "package": "Package"
+      },
+      "stderr": "stderr",
+      "stderrOnly": "Errors only",
+      "stdout": "stdout",
+      "timedOut": "timed out",
+      "title": "Build output",
+      "truncated": "Output was trimmed — the first and last part are kept."
+    },
     "confirm": {
       "deleteMetadata": {
         "description": "This removes the deleted Site, versions, operation history, and preserved-resource report from Cognia. Provider resources are not changed.",
@@ -35759,6 +35781,9 @@
       "cancelled": "Cancelled",
       "claimed": "Claimed",
       "failed": "Failed",
+      "phase-failed": "Failed",
+      "phase-started": "Started",
+      "phase-succeeded": "Finished",
       "queued": "Queued",
       "succeeded": "Succeeded",
       "waiting-reconcile": "Waiting for reconciliation"

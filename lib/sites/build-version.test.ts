@@ -139,6 +139,8 @@ function dependencies(
     completeOperation: jest.fn(async () => ({ id: "siteop_2" }) as never),
     failVersion: jest.fn(async () => ({ id: "siteversion_1" }) as never),
     failOperation: jest.fn(async () => ({ id: "siteop_2" }) as never),
+    appendPhaseEvent: jest.fn(async () => undefined as never),
+    putBuildLog: jest.fn(async () => ({}) as never),
   }
 }
 
@@ -232,4 +234,67 @@ it("refuses symlinks in recursively collected build assets", async () => {
       }
     )
   ).rejects.toThrow("symlinks")
+})
+
+const INPUT = {
+  siteId: "site_1",
+  environmentRevisionId: "env_1",
+  runtime: "node@24",
+  packageManager: "pnpm@10",
+  installNetworkHosts: ["registry.npmjs.org"],
+}
+
+it("announces every phase and stores what each one printed", async () => {
+  // A multi-minute build used to show a spinner and nothing else:
+  // `appendOperationEvent` fired only on lifecycle transitions, and the whole
+  // stdout/stderr of a successful build was discarded.
+  const deps = dependencies()
+  await buildAndSaveSiteVersion(INPUT, deps)
+
+  const phases = (deps.appendPhaseEvent as jest.Mock).mock.calls.map(
+    ([call]) => `${call.phase}:${call.outcome}`
+  )
+  expect(phases).toEqual([
+    "install:started",
+    "install:succeeded",
+    "build:started",
+    "build:succeeded",
+    "package:started",
+    "package:succeeded",
+  ])
+
+  const logged = (deps.putBuildLog as jest.Mock).mock.calls.map(([row]) => row.phase)
+  // `package` spawns no process, so it produces events but no log row.
+  expect(logged).toEqual(["install", "build"])
+  expect((deps.putBuildLog as jest.Mock).mock.calls[0][0]).toMatchObject({
+    versionId: "siteversion_1",
+    siteId: "site_1",
+    exitCode: 0,
+  })
+})
+
+it("stores the failing phase's output before it throws", async () => {
+  // The output is the only thing that explains a broken build, and it used to
+  // be reduced to a single Error message.
+  const deps = dependencies()
+  deps.runBuild = jest.fn(async () => ({
+    exitCode: 1,
+    stdout: "compiling…",
+    stderr: "TS2304: Cannot find name 'foo'",
+    durationSeconds: 3,
+    timedOut: false,
+    outputTruncated: false,
+  })) as never
+
+  await expect(buildAndSaveSiteVersion(INPUT, deps)).rejects.toThrow(/TS2304/)
+
+  const rows = (deps.putBuildLog as jest.Mock).mock.calls.map(([row]) => row)
+  expect(rows).toHaveLength(1)
+  expect(rows[0]).toMatchObject({ phase: "install", exitCode: 1 })
+  expect(rows[0].stderr).toContain("TS2304")
+
+  const phases = (deps.appendPhaseEvent as jest.Mock).mock.calls.map(
+    ([call]) => `${call.phase}:${call.outcome}`
+  )
+  expect(phases).toEqual(["install:started", "install:failed"])
 })

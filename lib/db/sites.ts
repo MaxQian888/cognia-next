@@ -1,10 +1,13 @@
 import { getDb } from "./schema"
 import type {
   SiteArtifactRow,
+  SiteBuildLogRow,
+  SiteBuildPhase,
   SiteDeploymentRow,
   SiteEnvironmentRevisionRow,
   SiteLifecycle,
   SiteOperationEventRow,
+  SiteOperationEventType,
   SiteOperationRow,
   SiteProjectRow,
   SiteResourceRow,
@@ -83,7 +86,7 @@ async function appendOperationEvent(
   operationId: string,
   type: SiteOperationEventRow["type"],
   createdAt: number,
-  extra: Pick<SiteOperationEventRow, "message" | "providerRequestId"> = {}
+  extra: Pick<SiteOperationEventRow, "message" | "providerRequestId" | "phase"> = {}
 ): Promise<SiteOperationEventRow> {
   const table = getDb().siteOperationEvents
   const previous = await table.where("operationId").equals(operationId).last()
@@ -714,6 +717,71 @@ export async function resolveSiteOperationFromReconcile(input: {
   )
 }
 
+/**
+ * Append a build-phase progress event.
+ *
+ * `appendOperationEvent` stays private — the journal is only trustworthy while
+ * lifecycle transitions are the sole writers of the lifecycle types. This is
+ * the one narrow opening: it accepts only the three `phase-*` types, and it
+ * checks the lease, so a build whose lease has already been reclaimed cannot
+ * keep writing progress into an operation someone else now owns.
+ */
+export async function appendSiteBuildPhaseEvent(input: {
+  operationId: string
+  leaseOwner: string
+  phase: SiteBuildPhase
+  outcome: "started" | "succeeded" | "failed"
+  message?: string
+  now?: number
+}): Promise<SiteOperationEventRow | undefined> {
+  const db = getDb()
+  return db.transaction(
+    "rw",
+    db.siteOperations,
+    db.siteOperationEvents,
+    async (): Promise<SiteOperationEventRow | undefined> => {
+      const operation = await db.siteOperations.get(input.operationId)
+      if (!operation || operation.leaseOwner !== input.leaseOwner) return undefined
+      return appendOperationEvent(
+        input.operationId,
+        `phase-${input.outcome}` as SiteOperationEventType,
+        input.now ?? Date.now(),
+        { message: input.message, phase: input.phase }
+      )
+    }
+  )
+}
+
+export async function putSiteBuildLog(
+  input: Omit<SiteBuildLogRow, "createdAt"> & { now?: number }
+): Promise<SiteBuildLogRow> {
+  const { now, ...rest } = input
+  const row: SiteBuildLogRow = { ...rest, createdAt: now ?? Date.now() }
+  await getDb().siteBuildLogs.put(row)
+  return row
+}
+
+/** One row per phase for a version, install before build. */
+export async function listSiteBuildLogs(versionId: string): Promise<SiteBuildLogRow[]> {
+  const rows = await getDb().siteBuildLogs.where("versionId").equals(versionId).toArray()
+  const order: Record<SiteBuildLogRow["phase"], number> = { install: 0, build: 1 }
+  return rows.sort((left, right) => order[left.phase] - order[right.phase])
+}
+
+export async function deleteSiteBuildLogsForVersions(
+  versionIds: readonly string[]
+): Promise<number> {
+  if (versionIds.length === 0) return 0
+  const db = getDb()
+  const keys = (
+    await Promise.all(
+      versionIds.map((id) => db.siteBuildLogs.where("versionId").equals(id).primaryKeys())
+    )
+  ).flat()
+  await db.siteBuildLogs.bulkDelete(keys)
+  return keys.length
+}
+
 export async function listSiteOperationEvents(
   operationId: string
 ): Promise<SiteOperationEventRow[]> {
@@ -1076,6 +1144,7 @@ export async function deleteSiteProjectMetadata(id: string): Promise<void> {
       db.siteResources,
       db.siteOperations,
       db.siteOperationEvents,
+      db.siteBuildLogs,
     ],
     async (): Promise<void> => {
       const site = await db.siteProjects.get(id)
@@ -1106,6 +1175,7 @@ export async function deleteSiteProjectMetadata(id: string): Promise<void> {
           )
         ).flat()
       )
+      await db.siteBuildLogs.where("siteId").equals(id).delete()
       await db.siteOperations.where("siteId").equals(id).delete()
       await db.siteDeployments.where("siteId").equals(id).delete()
       await db.siteEnvironmentRevisions.where("siteId").equals(id).delete()

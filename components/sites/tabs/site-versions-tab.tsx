@@ -35,6 +35,7 @@ import type {
   SiteVersionRow,
   SiteVersionStatus,
 } from "@/types/sites"
+import { SiteBuildLogViewer } from "../site-build-log-viewer"
 import { SITE_DEPLOYMENT_FACE, SITE_VERSION_FACE, SiteStatusPill } from "../site-status"
 
 type VersionFilter = SiteVersionStatus | "all"
@@ -125,6 +126,12 @@ const SiteVersionRow = memo(function SiteVersionRow({
       </span>
 
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 lg:justify-end">
+        {version.status !== "building" ? (
+          <SiteBuildLogViewer
+            versionId={version.id}
+            label={`v${version.sequence} · ${version.source.commitSha.slice(0, 7)}`}
+          />
+        ) : null}
         <span className="text-xs text-muted-foreground">
           {format.relativeTime(new Date(version.completedAt ?? version.createdAt), now)}
         </span>

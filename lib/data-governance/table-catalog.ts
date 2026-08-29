@@ -279,6 +279,7 @@ export const CORE_TABLE_NAMES = [
   "settings",
   "sharedLinks",
   "siteArtifacts",
+  "siteBuildLogs",
   "siteDeployments",
   "siteEnvironmentRevisions",
   "siteOperationEvents",
@@ -697,6 +698,8 @@ const LARGE_TABLES = new Set<CoreTableName>([
   // Several rows per operation, several operations per build, kept for the
   // life of the Site.
   "siteOperationEvents",
+  // Up to 512 KiB of captured build output per version.
+  "siteBuildLogs",
   "agentTeamTrajectory",
   "automationAuditLog",
   "browserRecordings",
@@ -796,6 +799,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "siteArtifacts",
     reason:
       "ADR-0084 requires artifact retention to preserve every version referenced by a deployment or an unfinished operation. The central sweeper prunes archives outside that set, outside the per-Site rollback window, and older than the window.",
+  },
+  siteBuildLogs: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "domain",
+    reason:
+      "Captured build stdout/stderr, trimmed to 256 KiB per stream. Deleted with the archive it explains by `lib/sites/artifact-gc.ts`, and with its Site by `deleteSiteProjectMetadata`.",
   },
   siteOperationEvents: {
     mode: "cap",

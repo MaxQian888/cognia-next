@@ -2,6 +2,7 @@ import { nanoid } from "nanoid"
 
 import { canonicalStringify } from "@/lib/data/migrate"
 import {
+  appendSiteBuildPhaseEvent,
   claimSiteOperation,
   completeSiteOperation,
   completeSiteVersion,
@@ -11,17 +12,19 @@ import {
   getSiteEnvironmentRevision,
   getSiteProject,
   putSiteArtifact,
+  putSiteBuildLog,
   queueSiteOperation,
 } from "@/lib/db/sites"
 import { exists, readBinaryFile, readTextFile } from "@/lib/file/file-operations"
 import { sha256Bytes } from "@/lib/ocr/hash"
 import { sha256Hex } from "@/lib/share/hash"
 import { packageSiteArtifact, type SiteArtifactFile } from "./artifact-package"
+import { buildLogRowFrom, buildPhaseMessage } from "./build-log"
 import { assertSiteAuthoringCapability } from "./authoring-policy"
 import { runConfinedSiteBuild, type ConfinedSiteBuildResult } from "./confined-build"
 import { parseSiteHostingManifest } from "./manifest"
 import { resolveSiteManifestPath, resolveSiteSourceDir } from "./manifest-file"
-import type { SiteVersionRow } from "@/types/sites"
+import type { SiteBuildPhase, SiteVersionRow } from "@/types/sites"
 import type { GitCommit, GitStatus } from "@/types/git"
 
 interface LocalEntry {
@@ -52,6 +55,8 @@ interface BuildVersionDeps {
   completeOperation: typeof completeSiteOperation
   failVersion: typeof failSiteVersion
   failOperation: typeof failSiteOperation
+  appendPhaseEvent: typeof appendSiteBuildPhaseEvent
+  putBuildLog: typeof putSiteBuildLog
 }
 
 async function defaultGitSnapshot(
@@ -98,6 +103,8 @@ function defaults(): BuildVersionDeps {
     completeOperation: completeSiteOperation,
     failVersion: failSiteVersion,
     failOperation: failSiteOperation,
+    appendPhaseEvent: appendSiteBuildPhaseEvent,
+    putBuildLog: putSiteBuildLog,
   }
 }
 
@@ -253,29 +260,71 @@ export async function buildAndSaveSiteVersion(
     leaseMs: 30 * 60 * 1000,
     now: deps.now(),
   })
-  try {
-    if (manifest.build.install) {
-      const result = await deps.runBuild({
-        argv: manifest.build.install,
-        cwd: sourceDir,
-        writableRoots: [sourceDir],
-        readableRoots: [site.sourceRoot],
-        env: environment.variables,
-        networkHosts: input.installNetworkHosts,
-      })
-      const error = failure(result, "install")
-      if (error) throw error
-    }
+  /**
+   * One confined phase: announce it, run it, store what it printed, announce
+   * the outcome, then throw on failure.
+   *
+   * The log row is written on both outcomes. A build that worked is exactly
+   * what a broken one gets compared against, and until now the successful
+   * path discarded its output entirely.
+   */
+  const runPhase = async (
+    phase: Exclude<SiteBuildPhase, "package">,
+    argv: string[],
+    networkHosts: string[] | undefined
+  ): Promise<void> => {
+    await deps.appendPhaseEvent({
+      operationId,
+      leaseOwner: deps.leaseOwner,
+      phase,
+      outcome: "started",
+      message: buildPhaseMessage(phase, argv),
+      now: deps.now(),
+    })
     const result = await deps.runBuild({
-      argv: manifest.build.command,
+      argv,
       cwd: sourceDir,
       writableRoots: [sourceDir],
       readableRoots: [site.sourceRoot],
       env: environment.variables,
-      networkHosts: input.buildNetworkHosts,
+      networkHosts,
     })
-    const error = failure(result, "build")
+    await deps.putBuildLog(
+      buildLogRowFrom(result, {
+        versionId: version.id,
+        siteId: site.id,
+        operationId,
+        phase,
+        argv,
+        now: deps.now(),
+      })
+    )
+    const error = failure(result, phase)
+    await deps.appendPhaseEvent({
+      operationId,
+      leaseOwner: deps.leaseOwner,
+      phase,
+      outcome: error ? "failed" : "succeeded",
+      message: error ? error.message : undefined,
+      now: deps.now(),
+    })
     if (error) throw error
+  }
+
+  try {
+    if (manifest.build.install) {
+      await runPhase("install", manifest.build.install, input.installNetworkHosts)
+    }
+    await runPhase("build", manifest.build.command, input.buildNetworkHosts)
+    // `package` spawns nothing, so it produces events but no log row.
+    await deps.appendPhaseEvent({
+      operationId,
+      leaseOwner: deps.leaseOwner,
+      phase: "package",
+      outcome: "started",
+      message: buildPhaseMessage("package", undefined),
+      now: deps.now(),
+    })
     const files = await collectSiteBuildOutput(
       { sourceDir, entry: manifest.build.entry, assets: manifest.build.assets },
       deps
@@ -284,6 +333,14 @@ export async function buildAndSaveSiteVersion(
       entry: manifest.build.entry,
       assets: manifest.build.assets,
       files,
+    })
+    await deps.appendPhaseEvent({
+      operationId,
+      leaseOwner: deps.leaseOwner,
+      phase: "package",
+      outcome: "succeeded",
+      message: `${artifact.fileCount} files`,
+      now: deps.now(),
     })
     await deps.putArtifact({
       digest: artifact.digest,

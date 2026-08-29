@@ -224,3 +224,18 @@ it("flags an uncommitted source tree", () => {
   })
   expect(screen.getByText("versions.dirty")).toBeInTheDocument()
 })
+
+it("offers the build log for anything that finished, and not for a build in flight", () => {
+  // The output is the only thing that explains a broken build; it used to be
+  // reduced to a single Error message on failure and discarded on success.
+  renderTab({
+    versions: [
+      version({ id: "done", sequence: 1 }),
+      version({ id: "failing", sequence: 2, status: "failed" }),
+      version({ id: "running", sequence: 3, status: "building" }),
+    ],
+  })
+  expect(screen.getByTestId("site-build-log-done")).toBeInTheDocument()
+  expect(screen.getByTestId("site-build-log-failing")).toBeInTheDocument()
+  expect(screen.queryByTestId("site-build-log-running")).not.toBeInTheDocument()
+})

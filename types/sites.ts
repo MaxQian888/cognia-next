@@ -178,8 +178,24 @@ export interface SiteOperationRow {
   completedAt?: number
 }
 
+/** The three stages a build passes through. */
+export type SiteBuildPhase = "install" | "build" | "package"
+
 export type SiteOperationEventType =
-  "queued" | "claimed" | "waiting-reconcile" | "succeeded" | "failed" | "cancelled"
+  | "queued"
+  | "claimed"
+  | "waiting-reconcile"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  /**
+   * Progress inside a running operation. A build is the only long operation in
+   * the system, and until these existed a multi-minute one showed a spinner and
+   * nothing else — `appendOperationEvent` fired only on lifecycle transitions.
+   */
+  | "phase-started"
+  | "phase-succeeded"
+  | "phase-failed"
 
 export interface SiteOperationEventRow {
   id: string
@@ -188,6 +204,39 @@ export interface SiteOperationEventRow {
   type: SiteOperationEventType
   message?: string
   providerRequestId?: string
+  /** Set on the three `phase-*` types. Non-indexed. */
+  phase?: SiteBuildPhase
+  createdAt: number
+}
+
+/**
+ * Captured output of one build phase.
+ *
+ * Its own table rather than a field on the version or a message on an event:
+ * `listSiteVersions` is the console's hottest read and sits on the live-query
+ * path, and `siteOperationEvents` is read to render a one-line sub-status.
+ * Putting up to half a megabyte of build output in either would undo the work
+ * that made those reads cheap. Here the bytes are read only when someone opens
+ * the viewer.
+ */
+export interface SiteBuildLogRow {
+  /** `${versionId}:${phase}` — one row per phase per version, rewritten on retry. */
+  id: string
+  versionId: string
+  siteId: string
+  operationId: string
+  /** `package` spawns no process, so it never produces a row. */
+  phase: Exclude<SiteBuildPhase, "package">
+  argv: string[]
+  exitCode: number
+  durationSeconds: number
+  timedOut: boolean
+  /** The transport cap, the storage cap, or both, cut this output. */
+  truncated: boolean
+  stdout: string
+  stderr: string
+  /** Bytes actually stored after trimming, for the retention picture. */
+  storedBytes: number
   createdAt: number
 }
 

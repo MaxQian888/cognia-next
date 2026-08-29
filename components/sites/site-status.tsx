@@ -122,6 +122,11 @@ export const SITE_EVENT_TONE: Record<SiteOperationEventType, SiteTone> = {
   succeeded: "success",
   failed: "danger",
   cancelled: "neutral",
+  // Progress inside a running operation — informational, never alarming; the
+  // operation's own status is what says whether it went wrong.
+  "phase-started": "info",
+  "phase-succeeded": "success",
+  "phase-failed": "danger",
 }
 
 export const SITE_RESOURCE_FACE: Record<SiteResourceStatus, StatusFace> = {

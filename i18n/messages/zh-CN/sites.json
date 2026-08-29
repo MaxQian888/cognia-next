@@ -76,6 +76,28 @@
     "runtime": "运行时快照",
     "title": "受限构建与本地预览"
   },
+  "buildLog": {
+    "command": "命令",
+    "copy": "复制输出",
+    "duration": "{seconds} 秒",
+    "empty": "本次构建没有记录任何输出。",
+    "exitCode": "退出码 {code}",
+    "loading": "正在载入构建输出…",
+    "noStderr": "标准错误没有任何内容。",
+    "noStdout": "标准输出没有任何内容。",
+    "open": "构建日志",
+    "phase": {
+      "install": "安装",
+      "build": "构建",
+      "package": "打包"
+    },
+    "stderr": "标准错误",
+    "stderrOnly": "只看错误",
+    "stdout": "标准输出",
+    "timedOut": "已超时",
+    "title": "构建输出",
+    "truncated": "输出已被截断——保留了开头与结尾部分。"
+  },
   "confirm": {
     "deleteMetadata": {
       "description": "此操作会从 Cognia 中删除已清除的站点、版本、操作历史和保留资源报告，不会更改服务商资源。",
@@ -218,6 +240,9 @@
     "cancelled": "已取消",
     "claimed": "已认领",
     "failed": "失败",
+    "phase-failed": "失败",
+    "phase-started": "开始",
+    "phase-succeeded": "完成",
     "queued": "已排队",
     "succeeded": "成功",
     "waiting-reconcile": "等待校准"

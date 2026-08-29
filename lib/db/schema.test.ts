@@ -87,6 +87,30 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  fullSchemaIt("v203 adds the Sites build-log table", async () => {
+    const name = `cognia-site-build-logs-v203-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(202).stores({ sessions: "id, updatedAt" })
+    await legacy.open()
+    await legacy.table("sessions").put({ id: "session-before-build-logs", updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(203)
+    expect(upgraded.siteBuildLogs.schema.primKey.keyPath).toBe("id")
+    // `[versionId+phase]` reads one phase directly rather than filtering a
+    // version's rows in memory.
+    expect(upgraded.siteBuildLogs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["versionId", "siteId", "operationId", "[versionId+phase]"])
+    )
+    expect(await upgraded.sessions.get("session-before-build-logs")).toEqual({
+      id: "session-before-build-logs",
+      updatedAt: 1,
+    })
+    upgraded.close()
+  })
+
   fullSchemaIt("v202 backfills the Sites artifact summary onto version rows", async () => {
     const name = `cognia-site-artifact-summary-v202-${Date.now()}`
     const legacy = new Dexie(name)

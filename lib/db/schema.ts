@@ -293,6 +293,7 @@ import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { RunRecordRow } from "./run-records"
 import type {
   SiteArtifactRow,
+  SiteBuildLogRow,
   SiteDeploymentRow,
   SiteEnvironmentRevisionRow,
   SiteOperationEventRow,
@@ -534,6 +535,8 @@ export class CogniaDB extends Dexie {
   siteOperations!: Table<SiteOperationRow, string>
   siteOperationEvents!: Table<SiteOperationEventRow, string>
   siteResources!: Table<SiteResourceRow, string>
+  // v203 — captured build output. See `lib/sites/build-log.ts`.
+  siteBuildLogs!: Table<SiteBuildLogRow, string>
   canvasDocuments!: Table<CanvasDocumentRow, string>
   canvasVersions!: Table<CanvasVersionRow, string>
   canvasComments!: Table<CanvasCommentRow, string>
@@ -4806,6 +4809,22 @@ export class CogniaDB extends Dexie {
           })
         }
       })
+
+    // v203 — captured Sites build output.
+    //
+    // `runConfinedSiteBuild` always returned the install and build phases'
+    // stdout and stderr; on success both were discarded and on failure only the
+    // last line survived as an Error message. Its own table because
+    // `listSiteVersions` is the console's hottest read and `siteOperationEvents`
+    // is read to render a one-line sub-status — up to half a megabyte of build
+    // output in either would undo exactly the reads v202 made cheap. The bytes
+    // load only when someone opens the viewer.
+    //
+    // `[versionId+phase]` reads one phase directly; the primary key is
+    // `${versionId}:${phase}` so a retry rewrites its own row.
+    this.version(203).stores({
+      siteBuildLogs: "&id, versionId, siteId, operationId, [versionId+phase], createdAt",
+    })
   }
 
   // v201 — host-owned external-agent configurations. See

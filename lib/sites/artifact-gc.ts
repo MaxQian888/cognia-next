@@ -28,6 +28,7 @@
  */
 import {
   deleteSiteArtifacts,
+  deleteSiteBuildLogsForVersions,
   listSiteArtifactDigests,
   listSiteDeployments,
   listSiteOperations,
@@ -65,6 +66,8 @@ export interface SiteArtifactGcReport {
   deletedDigests: string[]
   /** Bytes recovered, from the denormalized summary on the version rows. */
   bytesFreed: number
+  /** Build-log rows removed alongside the archives they explain. */
+  buildLogsDeleted: number
   /** Digests kept because a deployment or an unfinished operation needs them. */
   retainedReferenced: number
   /** Digests kept by the rollback window or the age window. */
@@ -78,6 +81,7 @@ export interface SiteArtifactGcDeps {
   listOperations: typeof listSiteOperations
   listDigests: typeof listSiteArtifactDigests
   deleteArtifacts: typeof deleteSiteArtifacts
+  deleteBuildLogs: typeof deleteSiteBuildLogsForVersions
   markCollected: typeof markSiteVersionArtifactCollected
 }
 
@@ -89,6 +93,7 @@ function defaults(): SiteArtifactGcDeps {
     listOperations: listSiteOperations,
     listDigests: listSiteArtifactDigests,
     deleteArtifacts: deleteSiteArtifacts,
+    deleteBuildLogs: deleteSiteBuildLogsForVersions,
     markCollected: markSiteVersionArtifactCollected,
   }
 }
@@ -211,6 +216,7 @@ export async function collectUnreferencedSiteArtifacts(
   const doomedSet = new Set(doomed)
   const losing = collectable.filter((version) => doomedSet.has(version.artifactDigest as string))
 
+  let buildLogsDeleted = 0
   let bytesFreed = 0
   const counted = new Set<string>()
   for (const version of losing) {
@@ -223,6 +229,11 @@ export async function collectUnreferencedSiteArtifacts(
 
   if (doomed.length > 0) {
     await deps.deleteArtifacts(doomed)
+    // The captured build output goes with the archive it explains. A version
+    // that can no longer be republished does not need half a megabyte of its
+    // compiler's stdout kept forever, and `siteBuildLogs` would otherwise
+    // become the next unbounded table.
+    buildLogsDeleted = await deps.deleteBuildLogs(losing.map((version) => version.id))
     for (const version of losing) await deps.markCollected(version.id, input.now)
   }
 
@@ -230,6 +241,7 @@ export async function collectUnreferencedSiteArtifacts(
     scanned: allDigests.length,
     deletedDigests: doomed,
     bytesFreed,
+    buildLogsDeleted,
     retainedReferenced: allDigests.filter((digest) => referenced.has(digest)).length,
     // `referenced` wins the label when a digest is pinned twice, so the two
     // counts plus the deletions always add up to `scanned`.
