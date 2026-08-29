@@ -124,3 +124,81 @@ describe("settings component primitives", () => {
     expect(violations).toEqual([])
   })
 })
+
+/**
+ * Two layout shapes that read fine on a desktop and break on a phone. Both are
+ * real defects this suite was extended for, not style preferences:
+ *
+ *  - A fixed multi-column grid whose cells hold a control AND a truncating
+ *    label. "Allowed types" in `artifacts-section` gave each cell ~110px at
+ *    375px; a Switch plus an icon left ~40px for the name, so every label cut
+ *    to one or two characters and "Code" and "Chart" both rendered as "C…".
+ *  - A section header that puts prose and buttons in one non-wrapping
+ *    `justify-between` row. The buttons keep their intrinsic width, so the
+ *    description is squeezed into a narrow column — the Language Servers blurb
+ *    ran to fifteen lines.
+ */
+describe("settings responsive layout", () => {
+  const sources = productionSettingsFiles(SETTINGS_ROOT).map((file) => ({
+    file: path.relative(process.cwd(), file),
+    lines: fs.readFileSync(file, "utf8").split("\n"),
+  }))
+
+  it("scans a non-empty set of settings files", () => {
+    expect(sources.length).toBeGreaterThan(50)
+  })
+
+  it("never puts a truncating label + control in a grid with no single-column base", () => {
+    const violations: string[] = []
+    for (const { file, lines } of sources) {
+      lines.forEach((line, i) => {
+        const cls = line.match(/className=\{?"([^"]*)"/)?.[1] ?? ""
+        if (!/(?:^|\s)grid-cols-[2-9](?:\s|$)/.test(cls)) return
+        if (/grid-cols-1\b/.test(cls)) return
+        const block = lines.slice(i, i + 26).join("\n")
+        if (!/\btruncate\b|text-ellipsis/.test(block)) return
+        if (!/<Switch|<Checkbox|<Input|<Select/.test(block)) return
+        violations.push(`${file}:${i + 1}`)
+      })
+    }
+    expect(violations).toEqual([])
+  })
+
+  it("wraps every section header that pairs a description with buttons", () => {
+    const violations: string[] = []
+    for (const { file, lines } of sources) {
+      lines.forEach((line, i) => {
+        const cls = line.match(/className=\{?"([^"]*)"/)?.[1] ?? ""
+        if (!/justify-between/.test(cls)) return
+        if (/flex-col|flex-wrap|sm:flex-row|md:flex-row/.test(cls)) return
+        const block = lines.slice(i, i + 22).join("\n")
+        const isHeader = /<h[123]\b|CardTitle|text-(?:lg|base) font-semibold/.test(block)
+        if (!isHeader) return
+        if (!/<Button\b/.test(block)) return
+        if (!/text-muted-foreground/.test(block)) return
+        violations.push(`${file}:${i + 1}`)
+      })
+    }
+    // Rows already in this shape when the guard landed. Each pairs a SHORT
+    // title with a compact action, so there is little prose to squeeze — but
+    // they are the same construction, so they are recorded rather than
+    // silently tolerated. The list may only shrink: a new one is a failure.
+    const BASELINE = [
+      "components/settings/a2ui/mcp-bridge-tab.tsx:98",
+      "components/settings/a2ui/overview-tab.tsx:91",
+      "components/settings/connections/adapters/tabs/config-detail.tsx:79",
+      "components/settings/discover/discover-preferences.tsx:40",
+      "components/settings/external-bridge/wiki-lint-card.tsx:112",
+      "components/settings/external-bridge/wiki-rebuild-card.tsx:155",
+      "components/settings/mcp/mcp-health-tab.tsx:379",
+      "components/settings/mcp/mcp-health-tab.tsx:440",
+      "components/settings/mcp/mcp-server-detail.tsx:385",
+      "components/settings/ocr/tabs/ocr-auto-router-panel.tsx:61",
+      "components/settings/provider/cliproxyapi-settings.tsx:295",
+      "components/settings/provider/local-provider-setup-wizard.tsx:304",
+      "components/settings/sections/plugin-messaging-card.tsx:92",
+      "components/settings/workflows/tabs/templates-tab.tsx:79",
+    ]
+    expect(violations.filter((v) => !BASELINE.includes(v))).toEqual([])
+  })
+})

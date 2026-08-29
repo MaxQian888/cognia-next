@@ -201,7 +201,10 @@ export function NotificationsSection() {
       <div className="space-y-2 border-t pt-4">
         <Label className="text-sm">{t("perSourceLabel")}</Label>
         <p className="text-xs text-muted-foreground">{t("perSourceHint")}</p>
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        {/* Two columns leave ~110px for a name beside a Switch; today's source
+            labels fit, but they are localized and one longer word would start
+            truncating the only thing that identifies the row. */}
+        <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
           {NOTIFICATION_SOURCES.map((s) => (
             <label
               key={s}
