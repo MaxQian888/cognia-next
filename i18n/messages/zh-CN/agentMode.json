@@ -1,5 +1,10 @@
 {
+  "a2uiTemplateComponents": "{n, plural, other {# 个组件}}",
+  "a2uiTemplateHide": "隐藏定义",
   "a2uiTemplatePreviewTitle": "A2UI 模板预览",
+  "a2uiTemplateShow": "显示定义",
+  "a2uiTemplateSpecNote": "模板原始定义——这是该模式保存的内容，并非实时界面。",
+  "a2uiTemplateUntitled": "未命名模板",
   "agentTeams": "代理团队",
   "builtInModes": "内置模式",
   "create": "创建",

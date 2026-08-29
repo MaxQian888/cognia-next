@@ -44,6 +44,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   useCustomModeStore,
   type CustomModeConfig,
+  type CustomModeA2UITemplate,
   type CustomModeCategory,
   type McpToolReference,
   type ModeTemplate,
@@ -124,6 +125,14 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
   const [temperatureOverride, setTemperatureOverride] = useState(mode?.temperatureOverride)
   const [maxTokensOverride, setMaxTokensOverride] = useState(mode?.maxTokensOverride)
   const [a2uiEnabled, setA2UIEnabled] = useState(mode?.a2uiEnabled || false)
+  // The generator has always been able to produce an A2UI template
+  // (`suggestedA2UITemplate`, gated on `includeA2UI`), but the editor threw the
+  // result away and never persisted one — so "Include A2UI template" generated
+  // something nobody could see and the preview card below was permanently its
+  // own empty state. Hold it, show it, save it.
+  const [a2uiTemplate, setA2UITemplate] = useState<CustomModeA2UITemplate | undefined>(
+    mode?.a2uiTemplate
+  )
 
   // MCP Tools state
   const [mcpTools, setMcpTools] = useState<McpToolReference[]>(mode?.mcpTools || [])
@@ -146,6 +155,7 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
     setTemperatureOverride(mode?.temperatureOverride)
     setMaxTokensOverride(mode?.maxTokensOverride)
     setA2UIEnabled(mode?.a2uiEnabled || false)
+    setA2UITemplate(mode?.a2uiTemplate)
     setMcpTools(mode?.mcpTools || [])
   }, [mode])
 
@@ -180,6 +190,7 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
       if (result.mode.outputFormat) setOutputFormat(result.mode.outputFormat)
       if (result.mode.category) setCategory(result.mode.category)
       if (result.mode.previewEnabled !== undefined) setPreviewEnabled(result.mode.previewEnabled)
+      if (result.suggestedA2UITemplate) setA2UITemplate(result.suggestedA2UITemplate)
     } catch (_error) {
       toast.error(t("modeGenerationFailed"))
     }
@@ -214,6 +225,7 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
       temperatureOverride,
       maxTokensOverride,
       a2uiEnabled,
+      a2uiTemplate,
       mcpTools,
     }
 
@@ -525,6 +537,7 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
                   </div>
                   {a2uiEnabled && (
                     <A2UITemplatePreview
+                      template={a2uiTemplate}
                       showPreview={previewEnabled}
                       onTogglePreview={() => setPreviewEnabled(!previewEnabled)}
                       className="mt-3"

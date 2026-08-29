@@ -4,7 +4,7 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { CustomModeEditor } from "./index"
-import type { CustomModeConfig } from "@/stores/agent/custom-mode-store"
+import type { CustomModeA2UITemplate, CustomModeConfig } from "@/stores/agent/custom-mode-store"
 
 // i18n passthrough.
 jest.mock("next-intl", () => ({
@@ -78,21 +78,10 @@ jest.mock("./mcp-tool-selector", () => ({
   ),
 }))
 
-jest.mock("../a2ui-template-preview", () => ({
-  A2UITemplatePreview: ({
-    onTogglePreview,
-  }: {
-    showPreview?: boolean
-    onTogglePreview?: () => void
-    className?: string
-  }) => (
-    <div data-testid="a2ui-preview">
-      <button data-testid="a2ui-toggle-preview" onClick={onTogglePreview}>
-        A2UITemplatePreview
-      </button>
-    </div>
-  ),
-}))
+// No mock for `../a2ui-template-preview` on purpose. The mock that used to sit
+// here rendered a toggle button the real component did not have, so the case
+// below passed for years against a fixture while `showPreview` /
+// `onTogglePreview` were silently ignored in production.
 
 // LucideIcons proxy.
 jest.mock("@/lib/agent/resolve-icon", () => ({
@@ -328,42 +317,37 @@ jest.mock("@/components/ui/select", () => ({
 }))
 
 jest.mock("@/components/ui/badge", () => ({
-  Badge: ({
-    children,
-    variant,
-    className,
-  }: {
-    children: React.ReactNode
-    variant?: string
-    className?: string
-  }) => (
-    <span data-testid="badge" data-variant={variant} className={className}>
+  Badge: ({ children, variant, ...rest }: React.ComponentProps<"span"> & { variant?: string }) => (
+    <span data-testid="badge" data-variant={variant} {...rest}>
       {children}
     </span>
   ),
 }))
 
+// Props are forwarded: the A2UI preview (rendered for real, not mocked) tags
+// its Card / CardContent with its own test ids, and a mock that only passed
+// `className` would drop them.
 jest.mock("@/components/ui/card", () => ({
-  Card: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="card" className={className}>
+  Card: ({ children, ...rest }: React.ComponentProps<"div">) => (
+    <div data-testid="card" {...rest}>
       {children}
     </div>
   ),
-  CardContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
+  CardContent: ({ children, ...rest }: React.ComponentProps<"div">) => (
+    <div {...rest}>{children}</div>
   ),
-  CardHeader: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
+  CardHeader: ({ children, ...rest }: React.ComponentProps<"div">) => (
+    <div {...rest}>{children}</div>
   ),
-  CardTitle: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
+  CardTitle: ({ children, ...rest }: React.ComponentProps<"div">) => (
+    <div {...rest}>{children}</div>
   ),
   CardDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
 }))
 
 jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className}>{children}</div>
+  ScrollArea: ({ children, ...rest }: React.ComponentProps<"div">) => (
+    <div {...rest}>{children}</div>
   ),
 }))
 
@@ -692,10 +676,12 @@ describe("CustomModeEditor — advanced tab", () => {
     // Switch order in advanced: livePreview (first), enableA2UI (second)
     const a2uiSwitch = switches[1] as HTMLInputElement
     expect(a2uiSwitch).toBeDefined()
-    // Initially a2uiEnabled is false; A2UITemplatePreview should not be visible.
-    expect(screen.queryByTestId("a2ui-preview")).not.toBeInTheDocument()
+    // Initially a2uiEnabled is false; the preview should not be visible.
+    expect(screen.queryByTestId("a2ui-template-empty")).not.toBeInTheDocument()
     fireEvent.click(a2uiSwitch)
-    expect(screen.getByTestId("a2ui-preview")).toBeInTheDocument()
+    // A mode with no stored template gets the honest empty state rather than a
+    // card claiming to preview nothing.
+    expect(screen.getByTestId("a2ui-template-empty")).toBeInTheDocument()
   })
 
   it("renders the model override input", () => {
@@ -727,19 +713,53 @@ describe("CustomModeEditor — advanced tab", () => {
     expect(() => fireEvent.click(selectChangeBtns[0])).not.toThrow()
   })
 
-  it("fires onTogglePreview when the A2UITemplatePreview toggle button is clicked", () => {
-    // First enable a2uiEnabled so A2UITemplatePreview renders.
-    renderEditor()
+  it("shows the stored A2UI template rather than an empty card", () => {
+    // The generator has always been able to produce `suggestedA2UITemplate`,
+    // but the editor dropped it and never passed one down, so this card was
+    // permanently its own empty state.
+    renderEditor({
+      mode: {
+        ...SAMPLE_MODE,
+        // `previewEnabled` is what the card's expanded state is bound to.
+        previewEnabled: true,
+        a2uiEnabled: true,
+        a2uiTemplate: {
+          id: "tpl-1",
+          name: "Status board",
+          components: [{ component: "Card" }] as unknown as CustomModeA2UITemplate["components"],
+          dataModel: {},
+        },
+      },
+    })
+    expect(screen.getByTestId("a2ui-template-preview")).toBeInTheDocument()
+    expect(screen.getByText("Status board")).toBeInTheDocument()
+  })
+
+  it("the preview's toggle drives the same live-preview switch as the row above it", () => {
+    renderEditor({
+      mode: {
+        ...SAMPLE_MODE,
+        previewEnabled: true,
+        a2uiEnabled: true,
+        a2uiTemplate: {
+          id: "tpl-1",
+          name: "Status board",
+          components: [] as unknown as CustomModeA2UITemplate["components"],
+          dataModel: {},
+        },
+      },
+    })
     const advancedTab = screen.getByTestId("tab-content-advanced")
-    const switches = advancedTab.querySelectorAll("input[type='checkbox']")
-    // Switch[1] = enableA2UI switch
-    const a2uiSwitch = switches[1] as HTMLInputElement
-    fireEvent.click(a2uiSwitch)
-    // A2UITemplatePreview is now rendered with a toggle button.
-    expect(screen.getByTestId("a2ui-preview")).toBeInTheDocument()
-    // Click the toggle button — calls onTogglePreview → setPreviewEnabled(!previewEnabled).
-    const toggleBtn = screen.getByTestId("a2ui-toggle-preview")
-    expect(() => fireEvent.click(toggleBtn)).not.toThrow()
+    const livePreviewSwitch = advancedTab.querySelectorAll(
+      "input[type='checkbox']"
+    )[0] as HTMLInputElement
+    expect(livePreviewSwitch.checked).toBe(true)
+    expect(screen.getByTestId("a2ui-template-body")).toBeInTheDocument()
+
+    // The Button mock drops data-testid, so find the toggle by its label key.
+    fireEvent.click(screen.getByText("a2uiTemplateHide"))
+    expect(livePreviewSwitch.checked).toBe(false)
+    expect(screen.queryByTestId("a2ui-template-body")).not.toBeInTheDocument()
   })
 
   it("updates temperature via the slider", () => {

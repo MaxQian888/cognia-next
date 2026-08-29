@@ -1,5 +1,10 @@
 {
+  "a2uiTemplateComponents": "{n, plural, one {# component} other {# components}}",
+  "a2uiTemplateHide": "Hide spec",
   "a2uiTemplatePreviewTitle": "A2UI template preview",
+  "a2uiTemplateShow": "Show spec",
+  "a2uiTemplateSpecNote": "Raw template spec — this is what the mode stores, not a live surface.",
+  "a2uiTemplateUntitled": "Untitled template",
   "agentTeams": "Agent Teams",
   "builtInModes": "Built-in Modes",
   "create": "Create",
