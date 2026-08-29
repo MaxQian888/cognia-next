@@ -7,7 +7,10 @@
  */
 
 import type {
+  ArtifactAuthoringOrigin,
   ArtifactLanguage,
+  ArtifactWorkspaceReturnContext,
+  CanvasAIWorkbenchState,
   CanvasEditorContext,
   CanvasSuggestion,
 } from "@/types/artifact/artifact"
@@ -27,6 +30,24 @@ export interface CanvasDocumentRow {
   editorContext?: CanvasEditorContext
   aiSuggestions?: CanvasSuggestion[]
   currentVersionId?: string
+  /**
+   * The artifact this document was opened from, and how to get back to it.
+   *
+   * These used to exist only in the `cognia-artifacts` localStorage blob, so
+   * the Dexie mirror dropped them — which was invisible while the blob was
+   * authoritative and became a broken "return to artifact" the moment it
+   * stopped being. Not indexed: nothing queries a document by its origin.
+   */
+  sourceArtifactId?: string
+  returnContext?: ArtifactWorkspaceReturnContext | null
+  authoringOrigin?: ArtifactAuthoringOrigin
+  /**
+   * Prompt draft, staged attachments, the open revision proposal and the action
+   * log. Stored verbatim, `Date` fields included — IndexedDB clones them, and
+   * the store's own rehydrator coerces the ISO strings a backup round-trip
+   * leaves behind.
+   */
+  aiWorkbench?: CanvasAIWorkbenchState
 }
 
 export interface CanvasVersionRow {

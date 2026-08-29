@@ -1796,7 +1796,8 @@ describe("persist partialize — artifacts live in Dexie", () => {
     }
     expect(parsed.state.artifacts).toBeUndefined()
     expect(parsed.state.artifactVersions).toBeUndefined()
-    expect(parsed.version).toBe(6)
+    expect(parsed.state.canvasDocuments).toBeUndefined()
+    expect(parsed.version).toBe(7)
     // The whole blob has to be smaller than the single artifact it used to
     // truncate; without this the assertions above could pass while the content
     // rode along under some other key.

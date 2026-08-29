@@ -40,9 +40,12 @@ no separate version map for canvas docs):
 | `restoreCanvasVersion` | `:1159` | auto-saves current first, then restores |
 | `addSuggestion` / `applySuggestion` / `updateSuggestionStatus` | `:1038` / `:1079` / `:1060` | AI suggestion lifecycle |
 
-Persistence: name `"cognia-artifacts"`, version 3 (`:1455-1456`); `partialize` persists
-`canvasDocuments` **whole** with no LRU/truncation (`:1511`) — the content-truncation + LRU eviction
-applies only to one-shot artifacts, not canvas docs. Auto-save version retention keeps at most
+Persistence: **Dexie**, from persist v7. `partialize` used to write `canvasDocuments` whole into
+`localStorage["cognia-artifacts"]` on every state change — and `editorContext.selection` changes on
+every cursor move, so moving the caret through one large document re-stringified every canvas
+document the user has. The `artifacts` / `artifactVersions` tables took the one-shot artifacts in v6
+(schema v206) and `canvasDocuments` / `canvasVersions` took these in v7; what stays in the blob is
+the dock's preferences. Auto-save version retention keeps at most
 `MAX_CANVAS_AUTOSAVE_VERSIONS = 30` (`:51`), pruning oldest auto-saves while keeping manual ones
 (`applyCanvasVersionRetention`, `:254`).
 
@@ -111,7 +114,7 @@ sequenceDiagram
 The write-through path in detail:
 
 1. A UI edit calls `useArtifactStore.updateCanvasDocument` (`artifact-store.ts:922`) — the in-memory
-   map mutates and Zustand persists it to `localStorage["cognia-artifacts"]` (the authoritative copy).
+   map mutates. Nothing reaches localStorage: Dexie is the authoritative copy from persist v7 on.
 2. The bridge's `subscribe` callback fires (`dexie-bridge.ts:290`) → `syncDocumentsAndVersions(docs)`
    (`:87`).
 3. That diffs against the `mirroredDocs` snapshot, flattens each document's `versions[]`, and runs a

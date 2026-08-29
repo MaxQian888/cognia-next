@@ -28,6 +28,41 @@ describe("canvas-types row shapes", () => {
     expect(doc.type).toBe("code")
   })
 
+  it("CanvasDocumentRow carries where the document came from", () => {
+    // These four rode only in the `cognia-artifacts` localStorage blob until
+    // persist v7. Dropping them from the row was invisible while that blob was
+    // authoritative, and became a broken "return to the artifact this came
+    // from" the moment Dexie became the only copy.
+    const doc: CanvasDocumentRow = {
+      id: "doc_2",
+      title: "Derived",
+      content: "x",
+      language: "typescript",
+      type: "code",
+      createdAt: 0,
+      updatedAt: 1,
+      sourceArtifactId: "art_1",
+      authoringOrigin: "artifact-panel",
+      returnContext: {
+        scope: "session",
+        searchQuery: "",
+        typeFilter: "all",
+        runtimeFilter: "all",
+      },
+      aiWorkbench: {
+        promptDraft: "",
+        selectedPresetAction: null,
+        attachments: [],
+        pendingReview: null,
+        actionHistory: [],
+        isInlineCommandOpen: false,
+      },
+    }
+    expect(doc.sourceArtifactId).toBe("art_1")
+    expect(doc.returnContext?.scope).toBe("session")
+    expect(doc.aiWorkbench?.actionHistory).toEqual([])
+  })
+
   it("CanvasVersionRow can carry an isAutoSave flag and description", () => {
     const v: CanvasVersionRow = {
       id: "ver_1",

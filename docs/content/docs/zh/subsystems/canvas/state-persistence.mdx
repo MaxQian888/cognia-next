@@ -37,9 +37,11 @@ description: 唯一真源（useArtifactStore.canvasDocuments）、五个 canvas 
 | `restoreCanvasVersion` | `:1159` | 先自动保存当前，再恢复 |
 | `addSuggestion` / `applySuggestion` / `updateSuggestionStatus` | `:1038` / `:1079` / `:1060` | AI 建议生命周期 |
 
-持久化：name `"cognia-artifacts"`，version 3（`:1455-1456`）；`partialize` **整体**持久化
-`canvasDocuments`，无 LRU/截断（`:1511`）—— 内容截断 + LRU 淘汰只对一次性 artifact 生效，不影响 canvas
-文档。自动保存版本保留至多 `MAX_CANVAS_AUTOSAVE_VERSIONS = 30`（`:51`），裁剪最旧的自动保存而保留手动版本
+持久化：**Dexie**，自 persist v7 起。此前 `partialize` 会在每次状态变更时把 `canvasDocuments` 整体写进
+`localStorage["cognia-artifacts"]` —— 而 `editorContext.selection` 每次移动光标都会变，所以在一份大文档里
+移动光标就意味着把用户所有的 canvas 文档重新序列化一遍。v6（schema v206）先把一次性 artifact 挪进
+`artifacts` / `artifactVersions`，v7 再把这些挪进 `canvasDocuments` / `canvasVersions`；blob 里只剩 dock
+的偏好。自动保存版本保留至多 `MAX_CANVAS_AUTOSAVE_VERSIONS = 30`（`:51`），裁剪最旧的自动保存而保留手动版本
 （`applyCanvasVersionRetention`，`:254`）。
 
 组件直接读这个 store。曾有一个 `useCanvasDocuments` 外观（排序列表、create/open/rename/duplicate/search）
@@ -103,8 +105,8 @@ sequenceDiagram
 
 写穿路径细节：
 
-1. UI 编辑调用 `useArtifactStore.updateCanvasDocument`（`artifact-store.ts:922`）—— 内存映射改变，Zustand
-   将其持久化到 `localStorage["cognia-artifacts"]`（权威副本）。
+1. UI 编辑调用 `useArtifactStore.updateCanvasDocument`（`artifact-store.ts:922`）—— 内存映射改变。
+   不再写 localStorage：自 persist v7 起，Dexie 才是权威副本。
 2. 桥的 `subscribe` 回调触发（`dexie-bridge.ts:290`）→ `syncDocumentsAndVersions(docs)`（`:87`）。
 3. 它与 `mirroredDocs` 快照做 diff，扁平化每个文档的 `versions[]`，并在四张表上跑单个 `rw` 事务：级联删除
    已移除文档的版本/评论/会话，再 `bulkPut` 文档 + 版本 upsert 并 `bulkDelete` 已移除版本（`:125-142`）。

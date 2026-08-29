@@ -247,9 +247,13 @@ function rehydrateArtifactMetadata(metadata?: ArtifactMetadata): ArtifactMetadat
 }
 
 /**
- * Rehydrate canvas document dates from storage
+ * Rehydrate canvas document dates from storage.
+ *
+ * Exported because the Dexie bridge reads the same shape back out of
+ * IndexedDB, and coercing there too would be a second definition of which
+ * fields are dates.
  */
-function rehydrateCanvasDocument(doc: CanvasDocument): CanvasDocument {
+export function rehydrateCanvasDocument(doc: CanvasDocument): CanvasDocument {
   return {
     ...doc,
     createdAt: ensureDate(doc.createdAt),
@@ -2297,12 +2301,14 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     {
       name: ARTIFACT_STORAGE_KEY,
       storage: persistLocalStorage(),
-      // v6 — artifacts + their versions left this blob for Dexie. The migrate
-      // hook deliberately does NOT strip them: on the first boot after the
-      // upgrade they are the migration source. The bridge clears the marker
-      // only after its initial transaction commits, which makes `partialize`
-      // remove the maps on the following persist write.
-      version: 6,
+      // v6 — artifacts + their versions left this blob for Dexie.
+      // v7 — canvas documents followed them.
+      //
+      // The migrate hook deliberately does NOT strip either: on the first boot
+      // after an upgrade they are the migration source. The artifact bridge
+      // clears its marker only after its initial transaction commits, which
+      // makes `partialize` remove the maps on the following persist write.
+      version: 7,
       migrate: (persistedState: unknown, version) => {
         const state = persistedState as Record<string, unknown>
         if (!state.canvasDocuments || typeof state.canvasDocuments !== "object") {
@@ -2426,7 +2432,16 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             state.activeArtifactIdBySession,
             (_sessionKey, current) => (current && state.artifacts[current] ? current : null)
           ),
-          canvasDocuments: state.canvasDocuments,
+          // `canvasDocuments` is deliberately absent from v7 on: Dexie owns
+          // them (`lib/canvas/dexie-bridge.ts`), the same way it owns artifacts
+          // from v6. They were serialised in full — no truncation, no cap — on
+          // every state change, and `editorContext.selection` changes on every
+          // cursor move, so moving the caret through one large document meant
+          // re-stringifying every canvas document the user has.
+          //
+          // Reads still accept them, for the reason v6 kept accepting
+          // artifacts: an install upgrading from v6 has them on disk, and the
+          // bridge needs that copy in memory to mirror it.
         }
       },
     }

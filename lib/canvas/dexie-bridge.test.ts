@@ -44,6 +44,7 @@ let contextCommentsTable = fakeTable()
 let canvasSessionsTable = fakeTable()
 
 const fakeDb = {
+  name: "cognia-db",
   canvasDocuments: canvasDocumentsTable,
   canvasVersions: canvasVersionsTable,
   contextComments: contextCommentsTable,
@@ -86,16 +87,24 @@ function makeFakeStore<T>(initial: T) {
 }
 
 const artifactStore = makeFakeStore<{
-  canvasDocuments: Record<string, unknown>
+  canvasDocuments: Record<string, Record<string, unknown>>
 }>({ canvasDocuments: {} })
 
 const commentStore = makeFakeStore<{ comments: Record<string, unknown[]> }>({
   comments: {},
 })
 
+// Identity, not the real coercer: this suite is about what the mirror reads
+// and writes, and the store's own tests own which fields are dates. The spy
+// exists so one test can prove hydration still routes rows through it — the
+// only place the ISO strings a backup restore leaves behind become Dates.
+const rehydrateCanvasDocumentSpy = jest.fn(
+  (doc: Record<string, unknown>) => doc as Record<string, unknown>
+)
 jest.mock("@/stores/artifact/artifact-store", () => ({
   __esModule: true,
   useArtifactStore: artifactStore,
+  rehydrateCanvasDocument: (doc: Record<string, unknown>) => rehydrateCanvasDocumentSpy(doc),
 }))
 
 jest.mock("@/stores/canvas/comment-store", () => ({
@@ -126,6 +135,8 @@ beforeEach(() => {
   fakeDb.canvasVersions = canvasVersionsTable
   fakeDb.contextComments = contextCommentsTable
   fakeDb.canvasSessions = canvasSessionsTable
+  fakeDb.name = "cognia-db"
+  rehydrateCanvasDocumentSpy.mockClear()
   fakeDb.transaction = jest.fn(async (..._args: unknown[]) => {
     const fn = _args[_args.length - 1] as () => Promise<void>
     await fn()
@@ -339,9 +350,7 @@ describe("startCanvasDexieBridge", () => {
     await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
 
     expect(canvasDocumentsTable.bulkPut).toHaveBeenCalledTimes(1)
-    expect(canvasDocumentsTable.bulkPut.mock.calls[0][0].map((r: { id: string }) => r.id)).toEqual([
-      "b",
-    ])
+    expect(canvasDocumentsTable.bulkPut.mock.calls[0][0].map((r) => r.id)).toEqual(["b"])
     // Versions are immutable once written; neither document's needs a rewrite.
     expect(canvasVersionsTable.bulkPut).not.toHaveBeenCalled()
     dispose()
@@ -553,6 +562,161 @@ describe("startCanvasDexieBridge", () => {
       },
     })
     await new Promise((r) => setTimeout(r, 30))
+    dispose()
+  })
+  it("carries the fields the mirror used to drop", async () => {
+    // `sourceArtifactId` / `returnContext` / `authoringOrigin` / `aiWorkbench`
+    // lived only in the localStorage blob until persist v7. Dropping them here
+    // was invisible while that blob was authoritative and became a broken
+    // "return to the artifact this came from" the moment it stopped being.
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, 30))
+
+    artifactStore.setState({
+      canvasDocuments: {
+        "doc-origin": {
+          id: "doc-origin",
+          sessionId: "s_1",
+          title: "From an artifact",
+          content: "x",
+          language: "ts",
+          type: "code",
+          createdAt: new Date(1),
+          updatedAt: new Date(2),
+          sourceArtifactId: "art_1",
+          authoringOrigin: "artifact-panel",
+          returnContext: {
+            scope: "session",
+            searchQuery: "",
+            typeFilter: "all",
+            runtimeFilter: "all",
+          },
+          aiWorkbench: {
+            promptDraft: "tighten the intro",
+            selectedPresetAction: null,
+            attachments: [],
+            pendingReview: null,
+            actionHistory: [],
+            isInlineCommandOpen: false,
+          },
+        },
+      },
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    const row = canvasDocumentsTable.records.find((r) => r.id === "doc-origin")
+    expect(row).toMatchObject({
+      sourceArtifactId: "art_1",
+      authoringOrigin: "artifact-panel",
+      returnContext: expect.objectContaining({ scope: "session" }),
+      aiWorkbench: expect.objectContaining({ promptDraft: "tighten the intro" }),
+    })
+    dispose()
+  })
+
+  it("routes hydrated rows through the store's rehydrator", async () => {
+    // A restored backup hands back ISO strings where the type says Date, and
+    // the store is the single place that knows which fields those are.
+    canvasDocumentsTable.records.push({
+      id: "doc-h",
+      sessionId: "s",
+      title: "H",
+      content: "c",
+      language: "ts",
+      type: "code",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, 30))
+
+    expect(rehydrateCanvasDocumentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "doc-h" })
+    )
+    dispose()
+  })
+
+  it("does not write back the rows hydration just read", async () => {
+    canvasDocumentsTable.records.push({
+      id: "doc-primed",
+      sessionId: "s",
+      title: "P",
+      content: "c",
+      language: "ts",
+      type: "code",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    canvasVersionsTable.records.push({
+      id: "v-primed",
+      documentId: "doc-primed",
+      title: "P",
+      content: "c",
+      createdAt: 1,
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, 30))
+
+    expect(canvasDocumentsTable.bulkPut).not.toHaveBeenCalled()
+    expect(canvasVersionsTable.bulkPut).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it("refuses to write into a database the mirror was not built against", async () => {
+    // Locking an account clears the Dexie selection BEFORE it clears the store,
+    // so a live subscription sees an empty store pointed at another database.
+    artifactStore._resetTo({
+      canvasDocuments: {
+        keep: {
+          id: "keep",
+          sessionId: "s",
+          title: "K",
+          content: "c",
+          language: "ts",
+          type: "code",
+          createdAt: new Date(1),
+          updatedAt: new Date(2),
+        },
+      },
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    expect(canvasDocumentsTable.records).toHaveLength(1)
+
+    fakeDb.name = "cognia-account-acct_b"
+    artifactStore.setState({ canvasDocuments: {} })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    expect(canvasDocumentsTable.records).toHaveLength(1)
+    dispose()
+  })
+
+  it("disables the mirror when hydration fails instead of deleting the table", async () => {
+    // Deletes are derived from "in the mirror, absent from memory". A partial
+    // read makes memory an unknown subset, so syncing it deletes the rest.
+    canvasDocumentsTable.toArray.mockRejectedValueOnce(new Error("DatabaseClosedError"))
+    canvasDocumentsTable.records.push({
+      id: "survivor",
+      sessionId: "s",
+      title: "S",
+      content: "c",
+      language: "ts",
+      type: "code",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await new Promise((r) => setTimeout(r, 30))
+
+    artifactStore.setState({ canvasDocuments: {} })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+
+    expect(canvasDocumentsTable.records.map((r) => r.id)).toEqual(["survivor"])
     dispose()
   })
 })

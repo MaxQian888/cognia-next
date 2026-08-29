@@ -59,16 +59,17 @@ describe("CanvasBridgeProvider", () => {
     expect(getByText("child")).toBeInTheDocument()
   })
 
-  it("restarts the artifact bridge when the account changes", () => {
+  it("restarts both bridges when the account changes", () => {
     // Each account has its own Dexie database. A bridge that kept mirroring
-    // across a switch would write one account's artifacts into another's, and
-    // only a restart re-runs hydration against the database selected now.
+    // across a switch would write one account's rows into another's, and only a
+    // restart re-runs hydration against the database selected now.
     const { rerender } = render(
       <CanvasBridgeProvider>
         <span>child</span>
       </CanvasBridgeProvider>
     )
     expect(startArtifact).toHaveBeenCalledTimes(1)
+    expect(startCanvas).toHaveBeenCalledTimes(1)
 
     accountRevision = 1
     rerender(
@@ -79,12 +80,12 @@ describe("CanvasBridgeProvider", () => {
 
     expect(disposeArtifact).toHaveBeenCalledTimes(1)
     expect(startArtifact).toHaveBeenCalledTimes(2)
+    expect(disposeCanvas).toHaveBeenCalledTimes(1)
+    expect(startCanvas).toHaveBeenCalledTimes(2)
   })
 
-  it("leaves the canvas bridge alone across an account change", () => {
-    // Canvas documents are still written to localStorage as well, so the
-    // canvas mirror has a safety net the artifact one does not — restarting it
-    // here would re-run its hydration for no benefit.
+  it("configures Monaco once and not again per account", () => {
+    // A global loader path, not per-account state.
     const { rerender } = render(
       <CanvasBridgeProvider>
         <span>child</span>
@@ -98,8 +99,7 @@ describe("CanvasBridgeProvider", () => {
       </CanvasBridgeProvider>
     )
 
-    expect(startCanvas).toHaveBeenCalledTimes(1)
-    expect(disposeCanvas).not.toHaveBeenCalled()
+    expect(configureMonacoLoader).toHaveBeenCalledTimes(1)
   })
 
   it("disposes both bridges on unmount", () => {

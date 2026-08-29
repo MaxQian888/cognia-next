@@ -3,19 +3,36 @@
 /**
  * Bridges the in-memory canvas state (Zustand-backed `useArtifactStore`
  * for documents + versions, `useCommentStore` for comments) with the
- * Dexie canvas tables. cognia-next persists canvas data primarily in
- * Zustand+localStorage (the `cognia-artifacts` and
- * `cognia-canvas-comments` namespaces, identical to Cognia upstream)
- * but the v3 backup format reads from Dexie. The bridge keeps both
- * sides in lockstep:
+ * Dexie canvas tables.
  *
- *   - Hydration: nothing to load — Zustand persistence is the
- *     authoritative source. Dexie is a write-through mirror.
+ * Dexie is AUTHORITATIVE for documents and versions from persist v7 on.
+ * `partialize` used to write every canvas document into the
+ * `cognia-artifacts` localStorage blob in full, on every state change —
+ * and `editorContext.selection` changes on every cursor move, so moving
+ * the caret through one large document re-stringified all of them. Now
+ * the store keeps the working copy in memory and this bridge owns the
+ * durable one:
+ *
+ *   - Hydration seeds the store from Dexie for every document memory
+ *     does not already hold. Memory still wins on a conflict — it is
+ *     either what the user is editing right now, or the v6 blob that
+ *     has not been migrated yet, and both are newer than the row.
  *   - Subscription: every store change diffs against the mirror and
  *     writes adds/updates/deletes into Dexie. Versions are flattened
  *     out of each document's nested `versions[]` array into the
  *     dedicated `canvasVersions` table so the backup importer can
  *     restore them on a different device.
+ *
+ * Two safety rules the account lifecycle forces, shared with
+ * `lib/artifacts/dexie-bridge.ts`:
+ *
+ *   1. **Never write to a database this mirror was not built against.**
+ *      Locking an account clears the Dexie selection BEFORE it clears
+ *      the store, so a live subscription would observe an empty store
+ *      pointed at another database and delete every row in it.
+ *   2. **A failed hydration disables the mirror entirely.** Deletes are
+ *      derived from "in the mirror, absent from memory"; if hydration
+ *      threw, memory is an unknown subset of the table.
  *
  * Comment-store comments are mirrored verbatim with timestamps
  * normalised to numbers. `canvasSessions` is NOT this bridge's to
@@ -27,7 +44,7 @@
 
 import type { CanvasDocument, CanvasDocumentVersion } from "@/types/artifact/artifact"
 import type { CanvasComment } from "@/types/canvas/collaboration"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { rehydrateCanvasDocument, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { getDb } from "@/lib/db/schema"
 import type { CanvasCommentRow, CanvasDocumentRow, CanvasVersionRow } from "@/lib/db/canvas-types"
@@ -36,9 +53,9 @@ import { canvasCommentRowFromContext, contextCommentRowFromCanvas } from "@/lib/
 import { loggers } from "@cognia/logging"
 
 /**
- * How long a burst of edits may accumulate before it reaches Dexie. Dexie is a
- * BACKUP mirror here — Zustand + localStorage is the authoritative copy — so a
- * short lag costs nothing, while a transaction per keystroke costs a real one.
+ * How long a burst of edits may accumulate before it reaches Dexie. The editor
+ * already commits on a typing pause, so this only coalesces what survives that:
+ * cursor moves, selection changes, autosave ticks.
  */
 const DOCUMENT_SYNC_DEBOUNCE_MS = 500
 
@@ -47,6 +64,18 @@ let flushDocumentSync: (() => void) | null = null
 let mirroredDocs: Record<string, CanvasDocument> = {}
 let mirroredVersionIds = new Set<string>()
 let mirroredCommentIds = new Set<string>()
+/** Which database {@link mirroredDocs} describes — see rule 1 in the header. */
+let mirroredDbName: string | null = null
+
+/** Test-only: drop the module-level mirror so suites don't leak into each other. */
+export function __resetCanvasDexieBridgeForTesting(): void {
+  started = false
+  flushDocumentSync = null
+  mirroredDocs = {}
+  mirroredVersionIds = new Set()
+  mirroredCommentIds = new Set()
+  mirroredDbName = null
+}
 
 function dateMs(d: Date | string | undefined): number {
   if (!d) return 0
@@ -69,6 +98,13 @@ function docToRow(doc: CanvasDocument): CanvasDocumentRow {
     editorContext: doc.editorContext,
     aiSuggestions: doc.aiSuggestions,
     currentVersionId: doc.currentVersionId,
+    // Dropped by this mirror until persist v7. Invisible while localStorage
+    // was authoritative; a broken "return to the artifact this came from" the
+    // moment it stopped being.
+    sourceArtifactId: doc.sourceArtifactId,
+    returnContext: doc.returnContext,
+    authoringOrigin: doc.authoringOrigin,
+    aiWorkbench: doc.aiWorkbench,
   }
 }
 
@@ -101,6 +137,10 @@ function commentToRow(c: CanvasComment): CanvasCommentRow {
  */
 async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): Promise<void> {
   const db = getDb()
+  // Rule 1 — see the module header. The mirror describes one database; a
+  // different one means the account changed under us and the provider is about
+  // to restart the bridge.
+  if (mirroredDbName !== null && db.name !== mirroredDbName) return
   const prevIds = new Set(Object.keys(mirroredDocs))
   const nextIds = new Set(Object.keys(next))
   const removedDocs: string[] = []
@@ -201,16 +241,14 @@ async function syncComments(byDoc: Record<string, CanvasComment[]>): Promise<voi
 }
 
 /**
- * On boot, check Dexie for canvas data the artifact-store doesn't
- * know about. This happens after a backup import on a fresh device:
- * `applyBackupPackage` writes to Dexie, but the artifact-store
- * (Zustand+localStorage) still has its old / empty state. Without
- * hydration the user can't see the imported documents.
+ * Seed the artifact-store from Dexie. On an ordinary boot this IS the
+ * documents — the store no longer persists them — and it is also how a
+ * backup import lands, since `applyBackupPackage` writes Dexie while the
+ * store still holds its old state.
  *
- * We seed the artifact-store with rows that are in Dexie but not in
- * memory; rows already in the store win (Zustand persistence is
- * authoritative for "what the user is editing right now"). Versions
- * and comments are bucketed back onto their parent documents.
+ * Rows already in memory win: they are either what the user is editing
+ * right now, or the v6 blob that has not been migrated yet. Versions and
+ * comments are bucketed back onto their parent documents.
  */
 async function hydrateFromDexie(): Promise<void> {
   const db = getDb()
@@ -219,6 +257,9 @@ async function hydrateFromDexie(): Promise<void> {
     db.canvasVersions.toArray(),
     db.contextComments.where("resourceKind").equals("canvas-document").toArray(),
   ])
+  // Stamped before the early return: rule 1 needs to know which database this
+  // mirror belongs to even when that database turned out to be empty.
+  mirroredDbName = db.name
   if (docRows.length === 0 && commentRows.length === 0) return
 
   const memoryDocs = useArtifactStore.getState().canvasDocuments
@@ -239,9 +280,10 @@ async function hydrateFromDexie(): Promise<void> {
   const docPatch: Record<string, CanvasDocument> = {}
   for (const row of docRows) {
     if (memoryDocs[row.id]) continue // memory wins
-    docPatch[row.id] = {
+    docPatch[row.id] = rehydrateCanvasDocument({
       id: row.id,
       sessionId: row.sessionId ?? "",
+      projectId: row.projectId,
       title: row.title,
       content: row.content,
       language: row.language,
@@ -251,16 +293,29 @@ async function hydrateFromDexie(): Promise<void> {
       editorContext: row.editorContext,
       aiSuggestions: row.aiSuggestions,
       currentVersionId: row.currentVersionId,
+      sourceArtifactId: row.sourceArtifactId,
+      returnContext: row.returnContext,
+      authoringOrigin: row.authoringOrigin,
+      aiWorkbench: row.aiWorkbench,
       versions: (versionsByDoc.get(row.id) ?? []).sort(
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
       ),
-    } as CanvasDocument
+    } as CanvasDocument)
   }
   if (Object.keys(docPatch).length > 0) {
     useArtifactStore.setState((state) => ({
       canvasDocuments: { ...docPatch, ...state.canvasDocuments },
     }))
   }
+
+  // Prime the mirror with exactly what was seeded, so the first sync does not
+  // write back the rows it just read. Documents already in memory are
+  // deliberately NOT primed: memory won the conflict, so the row on disk is
+  // stale and the first sync has to overwrite it.
+  mirroredDocs = { ...docPatch }
+  mirroredVersionIds = new Set(
+    Object.values(docPatch).flatMap((doc) => (doc.versions ?? []).map((v) => v.id))
+  )
 
   const commentMemory = useCommentStore.getState().comments
   const commentPatch: Record<string, CanvasComment[]> = {}
@@ -300,15 +355,15 @@ export function startCanvasDexieBridge(): () => void {
   let unsubDocs: () => void = () => {}
   let unsubComments: () => void = () => {}
 
+  let disposed = false
+
   void hydrateFromDexie()
-    .catch((err) => loggers.canvas.warn("dexie-bridge hydration failed", { err: String(err) }))
     .then(() => {
+      if (disposed) return
       const initialDocs = useArtifactStore.getState().canvasDocuments
-      // `mirroredDocs` is set only AFTER the first sync lands. Priming it from
-      // the same snapshot the sync is about to write would make the identity
-      // diff below see everything as already-mirrored, and the initial pass —
-      // the one that carries a localStorage-only document into Dexie — would
-      // do nothing at all.
+      // Documents hydration did NOT seed — the ones that exist only in memory,
+      // which on the first boot after persist v7 means the ones still coming
+      // out of the old localStorage blob — reach Dexie here.
       void syncDocumentsAndVersions(initialDocs)
         .then(() => {
           mirroredDocs = { ...initialDocs }
@@ -371,8 +426,18 @@ export function startCanvasDexieBridge(): () => void {
         )
       })
     })
+    .catch((err) => {
+      // Rule 2 — see the module header. No mirror, no deletes. The `.catch`
+      // used to sit BEFORE the `.then`, which swallowed the failure and started
+      // the subscriptions anyway: a partial read then looked like "the user
+      // deleted everything I did not see".
+      loggers.canvas.warn("dexie-bridge hydration failed; mirror disabled", {
+        err: String(err),
+      })
+    })
 
   return () => {
+    disposed = true
     // A pending mirror must not be lost when the bridge is torn down.
     flushDocumentSync?.()
     if (typeof window !== "undefined" && flushDocumentSync) {
@@ -381,6 +446,10 @@ export function startCanvasDexieBridge(): () => void {
     flushDocumentSync = null
     unsubDocs()
     unsubComments()
+    mirroredDocs = {}
+    mirroredVersionIds = new Set()
+    mirroredCommentIds = new Set()
+    mirroredDbName = null
     started = false
   }
 }

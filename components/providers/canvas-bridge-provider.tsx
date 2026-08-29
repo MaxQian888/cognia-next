@@ -11,10 +11,13 @@
  * Without the loader configuration the Tauri production build can't reach
  * Monaco's CDN.
  *
- * The artifact bridge is keyed on `accountRevision` so unlocking, switching or
- * locking an account restarts it. A bridge started against one account's
+ * Both bridges are keyed on `accountRevision` so unlocking, switching or
+ * locking an account restarts them. A bridge started against one account's
  * database must not keep mirroring into another's, and only a restart re-runs
  * hydration against the database that is actually selected now.
+ *
+ * Monaco is configured once and never again: it is a global loader path, not
+ * per-account state.
  */
 
 import { useEffect } from "react"
@@ -28,13 +31,15 @@ export function CanvasBridgeProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     configureMonacoLoader()
-    const dispose = startCanvasDexieBridge()
-    return () => dispose()
   }, [])
 
   useEffect(() => {
-    const dispose = startArtifactDexieBridge()
-    return () => dispose()
+    const disposeCanvas = startCanvasDexieBridge()
+    const disposeArtifacts = startArtifactDexieBridge()
+    return () => {
+      disposeCanvas()
+      disposeArtifacts()
+    }
   }, [accountRevision])
 
   return <>{children}</>
