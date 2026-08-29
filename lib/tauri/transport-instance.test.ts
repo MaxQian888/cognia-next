@@ -84,4 +84,54 @@ describe("transport-instance selection", () => {
 
     expect(destroy).toHaveBeenCalledTimes(1)
   })
+
+  it("does not destroy the transport when set to the instance already installed", () => {
+    const { mod } = loadInstance()
+    const destroy = jest.fn()
+    const same = {
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+      destroy,
+    } as Transport & { destroy: () => void }
+
+    mod.setTransport(same)
+    mod.setTransport(same)
+
+    expect(destroy).not.toHaveBeenCalled()
+    expect(mod.transport).toBe(same)
+  })
+
+  it("tells subscribers the singleton was replaced, after the swap", () => {
+    // A consumer that *subscribes* to the transport (rather than calling
+    // through it) has to re-bind: the live ES binding does not move its
+    // listeners, and the instance it is still listening to has just been
+    // destroyed — broadcasting `offline` on the way out.
+    const { mod } = loadInstance()
+    const seen: Transport[] = []
+    const unsubscribe = mod.onTransportChange(() => seen.push(mod.transport))
+
+    const first: Transport = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
+    const second: Transport = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
+    mod.setTransport(first)
+    mod.setTransport(second)
+
+    expect(seen).toEqual([first, second])
+
+    unsubscribe()
+    mod.setTransport({ call: jest.fn(), subscribe: jest.fn(() => () => {}) })
+    expect(seen).toHaveLength(2)
+  })
+
+  it("keeps notifying the remaining subscribers when one throws", () => {
+    const { mod } = loadInstance()
+    const second = jest.fn()
+    mod.onTransportChange(() => {
+      throw new Error("re-bind failed")
+    })
+    mod.onTransportChange(second)
+
+    mod.setTransport({ call: jest.fn(), subscribe: jest.fn(() => () => {}) })
+
+    expect(second).toHaveBeenCalledTimes(1)
+  })
 })

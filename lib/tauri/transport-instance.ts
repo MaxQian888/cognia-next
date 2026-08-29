@@ -44,13 +44,51 @@ function pickTransport(): Transport {
 // (which reads it per-call, never captures it) sees the swap.
 export let transport: Transport = pickTransport()
 
+const transportChangeHandlers = new Set<() => void>()
+
+/**
+ * Be told when {@link transport} is replaced.
+ *
+ * The live ES binding is enough for a caller that reads `transport.foo()` per
+ * call, and not enough for one that *subscribes*: a listener registered on the
+ * old instance keeps listening to it after the swap, and `setTransport`
+ * destroys that instance — whose teardown broadcasts `offline` as its last act.
+ *
+ * That is how a browser could hold a fully connected Host (RPC answering, the
+ * event socket open and `stream_ready` received) while the status bar read
+ * "Offline" forever: `useConnectionState` subscribed once at mount, pairing
+ * then swapped in a fresh `CompanionTransport`, and the hook spent the rest of
+ * the session listening to a corpse.
+ *
+ * Returns an unsubscribe function.
+ */
+export function onTransportChange(handler: () => void): () => void {
+  transportChangeHandlers.add(handler)
+  return () => {
+    transportChangeHandlers.delete(handler)
+  }
+}
+
 /**
  * Replace the process-wide transport. Intended for non-browser hosts (the CLI)
- * to install a custom {@link Transport} before any consumer issues a call.
- * No-op-safe to call multiple times; the last writer wins.
+ * to install a custom {@link Transport} before any consumer issues a call, and
+ * for the browser to swap the stub for a real companion transport once a
+ * pairing exists.
+ *
+ * No-op-safe to call multiple times; the last writer wins. Handlers registered
+ * through {@link onTransportChange} run after the swap, so a re-subscribing
+ * consumer binds to the new instance and never to the destroyed one.
  */
 export function setTransport(next: Transport): void {
   const previous = transport as Transport & { destroy?: () => void }
-  if (previous !== next) previous.destroy?.()
+  if (previous === next) return
+  previous.destroy?.()
   transport = next
+  for (const handler of transportChangeHandlers) {
+    try {
+      handler()
+    } catch {
+      // One consumer failing to re-bind must not stop the others.
+    }
+  }
 }
