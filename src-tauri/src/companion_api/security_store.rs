@@ -2335,14 +2335,15 @@ fn reconcile_interrupted_operations(
     Ok(interrupted.len())
 }
 
-fn insert_default_grants(
-    tx: &rusqlite::Transaction<'_>,
-    tenant_id: &str,
-    device_id: &str,
-    role: &str,
-    now: i64,
-) -> Result<(), rusqlite::Error> {
-    let capabilities: &[&str] = if role == "owner" {
+/// The capabilities a freshly paired device of `role` holds.
+///
+/// Split out from [`insert_default_grants`] so the backfill migration
+/// ([`migrate_client_plane_grants`]) reads the same list the registration path
+/// writes. A device paired before those names existed must end up with the same
+/// grants as one paired after, and two hand-kept lists is how that stops being
+/// true.
+fn default_capabilities_for_role(role: &str) -> &'static [&'static str] {
+    if role == "owner" {
         &[
             "host.observe",
             "agent.run",
@@ -2357,11 +2358,60 @@ fn insert_default_grants(
             "device.admin",
             "server.admin",
             "scheduler.manage",
+            // The client data plane — this device's own sessions, messages,
+            // transcripts and settings. `protocol/companion-commands.json`
+            // gates 22 commands on these two (`sync_pull`, `session_list`,
+            // `message_send`, `app_settings_update`, …) and nothing granted
+            // them, so every paired device answered 403 to the entire mirror
+            // it exists to serve. Pinned by
+            // `default_grants_cover_every_device_reachable_capability`.
+            "client.read",
+            "client.write",
+            // The performance plane. Unlike the client plane these commands
+            // ARE device-reachable (`target: execution`, http/ws/webrtc), so
+            // they cleared the transport gate and died one line later on a
+            // capability no code path granted — the remote perf dashboard was
+            // 403 for every paired device, owner included.
+            "performance.observe",
+            "performance.traces",
+            "performance.capture",
         ]
     } else {
-        &["host.observe", "agent.run", "workspace.read"]
-    };
-    for capability in capabilities {
+        // A member device reads its own client plane but does not write it;
+        // `client.write` stays an explicit elevation, like `workspace.write`.
+        &["host.observe", "agent.run", "workspace.read", "client.read"]
+    }
+}
+
+/// The capabilities this build ADDED to the defaults, by role.
+///
+/// The backfill grants exactly these to devices that were paired before they
+/// existed — not the whole default set. Re-asserting the older names would
+/// silently un-revoke a capability an admin took away on purpose; these five
+/// have no such history, because until this build nothing could grant them at
+/// all (`is_assignable_device_capability` rejected every one).
+fn backfilled_capabilities_for_role(role: &str) -> &'static [&'static str] {
+    if role == "owner" {
+        &[
+            "client.read",
+            "client.write",
+            "performance.observe",
+            "performance.traces",
+            "performance.capture",
+        ]
+    } else {
+        &["client.read"]
+    }
+}
+
+fn insert_default_grants(
+    tx: &rusqlite::Transaction<'_>,
+    tenant_id: &str,
+    device_id: &str,
+    role: &str,
+    now: i64,
+) -> Result<(), rusqlite::Error> {
+    for capability in default_capabilities_for_role(role) {
         tx.execute(
             "INSERT INTO capability_grants
              (id, tenant_id, device_id, capability, created_at)
@@ -2400,6 +2450,11 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             | "device.admin"
             | "server.admin"
             | "agent.worker"
+            | "client.read"
+            | "client.write"
+            | "performance.observe"
+            | "performance.traces"
+            | "performance.capture"
     )
 }
 
@@ -2448,6 +2503,7 @@ const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
 const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
 const MIGRATION_DEVICE_USER: &str = "device-user-v1";
+const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
@@ -2510,6 +2566,62 @@ fn apply_schema_migrations(
     migrate_host_binding_legacy(conn, now)?;
     migrate_host_binding_person(conn, now)?;
     migrate_device_user(conn, now)?;
+    migrate_client_plane_grants(conn, now)?;
+    Ok(())
+}
+
+/// Give devices that were already paired the client-plane and performance
+/// capabilities this build added to the pairing defaults.
+///
+/// [`insert_default_grants`] only runs inside `register`, so without this an
+/// upgrade fixes nothing for anybody: every existing pairing keeps answering
+/// 403 `capability_denied` on `sync_pull`, `session_list`, `message_send`,
+/// `app_settings_update` and the whole remote performance dashboard — the exact
+/// failures the new defaults exist to end — and the only remedy would be to
+/// unpair and pair again.
+///
+/// Scoped to the names in [`backfilled_capabilities_for_role`] and keyed by the
+/// device's own role, so a member is not quietly promoted, and suspended
+/// devices are included because suspension is a status the owner can lift
+/// rather than a decision about capabilities.
+///
+/// The enrollment classes are excluded by construction. A browser or worker
+/// device is a `member` row too, but it holds only its class's closed
+/// capabilities — never `host.observe`, which both ordinary default sets carry
+/// and neither class does. Selecting on that grant is what keeps this backfill
+/// from handing a browser extension the client data plane its comment
+/// explicitly denies it.
+fn migrate_client_plane_grants(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_CLIENT_PLANE_GRANTS)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let devices: Vec<(String, String, String)> = {
+        let mut statement = tx.prepare(
+            "SELECT d.id, d.tenant_id, d.role FROM devices d
+             WHERE d.status IN ('active', 'suspended')
+               AND EXISTS (
+                 SELECT 1 FROM capability_grants g
+                 WHERE g.tenant_id = d.tenant_id AND g.device_id = d.id
+                   AND g.capability = 'host.observe' AND g.revoked_at IS NULL
+               )",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (device_id, tenant_id, role) in devices {
+        for capability in backfilled_capabilities_for_role(&role) {
+            upsert_capability_grant(&tx, &tenant_id, &device_id, capability, now)?;
+        }
+    }
+    mark_migration(&tx, MIGRATION_CLIENT_PLANE_GRANTS, now)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -4586,7 +4698,9 @@ CREATE TABLE devices (
                 .capability_snapshot("tenant-a", "member-device")
                 .unwrap()
                 .unwrap(),
-            vec!["agent.run", "host.observe", "workspace.read"]
+            // Sorted by the snapshot query. `client.read` is the member's own
+            // data plane: its sessions, messages and sync deltas.
+            vec!["agent.run", "client.read", "host.observe", "workspace.read"]
         );
         assert!(!store
             .has_capability("tenant-a", "member-device", "workspace.write")
@@ -4861,5 +4975,167 @@ CREATE TABLE devices (
         let receipt: serde_json::Value = serde_json::from_str(&receipt_json).unwrap();
         assert_eq!(receipt["error"]["code"], "operation_interrupted");
         assert_eq!(receipt["error"]["retryable"], true);
+    }
+    /// Every capability the command manifest can demand of a *device* must be
+    /// one a device can actually hold.
+    ///
+    /// `client.read`, `client.write` and the three `performance.*` names were
+    /// added to `protocol/companion-commands.json` and to nothing else: no
+    /// role seeded them, and `is_assignable_device_capability` rejected them,
+    /// so no grant API could add them either. The result was 33 commands whose
+    /// gate no principal could ever pass — `sync_pull`, `session_list`,
+    /// `message_send`, `app_settings_update` and the whole remote performance
+    /// dashboard answered 403 to every paired device, owner included.
+    ///
+    /// Two names are deliberately exempt. `service.internal` and
+    /// `client.local` are not device capabilities at all — they mark the
+    /// loopback service plane and renderer-local commands. `browser.submit`
+    /// and `browser.read-own` belong to the browser-enrollment class, which
+    /// `replace_capabilities` admits by device class rather than by name (see
+    /// the `is_browser_device` branch there).
+    #[test]
+    fn every_device_capability_in_the_manifest_is_grantable() {
+        const NOT_A_DEVICE_CAPABILITY: &[&str] = &["service.internal", "client.local"];
+        let browser_only = super::BROWSER_ENROLLMENT.capabilities;
+
+        let mut unreachable: Vec<&str> = super::super::command_manifest::commands()
+            .iter()
+            .map(|descriptor| descriptor.capability.as_str())
+            .filter(|capability| !NOT_A_DEVICE_CAPABILITY.contains(capability))
+            .filter(|capability| !browser_only.contains(capability))
+            .filter(|capability| !is_assignable_device_capability(capability))
+            .collect();
+        unreachable.sort_unstable();
+        unreachable.dedup();
+        assert!(
+            unreachable.is_empty(),
+            "capabilities no device can hold: {unreachable:?}"
+        );
+    }
+
+    /// An owner device must be able to run every command the manifest exposes
+    /// to device transports.
+    ///
+    /// The sibling test above proves such a capability *can* be granted; this
+    /// one proves the default pairing actually grants it. `performance.*` is
+    /// the case that needed both: it cleared the transport gate, so an owner
+    /// reached the capability check and failed it.
+    #[test]
+    fn owner_default_grants_cover_every_device_reachable_command() {
+        use super::super::command_manifest::{CommandTarget, CommandTransport};
+
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+        let granted = store
+            .capability_snapshot("tenant-a", "owner-a")
+            .unwrap()
+            .expect("the freshly registered owner must be active");
+
+        let mut missing: Vec<&str> = super::super::command_manifest::commands()
+            .iter()
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.target,
+                    CommandTarget::Execution | CommandTarget::HostAdmin
+                ) && descriptor.transports.contains(&CommandTransport::Http)
+            })
+            .map(|descriptor| descriptor.capability.as_str())
+            // The browser-enrollment class is a different kind of device, not
+            // a weaker owner: `register_browser_device` is the only thing that
+            // grants these, and an owner deliberately does not hold them.
+            .filter(|capability| !BROWSER_ENROLLMENT.capabilities.contains(capability))
+            .filter(|capability| !granted.iter().any(|held| held == capability))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "an owner device cannot run these commands: {missing:?}"
+        );
+    }
+
+    /// A device paired BEFORE the client-plane defaults existed must end up
+    /// holding them after an upgrade.
+    ///
+    /// `insert_default_grants` only runs inside `register`, so without the
+    /// backfill an upgrade fixes nothing for anybody who was already paired —
+    /// the 403s on `sync_pull`, `session_list` and the performance plane simply
+    /// survive it. The enrollment classes must NOT be swept up: a browser
+    /// device is a `member` row too, and it is deliberately denied everything
+    /// outside its own two capabilities.
+    #[test]
+    fn the_backfill_reaches_existing_pairings_and_stops_at_the_enrollment_classes() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+        let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-a", "owner-a", 100, 600)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-a",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-a",
+                "Chrome",
+                "pem",
+                "thumb-browser",
+                "https://example.test",
+                101,
+            )
+            .unwrap();
+
+        // Rewind to a pre-upgrade database: drop the new grants and the marker
+        // so the migration has something to do.
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "DELETE FROM capability_grants WHERE capability IN
+                 ('client.read', 'client.write', 'performance.observe',
+                  'performance.traces', 'performance.capture')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM security_migrations WHERE key = ?1",
+                [MIGRATION_CLIENT_PLANE_GRANTS],
+            )
+            .unwrap();
+        }
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "client.read")
+            .unwrap());
+
+        {
+            let mut conn = store.conn.lock();
+            migrate_client_plane_grants(&mut conn, 200).unwrap();
+        }
+
+        for capability in backfilled_capabilities_for_role("owner") {
+            assert!(
+                store
+                    .has_capability("tenant-a", "owner-a", capability)
+                    .unwrap(),
+                "the backfill missed {capability} on an already-paired owner"
+            );
+        }
+        // The browser extension keeps exactly its class, backfill or not.
+        assert_eq!(
+            store
+                .capability_snapshot("tenant-a", "browser-a")
+                .unwrap()
+                .unwrap(),
+            vec!["browser.read-own", "browser.submit"]
+        );
+
+        // Idempotent: the marker means a second open does nothing.
+        {
+            let mut conn = store.conn.lock();
+            migrate_client_plane_grants(&mut conn, 300).unwrap();
+        }
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "client.write")
+            .unwrap());
     }
 }
