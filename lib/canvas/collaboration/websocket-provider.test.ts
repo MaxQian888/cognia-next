@@ -8,6 +8,7 @@ import type { Participant } from "@/types/canvas/collaboration"
 
 interface MockWebSocketInstance {
   url: string
+  protocols?: string | string[]
   readyState: number
   send: jest.Mock
   close: jest.Mock
@@ -33,8 +34,11 @@ class MockWebSocket {
   onerror?: (e: unknown) => void
   onmessage?: (e: { data: string }) => void
 
-  constructor(url: string) {
+  protocols?: string | string[]
+
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url
+    this.protocols = protocols
     lastMockSocket = this as unknown as MockWebSocketInstance
   }
 }
@@ -61,6 +65,12 @@ const PARTICIPANT: Participant = {
 function makeProvider(crdt = new CanvasCRDTStore()) {
   return new CanvasWebSocketProvider(crdt, {
     url: "ws://localhost:1234",
+    authorization: {
+      token: "canvas-ticket",
+      subjectId: "user-1",
+      resourceId: "document-1",
+      expiresAt: Date.now() + 60_000,
+    },
     reconnectAttempts: 2,
     reconnectInterval: 100,
     heartbeatInterval: 5_000,
@@ -68,6 +78,30 @@ function makeProvider(crdt = new CanvasCRDTStore()) {
 }
 
 describe("CanvasWebSocketProvider connect / disconnect lifecycle", () => {
+  it("rejects remote transport without a current resource-bound authorization", async () => {
+    const missing = new CanvasWebSocketProvider(new CanvasCRDTStore(), {
+      url: "ws://localhost:1234",
+    })
+    await expect(missing.connect("session-1", PARTICIPANT)).rejects.toThrow(
+      "CANVAS_REMOTE_AUTH_REQUIRED"
+    )
+    expect(lastMockSocket).toBeNull()
+
+    const expired = new CanvasWebSocketProvider(new CanvasCRDTStore(), {
+      url: "ws://localhost:1234",
+      authorization: {
+        token: "expired",
+        subjectId: "user-1",
+        resourceId: "document-1",
+        expiresAt: Date.now() - 1,
+      },
+    })
+    await expect(expired.connect("session-1", PARTICIPANT)).rejects.toThrow(
+      "CANVAS_REMOTE_AUTH_REQUIRED"
+    )
+    expect(lastMockSocket).toBeNull()
+  })
+
   it("opens a WebSocket and emits 'connected' once the socket opens", async () => {
     const p = makeProvider()
     const onConnect = jest.fn()
@@ -79,6 +113,7 @@ describe("CanvasWebSocketProvider connect / disconnect lifecycle", () => {
     expect(p.getConnectionState()).toBe("connected")
     expect(onConnect).toHaveBeenCalled()
     expect(lastMockSocket!.send).toHaveBeenCalled() // initial join presence
+    expect(lastMockSocket!.protocols).toEqual(["cognia.canvas.v1", "canvas-ticket"])
   })
 
   it("emits 'error' and rejects when the socket errors before opening", async () => {

@@ -24,6 +24,13 @@ export interface WebSocketMessage {
 
 export interface WebSocketProviderConfig {
   url: string
+  /** Short-lived server-minted proof bound to the human subject and canvas resource. */
+  authorization?: {
+    token: string
+    subjectId: string
+    resourceId: string
+    expiresAt: number
+  }
   reconnectAttempts?: number
   reconnectInterval?: number
   heartbeatInterval?: number
@@ -55,13 +62,22 @@ export class CanvasWebSocketProvider {
   }
 
   async connect(sessionId: string, participant: Participant): Promise<void> {
+    const authorization = this.config.authorization
+    if (
+      !authorization?.token ||
+      !authorization.subjectId ||
+      !authorization.resourceId ||
+      authorization.expiresAt <= Date.now()
+    ) {
+      throw new Error("CANVAS_REMOTE_AUTH_REQUIRED")
+    }
     this.sessionId = sessionId
     this.participantId = participant.id
     this.connectionState = "connecting"
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.config.url)
+        this.ws = new WebSocket(this.config.url, ["cognia.canvas.v1", authorization.token])
 
         this.ws.onopen = () => {
           this.connectionState = "connected"
@@ -73,7 +89,12 @@ export class CanvasWebSocketProvider {
             type: "presence",
             sessionId,
             participantId: participant.id,
-            data: { action: "join", participant },
+            data: {
+              action: "join",
+              participant,
+              subjectId: authorization.subjectId,
+              resourceId: authorization.resourceId,
+            },
             timestamp: Date.now(),
           })
 

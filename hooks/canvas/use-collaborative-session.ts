@@ -16,6 +16,7 @@ import { CanvasCRDTStore, crdtStore } from "@/lib/canvas/collaboration/crdt-stor
 import {
   CanvasWebSocketProvider,
   type ConnectionState,
+  type WebSocketProviderConfig,
 } from "@/lib/canvas/collaboration/websocket-provider"
 import { loggers } from "@cognia/logging"
 
@@ -68,6 +69,18 @@ export interface CollaborativeSessionConfig {
   participantColor?: string
   autoReconnect?: boolean
   reconnectAttempts?: number
+  /**
+   * Server-minted proof; without it every remote Canvas transport remains
+   * disabled.
+   *
+   * DORMANT BY DESIGN, for now: nothing in the app mints one yet, so
+   * `connect`/`joinSession` never open a socket and Canvas collaboration is
+   * local-only. That is the intended fail-closed state — a transport must not
+   * open without a grant — but it means the remote half is unreachable rather
+   * than merely unused. Purely local operations (`shareSession`,
+   * `importSharedSession`) deliberately do NOT consult this field.
+   */
+  remoteAuthorization?: WebSocketProviderConfig["authorization"]
   onStateChange?: (state: CanvasCollaborationRuntimeState) => void
   onRemoteContentChange?: (content: string) => void
 }
@@ -87,6 +100,7 @@ export function useCollaborativeSession(
   const participantName = config.participantName ?? DEFAULT_CONFIG.participantName ?? "Anonymous"
   const participantColor = config.participantColor ?? DEFAULT_CONFIG.participantColor ?? "#3b82f6"
   const reconnectAttempts = config.reconnectAttempts ?? DEFAULT_CONFIG.reconnectAttempts ?? 5
+  const remoteAuthorization = config.remoteAuthorization
   const onStateChange = config.onStateChange
   const onRemoteContentChange = config.onRemoteContentChange
 
@@ -229,11 +243,16 @@ export function useCollaborativeSession(
       setLocalParticipant(localParticipant)
       setParticipants([localParticipant])
 
-      if (websocketUrl) {
+      if (
+        websocketUrl &&
+        remoteAuthorization?.resourceId === documentId &&
+        remoteAuthorization.expiresAt > Date.now()
+      ) {
         try {
           const provider = new CanvasWebSocketProvider(store, {
             url: websocketUrl,
             reconnectAttempts,
+            authorization: remoteAuthorization,
           })
           providerRef.current = provider
 
@@ -254,6 +273,7 @@ export function useCollaborativeSession(
       handleCollaborationEvent,
       getParticipantId,
       reconnectAttempts,
+      remoteAuthorization,
       websocketUrl,
     ]
   )
@@ -319,6 +339,17 @@ export function useCollaborativeSession(
     return storeRef.current.getDocumentContent(sessionIdRef.current)
   }, [])
 
+  /**
+   * Serialize this session's CRDT state. Purely LOCAL — it reads the in-memory
+   * store and reaches no transport, so requiring a connected remote provider
+   * only meant that every caller without one (today: all of them — nothing in
+   * the app mints `remoteAuthorization`, so `providerRef` is never populated)
+   * got `null` and the Canvas "copy share link" action reported
+   * `shareLinkUnavailable` on every click.
+   *
+   * The transport gate that DOES belong to `remoteAuthorization` stays on
+   * `connect`/`joinSession`, which are the calls that open a socket.
+   */
   const shareSession = useCallback((): string | null => {
     if (!sessionIdRef.current) return null
     return storeRef.current.serializeState(sessionIdRef.current)
@@ -344,11 +375,17 @@ export function useCollaborativeSession(
           onRemoteContentChange?.(latestContent)
         }
 
-        if (websocketUrl && providerRef.current === null) {
+        if (
+          websocketUrl &&
+          providerRef.current === null &&
+          remoteAuthorization?.resourceId === existingSession.documentId &&
+          remoteAuthorization.expiresAt > Date.now()
+        ) {
           try {
             const provider = new CanvasWebSocketProvider(store, {
               url: websocketUrl,
               reconnectAttempts,
+              authorization: remoteAuthorization,
             })
             providerRef.current = provider
 
@@ -370,12 +407,22 @@ export function useCollaborativeSession(
       getParticipantId,
       onRemoteContentChange,
       reconnectAttempts,
+      remoteAuthorization,
       websocketUrl,
     ]
   )
 
   const importSharedSession = useCallback(
     async (serialized: string): Promise<string | null> => {
+      // Deserializing a share payload into the local CRDT store opens no
+      // transport, so it does not require a remote grant — demanding one made
+      // this return `null` unconditionally for every caller in the app. When a
+      // grant IS present it still pins the payload to the document it was
+      // minted for, so an authorized session cannot be pointed at another one.
+      const authorization =
+        remoteAuthorization && remoteAuthorization.expiresAt > Date.now()
+          ? remoteAuthorization
+          : null
       const store = storeRef.current
       const sessionId = store.deserializeState(serialized)
       if (!sessionId) {
@@ -384,6 +431,10 @@ export function useCollaborativeSession(
 
       const existingSession = store.getSession(sessionId)
       if (!existingSession) {
+        return null
+      }
+      if (authorization && existingSession.documentId !== authorization.resourceId) {
+        store.closeSession(sessionId)
         return null
       }
 
@@ -399,7 +450,7 @@ export function useCollaborativeSession(
 
       return sessionId
     },
-    [onRemoteContentChange]
+    [onRemoteContentChange, remoteAuthorization]
   )
 
   useEffect(() => {

@@ -44,6 +44,7 @@ const mockBroadcastOperation = jest.fn()
 const mockBroadcastCursor = jest.fn()
 const mockBroadcastSelection = jest.fn()
 const mockRequestSync = jest.fn()
+const mockGetConnectionState = jest.fn()
 
 jest.mock("@/lib/canvas/collaboration/websocket-provider", () => ({
   CanvasWebSocketProvider: jest.fn().mockImplementation(() => ({
@@ -54,10 +55,17 @@ jest.mock("@/lib/canvas/collaboration/websocket-provider", () => ({
     broadcastCursor: mockBroadcastCursor,
     broadcastSelection: mockBroadcastSelection,
     requestSync: mockRequestSync,
+    getConnectionState: mockGetConnectionState,
   })),
 }))
 
 describe("useCollaborativeSession", () => {
+  const remoteAuthorization = {
+    token: "canvas-ticket",
+    subjectId: "user-1",
+    resourceId: "doc-456",
+    expiresAt: Date.now() + 60_000,
+  }
   const mockSession: CollaborativeSession = {
     id: "session-123",
     documentId: "doc-456",
@@ -91,11 +99,12 @@ describe("useCollaborativeSession", () => {
     mockGetSession.mockReturnValue(mockSession)
     mockDeserializeState.mockReturnValue("session-123")
     mockProviderConnect.mockResolvedValue(undefined)
+    mockGetConnectionState.mockReturnValue("connected")
   })
 
   describe("initialization", () => {
     it("should initialize with default state", () => {
-      const { result } = renderHook(() => useCollaborativeSession())
+      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
 
       expect(result.current.session).toBeNull()
       expect(result.current.participants).toEqual([])
@@ -135,7 +144,7 @@ describe("useCollaborativeSession", () => {
 
     it("should connect to websocket when url is provided", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -149,7 +158,11 @@ describe("useCollaborativeSession", () => {
     it("should publish document-scoped collaboration state through onStateChange", async () => {
       const onStateChange = jest.fn()
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", onStateChange })
+        useCollaborativeSession({
+          websocketUrl: "ws://localhost:8080",
+          remoteAuthorization,
+          onStateChange,
+        })
       )
 
       await act(async () => {
@@ -170,7 +183,7 @@ describe("useCollaborativeSession", () => {
       mockProviderConnect.mockRejectedValue(new Error("Connection failed"))
 
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -183,7 +196,7 @@ describe("useCollaborativeSession", () => {
 
   describe("disconnect", () => {
     it("should clean up session and provider", async () => {
-      const { result } = renderHook(() => useCollaborativeSession())
+      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -304,7 +317,7 @@ describe("useCollaborativeSession", () => {
   describe("updateSelection", () => {
     it("should broadcast selection changes when session is active", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -356,7 +369,7 @@ describe("useCollaborativeSession", () => {
   describe("shareSession", () => {
     it("should serialize and return session state", async () => {
       mockSerializeState.mockReturnValue("serialized-session-data")
-      const { result } = renderHook(() => useCollaborativeSession())
+      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -417,7 +430,7 @@ describe("useCollaborativeSession", () => {
       mockGetSession.mockReturnValue(existingSession)
 
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -434,7 +447,9 @@ describe("useCollaborativeSession", () => {
       const onRemoteContentChange = jest.fn()
       mockGetDocumentContent.mockReturnValue("# shared content")
 
-      const { result } = renderHook(() => useCollaborativeSession({ onRemoteContentChange }))
+      const { result } = renderHook(() =>
+        useCollaborativeSession({ remoteAuthorization, onRemoteContentChange })
+      )
 
       let importedSessionId: string | null = null
       await act(async () => {
@@ -450,7 +465,7 @@ describe("useCollaborativeSession", () => {
   describe("collaboration events", () => {
     it("should handle participant-joined event", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -478,7 +493,7 @@ describe("useCollaborativeSession", () => {
 
     it("should handle participant-left event", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -521,7 +536,7 @@ describe("useCollaborativeSession", () => {
 
     it("should handle connection state changes", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -544,7 +559,7 @@ describe("useCollaborativeSession", () => {
 
     it("should handle disconnected event", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -567,7 +582,7 @@ describe("useCollaborativeSession", () => {
 
     it("should handle error event", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
@@ -604,7 +619,7 @@ describe("useCollaborativeSession", () => {
   describe("edge cases", () => {
     it("should not add duplicate participants", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080" })
+        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
       )
 
       await act(async () => {
