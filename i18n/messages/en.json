@@ -6799,7 +6799,7 @@
       "durationMs": "{ms}ms",
       "logsTailNote": "Showing the last {n} log entries",
       "noLogsYet": "No log entries yet — sub-agent is initializing.",
-      "openInWorkspace": "Open in workspace",
+      "openInRuns": "Open in Agent Runs",
       "openTranscript": "Open full transcript",
       "rejected": {
         "cycle": "Dispatch rejected — would create a cycle.",
@@ -42920,6 +42920,10 @@
         "query": {
           "label": "Query"
         },
+        "relevanceFloor": {
+          "hint": "0–1. Drops matches scoring below this. Defaults to 0.1.",
+          "label": "Minimum relevance"
+        },
         "scope": {
           "agent": "Agent",
           "character": "Character",
@@ -42929,6 +42933,15 @@
         },
         "topK": {
           "label": "Top K"
+        },
+        "types": {
+          "hint": "Leave all unchecked to search every type.",
+          "label": "Memory types",
+          "options": {
+            "episodic": "Episodic (events)",
+            "procedural": "Procedural (rules)",
+            "semantic": "Semantic (facts)"
+          }
         }
       },
       "memoryStore": {
@@ -42945,6 +42958,10 @@
           "hint": "How defining this fact is. /remember uses 7.",
           "label": "Importance (1–10)"
         },
+        "key": {
+          "hint": "Optional. Later writes with the same key update this memory instead of adding another — how “always do X” rules stay single.",
+          "label": "Stable key"
+        },
         "pathPattern": {
           "label": "Workspace-relative path prefix"
         },
@@ -42957,6 +42974,13 @@
         "projectId": {
           "label": "Project ID"
         },
+        "provenance": {
+          "explicit": "Explicit (user-authored)",
+          "hint": "System = written by automation. Explicit = stands in for a user's own instruction.",
+          "label": "Provenance",
+          "proceduralRequiresExplicit": "A procedural rule needs explicit provenance — a workflow may not silently rewrite agent behavior. The step will fail as configured.",
+          "system": "System (automated)"
+        },
         "scope": {
           "agent": "Agent",
           "character": "Character",
@@ -42967,6 +42991,13 @@
         "text": {
           "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",
           "label": "Fact"
+        },
+        "type": {
+          "episodic": "Episodic (event)",
+          "hint": "Semantic = a fact. Episodic = something that happened. Procedural = a standing rule for the agent.",
+          "label": "Memory type",
+          "procedural": "Procedural (rule)",
+          "semantic": "Semantic (fact)"
         }
       },
       "mobileCamera": {

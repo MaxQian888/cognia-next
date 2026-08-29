@@ -6799,7 +6799,7 @@
       "durationMs": "{ms}ms",
       "logsTailNote": "仅显示最近 {n} 条日志",
       "noLogsYet": "暂无日志 — 子代理正在初始化。",
-      "openInWorkspace": "在工作区打开",
+      "openInRuns": "在运行中心打开",
       "openTranscript": "打开完整记录",
       "rejected": {
         "cycle": "派发被拒 — 会形成循环。",
@@ -42920,6 +42920,10 @@
         "query": {
           "label": "查询"
         },
+        "relevanceFloor": {
+          "hint": "0–1。低于该分数的匹配会被丢弃。默认 0.1。",
+          "label": "最低相关度"
+        },
         "scope": {
           "agent": "智能体",
           "character": "角色",
@@ -42929,6 +42933,15 @@
         },
         "topK": {
           "label": "Top K"
+        },
+        "types": {
+          "hint": "全部不勾选则搜索所有类型。",
+          "label": "记忆类型",
+          "options": {
+            "episodic": "情景（事件）",
+            "procedural": "程序（规则）",
+            "semantic": "语义（事实）"
+          }
         }
       },
       "memoryStore": {
@@ -42945,6 +42958,10 @@
           "hint": "这条事实有多关键。/remember 使用 7。",
           "label": "重要度（1–10）"
         },
+        "key": {
+          "hint": "可选。之后使用相同键写入会更新这条记忆而非新增一条——“始终执行 X”这类规则据此保持唯一。",
+          "label": "稳定键"
+        },
         "pathPattern": {
           "label": "工作区相对路径前缀"
         },
@@ -42957,6 +42974,13 @@
         "projectId": {
           "label": "项目 ID"
         },
+        "provenance": {
+          "explicit": "显式（用户撰写）",
+          "hint": "系统 = 由自动化写入；显式 = 代表用户本人的指令。",
+          "label": "来源",
+          "proceduralRequiresExplicit": "程序类规则必须为显式来源——工作流不得静默改写智能体行为。按当前配置该步骤会失败。",
+          "system": "系统（自动化）"
+        },
         "scope": {
           "agent": "智能体",
           "character": "角色",
@@ -42967,6 +42991,13 @@
         "text": {
           "hint": "一条自洽的陈述。会经整合器与既有记忆去重。",
           "label": "事实"
+        },
+        "type": {
+          "episodic": "情景（事件）",
+          "hint": "语义 = 一条事实；情景 = 发生过的事；程序 = 给智能体的长期规则。",
+          "label": "记忆类型",
+          "procedural": "程序（规则）",
+          "semantic": "语义（事实）"
         }
       },
       "mobileCamera": {

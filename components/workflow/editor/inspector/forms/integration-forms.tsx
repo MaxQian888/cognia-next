@@ -13,6 +13,7 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -35,6 +36,9 @@ import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { PluginCapabilities } from "@/lib/plugin/api/plugin-capability-registry"
 import { PiiGateField } from "./form-support"
 import type { ConfigProps } from "./form-support"
+
+/** The three `MemoryType`s, in the order the memory console lists them. */
+const MEMORY_TYPES = ["semantic", "episodic", "procedural"] as const
 
 // ── action.skill.invoke ───────────────────────────────────────────────────
 export function SkillInvokeConfig({ params, onChange }: ConfigProps) {
@@ -266,6 +270,16 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
   const branch = readString(params, "branch")
   const path = readString(params, "path")
   const topK = readNumber(params, "topK", 6)
+  // `runMemoryRecall` falls back to 0.1 when unset — mirror that so the box
+  // shows the score actually in force rather than an empty field.
+  const relevanceFloor = readNumber(params, "relevanceFloor", 0.1)
+  const types = Array.isArray(params.types) ? (params.types as string[]) : []
+  const toggleType = (kind: string) => {
+    const next = types.includes(kind) ? types.filter((k) => k !== kind) : [...types, kind]
+    // An empty list means "no restriction", which is what absent already
+    // means — store `undefined` so the params stay minimal.
+    onChange(patchParam(params, "types", next.length > 0 ? next : undefined))
+  }
   return (
     <FieldGroup>
       <Field label={t("query.label")} htmlFor="mr-query" name="query" required>
@@ -302,6 +316,43 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </FieldRow>
+      <Field
+        label={t("relevanceFloor.label")}
+        htmlFor="mr-floor"
+        hint={t("relevanceFloor.hint")}
+        name="relevanceFloor"
+      >
+        <Input
+          id="mr-floor"
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          value={relevanceFloor}
+          onChange={(e) => {
+            const parsed = Number(e.target.value)
+            if (Number.isNaN(parsed)) return
+            onChange(patchParam(params, "relevanceFloor", Math.min(1, Math.max(0, parsed))))
+          }}
+        />
+      </Field>
+      <Field label={t("types.label")} hint={t("types.hint")} name="types">
+        <div className="space-y-1.5">
+          {MEMORY_TYPES.map((kind) => (
+            <label
+              key={kind}
+              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+            >
+              <Checkbox
+                checked={types.includes(kind)}
+                onCheckedChange={() => toggleType(kind)}
+                data-testid={`mr-type-${kind}`}
+              />
+              <span>{t(`types.options.${kind}` as never)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
       {scope === "character" ? (
         <Field label={t("characterId.label")} htmlFor="mr-char" name="characterId" required>
           <CharacterPicker
@@ -367,6 +418,13 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
   const pathPattern = readString(params, "pathPattern")
   const importance = readNumber(params, "importance", 7)
   const piiGate = readString(params, "piiGate", "block")
+  const memoryType = readString(params, "type", "semantic")
+  const provenance = readString(params, "provenance", "system")
+  const memoryKey = readString(params, "key")
+  // `runMemoryStore` refuses this pair outright: only explicit (user-authored)
+  // memories may rewrite agent behaviour, so a procedural write from a
+  // workflow has to opt in. Say so here instead of at run time.
+  const proceduralNeedsExplicit = memoryType === "procedural" && provenance !== "explicit"
   return (
     <FieldGroup>
       <Field label={t("text.label")} htmlFor="ms-text" hint={t("text.hint")} name="text" required>
@@ -410,6 +468,51 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </FieldRow>
+      <FieldRow>
+        <Field label={t("type.label")} htmlFor="ms-type" hint={t("type.hint")} name="type">
+          <Select value={memoryType} onValueChange={(v) => onChange(patchParam(params, "type", v))}>
+            <SelectTrigger id="ms-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="semantic">{t("type.semantic")}</SelectItem>
+              <SelectItem value="episodic">{t("type.episodic")}</SelectItem>
+              <SelectItem value="procedural">{t("type.procedural")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          label={t("provenance.label")}
+          htmlFor="ms-provenance"
+          hint={t("provenance.hint")}
+          name="provenance"
+        >
+          <Select
+            value={provenance}
+            onValueChange={(v) => onChange(patchParam(params, "provenance", v))}
+          >
+            <SelectTrigger id="ms-provenance">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="system">{t("provenance.system")}</SelectItem>
+              <SelectItem value="explicit">{t("provenance.explicit")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </FieldRow>
+      {proceduralNeedsExplicit ? (
+        <p className="text-[11px] text-destructive" data-testid="ms-procedural-warning">
+          {t("provenance.proceduralRequiresExplicit")}
+        </p>
+      ) : null}
+      <Field label={t("key.label")} htmlFor="ms-key" hint={t("key.hint")} name="key">
+        <ExpressionField
+          id="ms-key"
+          value={memoryKey}
+          onChange={(v) => onChange(patchParam(params, "key", v))}
+        />
+      </Field>
       {scope === "character" ? (
         <Field label={t("characterId.label")} htmlFor="ms-char" name="characterId" required>
           <CharacterPicker
