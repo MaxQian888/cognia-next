@@ -35,6 +35,24 @@ const messageEvent: SessionEvent = {
   operationId: "operation_1",
 }
 
+function readerFor(...events: SessionEvent[]) {
+  return {
+    getSharedSession: jest.fn().mockResolvedValue(session),
+    listSessionMembers: jest.fn().mockResolvedValue([
+      {
+        sessionId: session.id,
+        userId: "user_1",
+        role: "owner" as const,
+        approver: true,
+        guest: false,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]),
+    listSessionEvents: jest.fn().mockResolvedValue(events),
+  }
+}
+
 describe("shared chat synchronization", () => {
   beforeAll(dbFixture.initialize)
   beforeEach(async () => {
@@ -70,6 +88,48 @@ describe("shared chat synchronization", () => {
       collaboration: { sourceEventId: "event_1", eventSequence: 1, version: 1 },
     })
     expect((await getDb().collabChatSyncStates.get(session.id))?.lastSequence).toBe(1)
+  })
+
+  // `event.actor` is the only value the server authenticated. The payload is
+  // written by whoever appended the event, so a member could otherwise claim
+  // another member's identity and have every mirror render it as theirs.
+  it("refuses a payload author that claims a different person than the actor", async () => {
+    const client = readerFor({
+      ...messageEvent,
+      actor: { kind: "human", id: "user_2", displayName: "Mallory" },
+      payload: {
+        ...(messageEvent.payload as Record<string, unknown>),
+        author: { kind: "human", id: "user_1", displayName: "Ada" },
+      },
+    })
+
+    await syncSharedSession(client, session.orgId, session.id)
+
+    expect(await getDb().messages.get("message_1")).toMatchObject({
+      senderId: "user_2",
+      collaboration: { author: { kind: "human", id: "user_2" } },
+    })
+  })
+
+  // The reason the payload can carry an author at all: an imported transcript's
+  // assistant turns must not project as the human who ran the import. Those
+  // kinds name no person, so honouring them impersonates nobody.
+  it("keeps a non-human payload author so imported transcripts keep their shape", async () => {
+    const client = readerFor({
+      ...messageEvent,
+      payload: {
+        ...(messageEvent.payload as Record<string, unknown>),
+        role: "assistant",
+        author: { kind: "agent", id: "run:abc" },
+      },
+    })
+
+    await syncSharedSession(client, session.orgId, session.id)
+
+    expect(await getDb().messages.get("message_1")).toMatchObject({
+      senderId: "run:abc",
+      collaboration: { author: { kind: "agent", id: "run:abc" } },
+    })
   })
 
   it("purges the local projection when the server hides a revoked session", async () => {

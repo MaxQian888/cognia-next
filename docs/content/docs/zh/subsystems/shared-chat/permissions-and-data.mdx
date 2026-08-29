@@ -1,0 +1,49 @@
+---
+title: 权限与数据
+description: 共享会话的角色矩阵、事件模型、脱敏、附件与租户边界。
+---
+
+# 权限与数据
+
+## 成员关系是显式且由服务端裁决的
+
+Workspace 成员身份只构成权限上限，绝不自动把人加入私有会话。每条命令都调用服务端策略
+引擎，组合会话成员、动作、策略修订、消息作者、Guest 状态与风险上下文。前端能力提示只负责
+展示，不能替代授权。
+
+| 角色 | 核心权限 |
+|---|---|
+| `owner` | 完整管理、转移所有权、归档与删除 |
+| `maintainer` | 管理成员/设置、脱敏任意消息、取消/steer Run、高风险审批 |
+| `member` | 读取完整历史、发言、启动 Run、更正或脱敏自己的消息 |
+| `viewer` | 只读完整历史 |
+
+`approver` 是独立能力。owner 与 maintainer 默认拥有；非 Guest member 可以被显式授予。Guest
+最高只能是 member，不能管理、导出、break-glass 或批准高风险操作。UI 会把所有 Guest 消息与
+操作标记为外部来源。
+
+私有会话的非成员收到 `404`，已知资源但权限不足收到 `403`，修订和租约冲突收到 `409`，过期
+凭据收到 `410`，低于 v2 的客户端收到 `426`。
+
+## 事件是只追加投影
+
+`chat_session_events` 在会话内分配唯一单调 `sequence`。`operationId` 让重试返回原结果。更正或
+脱敏创建新事件，绝不覆盖原始行。普通 events endpoint 会计算会话完整的已脱敏消息 id 集合，
+返回之前把相关 create/correction payload 全部替换为墓碑。
+
+`StoredMessage` 携带稳定 `AuthorRef`、来源、服务端事件版本与脱敏状态。缺少这些可选字段的旧记录
+仍可读取。Dexie 保存会话、成员、投影事件、邀请、审批、附件与最后 sequence/policy revision，
+但任何远程授权都不会查询 Dexie。
+
+## 附件会被授权两次
+
+元数据进入 PostgreSQL，字节进入配置的本地目录或 S3-compatible bucket。初始化校验文件名、
+媒体类型、大小上限与小写 SHA-256。上传与下载使用不同的单次短期 header 凭据。提交时重新读取
+字节并校验长度和 digest。发放下载凭据前检查当前成员关系，消费凭据时再次检查。object key 与
+附件 URL 不会序列化或写日志。
+
+## 删除内容与审计元数据采用不同保留策略
+
+owner 确认删除后，会话立即不可用并开始清除正文与对象。只追加的授权审计只保留 actor/resource
+id、动作、稳定原因、结果、policy revision、request/grant id 与时间，不保存消息正文、邀请 token、
+邮箱、附件 URL、prompt 或工具 payload。

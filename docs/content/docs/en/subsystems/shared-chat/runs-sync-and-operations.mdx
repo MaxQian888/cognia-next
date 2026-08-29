@@ -1,0 +1,51 @@
+---
+title: Runs, sync, and operations
+description: Unique Agent Run leases, approvals, reconnect recovery, revocation, audit, and break-glass.
+---
+
+# Runs, sync, and operations
+
+## A shared session has at most one executing Agent Run
+
+The initiating client requests a lease with its stable device id and Run id. The service verifies
+`session.run`, stores only a token digest, and returns a short-lived token bound to the user, device,
+session, and Run. The local model/tool runtime publishes Run events with that token. A competing start
+receives `409`; its input is queued rather than executed.
+
+Only the initiator, maintainer, or owner may steer. Heartbeat loss pauses the Run and then fails it after
+the grace deadline. Another device never silently takes over, because repeating an irreversible tool is
+worse than asking a user to restart explicitly.
+
+Ordinary tools use initiator approval. High-risk, irreversible, or permission-expanding tools require a
+maintainer, owner, or non-Guest approver. Approval resolution compares the current revision and consumes
+one transition atomically, so double-clicks cannot approve twice.
+
+## HTTP repairs and WebSocket accelerates
+
+HTTP owns commands and event-gap recovery. WebSocket carries incremental events after a single-use
+stream ticket. The reducer applies only `lastSequence + 1`; a gap, reconnect, or policy change triggers
+an HTTP fetch from the stored cursor. Every policy-changing event is followed by a fresh membership
+check before more events are sent.
+
+Membership removal closes the person's stream, invalidates attachment tickets, cancels their queued
+input, and ends their active lease. The client purges the corresponding shared projection. Offline mode
+keeps cached reads and drafts only; there is no delayed message or Run outbox.
+
+## Break-glass is not implicit org-admin access
+
+Org administrators do not discover private session content through normal membership APIs. For an
+incident, an org admin with workspace-manage capability must provide a reason and choose a duration from
+one minute to one hour. The resulting grant is bound to that admin and session. Each raw event read
+validates expiry and writes a metadata-only `session.breakGlassRead` audit with `rawContentAccessed=true`.
+
+## Operating and rolling back
+
+1. Apply additive migrations with both flags disabled.
+2. Enable the service flag for selected organizations and verify protocol v2 health.
+3. Ship a client build with its flag enabled to the same canary population.
+4. Stop rollout on any cross-tenant allow, stale access after removal, event gap that cannot recover, or duplicate tool execution.
+5. Roll back by disabling either flag. Do not down-migrate or delete shared data.
+
+The collaboration service must never log bodies, tokens, emails, prompts, tool input, or attachment URLs.
+Operational dimensions are limited to action/event/risk/stage/reason classes. Private local chat remains
+available during service outage or rollback.

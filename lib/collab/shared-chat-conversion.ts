@@ -8,19 +8,31 @@ import type {
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { appendCollabChatEvents } from "@/lib/db/collab-chat-mirror"
 import { getDb } from "@/lib/db/schema"
+import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
 import type { CollabClient } from "./client"
+import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
 type SharedChatConversionClient = Pick<
   CollabClient,
   "identity" | "createSharedSession" | "appendSessionEvent" | "updateSharedSession"
->
+> &
+  Partial<
+    Pick<
+      CollabClient,
+      "initializeSessionAttachment" | "uploadSessionAttachment" | "commitSessionAttachment"
+    >
+  >
 
 export interface SharedChatConversionInput {
   localSessionId: string
   orgId: string
   workspaceId: string
   /** Uploads local file parts and returns parts containing server-safe references. */
-  prepareAttachmentParts?: (message: StoredMessage) => Promise<StoredMessage["parts"]>
+  prepareAttachmentParts?: (
+    message: StoredMessage,
+    sharedSession: SharedSession
+  ) => Promise<StoredMessage["parts"]>
+  readAttachment?: (part: StoredMessage["parts"][number]) => Promise<Uint8Array>
 }
 
 export interface SharedChatConversionResult {
@@ -60,6 +72,87 @@ function operationPrefix(localSessionId: string): string {
   return `chat-import:${localSessionId}`
 }
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+/**
+ * In-process attachment references: the bytes are already on this machine, so
+ * resolving one reaches no network and needs no guard.
+ */
+const LOCAL_ATTACHMENT_SCHEMES = ["data:", "blob:"]
+
+/**
+ * Read one local attachment's bytes for upload.
+ *
+ * `part.url` is NOT trustworthy. Session rows reach Dexie from the external
+ * agent importers (`lib/session-import/adapters/*`), where the url is whatever
+ * the foreign transcript carried — OpenCode alone can produce a remote
+ * `source.url` or a bare filesystem path. Converting such a session to shared
+ * would otherwise make the authenticated webview fetch an attacker-chosen
+ * origin and upload the response to the collab server.
+ *
+ * `data:`/`blob:` resolve locally and pass. Everything else goes through the
+ * shared SSRF floor (`@cognia/network-guard` via `lib/web/fetch-guard`), which
+ * permits only public http(s) — no loopback, LAN, or cloud metadata.
+ */
+async function defaultReadAttachment(part: StoredMessage["parts"][number]): Promise<Uint8Array> {
+  if (part.type !== "file") throw new Error("Only file parts can be uploaded")
+  if (!LOCAL_ATTACHMENT_SCHEMES.some((scheme) => part.url.startsWith(scheme))) {
+    assertFetchTargetAllowed(part.url)
+  }
+  const response = await fetch(part.url)
+  if (!response.ok) throw new Error("Local attachment could not be read")
+  return new Uint8Array(await response.arrayBuffer())
+}
+
+async function uploadMessageAttachments(
+  client: SharedChatConversionClient,
+  input: SharedChatConversionInput,
+  remote: SharedSession,
+  message: StoredMessage
+): Promise<{ parts: StoredMessage["parts"]; attachmentIds: string[] }> {
+  if (input.prepareAttachmentParts) {
+    return {
+      parts: await input.prepareAttachmentParts(message, remote),
+      attachmentIds: [],
+    }
+  }
+  if (
+    !client.initializeSessionAttachment ||
+    !client.uploadSessionAttachment ||
+    !client.commitSessionAttachment
+  ) {
+    throw new SharedChatAttachmentImportRequiredError(attachmentCount([message]))
+  }
+  const readAttachment = input.readAttachment ?? defaultReadAttachment
+  const attachmentIds: string[] = []
+  const parts: StoredMessage["parts"] = []
+  for (const part of message.parts) {
+    if (part.type !== "file") {
+      parts.push(part)
+      continue
+    }
+    const bytes = await readAttachment(part)
+    const initialized = await client.initializeSessionAttachment(input.orgId, remote.id, {
+      fileName: part.filename ?? "attachment",
+      mediaType: part.mediaType,
+      byteLength: bytes.byteLength,
+      sha256: await sha256Hex(bytes),
+    })
+    await client.uploadSessionAttachment(
+      input.orgId,
+      initialized.attachment.id,
+      initialized.ticket,
+      bytes
+    )
+    attachmentIds.push(initialized.attachment.id)
+    parts.push({ ...part, url: `cognia://shared-attachment/${initialized.attachment.id}` })
+  }
+  return { parts, attachmentIds }
+}
+
 async function readSource(localSessionId: string): Promise<{
   session: ChatSession
   messages: StoredMessage[]
@@ -80,9 +173,16 @@ export async function convertLocalSessionToShared(
   client: SharedChatConversionClient,
   input: SharedChatConversionInput
 ): Promise<SharedChatConversionResult> {
+  assertSharedChatClientEnabled()
   const { session: local, messages } = await readSource(input.localSessionId)
   const files = attachmentCount(messages)
-  if (files > 0 && !input.prepareAttachmentParts) {
+  if (
+    files > 0 &&
+    !input.prepareAttachmentParts &&
+    (!client.initializeSessionAttachment ||
+      !client.uploadSessionAttachment ||
+      !client.commitSessionAttachment)
+  ) {
     throw new SharedChatAttachmentImportRequiredError(files)
   }
 
@@ -100,9 +200,10 @@ export async function convertLocalSessionToShared(
     parts: StoredMessage["parts"]
   }> = []
   for (const message of messages) {
-    const parts = hasFilePart(message)
-      ? await input.prepareAttachmentParts!(message)
-      : message.parts
+    const uploaded = hasFilePart(message)
+      ? await uploadMessageAttachments(client, input, remoteDraft, message)
+      : { parts: message.parts, attachmentIds: [] }
+    const parts = uploaded.parts
     const author = authorFor(message, identity.userId)
     const event = await client.appendSessionEvent(input.orgId, remoteDraft.id, {
       kind: "message.created",
@@ -117,6 +218,11 @@ export async function convertLocalSessionToShared(
         imported: true,
       },
     })
+    await Promise.all(
+      uploaded.attachmentIds.map((attachmentId) =>
+        client.commitSessionAttachment!(input.orgId, remoteDraft.id, attachmentId, event.id)
+      )
+    )
     imported.push({ source: message, event, parts })
   }
 

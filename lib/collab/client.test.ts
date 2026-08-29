@@ -1,4 +1,9 @@
-import { CollabClient, CollabConflictError, CollabError } from "./client"
+import {
+  CollabClient,
+  CollabConflictError,
+  CollabError,
+  SHARED_CHAT_PROTOCOL_VERSION,
+} from "./client"
 
 const ORG = "org_acme00000000000000000"
 const ADA = "usr_aaaaaaaaaaaaaaaaaaaaaaaa"
@@ -352,5 +357,31 @@ describe("CollabClient", () => {
       },
     ])
     expect(sockets[0].url).not.toContain("st_one_time")
+  })
+
+  it("keeps one-time attachment credentials in headers", async () => {
+    const calls: Call[] = []
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        return new Response(null, { status: 204 })
+      },
+    })
+
+    await client.uploadSessionAttachment(
+      ORG,
+      "attachment_1",
+      "one-time-ticket",
+      new Uint8Array([1, 2, 3])
+    )
+
+    const call = calls[0]
+    expect(call.url).not.toContain("one-time-ticket")
+    expect(call.init?.headers).toEqual({
+      "x-cognia-attachment-ticket": "one-time-ticket",
+      "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+    })
   })
 })

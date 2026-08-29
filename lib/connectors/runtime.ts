@@ -44,6 +44,7 @@ import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-ex
 import type { AuditKind } from "@/types/connectors/audit"
 import type { InboxSendPolicy } from "@/lib/claude/build-options"
 import { getDb } from "@/lib/db/schema"
+import { assertLocalMutationAllowed } from "@/lib/collab/shared-session-access"
 import { publishSyncInvalidate } from "@/lib/sync/host-invalidate"
 import { publishInboundMessageAdded } from "@/lib/connectors/inbox-relay/host-events"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
@@ -582,6 +583,12 @@ export async function insertInboundMessage(
   sessionId: string,
   overrideTimestamp?: number
 ): Promise<StoredMessage> {
+  const targetSession = await getDb().sessions.get(sessionId)
+  if (!targetSession) throw new Error("SESSION_NOT_FOUND")
+  // Shared-session mirrors are never a write target. Connector bindings must
+  // normalize their platform subject and append through the collaboration
+  // server; failing closed here prevents Dexie from becoming an auth bypass.
+  assertLocalMutationAllowed(targetSession, "session.post")
   const now = overrideTimestamp ?? Date.now()
   const existing = await getDb()
     .messages.where("platformMessageId")

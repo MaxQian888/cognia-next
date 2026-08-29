@@ -1,0 +1,53 @@
+---
+title: Permissions and data
+description: The shared-session role matrix, event model, redaction, attachment, and tenant boundaries.
+---
+
+# Permissions and data
+
+## Membership is explicit and server-authoritative
+
+Workspace membership is only an upper bound. It never inserts a person into a private session. Every
+command calls the service policy engine, which combines the session membership, action, policy
+revision, message author, Guest status, and risk context. Frontend capability hints only control presentation.
+
+| Role | Core access |
+|---|---|
+| `owner` | full management, ownership transfer, archive, and deletion |
+| `maintainer` | member/settings management, any-message redaction, Run cancel/steer, high-risk approval |
+| `member` | full history, post, start a Run, correct or redact own messages |
+| `viewer` | full-history read only |
+
+`approver` is an orthogonal capability. Owners and maintainers have it implicitly; a non-Guest member
+may receive it explicitly. A Guest is capped at member and cannot manage, export, perform break-glass,
+or approve high-risk work. The UI marks every Guest message and operation as external.
+
+Private non-members receive `404`, known-but-forbidden actions receive `403`, revision and lease
+conflicts receive `409`, expired credentials receive `410`, and pre-v2 clients receive `426`.
+
+## Events are append-only projections
+
+`chat_session_events` allocates a unique monotonic `sequence` within a session. `operationId` makes a
+command retry return its original result. A correction or redaction creates a new event; neither
+overwrites the original row. The ordinary events endpoint computes the complete set of redacted
+message ids and replaces every affected create/correction payload with a tombstone before returning it.
+
+`StoredMessage` carries a stable `AuthorRef`, source, server event version, and redaction state. Old
+records without those optional fields remain readable. Dexie stores sessions, members, projected
+events, invites, approvals, attachments, and the last sequence/policy revision, but it is never queried
+to authorize a remote action.
+
+## Attachments are authorized twice
+
+Metadata lives in PostgreSQL; bytes live in a configured local directory or S3-compatible bucket.
+Initialization validates the file name, media type, length limit, and lowercase SHA-256. Upload and
+download use separate, single-use, short-lived credentials carried in headers. Commit re-reads bytes
+and verifies length and digest. Download rechecks current membership before a credential is issued and
+again when it is consumed. Object keys and attachment URLs are not serialized or logged.
+
+## Deletion and audit retain different data
+
+Owner-confirmed deletion immediately marks the session unavailable and starts content/object cleanup.
+The append-only authorization audit retains only actor/resource ids, action, stable reason, outcome,
+policy revision, request/grant id, and timestamp. It never stores message content, invite tokens, email
+addresses, attachment URLs, prompts, or tool payloads.

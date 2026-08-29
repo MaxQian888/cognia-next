@@ -53,6 +53,10 @@ import {
   validateTurnDetailCursor,
 } from "@/lib/chat/transcript/projection"
 import { transcriptCapabilitiesV1 } from "@/lib/chat/transcript/source"
+import {
+  assertLocalMutationAllowed,
+  assertSharedSessionRead,
+} from "@/lib/collab/shared-session-access"
 
 const UPDATE_EVENT = "companion://message-update-request"
 const DELETE_EVENT = "companion://message-delete-request"
@@ -326,6 +330,12 @@ async function respondSessionMedia(
     await fail("MEDIA_NOT_FOUND")
     return
   }
+  try {
+    await assertSharedSessionRead(session)
+  } catch {
+    await fail("MEDIA_NOT_FOUND")
+    return
+  }
   const media = await getMessageMedia(request.hash)
   const blob =
     request.variant === "thumbnail"
@@ -348,6 +358,13 @@ async function respondSessionMedia(
 
 async function respondUpdate(req: UpdateRequestEvent, bridge: TauriBridge): Promise<void> {
   try {
+    const [session, message] = await Promise.all([
+      getDb().sessions.get(req.sessionId),
+      getDb().messages.get(req.messageId),
+    ])
+    if (!session || !message || message.sessionId !== req.sessionId)
+      throw new Error("SESSION_NOT_FOUND")
+    assertLocalMutationAllowed(session, "message.correctOwn")
     await messageRepository.update(req.messageId, req.updates as Partial<UIMessage>)
     await bridge.invoke(RESPONSE_COMMAND, {
       requestId: req.requestId,
@@ -365,6 +382,13 @@ async function respondUpdate(req: UpdateRequestEvent, bridge: TauriBridge): Prom
 
 async function respondDelete(req: DeleteRequestEvent, bridge: TauriBridge): Promise<void> {
   try {
+    const [session, message] = await Promise.all([
+      getDb().sessions.get(req.sessionId),
+      getDb().messages.get(req.messageId),
+    ])
+    if (!session || !message || message.sessionId !== req.sessionId)
+      throw new Error("SESSION_NOT_FOUND")
+    assertLocalMutationAllowed(session, "message.redactOwn")
     await messageRepository.delete(req.messageId)
     await bridge.invoke(RESPONSE_COMMAND, {
       requestId: req.requestId,
@@ -486,8 +510,18 @@ export async function readSessionPage(
     .offset(offset)
     .limit(pageSize + 1)
     .toArray()
+  const accessible: ChatSession[] = []
+  for (const session of candidates) {
+    try {
+      await assertSharedSessionRead(session)
+      accessible.push(session)
+    } catch {
+      // Shared sessions are undiscoverable when current membership cannot be
+      // revalidated. A paired device's client.read capability is not enough.
+    }
+  }
   const hasMore = candidates.length > pageSize
-  const rows = candidates.slice(0, pageSize).map(projectSessionListItem)
+  const rows = accessible.slice(0, pageSize).map(projectSessionListItem)
   const nextOffset = hasMore ? offset + rows.length : undefined
 
   return {
@@ -533,6 +567,11 @@ export async function readMessagesPage(
   limit?: number,
   offset?: number
 ): Promise<MessagesPage> {
+  const session = await getDb().sessions.get(sessionId)
+  if (!session || !isSessionExposed(session, "external-connector")) {
+    throw new Error("SESSION_NOT_FOUND")
+  }
+  await assertSharedSessionRead(session)
   const start = typeof offset === "number" && offset > 0 ? offset : 0
   const pageSize = Math.min(typeof limit === "number" && limit > 0 ? limit : 200, 500)
   const collection = getDb().messages.where("[sessionId+createdAt]")
@@ -568,6 +607,7 @@ async function transcriptRevision(sessionId: string): Promise<{
   if (!session || !isSessionExposed(session, "external-connector")) {
     throw transcriptError("INVALID_PARAMS")
   }
+  await assertSharedSessionRead(session)
   return {
     revision: session.transcriptRevision ?? 0,
     ...(session.activeBranchByGroup ? { activeBranchByGroup: session.activeBranchByGroup } : {}),
@@ -792,6 +832,11 @@ export async function persistIncomingMessage(
   if (typeof content !== "string" || content.length === 0) {
     throw new Error("content must be a non-empty string")
   }
+  const session = await getDb().sessions.get(sessionId)
+  if (!session || !isSessionExposed(session, "external-connector")) {
+    throw new Error("SESSION_NOT_FOUND")
+  }
+  assertLocalMutationAllowed(session, "session.post")
   const normalizedRole: "user" | "assistant" = role === "assistant" ? "assistant" : "user"
   const message: UIMessage = {
     id: generateMessageId(),

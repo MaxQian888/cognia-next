@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use cognia_collab_server::chat_attachment_store::ObjectStoreChatAttachments;
 use cognia_collab_server::{router, AppState, PgStore};
 use cognia_tenant_auth::grant::GrantSigner;
 use cognia_tenant_auth::oidc::{OidcAuthenticator, OidcConfig};
@@ -36,6 +37,21 @@ struct Args {
     /// How long a fetched JWKS is reused before rediscovery.
     #[arg(long, env = "COLLAB_JWKS_TTL_SECONDS", default_value_t = 300)]
     jwks_ttl_seconds: u64,
+    #[arg(long, env = "COLLAB_OBJECT_STORE_LOCAL_DIR")]
+    object_store_local_dir: Option<std::path::PathBuf>,
+    #[arg(long, env = "COLLAB_S3_ENDPOINT")]
+    s3_endpoint: Option<String>,
+    #[arg(long, env = "COLLAB_S3_BUCKET", default_value = "cognia-collab")]
+    s3_bucket: String,
+    #[arg(long, env = "COLLAB_S3_REGION", default_value = "us-east-1")]
+    s3_region: String,
+    #[arg(long, env = "COLLAB_S3_ACCESS_KEY")]
+    s3_access_key: Option<String>,
+    #[arg(long, env = "COLLAB_S3_SECRET_KEY")]
+    s3_secret_key: Option<String>,
+    /// Rollout gate for server-authoritative shared chat routes.
+    #[arg(long, env = "COLLAB_SHARED_CHAT_ENABLED", default_value_t = false)]
+    shared_chat_enabled: bool,
 }
 
 #[tokio::main]
@@ -63,7 +79,25 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     let store = Arc::new(PgStore::connect(&args.database_url, args.db_max_connections).await?);
-    let state = AppState::new(store.clone(), signer, Arc::new(oidc)).with_chat_store(store);
+    let attachment_store = if let Some(root) = args.object_store_local_dir {
+        ObjectStoreChatAttachments::local(root)?
+    } else if args.s3_endpoint.is_some()
+        || (args.s3_access_key.is_some() && args.s3_secret_key.is_some())
+    {
+        ObjectStoreChatAttachments::s3(
+            &args.s3_bucket,
+            &args.s3_region,
+            args.s3_endpoint.as_deref(),
+            args.s3_access_key.as_deref(),
+            args.s3_secret_key.as_deref(),
+        )?
+    } else {
+        ObjectStoreChatAttachments::local(std::path::PathBuf::from("./data/collab-attachments"))?
+    };
+    let state = AppState::new(store.clone(), signer, Arc::new(oidc))
+        .with_chat_store(store)
+        .with_chat_attachments(Arc::new(attachment_store))
+        .with_shared_chat_enabled(args.shared_chat_enabled);
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     tracing::info!(bind = %args.bind, "collaboration plane listening");

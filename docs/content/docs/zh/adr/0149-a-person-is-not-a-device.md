@@ -470,3 +470,27 @@ PATCH 必须提交 `baseRevision`，并在并发冲突时返回 HTTP 409 与服�
 每 60 秒刷新一次，同一 account/org 只允许一个 in-flight 请求，失败退避最长 15 分钟。
 Plan 与 Run 只通过用户明确触发的发布动作和字段 allowlist 进入协作面；执行句柄、prompt、
 credential、tool input 与绝对路径始终留在本机。
+
+## 实施更新——共享 AI 会话（2026-08-29）
+
+会话与消息的第二阶段已经成为协作面的协议 v2。它收窄了原来的 non-goal，但不改变
+本地平面：所有没有协作绑定的旧 `ChatSession` 继续保持私有、离线可用，旧客户端仍可
+读取。用户必须显式导入本地会话；系统先创建仅 owner 可见的 `importing` 草稿，以确定性
+operation 上传消息和附件，只有完整历史全部持久化之后才切换为 `active`。
+
+共享会话使用显式的 `owner`、`maintainer`、`member`、`viewer` 成员身份，并提供独立的
+非 Guest `approver` 能力。Workspace 成员身份只构成权限上限，绝不自动获得会话发现权。
+PostgreSQL RLS 与统一策略引擎授权每条命令；私有会话的非成员统一收到 404。事件序号由
+服务器单调生成，更正与脱敏只追加新事件，普通投影把已脱敏正文替换为墓碑。读取原始内容
+必须持有有理由、有期限的 break-glass grant，并且每次访问都会新增不含内容的授权审计。
+
+Agent 仍由发起客户端执行。服务端只签发一个绑定设备、用户、会话和 Run 的租约 token；
+其他输入进入队列，心跳丢失后绝不静默接管。高风险或不可逆工具必须由 maintainer、owner
+或非 Guest approver 批准。附件使用单次 header 凭据、SHA-256/长度校验、PostgreSQL
+元数据，以及本地或 S3-compatible object store。
+
+灰度有两个独立 kill switch。只有 `COLLAB_SHARED_CHAT_ENABLED=true` 时，服务端才挂载共享
+路由并在 health feature 中报告 `shared-chat`；只有
+`NEXT_PUBLIC_SHARED_CHAT_ENABLED=true` 时，生产客户端才开放入口和写入。低于协议 v2 的
+客户端不能打开或写入共享会话，但全部私有本地会话继续工作。完整决策记录见
+`docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md`。

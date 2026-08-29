@@ -22,7 +22,9 @@
 //!
 //! It is not a session and not an identity. It says "the bearer proved, within
 //! the last few minutes, that they are this user with this role in this
-//! workspace". Anything longer-lived belongs to the IdP.
+//! organization". Workspace and role fields remain on the wire only for old
+//! clients; services must resolve current membership for every request.
+//! Anything longer-lived belongs to the IdP.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -79,10 +81,9 @@ pub struct GrantClaims {
     /// is not scoped to one of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
-    /// The role resolved at mint time by [`crate::membership`]. Baked in on
-    /// purpose: re-resolving on every request would let a mid-flight
-    /// membership change take effect at an arbitrary point inside a request.
-    /// The grant's short TTL is what bounds the staleness.
+    /// Informational compatibility field for pre-control-plane clients.
+    /// Deprecated: authorization must resolve the current server-side
+    /// membership for every request and must never trust this value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<WorkspaceRole>,
     pub issued_at: i64,

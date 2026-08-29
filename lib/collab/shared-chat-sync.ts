@@ -1,4 +1,5 @@
 import type {
+  AuthorRef,
   ChatSession,
   SessionEvent,
   SessionMembership,
@@ -14,6 +15,7 @@ import {
   replaceCollabChatSessions,
 } from "@/lib/db/collab-chat-mirror"
 import { CollabError, type CollabClient } from "./client"
+import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
 type SharedChatReader = Pick<
   CollabClient,
@@ -61,6 +63,42 @@ function payloadRole(payload: Record<string, unknown>): StoredMessage["role"] | 
 function payloadCreatedAt(payload: Record<string, unknown>, fallback: number): number {
   const value = payload.createdAt
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
+}
+
+/** Author kinds that name a PERSON, and can therefore be impersonated. */
+const HUMAN_AUTHOR_KINDS: AuthorRef["kind"][] = ["human", "guest"]
+const AUTHOR_KINDS: AuthorRef["kind"][] = [
+  ...HUMAN_AUTHOR_KINDS,
+  "agent",
+  "app",
+  "connector",
+  "system",
+]
+
+/**
+ * Resolve a projected message's author, with `event.actor` — the only value the
+ * server authenticated — as the authority.
+ *
+ * The payload carries an author at all so an IMPORTED transcript keeps its
+ * shape: an assistant turn must project as `kind: "agent"`, not as the human
+ * who ran the import. Those kinds name no person, so honouring them cannot
+ * impersonate anyone, and `event.actor` still records who submitted the event.
+ *
+ * A payload that claims a HUMAN identity is only honoured when it names the
+ * authenticated actor. Without that check any member could append an event
+ * whose payload said `{kind: "human", id: "<another member's userId>"}` and
+ * have every other member's mirror render the message as authored by them.
+ */
+function payloadAuthor(payload: Record<string, unknown>, actor: AuthorRef): AuthorRef {
+  const value = payload.author
+  if (!value || typeof value !== "object") return actor
+  const candidate = value as Partial<AuthorRef>
+  if (typeof candidate.id !== "string" || !AUTHOR_KINDS.includes(candidate.kind as never)) {
+    return actor
+  }
+  const claimed = candidate as AuthorRef
+  if (HUMAN_AUTHOR_KINDS.includes(claimed.kind) && claimed.id !== actor.id) return actor
+  return claimed
 }
 
 async function ensureLocalProjection(remote: SharedSession): Promise<ChatSession> {
@@ -115,6 +153,7 @@ async function projectEvents(
         const role = payloadRole(payload)
         const parts = payloadParts(payload)
         if (role && parts) {
+          const author = payloadAuthor(payload, event.actor)
           const existing = await db.messages.get(messageId)
           if ((existing?.collaboration?.eventSequence ?? 0) < event.sequence) {
             await db.messages.put({
@@ -123,12 +162,12 @@ async function projectEvents(
               projectId: remote.workspaceId,
               role,
               parts,
-              senderId: event.actor.id,
+              senderId: author.id,
               senderKind:
                 role === "assistant" ? "assistant" : role === "system" ? "system" : "user",
               createdAt: existing?.createdAt ?? payloadCreatedAt(payload, event.createdAt),
               collaboration: {
-                author: event.actor,
+                author,
                 sourceEventId: event.id,
                 eventSequence: event.sequence,
                 version: existing?.collaboration?.version ?? 1,
@@ -214,6 +253,7 @@ export async function listAndCacheSharedSessions(
   orgId: string,
   workspaceId: string
 ): Promise<SharedSession[]> {
+  assertSharedChatClientEnabled()
   const sessions = await client.listSharedSessions(orgId, workspaceId)
   const fetchedAt = Date.now()
   await replaceCollabChatSessions(
@@ -229,6 +269,7 @@ export async function syncSharedSession(
   orgId: string,
   sharedSessionId: string
 ): Promise<SharedChatSyncResult> {
+  assertSharedChatClientEnabled()
   const db = getDb()
   const previous = await db.collabChatSyncStates.get(sharedSessionId)
   try {
@@ -286,6 +327,7 @@ export async function connectSharedSessionStream(
   orgId: string,
   sharedSessionId: string
 ): Promise<SharedChatStreamController> {
+  assertSharedChatClientEnabled()
   await syncSharedSession(client, orgId, sharedSessionId)
   const socket = await client.openSessionStream(orgId, sharedSessionId)
   let stopped = false

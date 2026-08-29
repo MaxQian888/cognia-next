@@ -2,6 +2,7 @@
   "title": "子系统",
   "pages": [
     "scheduler",
+    "shared-chat",
     "plugin-system",
     "skills",
     "cognia-cli",

@@ -14,11 +14,14 @@ use axum::{
     routing::{get, patch},
     Json, Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_tenant_auth::grant::{GrantClaims, GrantSigner};
 use cognia_tenant_auth::membership::resolve_workspace_access;
 use cognia_tenant_auth::oidc::Authenticator;
-use cognia_tenant_auth::{OrgId, UserId, WorkspaceCapability};
+use cognia_tenant_auth::{OrgId, OrgRole, UserId, WorkspaceCapability, WorkspaceRole};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
@@ -30,7 +33,8 @@ use crate::model::{
     RunStatus,
 };
 use crate::store::{
-    IssuePatch, IssueQuery, MutationGuard, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch,
+    AcceptInvitation, AuthorizationAuditEvent, AuthorizationContext, Invitation, IssuePatch,
+    IssueQuery, MutationGuard, NewInvitation, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch,
     PlanQuery, PlanStepProgress, RunPatch, RunQuery, Store, StoreError, Workspace, WorkspaceMember,
 };
 
@@ -49,6 +53,9 @@ pub struct AppState {
     pub store: Arc<dyn Store>,
     pub chat_store: Arc<dyn ChatStore>,
     pub chat_hub: Arc<ChatHub>,
+    pub chat_attachments: Arc<dyn crate::chat_attachment_store::ChatAttachmentObjectStore>,
+    pub chat_metrics: Arc<crate::chat_metrics::ChatMetrics>,
+    pub shared_chat_enabled: bool,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -62,6 +69,11 @@ impl AppState {
             store,
             chat_store: Arc::new(InMemoryChatStore::new()),
             chat_hub: Arc::new(ChatHub::default()),
+            chat_attachments: Arc::new(
+                crate::chat_attachment_store::ObjectStoreChatAttachments::in_memory(),
+            ),
+            chat_metrics: Arc::new(crate::chat_metrics::ChatMetrics::default()),
+            shared_chat_enabled: true,
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -77,13 +89,50 @@ impl AppState {
         self.chat_store = chat_store;
         self
     }
+
+    pub fn with_chat_attachments(
+        mut self,
+        store: Arc<dyn crate::chat_attachment_store::ChatAttachmentObjectStore>,
+    ) -> Self {
+        self.chat_attachments = store;
+        self
+    }
+
+    pub fn with_shared_chat_enabled(mut self, enabled: bool) -> Self {
+        self.shared_chat_enabled = enabled;
+        self
+    }
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let routes = Router::new()
         .route("/health", get(health))
+        .route("/internal/shared-chat-metrics", get(shared_chat_metrics))
         .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
         .route("/v1/orgs/{org_id}/memberships/me", get(my_memberships))
+        .route(
+            "/v1/orgs/{org_id}/invitations",
+            axum::routing::post(create_invitation),
+        )
+        .route(
+            "/v1/orgs/{org_id}/invitations/accept",
+            axum::routing::post(accept_invitation),
+        )
+        .route(
+            "/v1/orgs/{org_id}/invitations/{invitation_id}",
+            get(get_invitation).delete(revoke_invitation),
+        )
+        .route(
+            "/v1/orgs/{org_id}/members/{user_id}",
+            patch(patch_org_member).delete(delete_org_member),
+        )
+        .route(
+            "/v1/orgs/{org_id}/workspaces/{workspace_id}/members/{user_id}",
+            axum::routing::post(set_workspace_member)
+                .patch(set_workspace_member)
+                .delete(delete_workspace_member),
+        )
+        .route("/v1/orgs/{org_id}/audit-events", get(list_audit_events))
         .route("/v1/orgs/{org_id}/workspaces", get(list_workspaces))
         .route(
             "/v1/orgs/{org_id}/workspaces/{workspace_id}/members",
@@ -104,9 +153,13 @@ pub fn router(state: AppState) -> Router {
             get(get_plan).patch(patch_plan),
         )
         .route("/v1/orgs/{org_id}/runs", get(list_runs).post(create_run))
-        .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run))
-        .merge(crate::chat_api::routes())
-        .with_state(state)
+        .route("/v1/orgs/{org_id}/runs/{run_id}", patch(patch_run));
+    let routes = if state.shared_chat_enabled {
+        routes.merge(crate::chat_api::routes())
+    } else {
+        routes
+    };
+    routes.with_state(state)
 }
 
 #[derive(Debug, Serialize)]
@@ -114,15 +167,25 @@ pub fn router(state: AppState) -> Router {
 struct HealthResponse {
     status: &'static str,
     collab_protocol_version: u32,
-    features: [&'static str; 4],
+    features: Vec<&'static str>,
 }
 
-async fn health() -> Json<HealthResponse> {
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let mut features = vec!["issue-writes", "plan-writes", "run-writes"];
+    if state.shared_chat_enabled {
+        features.push("shared-chat");
+    }
     Json(HealthResponse {
         status: "ok",
         collab_protocol_version: 2,
-        features: ["issue-writes", "plan-writes", "run-writes", "shared-chat"],
+        features,
     })
+}
+
+async fn shared_chat_metrics(
+    State(state): State<AppState>,
+) -> Json<crate::chat_metrics::ChatMetricsSnapshot> {
+    Json(state.chat_metrics.snapshot())
 }
 
 // ── Error shape ──────────────────────────────────────────────────────────────
@@ -189,6 +252,9 @@ impl Failure {
             Self::Auth(AuthError::Store(error)) | Self::Store(error) => match error {
                 StoreError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
                 StoreError::Conflict(_) => unreachable!("conflicts are handled before this match"),
+                StoreError::LastOwner => (StatusCode::CONFLICT, error.to_string()),
+                StoreError::InvitationUnavailable => (StatusCode::GONE, error.to_string()),
+                StoreError::Policy(_) => (StatusCode::FORBIDDEN, error.to_string()),
                 other => {
                     tracing::error!(error = %other, "collaboration store failure");
                     (
@@ -474,6 +540,66 @@ pub struct MintedGrant {
     pub expires_at: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateInvitationBody {
+    #[serde(default)]
+    pub org_role: Option<OrgRole>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub workspace_role: Option<WorkspaceRole>,
+    #[serde(default = "default_invitation_days")]
+    pub expires_in_days: u32,
+    pub reason: String,
+}
+
+fn default_invitation_days() -> u32 {
+    7
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedInvitation {
+    #[serde(flatten)]
+    pub invitation: Invitation,
+    /// Returned exactly once. Persisted state contains only its SHA-256 hash.
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptInvitationBody {
+    pub token: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchOrgMemberBody {
+    pub role: OrgRole,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWorkspaceMemberBody {
+    pub role: WorkspaceRole,
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventsParams {
+    #[serde(default = "default_audit_limit")]
+    pub limit: usize,
+}
+
+fn default_audit_limit() -> usize {
+    100
+}
+
 /// What a caller holds in one org.
 ///
 /// `orgRole` absent plus a non-empty `workspaces` is a guest — derived by the
@@ -537,8 +663,8 @@ async fn mint_grant(
     let org =
         OrgId::parse(org_id.clone()).map_err(|error| Failure::BadRequest(error.to_string()))?;
 
-    // Bake the role in, so a request does not re-resolve it mid-flight. The
-    // five-minute TTL is what bounds the staleness.
+    // `role` remains in the grant for wire compatibility and diagnostics only.
+    // Every protected request re-resolves authoritative memberships.
     let membership = state
         .store
         .membership(&org_id, user.as_str(), body.workspace_id.as_deref())
@@ -546,8 +672,18 @@ async fn mint_grant(
     let role = resolve_workspace_access(membership.org_role, membership.workspace_role)
         .map(|access| access.role);
     if membership.org_role.is_none() && role.is_none() {
-        // Neither in the org nor in any workspace of it.
-        return Err(Failure::UnlinkedIdentity);
+        // A workspace-only guest does not know a workspace id until the
+        // memberships endpoint answers. Permit an org-scoped discovery grant
+        // only when the server can already prove at least one membership.
+        if body.workspace_id.is_some()
+            || state
+                .store
+                .list_workspace_memberships(&org_id, user.as_str())
+                .await?
+                .is_empty()
+        {
+            return Err(Failure::UnlinkedIdentity);
+        }
     }
 
     let grant_claims = GrantClaims::issue(user, org, body.workspace_id, role, GRANT_TTL)
@@ -556,6 +692,26 @@ async fn mint_grant(
         .signer
         .sign(&grant_claims)
         .map_err(|error| Failure::BadRequest(error.to_string()))?;
+
+    state
+        .store
+        .append_authorization_audit(AuthorizationAuditEvent {
+            id: format!("aud_{}", Uuid::new_v4().simple()),
+            org_id: org_id.clone(),
+            workspace_id: grant_claims.workspace_id.clone(),
+            actor_user_id: grant_claims.user_id.to_string(),
+            target_user_id: None,
+            invitation_id: None,
+            action: "grant.minted".into(),
+            old_role: None,
+            new_role: role.map(|value| value.as_str().to_owned()),
+            reason: "OIDC grant exchange".into(),
+            request_id: request_id(&headers),
+            grant_id: Some(grant_claims.grant_id.to_string()),
+            source: request_source(&headers),
+            created_at: (state.now)(),
+        })
+        .await?;
 
     Ok(Json(MintedGrant {
         grant,
@@ -600,6 +756,261 @@ async fn my_memberships(
         org_role: membership.org_role,
         workspaces,
     }))
+}
+
+async fn create_invitation(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CreateInvitationBody>,
+) -> Result<(StatusCode, Json<CreatedInvitation>), Failure> {
+    if body.reason.trim().is_empty() {
+        return Err(Failure::BadRequest("reason must not be blank".into()));
+    }
+    if !(1..=30).contains(&body.expires_in_days) {
+        return Err(Failure::BadRequest(
+            "expiresInDays must be between 1 and 30".into(),
+        ));
+    }
+    let valid_scope = matches!(
+        (&body.org_role, &body.workspace_id, &body.workspace_role),
+        (Some(_), None, None) | (None, Some(_), Some(_))
+    );
+    if !valid_scope {
+        return Err(Failure::BadRequest(
+            "set exactly one orgRole or workspaceId/workspaceRole pair".into(),
+        ));
+    }
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    authorize_invitation_target(
+        &state,
+        &claims,
+        body.org_role,
+        body.workspace_id.as_deref(),
+        body.workspace_role,
+    )
+    .await?;
+
+    let mut token_bytes = [0_u8; 32];
+    rand::rng().fill_bytes(&mut token_bytes);
+    let token = URL_SAFE_NO_PAD.encode(token_bytes);
+    let now = (state.now)();
+    let invitation = Invitation {
+        id: format!("inv_{}", Uuid::new_v4().simple()),
+        org_id: org_id.clone(),
+        workspace_id: body.workspace_id,
+        org_role: body.org_role,
+        workspace_role: body.workspace_role,
+        created_by: claims.user_id.to_string(),
+        expires_at: now + i64::from(body.expires_in_days) * 86_400_000,
+        redeemed_at: None,
+        redeemed_by: None,
+        revoked_at: None,
+        created_at: now,
+    };
+    let invitation = state
+        .store
+        .create_invitation(NewInvitation {
+            invitation,
+            token_hash: invitation_token_hash(&token),
+        })
+        .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedInvitation { invitation, token }),
+    ))
+}
+
+async fn get_invitation(
+    State(state): State<AppState>,
+    Path((org_id, invitation_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Invitation>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let invitation = state
+        .store
+        .get_invitation(&org_id, &invitation_id)
+        .await?
+        .ok_or(Failure::Store(StoreError::NotFound))?;
+    authorize_invitation_target(
+        &state,
+        &claims,
+        invitation.org_role,
+        invitation.workspace_id.as_deref(),
+        invitation.workspace_role,
+    )
+    .await?;
+    Ok(Json(invitation))
+}
+
+async fn revoke_invitation(
+    State(state): State<AppState>,
+    Path((org_id, invitation_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Invitation>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let invitation = state
+        .store
+        .get_invitation(&org_id, &invitation_id)
+        .await?
+        .ok_or(Failure::Store(StoreError::NotFound))?;
+    authorize_invitation_target(
+        &state,
+        &claims,
+        invitation.org_role,
+        invitation.workspace_id.as_deref(),
+        invitation.workspace_role,
+    )
+    .await?;
+    let context = authorization_context(
+        &claims,
+        &headers,
+        header_reason(&headers, "invitation revoked"),
+        (state.now)(),
+    );
+    Ok(Json(
+        state
+            .store
+            .revoke_invitation(&org_id, &invitation_id, context)
+            .await?,
+    ))
+}
+
+async fn accept_invitation(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<AcceptInvitationBody>,
+) -> Result<Json<crate::store::AcceptedInvitation>, Failure> {
+    if body.token.trim().is_empty() {
+        return Err(Failure::BadRequest("token must not be blank".into()));
+    }
+    let oidc_token = crate::auth::bearer_token(authorization(&headers))?;
+    let claims = state
+        .oidc
+        .authenticate(oidc_token)
+        .await
+        .map_err(Failure::Oidc)?;
+    let mirrored = state.store.org_logto_id(&org_id).await?;
+    if mirrored.as_deref() != Some(claims.tenant_id.as_str()) {
+        return Err(Failure::UnlinkedIdentity);
+    }
+    let display_name = body
+        .display_name
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| claims.subject.clone());
+    Ok(Json(
+        state
+            .store
+            .accept_invitation(AcceptInvitation {
+                org_id,
+                token_hash: invitation_token_hash(&body.token),
+                identity_provider: LOGTO_PROVIDER.into(),
+                identity_tenant: claims.tenant_id,
+                identity_subject: claims.subject,
+                display_name,
+                now: (state.now)(),
+                request_id: request_id(&headers),
+                source: request_source(&headers),
+            })
+            .await?,
+    ))
+}
+
+async fn patch_org_member(
+    State(state): State<AppState>,
+    Path((org_id, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PatchOrgMemberBody>,
+) -> Result<StatusCode, Failure> {
+    if body.reason.trim().is_empty() {
+        return Err(Failure::BadRequest("reason must not be blank".into()));
+    }
+    let (claims, actor_role) = authorize_org_management(&state, &org_id, &headers).await?;
+    let target = state.store.membership(&org_id, &user_id, None).await?;
+    authorize_org_role_mutation(actor_role, target.org_role, Some(body.role))?;
+    let context = authorization_context(&claims, &headers, body.reason, (state.now)());
+    state
+        .store
+        .set_org_member(&org_id, &user_id, body.role, context)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_org_member(
+    State(state): State<AppState>,
+    Path((org_id, user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Failure> {
+    let (claims, actor_role) = authorize_org_management(&state, &org_id, &headers).await?;
+    let target = state.store.membership(&org_id, &user_id, None).await?;
+    authorize_org_role_mutation(actor_role, target.org_role, None)?;
+    let context = authorization_context(
+        &claims,
+        &headers,
+        header_reason(&headers, "organization member offboarded"),
+        (state.now)(),
+    );
+    state
+        .store
+        .offboard_org_member(&org_id, &user_id, context)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn set_workspace_member(
+    State(state): State<AppState>,
+    Path((org_id, workspace_id, user_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<SetWorkspaceMemberBody>,
+) -> Result<StatusCode, Failure> {
+    if body.reason.trim().is_empty() {
+        return Err(Failure::BadRequest("reason must not be blank".into()));
+    }
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    authorize_workspace_member_mutation(&state, &claims, &workspace_id, &user_id, Some(body.role))
+        .await?;
+    let context = authorization_context(&claims, &headers, body.reason, (state.now)());
+    state
+        .store
+        .set_workspace_member(&org_id, &workspace_id, &user_id, body.role, context)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_workspace_member(
+    State(state): State<AppState>,
+    Path((org_id, workspace_id, user_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    authorize_workspace_member_mutation(&state, &claims, &workspace_id, &user_id, None).await?;
+    let context = authorization_context(
+        &claims,
+        &headers,
+        header_reason(&headers, "workspace membership revoked"),
+        (state.now)(),
+    );
+    state
+        .store
+        .remove_workspace_member(&org_id, &workspace_id, &user_id, context)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_audit_events(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    Query(params): Query<AuditEventsParams>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AuthorizationAuditEvent>>, Failure> {
+    authorize_org_management(&state, &org_id, &headers).await?;
+    Ok(Json(
+        state
+            .store
+            .list_authorization_audit(&org_id, params.limit.clamp(1, 500))
+            .await?,
+    ))
 }
 
 /// Workspaces this caller can see — ADR-0149 §6.
@@ -696,6 +1107,7 @@ async fn create_issue(
     // Accepting `createdBy` from the body would let any member forge authorship.
     let created_by = CollabActor::new(ActorKind::Human, caller.user_id, None)?;
     let assignee = body.assignee.map(ActorBody::into_actor).transpose()?;
+    validate_human_assignee(&state, &org_id, &body.workspace_id, assignee.as_ref()).await?;
     let now = (state.now)();
 
     let issue = state
@@ -742,6 +1154,9 @@ async fn patch_issue(
         Some(None) => Some(None),
         None => None,
     };
+    if let Some(Some(actor)) = assignee.as_ref() {
+        validate_human_assignee(&state, &org_id, &existing.workspace_id, Some(actor)).await?;
+    }
 
     let issue = state
         .store
@@ -1138,6 +1553,184 @@ async fn peek_issue(
     Ok((claims, issue))
 }
 
+async fn validate_human_assignee(
+    state: &AppState,
+    org_id: &str,
+    workspace_id: &str,
+    assignee: Option<&CollabActor>,
+) -> Result<(), Failure> {
+    let Some(assignee) = assignee.filter(|actor| actor.kind == ActorKind::Human) else {
+        return Ok(());
+    };
+    if state
+        .store
+        .human_is_workspace_member(org_id, workspace_id, &assignee.id)
+        .await?
+    {
+        Ok(())
+    } else {
+        Err(Failure::BadRequest(
+            "a human assignee must be a current member of this workspace".into(),
+        ))
+    }
+}
+
+async fn authorize_org_management(
+    state: &AppState,
+    org_id: &str,
+    headers: &HeaderMap,
+) -> Result<(GrantClaims, OrgRole), Failure> {
+    let claims = verify_grant(&state.signer, authorization(headers), org_id).await?;
+    let role = state
+        .store
+        .membership(org_id, claims.user_id.as_str(), None)
+        .await?
+        .org_role
+        .filter(|role| matches!(role, OrgRole::Owner | OrgRole::Admin))
+        .ok_or(Failure::Auth(AuthError::Forbidden))?;
+    Ok((claims, role))
+}
+
+fn authorize_org_role_mutation(
+    actor: OrgRole,
+    current: Option<OrgRole>,
+    requested: Option<OrgRole>,
+) -> Result<(), Failure> {
+    if actor == OrgRole::Owner {
+        return Ok(());
+    }
+    if actor == OrgRole::Admin
+        && current != Some(OrgRole::Owner)
+        && requested != Some(OrgRole::Owner)
+    {
+        return Ok(());
+    }
+    Err(Failure::Auth(AuthError::Forbidden))
+}
+
+async fn authorize_invitation_target(
+    state: &AppState,
+    claims: &GrantClaims,
+    org_role: Option<OrgRole>,
+    workspace_id: Option<&str>,
+    workspace_role: Option<WorkspaceRole>,
+) -> Result<(), Failure> {
+    if let Some(role) = org_role {
+        let actor = state
+            .store
+            .membership(claims.org_id.as_str(), claims.user_id.as_str(), None)
+            .await?
+            .org_role
+            .ok_or(Failure::Auth(AuthError::Forbidden))?;
+        return authorize_org_role_mutation(actor, None, Some(role));
+    }
+    let workspace_id = workspace_id
+        .ok_or_else(|| Failure::BadRequest("workspace invitation needs workspaceId".into()))?;
+    let requested = workspace_role
+        .ok_or_else(|| Failure::BadRequest("workspace invitation needs workspaceRole".into()))?;
+    authorize_workspace(
+        state.store.as_ref(),
+        claims,
+        workspace_id,
+        WorkspaceCapability::Manage,
+    )
+    .await?;
+    let actor_org_role = state
+        .store
+        .membership(claims.org_id.as_str(), claims.user_id.as_str(), None)
+        .await?
+        .org_role;
+    if matches!(actor_org_role, Some(OrgRole::Owner | OrgRole::Admin))
+        || requested != WorkspaceRole::Maintainer
+    {
+        Ok(())
+    } else {
+        Err(Failure::Auth(AuthError::Forbidden))
+    }
+}
+
+async fn authorize_workspace_member_mutation(
+    state: &AppState,
+    claims: &GrantClaims,
+    workspace_id: &str,
+    target_user_id: &str,
+    requested: Option<WorkspaceRole>,
+) -> Result<(), Failure> {
+    authorize_workspace(
+        state.store.as_ref(),
+        claims,
+        workspace_id,
+        WorkspaceCapability::Manage,
+    )
+    .await?;
+    let actor = state
+        .store
+        .membership(claims.org_id.as_str(), claims.user_id.as_str(), None)
+        .await?;
+    if matches!(actor.org_role, Some(OrgRole::Owner | OrgRole::Admin)) {
+        return Ok(());
+    }
+    let target = state
+        .store
+        .membership(claims.org_id.as_str(), target_user_id, Some(workspace_id))
+        .await?;
+    if target.workspace_role == Some(WorkspaceRole::Maintainer)
+        || requested == Some(WorkspaceRole::Maintainer)
+    {
+        return Err(Failure::Auth(AuthError::Forbidden));
+    }
+    Ok(())
+}
+
+fn invitation_token_hash(token: &str) -> String {
+    format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+fn request_id(headers: &HeaderMap) -> String {
+    headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("req_{}", Uuid::new_v4().simple()))
+}
+
+fn request_source(headers: &HeaderMap) -> serde_json::Value {
+    serde_json::json!({
+        "userAgent": headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+        "forwardedFor": headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok()),
+    })
+}
+
+fn header_reason(headers: &HeaderMap, fallback: &str) -> String {
+    headers
+        .get("x-cognia-reason")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback)
+        .to_owned()
+}
+
+fn authorization_context(
+    claims: &GrantClaims,
+    headers: &HeaderMap,
+    reason: String,
+    now: i64,
+) -> AuthorizationContext {
+    AuthorizationContext {
+        actor_user_id: claims.user_id.to_string(),
+        reason,
+        request_id: request_id(headers),
+        grant_id: Some(claims.grant_id.to_string()),
+        source: request_source(headers),
+        now,
+    }
+}
+
 fn authorization(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(axum::http::header::AUTHORIZATION)
@@ -1186,6 +1779,8 @@ mod tests {
     /// A store with Ada as a workspace member of `proj-1` and Bob outside it.
     fn seeded() -> InMemoryStore {
         let store = InMemoryStore::new();
+        store.add_user(ada().as_str(), "Ada");
+        store.add_user(bob().as_str(), "Bob");
         store.add_org_member(ORG, ada().as_str(), OrgRole::Member);
         store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Member);
         store.add_org_member(ORG, bob().as_str(), OrgRole::Member);
@@ -1266,6 +1861,21 @@ mod tests {
             .uri(path)
             .header("authorization", token)
             .body(Body::empty())
+            .unwrap()
+    }
+
+    fn request_with_body(
+        method: &str,
+        path: &str,
+        token: &str,
+        body: serde_json::Value,
+    ) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header("authorization", token)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
             .unwrap()
     }
 
@@ -1598,6 +2208,29 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(error["error"].as_str().unwrap().contains("usr_"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_human_assignee_must_exist_and_belong_to_the_workspace() {
+        let outsider = UserId::parse("usr_outsider0000000000000000").unwrap();
+        let store = seeded();
+        store.add_user(outsider.as_str(), "Outsider");
+        let (status, error) = call(
+            app(store),
+            post(
+                &format!("/v1/orgs/{ORG}/issues"),
+                &token_for(&ada()),
+                serde_json::json!({
+                    "workspaceId": "proj-1",
+                    "issueProjectId": "cont-1",
+                    "title": "Ship it",
+                    "assignee": { "kind": "human", "id": outsider.as_str() },
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error["error"].as_str().unwrap().contains("current member"));
     }
 
     #[tokio::test]
@@ -2001,13 +2634,177 @@ mod tests {
         store.link_external_identity(ORG, "logto", Some(LOGTO_ORG), TEST_SUBJECT, ada().as_str());
         store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Member);
 
-        let (status, minted) = mint(
-            store,
-            &oidc_token(LOGTO_ORG),
-            serde_json::json!({ "workspaceId": "proj-1" }),
+        let (status, minted) =
+            mint(store.clone(), &oidc_token(LOGTO_ORG), serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        let grant = minted["grant"].as_str().unwrap();
+        let (status, memberships) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/memberships/me"),
+                &format!("Bearer {grant}"),
+            ),
         )
         .await;
+        assert_eq!(status, StatusCode::OK, "{memberships}");
+        assert_eq!(memberships["workspaces"][0]["workspaceId"], "proj-1");
+    }
+
+    #[tokio::test]
+    async fn an_invitation_is_single_use_and_bootstraps_grant_discovery() {
+        let store = InMemoryStore::new();
+        store.add_user(ada().as_str(), "Ada");
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        store.link_org_to_logto(ORG, LOGTO_ORG);
+
+        let (status, created) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({
+                    "orgRole": "member",
+                    "expiresInDays": 7,
+                    "reason": "join the release team"
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let token = created["token"].as_str().unwrap();
+        assert_eq!(token.len(), 43, "256 random bits encoded without padding");
+
+        let acceptance = serde_json::json!({ "token": token, "displayName": "New member" });
+        let (status, accepted) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations/accept"),
+                &oidc_token(LOGTO_ORG),
+                acceptance.clone(),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{accepted}");
+        assert_eq!(accepted["invitation"]["orgRole"], "member");
+
+        let (status, _) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations/accept"),
+                &oidc_token(LOGTO_ORG),
+                acceptance,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GONE);
+
+        let (status, minted) =
+            mint(store.clone(), &oidc_token(LOGTO_ORG), serde_json::json!({})).await;
         assert_eq!(status, StatusCode::OK, "{minted}");
+        let (status, audit) = call(
+            app(store),
+            get(&format!("/v1/orgs/{ORG}/audit-events"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{audit}");
+        assert!(audit
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["action"] == "invitation.redeemed"));
+    }
+
+    #[tokio::test]
+    async fn an_admin_cannot_grant_or_mutate_an_owner_role() {
+        let store = InMemoryStore::new();
+        store.add_user(ada().as_str(), "Ada");
+        store.add_user(bob().as_str(), "Bob");
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Admin);
+        store.add_org_member(ORG, bob().as_str(), OrgRole::Owner);
+
+        let (status, _) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "owner", "reason": "not allowed" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = call(
+            app(store),
+            request_with_body(
+                "PATCH",
+                &format!("/v1/orgs/{ORG}/members/{}", bob().as_str()),
+                &token_for(&ada()),
+                serde_json::json!({ "role": "member", "reason": "not allowed" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn the_last_owner_is_protected_inside_the_store_mutation() {
+        let store = InMemoryStore::new();
+        store.add_user(ada().as_str(), "Ada");
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let (status, body) = call(
+            app(store),
+            request_with_body(
+                "PATCH",
+                &format!("/v1/orgs/{ORG}/members/{}", ada().as_str()),
+                &token_for(&ada()),
+                serde_json::json!({ "role": "member", "reason": "leave" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+
+    #[tokio::test]
+    async fn a_workspace_maintainer_only_manages_member_and_viewer_roles() {
+        let store = InMemoryStore::new();
+        store.add_user(ada().as_str(), "Ada");
+        store.add_user(bob().as_str(), "Bob");
+        store.add_workspace(ORG, "proj-1", "Mercury");
+        store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Maintainer);
+
+        let path = format!(
+            "/v1/orgs/{ORG}/workspaces/proj-1/members/{}",
+            bob().as_str()
+        );
+        let (status, _) = call(
+            app(store.clone()),
+            request_with_body(
+                "POST",
+                &path,
+                &token_for(&ada()),
+                serde_json::json!({ "role": "maintainer", "reason": "too much" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = call(
+            app(store.clone()),
+            request_with_body(
+                "POST",
+                &path,
+                &token_for(&ada()),
+                serde_json::json!({ "role": "viewer", "reason": "review access" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let membership = store
+            .membership(ORG, bob().as_str(), Some("proj-1"))
+            .await
+            .unwrap();
+        assert_eq!(membership.workspace_role, Some(WorkspaceRole::Viewer));
     }
 
     // ── Plans and Runs (Batch 7c) ────────────────────────────────────────────

@@ -87,6 +87,7 @@ import { endSpan, recordEvent, startSpan } from "@cognia/agent-trace/emitter"
 import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
+import { compositionForSession } from "@/stores/agent/agent-runtime-store"
 import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
 import { acquireWorkspaceBundle, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
@@ -95,6 +96,7 @@ import {
   projectDirectChatCaptureEvent,
   startDirectChatExecutionRun,
 } from "@/lib/execution/direct-chat-run"
+import { beginSharedSessionRun } from "@/lib/collab/shared-run-coordinator"
 import {
   acceptChatTurn,
   bindChatTurnContext,
@@ -1046,6 +1048,7 @@ export function useClaudeChat() {
         callOptions?.resourceContext === undefined &&
         (callOptions?.attachmentManifest?.length ?? 0) === 0 &&
         useAgentRuntimeStore.getState().runtime !== "external" &&
+        !session?.collaboration &&
         !isStandaloneChatMode()
       if (hostStateEligible) {
         try {
@@ -1503,6 +1506,35 @@ export function useClaudeChat() {
         ? resolveSessionWorkspaceRoot(executionContext)
         : undefined
       try {
+        const sharedRun = await beginSharedSessionRun(session, executionRunId, {
+          messageId: userMsg.id,
+          parts: userMsg.parts,
+        })
+        if (sharedRun.kind === "queued") {
+          store.getState().setSessionStatus(sessionId, "idle")
+          await settleChatTurnForSession(sessionId, { outcome: "cancelled" })
+          stopAssemblyHeartbeat()
+          return
+        }
+        if (sharedRun.kind === "acquired") {
+          sharedRun.setLeaseLostHandler(() => {
+            durableLeaseLost = true
+            abortStaleLocalRuntime()
+            void (async () => {
+              const handle = getExecutionHandle(sessionId)
+              if (handle) await handle.interrupt()
+              else await interruptSession(sessionId)
+            })().catch(() => undefined)
+          })
+        }
+      } catch (error) {
+        await refuseTurn({
+          errorCode: "shared_run_coordination_failed",
+          diagnostic: toDiagnostic(error, { source: "chat", meta: { sessionId } }),
+        })
+        return
+      }
+      try {
         await startDirectChatExecutionRun({
           sessionId,
           runId: executionRunId,
@@ -1515,6 +1547,7 @@ export function useClaudeChat() {
       } catch (error) {
         await refuseTurn({
           errorCode: "execution_run_start_failed",
+          finishRun: true,
           diagnostic: toDiagnostic(error, { source: "chat", meta: { sessionId } }),
         })
         return
@@ -2017,6 +2050,10 @@ export function useClaudeChat() {
                 })
               : await executeOnExternalAgent(externalSendText, {
                   agentId: extAgentId,
+                  ...(sessionId.startsWith("import:") &&
+                  compositionForSession(sessionId).runtimeBindingRef
+                    ? { sessionId: compositionForSession(sessionId).runtimeBindingRef }
+                    : {}),
                   workingDirectory: sendOptions.cwd,
                   // The composer's thinking level, which before this reached only the
                   // built-in runtime — on an external agent the control was silently
@@ -2112,6 +2149,16 @@ export function useClaudeChat() {
           chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
           chatTurnPerformance.endFinalPersistence(sessionId)
+          if (session?.branchSeed) {
+            void clearBranchSeed(sessionId).catch((error) =>
+              console.error("clearBranchSeed failed", error)
+            )
+            if (sessionId.startsWith("import:") && session.importOwnership !== "native-bound") {
+              void freezeImportedSession(sessionId).catch((error) =>
+                console.error("freezeImportedSession failed", error)
+              )
+            }
+          }
           registry.release(sessionId)
           store.getState().setSessionStatus(sessionId, "idle")
           await finishDirectChatExecutionRun(sessionId, "completed")
@@ -2324,7 +2371,7 @@ export function useClaudeChat() {
           // re-import guard must stop mirroring source-side edits. This is the
           // exact first-continuation signal (imported sessions always carry a
           // `branchSeed`, consumed once here).
-          if (sessionId.startsWith("import:")) {
+          if (sessionId.startsWith("import:") && session.importOwnership !== "native-bound") {
             void freezeImportedSession(sessionId).catch((err) =>
               console.error("freezeImportedSession failed", err)
             )

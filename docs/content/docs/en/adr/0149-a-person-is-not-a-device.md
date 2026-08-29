@@ -579,3 +579,37 @@ local writes, with a 60-second visible interval, single-flight per account/org,
 and exponential backoff capped at 15 minutes. Plans and Runs cross the plane
 only through explicit publish actions and field allowlists; execution handles,
 prompts, credentials, tool input, and absolute paths remain local.
+
+## Implementation update — shared AI sessions (2026-08-29)
+
+The sessions/messages second cut is now protocol v2 of the collaboration
+plane. This narrows the original non-goal without changing the local plane:
+every legacy `ChatSession` without a collaboration binding remains private,
+offline, and readable by old clients. A user must explicitly import a local
+session; an owner-only `importing` draft receives deterministic message and
+attachment operations and becomes `active` only after the complete history is
+durable.
+
+Shared sessions use explicit `owner`, `maintainer`, `member`, and `viewer`
+memberships plus a non-Guest `approver` capability. Workspace membership is an
+upper bound, never implicit session discovery. PostgreSQL RLS and the shared
+policy engine authorize every command; private non-members receive a uniform
+404. Events have a server-monotonic sequence, corrections and redactions are
+append-only, and ordinary projections replace redacted bodies with tombstones.
+Raw content requires a reasoned, time-bound break-glass grant and every access
+adds metadata-only authorization audit.
+
+Agent execution remains on the initiating client. The service issues one
+device-, user-, session-, and Run-bound lease token; other input is queued and
+there is no silent takeover after heartbeat loss. High-risk or irreversible
+tools require a maintainer, owner, or non-Guest approver. Attachments use
+single-use header credentials, SHA-256/length verification, PostgreSQL
+metadata, and a local or S3-compatible object store.
+
+Rollout has two independent kill switches. The server omits shared routes and
+the `shared-chat` health feature unless `COLLAB_SHARED_CHAT_ENABLED=true`;
+production clients disable entry and mutation unless
+`NEXT_PUBLIC_SHARED_CHAT_ENABLED=true`. Clients below protocol v2 cannot open
+or write shared sessions, while all private local sessions continue to work.
+The complete decision record is
+`docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md`.

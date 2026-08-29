@@ -1,6 +1,7 @@
 import { getDb } from "./schema"
 import type {
   CollabChatApprovalMirrorRow,
+  CollabChatAttachmentMirrorRow,
   CollabChatEventMirrorRow,
   CollabChatInviteMirrorRow,
   CollabChatMembershipMirrorRow,
@@ -82,6 +83,7 @@ export async function purgeCollabChatSession(sessionId: string): Promise<void> {
       db.collabChatInvites,
       db.collabChatApprovals,
       db.collabChatSyncStates,
+      db.collabChatAttachments,
     ],
     async () => {
       await Promise.all([
@@ -91,6 +93,7 @@ export async function purgeCollabChatSession(sessionId: string): Promise<void> {
         db.collabChatInvites.where("sessionId").equals(sessionId).delete(),
         db.collabChatApprovals.where("sessionId").equals(sessionId).delete(),
         db.collabChatSyncStates.delete(sessionId),
+        db.collabChatAttachments.where("sessionId").equals(sessionId).delete(),
       ])
     }
   )
@@ -100,4 +103,17 @@ export async function putCollabChatSyncState(row: CollabChatSyncStateRow): Promi
   await getDb().collabChatSyncStates.put(row)
 }
 
-export type { CollabChatApprovalMirrorRow, CollabChatInviteMirrorRow, CollabChatSyncStateRow }
+export async function putCollabChatAttachment(row: CollabChatAttachmentMirrorRow): Promise<void> {
+  await getDb().collabChatAttachments.put(row)
+}
+
+export async function removeCollabChatAttachment(attachmentId: string): Promise<void> {
+  await getDb().collabChatAttachments.delete(attachmentId)
+}
+
+export type {
+  CollabChatApprovalMirrorRow,
+  CollabChatAttachmentMirrorRow,
+  CollabChatInviteMirrorRow,
+  CollabChatSyncStateRow,
+}

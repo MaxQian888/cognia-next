@@ -16,6 +16,7 @@ import {
   recordChatCanonicalEvents,
   recordChatSdkMessage,
 } from "@/lib/chat/canonical-sink"
+import { finishSharedSessionRun } from "@/lib/collab/shared-run-coordinator"
 
 export interface StartDirectChatExecutionRunInput {
   sessionId: string
@@ -211,6 +212,7 @@ export async function finishDirectChatExecutionRun(
   ts: number = Date.now(),
   summary?: string
 ): Promise<void> {
+  await finishSharedSessionRun(sessionId, status)
   const active = activeRuns.get(sessionId)
   if (!active) return
   activeRuns.delete(sessionId)

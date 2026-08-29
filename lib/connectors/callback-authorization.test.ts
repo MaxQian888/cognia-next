@@ -285,6 +285,24 @@ describe("authorizeConnectorCallback", () => {
     }
   })
 
+  it("atomically compare-and-consumes concurrent approval clicks", async () => {
+    const row = binding({
+      actorScope: { mode: "initiator", allowedUserIds: ["ou_alice"] },
+      payload: { sessionId: "session_1", runId: "run_1", action: "approve" },
+    })
+    await getDb().connectorCallbackBindings.put(row)
+    const [first, second] = await Promise.all([
+      authorize({ binding: row }),
+      authorize({ binding: row }),
+    ])
+    if (!first.allowed || !second.allowed || !first.consume || !second.consume) {
+      throw new Error("expected two pre-consumption authorization decisions")
+    }
+    const results = await Promise.allSettled([first.consume(), second.consume()])
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+  })
+
   it("audit-mode allow never consumes (shadow mode must not change behavior)", async () => {
     const decision = await authorize({
       adapterRow: adapterRow({ larkStrictCallbackAuthorization: "audit" }),

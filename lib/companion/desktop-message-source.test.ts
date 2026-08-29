@@ -29,6 +29,16 @@ import {
   readTranscriptTurnMessages,
 } from "./desktop-message-source"
 
+async function putExposedSession(id: string): Promise<void> {
+  await getDb().sessions.put({
+    id,
+    title: id,
+    kind: "direct",
+    createdAt: 1,
+    updatedAt: 1,
+  } as never)
+}
+
 describe("readSessionPage", () => {
   beforeEach(async () => {
     __resetInstalledForTests()
@@ -171,6 +181,7 @@ describe("installDesktopMessageSource — update", () => {
     const db = getDb()
     await db.messages.clear()
     await db.sessions.clear()
+    await putExposedSession("s1")
   })
 
   it("calls update on a message-update-request and reports success", async () => {
@@ -268,6 +279,8 @@ describe("installDesktopMessageSource — delete", () => {
   beforeEach(async () => {
     __resetInstalledForTests()
     await getDb().messages.clear()
+    await getDb().sessions.clear()
+    await putExposedSession("s1")
   })
 
   it("deletes the message and reports success", async () => {
@@ -322,6 +335,13 @@ describe("installDesktopMessageSource — delete", () => {
     })
 
     const db = getDb()
+    await db.messages.put({
+      id: "m1",
+      sessionId: "s1",
+      role: "user",
+      parts: [],
+      createdAt: 1,
+    } as never)
     const original = db.messages.delete.bind(db.messages)
     db.messages.delete = (() => {
       throw new Error("write blocked")
@@ -470,6 +490,8 @@ describe("readMessagesPage", () => {
   beforeEach(async () => {
     __resetInstalledForTests()
     await getDb().messages.clear()
+    await getDb().sessions.clear()
+    await putExposedSession("s1")
   })
 
   it("returns messages in createdAt-ascending order for the session", async () => {
@@ -564,6 +586,7 @@ describe("readMessagesPage", () => {
   })
 
   it("returns an empty page for a session with no messages", async () => {
+    await putExposedSession("ghost")
     const page = await readMessagesPage("ghost")
     expect(page.rows).toEqual([])
     expect(page.total).toBeUndefined()
@@ -571,6 +594,7 @@ describe("readMessagesPage", () => {
   })
 
   it("expands media refs only on the bounded legacy message page", async () => {
+    await putExposedSession("legacy-session")
     const hash = "c".repeat(64)
     await getDb().messages.put({
       id: "legacy-media",
@@ -602,6 +626,8 @@ describe("persistIncomingMessage", () => {
   beforeEach(async () => {
     __resetInstalledForTests()
     await getDb().messages.clear()
+    await getDb().sessions.clear()
+    await putExposedSession("s1")
   })
 
   it("creates a user message in Dexie and returns its id", async () => {

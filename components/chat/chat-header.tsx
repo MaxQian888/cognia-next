@@ -27,6 +27,7 @@ import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
+import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
@@ -150,6 +151,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           executionContext={session.executionContext}
           onManage={() => setSettingsOpen(true)}
         />
+        <SharedSessionPanel session={session} />
       </div>
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the

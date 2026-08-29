@@ -56,6 +56,7 @@ it("routes every pre-stream refusal through it", () => {
       "managed_project_unavailable",
       "workspace_bundle_unavailable",
       "execution_run_start_failed",
+      "shared_run_coordination_failed",
       "managed_worktree_unavailable",
       "task_workspace_unavailable",
       "environment_unavailable",

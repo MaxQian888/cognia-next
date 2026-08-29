@@ -18,6 +18,7 @@ describe("collab chat mirror", () => {
       getDb().collabChatSessions.clear(),
       getDb().collabChatEvents.clear(),
       getDb().collabChatSyncStates.clear(),
+      getDb().collabChatAttachments.clear(),
     ])
   })
   afterAll(dbFixture.dispose)
@@ -77,7 +78,22 @@ describe("collab chat mirror", () => {
       policyRevision: 1,
       fetchedAt: 1,
     })
+    await getDb().collabChatAttachments.put({
+      id: "attachment_1",
+      sessionId: "ses_1",
+      orgId: "org_1",
+      fileName: "secret.txt",
+      mediaType: "text/plain",
+      byteLength: 1,
+      sha256: "0".repeat(64),
+      status: "available",
+      createdByUserId: "usr_1",
+      createdAt: 1,
+      updatedAt: 1,
+      fetchedAt: 1,
+    })
     await purgeCollabChatSession("ses_1")
     expect(await getDb().collabChatSessions.get("ses_1")).toBeUndefined()
+    expect(await getDb().collabChatAttachments.get("attachment_1")).toBeUndefined()
   })
 })

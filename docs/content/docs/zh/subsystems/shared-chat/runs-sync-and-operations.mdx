@@ -1,0 +1,45 @@
+---
+title: Run、同步与运维
+description: 唯一 Agent Run 租约、审批、重连恢复、撤权、审计与 break-glass。
+---
+
+# Run、同步与运维
+
+## 一个共享会话最多只有一个正在执行的 Agent Run
+
+发起客户端携带稳定 device id 与 Run id 申请租约。服务端验证 `session.run`，只保存 token digest，
+返回绑定用户、设备、会话和 Run 的短期 token。本地模型/工具 runtime 用它发布 Run 事件。并发启动
+收到 `409`，输入进入队列而不会执行。
+
+只有发起人、maintainer 或 owner 可以 steer。心跳丢失会先暂停 Run，宽限期后转为失败。其他设备
+绝不静默接管，因为重复执行不可逆工具比要求用户显式重启更危险。
+
+普通工具由发起人审批。高风险、不可逆或扩大权限的工具必须由 maintainer、owner 或非 Guest
+approver 审批。审批解决会比较当前 revision 并原子消费一次状态转换，因此双击不会批准两次。
+
+## HTTP 负责修复，WebSocket 负责加速
+
+HTTP 承担命令与事件缺口恢复。WebSocket 使用单次 stream ticket 发送增量事件。Reducer 只应用
+`lastSequence + 1`；发现缺口、重连或策略变化时，从已保存游标发起 HTTP 拉取。每次策略事件之后，
+发送更多事件前都会重新检查成员身份。
+
+移除成员会关闭该用户的流、撤销附件 ticket、取消其排队输入，并结束其活动租约。客户端清除对应
+共享投影。离线模式只保留缓存读取与草稿，不存在延迟消息或 Run outbox。
+
+## Break-glass 不等于 Org admin 自动读取
+
+Org admin 不会通过普通成员 API 发现私有会话内容。事故处理中，拥有 workspace-manage 能力的
+Org admin 必须填写理由，并选择一到六十分钟的有效期。Grant 绑定该管理员与会话。每次读取原始
+事件都会检查有效期，并写入不含内容的 `session.breakGlassRead` 审计，其中
+`rawContentAccessed=true`。
+
+## 运维与回滚
+
+1. 在两个开关关闭时应用追加式 migrations。
+2. 对选定组织启用服务端开关，验证协议 v2 health。
+3. 向同一 canary 人群发布启用客户端开关的构建。
+4. 一旦出现跨租户放行、移除后仍可访问、无法恢复的事件缺口或重复工具执行，立即停止灰度。
+5. 关闭任一开关完成回滚；不要 down-migrate，也不要删除共享数据。
+
+协作服务绝不能记录正文、token、邮箱、prompt、工具输入或附件 URL。运维维度只允许动作、事件、
+风险、阶段与原因分类。服务中断或回滚期间，私有本地聊天继续可用。

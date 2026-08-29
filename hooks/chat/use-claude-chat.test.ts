@@ -232,7 +232,11 @@ const getSessionMock = jest.fn()
 const setSdkSessionIdMock = jest.fn().mockResolvedValue(undefined)
 const touchSessionMock = jest.fn().mockResolvedValue(undefined)
 const updateSessionMock = jest.fn().mockResolvedValue(undefined)
+const clearBranchSeedMock = jest.fn().mockResolvedValue(undefined)
+const freezeImportedSessionMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/sessions", () => ({
+  clearBranchSeed: (...a: unknown[]) => clearBranchSeedMock(...a),
+  freezeImportedSession: (...a: unknown[]) => freezeImportedSessionMock(...a),
   getSession: (id: string) => getSessionMock(id),
   setSdkSessionId: (...a: unknown[]) => setSdkSessionIdMock(...a),
   touchSession: (id: string) => touchSessionMock(id),
@@ -685,6 +689,8 @@ beforeEach(() => {
   setSdkSessionIdMock.mockClear()
   touchSessionMock.mockClear()
   updateSessionMock.mockReset().mockResolvedValue(undefined)
+  clearBranchSeedMock.mockReset().mockResolvedValue(undefined)
+  freezeImportedSessionMock.mockReset().mockResolvedValue(undefined)
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
   openWorkspaceBundleTurnLeaseMock.mockReset().mockResolvedValue(null)
   ensureSessionExecutionBundleMock
@@ -794,7 +800,11 @@ async function flush() {
 afterEach(() => {
   // The external-branch test flips the (real) agent-runtime store; reset it so
   // subsequent tests keep taking the default claude-sdk path.
-  useAgentRuntimeStore.setState({ runtime: "claude-sdk", externalAgentId: null })
+  useAgentRuntimeStore.setState({
+    runtime: "claude-sdk",
+    externalAgentId: null,
+    sessionCompositions: {},
+  })
   useExternalAgentStore.setState({ delegationRules: [], chatFailurePolicy: "fallback" })
 })
 
@@ -1285,6 +1295,34 @@ describe("useClaudeChat — actions", () => {
         surface: "chat",
       })
     )
+  })
+
+  it("reuses a verified imported native session on the external lane", async () => {
+    useAgentRuntimeStore.setState({
+      runtime: "external",
+      externalAgentId: "ext-1",
+      sessionCompositions: {
+        "import:codex:thread-1": { presetId: "standard", runtimeBindingRef: "thread-1" },
+      },
+    })
+    getSessionMock.mockResolvedValue({
+      id: "import:codex:thread-1",
+      title: "Imported Codex",
+      importOwnership: "native-bound",
+      branchSeed: { kind: "transcript", content: "Imported context" },
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "continued" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: "import:codex:thread-1" })
+    })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "continue",
+      expect.objectContaining({ agentId: "ext-1", sessionId: "thread-1" })
+    )
+    expect(clearBranchSeedMock).toHaveBeenCalledWith("import:codex:thread-1")
+    expect(freezeImportedSessionMock).not.toHaveBeenCalled()
   })
 
   // ADR-0127 §1: the external rail rides the per-session coalescer — a burst

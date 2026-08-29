@@ -45,6 +45,12 @@ pub enum StoreError {
     Database(String),
     #[error("revision conflict")]
     Conflict(serde_json::Value),
+    #[error("the last active organization owner cannot be removed or downgraded")]
+    LastOwner,
+    #[error("invitation is expired, revoked, or already redeemed")]
+    InvitationUnavailable,
+    #[error("authorization policy rejected the mutation: {0}")]
+    Policy(String),
 }
 
 impl From<ActorError> for StoreError {
@@ -117,6 +123,93 @@ pub struct OperatorBootstrap {
     pub workspace_id: String,
     pub workspace_name: String,
     pub now: i64,
+}
+
+/// A single-use organization or workspace invitation. The plaintext token is
+/// never represented here because stores only receive and retain its SHA-256
+/// digest.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Invitation {
+    pub id: String,
+    pub org_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_role: Option<OrgRole>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_role: Option<WorkspaceRole>,
+    pub created_by: String,
+    pub expires_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redeemed_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redeemed_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewInvitation {
+    pub invitation: Invitation,
+    pub token_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AcceptInvitation {
+    pub org_id: String,
+    pub token_hash: String,
+    pub identity_provider: String,
+    pub identity_tenant: String,
+    pub identity_subject: String,
+    pub display_name: String,
+    pub now: i64,
+    pub request_id: String,
+    pub source: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedInvitation {
+    pub invitation: Invitation,
+    pub user_id: String,
+}
+
+/// Context retained for every administrative authorization mutation.
+#[derive(Debug, Clone)]
+pub struct AuthorizationContext {
+    pub actor_user_id: String,
+    pub reason: String,
+    pub request_id: String,
+    pub grant_id: Option<String>,
+    pub source: serde_json::Value,
+    pub now: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizationAuditEvent {
+    pub id: String,
+    pub org_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub actor_user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invitation_id: Option<String>,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_role: Option<String>,
+    pub reason: String,
+    pub request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    pub source: serde_json::Value,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -395,6 +488,79 @@ pub trait Store: Send + Sync {
         workspace_id: &str,
     ) -> Result<Vec<WorkspaceMember>, StoreError>;
 
+    /// Human assignees must be real users recruited into the target workspace.
+    async fn human_is_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<bool, StoreError>;
+
+    async fn create_invitation(&self, input: NewInvitation) -> Result<Invitation, StoreError>;
+
+    async fn get_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+    ) -> Result<Option<Invitation>, StoreError>;
+
+    async fn revoke_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<Invitation, StoreError>;
+
+    async fn accept_invitation(
+        &self,
+        input: AcceptInvitation,
+    ) -> Result<AcceptedInvitation, StoreError>;
+
+    async fn set_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError>;
+
+    /// Removes all organization and workspace standing and revokes outstanding
+    /// invitations created by the offboarded person in one transaction.
+    async fn offboard_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError>;
+
+    async fn set_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        role: WorkspaceRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError>;
+
+    async fn remove_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError>;
+
+    async fn append_authorization_audit(
+        &self,
+        event: AuthorizationAuditEvent,
+    ) -> Result<(), StoreError>;
+
+    async fn list_authorization_audit(
+        &self,
+        org_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuthorizationAuditEvent>, StoreError>;
+
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError>;
 
     async fn get_issue(&self, org_id: &str, id: &str) -> Result<Option<Issue>, StoreError>;
@@ -463,10 +629,9 @@ pub trait Store: Send + Sync {
 #[derive(Default)]
 struct Tables {
     org_memberships: HashMap<(String, String), OrgRole>,
-    /// `(workspace_id, user_id) -> (org_id, role)`, mirroring the columns
-    /// `workspace_memberships` actually has. Without the org, a listing
-    /// cannot tell one tenant's workspaces from another's.
-    workspace_memberships: HashMap<(String, String), (String, WorkspaceRole)>,
+    /// `(org_id, workspace_id, user_id) -> role`. The tenant belongs in the
+    /// key: workspace ids are only unique inside an organization.
+    workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
     /// `org_id -> logto organization id`
     org_logto_ids: HashMap<String, String>,
     /// `(org_id, provider, tenant, subject) -> user_id`
@@ -476,6 +641,8 @@ struct Tables {
     /// `user_id -> display name`, so a roster can be assembled without a
     /// second table the test double does not have.
     users: HashMap<String, String>,
+    invitations: HashMap<String, (String, Invitation)>,
+    authorization_audit: Vec<AuthorizationAuditEvent>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
     /// Plans always hold `steps: Some(..)` in here; `list_plans` strips them,
@@ -536,8 +703,12 @@ impl InMemoryStore {
         role: WorkspaceRole,
     ) {
         self.tables.write().workspace_memberships.insert(
-            (workspace_id.to_owned(), user_id.to_owned()),
-            (org_id.to_owned(), role),
+            (
+                org_id.to_owned(),
+                workspace_id.to_owned(),
+                user_id.to_owned(),
+            ),
+            role,
         );
     }
 
@@ -562,6 +733,90 @@ impl InMemoryStore {
     }
 }
 
+fn ensure_another_owner(
+    memberships: &HashMap<(String, String), OrgRole>,
+    org_id: &str,
+    excluded_user_id: &str,
+) -> Result<(), StoreError> {
+    if memberships.iter().any(|((org, user), role)| {
+        org == org_id && user != excluded_user_id && *role == OrgRole::Owner
+    }) {
+        Ok(())
+    } else {
+        Err(StoreError::LastOwner)
+    }
+}
+
+fn invitation_role(invitation: &Invitation) -> Option<String> {
+    invitation
+        .org_role
+        .map(|role| role.as_str().to_owned())
+        .or_else(|| {
+            invitation
+                .workspace_role
+                .map(|role| role.as_str().to_owned())
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn invitation_audit_event(
+    invitation: &Invitation,
+    action: &str,
+    actor_user_id: String,
+    target_user_id: Option<String>,
+    old_role: Option<String>,
+    new_role: Option<String>,
+    reason: String,
+    request_id: String,
+    grant_id: Option<String>,
+    source: serde_json::Value,
+    now: i64,
+) -> AuthorizationAuditEvent {
+    AuthorizationAuditEvent {
+        id: format!("aud_{}", uuid::Uuid::new_v4().simple()),
+        org_id: invitation.org_id.clone(),
+        workspace_id: invitation.workspace_id.clone(),
+        actor_user_id,
+        target_user_id,
+        invitation_id: Some(invitation.id.clone()),
+        action: action.to_owned(),
+        old_role,
+        new_role,
+        reason,
+        request_id,
+        grant_id,
+        source,
+        created_at: now,
+    }
+}
+
+fn membership_audit_event(
+    org_id: &str,
+    workspace_id: Option<String>,
+    target_user_id: &str,
+    action: &str,
+    old_role: Option<String>,
+    new_role: Option<String>,
+    context: AuthorizationContext,
+) -> AuthorizationAuditEvent {
+    AuthorizationAuditEvent {
+        id: format!("aud_{}", uuid::Uuid::new_v4().simple()),
+        org_id: org_id.to_owned(),
+        workspace_id,
+        actor_user_id: context.actor_user_id,
+        target_user_id: Some(target_user_id.to_owned()),
+        invitation_id: None,
+        action: action.to_owned(),
+        old_role,
+        new_role,
+        reason: context.reason,
+        request_id: context.request_id,
+        grant_id: context.grant_id,
+        source: context.source,
+        created_at: context.now,
+    }
+}
+
 #[async_trait]
 impl Store for InMemoryStore {
     async fn membership(
@@ -579,9 +834,8 @@ impl Store for InMemoryStore {
             workspace_role: workspace_id.and_then(|workspace| {
                 tables
                     .workspace_memberships
-                    .get(&(workspace.to_owned(), user_id.to_owned()))
-                    .filter(|(org, _)| org == org_id)
-                    .map(|(_, role)| *role)
+                    .get(&(org_id.to_owned(), workspace.to_owned(), user_id.to_owned()))
+                    .copied()
             }),
         })
     }
@@ -619,8 +873,8 @@ impl Store for InMemoryStore {
         let mut workspaces: Vec<WorkspaceMembershipRow> = tables
             .workspace_memberships
             .iter()
-            .filter(|((_, member), (org, _))| member == user_id && org == org_id)
-            .map(|((workspace, _), (_, role))| WorkspaceMembershipRow {
+            .filter(|((org, _, member), _)| member == user_id && org == org_id)
+            .map(|((_, workspace, _), role)| WorkspaceMembershipRow {
                 workspace_id: workspace.clone(),
                 role: *role,
             })
@@ -657,8 +911,8 @@ impl Store for InMemoryStore {
         let mut rows: Vec<WorkspaceMember> = tables
             .workspace_memberships
             .iter()
-            .filter(|((workspace, _), (org, _))| workspace == workspace_id && org == org_id)
-            .map(|((_, user), (_, role))| WorkspaceMember {
+            .filter(|((org, workspace, _), _)| workspace == workspace_id && org == org_id)
+            .map(|((_, _, user), role)| WorkspaceMember {
                 user_id: user.clone(),
                 display_name: tables.users.get(user).cloned().unwrap_or_default(),
                 role: *role,
@@ -668,6 +922,354 @@ impl Store for InMemoryStore {
             })
             .collect();
         rows.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+        Ok(rows)
+    }
+
+    async fn human_is_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<bool, StoreError> {
+        let tables = self.tables.read();
+        Ok(tables.users.contains_key(user_id)
+            && tables.workspace_memberships.contains_key(&(
+                org_id.to_owned(),
+                workspace_id.to_owned(),
+                user_id.to_owned(),
+            )))
+    }
+
+    async fn create_invitation(&self, input: NewInvitation) -> Result<Invitation, StoreError> {
+        let mut tables = self.tables.write();
+        if tables
+            .invitations
+            .values()
+            .any(|(hash, _)| hash == &input.token_hash)
+        {
+            return Err(StoreError::Conflict(serde_json::json!({
+                "error": "duplicate invitation token"
+            })));
+        }
+        let invitation = input.invitation;
+        tables.invitations.insert(
+            invitation.id.clone(),
+            (input.token_hash, invitation.clone()),
+        );
+        tables.authorization_audit.push(invitation_audit_event(
+            &invitation,
+            "invitation.created",
+            invitation.created_by.clone(),
+            None,
+            None,
+            invitation_role(&invitation),
+            "invitation created".into(),
+            format!("invite:{}", invitation.id),
+            None,
+            serde_json::json!({}),
+            invitation.created_at,
+        ));
+        Ok(invitation)
+    }
+
+    async fn get_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+    ) -> Result<Option<Invitation>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .invitations
+            .get(invitation_id)
+            .map(|(_, invitation)| invitation)
+            .filter(|invitation| invitation.org_id == org_id)
+            .cloned())
+    }
+
+    async fn revoke_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<Invitation, StoreError> {
+        let mut tables = self.tables.write();
+        let invitation = tables
+            .invitations
+            .get_mut(invitation_id)
+            .map(|(_, invitation)| invitation)
+            .filter(|invitation| invitation.org_id == org_id)
+            .ok_or(StoreError::NotFound)?;
+        if invitation.redeemed_at.is_some() || invitation.revoked_at.is_some() {
+            return Err(StoreError::InvitationUnavailable);
+        }
+        invitation.revoked_at = Some(context.now);
+        let invitation = invitation.clone();
+        tables.authorization_audit.push(invitation_audit_event(
+            &invitation,
+            "invitation.revoked",
+            context.actor_user_id,
+            None,
+            invitation_role(&invitation),
+            None,
+            context.reason,
+            context.request_id,
+            context.grant_id,
+            context.source,
+            context.now,
+        ));
+        Ok(invitation)
+    }
+
+    async fn accept_invitation(
+        &self,
+        input: AcceptInvitation,
+    ) -> Result<AcceptedInvitation, StoreError> {
+        let mut tables = self.tables.write();
+        let invitation_id = tables
+            .invitations
+            .iter()
+            .find(|(_, (hash, invitation))| {
+                hash == &input.token_hash && invitation.org_id == input.org_id
+            })
+            .map(|(id, _)| id.clone())
+            .ok_or(StoreError::InvitationUnavailable)?;
+        let invitation = tables
+            .invitations
+            .get(&invitation_id)
+            .map(|(_, invitation)| invitation.clone())
+            .ok_or(StoreError::InvitationUnavailable)?;
+        if invitation.redeemed_at.is_some()
+            || invitation.revoked_at.is_some()
+            || invitation.expires_at < input.now
+        {
+            return Err(StoreError::InvitationUnavailable);
+        }
+
+        let identity_key = (
+            input.org_id.clone(),
+            input.identity_provider.clone(),
+            input.identity_tenant.clone(),
+            input.identity_subject.clone(),
+        );
+        let user_id = tables
+            .external_identities
+            .get(&identity_key)
+            .cloned()
+            .unwrap_or_else(|| format!("usr_{}", uuid::Uuid::new_v4().simple()));
+        tables
+            .users
+            .entry(user_id.clone())
+            .or_insert(input.display_name);
+        tables
+            .external_identities
+            .insert(identity_key, user_id.clone());
+        if let Some(role) = invitation.org_role {
+            tables
+                .org_memberships
+                .insert((input.org_id.clone(), user_id.clone()), role);
+        } else if let (Some(workspace_id), Some(role)) =
+            (&invitation.workspace_id, invitation.workspace_role)
+        {
+            if !tables
+                .workspaces
+                .contains_key(&(input.org_id.clone(), workspace_id.clone()))
+            {
+                return Err(StoreError::NotFound);
+            }
+            tables.workspace_memberships.insert(
+                (input.org_id.clone(), workspace_id.clone(), user_id.clone()),
+                role,
+            );
+        }
+
+        let redeemed = tables
+            .invitations
+            .get_mut(&invitation_id)
+            .map(|(_, invitation)| invitation)
+            .expect("invitation was resolved above");
+        redeemed.redeemed_at = Some(input.now);
+        redeemed.redeemed_by = Some(user_id.clone());
+        let redeemed = redeemed.clone();
+        tables.authorization_audit.push(invitation_audit_event(
+            &redeemed,
+            "invitation.redeemed",
+            user_id.clone(),
+            Some(user_id.clone()),
+            None,
+            invitation_role(&redeemed),
+            "invitation redeemed".into(),
+            input.request_id,
+            None,
+            input.source,
+            input.now,
+        ));
+        Ok(AcceptedInvitation {
+            invitation: redeemed,
+            user_id,
+        })
+    }
+
+    async fn set_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        if !tables.users.contains_key(user_id) {
+            return Err(StoreError::NotFound);
+        }
+        let key = (org_id.to_owned(), user_id.to_owned());
+        let old = tables.org_memberships.get(&key).copied();
+        if old == Some(OrgRole::Owner) && role != OrgRole::Owner {
+            ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
+        }
+        tables.org_memberships.insert(key, role);
+        tables.authorization_audit.push(membership_audit_event(
+            org_id,
+            None,
+            user_id,
+            "org.member.changed",
+            old.map(|value| value.as_str().to_owned()),
+            Some(role.as_str().to_owned()),
+            context,
+        ));
+        Ok(())
+    }
+
+    async fn offboard_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        let key = (org_id.to_owned(), user_id.to_owned());
+        let old = tables
+            .org_memberships
+            .get(&key)
+            .copied()
+            .ok_or(StoreError::NotFound)?;
+        if old == OrgRole::Owner {
+            ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
+        }
+        tables.org_memberships.remove(&key);
+        tables
+            .workspace_memberships
+            .retain(|(org, _, user), _| !(org == org_id && user == user_id));
+        for (_, invitation) in tables.invitations.values_mut() {
+            if invitation.org_id == org_id
+                && invitation.created_by == user_id
+                && invitation.redeemed_at.is_none()
+                && invitation.revoked_at.is_none()
+            {
+                invitation.revoked_at = Some(context.now);
+            }
+        }
+        tables.authorization_audit.push(membership_audit_event(
+            org_id,
+            None,
+            user_id,
+            "org.member.offboarded",
+            Some(old.as_str().to_owned()),
+            None,
+            context,
+        ));
+        Ok(())
+    }
+
+    async fn set_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        role: WorkspaceRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        if !tables.users.contains_key(user_id)
+            || !tables
+                .workspaces
+                .contains_key(&(org_id.to_owned(), workspace_id.to_owned()))
+        {
+            return Err(StoreError::NotFound);
+        }
+        let key = (
+            org_id.to_owned(),
+            workspace_id.to_owned(),
+            user_id.to_owned(),
+        );
+        let old = tables.workspace_memberships.insert(key, role);
+        tables.authorization_audit.push(membership_audit_event(
+            org_id,
+            Some(workspace_id.to_owned()),
+            user_id,
+            "workspace.member.changed",
+            old.map(|value| value.as_str().to_owned()),
+            Some(role.as_str().to_owned()),
+            context,
+        ));
+        Ok(())
+    }
+
+    async fn remove_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        let old = tables
+            .workspace_memberships
+            .remove(&(
+                org_id.to_owned(),
+                workspace_id.to_owned(),
+                user_id.to_owned(),
+            ))
+            .ok_or(StoreError::NotFound)?;
+        tables.authorization_audit.push(membership_audit_event(
+            org_id,
+            Some(workspace_id.to_owned()),
+            user_id,
+            "workspace.member.removed",
+            Some(old.as_str().to_owned()),
+            None,
+            context,
+        ));
+        Ok(())
+    }
+
+    async fn append_authorization_audit(
+        &self,
+        event: AuthorizationAuditEvent,
+    ) -> Result<(), StoreError> {
+        self.tables.write().authorization_audit.push(event);
+        Ok(())
+    }
+
+    async fn list_authorization_audit(
+        &self,
+        org_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuthorizationAuditEvent>, StoreError> {
+        let mut rows: Vec<_> = self
+            .tables
+            .read()
+            .authorization_audit
+            .iter()
+            .filter(|event| event.org_id == org_id)
+            .cloned()
+            .collect();
+        rows.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        rows.truncate(limit);
         Ok(rows)
     }
 
@@ -1176,6 +1778,17 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0005_shared_chat.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0006_tenant_integrity.sql"))
+            .await?;
+        client
+            .batch_execute(include_str!(
+                "../migrations/0007_membership_control_plane.sql"
+            ))
+            .await?;
+        client
+            .batch_execute(include_str!("../migrations/0008_shared_chat_control.sql"))
+            .await?;
         Ok(())
     }
 
@@ -1277,8 +1890,8 @@ impl PgStore {
                 "INSERT INTO workspace_memberships \
                    (workspace_id, user_id, org_id, role, created_at, updated_at) \
                  VALUES ($1, $2, $3, 'maintainer', $4, $4) \
-                 ON CONFLICT (workspace_id, user_id) DO UPDATE SET \
-                   org_id = EXCLUDED.org_id, role = 'maintainer', updated_at = EXCLUDED.updated_at",
+                 ON CONFLICT (org_id, workspace_id, user_id) DO UPDATE SET \
+                   role = 'maintainer', updated_at = EXCLUDED.updated_at",
                 &[
                     &input.workspace_id,
                     &input.user_id,
@@ -1567,6 +2180,111 @@ async fn replace_run_artifacts(
     Ok(())
 }
 
+const INVITATION_COLUMNS: &str = "id, org_id, workspace_id, org_role, workspace_role, \
+    created_by, expires_at, redeemed_at, redeemed_by, revoked_at, created_at";
+
+fn invitation_from_row(row: &tokio_postgres::Row) -> Result<Invitation, StoreError> {
+    let org_role = row
+        .get::<_, Option<String>>("org_role")
+        .map(|role| OrgRole::parse(&role).map_err(|error| StoreError::Corrupt(error.to_string())))
+        .transpose()?;
+    let workspace_role = row
+        .get::<_, Option<String>>("workspace_role")
+        .map(|role| {
+            WorkspaceRole::parse(&role).map_err(|error| StoreError::Corrupt(error.to_string()))
+        })
+        .transpose()?;
+    Ok(Invitation {
+        id: row.get("id"),
+        org_id: row.get("org_id"),
+        workspace_id: row.get("workspace_id"),
+        org_role,
+        workspace_role,
+        created_by: row.get("created_by"),
+        expires_at: row.get("expires_at"),
+        redeemed_at: row.get("redeemed_at"),
+        redeemed_by: row.get("redeemed_by"),
+        revoked_at: row.get("revoked_at"),
+        created_at: row.get("created_at"),
+    })
+}
+
+fn authorization_audit_from_row(
+    row: &tokio_postgres::Row,
+) -> Result<AuthorizationAuditEvent, StoreError> {
+    Ok(AuthorizationAuditEvent {
+        id: row.get("id"),
+        org_id: row.get("org_id"),
+        workspace_id: row.get("workspace_id"),
+        actor_user_id: row.get("actor_user_id"),
+        target_user_id: row.get("target_user_id"),
+        invitation_id: row.get("invitation_id"),
+        action: row.get("action"),
+        old_role: row.get("old_role"),
+        new_role: row.get("new_role"),
+        reason: row.get("reason"),
+        request_id: row.get("request_id"),
+        grant_id: row.get("grant_id"),
+        source: row.get("source"),
+        created_at: row.get("created_at"),
+    })
+}
+
+async fn insert_authorization_audit(
+    transaction: &deadpool_postgres::Transaction<'_>,
+    event: &AuthorizationAuditEvent,
+) -> Result<(), StoreError> {
+    let resource_type = if event.invitation_id.is_some() {
+        "invitation"
+    } else if event.workspace_id.is_some() {
+        "workspace_membership"
+    } else if event.target_user_id.is_some() {
+        "organization_membership"
+    } else {
+        "grant"
+    };
+    let resource_id = event
+        .invitation_id
+        .as_ref()
+        .or(event.target_user_id.as_ref())
+        .unwrap_or(&event.org_id);
+    let allowed = event
+        .source
+        .get("allowed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    transaction
+        .execute(
+            "INSERT INTO authorization_audit_events \
+               (id, org_id, workspace_id, actor_user_id, action, resource_type, resource_id, \
+                allowed, reason, policy_revision, created_at, target_user_id, invitation_id, \
+                old_role, new_role, request_id, grant_id, source, details) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13, $14, $15, $16, $17, '{}'::jsonb)",
+            &[
+                &event.id,
+                &event.org_id,
+                &event.workspace_id,
+                &event.actor_user_id,
+                &event.action,
+                &resource_type,
+                &resource_id,
+                &allowed,
+                &event.reason,
+                &event.created_at,
+                &event.target_user_id,
+                &event.invitation_id,
+                &event.old_role,
+                &event.new_role,
+                &event.request_id,
+                &event.grant_id,
+                &event.source,
+            ],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    Ok(())
+}
+
 #[async_trait]
 impl Store for PgStore {
     async fn membership(
@@ -1596,8 +2314,8 @@ impl Store for PgStore {
             Some(workspace) => transaction
                 .query_opt(
                     "SELECT role FROM workspace_memberships \
-                     WHERE workspace_id = $1 AND user_id = $2",
-                    &[&workspace, &user_id],
+                     WHERE org_id = $1 AND workspace_id = $2 AND user_id = $3",
+                    &[&org_id, &workspace, &user_id],
                 )
                 .await
                 .map_err(|error| StoreError::Database(error.to_string()))?
@@ -1744,6 +2462,513 @@ impl Store for PgStore {
                 })
             })
             .collect()
+    }
+
+    async fn human_is_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<bool, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        transaction
+            .query_opt(
+                "SELECT 1 FROM workspace_memberships w \
+                 JOIN users u ON u.id = w.user_id \
+                 WHERE w.org_id = $1 AND w.workspace_id = $2 AND w.user_id = $3",
+                &[&org_id, &workspace_id, &user_id],
+            )
+            .await
+            .map(|row| row.is_some())
+            .map_err(|error| StoreError::Database(error.to_string()))
+    }
+
+    async fn create_invitation(&self, input: NewInvitation) -> Result<Invitation, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, &input.invitation.org_id).await?;
+        let invitation = input.invitation;
+        transaction
+            .execute(
+                "INSERT INTO organization_invitations \
+                   (id, org_id, workspace_id, org_role, workspace_role, token_hash, created_by, \
+                    expires_at, created_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                &[
+                    &invitation.id,
+                    &invitation.org_id,
+                    &invitation.workspace_id,
+                    &invitation.org_role.map(OrgRole::as_str),
+                    &invitation.workspace_role.map(WorkspaceRole::as_str),
+                    &input.token_hash,
+                    &invitation.created_by,
+                    &invitation.expires_at,
+                    &invitation.created_at,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let event = invitation_audit_event(
+            &invitation,
+            "invitation.created",
+            invitation.created_by.clone(),
+            None,
+            None,
+            invitation_role(&invitation),
+            "invitation created".into(),
+            format!("invite:{}", invitation.id),
+            None,
+            serde_json::json!({}),
+            invitation.created_at,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(invitation)
+    }
+
+    async fn get_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+    ) -> Result<Option<Invitation>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        transaction
+            .query_opt(
+                &format!(
+                    "SELECT {INVITATION_COLUMNS} FROM organization_invitations \
+                     WHERE org_id = $1 AND id = $2"
+                ),
+                &[&org_id, &invitation_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .as_ref()
+            .map(invitation_from_row)
+            .transpose()
+    }
+
+    async fn revoke_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<Invitation, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let row = transaction
+            .query_opt(
+                &format!(
+                    "UPDATE organization_invitations \
+                        SET revoked_at = $3, revoked_by = $4 \
+                      WHERE org_id = $1 AND id = $2 \
+                        AND redeemed_at IS NULL AND revoked_at IS NULL \
+                    RETURNING {INVITATION_COLUMNS}"
+                ),
+                &[
+                    &org_id,
+                    &invitation_id,
+                    &context.now,
+                    &context.actor_user_id,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::InvitationUnavailable)?;
+        let invitation = invitation_from_row(&row)?;
+        let event = invitation_audit_event(
+            &invitation,
+            "invitation.revoked",
+            context.actor_user_id,
+            None,
+            invitation_role(&invitation),
+            None,
+            context.reason,
+            context.request_id,
+            context.grant_id,
+            context.source,
+            context.now,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(invitation)
+    }
+
+    async fn accept_invitation(
+        &self,
+        input: AcceptInvitation,
+    ) -> Result<AcceptedInvitation, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, &input.org_id).await?;
+        let row = transaction
+            .query_opt(
+                &format!(
+                    "SELECT {INVITATION_COLUMNS} FROM organization_invitations \
+                     WHERE org_id = $1 AND token_hash = $2 \
+                       AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at >= $3 \
+                     FOR UPDATE"
+                ),
+                &[&input.org_id, &input.token_hash, &input.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::InvitationUnavailable)?;
+        let invitation = invitation_from_row(&row)?;
+
+        let existing = transaction
+            .query_opt(
+                "SELECT user_id FROM external_identities \
+                 WHERE provider = $1 AND tenant = $2 AND subject = $3",
+                &[
+                    &input.identity_provider,
+                    &input.identity_tenant,
+                    &input.identity_subject,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let user_id = existing
+            .map(|row| row.get("user_id"))
+            .unwrap_or_else(|| format!("usr_{}", uuid::Uuid::new_v4().simple()));
+        transaction
+            .execute(
+                "INSERT INTO users (id, display_name, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $3) \
+                 ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = EXCLUDED.updated_at",
+                &[&user_id, &input.display_name, &input.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        if let Some(role) = invitation.org_role {
+            transaction
+                .execute(
+                    "INSERT INTO org_memberships (org_id, user_id, role, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, $4) ON CONFLICT (org_id, user_id) DO NOTHING",
+                    &[&input.org_id, &user_id, &role.as_str(), &input.now],
+                )
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+        } else if let (Some(workspace_id), Some(role)) =
+            (&invitation.workspace_id, invitation.workspace_role)
+        {
+            transaction
+                .execute(
+                    "INSERT INTO workspace_memberships \
+                       (org_id, workspace_id, user_id, role, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, $5, $5) \
+                     ON CONFLICT (org_id, workspace_id, user_id) DO NOTHING",
+                    &[
+                        &input.org_id,
+                        workspace_id,
+                        &user_id,
+                        &role.as_str(),
+                        &input.now,
+                    ],
+                )
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+        }
+        transaction
+            .execute(
+                "INSERT INTO external_identities \
+                   (id, user_id, provider, subject, tenant, label, linked_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 ON CONFLICT (provider, tenant, subject) DO NOTHING",
+                &[
+                    &format!("ext_{}", uuid::Uuid::new_v4().simple()),
+                    &user_id,
+                    &input.identity_provider,
+                    &input.identity_subject,
+                    &Some(input.identity_tenant.clone()),
+                    &Some(input.display_name.clone()),
+                    &input.now,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let row = transaction
+            .query_one(
+                &format!(
+                    "UPDATE organization_invitations \
+                        SET redeemed_at = $3, redeemed_by = $4 \
+                      WHERE org_id = $1 AND id = $2 AND redeemed_at IS NULL \
+                    RETURNING {INVITATION_COLUMNS}"
+                ),
+                &[&input.org_id, &invitation.id, &input.now, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let redeemed = invitation_from_row(&row)?;
+        let event = invitation_audit_event(
+            &redeemed,
+            "invitation.redeemed",
+            user_id.clone(),
+            Some(user_id.clone()),
+            None,
+            invitation_role(&redeemed),
+            "invitation redeemed".into(),
+            input.request_id,
+            None,
+            input.source,
+            input.now,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(AcceptedInvitation {
+            invitation: redeemed,
+            user_id,
+        })
+    }
+
+    async fn set_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let owner_rows = transaction
+            .query(
+                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
+                &[&org_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let old = transaction
+            .query_opt(
+                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
+                &[&org_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .map(|row| row.get::<_, String>("role"));
+        if old.as_deref() == Some("owner") && role != OrgRole::Owner && owner_rows.len() <= 1 {
+            return Err(StoreError::LastOwner);
+        }
+        transaction
+            .execute(
+                "INSERT INTO org_memberships (org_id, user_id, role, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $4) \
+                 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at",
+                &[&org_id, &user_id, &role.as_str(), &context.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let event = membership_audit_event(
+            org_id,
+            None,
+            user_id,
+            "org.member.changed",
+            old,
+            Some(role.as_str().to_owned()),
+            context,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn offboard_org_member(
+        &self,
+        org_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let owner_rows = transaction
+            .query(
+                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
+                &[&org_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let old = transaction
+            .query_opt(
+                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
+                &[&org_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .map(|row| row.get::<_, String>("role"))
+            .ok_or(StoreError::NotFound)?;
+        if old == "owner" && owner_rows.len() <= 1 {
+            return Err(StoreError::LastOwner);
+        }
+        transaction
+            .execute(
+                "DELETE FROM workspace_memberships WHERE org_id = $1 AND user_id = $2",
+                &[&org_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .execute(
+                "DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2",
+                &[&org_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .execute(
+                "UPDATE organization_invitations SET revoked_at = $3, revoked_by = $4 \
+                 WHERE org_id = $1 AND created_by = $2 AND redeemed_at IS NULL AND revoked_at IS NULL",
+                &[&org_id, &user_id, &context.now, &context.actor_user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let event = membership_audit_event(
+            org_id,
+            None,
+            user_id,
+            "org.member.offboarded",
+            Some(old),
+            None,
+            context,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn set_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        role: WorkspaceRole,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let old = transaction
+            .query_opt(
+                "SELECT role FROM workspace_memberships \
+                 WHERE org_id = $1 AND workspace_id = $2 AND user_id = $3 FOR UPDATE",
+                &[&org_id, &workspace_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .map(|row| row.get::<_, String>("role"));
+        transaction
+            .execute(
+                "INSERT INTO workspace_memberships \
+                   (org_id, workspace_id, user_id, role, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $5) \
+                 ON CONFLICT (org_id, workspace_id, user_id) DO UPDATE \
+                   SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at",
+                &[
+                    &org_id,
+                    &workspace_id,
+                    &user_id,
+                    &role.as_str(),
+                    &context.now,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let event = membership_audit_event(
+            org_id,
+            Some(workspace_id.to_owned()),
+            user_id,
+            "workspace.member.changed",
+            old,
+            Some(role.as_str().to_owned()),
+            context,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn remove_workspace_member(
+        &self,
+        org_id: &str,
+        workspace_id: &str,
+        user_id: &str,
+        context: AuthorizationContext,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let row = transaction
+            .query_opt(
+                "DELETE FROM workspace_memberships \
+                 WHERE org_id = $1 AND workspace_id = $2 AND user_id = $3 RETURNING role",
+                &[&org_id, &workspace_id, &user_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::NotFound)?;
+        let event = membership_audit_event(
+            org_id,
+            Some(workspace_id.to_owned()),
+            user_id,
+            "workspace.member.removed",
+            Some(row.get("role")),
+            None,
+            context,
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn append_authorization_audit(
+        &self,
+        event: AuthorizationAuditEvent,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, &event.org_id).await?;
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn list_authorization_audit(
+        &self,
+        org_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuthorizationAuditEvent>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let limit = i64::try_from(limit.min(500)).unwrap_or(500);
+        let rows = transaction
+            .query(
+                "SELECT id, org_id, workspace_id, actor_user_id, target_user_id, invitation_id, \
+                        action, old_role, new_role, reason, request_id, grant_id, source, created_at \
+                 FROM authorization_audit_events WHERE org_id = $1 \
+                 ORDER BY created_at DESC, id DESC LIMIT $2",
+                &[&org_id, &limit],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        rows.iter().map(authorization_audit_from_row).collect()
     }
 
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError> {

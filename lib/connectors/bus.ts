@@ -102,6 +102,7 @@ import { bootstrapFeishuRegistry } from "./principal/bootstrap"
 import { recordConnectorMetric } from "./metrics"
 import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
 import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { assertLocalMutationAllowed } from "@/lib/collab/shared-session-access"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -1523,6 +1524,9 @@ export class ConnectorBus {
     const db = getDb()
     const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
+      const session = await db.sessions.get(target.sessionId)
+      if (!session) throw new Error("SESSION_NOT_FOUND")
+      assertLocalMutationAllowed(session, "message.correctOwn")
       // Map the new segments → parts the same way insertInboundMessage does.
       const parts: StoredMessage["parts"] = event.segments
         .map((seg) => {
@@ -1592,6 +1596,9 @@ export class ConnectorBus {
     const db = getDb()
     const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
+      const session = await db.sessions.get(target.sessionId)
+      if (!session) throw new Error("SESSION_NOT_FOUND")
+      assertLocalMutationAllowed(session, "message.redactOwn")
       const deletedMetadata: StoredMessage["metadata"] = {
         ...target.metadata,
         deletedAt: now,

@@ -13,14 +13,10 @@
 //!
 //! # The resolution order is load-bearing
 //!
-//! A direct Workspace membership wins **even when it is a downgrade** — an Org
-//! admin who was deliberately made a `viewer` in one workspace stays a viewer
-//! there. Two reasons: an audit log should show the role a human actually
-//! assigned, and the alternative silently discards an explicit decision
-//! somebody made on purpose.
-//!
-//! Org membership alone grants nothing. Traversal is a separate, narrower rule
-//! that only `owner` and `admin` satisfy.
+//! Org owner/admin is an organization-wide management floor. A direct
+//! Workspace role can add context but cannot remove the audit/offboarding
+//! authority the organization assigned. Plain Org membership alone grants
+//! nothing.
 
 use serde::{Deserialize, Serialize};
 
@@ -63,21 +59,21 @@ pub fn resolve_workspace_access(
     org_membership: Option<OrgRole>,
     workspace_membership: Option<WorkspaceRole>,
 ) -> Option<EffectiveWorkspaceAccess> {
-    if let Some(role) = workspace_membership {
-        return Some(EffectiveWorkspaceAccess {
-            role,
-            capability: role.capability(),
-            via: WorkspaceAccessVia::Membership,
-            guest: org_membership.is_none(),
-        });
-    }
-
     if org_membership.is_some_and(OrgRole::can_traverse_workspaces) {
         return Some(EffectiveWorkspaceAccess {
             role: WorkspaceRole::Maintainer,
             capability: WorkspaceCapability::Manage,
             via: WorkspaceAccessVia::OrgAdmin,
             guest: false,
+        });
+    }
+
+    if let Some(role) = workspace_membership {
+        return Some(EffectiveWorkspaceAccess {
+            role,
+            capability: role.capability(),
+            via: WorkspaceAccessVia::Membership,
+            guest: org_membership.is_none(),
         });
     }
 
@@ -118,16 +114,13 @@ mod tests {
     }
 
     #[test]
-    fn an_explicit_membership_wins_even_when_it_is_a_downgrade() {
-        // The case worth protecting: an Org admin deliberately restricted to
-        // read-only in one workspace. Letting traversal override this would
-        // silently undo a decision a human made.
+    fn org_admin_management_is_never_downgraded_by_a_workspace_role() {
         let access =
             resolve_workspace_access(Some(OrgRole::Admin), Some(WorkspaceRole::Viewer)).unwrap();
-        assert_eq!(access.role, WorkspaceRole::Viewer);
-        assert_eq!(access.capability, WorkspaceCapability::Read);
-        assert_eq!(access.via, WorkspaceAccessVia::Membership);
-        assert!(!access.allows(WorkspaceCapability::Write));
+        assert_eq!(access.role, WorkspaceRole::Maintainer);
+        assert_eq!(access.capability, WorkspaceCapability::Manage);
+        assert_eq!(access.via, WorkspaceAccessVia::OrgAdmin);
+        assert!(access.allows(WorkspaceCapability::Manage));
     }
 
     #[test]

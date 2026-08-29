@@ -119,6 +119,41 @@ function actorIdOf(event: ConnectorCallbackEvent): string {
   return event.user.remoteUserId || event.user.id
 }
 
+function bindingSecuritySnapshot(binding: ConnectorCallbackBindingRow): string {
+  return JSON.stringify({
+    adapterId: binding.adapterId,
+    actionId: binding.actionId,
+    kind: binding.kind,
+    surfaceId: binding.surfaceId,
+    conversationKey: binding.conversationKey,
+    accountId: binding.accountId,
+    actorScope: binding.actorScope,
+    allowedActions: binding.allowedActions,
+    payload: binding.payload,
+    expiresAt: binding.expiresAt,
+  })
+}
+
+export async function consumeCallbackBindingAtomically(
+  binding: ConnectorCallbackBindingRow,
+  now: number
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.connectorCallbackBindings, async () => {
+    const current = await db.connectorCallbackBindings.get(binding.id)
+    if (
+      !current ||
+      current.consumedAt !== undefined ||
+      (current.expiresAt !== undefined && current.expiresAt <= now) ||
+      bindingSecuritySnapshot(current) !== bindingSecuritySnapshot(binding)
+    ) {
+      throw new Error("CALLBACK_BINDING_ALREADY_CONSUMED_OR_CHANGED")
+    }
+    const updated = await db.connectorCallbackBindings.update(binding.id, { consumedAt: now })
+    if (updated !== 1) throw new Error("CALLBACK_BINDING_ALREADY_CONSUMED_OR_CHANGED")
+  })
+}
+
 interface ParsedKeyParts {
   platform: string
   adapterId: string
@@ -292,7 +327,7 @@ export async function authorizeConnectorCallback(
   const decision: AuthorizeCallbackDecision = { allowed: true, mode }
   if (mode === "enforce" && binding && CONSUME_ONCE_KINDS.has(binding.kind)) {
     decision.consume = async () => {
-      await getDb().connectorCallbackBindings.update(binding.id, { consumedAt: now })
+      await consumeCallbackBindingAtomically(binding, now)
     }
   }
   return decision

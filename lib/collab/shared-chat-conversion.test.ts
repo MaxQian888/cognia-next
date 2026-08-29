@@ -135,3 +135,105 @@ describe("local-to-shared chat conversion", () => {
     expect(client.updateSharedSession).not.toHaveBeenCalled()
   })
 })
+
+describe("attachment reads are guarded", () => {
+  const dbFixture = createDbTestFixture()
+
+  beforeAll(dbFixture.initialize)
+  beforeEach(async () => {
+    await dbFixture.restore()
+    await getDb().sessions.put({
+      id: "local_1",
+      projectId: "workspace_1",
+      title: "Imported history",
+      kind: "direct",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+  })
+  afterAll(dbFixture.dispose)
+
+  function clientWithAttachments() {
+    return {
+      identity: jest.fn().mockResolvedValue({ userId: "user_1", orgId: "org_1" }),
+      createSharedSession: jest.fn().mockResolvedValue({
+        id: "shared_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+        title: "Imported history",
+        status: "importing",
+        createdBy: { kind: "human", id: "user_1" },
+        createdAt: 10,
+        updatedAt: 10,
+        revision: 1,
+        policyRevision: 1,
+      }),
+      appendSessionEvent: jest
+        .fn()
+        .mockResolvedValue({ id: "event_1", sequence: 1, createdAt: 11 }),
+      updateSharedSession: jest.fn().mockResolvedValue({
+        id: "shared_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+        title: "Imported history",
+        status: "active",
+        createdBy: { kind: "human", id: "user_1" },
+        createdAt: 10,
+        updatedAt: 20,
+        revision: 2,
+        policyRevision: 2,
+      }),
+      initializeSessionAttachment: jest
+        .fn()
+        .mockResolvedValue({ attachment: { id: "att_1" }, ticket: "ticket" }),
+      uploadSessionAttachment: jest.fn().mockResolvedValue(undefined),
+      commitSessionAttachment: jest.fn().mockResolvedValue(undefined),
+    }
+  }
+
+  async function putFileMessage(url: string) {
+    await getDb().messages.put({
+      id: "message_1",
+      sessionId: "local_1",
+      projectId: "workspace_1",
+      role: "user",
+      parts: [{ type: "file", url, mediaType: "image/png", filename: "shot.png" }],
+      createdAt: 3,
+    })
+  }
+
+  // `part.url` comes from whatever a foreign transcript carried — the external
+  // agent importers write it verbatim. Fetching it would make the authenticated
+  // webview reach an attacker-chosen host and upload the response.
+  it("refuses to fetch a loopback attachment URL", async () => {
+    await putFileMessage("http://127.0.0.1:9999/secret")
+    const fetchSpy = jest.spyOn(globalThis, "fetch")
+
+    await expect(
+      convertLocalSessionToShared(clientWithAttachments(), {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+      })
+    ).rejects.toThrow(/private\/loopback/)
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+
+  // `data:`/`blob:` resolve in-process and reach no network, so the guard must
+  // not stand in their way — they are what a locally-attached file actually is.
+  it("lets a data: attachment through to the reader", async () => {
+    await putFileMessage("data:image/png;base64,AAAA")
+    const readAttachment = jest.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+
+    await convertLocalSessionToShared(clientWithAttachments(), {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+      readAttachment,
+    }).catch(() => undefined)
+
+    expect(readAttachment).toHaveBeenCalled()
+  })
+})

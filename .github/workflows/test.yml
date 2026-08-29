@@ -859,6 +859,48 @@ jobs:
       - name: Run Rust tests (all crates except src-tauri)
         run: cargo test --locked --workspace --exclude cognia-next
 
+  postgres-rls:
+    name: PostgreSQL RLS & tenant integrity
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Create least-privilege application role
+        env:
+          PGPASSWORD: postgres
+        run: >-
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1
+          -c "CREATE ROLE cognia_rls_app LOGIN PASSWORD 'cognia_rls_app' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;"
+      - name: Run real PostgreSQL RLS matrix
+        env:
+          COLLAB_RLS_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+          COLLAB_RLS_APP_DATABASE_URL: postgresql://cognia_rls_app:cognia_rls_app@127.0.0.1:5432/postgres?sslmode=disable
+        run: cargo test --locked -p cognia-collab-server --test postgres_rls -- --ignored
+
   cargo-test-diagnostic-server:
     name: Rust Tests (diagnostic-server)
     runs-on: ubuntu-latest

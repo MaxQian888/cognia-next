@@ -27,8 +27,14 @@ import type { OrgRole, WorkspaceRole } from "@/types/identity"
 import type { IssuePriority, IssueRunArtifact, IssueRunStatus, IssueStatus } from "@/types/issues"
 import type { CollabIssueActor } from "@/types/issues/collab"
 import type {
+  ApprovalRequest,
+  AuthorizationAuditEvent,
+  BreakGlassGrant,
+  ChatAttachment,
   RunLease,
+  RunQueueItem,
   SessionEvent,
+  SessionInvite,
   SessionMembership,
   SessionRole,
   SharedSession,
@@ -275,6 +281,7 @@ export interface CollabIdentity {
  * from; spending one extra exchange to avoid that is the cheaper trade.
  */
 const GRANT_REFRESH_MARGIN_MS = 30_000
+export const SHARED_CHAT_PROTOCOL_VERSION = "2"
 
 export class CollabClient {
   private readonly baseUrl: string
@@ -399,6 +406,22 @@ export class CollabClient {
     )
   }
 
+  async deleteSharedSession(
+    orgId: string,
+    sessionId: string,
+    input: { operationId: string; baseRevision: number }
+  ): Promise<void> {
+    const query = new URLSearchParams({
+      operationId: input.operationId,
+      baseRevision: String(input.baseRevision),
+    })
+    await this.json<void>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}?${query}`,
+      { method: "DELETE" }
+    )
+  }
+
   async listSessionMembers(orgId: string, sessionId: string): Promise<SessionMembership[]> {
     return this.json<SessionMembership[]>(
       orgId,
@@ -435,6 +458,54 @@ export class CollabClient {
     await this.json<unknown>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async listSessionInvites(orgId: string, sessionId: string): Promise<SessionInvite[]> {
+    return this.json<SessionInvite[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/invites`
+    )
+  }
+
+  async createSessionInvite(
+    orgId: string,
+    sessionId: string,
+    input: {
+      targetUserId?: string
+      role: Exclude<SessionRole, "owner">
+      approver?: boolean
+      guest?: boolean
+      expiresAt: number
+    }
+  ): Promise<{ invite: SessionInvite; token: string }> {
+    return this.json<{ invite: SessionInvite; token: string }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/invites`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async acceptSessionInvite(
+    orgId: string,
+    token: string
+  ): Promise<{ invite: SessionInvite; membership: SessionMembership }> {
+    return this.json<{ invite: SessionInvite; membership: SessionMembership }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-invites/accept`,
+      { method: "POST", body: JSON.stringify({ token }) }
+    )
+  }
+
+  async revokeSessionInvite(
+    orgId: string,
+    sessionId: string,
+    inviteId: string
+  ): Promise<SessionInvite> {
+    return this.json<SessionInvite>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/invites/${encodeURIComponent(inviteId)}`,
       { method: "DELETE" }
     )
   }
@@ -491,6 +562,269 @@ export class CollabClient {
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases`,
       { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async getActiveSessionRunLease(orgId: string, sessionId: string): Promise<RunLease | null> {
+    return this.json<RunLease | null>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases`
+    )
+  }
+
+  async heartbeatSessionRunLease(
+    orgId: string,
+    sessionId: string,
+    leaseId: string,
+    input: { deviceId: string; token: string }
+  ): Promise<RunLease> {
+    return this.json<RunLease>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases/${encodeURIComponent(leaseId)}/heartbeat`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async releaseSessionRunLease(
+    orgId: string,
+    sessionId: string,
+    leaseId: string,
+    status: "released" | "failed" = "released"
+  ): Promise<RunLease> {
+    return this.json<RunLease>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases/${encodeURIComponent(leaseId)}?status=${status}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async listSessionRunQueue(orgId: string, sessionId: string): Promise<RunQueueItem[]> {
+    return this.json<RunQueueItem[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/queue`
+    )
+  }
+
+  async listSessionAuthorizationAudit(
+    orgId: string,
+    sessionId: string,
+    limit = 200
+  ): Promise<AuthorizationAuditEvent[]> {
+    return this.json<AuthorizationAuditEvent[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/audit?limit=${Math.max(1, Math.min(limit, 500))}`
+    )
+  }
+
+  async createSessionBreakGlassGrant(
+    orgId: string,
+    sessionId: string,
+    input: { reason: string; durationMs: number; operationId: string }
+  ): Promise<BreakGlassGrant> {
+    return this.json<BreakGlassGrant>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/break-glass`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async listSessionBreakGlassEvents(
+    orgId: string,
+    sessionId: string,
+    grantId: string,
+    afterSequence = 0,
+    limit = 200
+  ): Promise<SessionEvent[]> {
+    return this.json<SessionEvent[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/break-glass/${encodeURIComponent(grantId)}/events?afterSequence=${afterSequence}&limit=${Math.max(1, Math.min(limit, 500))}`
+    )
+  }
+
+  async enqueueSessionRunInput(
+    orgId: string,
+    sessionId: string,
+    input: { payload: Record<string, unknown>; operationId: string }
+  ): Promise<RunQueueItem> {
+    return this.json<RunQueueItem>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/queue`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async cancelSessionRunQueueItem(
+    orgId: string,
+    sessionId: string,
+    itemId: string
+  ): Promise<RunQueueItem> {
+    return this.json<RunQueueItem>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(itemId)}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async steerSessionRun(
+    orgId: string,
+    sessionId: string,
+    input: { runId: string; payload: Record<string, unknown>; operationId: string }
+  ): Promise<SessionEvent> {
+    return this.json<SessionEvent>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/steer`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async appendSessionRunEvent(
+    orgId: string,
+    sessionId: string,
+    runId: string,
+    token: string,
+    input: {
+      kind: "message.created" | "run.started" | "run.paused" | "run.completed" | "run.failed"
+      payload: Record<string, unknown>
+      operationId: string
+    }
+  ): Promise<SessionEvent> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/events`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+          "x-cognia-run-token": token,
+        },
+        body: JSON.stringify(input),
+      }
+    )
+    return readJson<SessionEvent>(response)
+  }
+
+  async listSessionApprovals(orgId: string, sessionId: string): Promise<ApprovalRequest[]> {
+    return this.json<ApprovalRequest[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/approvals`
+    )
+  }
+
+  async createSessionApproval(
+    orgId: string,
+    sessionId: string,
+    input: {
+      runId: string
+      action: string
+      risk: ApprovalRequest["risk"]
+      expiresAt: number
+      operationId: string
+    }
+  ): Promise<ApprovalRequest> {
+    return this.json<ApprovalRequest>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/approvals`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async resolveSessionApproval(
+    orgId: string,
+    sessionId: string,
+    approvalId: string,
+    input: { status: "approved" | "denied"; baseRevision: number }
+  ): Promise<ApprovalRequest> {
+    return this.json<ApprovalRequest>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  async initializeSessionAttachment(
+    orgId: string,
+    sessionId: string,
+    input: { fileName: string; mediaType: string; byteLength: number; sha256: string }
+  ): Promise<{ attachment: ChatAttachment; ticket: string; expiresAt: number }> {
+    return this.json<{ attachment: ChatAttachment; ticket: string; expiresAt: number }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/attachments`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async uploadSessionAttachment(
+    orgId: string,
+    attachmentId: string,
+    ticket: string,
+    body: Blob | ArrayBuffer | Uint8Array
+  ): Promise<void> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/orgs/${encodeURIComponent(orgId)}/chat-attachment-objects/${encodeURIComponent(attachmentId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "x-cognia-attachment-ticket": ticket,
+          "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+        },
+        body: body as BodyInit,
+      }
+    )
+    if (!response.ok) throw await responseError(response)
+  }
+
+  async commitSessionAttachment(
+    orgId: string,
+    sessionId: string,
+    attachmentId: string,
+    eventId?: string
+  ): Promise<ChatAttachment> {
+    return this.json<ChatAttachment>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}/commit`,
+      { method: "POST", body: JSON.stringify({ eventId }) }
+    )
+  }
+
+  async createSessionAttachmentDownloadTicket(
+    orgId: string,
+    sessionId: string,
+    attachmentId: string
+  ): Promise<{ attachment: ChatAttachment; ticket: string; expiresAt: number }> {
+    return this.json<{ attachment: ChatAttachment; ticket: string; expiresAt: number }>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}/download-ticket`,
+      { method: "POST", body: "{}" }
+    )
+  }
+
+  async downloadSessionAttachment(
+    orgId: string,
+    attachmentId: string,
+    ticket: string
+  ): Promise<Blob> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/orgs/${encodeURIComponent(orgId)}/chat-attachment-objects/${encodeURIComponent(attachmentId)}`,
+      {
+        headers: {
+          "x-cognia-attachment-ticket": ticket,
+          "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+        },
+      }
+    )
+    if (!response.ok) throw await responseError(response)
+    return response.blob()
+  }
+
+  async deleteSessionAttachment(
+    orgId: string,
+    sessionId: string,
+    attachmentId: string
+  ): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "DELETE" }
     )
   }
 
@@ -631,6 +965,7 @@ export class CollabClient {
         headers: {
           ...(init.body ? { "content-type": "application/json" } : {}),
           ...(init.headers as Record<string, string> | undefined),
+          "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
           authorization: `Bearer ${grant}`,
         },
       })
@@ -678,6 +1013,15 @@ async function readJson<T>(response: Response): Promise<T> {
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+async function responseError(response: Response): Promise<CollabError> {
+  const body = await readErrorBody(response)
+  const message =
+    typeof body?.error === "string" && body.error
+      ? body.error
+      : `collaboration plane returned ${response.status}`
+  return new CollabError(response.status, message)
 }
 
 async function readErrorBody(response: Response): Promise<Record<string, unknown> | null> {
