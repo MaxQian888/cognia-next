@@ -46,7 +46,7 @@ jest.mock("@/components/ui/context-menu", () => {
   }
 })
 
-import { ArtifactList, ArtifactListCompact } from "./artifact-list"
+import { ArtifactList } from "./artifact-list"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
@@ -404,52 +404,5 @@ describe("ArtifactList", () => {
   it("shows no generating row once the turn is idle", () => {
     render(<ArtifactList sessionId="s1" />)
     expect(screen.queryByTestId("artifact-list-generating")).not.toBeInTheDocument()
-  })
-
-  it("compact list renders nothing when empty", () => {
-    const { container } = render(<ArtifactListCompact sessionId="s1" />)
-    expect(container.firstChild).toBeNull()
-  })
-
-  it("compact list falls back to recent artifacts with no session", () => {
-    useArtifactStore.getState().createArtifact({
-      sessionId: "s1",
-      messageId: "m",
-      type: "code",
-      title: "Recent",
-      content: "x",
-    })
-    useChatStore.setState({ activeSessionId: null })
-
-    render(<ArtifactListCompact />)
-
-    expect(screen.getByText("Recent")).toBeInTheDocument()
-  })
-
-  it("compact list renders the recent artifacts", () => {
-    useArtifactStore.getState().createArtifact({
-      sessionId: "s1",
-      messageId: "m",
-      type: "code",
-      title: "Foo",
-      content: "x",
-    })
-    render(<ArtifactListCompact sessionId="s1" />)
-    expect(screen.getByText("Foo")).toBeInTheDocument()
-  })
-
-  it("compact list activates an artifact and opens the panel on click", () => {
-    const a = useArtifactStore.getState().createArtifact({
-      sessionId: "s1",
-      messageId: "m",
-      type: "code",
-      title: "Bar",
-      content: "x",
-    })
-    useArtifactStore.setState({ panelOpen: false, activeArtifactIdBySession: {} })
-    render(<ArtifactListCompact sessionId="s1" />)
-    fireEvent.click(screen.getByText("Bar"))
-    expect(selectActiveArtifactId(useArtifactStore.getState(), "s1")).toBe(a.id)
-    expect(useArtifactStore.getState().panelOpen).toBe(true)
   })
 })

@@ -19,7 +19,7 @@ description: 唯一真源（useArtifactStore.canvasDocuments）、五个 canvas 
   <Stat label="唯一真源" value="useArtifactStore" hint="canvasDocuments（artifact-store.ts:361）" />
   <Stat label="持久化键" value="4" hint="cognia-artifacts · -canvas-layout · -canvas-settings · -canvas-keybindings" />
   <Stat label="Dexie 表" value="4" hint="documents · versions · comments · sessions" />
-  <Stat label="仅运行时 store" value="2" hint="chunked-document-store · comment-store（镜像）" />
+  <Stat label="仅运行时 store" value="1" hint="comment-store（Dexie 的镜像）" />
 </StatGrid>
 
 ## 唯一真源
@@ -42,28 +42,26 @@ description: 唯一真源（useArtifactStore.canvasDocuments）、五个 canvas 
 文档。自动保存版本保留至多 `MAX_CANVAS_AUTOSAVE_VERSIONS = 30`（`:51`），裁剪最旧的自动保存而保留手动版本
 （`applyCanvasVersionRetention`，`:254`）。
 
-读取 hook `useCanvasDocuments`（`hooks/canvas/use-canvas-documents.ts:34`）是该 store 之上的薄外观（排序
-列表、create/open/rename/duplicate/search）—— 印证文档完全来自 artifact store。
+组件直接读这个 store。曾有一个 `useCanvasDocuments` 外观（排序列表、create/open/rename/duplicate/search）
+覆在它上面，零消费者；它被删除了，而不是留作"问同一个问题的第二种方式"。
 
-## 五个 Canvas Store
+## 四个 Canvas Store
 
 ```mermaid
 flowchart LR
   subgraph SOT["唯一真源"]
     ART["useArtifactStore<br/>artifact-store.ts:501<br/>persist: cognia-artifacts v3"]
   end
-  subgraph CANVAS["stores/canvas（5 个）"]
+  subgraph CANVAS["stores/canvas（4 个）"]
     L["useCanvasLayoutStore<br/>canvas-layout-store.ts:81<br/>persist: cognia-canvas-layout v5"]
     S["useCanvasSettingsStore<br/>canvas-settings-store.ts:30<br/>persist: cognia-canvas-settings"]
     K["useKeybindingStore<br/>keybinding-store.ts:73<br/>persist: cognia-canvas-keybindings"]
     C["useCommentStore<br/>comment-store.ts:59<br/>Dexie 的运行时镜像"]
-    CH["useChunkedDocumentStore<br/>chunked-document-store.ts:46<br/>仅运行时（不持久化）"]
   end
-  ART -.-> CH
   classDef sot fill:#0f172a,stroke:#34d399,color:#d1fae5
   classDef st fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   class ART sot
-  class L,S,K,C,CH st
+  class L,S,K,C st
 ```
 
 - **`useCanvasLayoutStore`**（`canvas-layout-store.ts:81`）—— 面板尺寸、折叠标志、活动右标签、
@@ -76,9 +74,6 @@ flowchart LR
   （`:15`）；冲突检测经 `checkConflicts`（`:151`）。
 - **`useCommentStore`**（`comment-store.ts:59`）—— `canvasComments` 表的内存镜像；每次变更先同步写内存，再
   经 `safeDexieCall`（`:53`）fire-and-forget 写 Dexie。详见 [执行与评论](./execution-comments#评论)。
-- **`useChunkedDocumentStore`**（`chunked-document-store.ts:46`）—— 仅运行时；分块在会话启动时从
-  `CanvasDocument.content` 重新推导，因此在此加持久化会与 artifact-store 契约冲突（`:1-11`）。
-
 ## Dexie 写穿桥
 
 `startCanvasDexieBridge` 在应用启动时运行一次并返回 disposer。顺序是关键：**先注水再订阅**，使备份恢复写入
@@ -155,10 +150,13 @@ localStorage 键 `"cognia-canvas-feature-flags-v1"`（`:3`）；环境字符串 
 
 ## 自动保存
 
-`useCanvasAutoSave`（`use-canvas-auto-save.ts:28`）跟踪本地内容与上次保存的内容，在静默 `autoSaveDelay`
-（默认 `30000` ms，`:34`）后调度一次保存，调用注入的 `onSave(documentId, undefined, true)`（`true` 标记
-为自动保存）。消费方 `CanvasPanel` 把 `onSave` 接到 `saveCanvasVersion`、`onContentUpdate` 接到
-`updateCanvasDocument`。面板还跑一个下限 10 秒的更粗粒度间隔自动保存（`canvas-panel.tsx:156-168`）。
+`CanvasPanel` 自己内联持有自动保存：一个下限 10 秒的间隔（`canvas-panel.tsx:242-259`）读取 Monaco 的实时
+缓冲，经 `updateCanvasDocument` 写回，并用 `saveCanvasVersion(id, "auto-save")` 打一个版本快照。切换活动
+文档时该间隔会重建——挂起的那一 tick 也随之清除。
+
+另有一个 `useCanvasAutoSave` hook 实现了另一套模型（自带 `localContent` 状态 + 静默去抖计时器），从未被
+使用。它不能直接替换面板那版：面板把 `editorRef.current.getValue()` 当作权威缓冲，而 hook 的镜像状态会与
+之打架。该 hook 已删除。
 
 ## 下一步
 

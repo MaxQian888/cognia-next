@@ -94,7 +94,6 @@ describe("stores root barrel — synthetic adapters", () => {
       expect(typeof mod.useSettingsStore).toBe("function")
       expect(typeof mod.useUIStore).toBe("function")
       expect(typeof mod.useCanvasSettingsStore).toBe("function")
-      expect(typeof mod.useChunkedDocumentStore).toBe("function")
       expect(typeof mod.useCommentStore).toBe("function")
       expect(typeof mod.useKeybindingStore).toBe("function")
       expect(typeof mod.useSessionStore).toBe("function")

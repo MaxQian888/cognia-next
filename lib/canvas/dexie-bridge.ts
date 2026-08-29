@@ -18,9 +18,11 @@
  *     restore them on a different device.
  *
  * Comment-store comments are mirrored verbatim with timestamps
- * normalised to numbers. canvasSessions is reserved for future
- * standalone collaboration session pinning; nothing writes to it
- * today, but the table is preserved for forward compatibility.
+ * normalised to numbers. `canvasSessions` is NOT this bridge's to
+ * mirror — it already has live writers (`collaboration/crdt-store.ts`
+ * on session create/join/leave, and `lib/plugin/api/canvas-api.ts`),
+ * which write it directly. All this bridge does with that table is
+ * cascade the delete when its document goes away.
  */
 
 import type { CanvasDocument, CanvasDocumentVersion } from "@/types/artifact/artifact"

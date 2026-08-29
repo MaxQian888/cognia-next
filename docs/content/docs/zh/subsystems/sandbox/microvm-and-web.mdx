@@ -12,8 +12,7 @@ description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话�
   **active tier** 映射，以及一个持有 **microVM exec 实现** 的注册表。`cognia-e2b-sandbox` 插件在
   activate 时注册真实的 exec（`buildMicrovmExec`）；同一个插件还为 Marketplace integration 提供
   `E2BWorkspaceBackend`。AgentENV 这类 E2B-compatible 自托管 endpoint 可在该插件设置里通过 API URL 配置。
-  `lib/sandbox/web/index.ts` 是一个刻意保留的 **stub** —— Web 代码执行运行时尚未发布。`types/system/sandbox.ts`
-  承载跨边界的结果与消耗元数据形状。
+  `types/system/sandbox.ts` 承载跨边界的结果与消耗元数据形状。
 </TLDR>
 
 ## 适配器注册表 —— `microvm-bridge.ts`
@@ -140,29 +139,16 @@ await execChecked(sandbox, {
   并调用 `Sandbox.create`。
 </Callout>
 
-## Web 代码执行 stub —— `lib/sandbox/web`
+## 浏览器代码执行 —— 它不是一个沙箱家族
 
-它有别于 artifact 渲染，是插件通过 `executeCode(language, code)` 触达的「运行代码」面。它如今仍是一个
-stub：`isAvailable()` 返回 `false`，因此调用方会得到一个明确的错误，而不是 `Cannot find module` 故障。
+`lib/sandbox/web/index.ts` 曾放着一个 `getWebSandboxService()` 桩，`execute` 永远返回 `ok: false`，
+文档把它描述成「插件通过 `executeCode(language, code)` 触达的面」。整棵树里并不存在这样的调用方，
+它所指的那个 `PluginSandbox` 也早已不在。这个桩被删除了，而不是继续作为一个无人索求的运行时的占位。
 
-```ts title="lib/sandbox/web/index.ts:25-37"
-const stub: WebSandboxService = {
-  isAvailable: () => false,
-  isLanguageSupported: () => false,
-  execute: async (req) => ({
-    ok: false,
-    error: `Web sandbox is not yet available; cannot execute ${req.language}.`,
-    durationMs: 0,
-  }),
-}
-
-export function getWebSandboxService(): WebSandboxService {
-  return stub
-}
-```
-
-要发布一个真实的运行时（Pyodide / WebContainer / Worker），替换本文件的主体即可；`WebSandboxService`
-接口与 `SandboxExecutionResult` 形状保持兼容。
+真正的浏览器执行路径是 `lib/native/code-execution-strategy.ts`（`executeCodeWithSandboxPriority`）：
+JS / TS / JSX / HTML / CSS 在每个壳上都跑在 `sandbox="allow-scripts"` 的 `srcdoc` iframe 里，
+Python 在桌面端被路由到 Rust 的 `canvas_run_python`。消费方是
+`hooks/canvas/use-code-execution.ts` 与 `components/canvas/code-execution-panel.tsx`。
 
 ## 跨边界类型 —— `types/system/sandbox.ts`
 

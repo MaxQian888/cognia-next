@@ -20,7 +20,7 @@ cognia-next 里有三个相关但不同的概念，先理清：
 | **Artifact** | 模型一次性产出的内容（HTML / React / SVG…） | iframe + CSP + DOMPurify（按类型不同） |
 | **Canvas**   | 用户可持续迭代的代码 / 文档                 | 主 React 树内 Monaco；不需要隔离       |
 | **A2UI**     | 模型用 MCP 工具拼装的交互式声明 UI          | 目录白名单 + 不允许内联脚本字符串      |
-| **Sandbox**  | 用来跑代码（Python / JS / …）的运行时       | Web stub / 桌面真子进程（详见下文）    |
+| **Sandbox**  | 用来跑代码（Python / JS / …）的运行时       | 各壳统一 `sandbox="allow-scripts"` iframe；Python 走桌面子进程 |
 
 Artifact 与 Canvas 经常衔接：用户在聊天里看到 artifact → 点 "Open in Canvas" →
 artifact 升级为可编辑文档（`lib/artifacts/reveal.ts`）。详见 [./canvas](./canvas)。
@@ -37,11 +37,6 @@ artifact 升级为可编辑文档（`lib/artifacts/reveal.ts`）。详见 [./can
     <File name="reveal.ts — revealArtifactInWorkspace（Artifact → Canvas）" />
     <File name="renderer-registry.ts — 插件 renderer 注册（PluginArtifactRenderer）" />
     <File name="utils.ts — 通用工具" />
-  </Folder>
-  <Folder name="lib/sandbox/">
-    <Folder name="web/">
-      <File name="index.ts — getWebSandboxService()（目前为 stub，executeCode 返回 ok:false）" />
-    </Folder>
   </Folder>
   <Folder name="components/artifacts/">
     <File name="artifact-panel.tsx — 右侧 Sheet 容器，Tabs 切换 preview/code/version/designer" />
@@ -265,34 +260,20 @@ cognia-next 主程目前**没启用**插件运行时（`registerArtifactRenderer
 [./plugin-system](./plugin-system) —— 那条沙箱模型（每插件一个 Web Worker、
 postMessage RPC）与本页的 iframe 模型可以并存。
 
-## `lib/sandbox/`（代码执行）
+## 代码执行 —— 另一个面
 
-这是与 artifact 渲染**不同**的另一条沙箱——给「跑代码」用：
+跑代码**不是** artifact 渲染，也不住在 `lib/sandbox/` 下。它是
+`lib/native/code-execution-strategy.ts:executeCodeWithSandboxPriority`，由
+`hooks/canvas/use-code-execution.ts` → `components/canvas/code-execution-panel.tsx` 触达：
 
-```ts title="lib/sandbox/web/index.ts (现状)"
-const stub: WebSandboxService = {
-  isAvailable: () => false,
-  isLanguageSupported: () => false,
-  execute: async (req) => ({
-    ok: false,
-    error: `Web sandbox is not yet available; cannot execute ${req.language}.`,
-    durationMs: 0,
-  }),
-}
-```
+1. **JavaScript / TypeScript / JSX / HTML / CSS** —— 一个 `sandbox="allow-scripts"` 的 `srcdoc`
+   iframe，执行结果 postMessage 回来。**每个壳**都能跑，桌面和 Web 一样。
+2. **Python** —— `src-tauri/src/canvas/python_exec.rs:canvas_run_python` 真正 spawn 系统 `python`
+   子进程。仅限桌面，详见 [./canvas](./canvas)。
 
-Web 端目前是**占位 stub**——返回 `ok: false` 而非抛 `Cannot find module`，让上层
-（[插件系统](./plugin-system)的 `executeCode` API）能给出有意义的报错。
-
-桌面端实际跑代码的路径分两条：
-
-1. **Python** —— `src-tauri/src/canvas/python_exec.rs:canvas_run_python` 真正
-   spawn 系统 `python` 子进程，详见 [./canvas](./canvas)。
-2. **JavaScript / TypeScript** —— 走 react/html artifact iframe，本质上是
-   "preview" 而不是 "run"。
-
-未来要加 Pyodide / WebContainer / Worker 路径时，替换 `lib/sandbox/web/index.ts`
-的 body 即可，类型签名（`SandboxExecutionResult`）保持兼容。
+`lib/sandbox/web/index.ts` 曾放着一个 `getWebSandboxService()` 桩，`execute` 永远返回 `ok: false`。
+它的头注释描述了插件系统 `executeCode` API 里的一个调用方——这棵树里从来没有过这样的调用方——
+所以它被删除了，而不是留作占位。
 
 ## Artifact 存储
 
@@ -347,7 +328,6 @@ interface ArtifactStoreState {
 | `lib/artifacts/reveal.test.ts`                        | reveal 行为 / 错过 id 的回退              |
 | `lib/artifacts/renderer-registry.test.ts`             | 注册 / 撤销 / 优先级 / canRender 抛错保护 |
 | `lib/artifacts/utils.test.ts` `preview-utils.test.ts` | 工具函数纯函数测试                        |
-| `lib/sandbox/web/index.test.ts`                       | stub 返回值；executeCode 报错路径         |
 | `components/artifacts/artifact-preview.test.tsx`      | 9 种类型渲染 + 出错回退                   |
 | `components/artifacts/artifact-renderers.test.tsx`    | 插件 host 协作                            |
 | `components/artifacts/jupyter-renderer.test.tsx`      | 损坏 JSON / 空 cell / mime 选择           |
@@ -360,7 +340,6 @@ interface ArtifactStoreState {
 | 调整 React iframe CSP            | `lib/artifacts/preview-utils.ts:getReactShellHtml` 的 `meta http-equiv`                                          |
 | 把 HTML/SVG 改成 `allow-scripts` | `runtime-adapters.ts`（强烈不推荐——会拆掉一道防线）                                                              |
 | 加新的 Mermaid 图类              | `lib/artifacts/constants.ts:MERMAID_TYPE_NAMES` + `MERMAID_TYPE_I18N_KEYS`                                       |
-| 真正实现 Web 沙箱                | 替换 `lib/sandbox/web/index.ts` body，保持 `SandboxExecutionService` 接口                                        |
 | 让插件注册自定义 renderer        | `lib/artifacts/renderer-registry.ts` + 插件 API（[plugin-system](./plugin-system)）                              |
 
 ## 下一篇

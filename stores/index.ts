@@ -23,12 +23,7 @@ export { useArtifactStore } from "./artifact"
 export { useChatStore } from "./chat"
 export { useSettingsStore } from "./settings"
 export { useUIStore } from "./ui"
-export {
-  useCanvasSettingsStore,
-  useChunkedDocumentStore,
-  useCommentStore,
-  useKeybindingStore,
-} from "./canvas"
+export { useCanvasSettingsStore, useCommentStore, useKeybindingStore } from "./canvas"
 export { useVectorStore } from "./vector/vector-store"
 
 /**

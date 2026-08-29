@@ -20,11 +20,11 @@ description: Monaco-based collaborative document workspace — AI action toolbar
 </TLDR>
 
 <StatGrid>
-  <Stat label="Source files" value="~60" hint="lib/components/hooks/stores/types + 2 Rust" />
+  <Stat label="Source files" value="~50" hint="lib/components/hooks/stores/types + 2 Rust" />
   <Stat label="Dexie tables" value="4" hint="documents · versions · comments · sessions (v11, schema now v65)" />
   <Stat label="Side-panel tabs" value="5" hint="Suggestions · History · Comments · Collaboration · Execution" />
   <Stat label="AI actions" value="10" hint="ACTION_PROMPTS in canvas-actions.ts:47" />
-  <Stat label="Zustand stores" value="6" hint="1 source-of-truth + 5 canvas-specific" />
+  <Stat label="Zustand stores" value="5" hint="1 source-of-truth + 4 canvas-specific" />
   <Stat label="Feature flags" value="2" hint="aiWorkbench.v1 · collaboration.v1 (both default on)" />
 </StatGrid>
 
@@ -86,7 +86,6 @@ flowchart TB
     direction TB
     SETUP["useCanvasMonacoSetup<br/>use-canvas-monaco-setup.ts:50"]
     ACT["useCanvasActions<br/>use-canvas-actions.ts:52"]
-    AUTOSAVE["useCanvasAutoSave<br/>use-canvas-auto-save.ts:28"]
   end
 
   subgraph STATE["State (stores)"]
@@ -116,7 +115,6 @@ flowchart TB
   SHELL --> RAIL & PANEL & SIDE
   PANEL --> SETUP
   PANEL --> ACT
-  PANEL --> AUTOSAVE
   RAIL <--> ART
   PANEL <--> ART
   SIDE <--> CMT
@@ -134,7 +132,7 @@ flowchart TB
   classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class ART,LAYOUT,CMT,LS,DEX,BRIDGE state
   class SHELL,RAIL,PANEL,SIDE,REVEAL,REVEALDOC,EMPTY ui
-  class PY,CRDT,WS,SETUP,ACT,AUTOSAVE native
+  class PY,CRDT,WS,SETUP,ACT native
 ```
 
 ## The Composition Tree

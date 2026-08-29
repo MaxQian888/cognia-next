@@ -11,7 +11,6 @@
     "components/a2ui/layout/index.ts",
     "components/agent/workspace/activity-report/index.ts",
     "components/artifacts/runtime-adapters.ts",
-    "components/artifacts/version-diff-view.tsx",
     "components/canvas/canvas-workspace.tsx",
     "components/chat/composer/drag-overlay.tsx",
     "components/chat/dialogs/single-export-trigger.tsx",

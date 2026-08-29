@@ -1,6 +1,6 @@
 ---
 title: 编辑器内核
-description: Monaco 如何挂载、主题化与布局 —— Tauri 的离线 loader、可调整的三栏 shell、文档轨道、经 cognia-active-theme 的主题同步、符号解析器、片段注册表、插件管理器、大文件分块，以及快捷键分发器。
+description: Monaco 如何挂载、主题化与布局 —— Tauri 的离线 loader、可调整的三栏 shell、文档轨道、经 cognia-active-theme 的主题同步、符号解析器、片段注册表、插件扩展点、大文档降级档位，以及快捷键分发器。
 ---
 
 # 编辑器内核
@@ -134,7 +134,7 @@ Tauri 严格的 CSP 禁止从 CDN 加载 Monaco，因此 `configureMonacoLoader`
 列表里刻意省略了 `AnimatePresence`（`:308-319`），因为其退出动画破坏了 jsdom 的搜索过滤测试 —— 只用
 `STAGGER_CONTAINER` 入场动效。
 
-## 符号、片段、插件
+## 符号与片段
 
 这些注册表在 `onMount` 里挂载（`use-canvas-monaco-setup.ts:76-99`，每次调用都用 try/catch →
 `loggers.canvas.warn` 包裹）：
@@ -144,22 +144,21 @@ Tauri 严格的 CSP 禁止从 CDN 加载 Monaco，因此 `configureMonacoLoader`
   `startLine + 20`），递归子符号，并暴露查找（`findSymbolAtLine` `:190`、`getSymbolBreadcrumb` `:246`）。
 - **片段** —— `SnippetProvider`（`snippet-registry.ts:252`）按语言从 `SNIPPET_REGISTRY`（`:244`）合并内置
   + 自定义片段；`applySnippet`（`:299`）剥离 `${n:default}` 占位符。
-- **插件** —— `CanvasPluginManager`（`plugin-manager.ts:112`）是 canvas 本地的插件层，通过
-  `syncWithMainManager`（`:183`）把启用/禁用桥接进主插件管理器，并分发类型化钩子
-  （`collectCompletions` `:295`、`collectDiagnostics` `:313`、`collectActions` `:331`）。
+插件走的是**主**插件系统，而不是 canvas 本地的那一套：`PluginExtensionSlot point="canvas.toolbar"` /
+`"canvas.sidebar"`（在 `lib/plugin/contracts/plugin-points.ts:465` 声明，挂载于 `canvas-panel.tsx`），
+外加 `lib/plugin/api/canvas-api.ts` 的文档 / 选区 / 评论面。`lib/canvas/plugins/` 里曾另有一套
+canvas 本地的 `CanvasPluginManager`，自带 `CanvasPlugin` 形状与补全、诊断、hover 钩子——它没有任何注册
+路径、没有任何消费者，已被删除，而不是被记成"第二套插件模型"。
 
-## 大文件分块
+## 大文档
 
-对超大文档，内容会被分块，使主线程永不阻塞：
+不存在 JS 侧分块：Monaco 自己已经虚拟化渲染，再套一层分块 store 只会和它的 model 打架。
+`lib/canvas/large-file-optimizer.ts`、`stores/canvas/chunked-document-store.ts` 与
+`hooks/canvas/use-chunk-loader.ts` 实现过一套，零消费者，已删除。
 
-- `LargeFileOptimizer`（`large-file-optimizer.ts:30`）—— `DEFAULT_CHUNK_SIZE = 10000` 字符（`:27`），
-  `LARGE_FILE_THRESHOLD = 50000` 字符（`:28`）。`chunkContent`（`:47`）构建行偏移并切片；
-  `getVisibleContent`（`:182`）返回带 50 行缓冲的窗口。
-- `useChunkLoader`（`use-chunk-loader.ts:28`）读取 `useChunkedDocumentStore`（不是 artifact store），
-  `BUFFER_LINES = 100`（`:25`）、`LOAD_THRESHOLD = 50`（`:26`）；首次加载经 `queueMicrotask` 取前 200 行
-  （`:119-126`）。
-- `getCanvasPerformanceProfile`（`utils.ts:151`）在 `standard` / `large` / `very-large` 模式间选择，逐模式
-  设置符号解析去抖（500 / 900 / 1500 ms）与分块开关（`CANVAS_LARGE_DOCUMENT_THRESHOLDS`，`utils.ts:133`）。
+留下来的是降级档位：`getCanvasPerformanceProfile`（`utils.ts:151`）在 `standard` / `large` /
+`very-large` 之间选择，逐模式设置符号解析去抖（500 / 900 / 1500 ms）与特性开关
+（`CANVAS_LARGE_DOCUMENT_THRESHOLDS`，`utils.ts:133`）。
 
 ## 操作快捷键
 

@@ -18,11 +18,11 @@ description: 基于 Monaco 的协作式文档工作区 —— AI 操作工具栏
 </TLDR>
 
 <StatGrid>
-  <Stat label="源文件" value="约 60" hint="lib/components/hooks/stores/types + 2 个 Rust" />
+  <Stat label="源文件" value="约 50" hint="lib/components/hooks/stores/types + 2 个 Rust" />
   <Stat label="Dexie 表" value="4" hint="documents · versions · comments · sessions（v11 引入，schema 现为 v65）" />
   <Stat label="侧栏标签" value="5" hint="建议 · 历史 · 评论 · 协作 · 执行" />
   <Stat label="AI 操作" value="10" hint="canvas-actions.ts:47 的 ACTION_PROMPTS" />
-  <Stat label="Zustand store" value="6" hint="1 个唯一真源 + 5 个 canvas 专用" />
+  <Stat label="Zustand store" value="5" hint="1 个唯一真源 + 4 个 canvas 专用" />
   <Stat label="特性开关" value="2" hint="aiWorkbench.v1 · collaboration.v1（默认均开启）" />
 </StatGrid>
 
@@ -82,7 +82,6 @@ flowchart TB
     direction TB
     SETUP["useCanvasMonacoSetup<br/>use-canvas-monaco-setup.ts:50"]
     ACT["useCanvasActions<br/>use-canvas-actions.ts:52"]
-    AUTOSAVE["useCanvasAutoSave<br/>use-canvas-auto-save.ts:28"]
   end
 
   subgraph STATE["状态 (stores)"]
@@ -112,7 +111,6 @@ flowchart TB
   SHELL --> RAIL & PANEL & SIDE
   PANEL --> SETUP
   PANEL --> ACT
-  PANEL --> AUTOSAVE
   RAIL <--> ART
   PANEL <--> ART
   SIDE <--> CMT
@@ -130,7 +128,7 @@ flowchart TB
   classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class ART,LAYOUT,CMT,LS,DEX,BRIDGE state
   class SHELL,RAIL,PANEL,SIDE,REVEAL,REVEALDOC,EMPTY ui
-  class PY,CRDT,WS,SETUP,ACT,AUTOSAVE native
+  class PY,CRDT,WS,SETUP,ACT native
 ```
 
 ## 组件组合树

@@ -90,7 +90,7 @@ execute<T>(code: string, context: Record<string, unknown> = {}): T {
 }
 ```
 
-That is `sandbox.ts:223-241`. `executeAsync` (`:246`) wraps the body in an `AsyncFunction` and races it against a timeout (`:262-267`). `executeCode(language, code)` (`:301`) is the separate heavy web sandbox (Pyodide / Worker) — gated on `sandbox:web-execute` (`:302`) and delegated to `@/lib/sandbox/web` (`:304`).
+That is `sandbox.ts:223-241`. `executeAsync` (`:246`) wraps the body in an `AsyncFunction` and races it against a timeout (`:262-267`). (This page describes a `sandbox.ts` that is no longer in the tree; its `executeCode` delegate `lib/sandbox/web` has been removed. Browser code execution is `lib/native/code-execution-strategy.ts` — see [Sandbox System](../sandbox/microvm-and-web).)
 
 ## 3. transport vs ipc vs message-bus
 

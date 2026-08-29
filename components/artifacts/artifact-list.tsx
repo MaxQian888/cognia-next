@@ -6,7 +6,6 @@
  * has no shared `EmptyState` primitive yet).
  */
 
-import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { formatDistanceToNow } from "date-fns"
 import { Trash2, Code, Search, Filter, CheckSquare, Eye, Loader2, Clock } from "lucide-react"
@@ -39,8 +38,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useChatStore } from "@/stores/chat"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { Artifact } from "@/types"
 import { ARTIFACT_TYPES, ARTIFACT_TYPE_KEYS, PREVIEWABLE_TYPES } from "@/lib/artifacts"
@@ -420,58 +417,6 @@ export function ArtifactList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  )
-}
-
-/**
- * Compact artifact list for sidebar
- */
-export function ArtifactListCompact({
-  sessionId,
-  className,
-  limit = 5,
-}: {
-  sessionId?: string
-  className?: string
-  limit?: number
-}) {
-  const setActiveArtifact = useArtifactStore((state) => state.setActiveArtifact)
-  const openPanel = useArtifactStore((state) => state.openPanel)
-  const getRecentArtifacts = useArtifactStore((state) => state.getRecentArtifacts)
-  const getSessionArtifacts = useArtifactStore((state) => state.getSessionArtifacts)
-  const activeChatSessionId = useChatStore((state) => state.activeSessionId)
-
-  const currentSessionId = sessionId || activeChatSessionId || undefined
-
-  const sessionArtifacts = useMemo(() => {
-    if (currentSessionId) {
-      return getSessionArtifacts(currentSessionId).slice(0, limit)
-    }
-    return getRecentArtifacts(limit)
-  }, [currentSessionId, limit, getSessionArtifacts, getRecentArtifacts])
-
-  if (sessionArtifacts.length === 0) {
-    return null
-  }
-
-  return (
-    <div className={cn("space-y-1", className)}>
-      {sessionArtifacts.map((artifact) => (
-        <Button
-          key={artifact.id}
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 h-8"
-          onClick={() => {
-            setActiveArtifact(artifact.id)
-            openPanel("artifact")
-          }}
-        >
-          <span className="text-muted-foreground">{getArtifactTypeIcon(artifact.type)}</span>
-          <span className="truncate text-xs">{artifact.title}</span>
-        </Button>
-      ))}
     </div>
   )
 }

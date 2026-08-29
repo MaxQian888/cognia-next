@@ -90,7 +90,7 @@ execute<T>(code: string, context: Record<string, unknown> = {}): T {
 }
 ```
 
-即 `sandbox.ts:223-241`。`executeAsync`（`:246`）把函数体包进 `AsyncFunction` 并与超时竞速（`:262-267`）。`executeCode(language, code)`（`:301`）是独立的重型 web 沙箱（Pyodide / Worker）—— 按 `sandbox:web-execute` 门控（`:302`），委托给 `@/lib/sandbox/web`（`:304`）。
+即 `sandbox.ts:223-241`。`executeAsync`（`:246`）把函数体包进 `AsyncFunction` 并与超时竞速（`:262-267`）。（本页描述的 `sandbox.ts` 已不在树内；其 `executeCode` 的委托目标 `lib/sandbox/web` 也已删除。浏览器里的代码执行是 `lib/native/code-execution-strategy.ts`，见[沙盒系统](../sandbox/microvm-and-web)。）
 
 ## 3. transport 与 ipc 与 message-bus
 

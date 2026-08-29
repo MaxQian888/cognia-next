@@ -7,14 +7,6 @@
 import * as canvas from "./index"
 
 describe("canvas barrel exports", () => {
-  it("re-exports large-file-optimizer surface", () => {
-    expect(typeof canvas.LargeFileOptimizer).toBe("function")
-  })
-
-  it("re-exports plugin manager", () => {
-    expect(typeof canvas.CanvasPluginManager).toBe("function")
-  })
-
   it("re-exports CRDT store + websocket provider", () => {
     expect(typeof canvas.CanvasCRDTStore).toBe("function")
     expect(typeof canvas.CanvasWebSocketProvider).toBe("function")

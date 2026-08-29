@@ -13,9 +13,8 @@ description: "The T4 e2b Firecracker microVM tier, the per-session tier router i
   implementation**. The `cognia-e2b-sandbox` plugin registers a real exec on activate
   (`buildMicrovmExec`); the same plugin also provides an `E2BWorkspaceBackend` for Marketplace
   integrations. E2B-compatible self-hosted endpoints such as AgentENV can be
-  configured in that plugin's settings via the API URL field. `lib/sandbox/web/index.ts` is a
-  deliberate **stub** — the web code-execution runtime is not shipped. `types/system/sandbox.ts`
-  carries the cross-boundary result and consumption-metadata shapes.
+  configured in that plugin's settings via the API URL field. `types/system/sandbox.ts` carries the
+  cross-boundary result and consumption-metadata shapes.
 </TLDR>
 
 ## The adapter registry — `microvm-bridge.ts`
@@ -148,30 +147,18 @@ await execChecked(sandbox, {
   factory dynamically imports `@e2b/sdk` and calls `Sandbox.create`.
 </Callout>
 
-## The web code-execution stub — `lib/sandbox/web`
+## Browser code execution — not a sandbox family
 
-Distinct from artifact rendering, this is the "run code" surface a plugin reaches through
-`executeCode(language, code)`. It is a stub today: `isAvailable()` returns `false` so the caller gets
-a clear error instead of a `Cannot find module` fault.
+`lib/sandbox/web/index.ts` held a `getWebSandboxService()` stub whose `execute` always returned
+`ok: false`, described as the surface "a plugin reaches through `executeCode(language, code)`". No
+such caller existed anywhere in the tree, and the `PluginSandbox` the description referred to is gone
+too. The stub was removed rather than left as a placeholder for a runtime nothing asked for.
 
-```ts title="lib/sandbox/web/index.ts:25-37"
-const stub: WebSandboxService = {
-  isAvailable: () => false,
-  isLanguageSupported: () => false,
-  execute: async (req) => ({
-    ok: false,
-    error: `Web sandbox is not yet available; cannot execute ${req.language}.`,
-    durationMs: 0,
-  }),
-}
-
-export function getWebSandboxService(): WebSandboxService {
-  return stub
-}
-```
-
-To ship a real runtime (Pyodide / WebContainer / Worker), replace this file's body; the
-`WebSandboxService` interface and the `SandboxExecutionResult` shape stay compatible.
+The real browser execution path is `lib/native/code-execution-strategy.ts`
+(`executeCodeWithSandboxPriority`): JS / TS / JSX / HTML / CSS run in a `sandbox="allow-scripts"`
+`srcdoc` iframe on every shell, and Python is routed to the Rust `canvas_run_python` on desktop.
+`hooks/canvas/use-code-execution.ts` and `components/canvas/code-execution-panel.tsx` are its
+consumers.
 
 ## Cross-boundary types — `types/system/sandbox.ts`
 

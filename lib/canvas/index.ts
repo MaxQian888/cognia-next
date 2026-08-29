@@ -2,7 +2,6 @@
  * Canvas utilities - performance optimization and advanced features
  */
 
-export * from "./large-file-optimizer"
 export * from "./ai"
 export * from "./snippets"
 export {
@@ -14,5 +13,4 @@ export {
 } from "./symbols"
 export * from "./collaboration"
 export * from "./themes"
-export * from "./plugins"
 export * from "./utils"

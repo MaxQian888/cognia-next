@@ -39,8 +39,11 @@ different isolation mechanisms. Read this table first.
 | **Plugin isolation**    | Third-party plugin code (JS / Node / WASM)               | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | Renderer + T2/T3 wired                  |
 | **Rendering sandbox**   | One-shot model artifacts (HTML / SVG / React)            | iframe + CSP + DOMPurify (see [Artifacts / Sandbox](../artifacts-sandbox)) | —    | Stable                                  |
 
-A fifth, the **web code-execution sandbox** (`lib/sandbox/web`), is a deliberate stub today —
-covered on [microVM & Web](./microvm-and-web).
+There is no fifth family. `lib/sandbox/web` used to hold a stub for a "web code-execution sandbox"
+that was never shipped and had no caller; it was removed. Running JS / TS / JSX / HTML / CSS in the
+browser is `lib/native/code-execution-strategy.ts` (a `sandbox="allow-scripts"` `srcdoc` iframe),
+which the Canvas execution panel uses on every shell; Python on that panel is desktop-only and goes
+to the Rust `canvas_run_python`.
 
 ## How they fit together
 

@@ -38,8 +38,10 @@ description: "cognia-next 中的四大隔离体系——ADR-0028 五层执行沙
 | **插件隔离**            | 第三方插件代码（JS / Node / WASM）                       | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | Renderer + T2/T3 已接线                 |
 | **渲染沙盒**            | 一次性模型制品（HTML / SVG / React）                     | iframe + CSP + DOMPurify（见 [制品 / 沙盒](../artifacts-sandbox)）         | —    | 稳定                                    |
 
-第五个，即 **web 代码执行沙盒**（`lib/sandbox/web`），目前是一个有意保留的桩——
-详见 [microVM 与 Web](./microvm-and-web)。
+不存在第五个家族。`lib/sandbox/web` 曾放着一个「web 代码执行沙盒」的桩，从未发布、也没有任何调用方，
+现已删除。浏览器里跑 JS / TS / JSX / HTML / CSS 的是 `lib/native/code-execution-strategy.ts`
+（`sandbox="allow-scripts"` 的 `srcdoc` iframe），Canvas 执行面板在每个壳上都走它；该面板上的 Python
+仅限桌面，走 Rust 的 `canvas_run_python`。
 
 ## 它们如何协作
 

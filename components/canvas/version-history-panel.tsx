@@ -42,7 +42,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { useArtifactStore } from "@/stores"
 import { cn } from "@/lib/utils"
 import type { CanvasDocumentVersion } from "@/types"
-import { VersionDiffView } from "@/components/artifacts/version-diff-view"
+import { VersionDiffView } from "@/components/canvas/version-diff-view"
 
 interface VersionHistoryPanelProps {
   documentId: string

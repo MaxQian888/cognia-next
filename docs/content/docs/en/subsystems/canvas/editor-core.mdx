@@ -1,6 +1,6 @@
 ---
 title: Editor Core
-description: How Monaco is mounted, themed, and laid out — the offline loader for Tauri, the resizable 3-pane shell, the document rail, theme sync via cognia-active-theme, the symbol parser, snippet registry, plugin manager, large-file chunking, and the keybinding dispatchers.
+description: How Monaco is mounted, themed, and laid out — the offline loader for Tauri, the resizable 3-pane shell, the document rail, theme sync via cognia-active-theme, the symbol parser, snippet registry, plugin extension points, the large-document degradation profile, and the keybinding dispatchers.
 ---
 
 # Editor Core
@@ -143,7 +143,7 @@ covers rename / duplicate / export (Blob → `${title}.md`, `:170-180`) / pin / 
 `AnimatePresence` is intentionally omitted from the list (`:308-319`) because its exit animation broke
 the jsdom search-filter test — only `STAGGER_CONTAINER` entry motion is used.
 
-## Symbols, Snippets, Plugins
+## Symbols and Snippets
 
 These registries are mounted in `onMount` (`use-canvas-monaco-setup.ts:76-99`, each call guarded by
 try/catch → `loggers.canvas.warn`):
@@ -154,23 +154,23 @@ try/catch → `loggers.canvas.warn`):
   (`findSymbolAtLine` `:190`, `getSymbolBreadcrumb` `:246`).
 - **Snippets** — `SnippetProvider` (`snippet-registry.ts:252`) merges built-in + custom snippets per
   language from `SNIPPET_REGISTRY` (`:244`); `applySnippet` (`:299`) strips `${n:default}` placeholders.
-- **Plugins** — `CanvasPluginManager` (`plugin-manager.ts:112`) is a canvas-local plugin layer that
-  bridges enable/disable into the main plugin manager via `syncWithMainManager` (`:183`) and dispatches
-  typed hooks (`collectCompletions` `:295`, `collectDiagnostics` `:313`, `collectActions` `:331`).
+Plugins reach the editor through the **main** plugin system, not a canvas-local one:
+`PluginExtensionSlot point="canvas.toolbar"` / `"canvas.sidebar"` (declared in
+`lib/plugin/contracts/plugin-points.ts:465`, mounted at `canvas-panel.tsx`), plus the document /
+selection / comment surface in `lib/plugin/api/canvas-api.ts`. A second, canvas-local
+`CanvasPluginManager` existed in `lib/canvas/plugins/` with its own `CanvasPlugin` shape, completions,
+diagnostics and hover hooks — it had no registration path and no consumer, and was removed rather than
+documented as a competing plugin model.
 
-## Large-File Chunking
+## Large Documents
 
-For very large documents the content is chunked so the main thread never blocks:
+There is no JS-side chunking: Monaco already virtualises rendering, and a parallel chunk store fights
+its model. `lib/canvas/large-file-optimizer.ts`, `stores/canvas/chunked-document-store.ts` and
+`hooks/canvas/use-chunk-loader.ts` implemented one, had zero consumers, and were removed.
 
-- `LargeFileOptimizer` (`large-file-optimizer.ts:30`) — `DEFAULT_CHUNK_SIZE = 10000` chars
-  (`:27`), `LARGE_FILE_THRESHOLD = 50000` chars (`:28`). `chunkContent` (`:47`) builds line offsets and
-  slices; `getVisibleContent` (`:182`) returns a window with a 50-line buffer.
-- `useChunkLoader` (`use-chunk-loader.ts:28`) reads `useChunkedDocumentStore` (not the artifact store),
-  with `BUFFER_LINES = 100` (`:25`) and `LOAD_THRESHOLD = 50` (`:26`); the initial load fetches the
-  first 200 lines via `queueMicrotask` (`:119-126`).
-- `getCanvasPerformanceProfile` (`utils.ts:151`) picks `standard` / `large` / `very-large` modes with
-  per-mode symbol-parse debounce (500 / 900 / 1500 ms) and chunking toggles
-  (`CANVAS_LARGE_DOCUMENT_THRESHOLDS`, `utils.ts:133`).
+What remains is the degradation profile: `getCanvasPerformanceProfile` (`utils.ts:151`) picks
+`standard` / `large` / `very-large` modes with per-mode symbol-parse debounce (500 / 900 / 1500 ms)
+and feature toggles (`CANVAS_LARGE_DOCUMENT_THRESHOLDS`, `utils.ts:133`).
 
 ## Action Keybindings
 
