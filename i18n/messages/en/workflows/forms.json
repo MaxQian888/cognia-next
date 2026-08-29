@@ -212,6 +212,14 @@
       "label": "Base URL (optional)",
       "placeholder": "https://api.openai.com/v1"
     },
+    "credentialRef": {
+      "hint": "Reads the key from the OS keyring at run time, so no secret is stored in the workflow.",
+      "inlineWins": "The key typed above wins at run time; clear it to use this credential.",
+      "label": "Credential",
+      "none": "None",
+      "noneDeclared": "No credentials declared yet — add one under Settings → Credentials, then pick it here.",
+      "placeholder": "None"
+    },
     "headersJson": {
       "hint": "Static provider headers as a JSON object. Values must be strings.",
       "label": "Headers JSON (optional)",
@@ -286,6 +294,14 @@
       "hint": "Needed for hosted embedding providers. Leave empty for the local / hash fallback.",
       "label": "API key (optional)"
     },
+    "credentialRef": {
+      "hint": "Reads the key from the OS keyring at run time, so no secret is stored in the workflow.",
+      "inlineWins": "The key typed above wins at run time; clear it to use this credential.",
+      "label": "Credential",
+      "none": "None",
+      "noneDeclared": "No credentials declared yet — add one under Settings → Credentials, then pick it here.",
+      "placeholder": "None"
+    },
     "dimension": {
       "hint": "Vector size. Used by the hash fallback and passed to providers that support it.",
       "label": "Dimension"
@@ -319,6 +335,14 @@
       "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
       "label": "Base URL (optional)",
       "placeholder": "https://api.openai.com/v1"
+    },
+    "credentialRef": {
+      "hint": "Reads the key from the OS keyring at run time, so no secret is stored in the workflow.",
+      "inlineWins": "The key typed above wins at run time; clear it to use this credential.",
+      "label": "Credential",
+      "none": "None",
+      "noneDeclared": "No credentials declared yet — add one under Settings → Credentials, then pick it here.",
+      "placeholder": "None"
     },
     "headersJson": {
       "hint": "Static provider headers as a JSON object. Values must be strings.",
@@ -371,6 +395,14 @@
     "characterId": {
       "hint": "Optional. When the character has a twin, its retrieved context is prepended to the system prompt.",
       "label": "Twin-bound character"
+    },
+    "credentialRef": {
+      "hint": "Reads the key from the OS keyring at run time, so no secret is stored in the workflow.",
+      "inlineWins": "The key typed above wins at run time; clear it to use this credential.",
+      "label": "Credential",
+      "none": "None",
+      "noneDeclared": "No credentials declared yet — add one under Settings → Credentials, then pick it here.",
+      "placeholder": "None"
     },
     "headersJson": {
       "hint": "Static provider headers as a JSON object. Values must be strings.",

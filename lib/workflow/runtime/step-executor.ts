@@ -214,6 +214,10 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     ...(input.securityContext ? { securityContext: input.securityContext } : {}),
     ...(input.projectId ? { projectId: input.projectId } : {}),
     params: resolvedParamRecord,
+    // Credential bindings live on the node's `data`, so `params` alone never
+    // carries them; hand them over explicitly or every keyring-backed ref
+    // resolves to nothing at run time.
+    ...(node.data.credentialRefs ? { credentialRefs: node.data.credentialRefs } : {}),
     upstream,
     trigger: input.trigger,
     signal,

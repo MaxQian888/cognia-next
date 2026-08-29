@@ -265,6 +265,29 @@ export function toWorkflowTaskExecution(
   return { ...execution, executionId: execution.id }
 }
 
+/**
+ * Resolve a node's provider API key: an inline `apiKey` param wins, else the
+ * `apiKey` credential binding is read out of the keyring.
+ *
+ * The binding lives on `WorkflowNodeData.credentialRefs` and reaches the
+ * executor as `ctx.credentialRefs`. The `ctx.params` lookup below is a
+ * fallback for graphs that stored the map inside `params` instead; without
+ * `ctx.credentialRefs` every ref resolved to nothing, because `params` never
+ * carried the field the editor and the diagnostics both write to.
+ */
+export async function resolveNodeApiKey(
+  ctx: Pick<StepExecutionContext, "params" | "credentialRefs" | "resolveSecret">,
+  inlineApiKey: string | undefined
+): Promise<string | undefined> {
+  if (inlineApiKey) return inlineApiKey
+  const fromParams = isRecord(ctx.params) ? ctx.params.credentialRefs : undefined
+  const refId =
+    ctx.credentialRefs?.apiKey ??
+    (isRecord(fromParams) && typeof fromParams.apiKey === "string" ? fromParams.apiKey : undefined)
+  if (!refId) return undefined
+  return ctx.resolveSecret(refId)
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }

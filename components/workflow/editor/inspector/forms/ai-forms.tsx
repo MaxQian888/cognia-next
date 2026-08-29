@@ -28,6 +28,7 @@ import { TRANSFORMERS_MODEL_PRESETS } from "@cognia/transformers-runtime/models"
 import type { TransformersTask } from "@cognia/transformers-runtime/types"
 import {
   AiExplicitProviderFields,
+  CredentialRefField,
   BROWSER_MODEL_TASKS,
   DEFAULT_COUNCILLORS,
   ENSEMBLE_AGG_DEFAULTS,
@@ -756,6 +757,12 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
         />
       </Field>
+      <CredentialRefField
+        slot="apiKey"
+        id="aem-credential"
+        t={t}
+        inlineValueSet={apiKey.length > 0}
+      />
       <Field
         label={t("input.label")}
         htmlFor="aem-input"

@@ -7,7 +7,7 @@ import { generateTextEmbedding } from "@cognia/provider-embedding/multimodal-emb
 import { buildJsonInstruction, parseStructured } from "./structured"
 import { runStructuredTurn } from "./structured-turn"
 import { validateAgainstJsonSchema } from "./schema-validate"
-import { coerceToType, nonRetryable } from "../shared/executor-support"
+import { coerceToType, nonRetryable, resolveNodeApiKey } from "../shared/executor-support"
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
 // Real LLM call via `createLlmClient` when provider + apiKey are present in
@@ -43,13 +43,7 @@ registerNodeExecutor({
       onSchemaViolation?: "fail" | "soft"
       piiGate?: "off" | "block" | "redact"
     }
-    const apiKey =
-      params.apiKey ??
-      (await ctx.resolveSecret(
-        ctx.params.credentialRefs && typeof ctx.params.credentialRefs === "object"
-          ? ((ctx.params.credentialRefs as Record<string, string>).apiKey ?? "")
-          : ""
-      ))
+    const apiKey = await resolveNodeApiKey(ctx, params.apiKey)
     const userPrompt = params.userPrompt ?? ""
     const jsonMode = params.responseFormat === "json"
     const outputSchema = params.outputSchema
@@ -443,13 +437,7 @@ registerNodeExecutor({
         ? Math.floor(params.dimension)
         : 384
 
-    const apiKey =
-      params.apiKey ??
-      (await ctx.resolveSecret(
-        ctx.params.credentialRefs && typeof ctx.params.credentialRefs === "object"
-          ? ((ctx.params.credentialRefs as Record<string, string>).apiKey ?? "")
-          : ""
-      ))
+    const apiKey = await resolveNodeApiKey(ctx, params.apiKey)
 
     // Real semantic embedding when a provider + model (+ key if required) are
     // configured; otherwise fall back to the deterministic hash so workflows

@@ -23,6 +23,7 @@
  * The stub never enforces the schema (there is no model to auto-fix).
  */
 
+import { resolveNodeApiKey } from "../shared/executor-support"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 import type { PiiGateMode } from "./pii-gate"
@@ -268,13 +269,7 @@ export async function executeAiPromptV2(ctx: StepExecutionContext): Promise<Step
   }
 
   // ── explicit mode (v1 contract + streaming + usage reporting) ────────────
-  const apiKey =
-    params.apiKey ??
-    (await ctx.resolveSecret(
-      ctx.params.credentialRefs && typeof ctx.params.credentialRefs === "object"
-        ? ((ctx.params.credentialRefs as Record<string, string>).apiKey ?? "")
-        : ""
-    ))
+  const apiKey = await resolveNodeApiKey(ctx, params.apiKey)
 
   if (!params.provider || !params.model || !apiKey) {
     ctx.log(

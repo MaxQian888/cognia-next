@@ -569,3 +569,31 @@ describe("plugin dependency lock enforcement", () => {
     expect(execute).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * Credential bindings live on the node's `data`, not its `params`, so the
+ * step executor has to hand them to the context explicitly. Without this the
+ * whole workflow-credentials feature was inert: the settings panel declared
+ * refs, `checkCredentials` validated them, and no executor could ever read one.
+ */
+describe("credential refs reach the executor", () => {
+  it("passes the node's credentialRefs into the execution context", async () => {
+    const input = await buildInput({})
+    const withRefs: WorkflowNode = {
+      ...node,
+      data: { ...node.data, credentialRefs: { apiKey: "keyring:wf:openai" } },
+    }
+    await runStep({
+      ...input,
+      node: withRefs,
+      workflow: { ...input.workflow, nodes: [withRefs] },
+    })
+    expect(execSpy).toHaveBeenCalledTimes(1)
+    expect(execSpy.mock.calls[0]![0].credentialRefs).toEqual({ apiKey: "keyring:wf:openai" })
+  })
+
+  it("leaves the field absent when the node binds nothing", async () => {
+    await runStep(await buildInput({}))
+    expect(execSpy.mock.calls[0]![0].credentialRefs).toBeUndefined()
+  })
+})

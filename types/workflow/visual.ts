@@ -1181,6 +1181,16 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   signal: AbortSignal
   /** Per-run logger; appends to `workflowRunEvents`. */
   log: (level: RunEventLogLevel, message: string, payload?: unknown) => void
+  /**
+   * The node's own credential bindings, verbatim from
+   * `WorkflowNodeData.credentialRefs` — a map of slot name (e.g. `apiKey`) to
+   * the id of a credential declared in `VisualWorkflow.credentials`. Values
+   * are ref ids, never secrets: pass one to {@link resolveSecret} to read it.
+   *
+   * Lives on the node's `data`, NOT its `params`, which is why the executor
+   * needs it handed over here — `params` carries only the authored fields.
+   */
+  credentialRefs?: Record<string, string>
   /** Resolves a credential ref id to its keychain value. */
   resolveSecret: (refId: string) => Promise<string | undefined>
   /**

@@ -212,6 +212,14 @@
       "label": "Base URL（可选）",
       "placeholder": "https://api.openai.com/v1"
     },
+    "credentialRef": {
+      "hint": "运行时从系统钥匙串读取密钥，工作流中不会保存任何明文。",
+      "inlineWins": "运行时以上方填写的密钥为准；清空后才会使用该凭据。",
+      "label": "凭据",
+      "none": "无",
+      "noneDeclared": "尚未声明任何凭据——先到「设置 → 凭据」中添加，再在此选择。",
+      "placeholder": "无"
+    },
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
       "label": "Headers JSON（可选）",
@@ -286,6 +294,14 @@
       "hint": "托管嵌入提供方需要。留空则使用本地 / 哈希回退。",
       "label": "API Key（可选）"
     },
+    "credentialRef": {
+      "hint": "运行时从系统钥匙串读取密钥，工作流中不会保存任何明文。",
+      "inlineWins": "运行时以上方填写的密钥为准；清空后才会使用该凭据。",
+      "label": "凭据",
+      "none": "无",
+      "noneDeclared": "尚未声明任何凭据——先到「设置 → 凭据」中添加，再在此选择。",
+      "placeholder": "无"
+    },
     "dimension": {
       "hint": "向量长度。用于哈希回退，并传给支持该参数的提供方。",
       "label": "维度"
@@ -319,6 +335,14 @@
       "hint": "用于代理或自建 OpenAI 兼容端点。",
       "label": "Base URL（可选）",
       "placeholder": "https://api.openai.com/v1"
+    },
+    "credentialRef": {
+      "hint": "运行时从系统钥匙串读取密钥，工作流中不会保存任何明文。",
+      "inlineWins": "运行时以上方填写的密钥为准；清空后才会使用该凭据。",
+      "label": "凭据",
+      "none": "无",
+      "noneDeclared": "尚未声明任何凭据——先到「设置 → 凭据」中添加，再在此选择。",
+      "placeholder": "无"
     },
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
@@ -371,6 +395,14 @@
     "characterId": {
       "hint": "可选。当该角色绑定了数字分身时，其检索到的上下文会前置到系统提示中。",
       "label": "绑定分身的角色"
+    },
+    "credentialRef": {
+      "hint": "运行时从系统钥匙串读取密钥，工作流中不会保存任何明文。",
+      "inlineWins": "运行时以上方填写的密钥为准；清空后才会使用该凭据。",
+      "label": "凭据",
+      "none": "无",
+      "noneDeclared": "尚未声明任何凭据——先到「设置 → 凭据」中添加，再在此选择。",
+      "placeholder": "无"
     },
     "headersJson": {
       "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",

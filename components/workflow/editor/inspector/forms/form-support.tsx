@@ -37,6 +37,8 @@ import { ExpressionField } from "./shared/expression-field"
 import { ConditionBuilder } from "./shared/condition-builder"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
 import { useInspectorExpressionCtx } from "./shared/inspector-context"
+import { useShallow } from "zustand/react/shallow"
+import type { EditorState as WfEditorState } from "@/lib/workflow/editor/store"
 import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import type { TransformersTask } from "@cognia/transformers-runtime/types"
@@ -295,6 +297,96 @@ export function patchJsonStringRecordField(
   return next
 }
 
+/**
+ * Binds one credential slot on the SELECTED NODE to a credential declared in
+ * the workflow's settings. The binding lives on `WorkflowNodeData.credentialRefs`
+ * (not `params`), which is why this reaches the editor store directly instead of
+ * going through the form's `onChange`.
+ *
+ * Rendered even when the workflow declares nothing — a hidden control would
+ * merge "this node cannot use a credential" with "you have not declared one
+ * yet", and only the second is true. It says which, and where to fix it.
+ */
+export function CredentialRefField({
+  slot,
+  id,
+  t,
+  inlineValueSet,
+}: {
+  /** Credential slot name, e.g. `apiKey`. */
+  slot: string
+  id: string
+  t: TranslationFn
+  /** True when the sibling plaintext field is filled — it wins at run time. */
+  inlineValueSet?: boolean
+}) {
+  const ctx = useInspectorExpressionCtx()
+  const store = ctx?.store
+  const nodeId = ctx?.currentNodeId
+  // `useShallow` must be called unconditionally (rules of hooks); the store it
+  // feeds is only invoked when the provider is mounted, which mirrors how
+  // `ExpressionField` reaches the same store.
+  // Select the raw reference only. A `?? {}` here would mint a fresh object on
+  // every call, which `useShallow` then compares by identity — an infinite
+  // render loop for any workflow that has declared no credentials yet.
+  const selector = useShallow((s: WfEditorState) => ({
+    credentials: s.baseWorkflow.credentials,
+    credentialRefs: s.nodes.find((n) => n.id === nodeId)?.data.credentialRefs as
+      Record<string, string> | undefined,
+  }))
+  const state = store?.(selector)
+
+  // No editor store (headless render / story): nothing to bind against.
+  if (!ctx || !state) return null
+
+  const declared = Object.values(state.credentials ?? {})
+  const current = state.credentialRefs?.[slot] ?? ""
+
+  const commit = (next: string) => {
+    const refs = { ...(state.credentialRefs ?? {}) }
+    if (next === CREDENTIAL_NONE) delete refs[slot]
+    else refs[slot] = next
+    store?.getState().updateNodeData(nodeId!, {
+      credentialRefs: Object.keys(refs).length > 0 ? refs : undefined,
+    })
+  }
+
+  return (
+    <Field
+      label={t("credentialRef.label")}
+      htmlFor={id}
+      hint={
+        declared.length === 0
+          ? t("credentialRef.noneDeclared")
+          : inlineValueSet && current
+            ? t("credentialRef.inlineWins")
+            : t("credentialRef.hint")
+      }
+      name="credentialRef"
+    >
+      <Select
+        value={current || CREDENTIAL_NONE}
+        onValueChange={commit}
+        disabled={declared.length === 0}
+      >
+        <SelectTrigger id={id}>
+          <SelectValue placeholder={t("credentialRef.placeholder")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={CREDENTIAL_NONE}>{t("credentialRef.none")}</SelectItem>
+          {declared.map((cred) => (
+            <SelectItem key={cred.id} value={cred.id}>
+              {cred.name || cred.id}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
+const CREDENTIAL_NONE = "__credential_none__"
+
 export function AiExplicitProviderFields({
   params,
   onChange,
@@ -355,6 +447,12 @@ export function AiExplicitProviderFields({
           onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
         />
       </Field>
+      <CredentialRefField
+        slot="apiKey"
+        id={`${idPrefix}-credential`}
+        t={t}
+        inlineValueSet={apiKey.length > 0}
+      />
       <Field
         label={t("baseURL.label")}
         htmlFor={`${idPrefix}-base`}
