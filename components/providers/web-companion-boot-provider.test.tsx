@@ -76,6 +76,14 @@ const networkTeardown = jest.fn()
 const installNetworkSyncMock = jest.fn(async () => networkTeardown)
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
+  // The provider awaits `critical` only. Standing it on the same mock keeps
+  // every "how many pulls did the boot do" assertion meaningful, and mirrors
+  // the real contract: `critical` rejects on a broken pipeline, `whenComplete`
+  // never does.
+  runStagedSyncDown: (...args: unknown[]) => {
+    const critical = Promise.resolve().then(() => runSyncDownMock(...args))
+    return { critical, whenComplete: critical.catch(() => []) }
+  },
   installForegroundSync: () => foregroundTeardown,
   installEventDrivenSync: () => installEventDrivenSyncMock(),
   installWorkflowRunStatusSync: () => installWorkflowRunStatusSyncMock(),

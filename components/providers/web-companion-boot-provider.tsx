@@ -18,6 +18,7 @@ import {
   installForegroundSync,
   installNetworkSync,
   installWorkflowRunStatusSync,
+  runStagedSyncDown,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -311,7 +312,15 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
             if (!(await loadManifest()) || cancelled) return
             needsManifestRefresh = false
           }
-          await runSyncDown()
+          // Only the `critical` stage gates "online": preferences, characters,
+          // the chat list and its per-conversation state. Awaiting the whole
+          // pull here is what kept a correctly paired client on "connecting"
+          // for as long as its largest table took, with every already-arrived
+          // row unrendered behind that state. `interactive` and `background`
+          // keep draining on the returned run, each behind an idle wait, so
+          // they interleave with the shell instead of preceding it.
+          const staged = runStagedSyncDown()
+          await staged.critical
           if (cancelled || !eventReady) return
           updateRuntimeSnapshot({ connectionState: "online" })
           completedRecovery = true

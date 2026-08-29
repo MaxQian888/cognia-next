@@ -34,6 +34,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type { RunStatus } from "@/types/workflow/visual"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
+import { whenIdle, yieldToMain } from "./scheduling"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAgentTeamBoard } from "./handlers/agent-team-board"
 import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
@@ -66,66 +67,126 @@ export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncO
 
 interface RegisteredHandler {
   table: SyncableTable
+  stage: SyncStage
   run: SyncFn
 }
 
+/** A handler as a caller may supply it — {@link RegisteredHandler} with an optional stage. */
+export type SyncHandlerOverride = Omit<RegisteredHandler, "stage"> & { stage?: SyncStage }
+
+/**
+ * Sync stages — the order a client learns about its Host.
+ *
+ * Every table used to be pulled in one uninterrupted run before the shell was
+ * allowed to call itself online, so a paired client sat on "connecting" for as
+ * long as the slowest table took, and the surfaces that were ready long before
+ * the last template package landed stayed dark anyway.
+ *
+ * The stages answer one question per table: *what is this client unable to
+ * show until this table arrives?*
+ *
+ *   `critical`     the first screen. Preferences, the chat list and the state
+ *                  that decides how it is bucketed. Nothing renders honestly
+ *                  without these, so the connection is not "online" until they
+ *                  land — and there are only four of them.
+ *   `interactive`  what the user reaches for next: transcripts, plans, tasks,
+ *                  runs, the Inbox. Wanted within seconds, not needed to paint.
+ *   `background`   libraries and configuration surfaces — skills, workflows,
+ *                  memories, plugins, MCP servers, templates. A settings page
+ *                  the user has not opened can afford to fill in behind them.
+ *
+ * A stage is a scheduling statement, not an authority one: every table still
+ * has the same Host authority and the same tombstone policy
+ * ({@link COMPANION_SYNC_DOMAINS}). Re-ordering a table changes when it shows
+ * up, never whether it is trusted.
+ */
+export const SYNC_STAGES = ["critical", "interactive", "background"] as const
+
+export type SyncStage = (typeof SYNC_STAGES)[number]
+
+/** Stage assumed for an injected handler that does not declare one. */
+const DEFAULT_HANDLER_STAGE: SyncStage = "critical"
+
 const DEFAULT_HANDLERS: RegisteredHandler[] = [
-  { table: "characters", run: syncCharacters },
-  { table: "skills", run: syncSkills },
-  { table: "sessions", run: syncSessions },
-  { table: "agentTasks", run: syncAgentTasks },
-  { table: "agentTaskAttempts", run: syncAgentTaskAttempts },
-  { table: "messages", run: syncMessages },
-  // Wave 4 / ADR-0026 — five more tables wired so the mobile shell can
-  // serve workflow viewer, twin profile, plugin toggles, connector policy,
-  // and per-device preferences from Dexie when the server is unreachable.
-  { table: "workflows", run: syncWorkflows },
-  { table: "twinProfile", run: syncTwinProfile },
-  { table: "plugins", run: syncPlugins },
-  { table: "adapterInstances", run: syncAdapterInstances },
-  { table: "settings", run: syncAppSettings },
+  // ── critical ──────────────────────────────────────────────────────────
+  // Device preferences first: the shell reads them while painting, and the
+  // merge is a single row.
+  { table: "settings", stage: "critical", run: syncAppSettings },
+  // Characters before sessions: a session row names a character, and a chat
+  // list that arrives first renders rows with no identity for one frame.
+  { table: "characters", stage: "critical", run: syncCharacters },
+  { table: "sessions", stage: "critical", run: syncSessions },
   // v49 — Inbox optimization. Mobile reads pinned/archived/unread state
   // from conversationOverrides; without this handler the orchestrator
   // never pulls it and the mobile inbox renders every conversation as
-  // unread + unpinned.
-  { table: "conversationOverrides", run: syncConversationOverrides },
-  // Companion read-mostly views (Goals console + long-term memory). Mobile
-  // mirrors these so the phone can show goal progress / recalled memories
-  // from Dexie offline; both are authored on the desktop.
-  { table: "goals", run: syncGoals },
+  // unread + unpinned. It is critical for the same reason `sessions` is:
+  // the list is wrong, not merely empty, without it.
+  { table: "conversationOverrides", stage: "critical", run: syncConversationOverrides },
+
+  // ── interactive ───────────────────────────────────────────────────────
+  // The transcript tail. Paged, and the largest payload in the pipeline —
+  // which is exactly why it must not gate the first paint.
+  { table: "messages", stage: "interactive", run: syncMessages },
+  { table: "agentTasks", stage: "interactive", run: syncAgentTasks },
+  { table: "agentTaskAttempts", stage: "interactive", run: syncAgentTaskAttempts },
   // ADR-0045 — AgentPlan rows. The companion mounts the approval dock and the
   // step tracker; without this pull they read an empty local table and a
   // plan-mode turn taken through the companion has nothing to approve.
-  { table: "plans", run: syncPlans },
-  { table: "memories", run: syncMemories },
-  // Canonical, remote-safe run summaries. Detailed/private event rows remain
-  // on the executing host and are never part of companion sync.
-  { table: "executionRuns", run: syncExecutionRuns },
-  // Workflow run history — mirrors execution state so the mobile library
-  // badges, runs feed, and active-runs card reflect runs (incl. phone-
-  // triggered ones). Definitions sync via `workflows` above; this is runs.
-  { table: "workflowRuns", run: syncWorkflowRuns },
-  // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
-  // mobile `/me/mcp` page can list the desktop's servers (the phone has no
-  // MCP push RPC and the standalone engine runs no MCP).
-  { table: "mcpServers", run: syncMcpServers },
-  // ADR-0039 (phase 2) — durable terminal command history. One-way read-only
-  // mirror (desktop → phone) powering the mobile `/me/command-history` browse
-  // /search viewer; the phone has no shell, so it never writes back.
-  { table: "terminalHistory", run: syncTerminalHistory },
+  { table: "plans", stage: "interactive", run: syncPlans },
+  // Companion read-mostly views (Goals console). Mobile mirrors these so the
+  // phone can show goal progress from Dexie offline; authored on the desktop.
+  { table: "goals", stage: "interactive", run: syncGoals },
   // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
   // the desktop task board (tasks + team-meta rows) so the mobile workspace
   // can render the kanban offline; controls travel back as Companion RPC.
-  { table: "agentTeamBoard", run: syncAgentTeamBoard },
-  { table: "templateDefinitions", run: syncTemplateDefinitions },
-  { table: "templatePackages", run: syncTemplatePackages },
-  { table: "templateInstances", run: syncTemplateInstances },
+  { table: "agentTeamBoard", stage: "interactive", run: syncAgentTeamBoard },
+  // Canonical, remote-safe run summaries. Detailed/private event rows remain
+  // on the executing host and are never part of companion sync.
+  { table: "executionRuns", stage: "interactive", run: syncExecutionRuns },
+  // Workflow run history — mirrors execution state so the mobile library
+  // badges, runs feed, and active-runs card reflect runs (incl. phone-
+  // triggered ones). Definitions sync in `background`; this is runs.
+  { table: "workflowRuns", stage: "interactive", run: syncWorkflowRuns },
   // ADR-0131 cross-shell inbox relay — drafts in full (the phone edits and
   // approves them), outbound as a status projection (`syncedFromHost`), so a
   // thin client's Inbox shows delivery state without running any adapter.
-  { table: "connectorDrafts", run: syncConnectorDrafts },
-  { table: "outboundQueue", run: syncOutboundQueue },
+  { table: "connectorDrafts", stage: "interactive", run: syncConnectorDrafts },
+  { table: "outboundQueue", stage: "interactive", run: syncOutboundQueue },
+
+  // ── background ────────────────────────────────────────────────────────
+  { table: "skills", stage: "background", run: syncSkills },
+  // Wave 4 / ADR-0026 — the workflow viewer, twin profile, plugin toggles and
+  // connector policy: settings-shaped surfaces, served from Dexie when the
+  // server is unreachable, and none of them on the first screen.
+  { table: "workflows", stage: "background", run: syncWorkflows },
+  { table: "twinProfile", stage: "background", run: syncTwinProfile },
+  { table: "plugins", stage: "background", run: syncPlugins },
+  { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
+  // Long-term memory. Decrypts row by row against the profile DEK, so it is
+  // the most CPU-expensive apply in the pipeline — last, and interruptible.
+  { table: "memories", stage: "background", run: syncMemories },
+  // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
+  // mobile `/me/mcp` page can list the desktop's servers (the phone has no
+  // MCP push RPC and the standalone engine runs no MCP).
+  { table: "mcpServers", stage: "background", run: syncMcpServers },
+  // ADR-0039 (phase 2) — durable terminal command history. One-way read-only
+  // mirror (desktop → phone) powering the mobile `/me/command-history` browse
+  // /search viewer; the phone has no shell, so it never writes back.
+  { table: "terminalHistory", stage: "background", run: syncTerminalHistory },
+  { table: "templateDefinitions", stage: "background", run: syncTemplateDefinitions },
+  { table: "templatePackages", stage: "background", run: syncTemplatePackages },
+  { table: "templateInstances", stage: "background", run: syncTemplateInstances },
 ]
+
+/** Which stage each table is pulled in. */
+export const SYNC_TABLE_STAGES: Readonly<Record<SyncableTable, SyncStage>> = Object.freeze(
+  Object.fromEntries(DEFAULT_HANDLERS.map((h) => [h.table, h.stage]))
+) as Readonly<Record<SyncableTable, SyncStage>>
+
+/** The tables in a stage, in the order the orchestrator runs them. */
+export function syncTablesForStage(stage: SyncStage): readonly SyncableTable[] {
+  return DEFAULT_HANDLERS.filter((h) => h.stage === stage).map((h) => h.table)
+}
 
 /**
  * Tables sync'd by the orchestrator, in execution order. Exported so the
@@ -414,8 +475,14 @@ export function snapshotSyncStates(): Record<SyncableTable, SyncState> {
 export interface RunSyncDownOptions {
   /** Override the transport (tests). */
   transport?: Transport
-  /** Override the handler list (tests). */
-  handlers?: RegisteredHandler[]
+  /**
+   * Override the handler list (tests).
+   *
+   * `stage` may be omitted: an injected handler that does not declare one runs
+   * in `critical`, so a test that never mentions stages keeps getting the whole
+   * list on every run.
+   */
+  handlers?: SyncHandlerOverride[]
   /**
    * Restrict the run to a subset of tables (settings UI: "Sync now"
    * for a single row). When set, the handler list is filtered to just
@@ -423,26 +490,42 @@ export interface RunSyncDownOptions {
    * handlers", which resolves to an empty outcomes array.
    */
   only?: readonly SyncableTable[]
+  /**
+   * Restrict the run to whole stages (see {@link SYNC_STAGES}). Composes with
+   * `only`: both filters apply, so a stage run can still be narrowed to one
+   * table. Omitted means every stage, which is what every existing caller —
+   * "Sync now", the resync coordinator, the network/resume triggers — asks
+   * for and keeps getting.
+   */
+  stages?: readonly SyncStage[]
 }
 
 /**
- * Pull all four tables sequentially. Returns one outcome per table.
+ * Pull every registered table sequentially. Returns one outcome per table.
  * Sequential — not parallel — so a slow desktop server doesn't get hit
- * with four simultaneous round-trips. Re-entrant: a second call while
+ * with 25 simultaneous round-trips. Re-entrant: a second call while
  * one is in flight reuses the in-flight promise.
  *
  * Per-table runs (`opts.only`) bypass the re-entrancy gate so the user
  * can sync one row from the SyncStatusCard even when a full pull is
  * already in flight — otherwise the UI would silently wait on whatever
- * the orchestrator is doing.
+ * the orchestrator is doing. Stage runs (`opts.stages`) bypass it for the
+ * same reason: {@link runStagedSyncDown} drives its later stages while the
+ * caller is already awaiting the earlier one.
  */
 let inflight: Promise<SyncOutcome[]> | null = null
 
 export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[]> {
-  const isTargeted = opts.only !== undefined
+  const isTargeted = opts.only !== undefined || opts.stages !== undefined
   if (inflight && !isTargeted) return inflight
   const t = opts.transport ?? transport
-  let handlers = opts.handlers ?? DEFAULT_HANDLERS
+  let handlers: RegisteredHandler[] = opts.handlers
+    ? opts.handlers.map((handler) => ({ stage: DEFAULT_HANDLER_STAGE, ...handler }))
+    : DEFAULT_HANDLERS
+  if (opts.stages) {
+    const stageSet = new Set(opts.stages)
+    handlers = handlers.filter((h) => stageSet.has(h.stage))
+  }
   if (opts.only) {
     const onlySet = new Set(opts.only)
     handlers = handlers.filter((h) => onlySet.has(h.table))
@@ -451,7 +534,13 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
   const runPromise: Promise<SyncOutcome[]> = (async () => {
     await ensureHydrated()
     const results: SyncOutcome[] = []
-    for (const { table, run } of handlers) {
+    for (let index = 0; index < handlers.length; index++) {
+      const { table, run } = handlers[index]
+      // Hand the thread back before every table but the first. A pull is
+      // request → parse → Dexie write, and back-to-back that is one unbroken
+      // run of main-thread work per table; the gap is what lets the shell
+      // paint the rows that already landed while the rest are still arriving.
+      if (index > 0) await yieldToMain()
       const state = getState(table)
       const sinceAtStart = state.since
       const outcome = await run(t, { since: sinceAtStart })
@@ -493,6 +582,90 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
   }
 
   return runPromise
+}
+
+/** What a staged run hands back. Both promises; neither rejects. */
+export interface StagedSyncRun {
+  /**
+   * Settles when the `critical` stage has finished — the point at which the
+   * client can paint its first screen honestly. This is what a boot path
+   * awaits.
+   *
+   * It REJECTS if the pipeline itself broke (hydration, transport
+   * construction). Per-table failures are not that: those are recorded as
+   * `{ ok: false }` outcomes and resolve normally. Swallowing the pipeline
+   * failure here would flip a client to "online" over a sync that never ran,
+   * and skip the reconnect the caller schedules on exactly that rejection.
+   */
+  critical: Promise<SyncOutcome[]>
+  /**
+   * Settles when every stage has drained, with the outcomes of all of them.
+   *
+   * Awaiting it is for tests and for a deliberate "sync everything now"; the
+   * boot path does not, which is the whole point of staging. Unlike `critical`
+   * it never rejects: nobody is awaiting it, so a throw here would be an
+   * unhandled rejection on a connection that is already usable. A stage that
+   * breaks is skipped and the later ones still get their turn.
+   */
+  whenComplete: Promise<SyncOutcome[]>
+}
+
+/**
+ * Pull the Host's state in stages, letting the caller continue as soon as the
+ * client can honestly paint.
+ *
+ * This exists because the boot path used to await *everything*: a paired client
+ * showed "connecting" until the last table landed, so one slow or large table
+ * held the whole shell dark and the tables that had already arrived went
+ * unrendered. Now `critical` settles first, the connection goes online, and
+ * `interactive` then `background` fill in behind the running UI — each waiting
+ * for an idle moment, so they interleave with whatever the user has started
+ * doing rather than competing with it.
+ *
+ * Re-entrant like {@link runSyncDown}: a second staged run while one is in
+ * flight reuses it, so a reconnect storm cannot stack three drains onto one
+ * transport.
+ */
+let stagedInflight: StagedSyncRun | null = null
+
+export function runStagedSyncDown(opts: RunSyncDownOptions = {}): StagedSyncRun {
+  if (stagedInflight) return stagedInflight
+
+  const critical = runSyncDown({ ...opts, stages: ["critical"] })
+
+  const whenComplete = (async () => {
+    const outcomes: SyncOutcome[] = []
+    try {
+      outcomes.push(...(await critical))
+    } catch {
+      // The caller owns this failure — it is awaiting `critical` and reacts to
+      // the rejection there. Catching it here is only so the later stages still
+      // run, and so this promise stays the one that never rejects.
+    }
+    for (const stage of SYNC_STAGES.slice(1)) {
+      try {
+        // Between stages the correct answer is "later", not "next macrotask":
+        // the shell is mid-first-paint and the rows this stage carries are not
+        // on screen yet. The deadline inside `whenIdle` keeps a busy or
+        // backgrounded tab from stalling here forever.
+        await whenIdle()
+        outcomes.push(...(await runSyncDown({ ...opts, stages: [stage] })))
+      } catch {
+        // Per-table failures are already recorded as outcomes; reaching here
+        // means the pipeline itself broke (hydration, transport construction).
+        // Later stages still get their turn — one broken stage is not a reason
+        // to abandon the rest of the mirror.
+      }
+    }
+    return outcomes
+  })()
+
+  const run: StagedSyncRun = { critical, whenComplete }
+  stagedInflight = run
+  void whenComplete.finally(() => {
+    if (stagedInflight === run) stagedInflight = null
+  })
+  return run
 }
 
 /**
@@ -670,6 +843,7 @@ export function installResumeSync(opts: RunSyncDownOptions = {}): Promise<() => 
 export function __resetSyncStateForTests(): void {
   stateMap.clear()
   inflight = null
+  stagedInflight = null
   hydratePromise = null
   // Also forget which host we were hydrated for, or the next test's first
   // `ensureHydrated` would see a "host change" and wipe the tables it just

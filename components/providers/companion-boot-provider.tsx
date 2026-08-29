@@ -39,6 +39,7 @@ import {
   installNetworkSync,
   installResumeSync,
   installWorkflowRunStatusSync,
+  runStagedSyncDown,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -381,7 +382,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       markMobileBootSettled()
       beginMobileBootStage("sync")
       try {
-        await runSyncDown()
+        // The stage ends — and the phone goes online — once the `critical`
+        // tables have landed: preferences, characters, the chat list and its
+        // per-conversation state. Everything else keeps draining behind
+        // `whenComplete`, each stage after an idle wait, so a deep message
+        // history or a large memory store no longer holds the first screen.
+        await runStagedSyncDown().critical
         if (!isStale()) updateRuntimeSnapshot({ connectionState: "online" })
         endMobileBootStage("sync", { detail: "synced" })
       } catch (error) {

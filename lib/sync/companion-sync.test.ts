@@ -26,7 +26,11 @@ import {
   installWorkflowRunStatusSync,
   getSyncStateFor,
   runSyncDown,
+  runStagedSyncDown,
   snapshotSyncStates,
+  SYNC_STAGES,
+  SYNC_TABLE_STAGES,
+  syncTablesForStage,
 } from "./companion-sync"
 import { SYNCABLE_TABLE_NAMES, type SyncOutcome, type SyncableTable } from "./types"
 
@@ -53,6 +57,132 @@ beforeEach(() => {
   // the client onto another host leaks that host into the next one, which now
   // decides whether the cold-start mirror wipe fires.
   companionConfig = null
+})
+
+describe("sync stages", () => {
+  it("assigns every governed table to exactly one stage", () => {
+    const staged = SYNC_STAGES.flatMap((stage) => [...syncTablesForStage(stage)])
+    expect(new Set(staged)).toEqual(new Set(SYNCABLE_TABLE_NAMES))
+    expect(staged).toHaveLength(SYNCABLE_TABLE_NAMES.length)
+  })
+
+  it("keeps the first screen's tables in `critical` and the heavy ones out of it", () => {
+    // The stage list is a product decision, so it is pinned rather than
+    // derived: what a client must have before it may call itself online.
+    expect(syncTablesForStage("critical")).toEqual([
+      "settings",
+      "characters",
+      "sessions",
+      "conversationOverrides",
+    ])
+    // `messages` and `memories` are the two largest applies in the pipeline —
+    // the transcript tail and the row-by-row DEK decrypt. Neither may gate
+    // first paint.
+    expect(SYNC_TABLE_STAGES.messages).toBe("interactive")
+    expect(SYNC_TABLE_STAGES.memories).toBe("background")
+  })
+
+  it("pulls characters before sessions so no chat row paints without its identity", () => {
+    const critical = syncTablesForStage("critical")
+    expect(critical.indexOf("characters")).toBeLessThan(critical.indexOf("sessions"))
+  })
+
+  it("runs only the requested stage's handlers", async () => {
+    const characters = jest.fn(async () => makeOkOutcome("characters"))
+    const messages = jest.fn(async () => makeOkOutcome("messages"))
+
+    const outcomes = await runSyncDown({
+      transport: makeTransport(),
+      stages: ["critical"],
+      handlers: [
+        { table: "characters", stage: "critical", run: characters },
+        { table: "messages", stage: "interactive", run: messages },
+      ],
+    })
+
+    expect(characters).toHaveBeenCalledTimes(1)
+    expect(messages).not.toHaveBeenCalled()
+    expect(outcomes).toHaveLength(1)
+  })
+
+  it("treats an injected handler with no stage as critical", async () => {
+    const characters = jest.fn(async () => makeOkOutcome("characters"))
+
+    await runSyncDown({
+      transport: makeTransport(),
+      stages: ["critical"],
+      handlers: [{ table: "characters", run: characters }],
+    })
+
+    expect(characters).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("runStagedSyncDown", () => {
+  it("resolves `critical` before the later stages have run", async () => {
+    const order: string[] = []
+    const handler = (table: SyncableTable, stage: "critical" | "interactive" | "background") => ({
+      table,
+      stage,
+      run: jest.fn(async () => {
+        order.push(table)
+        return makeOkOutcome(table)
+      }),
+    })
+    const handlers = [
+      handler("sessions", "critical"),
+      handler("messages", "interactive"),
+      handler("memories", "background"),
+    ]
+
+    const staged = runStagedSyncDown({ transport: makeTransport(), handlers })
+    await staged.critical
+
+    // The whole point: the boot path is released with only `critical` done.
+    expect(order).toEqual(["sessions"])
+
+    await staged.whenComplete
+    expect(order).toEqual(["sessions", "messages", "memories"])
+  })
+
+  it("reuses an in-flight staged run instead of stacking a second drain", () => {
+    const transport = makeTransport()
+    const handlers = [
+      {
+        table: "sessions" as const,
+        stage: "critical" as const,
+        run: jest.fn(async () => makeOkOutcome("sessions")),
+      },
+    ]
+    const first = runStagedSyncDown({ transport, handlers })
+    const second = runStagedSyncDown({ transport, handlers })
+    expect(second).toBe(first)
+  })
+
+  it("surfaces a broken pipeline on `critical` while still draining later stages", async () => {
+    const messages = jest.fn(async () => makeOkOutcome("messages"))
+    const staged = runStagedSyncDown({
+      transport: makeTransport(),
+      handlers: [
+        {
+          table: "sessions",
+          stage: "critical",
+          run: jest.fn(async () => {
+            throw new Error("transport exploded")
+          }),
+        },
+        { table: "messages", stage: "interactive", run: messages },
+      ],
+    })
+
+    // The boot path reconnects off this rejection — resolving would flip the
+    // client to "online" over a sync that never ran.
+    await expect(staged.critical).rejects.toThrow("transport exploded")
+    // `whenComplete` is nobody's await, so it must not reject; the stages that
+    // can still run, do.
+    await expect(staged.whenComplete).resolves.toEqual([makeOkOutcome("messages")])
+    expect(messages).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("SYNC_HANDLER_TABLES registry", () => {
