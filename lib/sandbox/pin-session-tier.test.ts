@@ -64,4 +64,25 @@ describe("decideSessionTierPin", () => {
     }
     expect(decideSessionTierPin({ sandboxEnabled: true, inputs }).tier).toBe("microvm")
   })
+
+  it("does not re-pin a conversation that was released to the default", () => {
+    // The composer shield's un-pin clears `session.sandboxTier`, which on its
+    // own leaves a session indistinguishable from one that was never pinned —
+    // so the next send pinned it straight back and the button looked inert.
+    // `followsDefault` is what carries the release across the send.
+    const inputs = {
+      session: { sandboxTier: undefined },
+      character: { sandboxTier: "microvm" as const },
+    }
+    expect(decideSessionTierPin({ sandboxEnabled: true, inputs })).toEqual({
+      pin: true,
+      tier: "microvm",
+      source: "character",
+    })
+    expect(decideSessionTierPin({ sandboxEnabled: true, followsDefault: true, inputs })).toEqual({
+      pin: false,
+      tier: "microvm",
+      source: "character",
+    })
+  })
 })

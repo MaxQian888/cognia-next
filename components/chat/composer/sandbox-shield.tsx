@@ -148,7 +148,14 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
                 className="w-full"
                 data-testid="sandbox-shield-unpin"
                 onClick={() => {
-                  void updateSession(sessionId, { sandboxTier: undefined })
+                  // Both halves. Clearing the tier alone leaves a session that
+                  // is indistinguishable from one that was never pinned, and
+                  // `pin-session-tier.ts` pins that on the next send — so the
+                  // release has to say it was a release.
+                  void updateSession(sessionId, {
+                    sandboxTier: undefined,
+                    sandboxTierFollowsDefault: true,
+                  })
                 }}
               >
                 {t("unpin")}

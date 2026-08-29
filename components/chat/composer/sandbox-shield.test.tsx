@@ -228,7 +228,12 @@ describe("SandboxShield tier pin", () => {
 
     expect(screen.getByTestId("sandbox-shield")).toHaveAttribute("data-pinned", "true")
     fireEvent.click(screen.getByTestId("sandbox-shield-unpin"))
-    expect(updateSessionMock).toHaveBeenCalledWith("s1", { sandboxTier: undefined })
+    // Both halves: clearing the tier alone leaves the session looking like one
+    // that was never pinned, and the next send pins it straight back.
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", {
+      sandboxTier: undefined,
+      sandboxTierFollowsDefault: true,
+    })
   })
 
   it("does not claim a pin for a tier that is merely inherited", () => {

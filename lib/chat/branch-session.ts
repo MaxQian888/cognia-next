@@ -256,6 +256,9 @@ function buildChildRow(
     // *now* (`lib/sandbox/binding.ts`), so a child of a `microvm` conversation
     // can silently run on `os`. Isolation must never decrease unannounced.
     sandboxTier: parent.sandboxTier,
+    // And the release that goes with it: a child of a conversation told to
+    // follow the default must not be pinned on its first send.
+    sandboxTierFollowsDefault: parent.sandboxTierFollowsDefault,
     systemPrompt: parent.systemPrompt,
     activePresetId: parent.activePresetId,
     workingDir: parent.workingDir,

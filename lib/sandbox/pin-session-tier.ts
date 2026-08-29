@@ -22,8 +22,11 @@
  * is not. Pinning keeps isolation from decreasing without breaking a send.
  *
  * A pin with no way out would be worse than the drift, so the composer shield
- * owns the un-pin: clearing `session.sandboxTier` returns the conversation to
- * following the default.
+ * owns the un-pin: it clears `session.sandboxTier` AND sets
+ * `session.sandboxTierFollowsDefault`, which this refuses to pin over. The flag
+ * is what makes the release durable — clearing the tier alone left the session
+ * looking exactly like one that had never been pinned, so the next send pinned
+ * it straight back and the button appeared to do nothing.
  */
 
 import type { SandboxShellTier } from "@/types/sandbox"
@@ -43,15 +46,23 @@ export interface SessionTierPinDecision {
  * Decide whether this send should freeze the tier onto the session.
  *
  * Pure. Pins only when the session is about to run sandboxed AND the tier came
- * from a layer beneath the session — a tier already stored on the session is
- * the user's own answer and is never rewritten, and a session that is not
- * sandboxed has no isolation to lose.
+ * from a layer beneath the session AND the conversation has not been explicitly
+ * released — a tier already stored on the session is the user's own answer and
+ * is never rewritten, a session that is not sandboxed has no isolation to lose,
+ * and a session someone told to follow the default is one whose answer is "keep
+ * following it".
  */
 export function decideSessionTierPin(args: {
   sandboxEnabled: boolean
+  /** `ChatSession.sandboxTierFollowsDefault` — the explicit release. */
+  followsDefault?: boolean
   inputs: SandboxBindingInputs
 }): SessionTierPinDecision {
   const tier = resolveSandboxSessionBinding(args.inputs).shellTier
   const source = resolveSandboxTierSource(args.inputs)
-  return { pin: args.sandboxEnabled && source !== "session", tier, source }
+  return {
+    pin: args.sandboxEnabled && source !== "session" && !args.followsDefault,
+    tier,
+    source,
+  }
 }

@@ -615,6 +615,7 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
     // source's tier. Fork never did — this comment sat here for two rounds
     // above the line it was written for, which is why the column kept leaking.
     sandboxTier: parent.sandboxTier,
+    sandboxTierFollowsDefault: parent.sandboxTierFollowsDefault,
     effort: parent.effort,
     thinkingLevel: parent.thinkingLevel,
     forkedFromSdkSessionId: parent.sdkSessionId,

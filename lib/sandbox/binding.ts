@@ -84,6 +84,34 @@ export function resolveSandboxSessionBinding(inputs: SandboxBindingInputs): Sand
   }
 }
 
+/** The three rungs of the sandbox-enabled ladder, in precedence order. */
+export interface SandboxEnabledInputs {
+  session?: { sandboxEnabled?: boolean }
+  character?: { sandboxEnabled?: boolean }
+  appSettings?: { sandboxDefaultEnabled?: boolean }
+}
+
+/**
+ * Whether this turn runs sandboxed at all: `session → character →
+ * appSettings.sandboxDefaultEnabled → false`.
+ *
+ * The other half of what {@link resolveSandboxSessionBinding} answers, and it
+ * lives here for the same reason: it was hand-rolled at every call site (the
+ * send-options builder, the tier pin), so a change to the ladder had to be made
+ * in each of them or they would disagree about whether the sandbox is even on.
+ * Note the third rung's different name — `sandboxDefaultEnabled`, not
+ * `sandboxTier`'s sibling — which is exactly the kind of detail a copy gets
+ * wrong.
+ */
+export function resolveSandboxEnabled(inputs: SandboxEnabledInputs): boolean {
+  return (
+    inputs.session?.sandboxEnabled ??
+    inputs.character?.sandboxEnabled ??
+    inputs.appSettings?.sandboxDefaultEnabled ??
+    false
+  )
+}
+
 /**
  * Isolation strength, ascending. `cua-desktop` outranks `microvm` because it
  * moves shell, file AND GUI work off the host, where `microvm` still leaves the

@@ -2180,6 +2180,20 @@ export interface ChatSession {
    * single `SandboxSessionBinding` by `lib/sandbox/binding.ts`.
    */
   sandboxTier?: import("@/types/sandbox").SandboxShellTier
+  /**
+   * The conversation was explicitly released from its pinned tier and must
+   * follow the character / app default from here on.
+   *
+   * Without it, "clearing `sandboxTier` returns the conversation to following
+   * the default" only held until the next message: `lib/sandbox/pin-session-tier.ts`
+   * pins whenever the tier resolved from a layer beneath the session, which is
+   * exactly what an un-pinned session looks like, so the badge re-pinned itself
+   * on the very next send. This is the one bit that tells the two apart.
+   *
+   * Not indexed — adding optional non-indexed fields doesn't require a Dexie
+   * store version bump.
+   */
+  sandboxTierFollowsDefault?: boolean
   systemPrompt?: string
   /**
    * Identity of the system-prompt preset this session was last configured

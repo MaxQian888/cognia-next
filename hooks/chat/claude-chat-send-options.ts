@@ -18,7 +18,8 @@ import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
 import { decideSessionTierPin } from "@/lib/sandbox/pin-session-tier"
-import { getCharacter } from "@/lib/db/characters"
+import { resolveSandboxEnabled } from "@/lib/sandbox/binding"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { updateSession } from "@/lib/db/sessions"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
@@ -102,25 +103,39 @@ export async function buildSendOptions(
     onWeb: !isTauri(),
   })
 
+  // The turn's character, resolved ONCE. Both the tier pin below and
+  // `resolveSendOptions` need it, and each used to load it for itself — two
+  // Dexie reads per send for one row. Handed down as `ctx.character`, which
+  // `resolveSendOptions` already accepts precisely so a caller that has it can
+  // skip the lookup.
+  // `resolveCharacterById`, not `getCharacter`: it falls through to the
+  // plugin-overlay pack registry for a synthetic `cognia-pack:` id, which is
+  // the same reader `resolveSendOptions` uses. The plain Dexie read answered
+  // nothing for a pack-bound session, so the pin saw no character tier at all.
+  const turnCharacter = session?.characterId
+    ? ((await resolveCharacterById(session.characterId).catch(() => undefined)) ?? null)
+    : null
+
   // Freeze the sandbox tier onto the session the first time it runs sandboxed.
   // The ladder is re-read every send and nothing else writes the session's own
   // tier, so without this a conversation follows `AppSettings.sandboxTier`
   // forever and can lose isolation because of a setting changed elsewhere.
-  // Resolved through the SAME pure functions `resolveSendOptions` binds with
-  // (`lib/sandbox/binding.ts`), so this cannot become a second precedence
-  // ladder. Best-effort: a failed pin must never block a send.
+  // BOTH halves go through `lib/sandbox/binding.ts` — `resolveSandboxEnabled`
+  // for the switch and `resolveSandboxSessionBinding` for the tier — so this
+  // cannot drift from what `resolveSendOptions` binds with. Best-effort: a
+  // failed pin must never block a send.
   if (session?.id) {
     try {
-      const pinCharacter = session.characterId ? await getCharacter(session.characterId) : undefined
       const pin = decideSessionTierPin({
-        sandboxEnabled:
-          session.sandboxEnabled ??
-          pinCharacter?.sandboxEnabled ??
-          appSettings?.sandboxDefaultEnabled ??
-          false,
+        sandboxEnabled: resolveSandboxEnabled({
+          session: { sandboxEnabled: session.sandboxEnabled },
+          character: { sandboxEnabled: turnCharacter?.sandboxEnabled },
+          appSettings: { sandboxDefaultEnabled: appSettings?.sandboxDefaultEnabled },
+        }),
+        followsDefault: session.sandboxTierFollowsDefault,
         inputs: {
           session: { sandboxTier: session.sandboxTier },
-          character: { sandboxTier: pinCharacter?.sandboxTier },
+          character: { sandboxTier: turnCharacter?.sandboxTier },
           appSettings: { sandboxTier: appSettings?.sandboxTier },
         },
       })
@@ -263,6 +278,7 @@ export async function buildSendOptions(
   return resolveSendOptions({
     postCompaction,
     session,
+    character: turnCharacter,
     appSettings,
     activeProject: turnProject,
     workspaceRestricted: workspaceTrust.restricted,
