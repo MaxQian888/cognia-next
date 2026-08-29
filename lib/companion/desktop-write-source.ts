@@ -658,15 +658,28 @@ async function resolveHostStateService(
   const callerAccountId = payload.callerAccountId
   const authoritativeHostId = payload.authoritativeHostId
   const runtimeTargetId = payload.runtimeTargetId
-  if (
-    !active ||
-    typeof callerAccountId !== "string" ||
-    typeof authoritativeHostId !== "string" ||
-    typeof runtimeTargetId !== "string" ||
-    active.accountId !== callerAccountId ||
-    active.targetId !== runtimeTargetId
-  ) {
-    throw new Error("host_state_scope_mismatch")
+  // One refusal used to stand for six causes, so a mismatch on the wire was
+  // indistinguishable from a Host that had no runtime target at all. Name the
+  // one that fired — the caller only ever sees this string.
+  if (!active) throw new Error("host_state_scope_mismatch: host has no active runtime target")
+  if (typeof callerAccountId !== "string") {
+    throw new Error("host_state_scope_mismatch: caller account is missing")
+  }
+  if (typeof authoritativeHostId !== "string") {
+    throw new Error("host_state_scope_mismatch: authoritative host id is missing")
+  }
+  if (typeof runtimeTargetId !== "string") {
+    throw new Error("host_state_scope_mismatch: runtime target id is missing")
+  }
+  if (active.accountId !== callerAccountId) {
+    throw new Error(
+      `host_state_scope_mismatch: account ${callerAccountId} is not the host's active account ${active.accountId}`
+    )
+  }
+  if (active.targetId !== runtimeTargetId) {
+    throw new Error(
+      `host_state_scope_mismatch: runtime target ${runtimeTargetId} is not the host's active target ${active.targetId}; read hostStateScope from host_feature_manifest`
+    )
   }
   const key = `${active.accountId}:${active.targetId}:${authoritativeHostId}`
   if (hostStateAuthority?.key === key) return hostStateAuthority.service
@@ -1532,12 +1545,20 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
       }
     }
   }
+  // The scope a device must use to reach this Host's host-state. Declared
+  // rather than inferred: a client only knows this Host by the `hostId` it
+  // filed the pairing under, and that is not the namespace the Host writes
+  // its channels to (see `resolveHostStateService`).
+  const active = getActiveRuntimeTargetContext()
   return buildLocalHostFeatureManifest({
     platform,
     hostId:
       typeof payload.authoritativeHostId === "string"
         ? payload.authoritativeHostId
         : `local-${platform}`,
+    hostStateScope: active
+      ? { accountId: active.accountId, runtimeTargetId: active.targetId }
+      : undefined,
     deviceGrants,
     operationHealth,
   })

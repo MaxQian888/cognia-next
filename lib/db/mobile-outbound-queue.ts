@@ -87,8 +87,17 @@ export interface EnqueueHostStateIntentInput {
 export async function enqueueHostStateIntentIfAvailable(
   input: EnqueueHostStateIntentInput
 ): Promise<MobileOutboundJobRow | null> {
-  const scope = getActiveRuntimeTargetContext()
-  if (!scope || !(await hostStateSubmitNegotiated())) return null
+  const local = getActiveRuntimeTargetContext()
+  if (!local || !(await hostStateSubmitNegotiated())) return null
+  // Host-state is addressed in the HOST's namespace. `local` is what this
+  // client calls the pairing; the Host writes its channels under the scope it
+  // declared in the manifest, and refuses a submit under any other target. A
+  // Host too old to declare one still gets the local id, which is what it
+  // matched before.
+  const scope = (await negotiatedHostStateScope()) ?? {
+    accountId: local.accountId,
+    targetId: local.targetId,
+  }
   const channel = sessionStateChannel(scope.targetId, input.sessionId)
   const db = getDb()
   const preferredClientId = input.clientId ?? loadOrCreateHostStateClientId()
@@ -103,8 +112,8 @@ export async function enqueueHostStateIntentIfAvailable(
       .filter(
         (row) =>
           row.protocol === "host-state" &&
-          row.accountId === scope.accountId &&
-          row.targetId === scope.targetId
+          row.accountId === local.accountId &&
+          row.targetId === local.targetId
       )
       .toArray()
     const active = rows.filter((row) => IN_FLIGHT_STATUSES.includes(row.status))
@@ -139,7 +148,10 @@ export async function enqueueHostStateIntentIfAvailable(
       action: input.action,
     }
     if (!isHostStateAction(action)) throw new Error("host_state_invalid_action")
-    const row = hostStateQueueRow(action)
+    const row = hostStateQueueRow(action, {
+      accountId: local.accountId,
+      targetId: local.targetId,
+    })
     await db.mobileOutboundQueue.add(row)
     return row
   })
@@ -270,12 +282,22 @@ function hostStateQueueInput(action: HostStateAction): EnqueueInput {
   }
 }
 
-function hostStateQueueRow(action: HostStateAction): MobileOutboundJobRow {
+/**
+ * `delivery` is the LOCAL scope that owns this row — the pair the outbound
+ * runner filters on. It is deliberately not `action.accountId` /
+ * `action.runtimeTargetId`: those are the Host's namespace for the state being
+ * written, and a row filed under them is invisible to the runner that has to
+ * send it.
+ */
+function hostStateQueueRow(
+  action: HostStateAction,
+  delivery: { accountId: string; targetId: string }
+): MobileOutboundJobRow {
   const input = hostStateQueueInput(action)
   return {
     id: action.actionId,
-    accountId: action.accountId,
-    targetId: action.runtimeTargetId,
+    accountId: delivery.accountId,
+    targetId: delivery.targetId,
     command: "host_state_submit",
     payload: input.payload,
     status: "pending",
@@ -291,6 +313,22 @@ function hostStateQueueRow(action: HostStateAction): MobileOutboundJobRow {
     actionId: action.actionId,
     baseRevision: action.baseRevision,
   }
+}
+
+/**
+ * The host-state scope the active Host declared, or null when it declared
+ * none. Read from the runtime snapshot — the same place `hostStateSubmitNegotiated`
+ * reads the negotiated operation list, so the two can never disagree about
+ * which Host they are describing.
+ */
+async function negotiatedHostStateScope(): Promise<{
+  accountId: string
+  targetId: string
+} | null> {
+  const { getRuntimeSnapshot } = await import("@/lib/runtime/runtime-snapshot-store")
+  const declared = getRuntimeSnapshot().host?.hostStateScope
+  if (!declared) return null
+  return { accountId: declared.accountId, targetId: declared.runtimeTargetId }
 }
 
 async function hostStateSubmitNegotiated(): Promise<boolean> {

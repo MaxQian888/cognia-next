@@ -114,6 +114,26 @@ export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
     id: string
     kind: "desktop" | "cloud"
   }
+  /**
+   * The scope the Host's own host-state actually lives under.
+   *
+   * `hostIdentity.id` is the id the *device* asserted and the Host echoed
+   * back — it names the pairing, not the state. The Host stores every
+   * host-state channel under its own active runtime target
+   * (`cognia://target/<runtimeTargetId>/sessions/...`), which on a Host
+   * serving other devices is its local runtime (`local-host`), never the
+   * `hostId` the client files it under in its own registry. A client that
+   * addresses host-state by its own id is asking for a namespace the Host
+   * has never written to, and every `host_state_*` call is refused with
+   * `host_state_scope_mismatch`.
+   *
+   * Optional because a Host older than this field cannot declare it; a
+   * client that sees no declaration keeps its previous behaviour.
+   */
+  hostStateScope?: {
+    accountId: string
+    runtimeTargetId: string
+  }
   protocol: {
     min: number
     max: number
@@ -183,12 +203,14 @@ export function buildLocalHostFeatureManifest({
   hostBuildId = APP_VERSION,
   platform,
   hostId = `local-${platform}`,
+  hostStateScope,
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
   operationHealth = {},
 }: {
   hostBuildId?: string
   platform: Platform
   hostId?: string
+  hostStateScope?: { accountId: string; runtimeTargetId: string }
   deviceGrants?: string[]
   operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
@@ -409,6 +431,7 @@ export function buildLocalHostFeatureManifest({
       id: hostId,
       kind: platform === "headless" ? "cloud" : "desktop",
     },
+    ...(hostStateScope ? { hostStateScope } : {}),
     protocol: {
       min: HOST_PROTOCOL_MIN_VERSION,
       max: HOST_PROTOCOL_MAX_VERSION,
@@ -528,6 +551,13 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
       typeof v2.hostIdentity.id !== "string" ||
       v2.hostIdentity.id.length === 0 ||
       !["desktop", "cloud"].includes(v2.hostIdentity.kind ?? "") ||
+      (v2.hostStateScope !== undefined &&
+        (!v2.hostStateScope ||
+          typeof v2.hostStateScope !== "object" ||
+          typeof v2.hostStateScope.accountId !== "string" ||
+          v2.hostStateScope.accountId.length === 0 ||
+          typeof v2.hostStateScope.runtimeTargetId !== "string" ||
+          v2.hostStateScope.runtimeTargetId.length === 0)) ||
       typeof protocolMin !== "number" ||
       typeof protocolMax !== "number" ||
       !Number.isSafeInteger(protocolMin) ||

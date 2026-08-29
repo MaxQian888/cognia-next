@@ -90,6 +90,39 @@ it("reaches subscribers when only the ceilings changed", () => {
   unsubscribe()
 })
 
+it("reaches subscribers when only the HostState scope changed", () => {
+  const base = runtimeHostSnapshotFromManifest(buildLocalHostFeatureManifest({ platform: "tauri" }))
+  const listener = jest.fn()
+  const unsubscribe = subscribeRuntimeSnapshot(listener)
+  setRuntimeSnapshot({
+    target: null,
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      ...base,
+      hostStateScope: { accountId: "acct-a", runtimeTargetId: "target-a" },
+    },
+  })
+  listener.mockClear()
+
+  setRuntimeSnapshot({
+    target: null,
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      ...base,
+      hostStateScope: { accountId: "acct-b", runtimeTargetId: "target-b" },
+    },
+  })
+
+  expect(listener).toHaveBeenCalledTimes(1)
+  expect(getRuntimeSnapshot().host?.hostStateScope).toEqual({
+    accountId: "acct-b",
+    runtimeTargetId: "target-b",
+  })
+  unsubscribe()
+})
+
 it("withholds HostState submit until the migration stage is authoritative", () => {
   const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
   const snapshot = runtimeHostSnapshotFromManifest(manifest, {

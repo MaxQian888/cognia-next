@@ -21,6 +21,18 @@ export interface HostRuntimeSnapshot {
    * manifest, and for any host that published no limits.
    */
   limits?: HostFeatureLimits
+  /**
+   * The scope this Host's host-state lives under, as the Host declared it.
+   *
+   * Carried because the client's own runtime target id is the id it filed the
+   * pairing under, which is not the namespace the Host writes host-state
+   * channels to. Anything addressing host-state — the sync installer and the
+   * outbound intent queue alike — must read the scope from here rather than
+   * from the local runtime-target context, or it addresses a namespace the
+   * Host has never written to. Absent for a V1 manifest and for any Host too
+   * old to declare one.
+   */
+  hostStateScope?: { accountId: string; runtimeTargetId: string }
 }
 
 export interface RuntimeSnapshot {

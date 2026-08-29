@@ -234,6 +234,86 @@ describe("mobile outbound queue target isolation", () => {
     })
   })
 
+  it("writes in the Host's namespace but files the row under the local delivery scope", async () => {
+    // The Host stores its channels under `local-host`; this client knows the
+    // pairing as `desktop-studio`. The action has to be addressed the Host's
+    // way, but the row has to stay findable by the runner, which filters on
+    // the local pair.
+    const hostChannel = sessionStateChannel("local-host", "s1")
+    await getDb().hostStateChannels.put({
+      channel: hostChannel,
+      hostId: "host-authority",
+      hostGeneration: 7,
+      hostSeq: 11,
+      revision: 3,
+      digest: "digest",
+      state: createEmptyHostStateSession("local-host", "s1"),
+      updatedAt: 100,
+    })
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: {
+        compatible: true,
+        operations: ["host_state_submit"],
+        grants: [],
+        hostStateScope: { accountId: "local_acct_a", runtimeTargetId: "local-host" },
+      },
+    })
+
+    const row = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s1",
+      actionId: "action-scoped",
+      clientId: "client-a",
+      nowMs: 200,
+      action: { kind: "message.enqueue", messageId: "m-scoped", text: "hi", attachments: [] },
+    })
+
+    expect(row).not.toBeNull()
+    // Wire side — the Host's namespace.
+    expect(row?.channel).toBe(hostChannel)
+    expect((row?.payload as { actions: Array<Record<string, unknown>> }).actions[0]).toMatchObject({
+      accountId: "local_acct_a",
+      runtimeTargetId: "local-host",
+      channel: hostChannel,
+    })
+    // Local side — what the outbound runner filters on.
+    expect(row?.accountId).toBe(scope.accountId)
+    expect(row?.targetId).toBe(scope.targetId)
+  })
+
+  it("falls back to the local scope when the Host declares none", async () => {
+    const channel = sessionStateChannel(scope.targetId, "s2")
+    await getDb().hostStateChannels.put({
+      channel,
+      hostId: "host-authority",
+      hostGeneration: 7,
+      hostSeq: 11,
+      revision: 3,
+      digest: "digest",
+      state: createEmptyHostStateSession(scope.targetId, "s2"),
+      updatedAt: 100,
+    })
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+
+    const row = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s2",
+      actionId: "action-legacy-scope",
+      clientId: "client-a",
+      nowMs: 201,
+      action: { kind: "message.enqueue", messageId: "m-legacy", text: "hi", attachments: [] },
+    })
+
+    expect(row?.channel).toBe(channel)
+    expect(row?.targetId).toBe(scope.targetId)
+  })
+
   it("keeps legacy writes when HostState was not negotiated or has no confirmed snapshot", async () => {
     setRuntimeSnapshot({
       target: {

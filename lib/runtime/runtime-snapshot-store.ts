@@ -96,6 +96,9 @@ export function runtimeHostSnapshotFromManifest(
     // the companion shell with no way to learn them at all — the desktop's
     // remote-host store, which does keep the manifest, is empty on a phone.
     ...(manifest.limits ? { limits: manifest.limits } : {}),
+    ...(manifest.schemaVersion === 2 && manifest.hostStateScope
+      ? { hostStateScope: manifest.hostStateScope }
+      : {}),
   }
 }
 
@@ -133,6 +136,8 @@ function runtimeSnapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot): b
   return (
     arraysEqual(left.host?.operations, right.host?.operations) &&
     arraysEqual(left.host?.grants, right.host?.grants) &&
+    left.host?.hostStateScope?.accountId === right.host?.hostStateScope?.accountId &&
+    left.host?.hostStateScope?.runtimeTargetId === right.host?.hostStateScope?.runtimeTargetId &&
     // Cheap and exact: the limits object is a flat record of scalars plus one
     // string array, and a host that republishes different ceilings has to
     // reach every subscriber.

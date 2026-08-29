@@ -308,6 +308,43 @@ describe("dispatchCommand: HostState authority", () => {
       })
     ).rejects.toThrow("host_state_scope_mismatch")
   })
+
+  // Every one of these used to throw the bare string `host_state_scope_mismatch`,
+  // so a client could not tell a Host with no runtime target from one that
+  // simply names its state differently — the second is one field away from
+  // working, the first is not.
+  it("names the account that did not match", async () => {
+    await expect(
+      dispatchCommand("host_state_status", {
+        callerAccountId: "other-account",
+        runtimeTargetId: "target-a",
+        authoritativeHostId: "host-a",
+      })
+    ).rejects.toThrow(/account other-account is not the host's active account local-default/)
+  })
+
+  it("names the runtime target that did not match, and where to read the right one", async () => {
+    await expect(
+      dispatchCommand("host_state_status", {
+        callerAccountId: "local-default",
+        runtimeTargetId: "2554514ce17e9c0bf0438b053676bc2e",
+        authoritativeHostId: "host-a",
+      })
+    ).rejects.toThrow(
+      /runtime target 2554514ce17e9c0bf0438b053676bc2e is not the host's active target target-a; read hostStateScope from host_feature_manifest/
+    )
+  })
+
+  it("says so when the host has no active runtime target at all", async () => {
+    mockActiveRuntimeTarget.mockReturnValue(null)
+    await expect(
+      dispatchCommand("host_state_status", {
+        callerAccountId: "local-default",
+        runtimeTargetId: "target-a",
+        authoritativeHostId: "host-a",
+      })
+    ).rejects.toThrow(/host has no active runtime target/)
+  })
 })
 
 describe("dispatchCommand: Agent task board", () => {
@@ -2009,6 +2046,24 @@ describe("dispatchCommand: unknown command", () => {
         skillUploadChunkBytes: 32 * 1024,
       },
     })
+  })
+
+  it("declares the scope its own host-state lives under, not the paired id", async () => {
+    // The device knows this Host as `host-a`; the Host writes its channels
+    // under `target-a`. A client that guesses the former is refused, so the
+    // manifest has to say which one to use.
+    await expect(
+      dispatchCommand("host_feature_manifest", { authoritativeHostId: "host-a" })
+    ).resolves.toMatchObject({
+      hostIdentity: { id: "host-a" },
+      hostStateScope: { accountId: "local-default", runtimeTargetId: "target-a" },
+    })
+  })
+
+  it("omits the scope when the host has no active runtime target", async () => {
+    mockActiveRuntimeTarget.mockReturnValue(null)
+    const manifest = (await dispatchCommand("host_feature_manifest", {})) as Record<string, unknown>
+    expect(manifest.hostStateScope).toBeUndefined()
   })
 
   it("projects only the authenticated caller grants supplied by the RPC boundary", async () => {

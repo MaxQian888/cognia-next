@@ -495,3 +495,57 @@ describe("external-agent.host-configs", () => {
     )
   })
 })
+
+describe("hostStateScope", () => {
+  it("is absent unless the Host declares one", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless", hostId: "host-a" })
+    expect(manifest.hostStateScope).toBeUndefined()
+    expect("hostStateScope" in manifest).toBe(false)
+  })
+
+  it("carries the Host's own runtime target, not the id the device paired under", () => {
+    const manifest = buildLocalHostFeatureManifest({
+      platform: "headless",
+      hostId: "2554514ce17e9c0bf0438b053676bc2e",
+      hostStateScope: { accountId: "local_acct_a", runtimeTargetId: "local-host" },
+    })
+    // The two ids are deliberately different: one names the pairing, the
+    // other names the namespace the Host writes its channels to.
+    expect(manifest.hostIdentity.id).toBe("2554514ce17e9c0bf0438b053676bc2e")
+    expect(manifest.hostStateScope).toEqual({
+      accountId: "local_acct_a",
+      runtimeTargetId: "local-host",
+    })
+  })
+
+  it("survives the wire", () => {
+    const parsed = parseHostFeatureManifest(
+      JSON.parse(
+        JSON.stringify(
+          buildLocalHostFeatureManifest({
+            platform: "headless",
+            hostStateScope: { accountId: "acct-1", runtimeTargetId: "local-host" },
+          })
+        )
+      )
+    )
+    expect(parsed?.schemaVersion).toBe(2)
+    expect(parsed?.schemaVersion === 2 ? parsed.hostStateScope : undefined).toEqual({
+      accountId: "acct-1",
+      runtimeTargetId: "local-host",
+    })
+  })
+
+  it.each([
+    ["an empty runtime target", { accountId: "acct-1", runtimeTargetId: "" }],
+    ["an empty account", { accountId: "", runtimeTargetId: "local-host" }],
+    ["a non-string runtime target", { accountId: "acct-1", runtimeTargetId: 7 }],
+    ["a non-object scope", "local-host"],
+  ])("rejects a manifest declaring %s", (_label, hostStateScope) => {
+    const wire = JSON.parse(
+      JSON.stringify(buildLocalHostFeatureManifest({ platform: "headless" }))
+    ) as Record<string, unknown>
+    wire.hostStateScope = hostStateScope
+    expect(parseHostFeatureManifest(wire)).toBeNull()
+  })
+})
