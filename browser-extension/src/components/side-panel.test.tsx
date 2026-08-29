@@ -538,10 +538,15 @@ describe("SidePanel capture and settings", () => {
 
     fireEvent.click(screen.getByTestId("submit"))
     await waitFor(() => expect(state.submitted).toHaveLength(1))
+    // Non-empty, because `instruction` is `required` with `minLength: 1` on the
+    // wire: an empty string is refused by the request schema before the Host
+    // ever sees it, which made every template submission impossible. The Host
+    // replaces this with the rendered body, so the name is only what a client
+    // that cannot read the body can honestly say was asked.
     expect(state.submitted[0]).toMatchObject({
       targetId: "template:tpl-1",
       targetParams: { tone: "terse" },
-      instruction: "",
+      instruction: "Summarize",
     })
   })
 

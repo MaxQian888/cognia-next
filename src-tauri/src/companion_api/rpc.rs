@@ -1097,9 +1097,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_session_get",
     "browser_capability",
     "browser_runtime_status",
-    // Browser Companion (ADR-0154) — the extension's whole surface. Four
-    // commands, one of which writes. The dispatch arm lives in
-    // `rpc/data_sync.rs`; the decisions live in TypeScript
+    // Browser Companion (ADR-0154) — the extension's whole surface. Six
+    // commands, two of which write (`browser_context_submit` and
+    // `browser_context_cancel`); those two are the ones excluded from
+    // `READ_ONLY_COMMANDS` and gated by the browser-access kill switch. The
+    // dispatch arm lives in `rpc/data_sync.rs`; the decisions live in TypeScript
     // (`lib/browser-companion/service.ts`), because the submit path creates a
     // session and enqueues a turn.
     "browser_companion_capability",
@@ -1809,7 +1811,7 @@ pub(crate) fn device_can_control(device_id: &str) -> bool {
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
-/// The Browser Companion's four commands.
+/// The Browser Companion's six commands.
 ///
 /// Named once so the dispatch binding and the caller-id injection cannot
 /// disagree about which commands are the extension's — a mismatch would leave

@@ -1,9 +1,10 @@
 /**
  * The Host side of the Browser Companion.
  *
- * Four commands, one of which does anything: `browser_context_submit` turns a
- * page the user explicitly captured into a new Cognia task. The other three
- * describe the Host and read back what this device has already submitted.
+ * Six commands, two of which do anything: `browser_context_submit` turns a
+ * page the user explicitly captured into Cognia work, and `browser_context_cancel`
+ * stops the turn one of them started. The other four describe the Host and read
+ * back what this device has already submitted.
  *
  * ## Why this creates the session itself and then enqueues one message
  *
@@ -196,12 +197,27 @@ export interface BrowserCompanionDeps {
   /**
    * Stop the turn running on a session.
    *
-   * Returns `false` when the Host refuses because somebody else is driving that
-   * session right now — a distinct outcome from an error, and the panel says so
-   * rather than reporting a failure the user cannot act on from a browser.
+   * Answers WHY when it did not stop, not just that it did not. A bare boolean
+   * made every refusal look like the one refusal that has its own remedy —
+   * "another device is driving this" — so a stale `hostGeneration`
+   * (`conflicted`) or a rejection because no turn is running sent the user to a
+   * desktop that was not driving anything. `reasonCode` is the receipt's own
+   * rejection code, and {@link SECOND_CLAIMANT_CODE} is the only one that means
+   * somebody else is holding the wheel.
    */
-  abortTurn: (sessionId: string) => Promise<boolean>
+  abortTurn: (sessionId: string) => Promise<{ stopped: boolean; reasonCode?: string }>
 }
+
+/**
+ * The HostState rejection that means another device is the effective
+ * controller of this session (`notControllerReceipt` in
+ * `lib/sync/host-state-service.ts`).
+ *
+ * Named here because it is the one refusal the panel has a different sentence
+ * for: the run is healthy and the remedy is on the other device, rather than
+ * anything the browser can retry.
+ */
+export const SECOND_CLAIMANT_CODE = "host_state_not_controller"
 
 /** `cognia://session/<id>` — the link that opens the task on the desktop. */
 export function browserSubmissionDeepLink(sessionId: string): string {
@@ -277,16 +293,20 @@ export async function submitBrowserContext(
   if (!validation.ok) throw rejectionError(validation.rejection)
   const request = validation.request
 
-  // Resolved before either branch, because a redrive has to reproduce the
-  // prompt the first attempt built — and for a template that means rendering it
-  // again from a declaration that may since have changed or gone.
-  const target = await resolveSubmissionTarget(deps, deviceId, request)
-  const instruction = await resolveSubmissionInstruction(deps, target, request)
-
-  // Replay before anything is created. The RPC layer already replays the
-  // receipt for a repeated Idempotency-Key, so reaching here twice means the
-  // ledger was cleared or the key was reused across restarts — either way, a
-  // second session for one user action is the failure this exists to prevent.
+  // Replay before anything is resolved or created. The RPC layer already
+  // replays the receipt for a repeated Idempotency-Key, so reaching here twice
+  // means the ledger was cleared or the key was reused across restarts —
+  // either way, a second session for one user action is the failure this
+  // exists to prevent.
+  //
+  // Resolving the target FIRST is what this used to do, and it turned the
+  // ordinary retry into a refusal: a submission that succeeded but whose
+  // response was lost is replayed with the same id, and re-resolving rebuilt
+  // the catalogue from scratch — so a `session:` target evicted from the
+  // recent window, or a template deleted since, answered `unknown_target` for
+  // work that had already run. It also re-recorded a template use per replay.
+  // Nothing in the replay path needs the target unless the row is redrivable,
+  // so the resolution moved inside that branch.
   const urlFingerprint = await sha256Hex(request.context.url)
   const existing = await deps.readSubmission(request.submissionId)
   if (existing) {
@@ -298,9 +318,14 @@ export async function submitBrowserContext(
     }
     let status = existing.status
     if (REDRIVABLE_STATUSES.includes(existing.status)) {
+      // Only here, because only a redrive has to reproduce the prompt the first
+      // attempt built — and for a template that means rendering it again from a
+      // declaration that may since have changed or gone.
+      const redriveTarget = await resolveSubmissionTarget(deps, deviceId, request)
+      const redriveInstruction = await resolveSubmissionInstruction(deps, redriveTarget, request)
       const { prompt, derivedTitle } = buildBrowserContextPrompt(
         request.context,
-        instruction,
+        redriveInstruction,
         request.suggestedTitle
       )
       // The submission id is the caller's, so "the row is still mid-flight"
@@ -327,6 +352,11 @@ export async function submitBrowserContext(
       ...workReference(existing),
     }
   }
+
+  // Nothing above this line created anything, so this is the first submission
+  // under this id and the catalogue lookup is a decision rather than a replay.
+  const target = await resolveSubmissionTarget(deps, deviceId, request)
+  const instruction = await resolveSubmissionInstruction(deps, target, request)
 
   const workspaces = await deps.listWorkspaces()
   // The workspace must be one the Host offered. Accepting an arbitrary id
@@ -727,11 +757,22 @@ export async function cancelBrowserContext(
       "this submission did not start a conversation"
     )
   }
-  const stopped = await deps.abortTurn(status.sessionId)
-  if (!stopped) {
+  const abort = await deps.abortTurn(status.sessionId)
+  if (!abort.stopped) {
+    // Only the second-claimant refusal gets the second-claimant sentence. Every
+    // other outcome — a stale host generation, a run that is not accepting an
+    // abort, no receipt at all — is a refusal the user cannot fix by walking to
+    // another machine, and saying so would be a wrong instruction rather than a
+    // vague one.
+    if (abort.reasonCode === SECOND_CLAIMANT_CODE) {
+      throw new BrowserCompanionError(
+        "session_driven_elsewhere",
+        "another device is driving this task; stop it there"
+      )
+    }
     throw new BrowserCompanionError(
-      "session_driven_elsewhere",
-      "another device is driving this task; stop it there"
+      "abort_refused",
+      `the Host refused the stop: ${abort.reasonCode ?? "no receipt"}`
     )
   }
   // Read the status back rather than assuming `cancelled`: an abort is a
@@ -741,20 +782,38 @@ export async function cancelBrowserContext(
 }
 
 /**
- * Cut text to a byte ceiling on a character boundary, and say whether it was
+ * Cut text to a byte ceiling on a CODEPOINT boundary, and say whether it was
  * cut.
  *
- * The loop steps back a character at a time so a multi-byte codepoint is never
- * split into a replacement character — the same shape the extension's own
- * clipper has, for the same reason.
+ * A binary search over code-unit offsets, then one step back off a lone
+ * surrogate. The previous loop claimed "a multi-byte codepoint is never split
+ * into a replacement character" but stepped by UTF-16 code units, so a cut
+ * landing inside an emoji left an unpaired high surrogate that every UTF-8
+ * encoder turns into U+FFFD — the exact outcome the comment promised to avoid.
+ * It also re-measured the whole prefix on each of many iterations, which on a
+ * 32 KiB CJK answer walked the string dozens of times; the search is
+ * logarithmic instead.
  */
 function clipToBytes(value: string, limitBytes: number): { text: string; truncated: boolean } {
   if (utf8ByteLength(value) <= limitBytes) return { text: value, truncated: false }
-  let cut = value.length
-  while (cut > 0 && utf8ByteLength(value.slice(0, cut)) > limitBytes) {
-    cut = Math.max(0, cut - Math.ceil((utf8ByteLength(value.slice(0, cut)) - limitBytes) / 4) - 1)
+  // Largest code-unit count whose UTF-8 encoding still fits.
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (utf8ByteLength(value.slice(0, mid)) <= limitBytes) low = mid
+    else high = mid - 1
   }
+  // `low` may sit between a surrogate pair. Backing off one unit is always
+  // enough: a pair is exactly two units, and dropping the high surrogate can
+  // only shrink the encoding.
+  const cut = low > 0 && isHighSurrogate(value.charCodeAt(low - 1)) ? low - 1 : low
   return { text: value.slice(0, cut), truncated: true }
+}
+
+/** A UTF-16 leading surrogate — the first half of an astral codepoint. */
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff
 }
 
 /**

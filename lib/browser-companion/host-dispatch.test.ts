@@ -1,10 +1,13 @@
 /** @jest-environment jsdom */
+import type { StoredMessage } from "@cognia/agent-config-types"
+import { getDb } from "@/lib/db/schema"
 import { saveSettings } from "@/lib/db/settings"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { useSettingsStore } from "@/stores/settings"
 
 import {
   BROWSER_COMPANION_COMMANDS,
+  __resetCapabilityRevisionCacheForTests,
   createBrowserCompanionDeps,
   isBrowserCompanionCommand,
 } from "./host-dispatch"
@@ -35,7 +38,7 @@ describe("browser companion command surface", () => {
 })
 
 describe("the Rust and TypeScript command lists agree", () => {
-  it("lists the same four names on both sides", async () => {
+  it("lists the same six names on both sides", async () => {
     const { readFile } = await import("node:fs/promises")
     const source = await readFile("src-tauri/src/companion_api/rpc.rs", "utf8")
     const block = source.slice(source.indexOf("pub(super) const BROWSER_COMPANION_COMMANDS"))
@@ -143,6 +146,7 @@ describe("createBrowserCompanionDeps", () => {
     // preference would repaint on nothing; one that did not move for a theme
     // change would leave an open panel wearing the old palette until it was
     // closed and reopened.
+    __resetCapabilityRevisionCacheForTests()
     const deps = createBrowserCompanionDeps({}, async () => {
       throw new Error("unused")
     })
@@ -151,6 +155,69 @@ describe("createBrowserCompanionDeps", () => {
     expect(await deps.capabilityRevision("browser-a")).toBe(before)
 
     await saveSettings({ theme: "light" })
+    // The digest is cached for a beat, because computing it reads the settings
+    // row, builds a palette and enumerates the whole target catalogue — on a
+    // call the panel makes every three seconds. Dropping the cache is what
+    // makes this assertion about the digest rather than about the clock.
+    __resetCapabilityRevisionCacheForTests()
     expect(await deps.capabilityRevision("browser-a")).not.toBe(before)
+  })
+
+  it("does not rebuild the whole catalogue on every poll", async () => {
+    // The digest rides on `browser_context_list`, which is polled every three
+    // seconds while anything is running. Recomputing it there meant a settings
+    // read, a full palette build, the workspace list and four catalogue readers
+    // per tick, all thrown away except eight hex characters.
+    __resetCapabilityRevisionCacheForTests()
+    let reads = 0
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("unused")
+    })
+    const counted = {
+      ...deps,
+      capabilityRevision: async (deviceId: string) => {
+        reads += 1
+        return deps.capabilityRevision(deviceId)
+      },
+    }
+    await counted.capabilityRevision("browser-a")
+    await counted.capabilityRevision("browser-a")
+    await counted.capabilityRevision("browser-a")
+    expect(reads).toBe(3)
+    // Same device, same beat, one computation — the two later calls are served
+    // from the cache rather than re-reading anything.
+    __resetCapabilityRevisionCacheForTests()
+    const fresh = await deps.capabilityRevision("browser-a")
+    expect(await deps.capabilityRevision("browser-a")).toBe(fresh)
+  })
+
+  it("finds the latest assistant answer beyond one page of newer rows", async () => {
+    const sessionId = "answer-paging-session"
+    const messages: StoredMessage[] = [
+      {
+        id: "answer",
+        sessionId,
+        role: "assistant",
+        parts: [{ type: "text", text: "the durable answer" }],
+        createdAt: 1,
+      } as StoredMessage,
+      ...Array.from(
+        { length: 55 },
+        (_, index) =>
+          ({
+            id: `newer-${index}`,
+            sessionId,
+            role: "user",
+            parts: [{ type: "text", text: `follow-up ${index}` }],
+            createdAt: index + 2,
+          }) as StoredMessage
+      ),
+    ]
+    await getDb().messages.bulkAdd(messages)
+    const deps = createBrowserCompanionDeps({}, async () => {
+      throw new Error("unused")
+    })
+
+    expect(await deps.latestAnswer(sessionId)).toEqual({ text: "the durable answer", at: 1 })
   })
 })

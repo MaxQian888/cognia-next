@@ -59,6 +59,19 @@ export const NEW_CHAT_LABEL = "New task"
  */
 export const MAX_SESSION_TARGETS = 6
 
+/**
+ * How many recent rows are read to find those {@link MAX_SESSION_TARGETS}.
+ *
+ * A separate number, because most rows in the ledger are not append targets:
+ * a `submitting` or `failed` row has no landed conversation, and an issue or an
+ * agent task is not a conversation at all. Reading exactly
+ * {@link MAX_SESSION_TARGETS} rows and then filtering meant the cap counted
+ * rows SCANNED rather than targets OFFERED — six pages filed as issues emptied
+ * the dropdown completely, while appendable conversations sat just behind them
+ * in a ledger that keeps a hundred per device.
+ */
+export const SESSION_TARGET_SCAN = 40
+
 export interface DeliveryTargetDeps {
   /** This device's submissions, newest first — the same reader the list uses. */
   listSubmissions: (deviceId: string, limit: number) => Promise<BrowserSubmissionRow[]>
@@ -148,8 +161,10 @@ export async function listDeliveryTargets(
     { id: NEW_CHAT_TARGET_ID, kind: "chat", label: NEW_CHAT_LABEL, isDefault: true },
   ]
   if (!deviceId) return targets
-  const rows = await deps.listSubmissions(deviceId, MAX_SESSION_TARGETS)
+  const rows = await deps.listSubmissions(deviceId, SESSION_TARGET_SCAN)
+  let offeredSessions = 0
   for (const row of rows) {
+    if (offeredSessions >= MAX_SESSION_TARGETS) break
     // A submission that never started has no conversation to append to. Its
     // own retry is the way to finish it, and offering it here would look like
     // a second, different way to do the same thing.
@@ -168,6 +183,7 @@ export async function listDeliveryTargets(
       ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}),
       detail: row.sourceHost,
     })
+    offeredSessions += 1
   }
   for (const template of await deps.listTemplates()) {
     const params = browserFillableParams(template)

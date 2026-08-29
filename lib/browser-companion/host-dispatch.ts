@@ -43,7 +43,7 @@ import {
   type BrowserCompanionDeps,
 } from "./service"
 
-/** The four commands this module answers. */
+/** The six commands this module answers. */
 export const BROWSER_COMPANION_COMMANDS: readonly string[] = [
   "browser_companion_capability",
   "browser_context_submit",
@@ -105,12 +105,7 @@ export function createBrowserCompanionDeps(
     // Built from the same readers the capability call uses, so the digest and
     // the answer it describes cannot disagree — a revision derived from
     // anything else would be a second definition of "what the capability is".
-    capabilityRevision: async (callerDeviceId) =>
-      capabilityRevisionOf({
-        workspaces: await listHostWorkspaces(),
-        deliveryTargets: await listDeliveryTargets(targetDeps(), callerDeviceId),
-        ...(await hostAppearance()),
-      }),
+    capabilityRevision: cachedCapabilityRevision,
     createIssue: fileHostIssue,
     createAgentTask: startHostAgentTask,
     workStatus: hostWorkStatus,
@@ -268,11 +263,25 @@ async function enqueueOnHostAuthority(
 }
 
 /**
+ * How many rows to deserialize at once while looking for the assistant's last
+ * words.
+ *
+ * Paging keeps memory bounded without changing the meaning of "latest": a long
+ * tool/reasoning tail may contain more than one page of rows before the text
+ * answer it belongs to.
+ */
+const LATEST_ANSWER_PAGE_SIZE = 50
+
+/**
  * The last thing the assistant said in a session.
  *
  * Text parts only. A tool call, a file part or a reasoning block is not an
  * answer, and concatenating them would hand the panel a wall of machinery
  * instead of the reply — the deep link is how somebody reads the rest.
+ *
+ * Reads the tail directly off the `[sessionId+createdAt]` index rather than
+ * through `listMessages`, which has no bound and hoists metadata this does not
+ * look at. `createdAt` comes off the column for the same reason.
  *
  * `null` rather than an empty string when there is nothing yet, so the caller
  * can tell "the task has not answered" from "the task answered with nothing".
@@ -280,27 +289,35 @@ async function enqueueOnHostAuthority(
 async function latestAssistantAnswer(
   sessionId: string
 ): Promise<{ text: string; at: number } | null> {
-  const { listMessages } = await import("@/lib/db/messages")
-  const messages = await listMessages(sessionId)
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message.role !== "assistant") continue
-    const text = (message.parts ?? [])
-      .filter(
-        (part): part is { type: "text"; text: string } =>
-          typeof part === "object" &&
-          part !== null &&
-          (part as { type?: unknown }).type === "text" &&
-          typeof (part as { text?: unknown }).text === "string"
-      )
-      .map((part) => part.text)
-      .join("")
-      .trim()
-    if (!text) continue
-    const at = (message.metadata as { createdAt?: unknown } | undefined)?.createdAt
-    return { text, at: typeof at === "number" ? at : Date.now() }
+  const { getDb } = await import("@/lib/db/schema")
+  // Newest first, so the first hit is the answer and the first page handles the
+  // common case. Further pages preserve correctness for machinery-heavy turns.
+  for (let offset = 0; ; offset += LATEST_ANSWER_PAGE_SIZE) {
+    const rows = await getDb()
+      .messages.where("[sessionId+createdAt]")
+      .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+      .reverse()
+      .offset(offset)
+      .limit(LATEST_ANSWER_PAGE_SIZE)
+      .toArray()
+    for (const message of rows) {
+      if (message.role !== "assistant") continue
+      const text = (message.parts ?? [])
+        .filter(
+          (part): part is { type: "text"; text: string } =>
+            typeof part === "object" &&
+            part !== null &&
+            (part as { type?: unknown }).type === "text" &&
+            typeof (part as { text?: unknown }).text === "string"
+        )
+        .map((part) => part.text)
+        .join("")
+        .trim()
+      if (!text) continue
+      return { text, at: typeof message.createdAt === "number" ? message.createdAt : Date.now() }
+    }
+    if (rows.length < LATEST_ANSWER_PAGE_SIZE) return null
   }
-  return null
 }
 
 /**
@@ -313,15 +330,21 @@ async function latestAssistantAnswer(
  * batch of one.
  *
  * `turn.abort` is a live-control intent, so `isSecondClaimant` refuses it while
- * another device holds the attach lease. That refusal is returned as `false`
- * rather than thrown: it means the run is healthy and the desktop is driving
- * it, which is a different thing to tell somebody than "this failed".
+ * another device holds the attach lease. That refusal is returned rather than
+ * thrown: it means the run is healthy and the desktop is driving it, which is a
+ * different thing to tell somebody than "this failed".
+ *
+ * The receipt's `rejection.code` is carried out with it. Collapsing every
+ * non-applied outcome into one boolean made `conflicted` (a stale
+ * `hostGeneration`) and every other rejection read as the second-claimant
+ * refusal, so the panel told people to go stop the task on a device that was
+ * not driving it.
  */
 async function abortOnHostAuthority(
   payload: Record<string, unknown>,
   resolveHostState: HostStateResolver,
   sessionId: string
-): Promise<boolean> {
+): Promise<{ stopped: boolean; reasonCode?: string }> {
   const active = getActiveRuntimeTargetContext()
   if (!active) {
     throw new BrowserCompanionError(
@@ -352,7 +375,80 @@ async function abortOnHostAuthority(
     { deviceId: "host:browser-companion", grants: ["workspace.write"] }
   )
   const receipt = response.results[0]
-  return receipt?.outcome === "applied" || receipt?.outcome === "duplicate"
+  if (receipt?.outcome === "applied" || receipt?.outcome === "duplicate") {
+    return { stopped: true }
+  }
+  return {
+    stopped: false,
+    // The rejection's own code when there is one; otherwise the outcome, so
+    // `conflicted` and "no receipt" still say something specific.
+    ...(receipt?.rejection?.code
+      ? { reasonCode: receipt.rejection.code }
+      : receipt
+        ? { reasonCode: receipt.outcome }
+        : {}),
+  }
+}
+
+/**
+ * How long a computed revision stands before it is recomputed.
+ *
+ * The digest rides on `browser_context_list`, which the panel polls every three
+ * seconds while anything is running — and computing it reads the settings row,
+ * builds a full palette, loads the workspaces, and enumerates submissions,
+ * templates, issue boards and characters, only to throw all of it away and keep
+ * eight hex characters. None of those change on their own; they change when the
+ * user does something in the app.
+ *
+ * Two seconds is under the poll interval, so a panel that asks twice in quick
+ * succession (a list plus the refresh a submission triggers) pays once, while a
+ * theme or workspace change is still noticed on the following tick.
+ */
+const CAPABILITY_REVISION_TTL_MS = 2_000
+
+/**
+ * The last computed revision per device, with the wall clock it was computed
+ * at.
+ *
+ * Per device because the catalogue is device-scoped: the session targets in it
+ * are the ones that browser started, so two paired browsers legitimately have
+ * different digests.
+ */
+const capabilityRevisionCache = new Map<string, { at: number; revision: string }>()
+
+/**
+ * Drop every entry past its TTL.
+ *
+ * The key is caller-supplied, so without this the map is a device id the Host
+ * never forgets: a browser that pairs once, submits once and is never seen
+ * again keeps a row for the life of the process, and nothing removes the rows
+ * of unpaired or revoked devices either. An expired entry is worthless by
+ * definition — it would be recomputed on the next read — so the sweep costs
+ * nothing but the walk, on a map that only ever holds live pollers.
+ */
+function evictStaleCapabilityRevisions(now: number): void {
+  for (const [deviceId, entry] of capabilityRevisionCache) {
+    if (now - entry.at >= CAPABILITY_REVISION_TTL_MS) capabilityRevisionCache.delete(deviceId)
+  }
+}
+
+async function cachedCapabilityRevision(callerDeviceId: string): Promise<string> {
+  const now = Date.now()
+  const cached = capabilityRevisionCache.get(callerDeviceId)
+  if (cached && now - cached.at < CAPABILITY_REVISION_TTL_MS) return cached.revision
+  evictStaleCapabilityRevisions(now)
+  const revision = capabilityRevisionOf({
+    workspaces: await listHostWorkspaces(),
+    deliveryTargets: await listDeliveryTargets(targetDeps(), callerDeviceId),
+    ...(await hostAppearance()),
+  })
+  capabilityRevisionCache.set(callerDeviceId, { at: now, revision })
+  return revision
+}
+
+/** Test seam — the cache is process-global, so a suite has to be able to drop it. */
+export function __resetCapabilityRevisionCacheForTests(): void {
+  capabilityRevisionCache.clear()
 }
 
 /**
@@ -376,12 +472,20 @@ function targetDeps() {
  *
  * Open boards only: a completed, cancelled or paused board is not a place to
  * file new work, and offering one would put an issue somewhere nobody is
- * looking. `backlog` is left out for the same reason — it is a board nobody has
- * started.
+ * looking.
+ *
+ * `backlog` IS a place to file new work, and leaving it out made the whole
+ * file-as-issue target invisible for the common case: `createIssueProject`
+ * stamps `backlog` on every new board, so a user who had just made a project
+ * opened the side panel and found no issue target at all — indistinguishable
+ * from a Host that cannot file issues. A board nobody has started yet is
+ * exactly where an unsorted capture belongs.
  */
+const FILEABLE_BOARD_STATUSES = ["backlog", "planned", "in_progress"] as const
+
 async function hostIssueBoards(): Promise<{ id: string; name: string; workspaceId: string }[]> {
   const { listIssueProjects } = await import("@/lib/db/issue-projects")
-  const boards = await listIssueProjects({ statuses: ["planned", "in_progress"] })
+  const boards = await listIssueProjects({ statuses: FILEABLE_BOARD_STATUSES })
   return boards.map((board) => ({
     id: board.id,
     name: board.name,

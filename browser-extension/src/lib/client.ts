@@ -139,7 +139,7 @@ export async function pairWithHost({
   }
 }
 
-/** The four calls the panel makes, over one authenticated session. */
+/** The six calls the panel makes, over one authenticated session. */
 export interface HostClient {
   /**
    * What the Host can do, and how it looks.

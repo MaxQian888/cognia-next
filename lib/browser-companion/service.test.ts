@@ -10,6 +10,7 @@ import {
   getBrowserContextSubmission,
   listBrowserContextSubmissions,
   submitBrowserContext,
+  SECOND_CLAIMANT_CODE,
   type BrowserCompanionDeps,
 } from "./service"
 import { listDeliveryTargets } from "./targets"
@@ -36,6 +37,12 @@ interface Harness {
   startedTasks: unknown[]
   workStatuses: Map<string, BrowserSubmissionRow["status"]>
   abortRefused: boolean
+  /** The rejection code the refused abort answers with. */
+  abortRefusalCode: string
+  /** The Host's templates, mutable so a test can delete one mid-flight. */
+  templates: ChatTemplateRow[]
+  /** Every `renderTemplate` call — the harness's stand-in for `recordChatTemplateUse`. */
+  renderedTemplates: string[]
 }
 
 function harness(
@@ -57,7 +64,13 @@ function harness(
   const workStatuses = new Map<string, BrowserSubmissionRow["status"]>()
   const answers = new Map<string, { text: string; at: number }>()
   const aborted: string[] = []
-  const state = { sessionStatusThrows: false, followsSystem: false, abortRefused: false }
+  const renderedTemplates: string[] = []
+  const state = {
+    sessionStatusThrows: false,
+    followsSystem: false,
+    abortRefused: false,
+    abortRefusalCode: SECOND_CLAIMANT_CODE,
+  }
   let sessionCounter = 0
   const deps: BrowserCompanionDeps = {
     now: () => 1_700_000_000_000,
@@ -113,6 +126,10 @@ function harness(
     },
     workStatus: async (_kind, workId) => workStatuses.get(workId) ?? null,
     renderTemplate: async (templateId, values) => {
+      // Counted, because the real one records the use on the way out — so a
+      // render that should not have happened is a write that should not have
+      // happened.
+      renderedTemplates.push(templateId)
       const found = templates.find((entry) => entry.id === templateId)
       if (!found) return null
       const missing = found.params
@@ -134,7 +151,9 @@ function harness(
     latestAnswer: async (sessionId) => answers.get(sessionId) ?? null,
     abortTurn: async (sessionId) => {
       aborted.push(sessionId)
-      return !state.abortRefused
+      return state.abortRefused
+        ? { stopped: false, reasonCode: state.abortRefusalCode }
+        : { stopped: true }
     },
     ...overrides,
   }
@@ -149,6 +168,8 @@ function harness(
     filedIssues,
     startedTasks,
     workStatuses,
+    templates,
+    renderedTemplates,
     get sessionStatusThrows() {
       return state.sessionStatusThrows
     },
@@ -166,6 +187,12 @@ function harness(
     },
     set abortRefused(value: boolean) {
       state.abortRefused = value
+    },
+    get abortRefusalCode() {
+      return state.abortRefusalCode
+    },
+    set abortRefusalCode(value: string) {
+      state.abortRefusalCode = value
     },
   }
 }
@@ -671,6 +698,27 @@ describe("getBrowserContextResult", () => {
     expect(Buffer.byteLength(result.text ?? "", "utf8")).toBeLessThanOrEqual(32 * 1024)
   })
 
+  it("never cuts an astral codepoint in half", async () => {
+    // The old clipper stepped by UTF-16 CODE UNITS while promising it stepped
+    // by characters, so a ceiling landing inside an emoji left an unpaired high
+    // surrogate — which every UTF-8 encoder renders as U+FFFD. Emoji are four
+    // bytes each, so sweeping the ceiling walks the cut across every offset of
+    // a pair.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.answers.set("session-1", { text: "😀".repeat(9_000), at: 1 })
+    const result = await getBrowserContextResult(h.deps, "browser-a", { submissionId: "sub-1" })
+    expect(result.truncated).toBe(true)
+    expect(result.text).not.toContain("\ufffd")
+    // A lone surrogate at either end is the defect itself, and it survives a
+    // `toContain` check because the replacement only appears once encoded.
+    expect(/[\ud800-\udbff]$/.test(result.text ?? "")).toBe(false)
+    expect(/^[\udc00-\udfff]/.test(result.text ?? "")).toBe(false)
+    expect(Buffer.byteLength(result.text ?? "", "utf8")).toBeLessThanOrEqual(32 * 1024)
+    // Whole emoji only.
+    expect([...(result.text ?? "")].every((char) => char === "😀")).toBe(true)
+  })
+
   it("answers another device's submission exactly as a missing one", async () => {
     const h = harness()
     await submitBrowserContext(h.deps, "browser-a", payload())
@@ -701,6 +749,20 @@ describe("cancelBrowserContext", () => {
     await expect(
       cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
     ).rejects.toMatchObject({ code: "session_driven_elsewhere" })
+  })
+
+  it("does not call every refusal a second driver", async () => {
+    // A stale `hostGeneration` comes back as `conflicted`, and a run that will
+    // not take an abort comes back with its own rejection code. Neither is
+    // fixed by walking to another machine, so neither may borrow the sentence
+    // that tells somebody to.
+    const h = harness()
+    await submitBrowserContext(h.deps, "browser-a", payload())
+    h.abortRefused = true
+    h.abortRefusalCode = "conflicted"
+    await expect(
+      cancelBrowserContext(h.deps, "browser-a", { submissionId: "sub-1" })
+    ).rejects.toMatchObject({ code: "abort_refused" })
   })
 
   it("will not stop a task belonging to another device", async () => {
@@ -779,6 +841,34 @@ describe("submitting through a template", () => {
     expect(texts).toHaveLength(2)
     expect(texts[0]).toBe(texts[1])
     expect(h.createdSessions).toHaveLength(1)
+  })
+
+  it("replays an accepted submission whose template has since been deleted", async () => {
+    // The ordinary lost-response retry. Resolving the target before the ledger
+    // check refused it as `unknown_target` — reporting a failure for work that
+    // had already run, which is exactly what the idempotency key exists to
+    // prevent. Nothing in a settled replay needs the target.
+    const h = harness({ templates: [TEMPLATE] })
+    const body = payload({ targetId: "template:tpl-1", targetParams: { tone: "plain English" } })
+    const first = await submitBrowserContext(h.deps, "browser-a", body)
+    h.templates.length = 0
+    await expect(submitBrowserContext(h.deps, "browser-a", body)).resolves.toMatchObject({
+      submissionId: first.submissionId,
+      status: first.status,
+    })
+    expect(h.createdSessions).toHaveLength(1)
+  })
+
+  it("does not re-record a template use on a settled replay", async () => {
+    // `renderTemplate` records the use on the way out, so re-rendering on every
+    // duplicate submit bumped the count and rewrote `lastParams` for a request
+    // that produced nothing.
+    const h = harness({ templates: [TEMPLATE] })
+    const body = payload({ targetId: "template:tpl-1", targetParams: { tone: "plain English" } })
+    await submitBrowserContext(h.deps, "browser-a", body)
+    const rendersAfterFirst = h.renderedTemplates.length
+    await submitBrowserContext(h.deps, "browser-a", body)
+    expect(h.renderedTemplates).toHaveLength(rendersAfterFirst)
   })
 })
 

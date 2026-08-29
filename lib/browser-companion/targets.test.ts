@@ -147,6 +147,31 @@ describe("listDeliveryTargets", () => {
     // one nearest the top.
     expect(targets[1].id).toBe(sessionTargetId(`session-${MAX_SESSION_TARGETS + 3}`))
   })
+
+  it("looks past rows that are not append targets to fill the list", async () => {
+    // The cap counts targets OFFERED, not rows scanned. Reading exactly
+    // `MAX_SESSION_TARGETS` rows and then filtering emptied the dropdown the
+    // moment somebody filed that many pages as issues — while appendable
+    // conversations sat one row behind them in a ledger that keeps a hundred.
+    const filed = Array.from({ length: MAX_SESSION_TARGETS }, (_unused, index) =>
+      row({
+        submissionId: `issue-sub-${index}`,
+        sessionId: undefined,
+        workKind: "issue",
+        workId: `issue-${index}`,
+        submittedAt: 1_000 + index,
+      })
+    )
+    const conversations = Array.from({ length: 2 }, (_unused, index) =>
+      row({
+        submissionId: `chat-sub-${index}`,
+        sessionId: `session-${index}`,
+        submittedAt: 100 + index,
+      })
+    )
+    const targets = await listDeliveryTargets(deps([...filed, ...conversations]), "browser-a")
+    expect(targets.filter((target) => target.kind === "session")).toHaveLength(2)
+  })
 })
 
 describe("resolveDeliveryTarget", () => {

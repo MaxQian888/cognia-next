@@ -409,9 +409,16 @@ export function SidePanel({
           // palette every three seconds for a thing that changes when the user
           // does something.
           if (page.capabilityRevision && page.capabilityRevision !== revisionRef.current) {
-            revisionRef.current = page.capabilityRevision
+            // The ref advances only once the new capability is actually in
+            // hand. Marking it seen up front meant a single transient failure
+            // — a throw the outer catch swallows, an incompatible answer, a
+            // teardown mid-flight — left the panel matching a revision whose
+            // content it never received, so no later tick ever retried and the
+            // targets and palette stayed stale until the Host moved again for
+            // an unrelated reason.
             const refreshed = await clientRef.current?.capability(preferredModeRef.current)
             if (refreshed && isCompatible(refreshed) && !stopped) {
+              revisionRef.current = page.capabilityRevision
               applyAppearance(document.documentElement, refreshed.appearance)
               void api.write(STORAGE_KEYS.appearance, refreshed.appearance)
               setState((current) =>
@@ -533,6 +540,14 @@ export function SidePanel({
     const chosen = offered.find((target) => target.id === chosenTarget)
     const declaredParams = chosen?.params ?? []
     const declaredTemplate = chosen?.kind === "template"
+    // The Host renders a template's body and REPLACES whatever instruction
+    // arrives, so this value is never read for the turn — but `instruction` is
+    // `required` with `minLength: 1` on the wire, so sending "" made every
+    // template submission a 422 that never reached the Host at all. The
+    // template's own name is non-empty by construction (it is the label the
+    // user just picked) and is the honest answer to "what was asked" from a
+    // client that cannot see the body.
+    const templateInstruction = chosen?.label.trim() || chosenTarget || "template"
     setSubmitting(true)
     setSubmitError(null)
     const draft = {
@@ -553,7 +568,7 @@ export function SidePanel({
       // A template supplies the instruction on the Host; the field is not shown
       // for one, so sending its stale contents would be sending something the
       // user is not looking at.
-      instruction: declaredTemplate ? "" : instruction.trim(),
+      instruction: declaredTemplate ? templateInstruction : instruction.trim(),
       context: {
         schemaVersion: 1 as const,
         captureMode: mode,
