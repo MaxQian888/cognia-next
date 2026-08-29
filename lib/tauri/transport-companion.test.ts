@@ -1213,6 +1213,42 @@ describe("subscribe() — WebSocket frame dispatch", () => {
     expect(transport.getActiveTier()).toBe("offline")
   })
 
+  it("opens the socket on a plaintext loopback Host, where there is no certificate to pin", async () => {
+    // The Host's browser-access listener (`browser_access.rs`) is the only
+    // plane a tab can reach, and a `cgnp3` invitation always carries the
+    // fingerprint. Treating that as "needs a pinned WebSocket" left a
+    // correctly paired browser with a working RPC plane and a permanently
+    // idle events plane — so `WebCompanionBootProvider` never ran `recover()`
+    // and the client never left "the current host is offline".
+    await setConfig({
+      ...MOCK_CONFIG,
+      baseUrl: "http://127.0.0.1:27891",
+      serverFingerprint: "ab".repeat(32),
+    })
+    transport = new CompanionTransport()
+    transport.subscribe("claude://message", jest.fn())
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(transport.getPlaneHealth().events).not.toBe("idle")
+  })
+
+  it("still refuses the socket for an https LAN Host over the same code path", async () => {
+    // The narrowing is about the scheme, not about loopback: an `https://`
+    // loopback Host presents the same un-pinnable self-signed certificate.
+    await setConfig({
+      ...MOCK_CONFIG,
+      baseUrl: "https://127.0.0.1:27890",
+      serverFingerprint: "ab".repeat(32),
+    })
+    transport = new CompanionTransport()
+    transport.subscribe("claude://message", jest.fn())
+
+    expect(wsSpy).not.toHaveBeenCalled()
+    expect(transport.getPlaneHealth().events).toBe("idle")
+  })
+
   it("dispatches payload to handler on matching frame type", () => {
     transport = new CompanionTransport()
     const handler = jest.fn()

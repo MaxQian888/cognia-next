@@ -308,8 +308,45 @@ export type TransportTier =
 // unaffected; the runtime caller is [`CompanionTransport.recomputeTier`].
 export { classifyWsHost }
 
+/**
+ * Whether this Host's event socket needs a pinned-TLS transport the browser
+ * cannot provide.
+ *
+ * The question is narrower than "is this a fingerprinted LAN Host": it is
+ * whether the socket will present a **certificate** at all. A `wss://` socket
+ * to a Cognia Host does — a self-signed one, pinned by SPKI outside any trust
+ * store, which the browser's `WebSocket` constructor has no way to accept. A
+ * `ws://` socket does not; there is nothing to pin, and the RPC plane beside it
+ * is already running over the very same plaintext origin.
+ *
+ * Keying on the fingerprint and the LAN classification alone therefore closed
+ * the events plane on the ONE transport a browser can actually use: the Host's
+ * plaintext loopback listener (`browser_access.rs`, `http://127.0.0.1:27891`),
+ * which is `ws-lan` by hostname and carries a `serverFingerprint` because the
+ * `cgnp3` invitation always does. A correctly paired browser then held a
+ * working RPC plane with `events: "idle"` forever, and since
+ * `WebCompanionBootProvider` only calls `recover()` once the events plane is
+ * ready, it never synced and never left "the current host is offline" — the RPC
+ * calls it was making all along notwithstanding.
+ *
+ * Native shells are unaffected: they dial `https://`, so this still answers
+ * true for them and the pinned WebSocket stays required.
+ */
 function requiresNativePinnedWebSocket(config: CompanionConfig): boolean {
-  return Boolean(config.serverFingerprint) && classifyWsHost(config.baseUrl) === "ws-lan"
+  if (!config.serverFingerprint) return false
+  if (classifyWsHost(config.baseUrl) !== "ws-lan") return false
+  return isTlsBaseUrl(config.baseUrl)
+}
+
+/** True when `baseUrl` yields a `wss://` socket — i.e. one with a certificate. */
+function isTlsBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).protocol === "https:"
+  } catch {
+    // An unparseable base URL is treated as TLS: refusing the socket keeps the
+    // conservative behaviour this predicate has always had on bad input.
+    return true
+  }
 }
 
 // ---------------------------------------------------------------------------
