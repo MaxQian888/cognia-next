@@ -42,7 +42,7 @@ import {
 
 /**
  * Shared-layout id for the active-tab pill. One element slides between the
- * eight stops instead of eight elements cross-fading, which is what makes the
+ * stops instead of one element per stop cross-fading, which is what makes the
  * jump legible — see `components/mobile/shell/mobile-tab-bar.tsx` for the same
  * idiom on the mobile bar.
  */
@@ -85,7 +85,7 @@ export interface WorkspaceTabNavProps {
    * Optional per-tab live signals, merged over `counts`. Only tabs that need
    * the operator's attention get one — an unread reply, or a tab where work is
    * actively happening. Everything else stays quiet on purpose: a rail where
-   * six of eight rows carry a number stops being a signal.
+   * most rows carry a number stops being a signal.
    */
   signals?: Partial<Record<string, WorkspaceTabSignal>>
 }

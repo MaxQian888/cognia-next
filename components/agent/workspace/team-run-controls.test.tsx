@@ -84,3 +84,35 @@ describe("TeamRunControls", () => {
     expect(screen.getByTestId("team-run-controls")).toHaveClass("ml-auto")
   })
 })
+
+/**
+ * A control wired to `undefined` is worse than an absent one: it reads as "the
+ * run refuses" rather than "this surface cannot". The mobile workspace shipped
+ * exactly that — a paused team with an inert Resume button — because only Pause
+ * and Stop were gated on their handlers.
+ */
+describe("no button without a handler", () => {
+  it("omits Resume when the surface cannot resume", () => {
+    render(<TeamRunControls status="paused" />)
+    expect(screen.queryByTestId("resume-team")).not.toBeInTheDocument()
+  })
+
+  it("omits Start when the surface cannot start", () => {
+    render(<TeamRunControls status="idle" />)
+    expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
+  })
+
+  it("omits Abort when the surface cannot abort", () => {
+    render(<TeamRunControls status="executing" />)
+    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
+  })
+
+  it("still renders each one when its handler is supplied", () => {
+    const { rerender } = render(<TeamRunControls status="paused" onResume={jest.fn()} />)
+    expect(screen.getByTestId("resume-team")).toBeInTheDocument()
+    rerender(<TeamRunControls status="idle" onStart={jest.fn()} />)
+    expect(screen.getByTestId("start-team")).toBeInTheDocument()
+    rerender(<TeamRunControls status="executing" onAbort={jest.fn()} />)
+    expect(screen.getByTestId("abort-team")).toBeInTheDocument()
+  })
+})

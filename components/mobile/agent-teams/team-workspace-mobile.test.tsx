@@ -27,11 +27,34 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (s: typeof fakeState) => unknown) => selector(fakeState),
 }))
 
-jest.mock("@/lib/ai/agent/agent-team", () => ({ agentTeamManager: { start: jest.fn() } }))
+const managerPause = jest.fn(async () => undefined)
+const managerResume = jest.fn(async () => undefined)
+const managerShutdown = jest.fn(async () => undefined)
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    start: jest.fn(),
+    pause: (...a: unknown[]) => managerPause(...(a as [])),
+    resume: (...a: unknown[]) => managerResume(...(a as [])),
+    shutdown: (...a: unknown[]) => managerShutdown(...(a as [])),
+  },
+}))
 jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({ abortTeam: jest.fn() }))
 
+// The stub exposes the run-control handlers as buttons: the point of the case
+// below is that this surface passes them at all, not what the shared control
+// block renders (that has its own suite).
 jest.mock("@/components/agent/workspace/overview", () => ({
-  AgentTeamOverview: () => <div data-testid="overview-section" />,
+  AgentTeamOverview: (props: {
+    onPause?: () => void
+    onResume?: () => void
+    onStop?: () => void
+  }) => (
+    <div data-testid="overview-section">
+      <button data-testid="stub-pause" onClick={props.onPause} disabled={!props.onPause} />
+      <button data-testid="stub-resume" onClick={props.onResume} disabled={!props.onResume} />
+      <button data-testid="stub-stop" onClick={props.onStop} disabled={!props.onStop} />
+    </div>
+  ),
 }))
 jest.mock("@/components/agent/workspace/members", () => ({
   AgentTeamMembers: () => <div data-testid="members-section" />,
@@ -89,6 +112,19 @@ describe("<TeamWorkspaceMobile />", () => {
     render(<TeamWorkspaceMobile />)
     await user.click(screen.getByTestId("mobile-team-tab-board"))
     expect(screen.getByTestId("board-section")).toBeInTheDocument()
+  })
+
+  // A paused team used to be a dead end here: the shared control block renders
+  // Resume for a paused run, and this surface passed no handler for it.
+  it("wires pause / resume / stop through to the team manager", async () => {
+    const user = userEvent.setup()
+    render(<TeamWorkspaceMobile />)
+    await user.click(screen.getByTestId("stub-pause"))
+    await user.click(screen.getByTestId("stub-resume"))
+    await user.click(screen.getByTestId("stub-stop"))
+    expect(managerPause).toHaveBeenCalledWith("t1")
+    expect(managerResume).toHaveBeenCalledWith("t1")
+    expect(managerShutdown).toHaveBeenCalledWith("t1")
   })
 
   it("does not mount a second GateModalsHost over the app-root one", () => {

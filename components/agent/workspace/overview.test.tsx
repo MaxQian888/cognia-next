@@ -286,7 +286,17 @@ describe("AgentTeamOverview", () => {
     // Store still says "executing" (optimistic), but the durable run finished.
     liveStatusOverride = "completed"
     const staleTeam = { ...baseTeam, status: "executing" as const }
-    render(<AgentTeamOverview team={staleTeam} teammates={[lead, teammate]} onAbort={jest.fn()} />)
+    render(
+      <AgentTeamOverview
+        team={staleTeam}
+        teammates={[lead, teammate]}
+        // Both handlers, so the assertion below is about which BRANCH the live
+        // status picks — not about which handler happens to be wired. Every
+        // button in the block is gated on its own handler now.
+        onStart={jest.fn()}
+        onAbort={jest.fn()}
+      />
+    )
     expect(screen.getByTestId("team-status").textContent).toContain("completed")
     // Completed → Start is offered, Abort is not.
     expect(screen.getByTestId("start-team")).toBeInTheDocument()

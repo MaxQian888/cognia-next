@@ -15,6 +15,13 @@
  *
  * The `data-testid`s are the historical ones from `overview.tsx` — unchanged so
  * existing suites and any external driver keep working.
+ *
+ * EVERY button is gated on its own handler. Pause and Stop always were; Start,
+ * Abort and Resume were not, so a caller that omitted one rendered an enabled
+ * button wired to `undefined`. That is how the mobile workspace shipped a
+ * paused team with a Resume button that did nothing when tapped: an inert
+ * control is worse than an absent one, because it reads as "the run refuses to
+ * resume" rather than "this surface cannot resume it".
  */
 
 import { useTranslations } from "next-intl"
@@ -68,9 +75,11 @@ export function TeamRunControls({
               {t("pauseTeam")}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
-            {t("abortTeam")}
-          </Button>
+          {onAbort && (
+            <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
+              {t("abortTeam")}
+            </Button>
+          )}
         </>
       ) : status === "paused" ? (
         <>
@@ -79,9 +88,11 @@ export function TeamRunControls({
               {t("stopTeam")}
             </Button>
           )}
-          <Button size="sm" onClick={onResume} data-testid="resume-team">
-            {t("resumeTeam")}
-          </Button>
+          {onResume && (
+            <Button size="sm" onClick={onResume} data-testid="resume-team">
+              {t("resumeTeam")}
+            </Button>
+          )}
         </>
       ) : (
         <>
@@ -95,9 +106,11 @@ export function TeamRunControls({
               {t("startTeamUltracode")}
             </Button>
           )}
-          <Button size="sm" onClick={onStart} data-testid="start-team">
-            {t("startTeam")}
-          </Button>
+          {onStart && (
+            <Button size="sm" onClick={onStart} data-testid="start-team">
+              {t("startTeam")}
+            </Button>
+          )}
         </>
       )}
     </div>

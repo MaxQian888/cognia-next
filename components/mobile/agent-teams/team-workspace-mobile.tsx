@@ -4,7 +4,7 @@
  * Mobile companion Agent-Teams workspace (closes the raw-desktop-page gap).
  *
  * The mobile Discover `TeamCard` links to `/agent-teams/workspace?teamId=…`,
- * which on the phone previously rendered the full desktop 6-tab shell. This
+ * which on the phone previously rendered the full desktop tab shell. This
  * read-mostly body reuses the same workspace sections (Overview / Members /
  * Activity + run history) from the on-device `useAgentTeamStore` and wires
  * Run / Stop through `agentTeamManager`. The @mention composer (Chat tab) and
@@ -159,6 +159,13 @@ export function TeamWorkspaceMobile() {
                 void agentTeamManager.start(team.id, { ultracode: true }).catch(() => undefined)
               }
               onAbort={() => void abortTeam(team.id, new Error("user-aborted"))}
+              // Pause / Resume / Stop reach the same manager the desktop header
+              // uses. Without them a paused team was a dead end on a phone: the
+              // shared run controls rendered Resume regardless, so it was a
+              // button that did nothing, and Stop never appeared at all.
+              onPause={() => void agentTeamManager.pause(team.id).catch(() => undefined)}
+              onResume={() => void agentTeamManager.resume(team.id).catch(() => undefined)}
+              onStop={() => void agentTeamManager.shutdown(team.id).catch(() => undefined)}
               onUpdateTeam={(updates) => {
                 updateTeam(team.id, updates)
                 toast.success(t("teamUpdated"))

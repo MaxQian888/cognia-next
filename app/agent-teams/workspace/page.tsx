@@ -393,11 +393,11 @@ function AgentTeamWorkspaceInner() {
       }
     : { initial: false as const }
 
-  // One console layout for all eight tabs: the chrome (tab rail + header) is
-  // pinned and only the panel body scrolls.
+  // One console layout for every tab: the chrome (tab rail + header) is pinned
+  // and only the panel body scrolls.
   //
   // This used to be two competing models — chat and editor were full-height
-  // while the other six scrolled as a whole page, which took the header with
+  // while the rest scrolled as a whole page, which took the header with
   // them despite it being the surface that carries the live status and the run
   // controls. The editor forced the question: in CodeServer mode a native
   // webview is pinned over the pane and cannot follow DOM scroll, so it can
@@ -449,7 +449,7 @@ function AgentTeamWorkspaceInner() {
             className={cn(
               "min-h-0 flex-1",
               // Chat and the editor need a flex column so their `flex-1` bodies
-              // can claim the remaining height. The other six are plain scroll
+              // can claim the remaining height. The rest are plain scroll
               // blocks — nesting them in a flex column risks a tall panel being
               // shrunk instead of scrolled.
               managesOwnScroll ? "flex flex-col" : "overflow-y-auto"
