@@ -220,7 +220,11 @@ export function RunList({ workflowId }: { workflowId: string }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    // `@container/run-list`: the stat strip sizes against this column, not the
+    // window. The list is also embedded in narrower hosts than the full runs
+    // page, where a viewport `sm:` breakpoint would show four columns in a
+    // fraction of the space it needs.
+    <div className="@container/run-list flex h-full flex-col">
       <header className="flex items-center gap-3 border-b px-6 py-4">
         <Button asChild size="icon" variant="ghost" aria-label={t("backToEditor")}>
           <Link href={`/workflows/editor?id=${encodeURIComponent(workflowId)}`}>
@@ -266,7 +270,7 @@ export function RunList({ workflowId }: { workflowId: string }) {
 
       {runs && runs.length > 0 ? (
         <>
-          <div className="grid grid-cols-2 gap-px border-b bg-border sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-px border-b bg-border @sm/run-list:grid-cols-4">
             <StatCell label={t("stats.total")} value={String(summary.total)} />
             <StatCell
               label={t("stats.successRate")}

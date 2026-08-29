@@ -26,7 +26,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { DEFAULT_MAX_CONCURRENCY } from "@/types/workflow/visual"
-import { Field, FieldGroup } from "../inspector/forms/shared"
+import { Field, FieldGroup, FieldRow } from "../inspector/forms/shared"
 import { DurationField } from "../inspector/forms/shared/duration-field"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { WorkflowVariablesEditor } from "./settings/workflow-variables-editor"
@@ -128,7 +128,11 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
 
   return (
     <ScrollArea className="h-full" data-testid="workflow-settings-tab">
-      <div className="space-y-5 px-4 py-4">
+      {/* `@container/inspector-form`: this panel shares the Context Workbench
+          column with the inspector and is draggable down to 240px, so its
+          `FieldRow`s must size against the panel. Only the rows nested in a
+          `FieldGroup` would otherwise find a container. */}
+      <div className="@container/inspector-form space-y-5 px-4 py-4">
         <section className="space-y-3">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("runPolicy.title")}
@@ -205,7 +209,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                 onChange={(ms) => setSettings({ timeoutMs: ms })}
               />
             </Field>
-            <div className="grid grid-cols-2 gap-2">
+            <FieldRow className="gap-2">
               <Field
                 label={t("concurrency.label")}
                 htmlFor="wf-concurrency"
@@ -238,7 +242,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                   }
                 />
               </Field>
-            </div>
+            </FieldRow>
           </FieldGroup>
         </section>
 
@@ -248,7 +252,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("retry.title")}
           </h4>
-          <div className="grid grid-cols-2 gap-2">
+          <FieldRow className="gap-2">
             <Field label={t("retry.attempts")} htmlFor="wf-retry-attempts">
               <Input
                 id="wf-retry-attempts"
@@ -306,7 +310,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                 }
               />
             </Field>
-          </div>
+          </FieldRow>
         </section>
 
         <Separator />

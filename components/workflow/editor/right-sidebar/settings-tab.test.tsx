@@ -135,12 +135,12 @@ function makeWorkflow(): VisualWorkflow {
 
 function mount(workflow = makeWorkflow()) {
   const store = createEditorStore(workflow)
-  render(
+  const utils = render(
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
       <SettingsTab useStore={store} />
     </NextIntlClientProvider>
   )
-  return store
+  return Object.assign(store, { container: utils.container })
 }
 
 describe("SettingsTab", () => {
@@ -149,6 +149,21 @@ describe("SettingsTab", () => {
     unpublishWorkflow.mockReset()
     useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
     await getDb().hostDispatchQueue.clear()
+  })
+
+  it("sizes its paired fields against the panel, not the window", () => {
+    // The settings panel shares the Context Workbench column with the
+    // inspector and drags down to 240px; two columns there leave ~85px per
+    // control. `FieldRow` queries the container this root declares.
+    const { container } = mount()
+    const root = container.querySelector(".space-y-5") as HTMLElement
+    expect(root.className).toContain("@container/inspector-form")
+    const responsive = container.querySelectorAll('[class*="@xs/inspector-form:grid-cols-2"]')
+    expect(responsive.length).toBeGreaterThan(0)
+    // And nothing keeps two columns unconditionally.
+    for (const el of container.querySelectorAll('[class*="grid-cols-2"]')) {
+      expect(el.className).toContain("@xs/inspector-form:grid-cols-2")
+    }
   })
 
   it("renders all sections", () => {

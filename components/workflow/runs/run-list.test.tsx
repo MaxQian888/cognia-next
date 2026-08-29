@@ -126,6 +126,20 @@ describe("RunList", () => {
     expect(screen.getByText("Success rate").parentElement).toHaveTextContent("50%")
   })
 
+  it("sizes the stat strip against its own column, not the window", async () => {
+    // The list is embedded in hosts far narrower than the runs page; a
+    // viewport `sm:` breakpoint showed four columns inside a fraction of the
+    // space they need, because it was reading the window instead.
+    await seedRun("r1", { status: "succeeded" })
+    const { container } = wrap()
+    await screen.findByTestId("runs-actions-r1")
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain("@container/run-list")
+    const strip = container.querySelector(".grid.grid-cols-2") as HTMLElement
+    expect(strip.className).toContain("@sm/run-list:grid-cols-4")
+    expect(strip.className).not.toContain("sm:grid-cols-4")
+  })
+
   it("filters by status", async () => {
     await seedRun("r1", { status: "succeeded" })
     await seedRun("r2", { status: "failed" })

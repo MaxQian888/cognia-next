@@ -58,6 +58,22 @@ describe("RunStepDetail", () => {
     expect(screen.getByText("Select a step in the timeline to inspect.")).toBeInTheDocument()
   })
 
+  it("sizes the summary stats against its own pane, not the window", () => {
+    // The detail renders both full-width on the runs page and inside the
+    // editor's Context Workbench panel, which drags to 240px. A viewport
+    // `sm:` breakpoint split the stats into two columns inside that panel on
+    // any wide desktop.
+    const { container } = wrap([
+      ev({ ts: 1, type: "step_started" }),
+      ev({ ts: 2, type: "step_completed", payload: { output: {} } }),
+    ])
+    const root = container.querySelector(".space-y-5") as HTMLElement
+    expect(root.className).toContain("@container/run-step")
+    const stats = container.querySelector(".grid.grid-cols-1") as HTMLElement
+    expect(stats.className).toContain("@xs/run-step:grid-cols-2")
+    expect(stats.className).not.toContain("sm:grid-cols-2")
+  })
+
   it("shows the live streaming section while the step is running", () => {
     wrap([
       ev({ ts: 10, type: "step_started", payload: { params: { userPrompt: "hi" } } }),

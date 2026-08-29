@@ -154,7 +154,12 @@ export function RunStepDetail({
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-5 p-5">
+      {/* `@container/run-step`: this detail renders both on the full-width
+          runs page and inside the editor's Context Workbench panel, which
+          drags down to 240px. A viewport `sm:` breakpoint reads the window,
+          so on a wide desktop it split the stat grid into two columns inside
+          a 208px panel. */}
+      <div className="@container/run-step space-y-5 p-5">
         <div className="space-y-1.5">
           <Badge variant="outline" className={cn("font-normal", CATEGORY_BADGE[category])}>
             {entry.kind}
@@ -166,7 +171,7 @@ export function RunStepDetail({
         </div>
 
         {summary ? (
-          <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/30 p-3 text-xs @xs/run-step:grid-cols-2">
             <Stat label={t("duration")} value={formatDurationMs(summary.durationMs)} />
             <Stat label={t("statusLabel")} value={summary.terminalType.replace("step_", "")} />
             {startedEv ? (
