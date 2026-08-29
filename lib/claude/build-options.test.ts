@@ -1555,6 +1555,60 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
   })
 })
 
+describe("resolveSendOptions — the agent mode's A2UI switch", () => {
+  // The custom-mode editor has always written `a2uiEnabled` onto the mode
+  // record (two switches do), and nothing read it: the control changed no
+  // turn. It now sits between the session's explicit toggle and the
+  // character's standing default.
+  const a2uiMode = (a2uiEnabled: boolean) =>
+    ({
+      id: "m-a2ui",
+      type: "custom",
+      name: "Painter",
+      description: "",
+      icon: "Bot",
+      a2uiEnabled,
+    }) as AgentModeConfig
+
+  it("turns A2UI on for a turn running under a mode that asks for it", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: a2uiMode(true),
+    })
+    expect(opts.appendSystemPrompt ?? "").toMatch(/A2UI/i)
+  })
+
+  it("leaves it off when the mode does not ask", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: a2uiMode(false),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toMatch(/A2UI/i)
+  })
+
+  it("yields to the session's own toggle, which is the closer scope", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", a2uiEnabled: false } as ChatSession & {
+        a2uiEnabled?: boolean
+      }),
+      character: makeChar(),
+      agentMode: a2uiMode(true),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toMatch(/A2UI/i)
+  })
+
+  it("outranks the character's standing default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ a2uiEnabled: false }),
+      agentMode: a2uiMode(true),
+    })
+    expect(opts.appendSystemPrompt ?? "").toMatch(/A2UI/i)
+  })
+})
+
 describe("resolveSendOptions — agent-mode prompt template variables", () => {
   it("substitutes {{date}} / {{tools_list}} in the active mode's system prompt", async () => {
     const opts = await resolveSendOptions({

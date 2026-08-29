@@ -2047,8 +2047,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // conversations need A2UI to deliver any interactive UX at all, so
   // making it opt-in per IM session would silently degrade every reply
   // to plain markdown.
+  // Session > agent mode > character > app default. The mode's own switch
+  // ("Enable A2UI" in the custom-mode editor, which also gates its A2UI
+  // template) wrote `a2uiEnabled` onto the record and NOTHING read it — the
+  // control had no effect on any turn. A mode is a per-turn composition
+  // choice, so it belongs under the session's explicit toggle and above the
+  // character's standing default.
   const baseA2uiEnabled =
     (session as { a2uiEnabled?: boolean } | undefined)?.a2uiEnabled ??
+    (activeMode as { a2uiEnabled?: boolean } | undefined)?.a2uiEnabled ??
     character?.a2uiEnabled ??
     appSettings?.a2uiDefaultEnabled ??
     false
