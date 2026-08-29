@@ -45,8 +45,12 @@ Canvas and [Artifacts](../artifacts-sandbox) are two distinct paths that share s
 - **Canvas** — a document meant for continuous editing, with Monaco mounted directly in the main React tree.
 
 The entry point that "upgrades" an artifact into the workspace is `revealArtifactInWorkspace`
-(`lib/artifacts/reveal.ts:4`), triggered by `handleOpenInCanvas` on the chat artifact part
-(`components/chat/message-parts/artifact-part.tsx:48`).
+(`lib/artifacts/reveal.ts:5`), triggered by `handleOpenInCanvas` on the chat artifact part
+(`components/chat/message-parts/artifact-part.tsx:48`). Its twin `revealCanvasDocument`
+(`reveal.ts:44`) does the same for a canvas document that already exists — it activates the
+document and switches the shell to the Canvas guild. There is **no** `/canvas/<id>` route: the app
+is a static export with no dynamic segments, so the anchor the inline canvas card used to render
+404'd on every click.
 
 ## Module Map
 
@@ -65,7 +69,8 @@ Each box is a documentation page. Read the per-module page for line-accurate int
 ```mermaid
 flowchart TB
   subgraph IN["Entry"]
-    REVEAL["revealArtifactInWorkspace<br/>reveal.ts:4"]
+    REVEAL["revealArtifactInWorkspace<br/>reveal.ts:5"]
+    REVEALDOC["revealCanvasDocument<br/>reveal.ts:44"]
     EMPTY["CanvasEmptyState<br/>canvas-empty-state.tsx:16"]
   end
 
@@ -106,6 +111,7 @@ flowchart TB
   end
 
   REVEAL --> SHELL
+  REVEALDOC --> SHELL
   EMPTY --> ART
   SHELL --> RAIL & PANEL & SIDE
   PANEL --> SETUP
@@ -127,7 +133,7 @@ flowchart TB
   classDef ui fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class ART,LAYOUT,CMT,LS,DEX,BRIDGE state
-  class SHELL,RAIL,PANEL,SIDE,REVEAL,EMPTY ui
+  class SHELL,RAIL,PANEL,SIDE,REVEAL,REVEALDOC,EMPTY ui
   class PY,CRDT,WS,SETUP,ACT,AUTOSAVE native
 ```
 

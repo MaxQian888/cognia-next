@@ -8,10 +8,22 @@ import type { CanvasInlinePart as CanvasInlinePartType } from "@/lib/claude/part
 import type { CanvasDocument } from "@/types"
 
 const mockCanvasDocs: Record<string, CanvasDocument | undefined> = {}
+const mockReveal = jest.fn()
+const mockPush = jest.fn()
+let mockPathname = "/"
 
 jest.mock("@/stores/artifact/artifact-store", () => ({
   useArtifactStore: (selector: (s: { canvasDocuments: typeof mockCanvasDocs }) => unknown) =>
     selector({ canvasDocuments: mockCanvasDocs }),
+}))
+
+jest.mock("@/lib/artifacts/reveal", () => ({
+  revealCanvasDocument: (...args: unknown[]) => mockReveal(...args),
+}))
+
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => mockPathname,
 }))
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
@@ -48,6 +60,10 @@ const part = (overrides: Partial<CanvasInlinePartType> = {}): CanvasInlinePartTy
 
 beforeEach(() => {
   for (const k of Object.keys(mockCanvasDocs)) delete mockCanvasDocs[k]
+  mockReveal.mockReset()
+  mockReveal.mockReturnValue(makeCanvas())
+  mockPush.mockReset()
+  mockPathname = "/"
 })
 
 describe("CanvasInlinePart", () => {
@@ -83,12 +99,35 @@ describe("CanvasInlinePart", () => {
     expect(screen.getByTestId("canvas-inline-part-body")).toBeInTheDocument()
   })
 
-  it("Open-in-Canvas link points at /canvas/<id>", () => {
+  it("Open-in-Canvas reveals the document through the store, not a route", () => {
+    mockCanvasDocs["abc"] = makeCanvas({ id: "abc" })
+    const { container } = render(<CanvasInlinePart part={part({ canvasId: "abc" })} />)
+    const open = screen.getByTestId("canvas-inline-part-open")
+    expect(open.tagName).toBe("BUTTON")
+
+    // Regression pin: `/canvas/<id>` is not a route in this static export, so
+    // an anchor here 404s on every click. It must never come back.
+    expect(container.querySelector('a[href^="/canvas/"]')).toBeNull()
+
+    fireEvent.click(open)
+    expect(mockReveal).toHaveBeenCalledWith("abc")
+  })
+
+  it("routes home first when the card is not on the shell route", () => {
+    mockPathname = "/inbox/c"
     mockCanvasDocs["abc"] = makeCanvas({ id: "abc" })
     render(<CanvasInlinePart part={part({ canvasId: "abc" })} />)
-    const link = screen.getByTestId("canvas-inline-part-open")
-    expect(link.tagName).toBe("A")
-    expect(link).toHaveAttribute("href", "/canvas/abc")
+    fireEvent.click(screen.getByTestId("canvas-inline-part-open"))
+    expect(mockPush).toHaveBeenCalledWith("/")
+  })
+
+  it("stays put when the document is gone", () => {
+    mockReveal.mockReturnValue(null)
+    mockPathname = "/inbox/c"
+    mockCanvasDocs["abc"] = makeCanvas({ id: "abc" })
+    render(<CanvasInlinePart part={part({ canvasId: "abc" })} />)
+    fireEvent.click(screen.getByTestId("canvas-inline-part-open"))
+    expect(mockPush).not.toHaveBeenCalled()
   })
 
   it("uses the maxHeight override on the body wrapper", () => {

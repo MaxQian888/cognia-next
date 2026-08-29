@@ -126,7 +126,9 @@
   "canvasInline": {
     "collapsePreview": "折叠预览",
     "expandPreview": "展开预览",
-    "openInCanvas": "在画布中打开"
+    "openInCanvas": "在画布中打开",
+    "subtitle": "画布 · {type}",
+    "subtitleWithLanguage": "画布 · {type} · {language}"
   },
   "characterMissing": {
     "action": {

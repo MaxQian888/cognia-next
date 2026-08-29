@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
-import { revealArtifactInWorkspace } from "./reveal"
+import { revealArtifactInWorkspace, revealCanvasDocument } from "./reveal"
 import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useUIStore } from "@/stores/ui"
 
 afterEach(() => {
   // Reset the store between tests; persist hydration is namespace-scoped
@@ -9,10 +10,13 @@ afterEach(() => {
   useArtifactStore.setState({
     artifacts: {},
     activeArtifactIdBySession: {},
+    canvasDocuments: {},
+    activeCanvasId: null,
     panelOpen: false,
     panelView: "artifact",
   })
   useArtifactDockLayoutStore.getState().resetLayout()
+  useUIStore.getState().setSelectedGuild({ kind: "dm" })
 })
 
 describe("revealArtifactInWorkspace", () => {
@@ -69,5 +73,29 @@ describe("revealArtifactInWorkspace", () => {
     revealArtifactInWorkspace(artifact.id)
 
     expect(useArtifactDockLayoutStore.getState().revealIntent?.panelId).toBe("preview")
+  })
+})
+
+describe("revealCanvasDocument", () => {
+  it("returns null and leaves the guild alone when the document is unknown", () => {
+    expect(revealCanvasDocument("missing")).toBeNull()
+    expect(useUIStore.getState().selectedGuild).toEqual({ kind: "dm" })
+    expect(useArtifactStore.getState().activeCanvasId).toBeNull()
+  })
+
+  it("activates the document and switches the shell to the Canvas guild", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s",
+      title: "Draft",
+      content: "hello",
+      language: "markdown",
+      type: "text",
+    })
+
+    const revealed = revealCanvasDocument(id)
+
+    expect(revealed?.id).toBe(id)
+    expect(useArtifactStore.getState().activeCanvasId).toBe(id)
+    expect(useUIStore.getState().selectedGuild).toEqual({ kind: "canvas" })
   })
 })

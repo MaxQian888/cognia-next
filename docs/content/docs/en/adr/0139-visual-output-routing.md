@@ -17,7 +17,7 @@ Cognia can render a picture five different ways:
 | `mermaid` fence | inline in the message | no |
 | chart artifact | the artifact dock (Recharts) | **yes** — themed, hoverable, versioned, exportable, re-bindable |
 | A2UI surface | inline, and projected into IM | **yes** — with callbacks |
-| canvas document | `/canvas/<id>`, previewed inline | **yes** — editable |
+| canvas document | the Canvas guild (store-driven reveal), previewed inline | **yes** — editable |
 | `diagram-design` skill | a self-contained HTML + inline SVG artifact | no |
 
 Nothing told a model the difference, and two gaps followed.

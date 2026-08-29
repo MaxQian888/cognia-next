@@ -42,8 +42,11 @@ Canvas 与 [Artifacts](../artifacts-sandbox) 是两条共享存储的不同路�
 - **Artifact** —— 一次性生成内容，渲染在沙箱化的 iframe 中。
 - **Canvas** —— 面向持续编辑的文档，Monaco 直接挂载在主 React 树里。
 
-将 artifact「升级」进工作区的入口是 `revealArtifactInWorkspace`（`lib/artifacts/reveal.ts:4`），由聊天
+将 artifact「升级」进工作区的入口是 `revealArtifactInWorkspace`（`lib/artifacts/reveal.ts:5`），由聊天
 artifact 部件上的 `handleOpenInCanvas` 触发（`components/chat/message-parts/artifact-part.tsx:48`）。
+它的孪生函数 `revealCanvasDocument`（`reveal.ts:44`）对已存在的 canvas 文档做同一件事——激活文档并把
+外壳切到 Canvas guild。**不存在 `/canvas/<id>` 路由**：本应用是静态导出、没有任何动态段，所以行内
+canvas 卡片过去渲染的那个锚点每次点击都是 404。
 
 ## 模块地图
 
@@ -62,7 +65,8 @@ artifact 部件上的 `handleOpenInCanvas` 触发（`components/chat/message-par
 ```mermaid
 flowchart TB
   subgraph IN["入口"]
-    REVEAL["revealArtifactInWorkspace<br/>reveal.ts:4"]
+    REVEAL["revealArtifactInWorkspace<br/>reveal.ts:5"]
+    REVEALDOC["revealCanvasDocument<br/>reveal.ts:44"]
     EMPTY["CanvasEmptyState<br/>canvas-empty-state.tsx:16"]
   end
 
@@ -103,6 +107,7 @@ flowchart TB
   end
 
   REVEAL --> SHELL
+  REVEALDOC --> SHELL
   EMPTY --> ART
   SHELL --> RAIL & PANEL & SIDE
   PANEL --> SETUP
@@ -124,7 +129,7 @@ flowchart TB
   classDef ui fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class ART,LAYOUT,CMT,LS,DEX,BRIDGE state
-  class SHELL,RAIL,PANEL,SIDE,REVEAL,EMPTY ui
+  class SHELL,RAIL,PANEL,SIDE,REVEAL,REVEALDOC,EMPTY ui
   class PY,CRDT,WS,SETUP,ACT,AUTOSAVE native
 ```
 

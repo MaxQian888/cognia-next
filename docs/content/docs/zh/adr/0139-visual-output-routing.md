@@ -17,7 +17,7 @@ Cognia 有五种画图方式：
 | `mermaid` 围栏 | 消息内行内 | 否 |
 | chart artifact | artifact dock（Recharts） | **是** —— 跟随主题、可悬停、有版本、可导出、可重绑数据 |
 | A2UI 面 | 行内，并投影到 IM | **是** —— 带回调 |
-| canvas 文档 | `/canvas/<id>`，行内预览 | **是** —— 可编辑 |
+| canvas 文档 | Canvas guild（store 驱动 reveal），行内预览 | **是** —— 可编辑 |
 | `diagram-design` skill | 自包含 HTML + 内联 SVG artifact | 否 |
 
 没有任何东西告诉模型这五者的差别，由此产生两个缺口。

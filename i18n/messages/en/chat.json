@@ -126,7 +126,9 @@
   "canvasInline": {
     "collapsePreview": "Collapse preview",
     "expandPreview": "Expand preview",
-    "openInCanvas": "Open in canvas"
+    "openInCanvas": "Open in canvas",
+    "subtitle": "Canvas · {type}",
+    "subtitleWithLanguage": "Canvas · {type} · {language}"
   },
   "characterMissing": {
     "action": {

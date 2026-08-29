@@ -2,9 +2,14 @@
 
 /**
  * CanvasInlinePart — embeds a low-height read-only preview of a Canvas
- * document directly in the chat thread. Editable canvas surfaces live at
- * `/canvas/<id>`; here we surface just enough context for the user to
- * recognise the document plus an "Open in Canvas" jump.
+ * document directly in the chat thread. Here we surface just enough context
+ * for the user to recognise the document, plus an "Open in Canvas" jump.
+ *
+ * The jump is a store write, not a link. There is no `/canvas/<id>` route and
+ * never was: the app is a static export with no dynamic segments, so the
+ * anchor this used to render 404'd on every click. `revealCanvasDocument`
+ * activates the document and switches the shell to the Canvas guild, which is
+ * what actually mounts `CanvasShell` (`desktop-chat-workspace.tsx`).
  *
  * Why read-only?
  * The Canvas editor is heavy (Monaco + CRDT collab + plugins). Mounting it
@@ -13,7 +18,8 @@
  * "text"`) and provide a single click to jump into the full editor.
  */
 
-import { memo, useState } from "react"
+import { memo, useCallback, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
@@ -26,6 +32,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { ChevronDownIcon, ChevronUpIcon, ExternalLinkIcon, FileWarningIcon } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { revealCanvasDocument } from "@/lib/artifacts/reveal"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import type { CanvasInlinePart as CanvasInlinePartType } from "@/lib/claude/parts-extensions"
@@ -44,6 +51,15 @@ export const CanvasInlinePart = memo(function CanvasInlinePart({
   const tArtifact = useTranslations("chat.artifactPart")
   const canvas = useArtifactStore((s) => s.canvasDocuments[part.canvasId])
   const [open, setOpen] = useState(true)
+  const router = useRouter()
+  const pathname = usePathname()
+
+  // Same shape as `use-shell-nav.ts:goHome` — the Canvas guild only renders on
+  // `/`, so a card opened from `/inbox/c` has to route there first.
+  const handleOpenInCanvas = useCallback(() => {
+    if (!revealCanvasDocument(part.canvasId)) return
+    if (pathname !== "/") router.push("/")
+  }, [part.canvasId, pathname, router])
 
   if (!canvas) {
     return (
@@ -64,7 +80,6 @@ export const CanvasInlinePart = memo(function CanvasInlinePart({
     )
   }
 
-  const canvasHref = `/canvas/${canvas.id}`
   const maxHeight = part.maxHeight ?? 320
 
   return (
@@ -78,20 +93,24 @@ export const CanvasInlinePart = memo(function CanvasInlinePart({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <ArtifactTitle className="truncate">{canvas.title || part.title}</ArtifactTitle>
           <ArtifactDescription className="truncate text-xs">
-            Canvas · {canvas.type}
-            {canvas.language && ` · ${canvas.language}`}
+            {canvas.language
+              ? t("subtitleWithLanguage", { type: canvas.type, language: canvas.language })
+              : t("subtitle", { type: canvas.type })}
           </ArtifactDescription>
         </div>
         <ArtifactActions>
-          <a
-            href={canvasHref}
-            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="size-8 p-0 text-muted-foreground hover:text-foreground"
+            onClick={handleOpenInCanvas}
             data-testid="canvas-inline-part-open"
             aria-label={t("openInCanvas")}
             title={t("openInCanvas")}
+            type="button"
           >
             <ExternalLinkIcon className="size-4" />
-          </a>
+          </Button>
           <Button
             variant="ghost"
             size="sm"
