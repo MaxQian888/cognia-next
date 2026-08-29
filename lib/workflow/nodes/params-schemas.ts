@@ -2047,6 +2047,20 @@ export const PARAMS_SCHEMAS = {
     message: z.string(),
     signoff: z.boolean().optional(),
   }),
+  "action.site.build": z.object({
+    siteId: z.string(),
+    runtime: z.string().optional(),
+    packageManager: z.string().optional(),
+    installNetworkHosts: z.array(z.string()).optional(),
+    buildNetworkHosts: z.array(z.string()).optional(),
+  }),
+  "action.site.deploy": z.object({
+    siteId: z.string(),
+    /** Omitted deploys the newest ready version. */
+    versionId: z.string().optional(),
+  }),
+  "action.site.rollback": z.object({ siteId: z.string() }),
+  "action.site.status": z.object({ siteId: z.string() }),
   "action.git.push": z.object({
     repoPath: z.string().optional(),
     remote: z.string().optional(),

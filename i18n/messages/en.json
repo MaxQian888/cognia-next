@@ -41788,48 +41788,48 @@
         }
       },
       "editor": {
+        "root": {
+          "label": "Pro IDE workspace",
+          "hint": "Optional. Defaults to the Pro IDE you currently have open. Supports '{{ }}' expressions.",
+          "placeholder": "/Users/me/my-project"
+        },
         "autoStart": {
-          "hint": "Bring code-server up when it is not already running for this workspace. Off by default — the first start can download a large binary.",
-          "label": "Start the IDE if needed"
+          "label": "Start the IDE if needed",
+          "hint": "Bring code-server up when it is not already running for this workspace. Off by default — the first start can download a large binary."
         },
         "path": {
-          "hint": "Required. Absolute, or relative to the workspace above. Supports '{{ }}' expressions.",
           "label": "File path",
+          "hint": "Required. Absolute, or relative to the workspace above. Supports '{{ }}' expressions.",
           "placeholder": "src/index.ts"
         },
         "position": {
+          "line": {
+            "label": "Line",
+            "hint": "Optional 1-based line to reveal.",
+            "placeholder": "42"
+          },
           "column": {
             "label": "Column",
             "placeholder": "1"
-          },
-          "line": {
-            "hint": "Optional 1-based line to reveal.",
-            "label": "Line",
-            "placeholder": "42"
-          }
-        },
-        "root": {
-          "hint": "Optional. Defaults to the Pro IDE you currently have open. Supports '{{ }}' expressions.",
-          "label": "Pro IDE workspace",
-          "placeholder": "/Users/me/my-project"
-        },
-        "saveAll": {
-          "path": {
-            "hint": "Optional. Leave empty to flush every dirty buffer. Supports '{{ }}' expressions.",
-            "label": "Only this file",
-            "placeholder": "src/index.ts"
           }
         },
         "showDiff": {
           "content": {
-            "hint": "Required. Shown beside the file on disk; never written. An empty value proposes deleting the contents.",
             "label": "Proposed content",
+            "hint": "Required. Shown beside the file on disk; never written. An empty value proposes deleting the contents.",
             "placeholder": "The full proposed file contents"
           },
           "title": {
-            "hint": "Optional label for the diff tab. Supports '{{ }}' expressions.",
             "label": "Diff title",
+            "hint": "Optional label for the diff tab. Supports '{{ }}' expressions.",
             "placeholder": "Proposed fix"
+          }
+        },
+        "saveAll": {
+          "path": {
+            "label": "Only this file",
+            "hint": "Optional. Leave empty to flush every dirty buffer. Supports '{{ }}' expressions.",
+            "placeholder": "src/index.ts"
           }
         }
       },
@@ -43285,6 +43285,33 @@
           "placeholder": "counter"
         }
       },
+      "site": {
+        "buildNetworkHosts": {
+          "hint": "Empty means the build runs with no network — the fail-closed default.",
+          "label": "Build network hosts"
+        },
+        "installNetworkHosts": {
+          "hint": "Hosts the dependency install may reach.",
+          "label": "Install network hosts"
+        },
+        "packageManager": {
+          "hint": "Defaults to the Site's usual package manager.",
+          "label": "Package manager"
+        },
+        "runtime": {
+          "hint": "Defaults to the Site's usual runtime.",
+          "label": "Runtime"
+        },
+        "siteId": {
+          "hint": "The Cognia Site id, or an expression that yields one.",
+          "label": "Site",
+          "placeholder": "site_..."
+        },
+        "versionId": {
+          "hint": "Leave empty to publish the newest ready version.",
+          "label": "Version"
+        }
+      },
       "skillInvoke": {
         "skillIds": {
           "hint": "The selected skills are appended to the next downstream AI prompt.",
@@ -44337,29 +44364,29 @@
           }
         },
         "editor": {
-          "applyEdit": {
-            "description": "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth.",
-            "label": "Reflect edit in editor"
-          },
           "open": {
-            "description": "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace.",
-            "label": "Open in editor"
-          },
-          "readActive": {
-            "description": "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run.",
-            "label": "Read active editor"
+            "label": "Open in editor",
+            "description": "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace."
           },
           "reveal": {
-            "description": "Reveal a path in the Pro IDE file explorer without opening it.",
-            "label": "Reveal in editor explorer"
-          },
-          "saveAll": {
-            "description": "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'.",
-            "label": "Save editor buffers"
+            "label": "Reveal in editor explorer",
+            "description": "Reveal a path in the Pro IDE file explorer without opening it."
           },
           "showDiff": {
-            "description": "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk.",
-            "label": "Show diff for review"
+            "label": "Show diff for review",
+            "description": "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk."
+          },
+          "readActive": {
+            "label": "Read active editor",
+            "description": "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run."
+          },
+          "applyEdit": {
+            "label": "Reflect edit in editor",
+            "description": "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth."
+          },
+          "saveAll": {
+            "label": "Save editor buffers",
+            "description": "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'."
           }
         },
         "git": {
@@ -44660,6 +44687,24 @@
             "label": "List upcoming scheduled tasks"
           }
         },
+        "site": {
+          "build": {
+            "description": "Build a Cognia Site into a new immutable version.",
+            "label": "Build Site"
+          },
+          "deploy": {
+            "description": "Upload a Site version to Cloudflare and make it serve traffic.",
+            "label": "Publish Site"
+          },
+          "rollback": {
+            "description": "Serve the version that was live before the current one.",
+            "label": "Roll back Site"
+          },
+          "status": {
+            "description": "Read a Site's live URL, current version, and unresolved failures.",
+            "label": "Site status"
+          }
+        },
         "skill": {
           "invoke": {
             "description": "Renders a skill into the prompt of the next AI step.",
@@ -44916,6 +44961,18 @@
         }
       },
       "knowledge": {
+        "source": {
+          "description": "Create or incrementally update a stable Knowledge Base source.",
+          "label": "Knowledge source"
+        },
+        "parse": {
+          "description": "Parse one persisted source into a protected run-scoped artifact.",
+          "label": "Parse knowledge"
+        },
+        "transform": {
+          "description": "Normalize and PII-redact parsed content before chunking.",
+          "label": "Transform knowledge"
+        },
         "chunk": {
           "description": "Create format-aware chunks with stable position metadata.",
           "label": "Chunk knowledge"
@@ -44928,10 +44985,6 @@
           "description": "Validate vector counts and dimensions before publication.",
           "label": "Validate knowledge index"
         },
-        "parse": {
-          "description": "Parse one persisted source into a protected run-scoped artifact.",
-          "label": "Parse knowledge"
-        },
         "publish": {
           "description": "Atomically publish a validated immutable index generation.",
           "label": "Publish knowledge revision"
@@ -44939,14 +44992,6 @@
         "retrieve": {
           "description": "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
           "label": "Retrieve knowledge"
-        },
-        "source": {
-          "description": "Create or incrementally update a stable Knowledge Base source.",
-          "label": "Knowledge source"
-        },
-        "transform": {
-          "description": "Normalize and PII-redact parsed content before chunking.",
-          "label": "Transform knowledge"
         }
       },
       "ocr": {

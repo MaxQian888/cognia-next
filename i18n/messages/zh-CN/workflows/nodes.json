@@ -12,12 +12,6 @@
         "label": "请求审批"
       }
     },
-    "humanInput": {
-      "request": {
-        "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
-        "label": "请求人工输入"
-      }
-    },
     "character": {
       "create": {
         "description": "新建一个角色（员工）。",
@@ -208,6 +202,12 @@
         "label": "更新目标内容"
       }
     },
+    "humanInput": {
+      "request": {
+        "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
+        "label": "请求人工输入"
+      }
+    },
     "mcp": {
       "invokeTool": {
         "description": "调用已配置的 MCP 服务器上的工具。",
@@ -396,6 +396,24 @@
       "upcoming": {
         "description": "读取任务注册表中接下来要触发的调度任务。",
         "label": "列出即将到来的计划任务"
+      }
+    },
+    "site": {
+      "build": {
+        "description": "把 Cognia 站点构建成一个新的不可变版本。",
+        "label": "构建站点"
+      },
+      "deploy": {
+        "description": "把站点版本上传到 Cloudflare 并接管线上流量。",
+        "label": "发布站点"
+      },
+      "rollback": {
+        "description": "改为提供当前版本之前那个正在服务的版本。",
+        "label": "回滚站点"
+      },
+      "status": {
+        "description": "读取站点的线上地址、当前版本与未解决的失败。",
+        "label": "站点状态"
       }
     },
     "skill": {

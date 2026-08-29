@@ -177,6 +177,10 @@ export type WorkflowNodeKind =
   // Local Git (Source Control panel backend — ADR-0038)
   | "action.git.stage"
   | "action.git.commit"
+  | "action.site.build"
+  | "action.site.deploy"
+  | "action.site.rollback"
+  | "action.site.status"
   | "action.git.push"
   | "action.git.branch"
   // Stacked branches (ADR — stacks as first-class). Local git only: publishing
@@ -424,6 +428,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.plugin.invoke",
   "action.git.stage",
   "action.git.commit",
+  "action.site.build",
+  "action.site.deploy",
+  "action.site.rollback",
+  "action.site.status",
   "action.git.push",
   "action.git.branch",
   "action.stack.list",

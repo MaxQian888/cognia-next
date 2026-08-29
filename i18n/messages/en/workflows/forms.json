@@ -409,81 +409,6 @@
       "label": "User prompt"
     }
   },
-  "approvalRequest": {
-    "message": {
-      "label": "Message (optional)"
-    },
-    "onTimeout": {
-      "fail": "Fail the step",
-      "label": "On timeout",
-      "reject": "Route as rejected"
-    },
-    "timeoutMs": {
-      "hint": "How long to wait for a decision. Default 1 hour.",
-      "label": "Timeout (ms)"
-    },
-    "title": {
-      "label": "Title"
-    }
-  },
-  "humanInputRequest": {
-    "actions": {
-      "actionLabel": "Action label",
-      "add": "Add action",
-      "defaultLabel": "Submit",
-      "id": "Action ID",
-      "label": "Actions",
-      "remove": "Remove action"
-    },
-    "assignees": {
-      "add": "Add assignee",
-      "group": "Group",
-      "id": "Member or group ID",
-      "initiator": "Run initiator",
-      "kind": "Assignee kind",
-      "label": "Assignees",
-      "member": "Member",
-      "remove": "Remove assignee"
-    },
-    "completion": {
-      "all": "All assignees",
-      "any": "Any assignee",
-      "count": "Required responses",
-      "label": "Completion policy",
-      "quorum": "At least N responses"
-    },
-    "fields": {
-      "add": "Add field",
-      "defaultLabel": "Response",
-      "fieldLabel": "Field label",
-      "id": "Field ID",
-      "label": "Form fields",
-      "options": "Options",
-      "optionsPlaceholder": "One, Two, Three",
-      "remove": "Remove field",
-      "required": "Required",
-      "sensitive": "Sensitive",
-      "type": "Field type",
-      "types": {
-        "boolean": "Boolean",
-        "file": "Single file",
-        "file-list": "File list",
-        "long-text": "Long text",
-        "multi-select": "Multiple choice",
-        "number": "Number",
-        "short-text": "Short text",
-        "single-select": "Single choice"
-      }
-    },
-    "message": "Message (optional)",
-    "sensitiveRetentionDays": "Sensitive value retention (days)",
-    "timeout": "Timeout (ms)",
-    "title": "Title"
-  },
-  "arrayField": {
-    "add": "Add",
-    "removeItem": "Remove item {index}"
-  },
   "answer": {
     "citations": {
       "hint": "JSON array of sourceId, documentId, revisionId, and chunkId references.",
@@ -505,6 +430,27 @@
       "hint": "Answer text or expression. Text or structured content is required.",
       "label": "Answer text"
     }
+  },
+  "approvalRequest": {
+    "message": {
+      "label": "Message (optional)"
+    },
+    "onTimeout": {
+      "fail": "Fail the step",
+      "label": "On timeout",
+      "reject": "Route as rejected"
+    },
+    "timeoutMs": {
+      "hint": "How long to wait for a decision. Default 1 hour.",
+      "label": "Timeout (ms)"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "arrayField": {
+    "add": "Add",
+    "removeItem": "Remove item {index}"
   },
   "branch": {
     "condition": {
@@ -1531,6 +1477,60 @@
       "placeholder": "https://api.example.com/v1/things"
     }
   },
+  "humanInputRequest": {
+    "actions": {
+      "actionLabel": "Action label",
+      "add": "Add action",
+      "defaultLabel": "Submit",
+      "id": "Action ID",
+      "label": "Actions",
+      "remove": "Remove action"
+    },
+    "assignees": {
+      "add": "Add assignee",
+      "group": "Group",
+      "id": "Member or group ID",
+      "initiator": "Run initiator",
+      "kind": "Assignee kind",
+      "label": "Assignees",
+      "member": "Member",
+      "remove": "Remove assignee"
+    },
+    "completion": {
+      "all": "All assignees",
+      "any": "Any assignee",
+      "count": "Required responses",
+      "label": "Completion policy",
+      "quorum": "At least N responses"
+    },
+    "fields": {
+      "add": "Add field",
+      "defaultLabel": "Response",
+      "fieldLabel": "Field label",
+      "id": "Field ID",
+      "label": "Form fields",
+      "options": "Options",
+      "optionsPlaceholder": "One, Two, Three",
+      "remove": "Remove field",
+      "required": "Required",
+      "sensitive": "Sensitive",
+      "type": "Field type",
+      "types": {
+        "boolean": "Boolean",
+        "file": "Single file",
+        "file-list": "File list",
+        "long-text": "Long text",
+        "multi-select": "Multiple choice",
+        "number": "Number",
+        "short-text": "Short text",
+        "single-select": "Single choice"
+      }
+    },
+    "message": "Message (optional)",
+    "sensitiveRetentionDays": "Sensitive value retention (days)",
+    "timeout": "Timeout (ms)",
+    "title": "Title"
+  },
   "integrationEventTrigger": {
     "accountId": {
       "hint": "Limit events to one connected account.",
@@ -2493,6 +2493,33 @@
     "variable": {
       "label": "Variable name",
       "placeholder": "counter"
+    }
+  },
+  "site": {
+    "buildNetworkHosts": {
+      "hint": "Empty means the build runs with no network — the fail-closed default.",
+      "label": "Build network hosts"
+    },
+    "installNetworkHosts": {
+      "hint": "Hosts the dependency install may reach.",
+      "label": "Install network hosts"
+    },
+    "packageManager": {
+      "hint": "Defaults to the Site's usual package manager.",
+      "label": "Package manager"
+    },
+    "runtime": {
+      "hint": "Defaults to the Site's usual runtime.",
+      "label": "Runtime"
+    },
+    "siteId": {
+      "hint": "The Cognia Site id, or an expression that yields one.",
+      "label": "Site",
+      "placeholder": "site_..."
+    },
+    "versionId": {
+      "hint": "Leave empty to publish the newest ready version.",
+      "label": "Version"
     }
   },
   "skillInvoke": {

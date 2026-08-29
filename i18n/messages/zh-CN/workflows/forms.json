@@ -409,81 +409,6 @@
       "label": "用户提示词"
     }
   },
-  "approvalRequest": {
-    "message": {
-      "label": "说明（可选）"
-    },
-    "onTimeout": {
-      "fail": "步骤失败",
-      "label": "超时处理",
-      "reject": "按已拒绝路由"
-    },
-    "timeoutMs": {
-      "hint": "等待决定的时长。默认 1 小时。",
-      "label": "超时（毫秒）"
-    },
-    "title": {
-      "label": "标题"
-    }
-  },
-  "humanInputRequest": {
-    "actions": {
-      "actionLabel": "动作名称",
-      "add": "添加动作",
-      "defaultLabel": "提交",
-      "id": "动作 ID",
-      "label": "动作",
-      "remove": "移除动作"
-    },
-    "assignees": {
-      "add": "添加答复对象",
-      "group": "群组",
-      "id": "成员或群组 ID",
-      "initiator": "运行发起者",
-      "kind": "对象类型",
-      "label": "答复对象",
-      "member": "成员",
-      "remove": "移除答复对象"
-    },
-    "completion": {
-      "all": "全部对象",
-      "any": "任一对象",
-      "count": "所需答复数",
-      "label": "完成策略",
-      "quorum": "至少 N 人"
-    },
-    "fields": {
-      "add": "添加字段",
-      "defaultLabel": "答复",
-      "fieldLabel": "字段名称",
-      "id": "字段 ID",
-      "label": "表单字段",
-      "options": "选项",
-      "optionsPlaceholder": "选项一, 选项二, 选项三",
-      "remove": "移除字段",
-      "required": "必填",
-      "sensitive": "敏感",
-      "type": "字段类型",
-      "types": {
-        "boolean": "布尔值",
-        "file": "单文件",
-        "file-list": "文件列表",
-        "long-text": "多行文本",
-        "multi-select": "多选",
-        "number": "数字",
-        "short-text": "短文本",
-        "single-select": "单选"
-      }
-    },
-    "message": "说明（可选）",
-    "sensitiveRetentionDays": "敏感值保留天数",
-    "timeout": "超时（毫秒）",
-    "title": "标题"
-  },
-  "arrayField": {
-    "add": "添加",
-    "removeItem": "移除第 {index} 项"
-  },
   "answer": {
     "citations": {
       "hint": "包含 sourceId、documentId、revisionId 和 chunkId 的 JSON 数组。",
@@ -505,6 +430,27 @@
       "hint": "答复文本或表达式。文本和结构化内容至少填写一项。",
       "label": "答复文本"
     }
+  },
+  "approvalRequest": {
+    "message": {
+      "label": "说明（可选）"
+    },
+    "onTimeout": {
+      "fail": "步骤失败",
+      "label": "超时处理",
+      "reject": "按已拒绝路由"
+    },
+    "timeoutMs": {
+      "hint": "等待决定的时长。默认 1 小时。",
+      "label": "超时（毫秒）"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
+  "arrayField": {
+    "add": "添加",
+    "removeItem": "移除第 {index} 项"
   },
   "branch": {
     "condition": {
@@ -1531,6 +1477,60 @@
       "placeholder": "https://api.example.com/v1/things"
     }
   },
+  "humanInputRequest": {
+    "actions": {
+      "actionLabel": "动作名称",
+      "add": "添加动作",
+      "defaultLabel": "提交",
+      "id": "动作 ID",
+      "label": "动作",
+      "remove": "移除动作"
+    },
+    "assignees": {
+      "add": "添加答复对象",
+      "group": "群组",
+      "id": "成员或群组 ID",
+      "initiator": "运行发起者",
+      "kind": "对象类型",
+      "label": "答复对象",
+      "member": "成员",
+      "remove": "移除答复对象"
+    },
+    "completion": {
+      "all": "全部对象",
+      "any": "任一对象",
+      "count": "所需答复数",
+      "label": "完成策略",
+      "quorum": "至少 N 人"
+    },
+    "fields": {
+      "add": "添加字段",
+      "defaultLabel": "答复",
+      "fieldLabel": "字段名称",
+      "id": "字段 ID",
+      "label": "表单字段",
+      "options": "选项",
+      "optionsPlaceholder": "选项一, 选项二, 选项三",
+      "remove": "移除字段",
+      "required": "必填",
+      "sensitive": "敏感",
+      "type": "字段类型",
+      "types": {
+        "boolean": "布尔值",
+        "file": "单文件",
+        "file-list": "文件列表",
+        "long-text": "多行文本",
+        "multi-select": "多选",
+        "number": "数字",
+        "short-text": "短文本",
+        "single-select": "单选"
+      }
+    },
+    "message": "说明（可选）",
+    "sensitiveRetentionDays": "敏感值保留天数",
+    "timeout": "超时（毫秒）",
+    "title": "标题"
+  },
   "integrationEventTrigger": {
     "accountId": {
       "hint": "仅接收指定已连接账号的事件。",
@@ -2493,6 +2493,33 @@
     "variable": {
       "label": "变量名",
       "placeholder": "counter"
+    }
+  },
+  "site": {
+    "buildNetworkHosts": {
+      "hint": "留空表示构建全程无网络——这是默认的失败关闭策略。",
+      "label": "构建阶段可访问的主机"
+    },
+    "installNetworkHosts": {
+      "hint": "依赖安装阶段允许访问的主机。",
+      "label": "安装阶段可访问的主机"
+    },
+    "packageManager": {
+      "hint": "默认沿用该站点惯用的包管理器。",
+      "label": "包管理器"
+    },
+    "runtime": {
+      "hint": "默认沿用该站点惯用的运行时。",
+      "label": "运行时"
+    },
+    "siteId": {
+      "hint": "Cognia 站点 id，或能求值出 id 的表达式。",
+      "label": "站点",
+      "placeholder": "site_..."
+    },
+    "versionId": {
+      "hint": "留空则发布最新的就绪版本。",
+      "label": "版本"
     }
   },
   "skillInvoke": {

@@ -12,12 +12,6 @@
         "label": "Request approval"
       }
     },
-    "humanInput": {
-      "request": {
-        "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
-        "label": "Request human input"
-      }
-    },
     "character": {
       "create": {
         "description": "Creates a new character (employee) row.",
@@ -208,6 +202,12 @@
         "label": "Update goal objective"
       }
     },
+    "humanInput": {
+      "request": {
+        "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
+        "label": "Request human input"
+      }
+    },
     "mcp": {
       "invokeTool": {
         "description": "Calls a tool on a configured MCP server.",
@@ -396,6 +396,24 @@
       "upcoming": {
         "description": "Read the next armed scheduler task fires across the task registry.",
         "label": "List upcoming scheduled tasks"
+      }
+    },
+    "site": {
+      "build": {
+        "description": "Build a Cognia Site into a new immutable version.",
+        "label": "Build Site"
+      },
+      "deploy": {
+        "description": "Upload a Site version to Cloudflare and make it serve traffic.",
+        "label": "Publish Site"
+      },
+      "rollback": {
+        "description": "Serve the version that was live before the current one.",
+        "label": "Roll back Site"
+      },
+      "status": {
+        "description": "Read a Site's live URL, current version, and unresolved failures.",
+        "label": "Site status"
       }
     },
     "skill": {

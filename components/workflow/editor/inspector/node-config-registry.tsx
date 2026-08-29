@@ -21,6 +21,12 @@ import {
   OcrExtractConfig,
 } from "./forms/git-ocr-forms"
 import {
+  SiteBuildConfig,
+  SiteDeployConfig,
+  SiteRollbackConfig,
+  SiteStatusConfig,
+} from "./forms/site-forms"
+import {
   StackListConfig,
   StackParentConfig,
   StackPushConfig,
@@ -304,6 +310,10 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.editor.saveAll": EditorSaveAllConfig,
   "action.git.stage": GitStageConfig,
   "action.git.commit": GitCommitConfig,
+  "action.site.build": SiteBuildConfig,
+  "action.site.deploy": SiteDeployConfig,
+  "action.site.rollback": SiteRollbackConfig,
+  "action.site.status": SiteStatusConfig,
   "action.git.push": GitPushConfig,
   "action.git.branch": GitBranchConfig,
   // Stacked branches

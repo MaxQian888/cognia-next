@@ -59,6 +59,12 @@ export const RISKY_NODE_KINDS: Record<string, RiskSurfaceId> = {
   "action.connector.forward": "external-send",
   "action.mobile.share": "external-send",
   "action.git.push": "external-send",
+  // Publishes to the public internet and cannot be unsent: `takeDown` removes
+  // the Site, it does not restore the previous version. `action.site.build`
+  // produces an immutable local version and publishes nothing, and
+  // `action.site.status` is a read — both deliberately absent.
+  "action.site.deploy": "external-send",
+  "action.site.rollback": "external-send",
   // ── Drives the operator's machine ──
   "action.desktop.getAppState": "computer-use",
   "action.desktop.performAction": "computer-use",

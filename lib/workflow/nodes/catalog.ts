@@ -827,6 +827,47 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     desktopOnly: true,
     requires: ["shell"],
   },
+  // ── Cognia Sites (ADR-0084) ──
+  //
+  // Four kinds, not seven. `upload` is folded into `deploy` because
+  // `deployVersion` refuses an un-uploaded version anyway, and two nodes would
+  // make the author responsible for an ordering the service already enforces —
+  // a flow that stops between them leaves a Site half-published. `takedown` and
+  // `purge` are console-only: removing a live site from the internet, or
+  // deleting managed provider resources, are not things an unattended DAG
+  // should reach. `reconcile`'s whole output is meant for a human.
+  "action.site.build": {
+    label: "Build Site",
+    description: "Build a Cognia Site into a new immutable version.",
+    iconName: "Hammer",
+    keywords: ["site", "build", "deploy", "cloudflare", "publish"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.site.deploy": {
+    label: "Publish Site",
+    description: "Upload a Site version to Cloudflare and make it serve traffic.",
+    iconName: "Rocket",
+    keywords: ["site", "deploy", "publish", "cloudflare", "release"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.site.rollback": {
+    label: "Roll back Site",
+    description: "Serve the version that was live before the current one.",
+    iconName: "Undo2",
+    keywords: ["site", "rollback", "revert", "deploy", "cloudflare"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  // No `desktopOnly` and no `requires`: a Dexie read that must answer in every
+  // shell, so a flow can at least report what happened.
+  "action.site.status": {
+    label: "Site status",
+    description: "Read a Site's live URL, current version, and unresolved failures.",
+    iconName: "Activity",
+    keywords: ["site", "status", "url", "version", "health"],
+  },
   "action.git.push": {
     label: "Git push",
     description: "Push commits to a remote (optionally set upstream).",

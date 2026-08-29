@@ -45,3 +45,7 @@ import "../connectors"
 import "../integrations"
 import "../knowledge"
 import "../mobile/executors"
+// Cognia Sites publish actions (ADR-0084). A registry nobody registers into is
+// this repo's most recurrent defect; `executor-coverage.test.ts` fails without
+// this line.
+import "../sites"
