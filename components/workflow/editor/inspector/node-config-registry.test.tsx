@@ -2,10 +2,12 @@
  * @jest-environment jsdom
  */
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import {
   getNodeConfigComponent,
   getNodeConfigComponentForEntry,
   hasDedicatedConfig,
+  hasDedicatedConfigForEntry,
 } from "./node-config-registry"
 
 // Kinds that intentionally fall back to the raw-JSON editor (no dedicated form).
@@ -91,11 +93,35 @@ describe("node-config-registry", () => {
     }
   })
 
-  it("has a dedicated config for every known kind except the intentional fallbacks", () => {
+  it("has a structured config for every known kind except the intentional fallbacks", () => {
+    // `hasDedicatedConfigForEntry`, not `hasDedicatedConfig`: what the user
+    // actually gets is what `InspectorPanel` resolves, and that consults the
+    // catalog entry's `paramsSchema` before falling back to raw JSON. The
+    // eight `knowledge.*` kinds are palette-visible and schema-driven — they
+    // have no REGISTRY row on purpose, and the kind-only predicate reported
+    // them as unconfigurable when the editor renders a real form for them.
     const missing = WORKFLOW_NODE_KINDS.filter(
-      (kind) => !hasDedicatedConfig(kind) && !INTENTIONAL_FALLBACKS.has(kind)
+      (kind) =>
+        !hasDedicatedConfigForEntry(nodeCatalogEntry(kind)) && !INTENTIONAL_FALLBACKS.has(kind)
     )
     expect(missing).toEqual([])
+  })
+
+  it("keeps the fallback list honest — no listed kind secretly has a form", () => {
+    // Guards the allowlist above from silently absorbing a kind that grew a
+    // form later: an entry that no longer needs the exemption must be removed.
+    const stale = [...INTENTIONAL_FALLBACKS].filter((kind) =>
+      hasDedicatedConfigForEntry(nodeCatalogEntry(kind))
+    )
+    expect(stale).toEqual([])
+  })
+
+  it("still resolves the built-in registry for kinds that ship a form", () => {
+    // `hasDedicatedConfig` is the narrower, REGISTRY-only predicate; keep it
+    // covered so the two never drift into disagreeing about a built-in.
+    for (const kind of NEWLY_WIRED) {
+      expect(hasDedicatedConfig(kind)).toBe(hasDedicatedConfigForEntry(nodeCatalogEntry(kind)))
+    }
   })
 
   it("returns a component for every kind (fallback never throws)", () => {
