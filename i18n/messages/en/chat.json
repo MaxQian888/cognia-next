@@ -1947,7 +1947,7 @@
     "durationMs": "{ms}ms",
     "logsTailNote": "Showing the last {n} log entries",
     "noLogsYet": "No log entries yet — sub-agent is initializing.",
-    "openInWorkspace": "Open in workspace",
+    "openInRuns": "Open in Agent Runs",
     "openTranscript": "Open full transcript",
     "rejected": {
       "cycle": "Dispatch rejected — would create a cycle.",

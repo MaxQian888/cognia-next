@@ -54,6 +54,7 @@ import {
 } from "@/components/chat/message-parts/tool-activity-group"
 import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { toToolActivityEntries } from "@/lib/claude/subagent-tool-parts"
+import { jobExecutionRunId } from "@/lib/execution/job-bridge"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { cn } from "@/lib/utils"
@@ -258,12 +259,19 @@ const SubagentLogBody = memo(function SubagentLogBody({
           <ExternalLinkIcon className="size-3" />
         </button>
       ) : (
+        // Into the run cockpit, on the EXECUTION run id. This used to point at
+        // `/agent-teams?focus=subagent:<id>`, a param that page never read — so
+        // the link on every sub-agent card in every transcript just dropped the
+        // operator on the team list. `job-bridge` projects the run's journal row
+        // (written for foreground and background dispatches alike) onto
+        // `execution:job:<runId>`, and `part.subagentId` is that same runId, so
+        // the target survives a reload — unlike the ephemeral runtime store.
         <Link
-          href={`/agent-teams?focus=subagent:${subagentId}`}
+          href={`/agent-runs?run=${encodeURIComponent(jobExecutionRunId(subagentId))}`}
           className="inline-flex items-center gap-1 text-xs underline"
           data-testid="subagent-open"
         >
-          {t("openInWorkspace")}
+          {t("openInRuns")}
           <ExternalLinkIcon className="size-3" />
         </Link>
       )}
@@ -346,7 +354,12 @@ export const SubagentPart = memo(function SubagentPart({
   if (mode === "simplified") {
     return (
       <div
-        className="not-prose my-0.5"
+        // `@container/subagent` measures THIS card, not the viewport: the same
+        // row renders full width in a desktop transcript and three levels deep
+        // inside a subagent tree on a phone. Every piece of chrome below drops
+        // in priority order rather than pushing the name and the status glyph —
+        // the two things the row exists for — out of the box.
+        className="@container/subagent not-prose my-0.5"
         data-testid={`subagent-part-${part.subagentId}`}
         data-status={status}
       >
@@ -366,7 +379,7 @@ export const SubagentPart = memo(function SubagentPart({
               )}
             />
             <BotIcon className="size-3.5 shrink-0" />
-            <span className="shrink-0 font-medium text-foreground/80">{part.name}</span>
+            <span className="min-w-0 truncate font-medium text-foreground/80">{part.name}</span>
             {typeof depth === "number" ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
                 {t("depthBadge", { n: depth })}
@@ -390,13 +403,17 @@ export const SubagentPart = memo(function SubagentPart({
                 {t("retrying", { n: retryCount })}
               </Badge>
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {/* Lowest-priority cell: below ~384px it becomes a bare spacer so
+                the status glyph stays pinned right instead of the log text
+                shoving it off the row. */}
+            <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground @sm/subagent:block">
               {lastLog?.message ?? ""}
             </span>
+            <span className="flex-1 @sm/subagent:hidden" aria-hidden />
             {typeof tokenTotal === "number" && tokenTotal > 0 ? (
               <Badge
                 variant="outline"
-                className="text-[10px] text-muted-foreground"
+                className="hidden text-[10px] text-muted-foreground @md/subagent:inline-flex"
                 data-testid="subagent-tokens-badge"
               >
                 {t("tokens", { n: tokenTotal })}
@@ -404,7 +421,7 @@ export const SubagentPart = memo(function SubagentPart({
             ) : null}
             {isRunning && toolUses > 0 ? (
               <span
-                className="shrink-0 text-[11px] text-muted-foreground tabular-nums"
+                className="hidden shrink-0 text-[11px] text-muted-foreground tabular-nums @md/subagent:inline"
                 data-testid="subagent-tools-count"
               >
                 {t("toolsRunCount", { n: toolUses })}
@@ -452,19 +469,23 @@ export const SubagentPart = memo(function SubagentPart({
   // Standard / detailed: the full card with a controllable Collapsible.
   return (
     <div
-      className="not-prose my-2 rounded-md border bg-card p-3"
+      // Same container as the simplified row: the header wraps onto a second
+      // line instead of overflowing once the badges no longer fit beside the
+      // name. See the simplified branch for why the viewport is the wrong
+      // thing to measure here.
+      className="@container/subagent not-prose my-2 rounded-md border bg-card p-3"
       data-testid={`subagent-part-${part.subagentId}`}
       data-status={status}
     >
       <Collapsible open={isOpen}>
         <div className="flex items-center justify-between gap-2">
           <CollapsibleTrigger
-            className="flex flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             data-testid={`subagent-toggle-${part.subagentId}`}
             onClick={toggle}
           >
             <glyph.Icon className={cn("size-3.5 shrink-0", glyph.className)} aria-hidden />
-            <span className="text-sm font-medium">{part.name}</span>
+            <span className="min-w-0 truncate text-sm font-medium">{part.name}</span>
             {typeof depth === "number" ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
                 {t("depthBadge", { n: depth })}
@@ -506,7 +527,7 @@ export const SubagentPart = memo(function SubagentPart({
             ) : null}
             {isRunning && toolUses > 0 ? (
               <span
-                className="ml-auto text-[11px] text-muted-foreground tabular-nums"
+                className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums"
                 data-testid="subagent-tools-count"
               >
                 {t("toolsRunCount", { n: toolUses })}
@@ -514,7 +535,7 @@ export const SubagentPart = memo(function SubagentPart({
             ) : null}
             <span
               className={cn(
-                "text-[11px] text-muted-foreground",
+                "shrink-0 text-[11px] text-muted-foreground",
                 !(isRunning && toolUses > 0) && "ml-auto"
               )}
             >

@@ -1947,7 +1947,7 @@
     "durationMs": "{ms}ms",
     "logsTailNote": "仅显示最近 {n} 条日志",
     "noLogsYet": "暂无日志 — 子代理正在初始化。",
-    "openInWorkspace": "在工作区打开",
+    "openInRuns": "在运行中心打开",
     "openTranscript": "打开完整记录",
     "rejected": {
       "cycle": "派发被拒 — 会形成循环。",

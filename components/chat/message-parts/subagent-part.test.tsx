@@ -145,10 +145,17 @@ describe("SubagentPart", () => {
     expect(screen.queryByTestId("subagent-tools-count")).not.toBeInTheDocument()
   })
 
-  it("renders an Open-in-workspace link with the subagent id encoded", () => {
+  // The link used to point at `/agent-teams?focus=subagent:<id>` — a param
+  // that page never read, so it dropped the operator on the team list with
+  // nothing selected. It has to name a route AND an id space that route
+  // actually resolves: `/agent-runs` reads `?run=` as an EXECUTION run id,
+  // which `jobExecutionRunId` derives from this subagent's run id.
+  it("renders an Open-in-Agent-Runs link on the execution run id", () => {
     render(<SubagentPart part={basePart} />)
     const link = screen.getByTestId("subagent-open") as HTMLAnchorElement
-    expect(link.getAttribute("href")).toContain("subagent:sa-1")
+    expect(link.getAttribute("href")).toBe(
+      `/agent-runs?run=${encodeURIComponent("execution:job:sa-1")}`
+    )
   })
 
   it("imported subagent: drills into the nested transcript session instead of the workspace link", async () => {
@@ -560,6 +567,50 @@ describe("SubagentPart", () => {
       )
       expect(screen.getByTestId("subagent-depth-badge")).toBeInTheDocument()
       expect(screen.getByTestId("subagent-tokens-badge").textContent).toMatch(/9/)
+    })
+  })
+
+  // jsdom has no layout, so the adaptive contract can only be pinned as class
+  // intent. It is worth pinning: this row carries up to six trailing cells and
+  // renders indented inside a subagent tree on a phone, where a `shrink-0` name
+  // pushed the status glyph and the Stop button clean out of the box.
+  describe("narrow-container contract", () => {
+    const rowOf = (id = "sa-1") => screen.getByTestId(`subagent-part-${id}`)
+
+    it("scopes a container on the card so the cells measure the card, not the viewport", () => {
+      render(<SubagentPart part={basePart} mode="simplified" />)
+      expect(rowOf().className).toContain("@container/subagent")
+    })
+
+    it("scopes the same container on the standard card", () => {
+      render(<SubagentPart part={basePart} />)
+      expect(rowOf().className).toContain("@container/subagent")
+    })
+
+    it("lets the sub-agent name truncate instead of holding its full width", () => {
+      render(<SubagentPart part={{ ...basePart, name: "A very long researcher name" }} />)
+      const name = screen.getByText("A very long researcher name")
+      expect(name.className).toContain("truncate")
+      expect(name.className).toContain("min-w-0")
+      expect(name.className).not.toContain("shrink-0")
+    })
+
+    it("drops the token and tool-count cells before the row can overflow", () => {
+      useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "running", toolUses: 4 }))
+      render(
+        <SubagentPart
+          part={{
+            ...basePart,
+            tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 9 },
+          }}
+          mode="simplified"
+        />
+      )
+      for (const id of ["subagent-tokens-badge", "subagent-tools-count"]) {
+        const cell = screen.getByTestId(id)
+        expect(cell.className).toContain("hidden")
+        expect(cell.className).toContain("@md/subagent:")
+      }
     })
   })
 })
