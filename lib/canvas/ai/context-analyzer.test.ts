@@ -2,7 +2,14 @@
  * Comprehensive Tests for Context Analyzer
  */
 
-import { ContextAnalyzer, contextAnalyzer, type DocumentContext } from "./context-analyzer"
+import {
+  ContextAnalyzer,
+  contextAnalyzer,
+  buildScopeBlock,
+  SCOPE_BLOCK_MAX_CHARS,
+  type DocumentContext,
+} from "./context-analyzer"
+import { symbolParser } from "@/lib/canvas/symbols/symbol-parser"
 
 describe("ContextAnalyzer", () => {
   let analyzer: ContextAnalyzer
@@ -130,6 +137,115 @@ class Calculator {
 
       expect(context.cursorContext.line).toBe(3)
       expect(context.cursorContext.scope.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe("parseSymbols delegates to the outline parser", () => {
+    // The analyzer used to carry its own regex table. Two tables meant every
+    // language fix had to land twice, and they had already drifted (no Python,
+    // no nesting here). This pins the delegation.
+    it("agrees with symbolParser on the same input", () => {
+      const code = [
+        "export class UserService {",
+        "  fetch(id) { return id }",
+        "}",
+        "export function greet(name) { return name }",
+        "const total = 1",
+      ].join("\n")
+
+      const outline = symbolParser.parseSymbols(code, "typescript")
+      const ai = analyzer.parseSymbols(code, "typescript")
+
+      // Every AI symbol traces back to an outline symbol with the same name.
+      const outlineNames = new Set<string>()
+      const walk = (nodes: { name: string; children?: unknown }[]) => {
+        for (const n of nodes) {
+          outlineNames.add(n.name)
+          if (Array.isArray(n.children)) walk(n.children as { name: string }[])
+        }
+      }
+      walk(outline as unknown as { name: string; children?: unknown }[])
+      for (const s of ai) expect(outlineNames.has(s.name)).toBe(true)
+      expect(ai.some((s) => s.name === "UserService" && s.kind === "class")).toBe(true)
+      expect(ai.some((s) => s.name === "greet" && s.kind === "function")).toBe(true)
+    })
+
+    it("parses Python, which the old private table could not", () => {
+      const symbols = analyzer.parseSymbols("def greet(name):\n    return name\n", "python")
+      expect(symbols.some((s) => s.name === "greet" && s.kind === "function")).toBe(true)
+    })
+
+    it("drops outline kinds with no narrow equivalent rather than mislabelling them", () => {
+      // `string` / `number` / `key` etc. have no AiContextSymbol kind. A wrong
+      // label in a prompt is worse than a missing symbol.
+      const symbols = analyzer.parseSymbols("const a = 1", "javascript")
+      for (const s of symbols) {
+        expect([
+          "function",
+          "class",
+          "variable",
+          "import",
+          "type",
+          "interface",
+          "enum",
+          "method",
+          "property",
+        ]).toContain(s.kind)
+      }
+    })
+  })
+
+  describe("dependency extraction", () => {
+    it("strips only the leading npm scope marker", () => {
+      const ctx = analyzer.analyzeContext(
+        "import a from '@scope/pkg'\nimport b from 'react/jsx-runtime'\n",
+        { line: 1, column: 1 },
+        "typescript"
+      )
+      expect(ctx.dependencies).toContain("scope")
+      expect(ctx.dependencies).toContain("react")
+    })
+
+    it("does not reshape an `@` that is not a scope marker", () => {
+      // Regression pin: `replace("@", "")` turned `jane@example.com/pkg` into
+      // `janeexample.com`, which no longer matches the PII gate's email pattern
+      // — derived prompt text was smuggling an address past `hasNoLeakingPii`.
+      const ctx = analyzer.analyzeContext(
+        "import x from 'jane@example.com/pkg'\n",
+        { line: 1, column: 1 },
+        "typescript"
+      )
+      expect(ctx.dependencies).toContain("jane@example.com")
+      expect(ctx.dependencies).not.toContain("janeexample.com")
+    })
+  })
+
+  describe("buildScopeBlock", () => {
+    it("returns null for an empty document", () => {
+      expect(buildScopeBlock("", { line: 1, column: 1 }, "typescript")).toBeNull()
+    })
+
+    it("names the enclosing function so a caret-window prompt does not have to guess", () => {
+      const code = [
+        "import { db } from '@/lib/db'",
+        "export function fetchUser(id) {",
+        "  return db.get(id)",
+        "}",
+      ].join("\n")
+      const block = buildScopeBlock(code, { line: 3, column: 3 }, "typescript")
+      expect(block).toContain("Nearby scope:")
+      expect(block).toContain("fetchUser")
+    })
+
+    it("stays under the hard ceiling on a symbol-heavy document", () => {
+      const code = Array.from(
+        { length: 400 },
+        (_, i) => `export function fn${i}() { return ${i} }`
+      ).join("\n")
+      const block = buildScopeBlock(code, { line: 1, column: 1 }, "typescript")
+      expect(block).not.toBeNull()
+      // +"Nearby scope:\n" prefix.
+      expect((block as string).length).toBeLessThanOrEqual(SCOPE_BLOCK_MAX_CHARS + 15)
     })
   })
 

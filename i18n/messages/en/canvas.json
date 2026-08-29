@@ -227,6 +227,10 @@
     "suggestionsEmpty": "No suggestions yet. Use the Suggest action to generate improvements."
   },
   "participants": "Participants",
+  "performanceMode": {
+    "large": "Large document ({lines, number} lines) — minimap, folding and occurrence highlighting are off to keep typing responsive.",
+    "veryLarge": "Very large document ({lines, number} lines) — minimap, folding, sticky scroll and word wrap are off to keep typing responsive."
+  },
   "pin": "Pin",
   "pinned": "Pinned",
   "pressKeys": "Press keys…",

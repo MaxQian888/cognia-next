@@ -55,7 +55,7 @@ canvas 卡片过去渲染的那个锚点每次点击都是 404。
 <Cards>
   <Card title="编辑器内核" href="./editor-core" description="Monaco 挂载 + 离线 loader、三栏 shell、文档轨道/标签、主题同步、符号、片段、插件、大文件分块、快捷键" />
   <Card title="状态与持久化" href="./state-persistence" description="唯一真源（useArtifactStore）、5 个 canvas store、Dexie 写穿桥、四张表、特性开关" />
-  <Card title="AI 操作与建议" href="./ai-actions" description="10 个操作 prompt、diff 审阅落地管线、结构化建议流、独立的 context-analyzer" />
+  <Card title="AI 操作与建议" href="./ai-actions" description="10 个操作 prompt、diff 审阅落地管线、结构化建议流、context-analyzer 作用域块" />
   <Card title="协作" href="./collaboration" description="向量时钟 CRDT、WebSocket provider（固定间隔重连 + 心跳）、会话、/canvas/join 流程" />
   <Card title="执行与评论" href="./execution-comments" description="Rust 的 canvas_run_python 沙箱、执行面板、行级评论线程、版本时间线 + diff" />
 </Cards>
@@ -175,7 +175,7 @@ flowchart TB
 | AI 操作 `generate / refactor / debug` | 实际操作集为 **review · fix · improve · explain · simplify · expand · translate · format**（外加 `custom`、`run`） | `lib/ai/generation/canvas-actions.ts:47` |
 | 「指数退避」重连 | 重连用**固定间隔**（默认 1000 ms），上限 5 次 —— 无退避 | `websocket-provider.ts:310`、`:326` |
 | `useCanvasStore` 归属含糊 | **不存在** `useCanvasStore`；文档与版本都在 `useArtifactStore` | `stores/artifact/artifact-store.ts:361` |
-| （暗示）context-analyzer 喂给 prompt | `ContextAnalyzer` 已完整实现但**未接线** —— 两个 AI hook 都直接发原始文档文本 | `lib/canvas/ai/context-analyzer.ts:79` |
+| （暗示）context-analyzer 喂给 prompt | 现在确实喂了，但**只喂建议** —— `buildScopeBlock` 附上一段 400 字符的作用域摘要。动作仍然只发文档，这是刻意的 | `lib/canvas/ai/context-analyzer.ts`、`hooks/canvas/use-canvas-suggestions.ts` |
 | Python 结果字段 | 结果结构体为 `{ stdout, stderr, exit_code, duration_ms }`；超时返回 `exit_code: 124` | `src-tauri/src/canvas/python_exec.rs:15`、`:81` |
 
 ## 沙箱与信任边界

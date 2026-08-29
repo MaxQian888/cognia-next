@@ -227,6 +227,10 @@
     "suggestionsEmpty": "暂无建议。使用 Suggest 功能生成改进建议。"
   },
   "participants": "参与者",
+  "performanceMode": {
+    "large": "大文档（{lines, number} 行）—— 已关闭缩略图、折叠与同名高亮，以保持输入流畅。",
+    "veryLarge": "超大文档（{lines, number} 行）—— 已关闭缩略图、折叠、粘性滚动与自动换行，以保持输入流畅。"
+  },
   "pin": "置顶",
   "pinned": "已置顶",
   "pressKeys": "按下按键…",

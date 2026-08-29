@@ -111,11 +111,25 @@ jest.mock("next-themes", () => ({
 
 // Canvas hooks pull in Monaco namespace types and side-effectful subscriptions
 // (keyboard event listeners, async action dispatching). Stub the surface used.
+// Mutable so a test can put the panel into a degraded tier (mock-prefixed to
+// satisfy jest's out-of-scope factory rule).
+const mockPerformanceProfile = {
+  current: {
+    mode: "standard" as "standard" | "large" | "very-large",
+    lineCount: 10,
+    charCount: 100,
+    outlineRefresh: "eager" as const,
+    symbolParseDebounceMs: 500,
+    showStickyScroll: true,
+    showDegradedModeNotice: false,
+  },
+}
 jest.mock("@/hooks/canvas/use-canvas-monaco-setup", () => ({
   useCanvasMonacoSetup: () => ({
     settings: { theme: "vs" },
     editorOptions: {},
     onMount: jest.fn(),
+    performanceProfile: mockPerformanceProfile.current,
   }),
 }))
 // Mutable so individual tests can surface an action error (mock-prefixed to
@@ -184,6 +198,15 @@ describe("CanvasPanel", () => {
     mockActionsState.runResult = ""
     mockEditorState.value = ""
     mockEditorState.selection = null
+    mockPerformanceProfile.current = {
+      mode: "standard",
+      lineCount: 10,
+      charCount: 100,
+      outlineRefresh: "eager",
+      symbolParseDebounceMs: 500,
+      showStickyScroll: true,
+      showDegradedModeNotice: false,
+    }
     editorStub.executeEdits.mockClear()
     act(() => {
       useCanvasSettingsStore.getState().resetSettings()
@@ -542,6 +565,66 @@ describe("CanvasPanel", () => {
         jest.advanceTimersByTime(200)
       })
       expect(mockEditorLayout).toHaveBeenCalledTimes(0)
+    })
+  })
+  describe("large-document degradation", () => {
+    async function seedAndRender() {
+      let id = ""
+      act(() => {
+        id = useArtifactStore.getState().createCanvasDocument({
+          title: "Big",
+          content: "x",
+          language: "javascript",
+          type: "code",
+        })
+        useArtifactStore.getState().setActiveCanvas(id)
+      })
+      renderWithProviders(<CanvasPanel />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      return id
+    }
+
+    it("says nothing for a normal document", async () => {
+      await seedAndRender()
+      expect(screen.queryByTestId("canvas-performance-notice")).toBeNull()
+    })
+
+    it("announces the degraded tier instead of silently dropping editor features", async () => {
+      // Monaco quietly losing its minimap and folding on a big file reads as
+      // breakage; the notice is what makes it read as a decision.
+      mockPerformanceProfile.current = {
+        mode: "very-large",
+        lineCount: 6000,
+        charCount: 400000,
+        outlineRefresh: "manual",
+        symbolParseDebounceMs: 1500,
+        showStickyScroll: false,
+        showDegradedModeNotice: true,
+      }
+      await seedAndRender()
+      const notice = screen.getByTestId("canvas-performance-notice")
+      expect(notice).toHaveAttribute("data-mode", "very-large")
+      // The jest next-intl mock resolves against the real `i18n/messages/en.json`,
+      // so this is the shipped copy — including the ICU `{lines, number}` grouping.
+      expect(notice).toHaveTextContent("Very large document (6,000 lines)")
+    })
+
+    it("stamps the resolved tier onto the document's editor context", async () => {
+      mockPerformanceProfile.current = {
+        mode: "large",
+        lineCount: 2000,
+        charCount: 90000,
+        outlineRefresh: "deferred",
+        symbolParseDebounceMs: 900,
+        showStickyScroll: true,
+        showDegradedModeNotice: true,
+      }
+      const id = await seedAndRender()
+      expect(useArtifactStore.getState().canvasDocuments[id]?.editorContext?.performanceMode).toBe(
+        "large"
+      )
     })
   })
 })

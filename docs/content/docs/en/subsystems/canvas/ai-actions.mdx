@@ -1,6 +1,6 @@
 ---
 title: AI Actions & Suggestions
-description: The Canvas AI loop — ten action prompts, the diff-review apply pipeline (full-replace / selection-splice), the structured-suggestion JSON stream with accept/reject, and the standalone (currently unwired) context-analyzer.
+description: The Canvas AI loop — ten action prompts, the diff-review apply pipeline (full-replace / selection-splice), the structured-suggestion JSON stream with accept/reject, and the context-analyzer that feeds the suggestion prompt its scope block.
 ---
 
 # AI Actions & Suggestions
@@ -14,7 +14,7 @@ description: The Canvas AI loop — ten action prompts, the diff-review apply pi
   (`buildCanvasReview:438` → `applyAcceptedCanvasReviewItems:508`). **Suggestions**
   (`useCanvasSuggestions`, `hooks/canvas/use-canvas-suggestions.ts:89`) ask the model for a JSON list
   and push each into `useArtifactStore.addSuggestion` for accept/reject in the side panel. A built-in
-  `ContextAnalyzer` exists but is **not wired** into either hook today.
+  `ContextAnalyzer` feeds `useCanvasSuggestions` a bounded scope block; `useCanvasActions` deliberately does not use it.
 </TLDR>
 
 ## The Ten Actions
@@ -128,17 +128,33 @@ splices `suggestedText` into `doc.content` over `[range.startLine .. range.endLi
 renders a `SuggestionItem` (`suggestion-item.tsx:32`) per suggestion with a collapsible original-vs-
 suggested diff.
 
-## The Standalone Context-Analyzer
+## The Context-Analyzer
 
-`ContextAnalyzer` (`lib/canvas/ai/context-analyzer.ts:61`, singleton `:340`) is a fully-built,
-regex-based code analyzer: `analyzeContext` (`:79`) extracts symbols, imports, exports, cursor scope
+`ContextAnalyzer` (`lib/canvas/ai/context-analyzer.ts`) extracts imports, exports, cursor scope
 (`inFunction` / `inClass` / `inBlock`), patterns (react-component, async-await, try-catch, …), bare
-dependencies, and a `low`/`medium`/`high` complexity estimate. `generateContextualPrompt` (`:299`)
-formats that into a prompt summary.
+dependencies, and a `low`/`medium`/`high` complexity estimate. Symbols are **not** parsed here: it
+delegates to `symbolParser` (`lib/canvas/symbols/symbol-parser.ts:52`), the same parser the outline
+panel renders, so a symbol the reader can see is the symbol the model is told about. It used to carry
+a second regex table that had already drifted (no Python, no nesting).
 
-> **Implementation note.** Neither `useCanvasActions` nor `useCanvasSuggestions` calls the analyzer
-> today — both send the raw document text to the model. The analyzer is an independent utility ready
-> to be wired into the prompt builders; treat it as latent capability, not the active path.
+`buildScopeBlock(content, position, language)` is the one prompt-facing entry point. It runs the
+analysis over the **full** document, renders `generateContextualPrompt` and caps the result at
+`SCOPE_BLOCK_MAX_CHARS` (400). It never throws — a malformed document degrades to no block.
+
+**Where it is used, and where it deliberately is not.** `useCanvasSuggestions` appends the block
+because its prompt sends a *window* around the caret (`sliceContextWindow`), and that window is
+exactly the slice that loses "which function am I in" and "what does this file export".
+`useCanvasActions` does not: a whole-document rewrite prompt gains nothing from a symbol outline and
+would pay the tokens on every action.
+
+<Callout type="warn">
+  Derived prompt text must not reshape its source. `extractDependencies` used to call
+  `replace("@", "")` to strip the npm scope marker, which also turned `jane@example.com/pkg` into
+  `janeexample.com` — an address that no longer matched `hasNoLeakingPii`, so it would have travelled
+  past the PII gate the moment the analyzer was wired in. It now strips a *leading* `@` only, and a
+  test pins that. There is exactly one gate (`use-canvas-suggestions.ts`, on the assembled prompt);
+  keeping it effective means never mangling what it has to recognise.
+</Callout>
 
 ## Next
 

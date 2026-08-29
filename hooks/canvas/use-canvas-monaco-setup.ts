@@ -31,6 +31,7 @@ import {
   type MonacoNamespace,
   type MonacoWorkbenchHandle,
 } from "@/lib/editor-workbench/monaco-workbench"
+import { getCanvasPerformanceProfile } from "@/lib/canvas/utils"
 import { loggers } from "@cognia/logging"
 
 export interface UseCanvasMonacoSetupOptions {
@@ -47,6 +48,17 @@ export interface UseCanvasMonacoSetupOptions {
    * first mount; subsequent value changes ride through `editor.setValue`.
    */
   initialContent?: string
+  /**
+   * The document's current content, used only to size the editor's own
+   * workload. A 5,000-line document does not want a minimap, folding
+   * ranges, occurrence highlighting or sticky scroll: each is O(document)
+   * work Monaco redoes on edits and scrolls.
+   *
+   * Passed separately from `initialContent` because that one is consumed
+   * once on mount, while this must track the live buffer — the profile has
+   * to be able to *escalate* as the user pastes.
+   */
+  content?: string
 }
 
 export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
@@ -77,14 +89,42 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
   const getEditorOptions = useCanvasSettingsStore((s) => s.getEditorOptions)
   const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
   const accessibilitySettings = useCanvasSettingsStore((s) => s.settings.accessibility)
+  // Size the editor's workload to the document. `mode` is the only part of
+  // the profile that can change the identity of `editorOptions`, so key the
+  // memo on it rather than on the content — otherwise every keystroke would
+  // hand Monaco a fresh options object.
+  const performanceProfile = useMemo(
+    () => getCanvasPerformanceProfile(opts.content ?? ""),
+    [opts.content]
+  )
+  const performanceMode = performanceProfile.mode
+
   const editorOptions = useMemo(() => {
     // editorSettings + accessibilitySettings both feed getEditorOptions (the
     // latter for accessibilitySupport + the reduced-motion overrides); reading
     // them here re-derives Monaco options whenever either slice changes.
     void editorSettings
     void accessibilitySettings
-    return getEditorOptions()
-  }, [getEditorOptions, editorSettings, accessibilitySettings])
+    const base = getEditorOptions()
+    if (performanceMode === "standard") return base
+    // Everything switched off here is work proportional to the whole
+    // document. `largeFileOptimizations` is Monaco's own switch for the same
+    // idea; it only engages above Monaco's internal size limit, so it is not
+    // a substitute for the rest.
+    return {
+      ...base,
+      minimap: { ...(base.minimap ?? {}), enabled: false },
+      folding: false,
+      occurrencesHighlight: "off" as const,
+      stickyScroll: {
+        ...(base.stickyScroll ?? {}),
+        enabled: performanceMode === "large" ? base.stickyScroll?.enabled !== false : false,
+      },
+      largeFileOptimizations: true,
+      // Wrapping a very large document re-measures every line on resize.
+      ...(performanceMode === "very-large" ? { wordWrap: "off" as const } : {}),
+    }
+  }, [getEditorOptions, editorSettings, accessibilitySettings, performanceMode])
 
   const onMount = useCallback(
     (editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {
@@ -232,6 +272,11 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
     editorOptions,
     settings,
     diagnostics,
+    /**
+     * The degradation tier this document falls into. The panel renders the
+     * notice and stamps `editorContext.performanceMode` from it.
+     */
+    performanceProfile,
     /** Single-writer Monaco theme id — pass straight to the editor `theme` prop. */
     resolvedThemeId,
   }

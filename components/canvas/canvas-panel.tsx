@@ -26,6 +26,7 @@ import {
   Copy,
   Trash2,
   Edit2,
+  Gauge as GaugeIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -117,7 +118,11 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     documentId: activeId ?? undefined,
     language: activeDoc?.language,
     initialContent: activeDoc?.content ?? "",
+    // Live content, not just the mount value: the profile has to escalate
+    // when a user pastes a large file into a document that opened small.
+    content: activeDoc?.content ?? "",
   })
+  const performanceProfile = monacoSetup.performanceProfile
 
   const actions = useCanvasActions()
   const suggestions = useCanvasSuggestions()
@@ -218,6 +223,28 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     window.addEventListener("canvas-format", handler as EventListener)
     return () => window.removeEventListener("canvas-format", handler as EventListener)
   }, [])
+
+  // Stamp the resolved tier onto the document. `CanvasEditorContext.performanceMode`
+  // has been declared since the type landed and never had a writer; plugins read
+  // the editor context through `lib/plugin/api/canvas-api.ts`, and a plugin that
+  // wants to skip its own whole-document pass on a 200k-char file needs to be able
+  // to see the same answer the editor acted on. Only writes on a tier *change*, so
+  // it never joins the per-keystroke traffic.
+  const stampedModeRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeId) {
+      stampedModeRef.current = null
+      return
+    }
+    const key = `${activeId}:${performanceProfile.mode}`
+    if (stampedModeRef.current === key) return
+    stampedModeRef.current = key
+    const doc = useArtifactStore.getState().canvasDocuments[activeId]
+    if (!doc || doc.editorContext?.performanceMode === performanceProfile.mode) return
+    updateDoc(activeId, {
+      editorContext: { ...doc.editorContext, performanceMode: performanceProfile.mode },
+    })
+  }, [activeId, performanceProfile.mode, updateDoc])
 
   // Ctrl+S / Ctrl+Shift+S arrive as `canvas-save` from the keybinding handler
   // (the panel owns the editor buffer, so the save lives here). "manual" flushes
@@ -433,9 +460,31 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     setActive(id)
   }, [create, setActive, t])
 
+  // The degraded tier is announced, not silent. Monaco quietly dropping the
+  // minimap and folding on a large file reads as breakage; saying why does not.
+  const performanceNotice = performanceProfile.showDegradedModeNotice ? (
+    <div
+      data-testid="canvas-performance-notice"
+      data-mode={performanceProfile.mode}
+      role="status"
+      className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-muted-foreground text-xs"
+    >
+      <GaugeIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">
+        {t(
+          performanceProfile.mode === "very-large"
+            ? "performanceMode.veryLarge"
+            : "performanceMode.large",
+          { lines: performanceProfile.lineCount }
+        )}
+      </span>
+    </div>
+  ) : null
+
   const desktopEditorNode = activeDoc ? (
     <div className="flex h-full flex-col">
       <LspServerHint language={activeDoc.language} />
+      {performanceNotice}
       <div className="min-h-0 flex-1">
         <Suspense fallback={<EditorLoading />}>
           <MonacoEditorView

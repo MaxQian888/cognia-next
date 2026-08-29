@@ -213,7 +213,6 @@ describe("Canvas Utils", () => {
       const profile = getCanvasPerformanceProfile("const small = true;")
 
       expect(profile.mode).toBe("standard")
-      expect(profile.enableChunking).toBe(false)
       expect(profile.outlineRefresh).toBe("eager")
       expect(profile.symbolParseDebounceMs).toBe(500)
     })
@@ -224,7 +223,6 @@ describe("Canvas Utils", () => {
       )
 
       expect(profile.mode).toBe("large")
-      expect(profile.enableChunking).toBe(true)
       expect(profile.outlineRefresh).toBe("deferred")
       expect(profile.showDegradedModeNotice).toBe(true)
     })

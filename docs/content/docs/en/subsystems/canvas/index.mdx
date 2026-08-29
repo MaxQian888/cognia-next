@@ -59,7 +59,7 @@ Each box is a documentation page. Read the per-module page for line-accurate int
 <Cards>
   <Card title="Editor core" href="./editor-core" description="Monaco mount + offline loader, the 3-pane shell, document rail/tabs, theme sync, symbols, snippets, plugins, large-file chunking, keybindings" />
   <Card title="State & persistence" href="./state-persistence" description="The single source of truth (useArtifactStore), 5 canvas stores, the Dexie write-through bridge, the 4 tables, feature flags" />
-  <Card title="AI actions & suggestions" href="./ai-actions" description="The 10 action prompts, diff-review apply pipeline, the structured-suggestion stream, the standalone context-analyzer" />
+  <Card title="AI actions & suggestions" href="./ai-actions" description="The 10 action prompts, diff-review apply pipeline, the structured-suggestion stream, the context-analyzer scope block" />
   <Card title="Collaboration" href="./collaboration" description="Vector-clock CRDT, the WebSocket provider (fixed-interval reconnect + heartbeat), sessions, the /canvas/join flow" />
   <Card title="Execution & comments" href="./execution-comments" description="The Rust canvas_run_python sandbox, the execution panel, line-anchored comment threads, version timeline + diff" />
 </Cards>
@@ -179,7 +179,7 @@ The single-page doc this section replaces drifted from the implementation. Concr
 | AI actions `generate / refactor / debug` | The real action set is **review · fix · improve · explain · simplify · expand · translate · format** (+ `custom`, `run`) | `lib/ai/generation/canvas-actions.ts:47` |
 | "exponential backoff" reconnect | Reconnect uses a **fixed interval** (default 1000 ms), capped at 5 attempts — no backoff | `websocket-provider.ts:310`, `:326` |
 | Ambiguous `useCanvasStore` ownership | There is **no** `useCanvasStore`; documents + versions live in `useArtifactStore` | `stores/artifact/artifact-store.ts:361` |
-| (implied) context-analyzer feeds the prompts | `ContextAnalyzer` is fully built but **unwired** — both AI hooks send raw document text | `lib/canvas/ai/context-analyzer.ts:79` |
+| (implied) context-analyzer feeds the prompts | It now does, for **suggestions only** — `buildScopeBlock` appends a 400-char scope summary. Actions still send the document alone, deliberately | `lib/canvas/ai/context-analyzer.ts`, `hooks/canvas/use-canvas-suggestions.ts` |
 | Python result fields | Result struct is `{ stdout, stderr, exit_code, duration_ms }`; timeout returns `exit_code: 124` | `src-tauri/src/canvas/python_exec.rs:15`, `:81` |
 
 ## Sandbox & Trust Boundaries

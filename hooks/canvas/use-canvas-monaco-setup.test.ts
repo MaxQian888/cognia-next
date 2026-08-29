@@ -194,6 +194,52 @@ describe("useCanvasMonacoSetup", () => {
     expect(result.current.diagnostics).toEqual({ monaco, editor })
   })
 
+  describe("large-document degradation", () => {
+    const line = "const x = 1\n"
+
+    it("leaves a normal document's options untouched", () => {
+      const { result } = renderHook(() => useCanvasMonacoSetup({ content: "small" }))
+      expect(result.current.performanceProfile.mode).toBe("standard")
+      expect(result.current.performanceProfile.showDegradedModeNotice).toBe(false)
+      expect(result.current.editorOptions).toEqual({ fontSize: 14 })
+    })
+
+    it("switches off the O(document) features on a large document", () => {
+      // Over `largeLines` (1500) but under `veryLargeLines` (5000).
+      const { result } = renderHook(() => useCanvasMonacoSetup({ content: line.repeat(2000) }))
+      expect(result.current.performanceProfile.mode).toBe("large")
+      expect(result.current.performanceProfile.showDegradedModeNotice).toBe(true)
+      const opts = result.current.editorOptions as Record<string, unknown>
+      expect(opts.minimap).toEqual({ enabled: false })
+      expect(opts.folding).toBe(false)
+      expect(opts.occurrencesHighlight).toBe("off")
+      expect(opts.largeFileOptimizations).toBe(true)
+      // Sticky scroll survives the `large` tier; only `very-large` drops it.
+      expect(opts.stickyScroll).toEqual({ enabled: true })
+      expect(opts.wordWrap).toBeUndefined()
+    })
+
+    it("also drops sticky scroll and word wrap on a very large document", () => {
+      const { result } = renderHook(() => useCanvasMonacoSetup({ content: line.repeat(6000) }))
+      expect(result.current.performanceProfile.mode).toBe("very-large")
+      const opts = result.current.editorOptions as Record<string, unknown>
+      expect(opts.stickyScroll).toEqual({ enabled: false })
+      expect(opts.wordWrap).toBe("off")
+    })
+
+    it("keeps editorOptions referentially stable while the tier does not change", () => {
+      const { result, rerender } = renderHook(
+        ({ content }: { content: string }) => useCanvasMonacoSetup({ content }),
+        { initialProps: { content: line.repeat(2000) } }
+      )
+      const first = result.current.editorOptions
+      // A keystroke inside the same tier must not hand Monaco a fresh options
+      // object — that would reconfigure the editor on every character.
+      rerender({ content: line.repeat(2000) + "x" })
+      expect(result.current.editorOptions).toBe(first)
+    })
+  })
+
   it("disposes the registered editor actions on unmount", () => {
     const { result, unmount } = renderHook(() =>
       useCanvasMonacoSetup({ documentId: "doc-1", language: "ts" })

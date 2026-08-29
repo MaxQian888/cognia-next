@@ -23,6 +23,7 @@ import { getProviderModel } from "@cognia/provider-core/core/client"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
+import { buildScopeBlock } from "@/lib/canvas/ai/context-analyzer"
 import { loggers } from "@cognia/logging"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { CanvasSuggestion, ArtifactLanguage } from "@/types"
@@ -158,9 +159,21 @@ export function useCanvasSuggestions() {
       try {
         const windowed = sliceContextWindow(ctx.content, ctx.cursorLine, contextLines)
         const system = SYSTEM_PROMPT.replace("{{N}}", String(max))
+        // The window above is a slice around the caret, so it drops exactly the
+        // things a good suggestion needs: which function/class the caret sits in,
+        // and what the file exports and depends on. Those are cheap to derive
+        // locally from the FULL document and expensive for the model to guess.
+        // Bounded to `SCOPE_BLOCK_MAX_CHARS`; `null` when there is nothing to say.
+        const scope = buildScopeBlock(
+          ctx.content,
+          { line: ctx.cursorLine ?? 1, column: ctx.cursorColumn ?? 1 },
+          String(ctx.language)
+        )
         const prompt = `Language: ${ctx.language}\nDocument:\n\n${windowed}\n\n${
           ctx.selectionText ? `User selection:\n${ctx.selectionText}\n\n` : ""
-        }${ctx.cursorLine !== undefined ? `Cursor line: ${ctx.cursorLine}` : ""}`
+        }${scope ? `${scope}\n\n` : ""}${
+          ctx.cursorLine !== undefined ? `Cursor line: ${ctx.cursorLine}` : ""
+        }`
         if (!hasNoLeakingPii(system) || !hasNoLeakingPii(prompt)) {
           throw new Error("Canvas suggestions blocked by PII gate")
         }

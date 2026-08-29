@@ -8,6 +8,8 @@
  */
 
 import { loggers } from "@cognia/logging"
+import { symbolParser } from "@/lib/canvas/symbols/symbol-parser"
+import type { DocumentSymbol, SymbolKind } from "@/types/canvas/symbols"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import type { CursorPosition } from "@/types/canvas/collaboration"
 
@@ -58,24 +60,44 @@ export interface DocumentContext {
   complexity: "low" | "medium" | "high"
 }
 
-export class ContextAnalyzer {
-  private symbolPatterns: Record<string, RegExp[]> = {
-    function: [
-      /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g,
-      /(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\([^)]*\)\s*=>)/g,
-      /(\w+)\s*:\s*(?:async\s+)?\([^)]*\)\s*=>/g,
-    ],
-    class: [/(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/g],
-    interface: [/(?:export\s+)?interface\s+(\w+)/g],
-    type: [/(?:export\s+)?type\s+(\w+)/g],
-    variable: [/(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::|=)/g],
-    import: [
-      /import\s+(?:\{[^}]+\}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"]/g,
-      /import\s+['"]([^'"]+)['"]/g,
-    ],
-    enum: [/(?:export\s+)?enum\s+(\w+)/g],
-  }
+/**
+ * The IDE outline's kind vocabulary is much wider than the prompt summary's.
+ * Anything with no sensible narrow equivalent is dropped rather than coerced —
+ * a mislabelled symbol in a prompt is worse than a missing one.
+ */
+const AI_SYMBOL_KIND_BY_OUTLINE_KIND: Partial<Record<SymbolKind, AiContextSymbol["kind"]>> = {
+  function: "function",
+  constructor: "method",
+  method: "method",
+  property: "property",
+  field: "property",
+  class: "class",
+  struct: "class",
+  interface: "interface",
+  enum: "enum",
+  enumMember: "property",
+  variable: "variable",
+  constant: "variable",
+  typeParameter: "type",
+}
 
+function toAiContextSymbols(symbols: readonly DocumentSymbol[]): AiContextSymbol[] {
+  const out: AiContextSymbol[] = []
+  for (const symbol of symbols) {
+    const kind = AI_SYMBOL_KIND_BY_OUTLINE_KIND[symbol.kind]
+    if (!kind) continue
+    const children = symbol.children ? toAiContextSymbols(symbol.children) : undefined
+    out.push({
+      name: symbol.name,
+      kind,
+      range: { startLine: symbol.range.startLine, endLine: symbol.range.endLine },
+      ...(children && children.length > 0 ? { children } : {}),
+    })
+  }
+  return out
+}
+
+export class ContextAnalyzer {
   analyzeContext(content: string, position: CursorPosition, language: string): DocumentContext {
     const lines = content.split("\n")
     const symbols = this.parseSymbols(content, language)
@@ -99,60 +121,18 @@ export class ContextAnalyzer {
     }
   }
 
+  /**
+   * Delegates to the outline parser rather than carrying a second regex table.
+   * `symbol-parser.ts` is the one the Canvas outline panel already renders, so
+   * a symbol the reader can see in the outline is the same symbol the model is
+   * told about. The two tables had drifted (this one had no Python support and
+   * no nesting); keeping both meant every language fix had to land twice.
+   */
   parseSymbols(content: string, language: string): AiContextSymbol[] {
-    const symbols: AiContextSymbol[] = []
-    const lines = content.split("\n")
-
-    try {
-      for (const [kind, patterns] of Object.entries(this.symbolPatterns)) {
-        for (const pattern of patterns) {
-          pattern.lastIndex = 0
-          let match
-          while ((match = pattern.exec(content)) !== null) {
-            const lineNumber = content.substring(0, match.index).split("\n").length
-            const endLine = this.findBlockEnd(lines, lineNumber - 1)
-
-            symbols.push({
-              name: match[1],
-              kind: kind as AiContextSymbol["kind"],
-              range: {
-                startLine: lineNumber,
-                endLine: endLine + 1,
-              },
-            })
-          }
-        }
-      }
-    } catch (err) {
-      loggers.canvas.warn("context-analyzer parseSymbols failed", {
-        language,
-        error: String(err),
-      })
-    }
-
-    return symbols.sort((a, b) => a.range.startLine - b.range.startLine)
-  }
-
-  private findBlockEnd(lines: string[], startLine: number): number {
-    let braceCount = 0
-    let foundStart = false
-
-    for (let i = startLine; i < lines.length; i++) {
-      const line = lines[i]
-      for (const char of line) {
-        if (char === "{") {
-          braceCount++
-          foundStart = true
-        } else if (char === "}") {
-          braceCount--
-          if (foundStart && braceCount === 0) {
-            return i
-          }
-        }
-      }
-    }
-
-    return startLine
+    if (!content) return []
+    return toAiContextSymbols(symbolParser.parseSymbols(content, language)).sort(
+      (a, b) => a.range.startLine - b.range.startLine
+    )
   }
 
   extractImports(content: string): string[] {
@@ -262,9 +242,17 @@ export class ContextAnalyzer {
   }
 
   private extractDependencies(imports: string[]): string[] {
-    return imports
-      .filter((imp) => !imp.startsWith(".") && !imp.startsWith("@/"))
-      .map((imp) => imp.split("/")[0].replace("@", ""))
+    return (
+      imports
+        .filter((imp) => !imp.startsWith(".") && !imp.startsWith("@/"))
+        // Strip only a LEADING `@` — the npm scope marker. `replace("@", "")`
+        // removed the first `@` anywhere in the specifier, which quietly turned
+        // `jane@example.com/pkg` into `janeexample.com`: an email that no longer
+        // matches the PII gate's pattern. Derived text must never reshape its
+        // source, because `hasNoLeakingPii` runs on the assembled prompt and can
+        // only catch what still looks like the thing it is.
+        .map((imp) => imp.split("/")[0].replace(/^@/, ""))
+    )
   }
 
   private assessComplexity(content: string, symbols: AiContextSymbol[]): "low" | "medium" | "high" {
@@ -338,5 +326,47 @@ export class ContextAnalyzer {
 }
 
 export const contextAnalyzer = new ContextAnalyzer()
+
+/**
+ * Hard ceiling on the scope block. This rides on every suggestion request, so
+ * it earns its budget by being short; a document with 400 symbols must not turn
+ * a caret-window prompt into a whole-file dump.
+ */
+export const SCOPE_BLOCK_MAX_CHARS = 400
+
+/**
+ * The one prompt-facing entry point: analyse the document around the caret and
+ * render a bounded scope summary, or `null` when there is nothing worth saying.
+ *
+ * Why this exists at all: the suggestion prompt sends a *window* around the
+ * caret (`sliceContextWindow`), which is exactly the slice that loses the
+ * answers to "what function am I in", "what does this file export", "what does
+ * it import". Those are cheap to compute locally and expensive for the model to
+ * guess, so they go in explicitly.
+ *
+ * Never throws — a malformed document degrades to no block, not a failed turn.
+ */
+export function buildScopeBlock(
+  content: string,
+  position: CursorPosition,
+  language: string,
+  actionType: CanvasActionType = "improve"
+): string | null {
+  if (!content.trim()) return null
+  try {
+    const context = contextAnalyzer.analyzeContext(content, position, language)
+    const body = contextAnalyzer.generateContextualPrompt(context, actionType).trim()
+    if (!body) return null
+    const trimmed =
+      body.length > SCOPE_BLOCK_MAX_CHARS ? `${body.slice(0, SCOPE_BLOCK_MAX_CHARS - 1)}…` : body
+    return `Nearby scope:\n${trimmed}`
+  } catch (err) {
+    loggers.canvas.warn("context-analyzer scope block failed", {
+      language,
+      error: String(err),
+    })
+    return null
+  }
+}
 
 export default ContextAnalyzer

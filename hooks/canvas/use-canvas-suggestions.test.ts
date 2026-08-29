@@ -247,6 +247,58 @@ describe("useCanvasSuggestions", () => {
     expect(result.current.error).toBe("api dead")
   })
 
+  it("carries a scope block derived from the FULL document, not the window", async () => {
+    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    // The declaration sits far outside the ±2-line caret window, so the only
+    // way the model can learn the caret is inside `fetchUser` is the block.
+    const content = [
+      "export function fetchUser(id) {",
+      ...Array.from({ length: 40 }, (_, i) => `  const step${i} = ${i}`),
+      "  return id",
+      "}",
+    ].join("\n")
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate(
+        { documentId: "doc", language: "typescript", content, cursorLine: 30 },
+        { contextLines: 2 }
+      )
+    })
+    const prompt = generateTextMock.mock.calls[0][0].prompt as string
+    expect(prompt).toContain("Nearby scope:")
+    expect(prompt).toContain("fetchUser")
+    expect(prompt).not.toContain("export function fetchUser(id) {")
+  })
+
+  it("omits the scope block rather than emitting an empty one", async () => {
+    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate({ documentId: "doc", language: "ts", content: "   " })
+    })
+    expect(generateTextMock.mock.calls[0][0].prompt as string).not.toContain("Nearby scope:")
+  })
+
+  it("still trips the PII gate when the leak is only reachable via the scope block", async () => {
+    // The caret window is clean; the import line carrying the address is not.
+    // The gate reads the assembled prompt, so it must still catch this.
+    const content = [
+      "import { mail } from 'jane@example.com/pkg'",
+      ...Array.from({ length: 40 }, (_, i) => `const step${i} = ${i}`),
+    ].join("\n")
+    const { result } = renderHook(() => useCanvasSuggestions())
+    let suggestions: unknown[] = []
+    await act(async () => {
+      suggestions = await result.current.generate(
+        { documentId: "doc", language: "typescript", content, cursorLine: 35 },
+        { contextLines: 2 }
+      )
+    })
+    expect(suggestions).toEqual([])
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.error).toContain("PII gate")
+  })
+
   it("blocks provider dispatch when the suggestion prompt contains PII", async () => {
     const { result } = renderHook(() => useCanvasSuggestions())
     let suggestions: unknown[] = []

@@ -141,7 +141,6 @@ export interface CanvasPerformanceProfile {
   mode: CanvasPerformanceMode
   lineCount: number
   charCount: number
-  enableChunking: boolean
   outlineRefresh: "eager" | "deferred" | "manual"
   symbolParseDebounceMs: number
   showStickyScroll: boolean
@@ -160,7 +159,6 @@ export function getCanvasPerformanceProfile(content: string): CanvasPerformanceP
       mode: "very-large",
       lineCount,
       charCount,
-      enableChunking: true,
       outlineRefresh: "manual",
       symbolParseDebounceMs: 1500,
       showStickyScroll: false,
@@ -176,7 +174,6 @@ export function getCanvasPerformanceProfile(content: string): CanvasPerformanceP
       mode: "large",
       lineCount,
       charCount,
-      enableChunking: true,
       outlineRefresh: "deferred",
       symbolParseDebounceMs: 900,
       showStickyScroll: true,
@@ -188,7 +185,6 @@ export function getCanvasPerformanceProfile(content: string): CanvasPerformanceP
     mode: "standard",
     lineCount,
     charCount,
-    enableChunking: false,
     outlineRefresh: "eager",
     symbolParseDebounceMs: 500,
     showStickyScroll: true,
