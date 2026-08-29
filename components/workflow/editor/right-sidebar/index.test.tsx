@@ -20,7 +20,20 @@ jest.mock("./templates-tab", () => ({
   TemplatesTab: () => <div data-testid="mock-templates-tab" />,
 }))
 jest.mock("./changelog-tab", () => ({
-  ChangelogTab: () => <div data-testid="mock-changelog-tab" />,
+  // Surfaces the reveal handler so the wiring is assertable: the real button
+  // used to render with no handler at all and did nothing when clicked.
+  ChangelogTab: ({
+    onRevealInChat,
+  }: {
+    onRevealInChat?: (messageId: string | undefined, proposalId: string) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="mock-changelog-tab"
+      data-has-reveal={onRevealInChat ? "true" : "false"}
+      onClick={() => onRevealInChat?.("m1", "p1")}
+    />
+  ),
 }))
 jest.mock("./problems-tab", () => ({
   ProblemsTab: () => <div data-testid="mock-problems-tab" />,
@@ -246,6 +259,27 @@ describe("RightSidebar", () => {
 
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     expect(await screen.findByTestId("mock-settings-tab")).toBeInTheDocument()
+  })
+
+  it("hands the changelog panel a working reveal handler", async () => {
+    // `ChangelogTab` renders its Reveal button whenever a row carries a
+    // messageId, but the handler was optional and never supplied — so the
+    // button was visible and inert. Pin that the host now provides one.
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_reveal", name: "Reveal" },
+    })
+    const user = userEvent.setup()
+    harness(store)
+
+    await user.click(screen.getByRole("button", { name: "Changes" }))
+    const tab = await screen.findByTestId("mock-changelog-tab")
+    expect(tab).toHaveAttribute("data-has-reveal", "true")
+
+    // Clicking it fronts the chat panel again — the card lives in that stream.
+    await user.click(tab)
+    expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
   })
 
   it("uses mobile Sheet semantics without desktop layout controls", async () => {

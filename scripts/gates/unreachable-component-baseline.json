@@ -4,7 +4,6 @@
   "files": [
     "components/account/account-switcher.tsx",
     "components/mobile/settings/mobile-settings-panel.tsx",
-    "components/terminal/ai-shell/index.ts",
-    "components/workflow/editor/chat/sticky-proposal-banner.tsx"
+    "components/terminal/ai-shell/index.ts"
   ]
 }

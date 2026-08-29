@@ -59,6 +59,7 @@ import type {
 } from "@/types/context-workbench"
 import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
+import { revealProposalInChat } from "@/lib/workflow/editor/reveal-proposal"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
@@ -112,6 +113,13 @@ function WorkflowPanelLoading() {
 interface WorkflowPanelRuntime {
   editorRevision: string
   handleOpenSettings: (tab?: string) => void
+  /**
+   * Bring the chat panel forward and scroll to a proposal card. The changelog
+   * tab lives in a different panel, so revealing has to navigate first — its
+   * "Reveal" button used to render with no handler at all and simply did
+   * nothing when clicked.
+   */
+  revealProposal: (messageId: string | undefined, proposalId: string) => void
   reactFlowInstance?: ReactFlowInstance | null
   selectedEdgeIds: string[]
   selectedNodeIds: string[]
@@ -222,7 +230,11 @@ function WorkflowChangelogPanel() {
   const runtime = useWorkflowPanelRuntime()
   return (
     <Suspense fallback={<WorkflowPanelLoading />}>
-      <ChangelogTab useStore={runtime.useStore} workflowId={runtime.workflowId} />
+      <ChangelogTab
+        useStore={runtime.useStore}
+        workflowId={runtime.workflowId}
+        onRevealInChat={runtime.revealProposal}
+      />
     </Suspense>
   )
 }
@@ -297,6 +309,19 @@ function WorkflowContextWorkbench({
       onOpenWorkflowSettings?.(tab)
     },
     [navigatePanel, onOpenWorkflowSettings, scopeKey]
+  )
+
+  const handleRevealProposal = useCallback(
+    (messageId: string | undefined, proposalId: string) => {
+      // Front the chat panel first: the card lives in the chat stream, and the
+      // request usually arrives from the changelog panel next door. The scroll
+      // waits a frame so the panel has mounted its content.
+      navigatePanel(scopeKey, "chat", "narrow")
+      requestAnimationFrame(() => {
+        revealProposalInChat({ proposalId, messageId })
+      })
+    },
+    [navigatePanel, scopeKey]
   )
 
   const panels = useMemo<ContextPanelDefinition[]>(
@@ -412,6 +437,7 @@ function WorkflowContextWorkbench({
     () => ({
       editorRevision,
       handleOpenSettings,
+      revealProposal: handleRevealProposal,
       reactFlowInstance,
       selectedEdgeIds,
       selectedNodeIds,
@@ -422,6 +448,7 @@ function WorkflowContextWorkbench({
     [
       editorRevision,
       handleOpenSettings,
+      handleRevealProposal,
       reactFlowInstance,
       selectedEdgeIds,
       selectedNodeIds,

@@ -23,7 +23,7 @@
  * back through the same `claude.send` path.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -39,6 +39,8 @@ import { getDb } from "@/lib/db/schema"
 import { listMessages } from "@/lib/db/messages"
 import { Loader2Icon, MessageSquareIcon } from "lucide-react"
 import { WorkflowSessionBar } from "@/components/workflow/editor/chat/session-bar"
+import { StickyProposalBanner } from "@/components/workflow/editor/chat/sticky-proposal-banner"
+import { revealProposalInChat } from "@/lib/workflow/editor/reveal-proposal"
 import type { ChatSession, SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import type { EditorStore } from "@/lib/workflow/editor/store"
 import { useMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
@@ -265,6 +267,14 @@ export function WorkflowEditorChatTab({
 
   // Workflow-specific welcome copy + starter cards for the empty chat state,
   // in place of the generic dev-tool starters the main chat shows.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  // Reveal handler for the sticky banner. The banner is deliberately agnostic
+  // about how to reach the card; this side knows the pane it lives in, so the
+  // lookup is scoped to it rather than the whole document.
+  const handleRevealProposal = useCallback((proposalId: string) => {
+    revealProposalInChat({ proposalId, root: paneRef.current })
+  }, [])
+
   const emptyState = useMemo(
     () => ({
       title: t("starters.title"),
@@ -318,6 +328,7 @@ export function WorkflowEditorChatTab({
       <WorkflowEditorProvider value={ctxValue}>
         <PerfBoundary id="workflow:chat-tab">
           <div
+            ref={paneRef}
             className="flex h-full w-full flex-col bg-card/40"
             aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
             data-testid="workflow-chat-tab"
@@ -329,6 +340,7 @@ export function WorkflowEditorChatTab({
               onSwitchSession={setSelectedSessionId}
               onCreateSession={setSelectedSessionId}
             />
+            <StickyProposalBanner workflowId={workflowId} onRevealInChat={handleRevealProposal} />
             <ChatPane
               activeSession={activeSession}
               sessionId={activeSession.id}

@@ -105,7 +105,9 @@ jest.mock("@/lib/db/messages", () => ({ listMessages: jest.fn(async () => []) })
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn(), info: jest.fn(), message: jest.fn() },
+}))
 
 jest.mock("@/lib/perf", () => ({
   PerfBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -131,6 +133,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages } from "@/lib/db/messages"
 import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
 import { useChatStore } from "@/stores/chat"
+import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
 import { WorkflowEditorChatTab, prependWorkflowRefs } from "./chat-tab"
 
 const mLive = useLiveQuery as jest.Mock
@@ -148,6 +151,17 @@ const DEFAULT_SESSION = {
 const MESSAGES = {
   workflowEditor: {
     chat: {
+      proposal: {
+        banner: {
+          applyAll: "Apply",
+          discard: "Discard",
+          ops: "{count} ops",
+          revealInChat: "Reveal",
+        },
+        errorEditorNotOpen: "not open",
+        errorStale: "stale",
+        toast: { applied: "a", discarded: "d", proposed: "p" },
+      },
       noWorkflow: "No workflow",
       loading: "Loading",
       ariaLabel: "Copilot for {name}",
@@ -310,5 +324,52 @@ describe("prependWorkflowRefs", () => {
       type: "text",
       text: "Referring to these workflow elements: @node:n_a\n\n",
     })
+  })
+})
+
+/**
+ * The sticky proposal banner was a fully built component with zero mount
+ * sites — it sat in the unreachable-components baseline, so its Apply /
+ * Discard controls AND its "a proposal arrived" toasts were unreachable even
+ * when the agent opened one through a tool path.
+ */
+describe("WorkflowEditorChatTab proposal banner", () => {
+  afterEach(() => {
+    act(() => useProposalStore.setState({ entries: {} }))
+  })
+
+  it("does not render a banner while no proposal is open", () => {
+    harness()
+    expect(screen.queryByTestId("workflow-proposal-banner")).toBeNull()
+  })
+
+  it("surfaces an open proposal for this workflow", () => {
+    act(() => {
+      useProposalStore.getState().openProposal("wf_a", {
+        proposalId: "p1",
+        workflowId: "wf_a",
+        summary: "Add a retry",
+        ops: [],
+      })
+    })
+    harness()
+    const banner = screen.getByTestId("workflow-proposal-banner")
+    expect(banner).toHaveAttribute("data-proposal-id", "p1")
+    // The reveal button only renders when the tab supplies a handler, which
+    // is exactly the wiring that was missing.
+    expect(screen.getByTestId("workflow-proposal-banner-reveal")).toBeInTheDocument()
+  })
+
+  it("ignores a proposal opened against a different workflow", () => {
+    act(() => {
+      useProposalStore.getState().openProposal("wf_other", {
+        proposalId: "p2",
+        workflowId: "wf_other",
+        summary: "Elsewhere",
+        ops: [],
+      })
+    })
+    harness()
+    expect(screen.queryByTestId("workflow-proposal-banner")).toBeNull()
   })
 })
