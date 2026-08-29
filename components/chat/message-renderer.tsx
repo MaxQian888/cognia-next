@@ -106,6 +106,7 @@ import {
   ScissorsIcon,
   ImageIcon,
   PencilIcon,
+  BrainIcon,
   RefreshCcwIcon,
   Repeat2Icon,
   Share2Icon,
@@ -143,6 +144,8 @@ import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
 import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
+import { saveMessageAsMemory } from "@/lib/chat/save-message-as-memory"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getSession } from "@/lib/db/sessions"
@@ -350,6 +353,7 @@ function MessageRendererInner({
         canReadAloud: ttsEnabled,
         canBringBack: Boolean(handBackTargetId),
         canRerunTemplate: Boolean(templateRun && branchSessionId),
+        canSaveAsMemory: Boolean(branchSessionId),
         streaming: isStreaming,
       }),
     [
@@ -498,6 +502,33 @@ function MessageRendererInner({
     })
     toast.success(t("bringBackDone"))
   }, [handBackTargetId, message, t])
+
+  const handleSaveAsMemory = useCallback(async () => {
+    if (!branchSessionId) return
+    try {
+      // Read at click time rather than subscribed: the value is used once per
+      // action, and `branch-dialog.tsx` reaches for it the same way.
+      const { activeProjectId } = useProjectStore.getState()
+      const title = await saveMessageAsMemory({
+        parts: message.parts,
+        sessionId: branchSessionId,
+        ...(activeProjectId ? { projectId: activeProjectId } : {}),
+      })
+      // Nothing readable in the turn. Saying so beats a success toast for a
+      // draft that was never filed.
+      if (!title) {
+        toast.error(t("saveAsMemoryEmpty"))
+        return
+      }
+      toast.success(t("saveAsMemoryDone", { title }))
+    } catch (err) {
+      // A PII-gate refusal arrives here, and it is a real answer the user has
+      // to see — the draft was not filed and no retry will change that.
+      toast.error(
+        t("saveAsMemoryFailed", { reason: err instanceof Error ? err.message : String(err) })
+      )
+    }
+  }, [branchSessionId, message.parts, t])
 
   const handleQuote = useCallback(() => {
     if (!branchSessionId) return
@@ -806,6 +837,17 @@ function MessageRendererInner({
                   disabled={actionCommand("rerunTemplate")?.disabled}
                 >
                   <Repeat2Icon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {hasActionCommand("saveAsMemory") && (
+                <MessageAction
+                  tooltip={t("saveAsMemoryTooltip")}
+                  label={t("saveAsMemoryLabel")}
+                  onClick={() => void handleSaveAsMemory()}
+                  disabled={actionCommand("saveAsMemory")?.disabled}
+                >
+                  <BrainIcon className="size-3.5" />
                 </MessageAction>
               )}
 

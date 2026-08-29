@@ -12,6 +12,7 @@ export type MessageActionCommandId =
   | "truncate"
   | "bringBack"
   | "rerunTemplate"
+  | "saveAsMemory"
   | "delete"
 
 export interface MessageActionCommandContext {
@@ -24,6 +25,15 @@ export interface MessageActionCommandContext {
   canBringBack?: boolean
   /** This turn recorded the template parameters it was written from. */
   canRerunTemplate?: boolean
+  /**
+   * The turn's content can be kept as a pending memory draft.
+   *
+   * Assistant turns only. A user's own message is already theirs to save with
+   * `/remember`; what has no path is the thing the AGENT worked out, which is
+   * exactly what `lib/memory/agent-findings.ts` was built to take and what
+   * nothing has ever called.
+   */
+  canSaveAsMemory?: boolean
   canDelete?: boolean
   streaming?: boolean
 }
@@ -65,6 +75,9 @@ export function resolveMessageActionCommands(
   // command sitting two rows above.
   if (context.role === "user" && context.canRerunTemplate) {
     commands.push({ id: "rerunTemplate", disabled: context.streaming })
+  }
+  if (context.role === "assistant" && context.canSaveAsMemory && context.hasContent) {
+    commands.push({ id: "saveAsMemory", disabled: context.streaming })
   }
   if (context.canDelete) commands.push({ id: "delete", destructive: true })
   return commands

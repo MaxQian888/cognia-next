@@ -83,3 +83,35 @@ describe("rerunTemplate", () => {
     expect(command?.disabled).toBe(true)
   })
 })
+
+describe("saveAsMemory", () => {
+  const base = { role: "assistant" as const, hasContent: true, hasSession: true }
+  const ids = (over = {}) => resolveMessageActionCommands({ ...base, ...over }).map((c) => c.id)
+
+  it("is offered on an assistant turn that can be saved", () => {
+    expect(ids({ canSaveAsMemory: true })).toContain("saveAsMemory")
+  })
+
+  it("is absent without the capability", () => {
+    expect(ids()).not.toContain("saveAsMemory")
+  })
+
+  // A user's own message is already theirs to save with `/remember`; what had
+  // no path is the thing the AGENT worked out.
+  it("is never offered on the user's own turn", () => {
+    expect(ids({ role: "user", canSaveAsMemory: true })).not.toContain("saveAsMemory")
+  })
+
+  it("is absent for a turn with nothing in it", () => {
+    expect(ids({ hasContent: false, canSaveAsMemory: true })).not.toContain("saveAsMemory")
+  })
+
+  it("is disabled mid-stream", () => {
+    const command = resolveMessageActionCommands({
+      ...base,
+      canSaveAsMemory: true,
+      streaming: true,
+    }).find((c) => c.id === "saveAsMemory")
+    expect(command?.disabled).toBe(true)
+  })
+})
