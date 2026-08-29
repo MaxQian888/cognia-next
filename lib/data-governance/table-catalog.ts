@@ -69,6 +69,8 @@ export const CORE_TABLE_NAMES = [
   "agentTeamTrajectory",
   "agentTraces",
   "approvedBinaries",
+  "artifactVersions",
+  "artifacts",
   "automationAuditLog",
   "backgroundTasks",
   "backupHistory",
@@ -381,6 +383,8 @@ export const PORTABLE_BACKUP_BINDINGS = {
   messages: "messages",
   sessionState: "sessionState",
   trustedWorkspaces: "trustedWorkspaces",
+  artifacts: "artifacts",
+  artifactVersions: "artifactVersions",
   canvasDocuments: "canvasDocuments",
   canvasVersions: "canvasVersions",
   contextComments: "contextComments",
@@ -701,6 +705,9 @@ const LARGE_TABLES = new Set<CoreTableName>([
   // Up to 512 KiB of captured build output per version.
   "siteBuildLogs",
   "agentTeamTrajectory",
+  // One row per artifact revision, each holding a full copy of the content —
+  // the reason artifacts could not stay in a 5 MB localStorage blob.
+  "artifactVersions",
   "automationAuditLog",
   "browserRecordings",
   "codeAdoptionTurns",
@@ -734,6 +741,8 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   mcpServerSummaries: "mcp",
   mcpSyncJobs: "mcp",
   promptPresets: "preset",
+  artifacts: "artifact",
+  artifactVersions: "artifact",
   canvasDocuments: "canvas",
   canvasVersions: "canvas",
   canvasComments: "canvas",
@@ -745,7 +754,7 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
 
 function ownerFor(name: CoreTableName): string {
   const prefix = name.match(
-    /^(agentTeam|agent|workflow|provider|plugin|connector|integration|twin|wiki|eval|site|pet|browser|canvas|memory|retrieval|session|chat|template|knowledgeBase)/
+    /^(agentTeam|agent|artifact|workflow|provider|plugin|connector|integration|twin|wiki|eval|site|pet|browser|canvas|memory|retrieval|session|chat|template|knowledgeBase)/
   )?.[1]
   return prefix ?? "core"
 }

@@ -117,6 +117,7 @@
   },
   "breakdown": {
     "categories": {
+      "artifact": "Artifacts",
       "backupHistory": "备份历史",
       "canvas": "画布文档",
       "character": "角色",
@@ -205,7 +206,7 @@
       "title": "Agent 团队工作区"
     },
     "artifacts": {
-      "body": "生成产物、版本历史、画布文档与分析结果。",
+      "body": "生成产物及其完整版本历史。",
       "importBody": "恢复你的生成产物及历史。",
       "importTitle": "导入 Artifacts",
       "title": "Artifacts"

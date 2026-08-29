@@ -108,13 +108,15 @@ function reviewReceiptIdentity(r: ArtifactReviewReceipt): string {
   return `${r.sessionId}\0${r.artifactId}\0${r.outcome}\0${r.accepted}\0${r.total}`
 }
 
-/** Maximum content size to persist per artifact (100KB) */
-const MAX_PERSISTED_CONTENT_SIZE = 100 * 1024
-/** Maximum total artifacts to persist (LRU eviction beyond this) */
-const MAX_PERSISTED_ARTIFACTS = 200
 /** Maximum number of auto-save canvas versions retained per document */
 const MAX_CANVAS_AUTOSAVE_VERSIONS = 30
-const ARTIFACT_STORAGE_KEY = "cognia-artifacts"
+/**
+ * The default persist bucket. Exported because the Dexie migration
+ * (`lib/artifacts/localstorage-migration.ts`) has to read the same bucket the
+ * store writes, and guessing the string there would silently miss the legacy
+ * artifacts it exists to rescue.
+ */
+export const ARTIFACT_STORAGE_KEY = "cognia-artifacts"
 
 function artifactAccountStorageKey(accountId: string): string {
   return `${ARTIFACT_STORAGE_KEY}:${accountId}`
@@ -540,6 +542,12 @@ interface ArtifactState {
   // Artifacts
   artifacts: Record<string, Artifact>
   /**
+   * Keeps the legacy localStorage maps intact until the first authoritative
+   * Dexie transaction commits. Persisted so a reload after a failed write
+   * resumes the migration instead of silently cleaning the only copy.
+   */
+  artifactDexieMigrationPending: boolean
+  /**
    * The artifact each chat session is parked on, keyed by session id (see
    * `artifactSessionKey`). Read it through `selectActiveArtifactId` /
    * `useActiveArtifactId` rather than indexing directly.
@@ -832,6 +840,7 @@ interface ArtifactActions {
 
 const initialState: ArtifactState = {
   artifacts: {},
+  artifactDexieMigrationPending: false,
   activeArtifactIdBySession: {},
   artifactVersions: {},
   artifactWorkspace: INITIAL_ARTIFACT_WORKSPACE,
@@ -2288,7 +2297,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     {
       name: ARTIFACT_STORAGE_KEY,
       storage: persistLocalStorage(),
-      version: 5,
+      // v6 — artifacts + their versions left this blob for Dexie. The migrate
+      // hook deliberately does NOT strip them: on the first boot after the
+      // upgrade they are the migration source. The bridge clears the marker
+      // only after its initial transaction commits, which makes `partialize`
+      // remove the maps on the following persist write.
+      version: 6,
       migrate: (persistedState: unknown, version) => {
         const state = persistedState as Record<string, unknown>
         if (!state.canvasDocuments || typeof state.canvasDocuments !== "object") {
@@ -2296,6 +2310,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         }
         if (!state.artifactVersions || typeof state.artifactVersions !== "object") {
           state.artifactVersions = {}
+        }
+        const hasLegacyArtifactRows =
+          Object.keys((state.artifacts as Record<string, unknown> | undefined) ?? {}).length > 0 ||
+          Object.keys(state.artifactVersions as Record<string, unknown>).length > 0
+        if (typeof state.artifactDexieMigrationPending !== "boolean") {
+          state.artifactDexieMigrationPending = hasLegacyArtifactRows
         }
         if (!state.artifactWorkspace || typeof state.artifactWorkspace !== "object") {
           state.artifactWorkspace = INITIAL_ARTIFACT_WORKSPACE
@@ -2344,42 +2364,43 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
       },
       // Restore `Date` objects stripped to ISO strings during serialization,
       // so components reading the raw state maps don't crash on `.getTime()`.
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...rehydratePersistedArtifactState((persistedState ?? {}) as Partial<ArtifactState>),
-      }),
-      partialize: (state) => {
-        // LRU eviction: keep only the most recently updated artifacts
-        const sortedArtifacts = Object.values(state.artifacts)
-          .sort((a, b) => {
-            const dateA =
-              a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime()
-            const dateB =
-              b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime()
-            return dateB - dateA
-          })
-          .slice(0, MAX_PERSISTED_ARTIFACTS)
-
-        // Truncate oversized content to prevent localStorage overflow
-        const artifacts: Record<string, Artifact> = {}
-        for (const artifact of sortedArtifacts) {
-          artifacts[artifact.id] =
-            artifact.content.length > MAX_PERSISTED_CONTENT_SIZE
-              ? { ...artifact, content: artifact.content.slice(0, MAX_PERSISTED_CONTENT_SIZE) }
-              : artifact
-        }
-
-        // Only keep versions for artifacts that are being persisted
-        const artifactVersions: Record<string, ArtifactVersion[]> = {}
-        for (const [id, versions] of Object.entries(state.artifactVersions)) {
-          if (artifacts[id]) {
-            artifactVersions[id] = versions
-          }
-        }
-
+      merge: (persistedState, currentState) => {
+        const persisted = rehydratePersistedArtifactState(
+          (persistedState ?? {}) as Partial<ArtifactState>
+        )
+        const hasLegacyArtifactRows =
+          Object.keys(persisted.artifacts ?? {}).length > 0 ||
+          Object.keys(persisted.artifactVersions ?? {}).length > 0
         return {
-          artifacts,
-          artifactVersions,
+          ...currentState,
+          ...persisted,
+          artifactDexieMigrationPending:
+            persisted.artifactDexieMigrationPending === true || hasLegacyArtifactRows,
+        }
+      },
+      partialize: (state) => {
+        // Once the initial migration commits, `artifacts` and
+        // `artifactVersions` are deliberately absent: Dexie owns them from v6
+        // on (`lib/artifacts/dexie-bridge.ts`). Until then the conditional below
+        // retains the full legacy maps so a failed transaction or crash cannot
+        // destroy the only durable copy. They used to be
+        // written here on every keystroke, and to fit the ~5 MB localStorage
+        // ceiling each artifact's content was cut at 100 KB and everything past
+        // the 200 most recent was evicted — silently, and permanently, because
+        // the truncated copy was what the next reload read back.
+        //
+        // Reads still accept them: an install upgrading from v5 has them on
+        // disk, and `merge` has to hand that copy to the store so the bridge
+        // can carry it into Dexie on first boot. The first write after the
+        // bridge confirms that transaction drops them.
+        return {
+          ...(state.artifactDexieMigrationPending
+            ? {
+                artifacts: state.artifacts,
+                artifactVersions: state.artifactVersions,
+                artifactDexieMigrationPending: true,
+              }
+            : {}),
           // Only the durable *preferences* survive a reload. `searchQuery` and
           // `sessionId` describe the conversation you happened to be in when
           // the app closed: restoring them boots the artifact list already
@@ -2391,17 +2412,19 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             searchQuery: "",
             sessionId: null,
           },
-          // Only tabs whose artifact survived the LRU eviction above.
+          // Only tabs whose artifact still exists. There is no LRU cap to
+          // survive any more, so this now drops exactly the tabs whose artifact
+          // was deleted rather than also the ones evicted to save bytes.
           openArtifactIdsBySession: pruneSessionTabs(state.openArtifactIdsBySession, (id) =>
-            Boolean(artifacts[id])
+            Boolean(state.artifacts[id])
           ),
           // Which artifact each conversation was parked on. Persisted alongside
           // the tabs so re-opening the app puts the dock back where it was;
           // keeping only the tabs restored the strip but dropped you onto the
-          // session workbench every time. Same LRU gate as the tabs.
+          // session workbench every time. Same existence gate as the tabs.
           activeArtifactIdBySession: pruneSessionActive(
             state.activeArtifactIdBySession,
-            (_sessionKey, current) => (current && artifacts[current] ? current : null)
+            (_sessionKey, current) => (current && state.artifacts[current] ? current : null)
           ),
           canvasDocuments: state.canvasDocuments,
         }
@@ -2409,6 +2432,16 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     }
   )
 )
+
+/**
+ * Called only after the bridge's initial artifacts + versions transaction has
+ * committed. Updating the marker triggers Zustand persist, atomically replacing
+ * the legacy blob with the preferences-only v6 shape.
+ */
+export function completeArtifactDexieMigration(): void {
+  if (!useArtifactStore.getState().artifactDexieMigrationPending) return
+  useArtifactStore.setState({ artifactDexieMigrationPending: false })
+}
 
 registerProjectBucketPurger("artifacts", (projectId) => {
   useArtifactStore.getState().purgeProject(projectId)

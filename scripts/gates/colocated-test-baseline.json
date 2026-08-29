@@ -45,7 +45,6 @@
     "components/plugins/index.ts",
     "components/plugins/marketplace/types.ts",
     "components/plugins/test-utils/register-mock-extension.ts",
-    "components/providers/canvas-bridge-provider.tsx",
     "components/providers/initializers/agent-team-runtime-initializer.tsx",
     "components/providers/initializers/audit-retention-initializer.tsx",
     "components/providers/initializers/automation-policy-initializer.tsx",

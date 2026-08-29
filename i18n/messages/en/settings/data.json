@@ -117,6 +117,7 @@
   },
   "breakdown": {
     "categories": {
+      "artifact": "Artifacts",
       "backupHistory": "Backup history",
       "canvas": "Canvas documents",
       "character": "Characters",
@@ -205,7 +206,7 @@
       "title": "Agent team workspace"
     },
     "artifacts": {
-      "body": "Generated artifacts, version history, canvas documents, and analysis results.",
+      "body": "Generated artifacts and their full version history.",
       "importBody": "Restore your generated artifacts and their history.",
       "importTitle": "Import artifacts",
       "title": "Artifacts"

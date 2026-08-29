@@ -1,8 +1,17 @@
-// Snapshot for `localStorage["cognia-artifacts"]`. The artifact-store can be
-// the largest persisted face on disk (artifacts + versions + canvas
-// documents + analysis results all sit in the same Zustand persist). We set
-// a 2 MB warn threshold per the plan; once the user nears 5 MB we strongly
-// recommend migrating this store to IndexedDB (separate work).
+// Snapshot for `localStorage["cognia-artifacts"]`.
+//
+// This blob used to be the largest persisted face on disk — artifacts, their
+// version history and canvas documents all shared one Zustand persist, which
+// is why it carries a 2 MB warn threshold. The artifacts moved to Dexie in
+// schema v206 (`lib/artifacts/dexie-bridge.ts`), so what is left is dock
+// preferences: the workspace filters, the per-session tab strip, and which
+// artifact each conversation was parked on.
+//
+// `exposeAsDomain` is therefore false: the "Artifacts" transfer domain reads
+// the Dexie tables now (`lib/data/domain/index.ts`). The module stays
+// registered so a full backup still round-trips those preferences, and so an
+// export written before v206 — whose artifacts are inside this blob — still
+// applies.
 
 import { createGenericSnapshotModule } from "./factory"
 
@@ -13,6 +22,6 @@ export const ARTIFACTS_SIZE_WARN_BYTES = 2_000_000
 export const artifactsSnapshot = createGenericSnapshotModule({
   key: ARTIFACTS_PERSIST_KEY,
   labelKey: ARTIFACTS_LABEL_KEY,
-  exposeAsDomain: true,
+  exposeAsDomain: false,
   maxBytesWarn: ARTIFACTS_SIZE_WARN_BYTES,
 })

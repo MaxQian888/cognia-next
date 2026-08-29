@@ -76,6 +76,7 @@ import type {
   CanvasCommentRow,
   CanvasSessionRow,
 } from "./canvas-types"
+import type { ArtifactRow, ArtifactVersionRow } from "./artifact-types"
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 import { dispatchDbUpgradeBlocked } from "./upgrade-blocked-signal"
@@ -4897,8 +4898,36 @@ export class CogniaDB extends Dexie {
           updatedAt: Date.now(),
         })
       })
+
+    // v206 — artifacts and their version history move out of the
+    // `cognia-artifacts` localStorage blob (ADR-0158).
+    //
+    // The Zustand persist wrote every artifact on every keystroke through a
+    // synchronous `JSON.stringify` + `setItem`, and to survive the ~5 MB
+    // localStorage ceiling its `partialize` truncated each artifact's content
+    // at 100 KB and evicted everything past the 200 most recent. Both losses
+    // were silent and permanent: the truncated copy was what the next reload
+    // read back. Canvas documents already lived in Dexie for this reason; this
+    // gives artifacts the same home.
+    //
+    // `[sessionId+updatedAt]` is the dock's list (one conversation, newest
+    // first) and `[projectId+updatedAt]` the workspace page's. Versions carry
+    // `[artifactId+version]` so restoring one revision does not read the whole
+    // history. No `.upgrade()`: the rows are still in localStorage at this
+    // point, and `lib/artifacts/dexie-bridge.ts` carries them over on first
+    // boot — an upgrade hook cannot reach `window.localStorage` on every shell
+    // and would strand the data on the ones it cannot.
+    this.version(206).stores({
+      artifacts:
+        "&id, sessionId, projectId, messageId, type, updatedAt, [sessionId+updatedAt], [projectId+updatedAt]",
+      artifactVersions: "&id, artifactId, projectId, [artifactId+version], createdAt",
+    })
   }
 
+  // v206 — artifacts + their version history (ADR-0158). Authoritative; the
+  // Zustand store is the in-memory view. See `lib/db/artifacts.ts`.
+  artifacts!: Table<ArtifactRow, string>
+  artifactVersions!: Table<ArtifactVersionRow, string>
   // v205 — backlink index (which turns cited which record) + its watermark.
   // Rebuildable derived data; see `lib/db/mention-links.ts`.
   mentionLinks!: Table<import("./mention-links").MentionLinkRow, string>

@@ -62,6 +62,11 @@ export const CATEGORY_INFO: Record<StorageCategory, CategoryDescriptor> = {
     defaultName: "Prompt presets",
     tables: tableNamesForCategory("preset"),
   },
+  artifact: {
+    i18nKey: "artifact",
+    defaultName: "Artifacts",
+    tables: tableNamesForCategory("artifact"),
+  },
   canvas: {
     i18nKey: "canvas",
     defaultName: "Canvas documents",

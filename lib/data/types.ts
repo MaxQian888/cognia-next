@@ -25,6 +25,7 @@ import type {
   CanvasCommentRow,
   CanvasSessionRow,
 } from "@/lib/db/canvas-types"
+import type { ArtifactRow, ArtifactVersionRow } from "@/lib/db/artifact-types"
 import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import type { Memory } from "@/types/memory/memory"
@@ -96,6 +97,11 @@ export interface BackupPayloadV3 {
   sessionState?: SessionStateRow[]
   trustedWorkspaces?: TrustedWorkspace[]
   ttsProviderKeys?: TtsProviderKeyRow[]
+  /** Artifact tables (schema v206). Before v206 these travelled inside the
+   * `cognia-artifacts` localStorage snapshot; an older package still carries
+   * them there and is still importable. */
+  artifacts?: ArtifactRow[]
+  artifactVersions?: ArtifactVersionRow[]
   /** Canvas tables — added in cognia-next when the Canvas guild lands. */
   canvasDocuments?: CanvasDocumentRow[]
   canvasVersions?: CanvasVersionRow[]

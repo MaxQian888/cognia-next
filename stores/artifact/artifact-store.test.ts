@@ -49,6 +49,7 @@ import { resetPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import {
   activateArtifactAccountStorage,
   clearArtifactAccountStorage,
+  completeArtifactDexieMigration,
   purgeArtifactAccountStorage,
   MAX_OPEN_ARTIFACTS,
   selectActiveArtifactId,
@@ -1727,93 +1728,120 @@ describe("resolveNextActiveArtifactId fallback paths", () => {
   })
 })
 
-describe("persist partialize - LRU & truncation", () => {
-  it("sorts artifacts by string-form updatedAt and truncates oversized content during persistence", async () => {
-    // Rather than dig into the internal partialize, we simulate the behavior by
-    // creating an artifact with oversized content and one with a Date string
-    // updatedAt, then forcing a write by mutating state and reading the
-    // localStorage snapshot the persist middleware emits.
-    const big = "x".repeat(200_000)
-    const recent = useArtifactStore
-      .getState()
-      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "big", content: big })
-    // Add two artifacts whose updatedAt is a string (simulating just-rehydrated)
-    // so that both sides of the partialize ternary on the b-side run.
-    useArtifactStore.setState((state) => ({
-      artifacts: {
-        ...state.artifacts,
-        "with-string-date-1": {
-          id: "with-string-date-1",
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: "string-date-1",
-          content: "small-1",
-          version: 1,
-          createdAt: new Date(),
-          updatedAt: "2023-01-01T00:00:00.000Z" as unknown as Date,
-        },
-        "with-string-date-2": {
-          id: "with-string-date-2",
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: "string-date-2",
-          content: "small-2",
-          version: 1,
-          createdAt: new Date(),
-          updatedAt: "2024-01-01T00:00:00.000Z" as unknown as Date,
-        },
-      },
-    }))
-    // Trigger a persist write by toggling state
-    useArtifactStore.getState().setPanelView("artifact")
-    // Allow the persist middleware to flush
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    const persisted = localStorage.getItem("cognia-artifacts")
-    if (persisted) {
-      const parsed = JSON.parse(persisted) as {
-        state: { artifacts: Record<string, { content: string }> }
-      }
-      const recentEntry = parsed.state.artifacts[recent.id]
-      // Truncated to 100KB
-      expect(recentEntry?.content.length).toBeLessThanOrEqual(100 * 1024)
+describe("persist partialize — artifacts live in Dexie", () => {
+  it("retains the legacy maps until Dexie confirms the initial migration", () => {
+    const legacyArtifact = {
+      id: "legacy-artifact",
+      sessionId: "s",
+      messageId: "m",
+      type: "code" as const,
+      title: "legacy",
+      content: "must survive",
+      version: 1,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     }
+    const legacyVersion = {
+      id: "legacy-version",
+      artifactId: legacyArtifact.id,
+      content: "older",
+      version: 1,
+      createdAt: new Date("2025-12-31T00:00:00.000Z"),
+    }
+    useArtifactStore.setState({
+      artifacts: { [legacyArtifact.id]: legacyArtifact },
+      artifactVersions: { [legacyArtifact.id]: [legacyVersion] },
+      artifactDexieMigrationPending: true,
+    })
+
+    expect(readPartialize()).toMatchObject({
+      artifacts: { [legacyArtifact.id]: legacyArtifact },
+      artifactVersions: { [legacyArtifact.id]: [legacyVersion] },
+      artifactDexieMigrationPending: true,
+    })
+    expect(JSON.parse(localStorage.getItem("cognia-artifacts")!).state.artifacts).toHaveProperty(
+      legacyArtifact.id
+    )
+
+    completeArtifactDexieMigration()
+
+    expect(readPartialize().artifacts).toBeUndefined()
+    expect(readPartialize().artifactVersions).toBeUndefined()
+    expect(readPartialize().artifactDexieMigrationPending).toBeUndefined()
+    const cleaned = JSON.parse(localStorage.getItem("cognia-artifacts")!).state
+    expect(cleaned.artifacts).toBeUndefined()
+    expect(cleaned.artifactVersions).toBeUndefined()
   })
 
-  it("sorts when both updatedAt values are non-Date strings", async () => {
-    // Pure string-vs-string sort, exercising both sides of the ternary.
-    useArtifactStore.setState({
-      artifacts: {
-        x: {
-          id: "x",
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: "x",
-          content: "c",
-          version: 1,
-          createdAt: new Date(),
-          updatedAt: "2024-06-01T00:00:00.000Z" as unknown as Date,
-        },
-        y: {
-          id: "y",
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: "y",
-          content: "c",
-          version: 1,
-          createdAt: new Date(),
-          updatedAt: "2024-07-01T00:00:00.000Z" as unknown as Date,
-        },
-      },
-    })
-    // Cause persist write
-    useArtifactStore.getState().setPanelView("canvas")
+  it("writes neither artifacts nor their versions, whatever their size", async () => {
+    // The old partialize wrote both, and to fit the ~5 MB localStorage ceiling
+    // it cut each artifact's content at 100 KB and evicted everything past the
+    // 200 most recent. Both losses were permanent: the truncated copy was what
+    // the next reload read back. Dexie owns these two maps now
+    // (`lib/artifacts/dexie-bridge.ts`), so the blob must not carry them at all.
+    const big = "x".repeat(200_000)
+    const artifact = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "big", content: big })
+    useArtifactStore.getState().updateArtifact(artifact.id, { content: `${big}!` })
+
+    useArtifactStore.getState().setPanelView("artifact")
     await new Promise((resolve) => setTimeout(resolve, 0))
+
     const persisted = localStorage.getItem("cognia-artifacts")
     expect(persisted).toBeTruthy()
+    const parsed = JSON.parse(persisted!) as {
+      state: Record<string, unknown>
+      version: number
+    }
+    expect(parsed.state.artifacts).toBeUndefined()
+    expect(parsed.state.artifactVersions).toBeUndefined()
+    expect(parsed.version).toBe(6)
+    // The whole blob has to be smaller than the single artifact it used to
+    // truncate; without this the assertions above could pass while the content
+    // rode along under some other key.
+    expect(persisted!.length).toBeLessThan(10_000)
+    // …and the artifact itself is untouched in memory, full length and all.
+    expect(useArtifactStore.getState().artifacts[artifact.id].content.length).toBe(big.length + 1)
+  })
+
+  it("still persists the dock preferences a reload needs", async () => {
+    const artifact = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "keep", content: "c" })
+    // `createArtifact` opens the tab and parks the session on it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const parsed = JSON.parse(localStorage.getItem("cognia-artifacts")!) as {
+      state: {
+        artifactWorkspace: { scope: string; searchQuery: string; sessionId: string | null }
+        openArtifactIdsBySession: Record<string, string[]>
+        activeArtifactIdBySession: Record<string, string | null>
+      }
+    }
+    expect(Object.values(parsed.state.openArtifactIdsBySession).flat()).toContain(artifact.id)
+    expect(Object.values(parsed.state.activeArtifactIdBySession)).toContain(artifact.id)
+    expect(parsed.state.artifactWorkspace.scope).toBeDefined()
+    // Deliberately reset on write — see the partialize comment.
+    expect(parsed.state.artifactWorkspace.searchQuery).toBe("")
+    expect(parsed.state.artifactWorkspace.sessionId).toBeNull()
+  })
+
+  it("drops a tab and an active id whose artifact no longer exists", async () => {
+    const artifact = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "gone", content: "c" })
+    useArtifactStore.getState().deleteArtifact(artifact.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const parsed = JSON.parse(localStorage.getItem("cognia-artifacts")!) as {
+      state: {
+        openArtifactIdsBySession: Record<string, string[]>
+        activeArtifactIdBySession: Record<string, string | null>
+      }
+    }
+    expect(Object.values(parsed.state.openArtifactIdsBySession).flat()).not.toContain(artifact.id)
+    expect(Object.values(parsed.state.activeArtifactIdBySession)).not.toContain(artifact.id)
   })
 })
 
@@ -2208,10 +2236,15 @@ describe("account storage isolation", () => {
     )
 
     activateArtifactAccountStorage("acct_a")
+    expect(useArtifactStore.getState().artifacts.art_a?.title).toBe("Alpha artifact")
+
     clearArtifactAccountStorage()
 
     expect(useArtifactStore.getState().artifacts).toEqual({})
-    expect(localStorage.getItem("cognia-artifacts:acct_a")).toContain("Alpha artifact")
+    // The bucket still exists — clearing is not deleting. Since v206 it holds
+    // only the dock's preferences; the artifact itself was handed to Dexie by
+    // `lib/artifacts/dexie-bridge.ts` while the account was active.
+    expect(localStorage.getItem("cognia-artifacts:acct_a")).toBeTruthy()
   })
 
   it("purges only the deleted account's artifact bucket", () => {
@@ -2242,7 +2275,9 @@ describe("account storage isolation", () => {
     activateArtifactAccountStorage("acct_legacy")
 
     expect(localStorage.getItem("cognia-artifacts")).toBeNull()
-    expect(localStorage.getItem("cognia-artifacts:acct_legacy")).toContain("legacy_art")
+    expect(localStorage.getItem("cognia-artifacts:acct_legacy")).toBeTruthy()
+    // The rows land in memory, which is what the Dexie bridge mirrors. They no
+    // longer stay in the bucket: `partialize` stopped writing them at v206.
     expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["legacy_art"])
   })
 
@@ -2265,7 +2300,7 @@ describe("account storage isolation", () => {
     activateArtifactAccountStorage("acct_a")
 
     expect(localStorage.getItem("cognia-artifacts")).toContain("legacy_art")
-    expect(localStorage.getItem("cognia-artifacts:acct_a")).toContain("art_a")
+    expect(localStorage.getItem("cognia-artifacts:acct_a")).toBeTruthy()
     expect(Object.keys(useArtifactStore.getState().artifacts)).toEqual(["art_a"])
   })
 
@@ -2590,7 +2625,10 @@ describe("AI-revision review (pending reviews)", () => {
     expect(partialize).toBeDefined()
     const persisted = partialize!(useArtifactStore.getState())
     expect(persisted.pendingReviews).toBeUndefined()
-    expect((persisted.artifacts as Record<string, unknown>)[a.id]).toBeDefined()
+    // Nor the artifact itself — Dexie owns it since v206. The tab strip is the
+    // field that still proves the artifact was known when the blob was written.
+    expect(persisted.artifacts).toBeUndefined()
+    expect(Object.values(persisted.openArtifactIdsBySession ?? {}).flat()).toContain(a.id)
   })
 })
 

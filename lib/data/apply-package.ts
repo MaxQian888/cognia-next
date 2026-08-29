@@ -142,6 +142,8 @@ export async function applyBackupPackage(
       db.sessionState,
       db.trustedWorkspaces,
       db.tts_provider_keys,
+      db.artifacts,
+      db.artifactVersions,
       db.canvasDocuments,
       db.canvasVersions,
       db.contextComments,
@@ -335,6 +337,35 @@ export async function applyBackupPackage(
         opts,
         summary,
         keyOf: (r) => r.id,
+      })
+
+      // --- artifacts (always applied) ------------------------------------
+      // Versions are applied after their artifacts so a partial failure leaves
+      // history without a parent rather than a parent with no history — the
+      // first is invisible, the second renders an artifact whose version list
+      // silently lost entries.
+      //
+      // Under `duplicate` the copied artifact gets a fresh id and its versions
+      // keep pointing at the original, exactly as canvas documents and their
+      // versions already behave. The duplicate therefore starts with no
+      // history rather than sharing the original's.
+      await applyCollection({
+        rows: env.artifacts,
+        table: db.artifacts,
+        kind: "artifacts",
+        opts,
+        summary,
+        idPrefix: "art",
+        respectBuiltIn: false,
+      })
+      await applyCollection({
+        rows: env.artifactVersions,
+        table: db.artifactVersions,
+        kind: "artifactVersions",
+        opts,
+        summary,
+        idPrefix: "artver",
+        respectBuiltIn: false,
       })
 
       // --- canvas (always applied) ---------------------------------------

@@ -11,7 +11,9 @@ describe("artifactsSnapshot", () => {
   it("uses the documented persist + label keys", () => {
     expect(artifactsSnapshot.key).toBe(ARTIFACTS_PERSIST_KEY)
     expect(artifactsSnapshot.labelKey).toBe(ARTIFACTS_LABEL_KEY)
-    expect(artifactsSnapshot.exposeAsDomain).toBe(true)
+    // False since schema v206: the "Artifacts" transfer domain reads the Dexie
+    // tables, and this blob holds only the dock's preferences.
+    expect(artifactsSnapshot.exposeAsDomain).toBe(false)
     expect(ARTIFACTS_SIZE_WARN_BYTES).toBe(2_000_000)
   })
 

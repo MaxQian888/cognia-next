@@ -119,7 +119,6 @@ const SNAPSHOT_DOMAIN_KEYS: Record<string, DomainKey> = {
   "cognia-agent-teams": "agentTeamsLayout",
   "cognia-next.agent-runtime": "agentRuntime",
   "cognia-custom-themes": "customThemes",
-  "cognia-artifacts": "artifacts",
   "cognia-a2ui-surfaces": "a2uiSurfaces",
   "cognia-canvas-keybindings": "canvasKeybindings",
   "cognia-canvas-comments": "canvasComments",
@@ -180,6 +179,14 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
       pluginPermissions: pluginPermissions.filter((r) => userIds.has(r.pluginId)),
       pluginAnalytics: pluginAnalytics.filter((r) => userIds.has(r.pluginId)),
     }
+  }),
+  makeSpec("artifacts", "artifacts", async () => {
+    const db = getDb()
+    const [artifacts, artifactVersions] = await Promise.all([
+      db.artifacts.toArray(),
+      db.artifactVersions.toArray(),
+    ])
+    return { artifacts, artifactVersions }
   }),
   makeSpec("canvas", "canvas", async () => {
     const db = getDb()

@@ -290,9 +290,16 @@ interface ArtifactStoreState {
 }
 ```
 
-- **LRU 容量上限** —— `MAX_PERSISTED_ARTIFACTS`，超过就淘汰最早访问的。
-- **持久化** —— `persist` middleware 写到 `cognia-artifacts` localStorage key
-  （继承 Cognia 上游命名空间）。
+- **持久化** —— Dexie 的 `artifacts` / `artifactVersions` 两张表（schema v206），由
+  `lib/artifacts/dexie-bridge.ts` 写穿。store 只是内存里的工作副本，Dexie 才是权威。
+- **localStorage 还剩什么** —— 只剩 dock 的偏好，仍放在 `cognia-artifacts` key 下
+  （继承 Cognia 上游命名空间）：工作区筛选、按会话分桶的标签页、每个会话停在哪个 artifact。
+- **不再有容量上限与内容截断** —— v206 之前，`partialize` 会把每个 artifact 的内容切到 100 KB，
+  并淘汰第 200 条之后的全部（`MAX_PERSISTED_ARTIFACTS`），只为塞进 ~5 MB 的 localStorage 上限。
+  两种损失都是静默且不可逆的——下次重载读回来的就是被截断的那份。现在两条限制都没有了。
+- **旧数据迁移** —— 升级后的第一次启动会把旧 blob 里剩下的内容搬进 Dexie。
+  `lib/artifacts/localstorage-migration.ts` 会先把副本寄存起来，等写入落盘后才清除，
+  所以迁移被打断只会重放，不会丢行。
 - **rehydrate hook** —— `rehydrateArtifact()` 在恢复时补齐缺失字段、Date 反序列化。
 - **指纹去重** —— `lib/artifacts/source-metadata.ts:buildArtifactSourceFingerprint()`
   用 FNV-1a 哈希同一条消息里的内容，避免同一个 code block 被检测两遍后建出两个

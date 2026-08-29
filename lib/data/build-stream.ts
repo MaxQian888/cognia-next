@@ -119,6 +119,8 @@ export async function* buildBackupSections(
     }
     if (!emittedMcp) yield { section: "mcpServers", rows: [] }
     yield* tableSections("trustedWorkspaces", db.trustedWorkspaces, iterate)
+    yield* tableSections("artifacts", db.artifacts, iterate)
+    yield* tableSections("artifactVersions", db.artifactVersions, iterate)
     yield* tableSections("canvasDocuments", db.canvasDocuments, iterate)
     yield* tableSections("canvasVersions", db.canvasVersions, iterate)
     yield* tableSections("contextComments", db.contextComments, iterate)

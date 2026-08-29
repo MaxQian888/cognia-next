@@ -289,8 +289,19 @@ interface ArtifactStoreState {
 }
 ```
 
-- **LRU capacity cap** — `MAX_PERSISTED_ARTIFACTS`; evicts the least recently accessed when exceeded.
-- **Persistence** — `persist` middleware writes to the `cognia-artifacts` localStorage key (inherits upstream Cognia namespace).
+- **Persistence** — the Dexie `artifacts` / `artifactVersions` tables (schema v206), written
+  through by `lib/artifacts/dexie-bridge.ts`. The store is the in-memory working copy; Dexie is
+  authoritative.
+- **What localStorage still holds** — only the dock's preferences under the `cognia-artifacts` key
+  (inherits the upstream Cognia namespace): the workspace filters, the per-session tab strip, and
+  which artifact each conversation was parked on.
+- **No capacity cap or content truncation** — until v206 `partialize` cut each artifact's content at
+  100 KB and evicted everything past the 200 most recent (`MAX_PERSISTED_ARTIFACTS`) to fit the
+  ~5 MB localStorage ceiling. Both losses were silent and permanent, because the truncated copy was
+  what the next reload read back. Neither limit exists now.
+- **Legacy migration** — the first boot after the upgrade carries whatever the old blob still holds
+  into Dexie. `lib/artifacts/localstorage-migration.ts` parks a copy first and clears it only once
+  the write lands, so an interrupted migration replays instead of losing rows.
 - **Rehydrate hook** — `rehydrateArtifact()` fills in missing fields and deserializes Dates on restore.
 - **Fingerprint deduplication** — `lib/artifacts/source-metadata.ts:buildArtifactSourceFingerprint()` uses FNV-1a hashing on content from the same message, preventing a single code block from being detected twice and creating duplicate artifact rows.
 

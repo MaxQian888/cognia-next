@@ -17,6 +17,7 @@ export type StorageCategory =
   | "team"
   | "mcp"
   | "preset"
+  | "artifact"
   | "canvas"
   | "trustedWorkspace"
   | "ttsKey"
