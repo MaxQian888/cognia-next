@@ -14,7 +14,12 @@
 import { createContextManager } from "@cognia/rag/context-manager"
 import { computeMemoryStats, type MemoryStats } from "@/lib/memory/history-filter"
 import type { Memory, MemoryScope } from "@/types/memory/memory"
-import type { MemoryAuditEvent, MemoryJob, MemoryJobKind } from "@/types/memory/governance"
+import {
+  MEMORY_JOB_KINDS,
+  type MemoryAuditEvent,
+  type MemoryJob,
+  type MemoryJobKind,
+} from "@/types/memory/governance"
 
 /**
  * Audit `reason` values written by the decay and PII-gate instrumentation.
@@ -127,11 +132,8 @@ export interface MemoryJobKindSummary {
   lastErrorCode?: string
 }
 
-const JOB_KINDS: readonly MemoryJobKind[] = [
-  "turn-extraction",
-  "session-distill",
-  "vector-reconcile",
-]
+// Derived so a new job kind shows up in the console instead of being invisible.
+const JOB_KINDS: readonly MemoryJobKind[] = MEMORY_JOB_KINDS
 
 /**
  * Queue health per job kind. `retrying` and `queued` are distinguishable only

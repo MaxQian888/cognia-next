@@ -1057,13 +1057,72 @@ describe("applyBackupPackage — learned memory", () => {
     expect(summary.added.memoryAuditEvents).toBe(1)
   })
 
+  it("imports project-claim descriptors but never a validation verdict", async () => {
+    // `validationState` / `validatedAt` mean "checked against the messages on
+    // that machine at that moment". A restore cannot vouch for that — a partial
+    // or merged import can land a claim whose sources did not come with it — so
+    // the verdict is dropped and the re-check sweep re-derives it. Descriptors
+    // (`projectMemoryKind`, `observedAt`, `validationStrategy`) do travel.
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    const memory = snapshot.memories?.[0]
+    const evidence = snapshot.memoryEvidence?.[0]
+    if (!memory || !evidence) throw new Error("fixture must carry a memory and its evidence")
+    Object.assign(memory, {
+      projectMemoryKind: "constraint",
+      observedAt: 1_700_000_000_000,
+      validatedAt: 1_800_000_000_000,
+    })
+    Object.assign(evidence, {
+      validationStrategy: "message-presence",
+      validationState: "valid",
+      validatedAt: 1_800_000_000_000,
+      sourceRevision: 7,
+    })
+
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const storedMemory = await db.memories.get("mem_1")
+    expect(storedMemory?.projectMemoryKind).toBe("constraint")
+    expect(storedMemory?.observedAt).toBe(1_700_000_000_000)
+    expect(storedMemory?.validatedAt).toBeUndefined()
+
+    const storedEvidence = await db.memoryEvidence.get("mev_1")
+    expect(storedEvidence?.validationStrategy).toBe("message-presence")
+    expect(storedEvidence?.sourceRevision).toBe(7)
+    expect(storedEvidence?.validationState).toBeUndefined()
+    expect(storedEvidence?.validatedAt).toBeUndefined()
+  })
+
+  it("rejects an unknown project-memory kind rather than storing it", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    const memory = snapshot.memories?.[0]
+    if (!memory) throw new Error("fixture must carry a memory")
+    Object.assign(memory, { projectMemoryKind: "not-a-kind" })
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    // Absent means personal, which is the safe reading — an unrecognised kind
+    // must not smuggle a row into the project corpus.
+    expect((await db.memories.get("mem_1"))?.projectMemoryKind).toBeUndefined()
+  })
+
   it("drops a partially-valid job checkpoint instead of half-importing it", async () => {
     // Without a checkpoint the job falls back to the trailing `:<n>` of its
     // dedupe key, which is still correct. A checkpoint missing an endpoint would
     // instead resolve against ids that were never verified.
     const db = getDb()
     const snapshot = memorySnapshot()
-    snapshot.memoryJobs[0].checkpoint = {
+    const job = snapshot.memoryJobs?.[0]
+    if (!job) throw new Error("fixture must carry a memory job")
+    job.checkpoint = {
       transcriptRevision: 4,
       firstMessageId: "msg_1",
       messageCount: 2,

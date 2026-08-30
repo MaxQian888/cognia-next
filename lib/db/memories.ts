@@ -101,6 +101,18 @@ export interface MemoryUpdatePatch {
   conflictWithIds?: string[]
   contaminationState?: Memory["contaminationState"]
   sensitivity?: Memory["sensitivity"]
+  /**
+   * Freshness and trust, written by the claim re-check sweep. Both are already
+   * READ by `isMemoryEligibleForRetrieval` and `governanceScoreFor`; until this
+   * patch carried them there was no way to write either, so a claim whose
+   * evidence had gone stale kept being injected at full confidence.
+   */
+  staleness?: Memory["staleness"]
+  trustState?: Memory["trustState"]
+  /** When the re-check last succeeded. */
+  validatedAt?: Memory["validatedAt"]
+  /** Hash over the ordered evidence set, for "did the support change" in O(1). */
+  evidenceHash?: Memory["evidenceHash"]
   /** When true, also bumps `version` (used by the consolidation UPDATE op). */
   bumpVersion?: boolean
 }

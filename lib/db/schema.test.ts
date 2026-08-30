@@ -188,6 +188,79 @@ describe("getDb", () => {
     upgraded.close()
   })
 
+  fullSchemaIt("v210 indexes project-claim and evidence lookup without touching data", async () => {
+    const name = `cognia-project-context-v210-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(209).stores({
+      sessions: "id, updatedAt",
+      memories: "&id, scope, type, status",
+      memoryEvidence: "&id, memoryId, kind, sessionId, createdAt",
+    })
+    await legacy.open()
+    await legacy.table("memories").put({
+      id: "legacy-mem",
+      scope: "global",
+      type: "semantic",
+      text: "Prefers pnpm",
+      tags: [],
+      importance: 5,
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned: false,
+      provenance: "user",
+    })
+    await legacy.table("memoryEvidence").put({
+      id: "legacy-ev",
+      memoryId: "legacy-mem",
+      kind: "message",
+      sourceId: "s1:turn:2",
+      sessionId: "s1",
+      messageId: "m2",
+      contaminationState: "clean",
+      reviewed: false,
+      createdAt: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(210)
+
+    // `messageId` is the load-bearing addition: deleting a message has to be able
+    // to ask "which learned rows rest on this?" before the claims citing it keep
+    // being injected. `[sessionId+messageId]` answers it for a whole session.
+    expect(upgraded.memoryEvidence.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["messageId", "validationState", "[sessionId+messageId]"])
+    )
+    expect(upgraded.memories.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["projectMemoryKind", "trustState", "[projectId+projectMemoryKind]"])
+    )
+
+    // The migration is purely additive. Backfilling any of these would change
+    // behavior for existing users: a fabricated `projectMemoryKind` would move a
+    // personal row into the project corpus, `observedAt = createdAt` is the exact
+    // lie that field exists to prevent, and `trustState: "trusted"` would raise
+    // every legacy row's governance score and re-rank retrieval.
+    const memory = await upgraded.memories.get("legacy-mem")
+    expect(memory).toMatchObject({ id: "legacy-mem", text: "Prefers pnpm" })
+    expect(memory?.projectMemoryKind).toBeUndefined()
+    expect(memory?.observedAt).toBeUndefined()
+    expect(memory?.validatedAt).toBeUndefined()
+    expect(memory?.trustState).toBeUndefined()
+
+    const evidence = await upgraded.memoryEvidence.get("legacy-ev")
+    expect(evidence).toMatchObject({ id: "legacy-ev", messageId: "m2" })
+    expect(evidence?.validationState).toBeUndefined()
+    expect(evidence?.validationStrategy).toBeUndefined()
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
     const name = `cognia-external-agent-configs-v201-${Date.now()}`
     const legacy = new Dexie(name)

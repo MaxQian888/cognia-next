@@ -31,12 +31,15 @@ import type {
   PluginRow,
 } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
-import { isMemorySourceChannel, type Memory } from "@/types/memory/memory"
-import type {
-  MemoryAuditEvent,
-  MemoryEvidence,
-  MemoryJob,
-  MemoryJobCheckpoint,
+import { isMemorySourceChannel, isProjectMemoryKind, type Memory } from "@/types/memory/memory"
+import {
+  MEMORY_EVIDENCE_KINDS,
+  MEMORY_JOB_KINDS,
+  isMemoryValidationStrategy,
+  type MemoryAuditEvent,
+  type MemoryEvidence,
+  type MemoryJob,
+  type MemoryJobCheckpoint,
 } from "@/types/memory/governance"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
@@ -969,15 +972,10 @@ const MEMORY_SCOPES = new Set(["global", "workspace", "character", "agent"])
 const MEMORY_TYPES = new Set(["semantic", "episodic", "procedural"])
 const MEMORY_STATUSES = new Set(["active", "invalidated"])
 const MEMORY_PROVENANCE = new Set(["user", "explicit", "inbound", "system", "external"])
-const EVIDENCE_KINDS = new Set([
-  "message",
-  "file",
-  "external",
-  "manual",
-  "checkpoint",
-  "agent-finding",
-])
-const JOB_KINDS = new Set(["turn-extraction", "session-distill", "vector-reconcile"])
+// Derived, never hand-listed: a kind added to the union but missed here used to
+// be silently dropped on restore, taking the row's provenance with it.
+const EVIDENCE_KINDS = new Set<string>(MEMORY_EVIDENCE_KINDS)
+const JOB_KINDS = new Set<string>(MEMORY_JOB_KINDS)
 const JOB_STATUSES = new Set([
   "queued",
   "running",
@@ -1198,6 +1196,15 @@ function sanitizeImportedMemory(value: unknown): Memory | undefined {
   }
   const invalidatedAt = optionalFiniteNumber(value.invalidatedAt)
   if (invalidatedAt !== undefined) row.invalidatedAt = invalidatedAt
+  // Project-claim descriptors travel; the validation verdict does not. See the
+  // matching note in `sanitizeImportedEvidence` — `validatedAt` is a claim about
+  // sources that may not have come with this package, so it is left unset and
+  // re-derived by the re-check sweep.
+  if (isProjectMemoryKind(value.projectMemoryKind)) {
+    row.projectMemoryKind = value.projectMemoryKind
+  }
+  const observedAt = optionalFiniteNumber(value.observedAt)
+  if (observedAt !== undefined) row.observedAt = observedAt
   return row
 }
 
@@ -1239,6 +1246,19 @@ function sanitizeImportedEvidence(value: unknown): MemoryEvidence | undefined {
       : {}),
     ...(optionalIdentifier(value.excerptHash)
       ? { excerptHash: optionalIdentifier(value.excerptHash) }
+      : {}),
+    // Descriptive fields travel; VERDICTS do not. `validationState` and
+    // `validatedAt` say "we checked this against the messages on that machine at
+    // that moment", which a restore cannot vouch for — a partial or merged
+    // import can easily land a claim whose sources did not come with it. Leaving
+    // them unset means the row reads as `"unvalidated"` and the re-check sweep
+    // re-derives the truth against whatever actually got restored, instead of
+    // this claim being injected at full support on an imported promise.
+    ...(isMemoryValidationStrategy(value.validationStrategy)
+      ? { validationStrategy: value.validationStrategy }
+      : {}),
+    ...(optionalFiniteNumber(value.sourceRevision) !== undefined
+      ? { sourceRevision: optionalFiniteNumber(value.sourceRevision) }
       : {}),
   }
 }

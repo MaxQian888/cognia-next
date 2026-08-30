@@ -4966,6 +4966,36 @@ export class CogniaDB extends Dexie {
     this.version(209).stores({
       collabChatAttachments: "&id, sessionId, orgId, status, updatedAt, fetchedAt",
     })
+
+    // v210 — project context mining. Purely additive: new indexes on two
+    // existing tables, no new table and NO upgrade callback.
+    //
+    // `memoryEvidence.messageId` is the load-bearing one. Evidence has carried a
+    // `messageId` since v122 but never indexed it, so there was no way to answer
+    // "which learned rows rest on this message" — which is exactly what deleting
+    // a message has to ask before the claims that cite it keep being injected.
+    // `[sessionId+messageId]` answers the same question for a whole session, and
+    // `validationState` lets the re-check sweep find unvalidated rows without a
+    // full scan.
+    //
+    // Deliberately NO `.upgrade()`. Existing rows must keep `projectMemoryKind`,
+    // `observedAt`, `trustState` and `validationState` UNSET:
+    //   - a fabricated `projectMemoryKind` is worse than an absent one, and
+    //     absent already means "personal" (see `isProjectClaim`);
+    //   - `observedAt = createdAt` is precisely the lie that field exists to
+    //     prevent, since the two only diverge for backfilled history;
+    //   - writing `trustState: "trusted"` would silently raise every legacy
+    //     row's governance score and CHANGE RETRIEVAL RANKING for existing users
+    //     inside a migration that is supposed to be additive — undefined already
+    //     scores 0.7 and is not excluded;
+    //   - `validationState` is read as `"unvalidated"` when absent, so
+    //     materializing it buys nothing and costs a full table rewrite.
+    this.version(210).stores({
+      memories:
+        "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, updatedAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, projectMemoryKind, trustState, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status], [projectId+projectMemoryKind]",
+      memoryEvidence:
+        "&id, memoryId, kind, sessionId, messageId, validationState, createdAt, [memoryId+createdAt], [sessionId+messageId]",
+    })
   }
 
   accountContentMigrations!: Table<

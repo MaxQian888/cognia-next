@@ -7,7 +7,7 @@ import {
   MEMORY_PII_BLOCK_REASON,
 } from "./insights"
 import type { Memory } from "@/types/memory/memory"
-import type { MemoryAuditEvent, MemoryJob } from "@/types/memory/governance"
+import { MEMORY_JOB_KINDS, type MemoryAuditEvent, type MemoryJob } from "@/types/memory/governance"
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = 1_800_000_000_000
@@ -155,12 +155,10 @@ describe("summarizeMemoryJobs", () => {
     expect(distill?.lastCompletedAt).toBe(NOW - 100)
   })
 
-  it("always reports all three kinds, even with no rows", () => {
-    expect(summarizeMemoryJobs([]).map((s) => s.kind)).toEqual([
-      "turn-extraction",
-      "session-distill",
-      "vector-reconcile",
-    ])
+  it("reports every job kind in the vocabulary, even with no rows", () => {
+    // Derived from MEMORY_JOB_KINDS rather than a hand-copied list, so a kind
+    // added to the union shows up in the console instead of being invisible.
+    expect(summarizeMemoryJobs([]).map((s) => s.kind)).toEqual([...MEMORY_JOB_KINDS])
   })
 
   it("surfaces the error code of an exhausted job", () => {

@@ -75,6 +75,39 @@ export function isMemorySourceChannel(value: unknown): value is MemorySourceChan
   return MEMORY_SOURCE_CHANNELS.includes(value as MemorySourceChannel)
 }
 
+/**
+ * What kind of durable project fact a mined claim asserts.
+ *
+ * - `state` — how the project currently IS (architecture, versions, layout).
+ *   Perishable: it is the kind most likely to be invalidated by later work.
+ * - `constraint` — a rule the project must obey ("must", "never", "requires").
+ * - `decision` — a choice plus its rationale. Superseded, never overwritten, so
+ *   "why did we pick X" stays answerable after the answer changes.
+ * - `outcome` — something verified to have happened (a test passed, a build
+ *   succeeded). Requires tool or test evidence; an assistant saying "done" is not
+ *   an outcome.
+ * - `gotcha` — an environment trap: a failure mode plus its cause or fix.
+ *
+ * This is a lifecycle axis, not a label: decay, expiry and supersession all
+ * branch on it. It is deliberately NOT folded into `MemoryType`, which is the
+ * LangMem taxonomy (semantic / episodic / procedural) and answers a different
+ * question — a claim IS semantic; the kind says what it is semantic ABOUT.
+ */
+export const PROJECT_MEMORY_KINDS = [
+  "state",
+  "constraint",
+  "decision",
+  "outcome",
+  "gotcha",
+] as const
+
+export type ProjectMemoryKind = (typeof PROJECT_MEMORY_KINDS)[number]
+
+/** Narrowing guard for untrusted input — backup imports, extractor output. */
+export function isProjectMemoryKind(value: unknown): value is ProjectMemoryKind {
+  return PROJECT_MEMORY_KINDS.includes(value as ProjectMemoryKind)
+}
+
 export interface Memory {
   /** `mem_<ts>_<rand>`. */
   id: string
@@ -153,6 +186,35 @@ export interface Memory {
   }
   /** Why an automatic candidate was narrowed below workspace scope. */
   scopeRationale?: string
+  /**
+   * Set only on mined project claims. Its PRESENCE is what separates the project
+   * corpus from the personal one — see `isProjectClaim`.
+   */
+  projectMemoryKind?: ProjectMemoryKind
+  /**
+   * When the underlying evidence actually happened, as opposed to `createdAt`,
+   * which is when Cognia learned it.
+   *
+   * These diverge sharply under history backfill: mining an eight-month-old
+   * session today gives every claim a `createdAt` of today, and recency scoring
+   * would rank an ancient, long-superseded project state as brand new.
+   */
+  observedAt?: number
+  /** Last time this row's evidence was re-verified. Undefined means never. */
+  validatedAt?: number
+}
+
+/**
+ * Whether a row belongs to the project corpus rather than the personal one.
+ *
+ * ABSENT MEANS PERSONAL. Every row written before project mining existed has no
+ * `projectMemoryKind`, and must keep behaving exactly as it does today. This
+ * function is the single place that contract is expressed — the retriever's
+ * corpus partition and the console's facet filter both call it, so the two can
+ * never disagree about which corpus a row is in.
+ */
+export function isProjectClaim(memory: Pick<Memory, "projectMemoryKind">): boolean {
+  return memory.projectMemoryKind !== undefined
 }
 
 export interface MemoryReaderContext {
