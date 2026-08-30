@@ -32,6 +32,30 @@ export type MemoryJobStatus =
   | "failed"
   | "cancelled"
 
+/**
+ * Durable identity of the transcript window a learning job was enqueued for.
+ *
+ * Learning jobs persist only source identities, never transcript content, so a
+ * recovering worker has to re-derive the conversation prefix that existed at
+ * enqueue time. That used to be encoded as a message COUNT in the dedupe key,
+ * which silently replayed the wrong content whenever an edit left the length
+ * unchanged. Message ids pin the window to actual rows instead.
+ *
+ * `transcriptRevision` is a soft signal only: `updateMessageMetadata` bumps it
+ * without changing a single character, so drift triggers re-verification of the
+ * id window rather than discarding the job.
+ */
+export interface MemoryJobCheckpoint {
+  /** `ChatSession.transcriptRevision` when the job was enqueued. */
+  transcriptRevision: number
+  /** Id of the first message in the window. */
+  firstMessageId: string
+  /** Id of the last message in the window. */
+  lastMessageId: string
+  /** Number of messages the window spanned, inclusive of both endpoints. */
+  messageCount: number
+}
+
 export interface MemoryJob {
   id: string
   dedupeKey: string
@@ -45,6 +69,12 @@ export interface MemoryJob {
   provenance: MemoryProvenance
   /** Evidence references only. Raw transcript content is never persisted here. */
   evidenceIds: string[]
+  /**
+   * Transcript window this job was enqueued for. Absent on rows written before
+   * this field existed — those still fall back to the trailing `:<count>` of
+   * `dedupeKey`, so shipped databases keep working unchanged.
+   */
+  checkpoint?: MemoryJobCheckpoint
   queuedAt: number
   startedAt?: number
   completedAt?: number

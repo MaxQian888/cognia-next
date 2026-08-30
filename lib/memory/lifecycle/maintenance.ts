@@ -131,7 +131,7 @@ export async function runMemoryMaintenance(
   }
 }
 
-// Scheduling is deduped durably by `(session, transcript length)` in memoryJobs.
+// Scheduling is deduped durably by `(session, last message id, count)` in memoryJobs.
 // Retained as a compatibility test hook; no process-local correctness state remains.
 export const __resetMaintenanceGuard = () => undefined
 
@@ -145,7 +145,8 @@ export interface ScheduleMemoryMaintenanceParams {
   sessionId: string
   session: ChatSession | null | undefined
   appSettings: AppSettings | null | undefined
-  transcript: { role: string; text: string }[]
+  /** `id` pins the durable job checkpoint; see `./transcript-window`. */
+  transcript: { id?: string; role: string; text: string }[]
   provenance: MemoryProvenance
   contaminationState?: MemoryContaminationState
   config: MemoryConfig
@@ -176,10 +177,17 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
     void enqueueDailyVectorReconcile()
 
     const { enqueueMemoryJob } = await import("@/lib/db/memory-governance")
+    const { buildJobCheckpoint, transcriptJobIdentity } = await import("./transcript-window")
+    const checkpoint = buildJobCheckpoint(params.transcript, params.session?.transcriptRevision)
+    const identity = `${sessionId}:${transcriptJobIdentity(
+      checkpoint,
+      `${params.transcript.length}`
+    )}`
     const job = await enqueueMemoryJob(
       {
-        dedupeKey: `session-distill:${sessionId}:${params.transcript.length}`,
+        dedupeKey: `session-distill:${identity}`,
         kind: "session-distill",
+        checkpoint,
         sessionId,
         projectId: params.session?.projectId,
         characterId: params.session?.characterId,

@@ -134,6 +134,44 @@ describe("runTurnMemory", () => {
     expect(mockSchedule).toHaveBeenCalledWith(expect.objectContaining({ agentId: "twin:alice" }))
   })
 
+  it("pins the job to a message-id checkpoint and keys it by the last id + count", async () => {
+    mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1", transcriptRevision: 6 })
+    await runTurnMemory("s1", {
+      ...INPUT,
+      transcript: [
+        { id: "m1", role: "user", text: "remember my timezone is UTC+8" },
+        { id: "m2", role: "assistant", text: "noted — UTC+8" },
+      ],
+    })
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: "turn-extraction:s1:m2:2",
+        checkpoint: {
+          transcriptRevision: 6,
+          firstMessageId: "m1",
+          lastMessageId: "m2",
+          messageCount: 2,
+        },
+      }),
+      { reuseCompleted: true }
+    )
+    // Evidence source ids ride the same identity, so they stay unique across an
+    // edit-and-resend (which produces a new assistant message id).
+    expect(mockCreateEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "s1:m2:2:user" })
+    )
+  })
+
+  it("keeps the legacy dedupe-key shape when the transcript carries no ids", async () => {
+    // Shipped databases hold queued jobs keyed `turn-extraction:<session>:turn:<n>`.
+    // Emitting a different shape here would orphan them and re-enqueue the work.
+    await runTurnMemory("s1", INPUT)
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: "turn-extraction:s1:turn:2", checkpoint: undefined }),
+      { reuseCompleted: true }
+    )
+  })
+
   it("forwards assistantMessageId as source.messageId for chip attribution", async () => {
     await runTurnMemory("s1", { ...INPUT, assistantMessageId: "msg-42" })
     const [extractionInput] = mockRunExtraction.mock.calls[0]

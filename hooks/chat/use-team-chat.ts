@@ -608,6 +608,7 @@ export function useTeamChat() {
           assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
           assistantMessageId: lastAssistant?.id,
           transcript: finalMessages.map((m) => ({
+            id: m.id,
             role: m.role,
             text: textFromParts(m.parts),
             parts: m.parts,

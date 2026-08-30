@@ -36,8 +36,15 @@ import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamin
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import type { MemoryScope } from "@/types/memory/memory"
 import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
+import { buildJobCheckpoint, transcriptJobIdentity } from "@/lib/memory/lifecycle/transcript-window"
 
 export interface TurnTranscriptEntry {
+  /**
+   * Source message id. Optional only for legacy callers: without it the job
+   * falls back to count-based checkpointing, which replays the wrong content
+   * after a same-length edit. Every in-tree caller supplies it.
+   */
+  id?: string
   role: string
   text: string
   parts?: readonly unknown[]
@@ -127,7 +134,14 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
     const { buildAutoExtractionDeps, runMemoryExtraction, sessionProvenance } =
       await import("@/lib/memory/write/run-memory-extraction")
     const provenance = sessionProvenance(sessionRow)
-    const turnIdentity = `${sessionId}:turn:${input.transcript.length}`
+    // Pin the job to real message ids. The identity still ends in the message
+    // count, so a row whose checkpoint is ever lost still resolves through the
+    // legacy trailing-`:<n>` path in `resolveJobTranscriptWindow`.
+    const checkpoint = buildJobCheckpoint(input.transcript, sessionRow.transcriptRevision)
+    const turnIdentity = `${sessionId}:${transcriptJobIdentity(
+      checkpoint,
+      `turn:${input.transcript.length}`
+    )}`
     const evidence = await Promise.all([
       createMemoryEvidence({
         kind: "message",
@@ -150,6 +164,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
       {
         dedupeKey: `turn-extraction:${turnIdentity}`,
         kind: "turn-extraction",
+        checkpoint,
         sessionId,
         projectId: sessionRow.projectId,
         characterId: sessionRow.characterId,

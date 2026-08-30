@@ -14,6 +14,7 @@ import { listMemories, updateMemory } from "@/lib/db/memories"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryJob } from "@/types/memory/governance"
+import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-window"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
@@ -109,6 +110,8 @@ async function loadJobContext(job: MemoryJob): Promise<{
   config: MemoryConfig
   transcript: Array<{ id?: string; role: string; text: string; parts?: readonly unknown[] }>
   contaminationState: "clean" | "external-context"
+  /** Set when the session advanced past the checkpoint but the window verified intact. */
+  windowResultCode?: "revision_advanced_window_intact"
 }> {
   if (!job.sessionId) throw new MemoryJobTerminalError("session_missing")
   const [settings, session, messages] = await Promise.all([
@@ -127,11 +130,16 @@ async function loadJobContext(job: MemoryJob): Promise<{
     text: extractPlainText(message.parts),
     parts: message.parts,
   }))
-  const checkpointLength = jobTranscriptCheckpoint(job)
-  if (checkpointLength === undefined || checkpointLength > fullTranscript.length) {
-    throw new MemoryJobProcessingError("transcript_checkpoint_unavailable")
+  const window = resolveJobTranscriptWindow(job, fullTranscript, session.transcriptRevision)
+  if (!window.ok) {
+    // Terminal codes mean the window can never resolve again (its messages were
+    // deleted, or the slice no longer describes the conversation it was mined
+    // from). Burning the retry budget on those is pure waste.
+    throw window.terminal
+      ? new MemoryJobTerminalError(window.code)
+      : new MemoryJobProcessingError(window.code)
   }
-  const transcript = fullTranscript.slice(0, checkpointLength)
+  const transcript = window.transcript
   const externalContext = detectMemoryExternalContext(transcript)
   const policy = resolveAgentMemoryPolicy({
     config,
@@ -154,20 +162,8 @@ async function loadJobContext(job: MemoryJob): Promise<{
     config,
     transcript,
     contaminationState: hasUntrustedMemoryContext(externalContext) ? "external-context" : "clean",
+    windowResultCode: window.resultCode,
   }
-}
-
-/**
- * Learning jobs intentionally persist only source identities, never transcript
- * content. Their dedupe key therefore doubles as the durable transcript
- * checkpoint: recovery must replay the conversation prefix that existed when
- * the job was enqueued, not whatever newer messages exist when a worker starts.
- */
-function jobTranscriptCheckpoint(job: MemoryJob): number | undefined {
-  const match = job.dedupeKey.match(/:(\d+)$/)
-  if (!match) return undefined
-  const length = Number(match[1])
-  return Number.isSafeInteger(length) && length > 0 ? length : undefined
 }
 
 function lastCompletedPair(
@@ -239,6 +235,17 @@ async function recordRecoveredOperations(
   }
 }
 
+/**
+ * Compose the job's own result code with the transcript-window outcome, so a
+ * recovered job that ran against a session whose revision had already advanced
+ * is distinguishable in the console from one that replayed a pristine window.
+ * `resultCode` is a free-form diagnostic string (`SAFE_IDENTIFIER` in the backup
+ * sanitizer permits `:`), so the composed form round-trips through export.
+ */
+function withWindowOutcome(base: string, windowResultCode: string | undefined): string {
+  return windowResultCode ? `${base}:${windowResultCode}` : base
+}
+
 async function processTurnExtraction(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
   const context = await loadJobContext(job)
   const pair = lastCompletedPair(context.transcript)
@@ -266,8 +273,14 @@ async function processTurnExtraction(job: MemoryJob): Promise<MemoryJobProcessOu
   )
   await recordRecoveredOperations(job, result.applied, context.contaminationState)
   return result.applied.some((operation) => operation.op !== "NOOP")
-    ? { status: "succeeded", resultCode: "memories_applied" }
-    : { status: "no_output", resultCode: "nothing_durable" }
+    ? {
+        status: "succeeded",
+        resultCode: withWindowOutcome("memories_applied", context.windowResultCode),
+      }
+    : {
+        status: "no_output",
+        resultCode: withWindowOutcome("nothing_durable", context.windowResultCode),
+      }
 }
 
 async function processSessionDistill(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
@@ -294,7 +307,10 @@ async function processSessionDistill(job: MemoryJob): Promise<MemoryJobProcessOu
     },
     deps
   )
-  return { status: "succeeded", resultCode: "maintenance_completed" }
+  return {
+    status: "succeeded",
+    resultCode: withWindowOutcome("maintenance_completed", context.windowResultCode),
+  }
 }
 
 async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {

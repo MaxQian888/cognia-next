@@ -393,6 +393,44 @@ describe("scheduleMemoryMaintenance", () => {
     expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
   })
 
+  it("pins the distill job to a message-id checkpoint when the transcript carries ids", async () => {
+    const withIds = transcript.map((entry, index) => ({ ...entry, id: `m${index + 1}` }))
+    scheduleMemoryMaintenance({
+      ...base,
+      session: { id: "s1", transcriptRevision: 3 } as never,
+      transcript: withIds,
+      config: cfg(),
+    })
+    await jest.runAllTimersAsync()
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "session-distill",
+        dedupeKey: `session-distill:s1:m${withIds.length}:${withIds.length}`,
+        checkpoint: {
+          transcriptRevision: 3,
+          firstMessageId: "m1",
+          lastMessageId: `m${withIds.length}`,
+          messageCount: withIds.length,
+        },
+      }),
+      { reuseCompleted: true }
+    )
+  })
+
+  it("keeps the legacy `session-distill:<session>:<count>` key without ids", async () => {
+    // Distillation ships a different fallback shape than turn extraction. A
+    // shared shape would orphan every in-flight job of one of the two kinds.
+    scheduleMemoryMaintenance({ ...base, config: cfg() })
+    await jest.runAllTimersAsync()
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: `session-distill:s1:${transcript.length}`,
+        checkpoint: undefined,
+      }),
+      { reuseCompleted: true }
+    )
+  })
+
   it("enqueues, claims and completes the durable session-distill job", async () => {
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()

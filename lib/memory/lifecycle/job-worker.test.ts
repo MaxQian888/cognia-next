@@ -220,6 +220,135 @@ describe("memory job worker", () => {
     expect(del).toHaveBeenCalledWith(["orphan"])
   })
 
+  describe("transcript window recovery", () => {
+    const windowed = [
+      { id: "m1", role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
+      { id: "m2", role: "assistant", parts: [{ type: "text", text: "Noted." }] },
+      { id: "m3", role: "user", parts: [{ type: "text", text: "and turbo" }] },
+    ]
+
+    it("replays the checkpointed id window instead of a prefix of the live transcript", async () => {
+      mockListMessages.mockResolvedValue(windowed)
+      mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1", transcriptRevision: 4 })
+      await processMemoryJob({
+        ...job("windowed"),
+        dedupeKey: "session-distill:s1:m2:2",
+        kind: "session-distill",
+        sessionId: "s1",
+        checkpoint: {
+          transcriptRevision: 4,
+          firstMessageId: "m1",
+          lastMessageId: "m2",
+          messageCount: 2,
+        },
+      })
+      expect(mockRunMaintenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transcript: [
+            { id: "m1", role: "user", text: "I always use pnpm", parts: expect.any(Array) },
+            { id: "m2", role: "assistant", text: "Noted.", parts: expect.any(Array) },
+          ],
+        }),
+        {}
+      )
+    })
+
+    it("flags a revision that advanced while the window verified intact", async () => {
+      mockListMessages.mockResolvedValue(windowed)
+      mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1", transcriptRevision: 9 })
+      const outcome = await processMemoryJob({
+        ...job("drifted"),
+        dedupeKey: "session-distill:s1:m2:2",
+        kind: "session-distill",
+        sessionId: "s1",
+        checkpoint: {
+          transcriptRevision: 4,
+          firstMessageId: "m1",
+          lastMessageId: "m2",
+          messageCount: 2,
+        },
+      })
+      expect(outcome).toEqual({
+        status: "succeeded",
+        resultCode: "maintenance_completed:revision_advanced_window_intact",
+      })
+    })
+
+    it("skips — never retries — a job whose window messages were deleted", async () => {
+      // The messages are gone; replay can never succeed, so burning the retry
+      // budget on it is pure waste.
+      mockListMessages.mockResolvedValue(windowed)
+      const d = deps(
+        [
+          {
+            ...job("gone"),
+            dedupeKey: "session-distill:s1:mX:2",
+            kind: "session-distill",
+            sessionId: "s1",
+            checkpoint: {
+              transcriptRevision: 1,
+              firstMessageId: "mX",
+              lastMessageId: "mY",
+              messageCount: 2,
+            },
+          },
+        ],
+        processMemoryJob
+      )
+      await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
+      expect(d.finish).toHaveBeenCalledWith("gone", {
+        status: "skipped",
+        resultCode: "source_missing",
+      })
+      expect(d.fail).not.toHaveBeenCalled()
+    })
+
+    it("skips a job whose window no longer spans the recorded message count", async () => {
+      mockListMessages.mockResolvedValue(windowed)
+      const d = deps(
+        [
+          {
+            ...job("resized"),
+            dedupeKey: "session-distill:s1:m3:2",
+            kind: "session-distill",
+            sessionId: "s1",
+            checkpoint: {
+              transcriptRevision: 1,
+              firstMessageId: "m1",
+              lastMessageId: "m3",
+              messageCount: 2,
+            },
+          },
+        ],
+        processMemoryJob
+      )
+      await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
+      expect(d.finish).toHaveBeenCalledWith("resized", {
+        status: "skipped",
+        resultCode: "snapshot_changed",
+      })
+      expect(d.fail).not.toHaveBeenCalled()
+    })
+
+    it("loads a checkpointed job whose dedupe key carries no trailing count", async () => {
+      // Job kinds added later need not encode a count in their key.
+      mockListMessages.mockResolvedValue(windowed)
+      const outcome = await processMemoryJob({
+        ...job("keyless"),
+        dedupeKey: "session-distill:s1:run-a",
+        kind: "session-distill",
+        sessionId: "s1",
+        checkpoint: {
+          transcriptRevision: 1,
+          firstMessageId: "m1",
+          lastMessageId: "m2",
+          messageCount: 2,
+        },
+      })
+      expect(outcome.status).toBe("succeeded")
+    })
+  })
+
   it("skips (not succeeds or fails) a job that dies with a terminal error", async () => {
     // A turn job without a sessionId is terminally unprocessable — the drain
     // loop completes it instead of retry-failing.

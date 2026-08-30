@@ -222,6 +222,7 @@ export function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
     assistantText: extractAssistantText(lastAssistant),
     assistantMessageId: lastAssistant?.id,
     transcript: messages.map((m) => ({
+      id: m.id,
       role: m.role,
       text: extractPlainText(m),
       parts: m.parts,

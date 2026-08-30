@@ -997,6 +997,12 @@ describe("applyBackupPackage — learned memory", () => {
           maxAttempts: 4,
           heartbeatAt: 2,
           resultCode: "memory_created",
+          checkpoint: {
+            transcriptRevision: 4,
+            firstMessageId: "msg_1",
+            lastMessageId: "msg_2",
+            messageCount: 2,
+          },
         },
       ],
       memoryAuditEvents: [
@@ -1037,12 +1043,39 @@ describe("applyBackupPackage — learned memory", () => {
       maxAttempts: 4,
       heartbeatAt: 2,
       resultCode: "memory_created",
+      checkpoint: {
+        transcriptRevision: 4,
+        firstMessageId: "msg_1",
+        lastMessageId: "msg_2",
+        messageCount: 2,
+      },
     })
     expect((await db.memoryAuditEvents.get("maudit_1"))?.memoryId).toBe("mem_1")
     expect(summary.added.memories).toBe(1)
     expect(summary.added.memoryEvidence).toBe(1)
     expect(summary.added.memoryJobs).toBe(1)
     expect(summary.added.memoryAuditEvents).toBe(1)
+  })
+
+  it("drops a partially-valid job checkpoint instead of half-importing it", async () => {
+    // Without a checkpoint the job falls back to the trailing `:<n>` of its
+    // dedupe key, which is still correct. A checkpoint missing an endpoint would
+    // instead resolve against ids that were never verified.
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memoryJobs[0].checkpoint = {
+      transcriptRevision: 4,
+      firstMessageId: "msg_1",
+      messageCount: 2,
+    } as never
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.memoryJobs.get("mjob_1")
+    expect(row).toBeDefined()
+    expect(row?.checkpoint).toBeUndefined()
   })
 
   it("remaps child references when duplicate import ids collide", async () => {

@@ -32,7 +32,12 @@ import type {
 } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import { isMemorySourceChannel, type Memory } from "@/types/memory/memory"
-import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
+import type {
+  MemoryAuditEvent,
+  MemoryEvidence,
+  MemoryJob,
+  MemoryJobCheckpoint,
+} from "@/types/memory/governance"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
   emptySummary,
@@ -1238,6 +1243,36 @@ function sanitizeImportedEvidence(value: unknown): MemoryEvidence | undefined {
   }
 }
 
+/**
+ * Validate a `MemoryJobCheckpoint` sub-object field by field.
+ *
+ * Dropping it on import is not neutral: without a checkpoint the job falls back
+ * to the legacy trailing-`:<n>` of its dedupe key, which resolves to a message
+ * COUNT rather than an id window. Every dedupe key this codebase writes still
+ * ends in that count, so the fallback stays correct — but a partially-valid
+ * checkpoint must never survive, or the job would resolve against ids that were
+ * never verified.
+ */
+function sanitizeImportedJobCheckpoint(value: unknown): MemoryJobCheckpoint | undefined {
+  if (!isRecord(value)) return undefined
+  const firstMessageId = optionalIdentifier(value.firstMessageId)
+  const lastMessageId = optionalIdentifier(value.lastMessageId)
+  const transcriptRevision = optionalFiniteNumber(value.transcriptRevision)
+  const messageCount = optionalFiniteNumber(value.messageCount)
+  if (
+    !firstMessageId ||
+    !lastMessageId ||
+    transcriptRevision === undefined ||
+    transcriptRevision < 0 ||
+    messageCount === undefined ||
+    !Number.isSafeInteger(messageCount) ||
+    messageCount <= 0
+  ) {
+    return undefined
+  }
+  return { transcriptRevision, firstMessageId, lastMessageId, messageCount }
+}
+
 function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
   if (!isRecord(value)) return undefined
   const id = optionalIdentifier(value.id)
@@ -1302,6 +1337,8 @@ function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
   }
   const resultCode = optionalIdentifier(value.resultCode)
   if (resultCode) row.resultCode = resultCode
+  const checkpoint = sanitizeImportedJobCheckpoint(value.checkpoint)
+  if (checkpoint) row.checkpoint = checkpoint
   return row
 }
 
