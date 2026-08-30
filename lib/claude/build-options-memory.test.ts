@@ -353,3 +353,50 @@ describe("resolveSendOptions project-claim injection", () => {
     })
   })
 })
+
+describe("resolveSendOptions project_history_search offering", () => {
+  const ON = { memory: { enableProjectContinuity: true } } as unknown as AppSettings
+
+  function offered(opts: Awaited<ReturnType<typeof resolveSendOptions>>): boolean {
+    return (opts.pluginTools ?? []).some((entry) => entry.name === "project_history_search")
+  }
+
+  it("is withheld until the user turns project continuity on", async () => {
+    // A tool that can read every conversation in the workspace is part of the
+    // same opt-in as the injected claims, not a separate always-on capability.
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      session: { id: "s1", projectId: "p1" } as never,
+    })
+    expect(offered(opts)).toBe(false)
+  })
+
+  it("is offered for a workspace-bound chat once continuity is on", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      session: { id: "s1", projectId: "p1" } as never,
+    })
+    expect(offered(opts)).toBe(true)
+  })
+
+  it("is withheld from a chat with no workspace, because the scope IS the isolation", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      session: { id: "s1" } as never,
+    })
+    expect(offered(opts)).toBe(false)
+  })
+
+  it("is withheld from a temporary chat", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: {
+        memory: { enableProjectContinuity: true, temporary: true },
+      } as unknown as AppSettings,
+      session: { id: "s1", projectId: "p1" } as never,
+    })
+    expect(offered(opts)).toBe(false)
+  })
+})

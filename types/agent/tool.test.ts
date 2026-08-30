@@ -12,6 +12,7 @@ import {
   buildCanvasManifestEntries,
 } from "@/lib/claude/artifact-builtin-tools"
 import type { BuiltInToolName } from "./tool"
+import { buildProjectHistoryManifestEntries } from "@/lib/claude/project-history-tool"
 
 // The artifact/canvas arm, restated as a value so it can be compared. If the
 // union changes, this list must change with it — a `satisfies` keeps the two
@@ -40,5 +41,19 @@ describe("declared artifact/canvas tool names", () => {
     for (const name of retired) {
       expect(DECLARED_ARTIFACT_TOOLS as readonly string[]).not.toContain(name)
     }
+  })
+})
+
+// Same contract for the project-context deep path: the name in the union and
+// the name in the shipped manifest are one fact, so they are compared rather
+// than maintained twice.
+const DECLARED_PROJECT_HISTORY_TOOLS = [
+  "project_history_search",
+] as const satisfies readonly BuiltInToolName[]
+
+describe("declared project-history tool names", () => {
+  it("match the tool actually shipped in the manifest", () => {
+    const shipped = buildProjectHistoryManifestEntries().map((entry) => entry.name)
+    expect([...shipped].sort()).toEqual([...DECLARED_PROJECT_HISTORY_TOOLS].sort())
   })
 })

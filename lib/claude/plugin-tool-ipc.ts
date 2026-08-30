@@ -57,6 +57,11 @@ import {
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
 import { isWorkingSetTool, runWorkingSetTool } from "./working-set-tool"
 import {
+  isProjectHistorySearchTool,
+  runProjectHistorySearch,
+  type ProjectHistoryToolDeps,
+} from "./project-history-tool"
+import {
   isArtifactBuiltinTool,
   resolveArtifactToolDeps,
   runArtifactBuiltinTool,
@@ -303,6 +308,65 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
         codeServerClient.driveApplyEdit(root, path, line, column),
       saveAll: (root, path) => codeServerClient.saveAll(root, path),
     },
+  }
+}
+
+/** Resolver for the project-history tool's host deps. Swappable for tests / CLI. */
+let projectHistoryToolDepsOverride:
+  (() => Promise<ProjectHistoryToolDeps> | ProjectHistoryToolDeps) | null = null
+
+/** Inject project-history deps (tests / CLI host). Pass `null` to restore default. */
+export function __setProjectHistoryToolDepsForTesting(
+  fn: (() => Promise<ProjectHistoryToolDeps> | ProjectHistoryToolDeps) | null
+): void {
+  projectHistoryToolDepsOverride = fn
+}
+
+/**
+ * Build the project-history tool's host deps.
+ *
+ * Everything here is an existing reader used as-is: the chat-search engine, the
+ * result index, the indexer drain, and the `@msg:` window builder. The tool
+ * adds filtering and framing on top; it owns no storage of its own.
+ */
+async function resolveProjectHistoryToolDeps(): Promise<ProjectHistoryToolDeps> {
+  if (projectHistoryToolDepsOverride) return projectHistoryToolDepsOverride()
+  const [
+    { searchChatHistory },
+    { drainSearchIndex },
+    { searchChatResults },
+    { buildMessageReferenceText },
+    { getDb },
+  ] = await Promise.all([
+    import("@/lib/chat/search/engine"),
+    import("@/lib/chat/search/indexer"),
+    import("@/lib/db/chat-result-index"),
+    import("@/lib/chat/mentions/message-reference"),
+    import("@/lib/db/schema"),
+  ])
+  return {
+    resolveProjectId: async (sessionId) => {
+      const { getSession } = await import("@/lib/db/sessions")
+      const session = await getSession(sessionId).catch(() => null)
+      const projectId = session?.projectId?.trim()
+      return projectId ? projectId : null
+    },
+    // `backfill: false`: the tool needs the DIRTY queue flushed so a message
+    // sent moments ago is findable. Widening coverage into older history is
+    // the idle scheduler's job and would make every call pay for a 500-row read.
+    drainIndex: async () => {
+      await drainSearchIndex(undefined, { backfill: false })
+    },
+    searchMessages: (query) => searchChatHistory(query),
+    searchResults: (needle, limit) => searchChatResults(needle, limit),
+    getSessions: (ids) => getDb().sessions.bulkGet(ids as string[]),
+    locateMessage: async (messageId) => {
+      const row = await getDb().messages.get(messageId)
+      return row?.sessionId ?? null
+    },
+    buildWindow: ({ sessionId, messageId, span }) =>
+      buildMessageReferenceText({ sessionId, messageId, span }),
+    now: () => Date.now(),
   }
 }
 
@@ -586,6 +650,18 @@ export async function handlePluginToolExec(
     // the shared Dexie CAS service through this existing tool round trip.
     if (isWorkingSetTool(request.name)) {
       const result = await runWorkingSetTool(request.args, { sessionId: request.sessionId })
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Deep-path project history — read this workspace's own conversations ──
+    // Host-routed for the same reason: the resident search corpus, the chat
+    // result index and Dexie all live here. The runner pre-filters PII per hit,
+    // so `assertSafePluginToolResult` is a backstop rather than the gate.
+    if (isProjectHistorySearchTool(request.name)) {
+      const result = await runProjectHistorySearch(
+        request.args,
+        await resolveProjectHistoryToolDeps(),
+        { sessionId: request.sessionId }
+      )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Agent-authored artifacts and canvas documents ─────────────────────

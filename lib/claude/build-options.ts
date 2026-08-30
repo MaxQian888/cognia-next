@@ -3085,6 +3085,34 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // Deep-path project history. Rides the SAME switch as the fast path
+  // (`enableProjectContinuity`, off by default) rather than a second flag: both
+  // are the one feature "let this chat see what earlier chats in this workspace
+  // established", and a user who has not turned that on should not find a tool
+  // that can read every conversation in the workspace in the manifest. It needs
+  // a workspace for the same reason the fast path does — the scope filter IS
+  // the isolation — and is withheld from temporary chats, which are the mode
+  // that exists to leave no trace.
+  if (session?.id) {
+    const historyProjectId = session?.projectId ?? ctx.activeProject?.id
+    const historyMemoryConfig = resolveMemoryConfig(appSettings?.memory)
+    if (
+      historyProjectId &&
+      historyMemoryConfig.enableProjectContinuity &&
+      !historyMemoryConfig.temporary
+    ) {
+      try {
+        const { buildProjectHistoryManifestEntries, PROJECT_HISTORY_TOOL_NAME } =
+          await import("@/lib/claude/project-history-tool")
+        if (!(opts.pluginTools ?? []).some((entry) => entry.name === PROJECT_HISTORY_TOOL_NAME)) {
+          opts.pluginTools = [...(opts.pluginTools ?? []), ...buildProjectHistoryManifestEntries()]
+        }
+      } catch (err) {
+        loggers.app.warn("failed to append project_history_search tool", { error: String(err) })
+      }
+    }
+  }
+
   // --- Anthropic native tools (Computer Use) -------------------------------
   // When the character has `enableComputerUse === true`, attach every
   // registered native Anthropic tool (computer / bash / text_editor) plus

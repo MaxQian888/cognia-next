@@ -9,6 +9,7 @@ import {
   __setSkillToolDepsForTesting,
   __setSlashToolDepsForTesting,
   __setVectorToolDepsForTesting,
+  __setProjectHistoryToolDepsForTesting,
   __setSpawnTaskToolDepsForTesting,
   __setSessionPeerToolDepsForTesting,
   handlePluginToolExec,
@@ -16,6 +17,7 @@ import {
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
 import type { VectorToolRunDeps } from "./vector-builtin-tools"
+import type { ProjectHistoryToolDeps } from "./project-history-tool"
 // Static imports so these share the SAME module instance the top-level
 // `handlePluginToolExec` closes over (sibling describes call jest.resetModules,
 // which would make a dynamic import resolve a different registry instance).
@@ -1035,5 +1037,53 @@ describe("handlePluginToolExec — host web dependency injection", () => {
       { query: "hi" },
       expect.objectContaining({ searchExecutor })
     )
+  })
+})
+
+describe("project_history_search routing", () => {
+  afterEach(() => {
+    __setProjectHistoryToolDepsForTesting(null)
+    __setPluginToolResolverForTesting(null)
+  })
+
+  function makeDeps(overrides: Partial<ProjectHistoryToolDeps> = {}): ProjectHistoryToolDeps {
+    return {
+      resolveProjectId: async () => "proj-1",
+      drainIndex: async () => {},
+      searchMessages: async () => ({
+        results: [],
+        moreOlderHistory: false,
+        indexIncomplete: false,
+      }),
+      searchResults: async () => [],
+      getSessions: async () => [],
+      locateMessage: async () => null,
+      buildWindow: async () => null,
+      now: () => 0,
+      ...overrides,
+    }
+  }
+
+  it("routes ahead of the plugin registry and carries the calling session", async () => {
+    const execute = jest.fn()
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+    const resolveProjectId = jest.fn(async () => "proj-1")
+    __setProjectHistoryToolDepsForTesting(() => makeDeps({ resolveProjectId }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "project_history_search", args: { queries: ["pnpm"] } })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    expect(resolveProjectId).toHaveBeenCalledWith("session-1")
+    expect(response.error).toBeUndefined()
+    expect(response.result).toMatchObject({ ok: true, coverage: "complete" })
+  })
+
+  it("relays a structured refusal as a RESULT, not a transport error", async () => {
+    __setProjectHistoryToolDepsForTesting(() => makeDeps({ resolveProjectId: async () => null }))
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "project_history_search", args: { queries: ["pnpm"] } })
+    )
+    expect(response.error).toBeUndefined()
+    expect(response.result).toMatchObject({ ok: false, code: "no_workspace" })
   })
 })

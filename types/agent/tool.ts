@@ -149,6 +149,12 @@ export type BuiltInToolName =
   | "artifact_update"
   | "artifact_read"
   | "artifact_delete"
+  // Project-context deep path — implemented in
+  // `lib/claude/project-history-tool.ts`, routed host-side through
+  // `lib/claude/plugin-tool-ipc.ts`. Offered only when the user turned project
+  // continuity on AND the chat is bound to a workspace, because the workspace
+  // scope IS the isolation.
+  | "project_history_search"
   // Memory tools
   | "memory_store"
   | "memory_recall"
