@@ -109,7 +109,9 @@ describe("DataTableCatalog", () => {
       "evalArtifacts",
       "evalOnline",
       "workSubmissions",
+      "memoryGovernance",
       "ocrResults",
+      "retrievalControl",
       "workflowAppData",
       "siteArtifacts",
     ])

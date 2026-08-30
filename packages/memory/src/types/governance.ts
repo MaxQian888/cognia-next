@@ -209,6 +209,14 @@ export interface MemoryJob {
   nextAttemptAt?: number
   errorCode?: string
   resultCode?: string
+  /**
+   * The terminal job this one was manually retried from.
+   *
+   * A manual retry creates a NEW row rather than reopening the old one, because
+   * the audit relationship depends on the source staying terminal. This is the
+   * link back. Not indexed, so it costs no schema version.
+   */
+  retryOfJobId?: string
 }
 
 /**

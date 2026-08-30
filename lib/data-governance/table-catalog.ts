@@ -882,6 +882,43 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  // ADR-0115 gives the memory and retrieval control planes differentiated
+  // windows: 30 days for a job that succeeded or produced nothing, 90 for one
+  // that failed or was quarantined, 180 for content-free audit. The catalog
+  // records the OUTER bound of each table, because a policy that understates
+  // what the code keeps is a policy that lies.
+  memoryJobs: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "memoryGovernance",
+    reason:
+      "ADR-0115 durable job retention. `pruneMemoryGovernanceData` keeps a succeeded or no-output job for 30 days and a failed, skipped or cancelled one for 90, and caps retained completed rows so a busy profile cannot grow without bound.",
+  },
+  memoryAuditEvents: {
+    mode: "ttl",
+    days: 180,
+    enforcement: "central",
+    executorId: "memoryGovernance",
+    reason:
+      "ADR-0115 content-free audit retention. The ledger carries only actions, reasons and counters, so 180 days is the window a user needs to answer why a memory exists. Also the only bound on a table registered as very-large.",
+  },
+  retrievalJobs: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "retrievalControl",
+    reason:
+      "ADR-0115 shared job retention, matching `memoryJobs`. `pruneRetrievalControlData` applies the same 30/90 split and row cap.",
+  },
+  retrievalTraces: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "retrievalControl",
+    reason:
+      "Content-free recall traces. Each row expires on its own `expiresAt`, which the memory domain sets to 14 days; 90 is the outer bound for domains that keep them longer, plus a row cap.",
+  },
   siteArtifacts: {
     mode: "ttl",
     days: 30,

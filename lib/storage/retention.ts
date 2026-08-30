@@ -28,6 +28,8 @@ import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds, policyForTable } from "@/lib/data-governance/table-catalog"
 import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-service"
 import { pruneOnlineEvalData } from "@/lib/db/eval-online"
+import { pruneMemoryGovernanceData } from "@/lib/db/memory-governance"
+import { pruneRetrievalControlData } from "@/lib/db/retrieval-control"
 import {
   SITE_ARTIFACT_GC_DEFAULTS,
   collectUnreferencedSiteArtifacts,
@@ -58,6 +60,26 @@ export interface RetentionTarget {
 const SETTLED_QUEUE_RETENTION_DAYS = 7
 
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  // ADR-0115's memory and retrieval control planes. Both prune functions were
+  // written, tested, and then never called from anywhere, so `memoryJobs`,
+  // `memoryAuditEvents`, `retrievalJobs` and `retrievalTraces` grew without
+  // bound. Their windows are internal policy (30 days for a clean outcome, 90
+  // for a failure, 180 for audit, plus row caps), not the user's trace slider,
+  // so they compute their own cutoffs and this is `row-expiry`.
+  memoryGovernance: {
+    policy: "row-expiry",
+    prune: async () => {
+      const report = await pruneMemoryGovernanceData(Date.now())
+      return report.jobsDeleted + report.auditsDeleted + report.orphanEvidenceDeleted
+    },
+  },
+  retrievalControl: {
+    policy: "row-expiry",
+    prune: async () => {
+      const report = await pruneRetrievalControlData(Date.now())
+      return report.jobsDeleted + report.tracesDeleted
+    },
+  },
   // Sites build archives (ADR-0084). The cutoff carries the configured window;
   // the reference rules — serving deployments, the rollback target, anything
   // behind an unfinished operation — are the collector's own and are not

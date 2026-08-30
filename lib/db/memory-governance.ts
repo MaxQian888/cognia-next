@@ -499,6 +499,56 @@ export async function cancelMemoryJob(
   })
 }
 
+/**
+ * Re-queue a terminal job as a NEW row.
+ *
+ * The source row is never reopened: it stays terminal so the audit trail keeps
+ * saying what happened to it, and the new row links back through
+ * `retryOfJobId`. Mirrors `retryStoredRetrievalJob` in the retrieval control
+ * plane, which solved the same problem the same way.
+ *
+ * `skipped` is deliberately not retryable. It is a terminal policy refusal, not
+ * a transient failure, so re-running it would just refuse again.
+ */
+export async function retryMemoryJob(
+  id: string,
+  now: number = Date.now()
+): Promise<MemoryJob | undefined> {
+  const source = await getDb().memoryJobs.get(id)
+  if (!source) return undefined
+  if (source.status !== "failed" && source.status !== "cancelled") return undefined
+
+  const retried = await enqueueMemoryJob({
+    // The key MUST differ. `reuseCompleted` would otherwise hand back the very
+    // row we are retrying and the retry would silently do nothing.
+    dedupeKey: `${source.dedupeKey}:manual-retry:${now}`,
+    kind: source.kind,
+    scope: source.scope,
+    provenance: source.provenance,
+    evidenceIds: source.evidenceIds,
+    queuedAt: now,
+    retryOfJobId: source.id,
+    ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+    ...(source.projectId ? { projectId: source.projectId } : {}),
+    ...(source.characterId ? { characterId: source.characterId } : {}),
+    ...(source.agentId ? { agentId: source.agentId } : {}),
+    ...(source.checkpoint ? { checkpoint: source.checkpoint } : {}),
+    ...(source.memoryId ? { memoryId: source.memoryId } : {}),
+    ...(source.maxAttempts !== undefined ? { maxAttempts: source.maxAttempts } : {}),
+  })
+
+  await appendMemoryAuditEvent({
+    action: "learn-allowed",
+    ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+    // `MemoryAuditAction` has no `retry` member, and adding one would touch the
+    // package type and every consumer switching on it. The reason carries it.
+    reason: "job_retry",
+    metadata: { sourceJobId: source.id, newJobId: retried.id, kind: source.kind },
+  }).catch(() => undefined)
+
+  return retried
+}
+
 export async function failMemoryJob(
   id: string,
   errorCode: string,
@@ -549,33 +599,50 @@ export async function failMemoryJob(
 export async function pruneMemoryGovernanceData(
   now: number = Date.now(),
   cap = 20_000
-): Promise<{ jobsDeleted: number; auditsDeleted: number }> {
+): Promise<{ jobsDeleted: number; auditsDeleted: number; orphanEvidenceDeleted: number }> {
   const db = getDb()
   const dayMs = 24 * 60 * 60 * 1000
-  return db.transaction("rw", [db.memoryJobs, db.memoryAuditEvents], async () => {
-    const jobs = await db.memoryJobs.toArray()
-    const jobsToDelete = new Set(
-      jobs
-        .filter((job) => {
-          const terminalAt = job.completedAt ?? job.queuedAt
-          const shortRetention = job.status === "succeeded" || job.status === "no_output"
-          return terminalAt < now - (shortRetention ? 30 : 90) * dayMs
-        })
-        .map((job) => job.id)
-    )
-    const successful = jobs
-      .filter(
-        (job) =>
-          (job.status === "succeeded" || job.status === "no_output") && !jobsToDelete.has(job.id)
+  return db.transaction(
+    "rw",
+    [db.memoryJobs, db.memoryAuditEvents, db.memoryEvidence],
+    async () => {
+      const jobs = await db.memoryJobs.toArray()
+      const jobsToDelete = new Set(
+        jobs
+          .filter((job) => {
+            const terminalAt = job.completedAt ?? job.queuedAt
+            const shortRetention = job.status === "succeeded" || job.status === "no_output"
+            return terminalAt < now - (shortRetention ? 30 : 90) * dayMs
+          })
+          .map((job) => job.id)
       )
-      .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
-    for (const job of successful.slice(cap)) jobsToDelete.add(job.id)
-    const auditIds = (await db.memoryAuditEvents
-      .where("createdAt")
-      .below(now - 180 * dayMs)
-      .primaryKeys()) as string[]
-    await db.memoryJobs.bulkDelete([...jobsToDelete])
-    await db.memoryAuditEvents.bulkDelete(auditIds)
-    return { jobsDeleted: jobsToDelete.size, auditsDeleted: auditIds.length }
-  })
+      const successful = jobs
+        .filter(
+          (job) =>
+            (job.status === "succeeded" || job.status === "no_output") && !jobsToDelete.has(job.id)
+        )
+        .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
+      for (const job of successful.slice(cap)) jobsToDelete.add(job.id)
+      const auditIds = (await db.memoryAuditEvents
+        .where("createdAt")
+        .below(now - 180 * dayMs)
+        .primaryKeys()) as string[]
+      // Evidence that never got attached to a memory. The turn path used to write
+      // two of these per turn BEFORE the job existed, and `deleteMemoryEvidence`
+      // keys on `memoryId`, so nothing could ever reach them. The write is gone,
+      // but shipped databases still hold the leak.
+      const orphanEvidence = (await db.memoryEvidence.toArray())
+        .filter((row) => !row.memoryId && row.createdAt < now - 30 * dayMs)
+        .map((row) => row.id)
+
+      await db.memoryJobs.bulkDelete([...jobsToDelete])
+      await db.memoryAuditEvents.bulkDelete(auditIds)
+      await db.memoryEvidence.bulkDelete(orphanEvidence)
+      return {
+        jobsDeleted: jobsToDelete.size,
+        auditsDeleted: auditIds.length,
+        orphanEvidenceDeleted: orphanEvidence.length,
+      }
+    }
+  )
 }

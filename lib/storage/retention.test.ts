@@ -121,7 +121,9 @@ describe("pruneRetainedTables", () => {
       { id: "evalArtifacts", removed: 0 },
       { id: "evalOnline", removed: 0 },
       { id: "workSubmissions", removed: 0 },
+      { id: "memoryGovernance", removed: 0 },
       { id: "ocrResults", removed: 0 },
+      { id: "retrievalControl", removed: 0 },
       { id: "workflowAppData", removed: 0 },
       { id: "siteArtifacts", removed: 0 },
     ])
@@ -137,6 +139,36 @@ describe("pruneRetainedTables", () => {
     // this pins that the online tables are actually swept rather than merely
     // documented as swept.
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("evalOnline")
+    // ADR-0115's two prune functions were written, tested, and then called from
+    // nowhere, so the memory and retrieval control-plane tables grew without
+    // bound. These two entries are what actually sweeps them.
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("memoryGovernance")
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("retrievalControl")
+  })
+
+  it("sweeps the memory and retrieval control planes on a real database", async () => {
+    const stale = Date.now() - 200 * MS_PER_DAY
+    await getDb().memoryAuditEvents.add({
+      id: "a-old",
+      action: "created",
+      reason: "user",
+      createdAt: stale,
+    })
+    await getDb().memoryEvidence.add({
+      id: "e-orphan",
+      kind: "message",
+      sourceId: "s1:turn:2:user",
+      contaminationState: "clean",
+      reviewed: false,
+      createdAt: stale,
+    })
+
+    const out = await pruneRetainedTables(30)
+    expect(out).toContainEqual({ id: "memoryGovernance", removed: 2 })
+    expect(await getDb().memoryAuditEvents.count()).toBe(0)
+    // The turn path used to leak two of these per turn, and nothing could reach
+    // them because `deleteMemoryEvidence` keys on `memoryId`.
+    expect(await getDb().memoryEvidence.count()).toBe(0)
   })
 
   it("prunes stale OCR cache rows through the shared configured window", async () => {

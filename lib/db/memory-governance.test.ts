@@ -11,6 +11,7 @@ import {
   failMemoryJob,
   finishMemoryJob,
   heartbeatMemoryJob,
+  retryMemoryJob,
   findEarliestInstrumentedAuditAt,
   getMemoryJob,
   listMemoryAuditEvents,
@@ -186,6 +187,61 @@ describe("durable memory jobs", () => {
     })
   })
 
+  it("re-queues a failed job as a new row without reopening the old one", async () => {
+    await enqueueMemoryJob({ ...draft, checkpoint: undefined, maxAttempts: 4 })
+    await claimNextMemoryJob("w1", 1_000, 50_000)
+    await finishMemoryJob("j1", "failed", "retry_exhausted", 1_500)
+
+    const retried = await retryMemoryJob("j1", 2_000)
+    expect(retried?.id).not.toBe("j1")
+    expect(retried).toMatchObject({
+      status: "queued",
+      kind: "turn-extraction",
+      sessionId: "session-1",
+      scope: "global",
+      retryOfJobId: "j1",
+      retryCount: 0,
+    })
+    // A distinct dedupe key, or `reuseCompleted` would hand back the very row
+    // we are retrying and the retry would silently do nothing.
+    expect(retried?.dedupeKey).not.toBe(draft.dedupeKey)
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "failed" })
+  })
+
+  it("re-queues a cancelled job", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("w1", 1_000, 50_000)
+    await cancelMemoryJob("j1", 1_500)
+    expect(await retryMemoryJob("j1", 2_000)).toMatchObject({ status: "queued" })
+  })
+
+  it.each([["succeeded"], ["no_output"], ["skipped"]] as const)(
+    "refuses to retry a %s job",
+    async (status) => {
+      await enqueueMemoryJob(draft)
+      await claimNextMemoryJob("w1", 1_000, 50_000)
+      await finishMemoryJob("j1", status, "done", 1_500)
+      expect(await retryMemoryJob("j1", 2_000)).toBeUndefined()
+    }
+  )
+
+  it("returns nothing for a job that is gone", async () => {
+    expect(await retryMemoryJob("nope")).toBeUndefined()
+  })
+
+  it("links the retry to its source in the audit ledger", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("w1", 1_000, 50_000)
+    await finishMemoryJob("j1", "failed", "retry_exhausted", 1_500)
+    const retried = await retryMemoryJob("j1", 2_000)
+    expect(await listMemoryAuditEvents({ sessionId: "session-1" })).toContainEqual(
+      expect.objectContaining({
+        reason: "job_retry",
+        metadata: { sourceJobId: "j1", newJobId: retried!.id, kind: "turn-extraction" },
+      })
+    )
+  })
+
   it("reclaims an expired lease", async () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("dead-worker", 1_000, 50)
@@ -354,6 +410,7 @@ describe("insight readers", () => {
     await expect(pruneMemoryGovernanceData(now)).resolves.toEqual({
       jobsDeleted: 1,
       auditsDeleted: 1,
+      orphanEvidenceDeleted: 0,
     })
   })
 })
