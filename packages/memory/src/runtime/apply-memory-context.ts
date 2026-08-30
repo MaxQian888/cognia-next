@@ -116,6 +116,12 @@ export async function applyMemoryContext(
               topK: input.topK,
               relevanceFloor: input.relevanceFloor,
               types: RECALLED_TYPES,
+              // THE guard for this section. Without it, the day project mining
+              // stamps its first claim, every claim also renders under
+              // "What you remember about the user" — silently, with no error and
+              // no failing test, in a first-person voice that reads as though the
+              // user personally told the agent a fact about their own repo.
+              claimFilter: "personal-only",
               precomputedQueryEmbedding: input.precomputedQueryEmbedding,
               enableQueryExpansion: input.enableQueryExpansion,
               recencyHalfLifeDays: input.recencyHalfLifeDays,

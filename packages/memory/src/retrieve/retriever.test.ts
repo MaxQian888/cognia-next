@@ -340,3 +340,119 @@ describe("retrieveMemories", () => {
     expect(out.map((r) => r.memory.id)).toContain("hit")
   })
 })
+
+describe("claimFilter — corpus partition", () => {
+  const personal = mem("The user prefers pnpm workspaces", { id: "personal-1" })
+  const claim = mem("The repo uses pnpm workspaces", {
+    id: "claim-1",
+    projectId: "p1",
+    projectMemoryKind: "state",
+  })
+  const deps = (rows: Memory[]): MemoryRetrieverDeps => ({
+    loadCandidates: async () => rows,
+  })
+
+  it("returns only personal rows under personal-only", async () => {
+    const hits = await retrieveMemories(
+      { ...base, queryText: "pnpm workspaces", claimFilter: "personal-only" },
+      deps([personal, claim])
+    )
+    expect(hits.map((h) => h.memory.id)).toEqual(["personal-1"])
+  })
+
+  it("returns only project rows under project-only", async () => {
+    const hits = await retrieveMemories(
+      {
+        ...base,
+        queryText: "pnpm workspaces",
+        reader: { projectId: "p1" },
+        claimFilter: "project-only",
+      },
+      deps([personal, claim])
+    )
+    expect(hits.map((h) => h.memory.id)).toEqual(["claim-1"])
+  })
+
+  it("treats a row with no projectMemoryKind as personal", async () => {
+    // The migration contract: every row written before mining existed has no
+    // kind and must keep behaving exactly as it does today.
+    const legacy = mem("Legacy row with a projectId but no kind", {
+      id: "legacy-1",
+      projectId: "p1",
+    })
+    const hits = await retrieveMemories(
+      { ...base, queryText: "legacy row", claimFilter: "personal-only" },
+      deps([legacy])
+    )
+    expect(hits.map((h) => h.memory.id)).toEqual(["legacy-1"])
+  })
+
+  it("searches both corpora when no filter is given", async () => {
+    const hits = await retrieveMemories(
+      { ...base, queryText: "pnpm workspaces" },
+      deps([personal, claim])
+    )
+    expect(hits.map((h) => h.memory.id).sort()).toEqual(["claim-1", "personal-1"])
+  })
+
+  it("short-circuits project-only with no project, without loading candidates", async () => {
+    const loadCandidates = jest.fn(async () => [claim])
+    const hits = await retrieveMemories(
+      { ...base, queryText: "pnpm", claimFilter: "project-only" },
+      { loadCandidates }
+    )
+    expect(hits).toEqual([])
+    expect(loadCandidates).not.toHaveBeenCalled()
+  })
+
+  it("scores each corpus independently rather than letting one drown the other", async () => {
+    // The reason this is a pre-index partition and not a post-filter:
+    // `normalizeScores` is min-max over the FUSED set, so a lone modest personal
+    // hit ranked alongside many strong claims normalizes toward 0 and falls under
+    // the floor. Partitioned, it keeps a full-strength score of its own.
+    const claims = Array.from({ length: 8 }, (_, i) =>
+      mem("pnpm workspaces pnpm workspaces pnpm", {
+        id: `claim-${i}`,
+        projectId: "p1",
+        projectMemoryKind: "state",
+      })
+    )
+    const modest = mem("the user mentioned pnpm once", { id: "personal-modest" })
+    const hits = await retrieveMemories(
+      {
+        ...base,
+        queryText: "pnpm workspaces",
+        relevanceFloor: 0.35,
+        claimFilter: "personal-only",
+      },
+      deps([...claims, modest])
+    )
+    expect(hits.map((h) => h.memory.id)).toEqual(["personal-modest"])
+  })
+
+  it("keys the BM25 cache by partition so the corpora never share an index", async () => {
+    // A shared cache key would hand the second call the first call's index, and
+    // the wrong corpus would answer.
+    const rows = [personal, claim]
+    const personalHits = await retrieveMemories(
+      {
+        ...base,
+        queryText: "pnpm workspaces",
+        reader: { projectId: "p1" },
+        claimFilter: "personal-only",
+      },
+      deps(rows)
+    )
+    const projectHits = await retrieveMemories(
+      {
+        ...base,
+        queryText: "pnpm workspaces",
+        reader: { projectId: "p1" },
+        claimFilter: "project-only",
+      },
+      deps(rows)
+    )
+    expect(personalHits.map((h) => h.memory.id)).toEqual(["personal-1"])
+    expect(projectHits.map((h) => h.memory.id)).toEqual(["claim-1"])
+  })
+})

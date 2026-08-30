@@ -168,3 +168,44 @@ describe("applyMemoryContext", () => {
     expect(res.systemPromptSection).toBeNull()
   })
 })
+
+describe("personal/project corpus isolation", () => {
+  it("never renders a mined project claim under the personal heading", async () => {
+    // This is the highest-consequence silent failure in the whole feature. With
+    // the corpus filter missing, the claim below still retrieves and still packs,
+    // producing a first-person "what you remember about the user" line asserting
+    // a fact about the user's repository that the user never said. Nothing else
+    // in the suite catches it: no error, no type failure, no changed shape.
+    const claim = mem("The repo pins Rust to 1.77.2", {
+      id: "claim-1",
+      projectId: "p1",
+      projectMemoryKind: "constraint",
+    })
+    const personal = mem("The user works in UTC+8", { id: "personal-1" })
+
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "repo rust user timezone",
+      reader: { projectId: "p1" },
+      deps: deps({ loadCandidates: async () => [claim, personal] }),
+    })
+
+    expect(result.systemPromptSection).toContain("What you remember about the user")
+    expect(result.systemPromptSection).toContain("The user works in UTC+8")
+    expect(result.systemPromptSection).not.toContain("The repo pins Rust")
+    expect(result.retrievedMemories.map((m) => m.id)).toEqual(["personal-1"])
+  })
+
+  it("still recalls a legacy row that carries a projectId but no kind", async () => {
+    // Absent kind means personal. Rows written before mining existed must keep
+    // being recalled exactly as they are today.
+    const legacy = mem("The user works in UTC+8", { id: "legacy-1", projectId: "p1" })
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "user timezone",
+      reader: { projectId: "p1" },
+      deps: deps({ loadCandidates: async () => [legacy] }),
+    })
+    expect(result.retrievedMemories.map((m) => m.id)).toEqual(["legacy-1"])
+  })
+})

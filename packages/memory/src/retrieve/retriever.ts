@@ -15,6 +15,7 @@
 
 import {
   DEFAULT_MEMORY_CONFIG,
+  isProjectClaim,
   type Memory,
   type MemoryReaderContext,
   type MemoryType,
@@ -161,7 +162,7 @@ const STOPWORDS = new Set<string>([
 ])
 
 /** Distinct non-stopword tokens in `text` (case handled by the tokenizer). */
-function meaningfulTerms(text: string): Set<string> {
+export function meaningfulTerms(text: string): Set<string> {
   const out = new Set<string>()
   for (const term of tokenizeMultilingual(text)) {
     if (term.length === 0 || STOPWORDS.has(term)) continue
@@ -191,6 +192,26 @@ export interface RetrieveMemoriesInput {
   relevanceFloor: number
   /** Restrict to these types (e.g. semantic+episodic for injection). */
   types?: MemoryType[]
+  /**
+   * Which corpus to search. Absent searches BOTH, which is only correct for
+   * callers that genuinely want everything (the console, similarity lookups
+   * during consolidation).
+   *
+   * Every prompt-injecting caller MUST pass one. Personal memory and mined
+   * project claims are rendered under different headings with different voices —
+   * one says the user told you this, the other says the workspace was observed
+   * doing this — so a row reaching the wrong section is a correctness bug, not a
+   * ranking nit.
+   *
+   * Partitioning here rather than after retrieval is deliberate, for two reasons
+   * that both bite. `normalizeScores` is min-max over the FUSED set, so ranking
+   * the corpora together and splitting afterwards lets eight strong claims
+   * normalize a decent personal fact toward zero and under `relevanceFloor` —
+   * the two sections would compete invisibly and the loser would be silent. And
+   * `topK` is per call, so a post-filter can only offer "K mixed, then split",
+   * which can return K claims and zero personal facts.
+   */
+  claimFilter?: "personal-only" | "project-only"
   /**
    * Query embedding computed once by the caller for this turn. When provided,
    * the vector leg reuses it instead of calling `deps.embed(query)` — avoids a
@@ -237,7 +258,11 @@ interface CachedMemoryBm25 {
   signature: string
 }
 const memoryBm25Cache = new Map<string, CachedMemoryBm25>()
-const MAX_CACHED_CORPORA = 4
+// Two entries per reader, not one: a turn that recalls personal memory AND
+// project claims builds two indexes under two cache keys. Left at 4 this evicts
+// on every turn and the cache degrades into a re-tokenize loop — worst in a team
+// turn, whose members already compete for slots.
+const MAX_CACHED_CORPORA = 8
 
 function corpusSignature(candidates: Memory[]): string {
   let latest = 0
@@ -289,12 +314,27 @@ export async function retrieveMemories(
   if (!query) return []
 
   const reader = input.reader ?? input.characterId
+
+  // Project claims are scoped to a workspace by construction, so asking for them
+  // without one can only ever return nothing. Bail before touching the corpus —
+  // belt and braces on top of `isVisibleToReader`, which already refuses to hand
+  // a row carrying a `projectId` to a reader in a different (or no) project.
+  if (input.claimFilter === "project-only" && !input.reader?.projectId) return []
+
   let candidates = (await deps.loadCandidates(reader)).filter((memory) =>
     isMemoryEligibleForRetrieval(memory, input.now)
   )
   if (input.types) {
     const allow = new Set(input.types)
     candidates = candidates.filter((m) => allow.has(m.type))
+  }
+  if (input.claimFilter) {
+    // `isProjectClaim` is the ONE place "absent means personal" is expressed, so
+    // this filter and the console's facet can never disagree about which corpus
+    // a row belongs to. Applied before the BM25 index is built, so each corpus
+    // gets its own index and its own score normalization.
+    const wantProject = input.claimFilter === "project-only"
+    candidates = candidates.filter((m) => isProjectClaim(m) === wantProject)
   }
   if (candidates.length === 0) return []
 
@@ -311,7 +351,7 @@ export async function retrieveMemories(
   )
     .slice()
     .sort()
-    .join(",")}`
+    .join(",")}::${input.claimFilter ?? "all"}`
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
   const rawKeywordHits = bm25.search(keywordQuery, input.topK * OVERFETCH)
