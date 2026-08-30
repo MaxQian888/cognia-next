@@ -1,15 +1,18 @@
 import { readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
 import {
-  pairedBootstrap,
+  bootstrapMean,
   recommendVariants,
   selectAdaptiveRepetitions,
   type EvalCandidateEvidence,
   type EvalRecommendationResult,
   type EvalVariant,
 } from "@cognia/eval-core"
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, RepetitionVerdict, Score } from "@/types/eval/eval"
 import { createPureModelEvalTarget } from "@/lib/ai/eval/targets/model"
+import { deterministicScorers } from "@/lib/ai/eval/scorers"
+import { safeScore } from "@/lib/ai/eval/runner"
+import { repetitionVerdict } from "@/lib/ai/eval/report"
 import type { CliEvalExecutionResult, CliEvalProjectDocument } from "../cli/eval-command"
 import { APP_VERSION } from "@/lib/app-version"
 
@@ -18,6 +21,15 @@ interface CliEvalSampleRecord {
   caseId: string
   repetition: number
   status: "running" | "completed" | "failed" | "interrupted"
+  /**
+   * The shared scorers' verdict. `ungraded` means no selected scorer could
+   * grade this case — it is neither a pass nor a failure and is EXCLUDED from
+   * the quality vector rather than silently counted as 1.
+   */
+  verdict?: RepetitionVerdict
+  /** Every scorer observation, kept as run evidence for export. */
+  scores?: Score[]
+  /** 1 for a passing verdict, 0 otherwise. Retained for the CSV export. */
   quality: number
   cost: number
   latencyMs: number
@@ -89,18 +101,21 @@ function providerSettings(variant: EvalVariant) {
   }
 }
 
-function qualityScore(sample: EvalSample, evalCase: EvalCase): number {
-  if (sample.error || !sample.output.trim()) return 0
-  const expected = evalCase.reference?.expectedOutput
-  if (expected !== undefined) {
-    return sample.output.trim().toLocaleLowerCase() === expected.trim().toLocaleLowerCase() ? 1 : 0
-  }
-  const contains = evalCase.reference?.expectedContains
-  if (contains?.length) {
-    const normalized = sample.output.toLocaleLowerCase()
-    return contains.every((value) => normalized.includes(value.toLocaleLowerCase())) ? 1 : 0
-  }
-  return 1
+/**
+ * The CLI grades with the SAME scorers the in-app engine uses. It previously
+ * carried its own binary heuristic whose last branch returned 1 for any
+ * non-empty answer — so a dataset with no reference answers scored a perfect
+ * 1.0 on every case, which is exactly the failure mode `ScoreStatus` and
+ * `gradedCaseCount` exist to prevent.
+ */
+const CLI_SCORERS = deterministicScorers()
+
+async function scoreSample(
+  sample: EvalSample,
+  evalCase: EvalCase
+): Promise<{ verdict: RepetitionVerdict; scores: Score[] }> {
+  const scores = await Promise.all(CLI_SCORERS.map((scorer) => safeScore(scorer, sample, evalCase)))
+  return { verdict: repetitionVerdict({ sample, scores }), scores }
 }
 
 function worstCaseCost(variant: EvalVariant, evalCase: EvalCase): number {
@@ -120,6 +135,24 @@ async function persistCheckpoint(pathname: string, checkpoint: CliEvalCheckpoint
   await rename(temporary, target)
 }
 
+/**
+ * Turn the checkpoint's per-repetition verdicts into decision evidence.
+ *
+ * Two rules this encodes, both learned the hard way:
+ *
+ *  - Only GRADED repetitions enter the quality vector. An ungraded case is not
+ *    a pass, so `effectiveCases` counts what was actually judged. That alone
+ *    makes `recommendVariants` answer `no_conclusion` ("insufficient_cases")
+ *    on a dataset carrying no references, instead of recommending a variant on
+ *    the strength of a vector of 1.0s.
+ *  - The interval is a single-sample mean CI, computed with {@link bootstrapMean}.
+ *    It used to call `pairedBootstrap(quality, zeros)`, which dresses a mean CI
+ *    as a paired comparison against a baseline that never ran. Real paired
+ *    comparison needs a real baseline variant.
+ *
+ * Cost and latency are summed over EVERY row, graded or not — ungraded work
+ * still spends money.
+ */
 function evidenceFor(
   variantId: string,
   samples: CliEvalSampleRecord[],
@@ -127,28 +160,22 @@ function evidenceFor(
   seed: number
 ): EvalCandidateEvidence {
   const rows = samples.filter((sample) => sample.variantId === variantId)
-  const latestByCase = new Map<string, CliEvalSampleRecord[]>()
+  const gradedByCase = new Map<string, number[]>()
   for (const row of rows) {
-    const group = latestByCase.get(row.caseId) ?? []
-    group.push(row)
-    latestByCase.set(row.caseId, group)
+    if (row.verdict === undefined || row.verdict === "ungraded") continue
+    const group = gradedByCase.get(row.caseId) ?? []
+    group.push(row.verdict === "pass" ? 1 : 0)
+    gradedByCase.set(row.caseId, group)
   }
-  const quality = [...latestByCase.values()].map(
-    (group) => group.reduce((sum, row) => sum + row.quality, 0) / group.length
+  const quality = [...gradedByCase.values()].map(
+    (group) => group.reduce((sum, value) => sum + value, 0) / group.length
   )
   const cost = rows.reduce((sum, row) => sum + row.cost, 0)
   const latency = rows.length
     ? rows.reduce((sum, row) => sum + row.latencyMs, 0) / rows.length / 10_000
     : 1
   const reliability = quality.filter((value) => value === 1).length / Math.max(1, quality.length)
-  const interval = pairedBootstrap(
-    quality,
-    quality.map(() => 0),
-    {
-      seed,
-      iterations: 2_000,
-    }
-  )
+  const interval = quality.length ? bootstrapMean(quality, { seed, iterations: 2_000 }) : undefined
   return {
     variantId,
     effectiveCases: quality.length,
@@ -158,7 +185,7 @@ function evidenceFor(
       cost,
       latency,
     },
-    intervals: { quality: { low: interval.low, high: interval.high } },
+    intervals: interval ? { quality: { low: interval.low, high: interval.high } } : {},
     calibrationPassed: calibrated,
   }
 }
@@ -278,12 +305,15 @@ export async function executeCliEvalProject(
         await persistCheckpoint(checkpointPath, checkpoint)
         const sample = await target.run(evalCase, controller.signal)
         checkpoint.spentCost += sample.costUsd
+        const { verdict, scores } = await scoreSample(sample, evalCase)
         checkpoint.samples[inFlightIndex] = {
           variantId: variant.id,
           caseId: evalCase.id,
           repetition,
           status: "completed",
-          quality: qualityScore(sample, evalCase),
+          verdict,
+          scores,
+          quality: verdict === "pass" ? 1 : 0,
           cost: sample.costUsd,
           latencyMs: sample.latencyMs,
           output: sample.output,
@@ -303,6 +333,11 @@ export async function executeCliEvalProject(
           caseId: evalCase.id,
           repetition,
           status: "failed",
+          // A target that threw IS an agent failure, so this is a graded
+          // `fail`, not `ungraded` — otherwise a variant that crashes on every
+          // case reports zero effective cases and gets excluded from the
+          // comparison instead of losing it.
+          verdict: "fail",
           quality: 0,
           cost: 0,
           latencyMs: 0,

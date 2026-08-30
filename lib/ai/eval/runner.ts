@@ -58,7 +58,19 @@ async function safeRun(
   }
 }
 
-async function safeScore(scorer: Scorer, sample: EvalSample, evalCase: EvalCase): Promise<Score> {
+/**
+ * Run one scorer, converting a scorer crash into an `errored` observation.
+ *
+ * Exported because every driver that scores samples outside {@link runEval} —
+ * the CLI's checkpointed loop, for one — must apply the same rule: the SCORER
+ * blowing up is never an agent failure. Re-deriving that per driver is how the
+ * CLI ended up with its own quality heuristic.
+ */
+export async function safeScore(
+  scorer: Scorer,
+  sample: EvalSample,
+  evalCase: EvalCase
+): Promise<Score> {
   try {
     return await scorer.score(sample, evalCase)
   } catch (err) {
