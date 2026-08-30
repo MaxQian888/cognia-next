@@ -27,6 +27,7 @@ export * from "./retrieve/query-expansion"
 // Write path: extraction + consolidation
 export * from "./extract/extractor"
 export * from "./extract/salience"
+export * from "./extract/project-path-normalize"
 export * from "./consolidate/consolidator"
 
 // Forgetting / decay
