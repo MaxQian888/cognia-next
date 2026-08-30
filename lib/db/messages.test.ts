@@ -22,6 +22,13 @@ import { listMessageMediaRefsForSession } from "./message-media-refs"
 
 jest.setTimeout(30_000)
 
+const mockRevokeForMessages = jest.fn()
+const mockRevokeForSession = jest.fn()
+jest.mock("@/lib/memory/lifecycle/claim-deletion-closure", () => ({
+  revokeClaimsForDeletedMessages: (...a: unknown[]) => mockRevokeForMessages(...a),
+  revokeClaimsForDeletedSession: (...a: unknown[]) => mockRevokeForSession(...a),
+}))
+
 async function putSession(id: string, projectId = "proj-A"): Promise<void> {
   await getDb().sessions.put({
     id,
@@ -546,5 +553,51 @@ describe("listRecentMessages", () => {
     const tail = await listRecentMessages("s-a", 10)
     expect(tail).toHaveLength(3)
     expect(tail.every((m) => (m.metadata as { sessionId?: string }).sessionId === "s-a")).toBe(true)
+  })
+})
+
+describe("deletion publishes what it removed, for the memory closure", () => {
+  beforeEach(() => {
+    mockRevokeForMessages.mockReset().mockResolvedValue(0)
+    mockRevokeForSession.mockReset().mockResolvedValue(0)
+  })
+
+  it("publishes the ids a truncate removed", async () => {
+    // `truncateAfter` computed these ids and then discarded them, so a truncate
+    // told nothing what it had deleted — which is how a claim went on citing a
+    // message that edit-and-resend had lopped off ten turns ago.
+    await putSession("s-trunc")
+    await persistMessages("s-trunc", [
+      msg("keep", "user", "first"),
+      msg("cut1", "assistant", "second"),
+      msg("cut2", "user", "third"),
+    ])
+    await truncateAfter("s-trunc", "keep")
+    expect(mockRevokeForMessages).toHaveBeenCalledTimes(1)
+    expect(new Set(mockRevokeForMessages.mock.calls[0]![0] as string[])).toEqual(
+      new Set(["cut1", "cut2"])
+    )
+  })
+
+  it("publishes nothing when a truncate removed nothing", async () => {
+    await putSession("s-trunc-noop")
+    await persistMessages("s-trunc-noop", [msg("only", "user", "first")])
+    await truncateAfter("s-trunc-noop", "only")
+    expect(mockRevokeForMessages).not.toHaveBeenCalled()
+  })
+
+  it("publishes the single id a message delete removed", async () => {
+    await putSession("s-del")
+    await persistMessages("s-del", [msg("gone", "user", "bye")])
+    await deleteStoredMessage("gone")
+    expect(mockRevokeForMessages).toHaveBeenCalledWith(["gone"])
+  })
+
+  it("clears at the session level, so turn-level citations are reached too", async () => {
+    await putSession("s-clear-claims")
+    await persistMessages("s-clear-claims", [msg("a", "user", "hi")])
+    await clearMessages("s-clear-claims")
+    expect(mockRevokeForSession).toHaveBeenCalledWith("s-clear-claims")
+    expect(mockRevokeForMessages).not.toHaveBeenCalled()
   })
 })

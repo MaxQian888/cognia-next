@@ -18,6 +18,10 @@ import {
   listMemoryEvidence,
   listMemoryJobs,
   pruneMemoryGovernanceData,
+  cancelMemoryJobsForSession,
+  recordMemoryEvidenceVerdict,
+  revokeMemoryEvidenceForMessages,
+  revokeMemoryEvidenceForSession,
 } from "./memory-governance"
 import { createMemory, getMemory } from "./memories"
 
@@ -282,5 +286,140 @@ describe("insight readers", () => {
       jobsDeleted: 1,
       auditsDeleted: 1,
     })
+  })
+})
+
+describe("evidence revocation", () => {
+  async function seed() {
+    const claim = await createMemory({
+      scope: "workspace",
+      type: "semantic",
+      text: "The repo pins Rust to 1.77.2",
+      importance: 7,
+      provenance: "user",
+      projectId: "p1",
+      projectMemoryKind: "constraint",
+    })
+    const cited = await createMemoryEvidence({
+      memoryId: claim.id,
+      kind: "message",
+      sourceId: "m1",
+      sessionId: "s1",
+      messageId: "m1",
+      contaminationState: "clean",
+      reviewed: false,
+      validationStrategy: "message-presence",
+    })
+    const turnLevel = await createMemoryEvidence({
+      memoryId: claim.id,
+      kind: "message",
+      sourceId: "s1:turn:2",
+      sessionId: "s1",
+      contaminationState: "clean",
+      reviewed: false,
+    })
+    const elsewhere = await createMemoryEvidence({
+      memoryId: claim.id,
+      kind: "message",
+      sourceId: "m9",
+      sessionId: "s2",
+      messageId: "m9",
+      contaminationState: "clean",
+      reviewed: false,
+    })
+    return { claim, cited, turnLevel, elsewhere }
+  }
+
+  it("revokes only the citations that name a deleted message", async () => {
+    const { claim, cited, elsewhere } = await seed()
+    expect(await revokeMemoryEvidenceForMessages(["m1"], 5_000)).toEqual([claim.id])
+    const rows = await listMemoryEvidence(claim.id)
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    expect(byId.get(cited.id)).toMatchObject({ validationState: "revoked", validatedAt: 5_000 })
+    expect(byId.get(elsewhere.id)?.validationState).toBeUndefined()
+  })
+
+  it("reaches turn-level citations only through the session form", async () => {
+    // Those rows carry a sessionId and no messageId, so an id sweep leaves them
+    // behind pointing at a conversation that no longer exists.
+    const { claim, turnLevel } = await seed()
+    await revokeMemoryEvidenceForMessages(["m1"])
+    expect(
+      (await listMemoryEvidence(claim.id)).find((row) => row.id === turnLevel.id)?.validationState
+    ).toBeUndefined()
+
+    await revokeMemoryEvidenceForSession("s1")
+    expect(
+      (await listMemoryEvidence(claim.id)).find((row) => row.id === turnLevel.id)?.validationState
+    ).toBe("revoked")
+  })
+
+  it("leaves another session's citations alone", async () => {
+    const { claim, elsewhere } = await seed()
+    await revokeMemoryEvidenceForSession("s1")
+    expect(
+      (await listMemoryEvidence(claim.id)).find((row) => row.id === elsewhere.id)?.validationState
+    ).toBeUndefined()
+  })
+
+  it("returns nothing to re-check when no citation names the deleted rows", async () => {
+    await seed()
+    expect(await revokeMemoryEvidenceForMessages(["nope"])).toEqual([])
+    expect(await revokeMemoryEvidenceForSession("no-such-session")).toEqual([])
+    expect(await revokeMemoryEvidenceForMessages([])).toEqual([])
+  })
+
+  it("records a verdict without letting it rewrite what the next check compares", async () => {
+    // Widening this to a general patch would let a re-check overwrite
+    // `sourceId` / `messageId` / `excerptHash` — the very fields the NEXT check
+    // reads, which would make the check self-confirming.
+    const { claim, cited } = await seed()
+    await recordMemoryEvidenceVerdict(cited.id, { validationState: "valid", validatedAt: 9_000 })
+    const row = (await listMemoryEvidence(claim.id)).find((item) => item.id === cited.id)
+    expect(row).toMatchObject({
+      validationState: "valid",
+      validatedAt: 9_000,
+      sourceId: "m1",
+      messageId: "m1",
+    })
+  })
+})
+
+describe("cancelMemoryJobsForSession", () => {
+  it("cancels pending work and leaves finished rows untouched", async () => {
+    const queued = await enqueueMemoryJob({
+      dedupeKey: "turn-extraction:s1:a",
+      kind: "turn-extraction",
+      sessionId: "s1",
+      scope: "workspace",
+      provenance: "user",
+      evidenceIds: [],
+    })
+    const done = await enqueueMemoryJob({
+      dedupeKey: "turn-extraction:s1:b",
+      kind: "turn-extraction",
+      sessionId: "s1",
+      scope: "workspace",
+      provenance: "user",
+      evidenceIds: [],
+    })
+    await finishMemoryJob(done.id, "succeeded", "memories_applied")
+    const other = await enqueueMemoryJob({
+      dedupeKey: "turn-extraction:s2:a",
+      kind: "turn-extraction",
+      sessionId: "s2",
+      scope: "workspace",
+      provenance: "user",
+      evidenceIds: [],
+    })
+
+    expect(await cancelMemoryJobsForSession("s1")).toBe(1)
+    expect((await getMemoryJob(queued.id))?.status).toBe("cancelled")
+    expect((await getMemoryJob(done.id))?.status).toBe("succeeded")
+    expect((await getMemoryJob(other.id))?.status).toBe("queued")
+  })
+
+  it("no-ops on an empty session id", async () => {
+    expect(await cancelMemoryJobsForSession("")).toBe(0)
   })
 })

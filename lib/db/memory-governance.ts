@@ -74,6 +74,49 @@ export async function revokeMemoryEvidenceForMessages(
   return [...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id)))]
 }
 
+/**
+ * Mark every evidence row captured in one session as `revoked`.
+ *
+ * Used when a whole session goes: `sessionId` is indexed, and unlike a
+ * message-id sweep this also catches rows that carry no `messageId` at all —
+ * the turn-level citations `runTurnMemory` writes. Returns the affected memory
+ * ids.
+ */
+export async function revokeMemoryEvidenceForSession(
+  sessionId: string,
+  now: number = Date.now()
+): Promise<string[]> {
+  if (!sessionId) return []
+  const db = getDb()
+  const rows = await db.memoryEvidence.where("sessionId").equals(sessionId).toArray()
+  if (rows.length === 0) return []
+  await db.memoryEvidence.bulkPut(
+    rows.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
+  )
+  return [...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id)))]
+}
+
+/**
+ * Cancel every still-pending job for a session.
+ *
+ * A job whose session is gone would fail `loadJobContext` with a terminal
+ * `session_unavailable` anyway, so this is about the console rather than
+ * correctness: without it, deleting a busy conversation leaves a row of jobs
+ * that look like real pending work and then die one by one.
+ */
+export async function cancelMemoryJobsForSession(sessionId: string): Promise<number> {
+  if (!sessionId) return 0
+  const db = getDb()
+  const pending = await db.memoryJobs.where("sessionId").equals(sessionId).toArray()
+  let cancelled = 0
+  for (const job of pending) {
+    if (job.status !== "queued" && job.status !== "running" && job.status !== "retry_wait") continue
+    await cancelMemoryJob(job.id)
+    cancelled += 1
+  }
+  return cancelled
+}
+
 export async function deleteMemoryEvidence(memoryId: string): Promise<void> {
   await getDb().memoryEvidence.where("memoryId").equals(memoryId).delete()
 }

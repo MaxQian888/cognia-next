@@ -60,6 +60,12 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
 }))
 
 const markSessionRemovedMock = jest.fn()
+// Typed, not `(...a: unknown[])`: a zero-arg `jest.fn` makes the spread a
+// TS2556 and leaves `mock.calls` a `[]` tuple with no element to read back.
+const mockRevokeClaimsForSession = jest.fn(async (_sessionId: string) => 0)
+jest.mock("@/lib/memory/lifecycle/claim-deletion-closure", () => ({
+  revokeClaimsForDeletedSession: (sessionId: string) => mockRevokeClaimsForSession(sessionId),
+}))
 jest.mock("@/lib/chat/search/indexer", () => ({
   markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
 }))
@@ -617,6 +623,18 @@ describe("updateSession + listSessions", () => {
 })
 
 describe("bulkDeleteSessions", () => {
+  it("revokes the claims that cited each deleted conversation", async () => {
+    // Post-commit, alongside the other derived-view cleanups: a claim whose
+    // whole source conversation is gone must stop being injected.
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    mockRevokeClaimsForSession.mockClear()
+    await bulkDeleteSessions([a.id, b.id])
+    expect(mockRevokeClaimsForSession.mock.calls.map(([id]) => id).sort()).toEqual(
+      [a.id, b.id].sort()
+    )
+  })
+
   it("removes every session in the list and leaves the rest untouched", async () => {
     const a = await createSession({ title: "A" })
     const b = await createSession({ title: "B" })

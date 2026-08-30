@@ -10,6 +10,7 @@ import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
+import { revokeClaimsForDeletedSession } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/session-write-guard"
@@ -847,6 +848,11 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     }
     invalidatePersistSnapshot(id)
     markSessionRemoved(id)
+    // Post-commit, alongside the other derived-view cleanups. Every citation
+    // captured in this conversation now points at nothing, so the claims that
+    // rested on it must stop being injected; the arithmetic that follows runs
+    // on the job worker.
+    await revokeClaimsForDeletedSession(id)
     await purgeSessionStoreBuckets(id)
   }
   if (sandboxReleaseErrors.length > 0) {

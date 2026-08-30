@@ -1,6 +1,10 @@
 import type { UIMessage } from "ai"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import { markMessagesRemoved, markSessionDirty } from "@/lib/chat/search/indexer"
+import {
+  revokeClaimsForDeletedMessages,
+  revokeClaimsForDeletedSession,
+} from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { normalizeMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { getDb, withDbReopenRetry } from "./schema"
@@ -677,6 +681,10 @@ export async function clearMessages(sessionId: string): Promise<void> {
   })
   invalidatePersistSnapshot(sessionId)
   markSessionDirty(sessionId)
+  // Every citation captured in this session now points at nothing. Session-level
+  // rather than message-level because turn citations carry a `sessionId` and no
+  // `messageId`, so an id sweep would leave them behind.
+  void revokeClaimsForDeletedSession(sessionId)
   if (refs.length > 0) {
     await collectUnreferencedMessageMedia(refs.map((ref) => ref.hash))
   }
@@ -705,6 +713,7 @@ export async function deleteStoredMessage(messageId: string): Promise<void> {
   })
   invalidatePersistSnapshot(row.sessionId)
   markMessagesRemoved([messageId])
+  void revokeClaimsForDeletedMessages([messageId])
   if (refs.length > 0) {
     await collectUnreferencedMessageMedia(refs.map((ref) => ref.hash))
   }
@@ -762,6 +771,11 @@ export async function truncateAfter(
 
   const lowerBound = options.inclusive ? anchor.createdAt : anchor.createdAt + 1
   const orphanCandidates = new Set<string>()
+  // Lifted out of the transaction closure. The ids were already computed here
+  // and then discarded, so a truncate published nothing about what it deleted —
+  // which is how a claim could go on citing a message that edit-and-resend had
+  // lopped off ten turns ago.
+  const removedIds: string[] = []
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
     const ids = await db.messages
@@ -769,6 +783,7 @@ export async function truncateAfter(
       .between([sessionId, lowerBound], [sessionId, Number.MAX_SAFE_INTEGER])
       .primaryKeys()
     if (ids.length > 0) {
+      removedIds.push(...(ids as string[]))
       const refs = await db.messageMediaRefs
         .where("messageId")
         .anyOf(ids as string[])
@@ -786,6 +801,9 @@ export async function truncateAfter(
   // cache so the next persist re-derives existence/createdAt from Dexie.
   invalidatePersistSnapshot(sessionId)
   markSessionDirty(sessionId)
+  // `markSessionDirty` above already covers the search index for a truncate;
+  // only the memory leg needs the explicit id list.
+  if (removedIds.length > 0) void revokeClaimsForDeletedMessages(removedIds)
   if (orphanCandidates.size > 0) {
     await collectUnreferencedMessageMedia(orphanCandidates)
   }
