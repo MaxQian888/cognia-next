@@ -1,7 +1,7 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { EvalJudgeClient } from "./judge-client"
 import { deterministicScorers, llmScorers } from "./index"
 
-const client: LlmClient = {
+const client: EvalJudgeClient = {
   async complete() {
     return "{}"
   },

@@ -1,6 +1,6 @@
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
-import type { GradingSpec } from "@/types/eval/grading"
-import { GSM8K_ANSWER_PATTERN } from "@/types/eval/grading"
+import type { EvalCase, EvalSample } from "../domain/eval"
+import type { GradingSpec } from "../domain/grading"
+import { GSM8K_ANSWER_PATTERN } from "../domain/grading"
 import {
   choiceMatchScorer,
   containsAnyScorer,

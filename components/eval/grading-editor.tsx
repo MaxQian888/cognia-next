@@ -20,7 +20,7 @@ import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { extractChoice, extractNumber } from "@/lib/ai/eval/scorers/match"
+import { extractChoice, extractNumber } from "@cognia/eval-core/scorers/match"
 import { GRADING_MODES, GSM8K_ANSWER_PATTERN } from "@/types/eval/grading"
 import type { GradingMode, GradingSpec } from "@/types/eval/grading"
 

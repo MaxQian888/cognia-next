@@ -8,7 +8,7 @@ jest.mock("next-intl", () => ({
     vals ? `${key}:${JSON.stringify(vals)}` : key,
 }))
 
-import { ALL_SCORER_IDS } from "@/lib/ai/eval/scorers/catalog"
+import { ALL_SCORER_IDS } from "@cognia/eval-core/scorers/catalog"
 import { ScorerPicker, expandScorerSelection, normalizeScorerSelection } from "./scorer-picker"
 
 describe("scorer selection helpers", () => {

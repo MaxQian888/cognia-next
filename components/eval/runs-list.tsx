@@ -9,8 +9,8 @@
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { useEvalRuns } from "@/hooks/eval/use-eval-data"
-import { evaluateGate } from "@/lib/ai/eval/gate"
-import { isLegacyScoring, isPartialRun } from "@/lib/ai/eval/report"
+import { evaluateGate } from "@cognia/eval-core"
+import { isLegacyScoring, isPartialRun } from "@cognia/eval-core"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { GateThresholds } from "@/types/eval/gate"
 

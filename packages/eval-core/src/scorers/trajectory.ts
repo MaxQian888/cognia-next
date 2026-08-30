@@ -16,7 +16,7 @@
  * treats a trajectory as either matching or not.
  */
 
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, Score, Scorer } from "../domain/eval"
 
 export type TrajectoryMode = "strict" | "unordered" | "superset" | "subset"
 

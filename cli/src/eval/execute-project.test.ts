@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { EvalProject } from "@cognia/eval-core"
-import { deterministicScorers } from "@/lib/ai/eval/scorers"
+import { deterministicScorers } from "@cognia/eval-core"
 import { executeCliEvalProject, type CliEvalCheckpoint } from "./execute-project"
 
 const mockRunTarget = jest.fn()

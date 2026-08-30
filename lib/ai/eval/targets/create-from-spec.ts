@@ -4,7 +4,7 @@
  */
 
 import type { TargetSpec } from "@/types/eval/run-config"
-import type { EvalTarget } from "../runner"
+import type { EvalTarget } from "@cognia/eval-core"
 import { createChatTarget, type ChatTargetDeps } from "./chat"
 import { createTeamTarget, type TeamTargetDeps } from "./team"
 import { createWorkflowTarget, type WorkflowTargetDeps } from "./workflow"

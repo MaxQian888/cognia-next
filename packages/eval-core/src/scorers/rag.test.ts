@@ -1,5 +1,5 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { EvalCase, EvalRetrievedChunk, EvalSample } from "@/types/eval/eval"
+import type { EvalJudgeClient } from "./judge-client"
+import type { EvalCase, EvalRetrievedChunk, EvalSample } from "../domain/eval"
 import { makeRagScorer } from "./rag"
 
 function sample(output: string, chunks: EvalRetrievedChunk[] = []): EvalSample {
@@ -28,7 +28,7 @@ function makeCase(reference?: EvalCase["reference"]): EvalCase {
   }
 }
 
-function client(text: string): LlmClient {
+function client(text: string): EvalJudgeClient {
   return {
     async complete() {
       return text
@@ -200,7 +200,7 @@ describe("makeRagScorer — status separation", () => {
   it("reports a malformed judge payload as errored", async () => {
     const s = makeRagScorer({
       metric: "context-precision",
-      client: { complete: async () => "not json at all" } as LlmClient,
+      client: { complete: async () => "not json at all" } as EvalJudgeClient,
     })
     const score = await s.score(sample("answer", chunks), makeCase())
     expect(score.status).toBe("errored")
@@ -210,7 +210,7 @@ describe("makeRagScorer — status separation", () => {
   it("reports no-retrieval as not-applicable for the LLM metrics", async () => {
     const s = makeRagScorer({
       metric: "faithfulness",
-      client: { complete: async () => "{}" } as LlmClient,
+      client: { complete: async () => "{}" } as EvalJudgeClient,
     })
     const score = await s.score(sample("answer"), makeCase())
     expect(score.status).toBe("not-applicable")

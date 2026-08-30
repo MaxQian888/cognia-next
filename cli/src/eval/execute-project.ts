@@ -10,9 +10,9 @@ import {
 } from "@cognia/eval-core"
 import type { EvalCase, EvalSample, RepetitionVerdict, Score } from "@/types/eval/eval"
 import { createPureModelEvalTarget } from "@/lib/ai/eval/targets/model"
-import { deterministicScorers } from "@/lib/ai/eval/scorers"
-import { safeScore } from "@/lib/ai/eval/runner"
-import { repetitionVerdict } from "@/lib/ai/eval/report"
+import { deterministicScorers } from "@cognia/eval-core"
+import { safeScore } from "@cognia/eval-core"
+import { repetitionVerdict } from "@cognia/eval-core"
 import type { CliEvalExecutionResult, CliEvalProjectDocument } from "../cli/eval-command"
 import { APP_VERSION } from "@/lib/app-version"
 

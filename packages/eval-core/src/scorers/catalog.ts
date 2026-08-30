@@ -11,7 +11,7 @@
  * so the drift can never recur.
  */
 
-import type { EvalDimension } from "@/types/eval/eval"
+import type { EvalDimension } from "../domain/eval"
 
 export interface ScorerCatalogEntry {
   /** The scorer's stable id — matches the `Scorer.id` the factory produces. */

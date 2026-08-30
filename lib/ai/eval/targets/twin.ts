@@ -1,7 +1,7 @@
 import type { Character } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
-import type { EvalTarget } from "../runner"
+import type { EvalTarget } from "@cognia/eval-core"
 import { createChatTarget, type ChatTargetDeps } from "./chat"
 
 export interface TwinTargetConfig {

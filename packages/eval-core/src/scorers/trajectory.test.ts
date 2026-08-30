@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSample, EvalToolCall } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, EvalToolCall } from "../domain/eval"
 import { makeTrajectoryScorer, trajectoryScorer } from "./trajectory"
 
 function call(name: string, index: number, args: Record<string, unknown> = {}): EvalToolCall {

@@ -19,7 +19,7 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalCase, EvalSample, Scorer } from "@/types/eval/eval"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
-import { makeJudgeScorer } from "@/lib/ai/eval/scorers/judge"
+import { makeJudgeScorer } from "@cognia/eval-core/scorers/judge"
 import { listItemsBySet, type CalibrationItemRow } from "@/lib/db/calibration-items"
 import {
   saveCalibrationRun,

@@ -1,6 +1,6 @@
 import type { EvalCase, EvalDataset, EvalSample, Score, Scorer } from "@/types/eval/eval"
 import { runDatasetEval } from "./index"
-import type { EvalTarget } from "./runner"
+import type { EvalTarget } from "@cognia/eval-core"
 
 function dataset(): EvalDataset {
   return {

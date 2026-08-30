@@ -7,7 +7,7 @@
  * case-insensitive to reduce brittleness on free-form text.
  */
 
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, Score, Scorer } from "../domain/eval"
 
 export const assertionScorer: Scorer = {
   id: "assertion",

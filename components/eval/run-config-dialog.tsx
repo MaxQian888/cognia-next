@@ -30,7 +30,7 @@ import { resolveEvalSettings } from "@/lib/ai/eval/settings"
 import { useEvalRuns, useEvalCases } from "@/hooks/eval/use-eval-data"
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
 import type { EvalRunConfig, TargetKind, TargetSpec } from "@/types/eval/run-config"
-import { SCORER_CATALOG } from "@/lib/ai/eval/scorers/catalog"
+import { SCORER_CATALOG } from "@cognia/eval-core/scorers/catalog"
 import { ScorerPicker, expandScorerSelection, normalizeScorerSelection } from "./scorer-picker"
 
 interface NameId {

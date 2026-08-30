@@ -7,9 +7,9 @@
 
 import type { EvalCaseResult } from "@/types/eval/eval"
 import { GOLDEN_ENTRIES } from "./golden-fixture"
-import { deterministicScorers } from "../scorers"
-import { buildReport } from "../report"
-import { evaluateGate } from "../gate"
+import { deterministicScorers } from "@cognia/eval-core"
+import { buildReport } from "@cognia/eval-core"
+import { evaluateGate } from "@cognia/eval-core"
 
 async function scoreGolden(): Promise<EvalCaseResult[]> {
   const scorers = deterministicScorers()

@@ -9,7 +9,7 @@ import {
   type ResolvedProvider,
 } from "@/lib/ai/provider-consumption"
 import type { EvalCase, EvalInputPart, EvalSample } from "@/types/eval/eval"
-import type { EvalTarget } from "../runner"
+import type { EvalTarget } from "@cognia/eval-core"
 import { isConfirmedLocalProvider } from "../provider-locality"
 
 const PART_SEPARATOR = "\u001eCOGNIA_EVAL_PART\u001e"

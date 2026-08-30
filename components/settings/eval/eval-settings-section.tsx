@@ -66,7 +66,7 @@ import {
   expandScorerSelection,
   normalizeScorerSelection,
 } from "@/components/eval/scorer-picker"
-import { ALL_SCORER_IDS } from "@/lib/ai/eval/scorers/catalog"
+import { ALL_SCORER_IDS } from "@cognia/eval-core/scorers/catalog"
 import { resolveEvalSettings, EVAL_K_RANGE } from "@/lib/ai/eval/settings"
 import { MAX_STORED_OUTPUT_CHARS, type EvalSettings } from "@/types/eval/settings"
 import type { GateThresholds } from "@/types/eval/gate"

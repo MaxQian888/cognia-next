@@ -6,10 +6,10 @@
  * "Pass rate is a product decision" — thresholds are explicit, not baked in.
  */
 
-import type { EvalReport, ScorerAggregate } from "@/types/eval/eval"
-import type { GateThresholds, GateResult } from "@/types/eval/gate"
+import type { EvalReport, ScorerAggregate } from "./domain/eval"
+import type { GateThresholds, GateResult } from "./domain/gate"
 
-export type { GateThresholds, GateResult } from "@/types/eval/gate"
+export type { GateThresholds, GateResult } from "./domain/gate"
 
 /**
  * True when this scorer actually produced verdicts. A scorer that graded

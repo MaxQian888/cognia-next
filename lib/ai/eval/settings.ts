@@ -8,7 +8,7 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalSettings } from "@/types/eval/settings"
 import { DEFAULT_EVAL_SETTINGS, MAX_STORED_OUTPUT_CHARS } from "@/types/eval/settings"
-import { sanitizeScorerIds } from "./scorers/catalog"
+import { sanitizeScorerIds } from "@cognia/eval-core/scorers/catalog"
 
 const MIN_K = 1
 const MAX_K = 10

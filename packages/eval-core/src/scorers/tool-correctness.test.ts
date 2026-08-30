@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSample, EvalToolCall } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, EvalToolCall } from "../domain/eval"
 import {
   toolSelectionScorer,
   toolArgsScorer,

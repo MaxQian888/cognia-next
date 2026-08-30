@@ -31,9 +31,9 @@ import {
   type EvalOrchestratorRepository,
   type EvalTaskExecutionResult,
 } from "./orchestrator"
-import { deterministicScorers, llmScorers } from "./scorers"
+import { deterministicScorers, llmScorers } from "@cognia/eval-core"
 import { prepareNextEvalStage } from "./finalization"
-import type { EvalTarget } from "./runner"
+import type { EvalTarget } from "@cognia/eval-core"
 import { createTargetFromSpec } from "./targets/create-from-spec"
 import { defaultChatTargetDeps } from "./targets/chat"
 import { createPureModelEvalTarget } from "./targets/model"

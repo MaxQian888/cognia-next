@@ -15,7 +15,7 @@
  * within all budgets; <1 means at least one dimension is over).
  */
 
-import type { EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalSample, Score, Scorer } from "../domain/eval"
 
 export interface CostBudget {
   maxCostUsd?: number

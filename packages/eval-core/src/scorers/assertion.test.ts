@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
+import type { EvalCase, EvalSample } from "../domain/eval"
 import { assertionScorer } from "./assertion"
 
 function sample(output: string): EvalSample {

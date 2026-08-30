@@ -17,7 +17,7 @@
  * every case — half of the reason such runs reported 100%.
  */
 
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, Score, Scorer } from "../domain/eval"
 
 /** Stable JSON stringify (sorted keys) for deterministic value comparison. */
 function stableStringify(value: unknown): string {

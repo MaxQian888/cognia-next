@@ -1,4 +1,4 @@
-import { evaluateGate } from "@/lib/ai/eval/gate"
+import { evaluateGate } from "@cognia/eval-core"
 import { getDb } from "@/lib/db/schema"
 import type { WorkflowAppDraft, WorkflowAppRelease } from "@/types/workflow/app"
 

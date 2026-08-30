@@ -1,5 +1,5 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
+import type { EvalJudgeClient } from "./judge-client"
+import type { EvalCase, EvalSample } from "../domain/eval"
 import { makeJudgeScorer } from "./judge"
 
 function sample(output: string): EvalSample {
@@ -27,7 +27,7 @@ function makeCase(input = "summarize the file"): EvalCase {
   }
 }
 
-function clientReturning(text: string, capture?: { prompt?: string }): LlmClient {
+function clientReturning(text: string, capture?: { prompt?: string }): EvalJudgeClient {
   return {
     async complete(prompt: string) {
       if (capture) capture.prompt = prompt

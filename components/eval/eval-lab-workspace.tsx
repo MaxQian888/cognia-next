@@ -95,8 +95,8 @@ import {
   loadEvalReportView,
   type EvalReportView,
 } from "@/lib/ai/eval/report-view"
-import { SCORING_VERSION } from "@/lib/ai/eval/report"
-import { deterministicScorers } from "@/lib/ai/eval/scorers"
+import { SCORING_VERSION } from "@cognia/eval-core"
+import { deterministicScorers } from "@cognia/eval-core"
 import { browserEvalConfigurationApplicationDeps } from "@/lib/ai/eval/configuration-targets"
 import {
   applyEvalRecommendation,

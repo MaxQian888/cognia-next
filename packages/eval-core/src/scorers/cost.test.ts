@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSample } from "@/types/eval/eval"
+import type { EvalCase, EvalSample } from "../domain/eval"
 import { costScorer, makeCostScorer } from "./cost"
 
 function sample(overrides: Partial<EvalSample> = {}): EvalSample {

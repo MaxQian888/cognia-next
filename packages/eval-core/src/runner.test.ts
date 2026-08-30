@@ -1,4 +1,4 @@
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalSample, Score, Scorer } from "./domain/eval"
 import { runEval, type EvalTarget } from "./runner"
 
 function makeCase(id: string): EvalCase {

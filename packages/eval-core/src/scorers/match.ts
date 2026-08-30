@@ -20,8 +20,8 @@
  * a rule would extract before the user commits to it.
  */
 
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
-import type { GradingMode, GradingNormalize, GradingSpec } from "@/types/eval/grading"
+import type { EvalCase, EvalSample, Score, Scorer } from "../domain/eval"
+import type { GradingMode, GradingNormalize, GradingSpec } from "../domain/grading"
 
 const DEFAULT_ALPHABET = "ABCDEFGHIJ"
 

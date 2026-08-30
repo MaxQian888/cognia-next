@@ -17,3 +17,11 @@ export * from "./domain/comparison"
 export * from "./domain/version"
 export * from "./domain/import"
 export * from "./domain/settings"
+
+// Execution + aggregation + gating: one implementation for the app, the CLI,
+// and CI.
+export * from "./runner"
+export * from "./report"
+export * from "./gate"
+export * from "./scorers/index"
+export * from "./scorers/judge-client"

@@ -24,7 +24,7 @@ import {
   SCORER_DIMENSIONS,
   scorersForDimension,
   type ScorerCatalogEntry,
-} from "@/lib/ai/eval/scorers/catalog"
+} from "@cognia/eval-core/scorers/catalog"
 
 /** `[]` (all) → the explicit full id list; any other list passes through. */
 export function expandScorerSelection(ids: readonly string[]): string[] {

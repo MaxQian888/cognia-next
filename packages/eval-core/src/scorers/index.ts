@@ -4,11 +4,11 @@
  * `deterministicScorers()` is the L1+L2 no-LLM tier the CI gate runs every
  * change (cheap, fast, no provider key needed). `llmScorers()` adds the L3
  * judge + RAG scorers for the full in-app run; the caller injects a
- * cross-model judge `LlmClient`.
+ * cross-model judge `EvalJudgeClient`.
  */
 
-import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { Scorer } from "@/types/eval/eval"
+import type { EvalJudgeClient } from "./judge-client"
+import type { Scorer } from "../domain/eval"
 import {
   toolSelectionScorer,
   toolArgsScorer,
@@ -76,7 +76,7 @@ export function deterministicScorers(options: DeterministicScorerOptions = {}): 
 
 export interface LlmScorerOptions {
   /** Cross-model judge client (build via `buildRendererLlmClient`). */
-  client: LlmClient
+  client: EvalJudgeClient
   /** Include the RAG groundedness scorers. Default true. */
   includeRag?: boolean
 }

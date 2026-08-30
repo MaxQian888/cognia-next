@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table"
 import { listCaseResults, type EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 import { buildComparison } from "@/lib/ai/eval/compare"
-import { isLegacyScoring } from "@/lib/ai/eval/report"
+import { isLegacyScoring } from "@cognia/eval-core"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 
 export interface RunComparisonViewProps {

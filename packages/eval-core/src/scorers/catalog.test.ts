@@ -1,4 +1,4 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { EvalJudgeClient } from "./judge-client"
 import { deterministicScorers, llmScorers } from "./index"
 import {
   SCORER_CATALOG,
@@ -12,7 +12,7 @@ import {
 
 // The judge / RAG factories only need a client to *construct*; scoring is never
 // invoked here, so a no-op complete() is enough.
-const fakeClient: LlmClient = {
+const fakeClient: EvalJudgeClient = {
   complete: async () => "{}",
 }
 

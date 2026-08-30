@@ -21,7 +21,7 @@ import type { StepExecutionContext } from "@/types/workflow/visual"
 import type { TargetSpec } from "@/types/eval/run-config"
 import type { GateThresholds } from "@/types/eval/gate"
 import { runEvalService } from "@/lib/ai/eval/service"
-import { evaluateGate } from "@/lib/ai/eval/gate"
+import { evaluateGate } from "@cognia/eval-core"
 
 function str(params: Record<string, unknown>, key: string): string | undefined {
   const v = params[key]

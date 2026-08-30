@@ -7,17 +7,17 @@
  */
 
 import type { EvalCase, EvalCaseResult, EvalDataset, EvalReport, Scorer } from "@/types/eval/eval"
-import { runEval, type EvalTarget, type RunEvalOptions } from "./runner"
-import { buildReport } from "./report"
+import { runEval, type EvalTarget, type RunEvalOptions } from "@cognia/eval-core"
+import { buildReport } from "@cognia/eval-core"
 
-export { runEval, type EvalTarget, type RunEvalOptions } from "./runner"
+export { runEval, type EvalTarget, type RunEvalOptions } from "@cognia/eval-core"
 export {
   buildReport,
   gatingScores,
   repetitionVerdict,
   SCORING_VERSION,
   type BuildReportInput,
-} from "./report"
+} from "@cognia/eval-core"
 export {
   assembleSampleFromSpans,
   createChatTarget,
@@ -25,7 +25,7 @@ export {
   type ChatTargetConfig,
   type ChatTargetDeps,
 } from "./targets/chat"
-export * from "./scorers"
+export * from "@cognia/eval-core/scorers/index"
 
 export interface RunDatasetEvalInput {
   dataset: EvalDataset

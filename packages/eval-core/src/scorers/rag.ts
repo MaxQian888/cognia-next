@@ -18,16 +18,16 @@
  * is down" must not look alike in the report.
  */
 
-import type { LlmClient } from "@/lib/twin/distill/llm"
-import { extractJson } from "@/lib/twin/distill/llm"
-import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalJudgeClient } from "./judge-client"
+import { extractJson } from "../json"
+import type { EvalCase, EvalSample, Score, Scorer } from "../domain/eval"
 
 export type RagMetric = "faithfulness" | "answer-relevancy" | "context-precision" | "context-recall"
 
 export interface RagScorerOptions {
   metric: RagMetric
   /** Required for the three LLM-backed metrics; unused by context-recall. */
-  client?: LlmClient
+  client?: EvalJudgeClient
   /** Pass threshold (answer-relevancy / context-precision). Default 0.7. */
   threshold?: number
   maxTokens?: number
@@ -63,7 +63,7 @@ function contextText(sample: EvalSample): string {
 }
 
 async function callJson<T>(
-  client: LlmClient,
+  client: EvalJudgeClient,
   prompt: string,
   maxTokens: number
 ): Promise<{ ok: true; value: T } | { ok: false; error: string }> {

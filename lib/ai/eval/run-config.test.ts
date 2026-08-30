@@ -3,7 +3,7 @@ import type { EvalCase, EvalDataset, EvalReport, EvalSample, Scorer } from "@/ty
 import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { SaveCaseResultInput } from "@/lib/db/eval-run-cases"
 import type { TargetSpec } from "@/types/eval/run-config"
-import type { EvalTarget } from "./runner"
+import type { EvalTarget } from "@cognia/eval-core"
 
 function caseRow(over: Partial<EvalCase>): EvalCase {
   return {

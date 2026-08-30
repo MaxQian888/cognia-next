@@ -1,4 +1,4 @@
-import type { EvalReport, ScorerAggregate } from "@/types/eval/eval"
+import type { EvalReport, ScorerAggregate } from "./domain/eval"
 import { evaluateGate } from "./gate"
 
 function agg(scorerId: string, passRate: number, scoredCount = 4): ScorerAggregate {

@@ -1,10 +1,4 @@
-import type {
-  EvalCaseResult,
-  EvalSample,
-  Score,
-  ScorerAggregate,
-  ScoreStatus,
-} from "@/types/eval/eval"
+import type { EvalCaseResult, EvalSample, Score, ScorerAggregate, ScoreStatus } from "./domain/eval"
 import {
   buildReport,
   fullyErroredScorers,

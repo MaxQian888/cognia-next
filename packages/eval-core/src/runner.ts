@@ -12,7 +12,7 @@
  * `lib/ai/eval/targets/chat.ts`.
  */
 
-import type { EvalCase, EvalCaseResult, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalCaseResult, EvalSample, Score, Scorer } from "./domain/eval"
 
 /** A target runs one case and returns the captured trajectory. */
 export interface EvalTarget {

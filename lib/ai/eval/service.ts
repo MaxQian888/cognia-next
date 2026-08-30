@@ -10,7 +10,7 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalReport } from "@/types/eval/eval"
 import type { EvalRunConfig } from "@/types/eval/run-config"
 import type { GateResult } from "@/types/eval/gate"
-import { evaluateGate } from "./gate"
+import { evaluateGate } from "@cognia/eval-core"
 import { filterCases, runConfiguredEval, type RunConfiguredDeps } from "./run-config"
 import { buildConfiguredRunDeps } from "./browser-deps"
 

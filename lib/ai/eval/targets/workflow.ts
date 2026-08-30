@@ -11,7 +11,7 @@
 
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import type { EvalCase, EvalSample } from "@/types/eval/eval"
-import type { EvalTarget } from "../runner"
+import type { EvalTarget } from "@cognia/eval-core"
 import { assembleSampleFromSpans } from "./chat"
 import { newEvalTraceId } from "./span-scope"
 

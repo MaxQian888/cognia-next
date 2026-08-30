@@ -32,7 +32,7 @@ import type {
   RepetitionVerdict,
   Score,
   ScorerAggregate,
-} from "@/types/eval/eval"
+} from "./domain/eval"
 
 /** The current scoring semantics — stamped on every report this file builds. */
 export const SCORING_VERSION = 2 as const

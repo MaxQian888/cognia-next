@@ -10,16 +10,16 @@
  * rather than quietly reporting a verdict built from whatever survived.
  * Cross-model judging (don't judge with the model
  * that generated the answer, to dodge self-preference bias) is the caller's
- * responsibility: build the {@link LlmClient} via `buildRendererLlmClient` with
+ * responsibility: build the {@link EvalJudgeClient} via `buildRendererLlmClient` with
  * a different `modelOverride` than the target.
  *
  * Pointwise single-candidate judging has no position bias, so no order-swap is
  * needed here (that matters for pairwise comparisons).
  */
 
-import type { LlmClient } from "@/lib/twin/distill/llm"
-import { extractJson } from "@/lib/twin/distill/llm"
-import type { EvalCase, EvalDimension, EvalSample, Score, Scorer } from "@/types/eval/eval"
+import type { EvalJudgeClient } from "./judge-client"
+import { extractJson } from "../json"
+import type { EvalCase, EvalDimension, EvalSample, Score, Scorer } from "../domain/eval"
 
 const JUDGE_SYSTEM_PROMPT =
   "You are a strict, impartial evaluator of an AI assistant's answer. You judge " +
@@ -29,7 +29,7 @@ const JUDGE_SYSTEM_PROMPT =
 
 export interface JudgeScorerOptions {
   /** Judge LLM client. Build cross-model via `buildRendererLlmClient`. */
-  client: LlmClient
+  client: EvalJudgeClient
   /** The single criterion this judge evaluates, e.g. "task completion". */
   criterion: string
   /** Rubric text describing what pass vs fail means for this criterion. */
