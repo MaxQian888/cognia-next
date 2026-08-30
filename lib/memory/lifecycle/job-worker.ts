@@ -18,7 +18,11 @@ import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-wi
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
-import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
+import {
+  consolidationAuditAction,
+  consolidationOpMemoryId,
+  type ConsolidationOp,
+} from "@/lib/memory/consolidate/consolidator"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface MemoryJobWorkerDeps {
@@ -196,13 +200,9 @@ async function recordRecoveredOperations(
   contaminationState: "clean" | "external-context"
 ): Promise<void> {
   for (const operation of operations) {
-    const memoryId =
-      operation.op === "ADD" || operation.op === "CONFLICT"
-        ? operation.memory.id
-        : operation.op === "UPDATE"
-          ? operation.targetId
-          : undefined
-    if (!memoryId) continue
+    const memoryId = consolidationOpMemoryId(operation)
+    const auditAction = consolidationAuditAction(operation)
+    if (!memoryId || !auditAction) continue
     const addedType =
       operation.op === "ADD" || operation.op === "CONFLICT" ? operation.memory.type : undefined
     await updateMemory(memoryId, {
@@ -226,8 +226,7 @@ async function recordRecoveredOperations(
       sourceRole: "user",
     })
     await appendMemoryAuditEvent({
-      action:
-        operation.op === "CONFLICT" ? "conflict" : operation.op === "ADD" ? "created" : "revised",
+      action: auditAction,
       memoryId,
       sessionId: job.sessionId,
       reason: "recovered_job",

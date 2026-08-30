@@ -35,6 +35,10 @@ import {
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import type { MemoryScope } from "@/types/memory/memory"
+import {
+  consolidationAuditAction,
+  consolidationOpMemoryId,
+} from "@/lib/memory/consolidate/consolidator"
 import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
 import { buildJobCheckpoint, transcriptJobIdentity } from "@/lib/memory/lifecycle/transcript-window"
 
@@ -197,13 +201,9 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
         deps
       )
       for (const operation of result.applied) {
-        const memoryId =
-          operation.op === "ADD" || operation.op === "CONFLICT"
-            ? operation.memory.id
-            : operation.op === "UPDATE"
-              ? operation.targetId
-              : undefined
-        if (!memoryId) continue
+        const memoryId = consolidationOpMemoryId(operation)
+        const auditAction = consolidationAuditAction(operation)
+        if (!memoryId || !auditAction) continue
         await bindMemoryGovernanceOutcome({
           memoryId,
           patch: {
@@ -225,12 +225,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
             reviewed: false,
           },
           audit: {
-            action:
-              operation.op === "CONFLICT"
-                ? "conflict"
-                : operation.op === "ADD"
-                  ? "created"
-                  : "revised",
+            action: auditAction,
             sessionId,
             reason: "automatic_learning",
           },

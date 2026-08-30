@@ -1,6 +1,13 @@
 import type { Memory } from "../types/memory"
 import type { MemoryCandidate } from "../extract/extractor"
-import { consolidate, sameMemoryNamespace, type ConsolidateDeps } from "./consolidator"
+import {
+  consolidate,
+  consolidationAuditAction,
+  consolidationOpMemoryId,
+  sameMemoryNamespace,
+  type ConsolidateDeps,
+  type ConsolidationOp,
+} from "./consolidator"
 
 let seq = 0
 function existing(text: string, over: Partial<Memory> = {}): Memory {
@@ -313,5 +320,181 @@ describe("consolidate", () => {
     })
     const res = await consolidate({ ...baseInput, candidates: [cand("fact")] }, deps)
     expect(res.applied[0].op).toBe("ADD")
+  })
+})
+
+describe("failureMode", () => {
+  const neighbour = () => [existing("Prefers pnpm")]
+
+  it("defaults to ADD, keeping personal-memory behavior bit-for-bit", async () => {
+    // No `failureMode` at any existing call site, so none of them change.
+    const deps = makeDeps({
+      findSimilar: async () => neighbour(),
+      client: {
+        complete: jest.fn(async () => {
+          throw new Error("judge down")
+        }),
+      },
+    })
+    const { applied } = await consolidate(
+      { candidates: [cand("Uses turbo")], scope: "global", provenance: "user" },
+      deps
+    )
+    expect(applied).toEqual([
+      expect.objectContaining({
+        op: "ADD",
+        candidate: expect.objectContaining({ text: "Uses turbo" }),
+      }),
+    ])
+    expect(deps.persistInputs[0]?.trustState).toBeUndefined()
+  })
+
+  it("quarantines instead of adding when the judge call fails", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => neighbour(),
+      client: {
+        complete: jest.fn(async () => {
+          throw new Error("judge down")
+        }),
+      },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Uses turbo")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied).toEqual([
+      expect.objectContaining({ op: "QUARANTINE", reason: "judge_unavailable" }),
+    ])
+    // Persisted, not dropped: the row stays reviewable in the console while
+    // `isMemoryEligibleForRetrieval` keeps it out of every prompt.
+    expect(deps.persisted).toHaveLength(1)
+    expect(deps.persistInputs[0]).toMatchObject({
+      trustState: "quarantined",
+      reviewStatus: "unreviewed",
+    })
+  })
+
+  it("quarantines when the judge returns unparsable JSON", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => neighbour(),
+      client: { complete: jest.fn(async () => "not json at all") },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Uses turbo")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied[0]).toMatchObject({ op: "QUARANTINE", reason: "judge_unavailable" })
+  })
+
+  it("quarantines when the judge names a target id that does not exist", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => neighbour(),
+      client: {
+        complete: jest.fn(async () => JSON.stringify({ op: "UPDATE", targetId: "ghost" })),
+      },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Uses turbo")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied[0]).toMatchObject({ op: "QUARANTINE", reason: "unresolvable_target" })
+    expect(deps.updates).toEqual([])
+  })
+
+  it("quarantines an unrecognised operation name", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => neighbour(),
+      client: { complete: jest.fn(async () => JSON.stringify({ op: "MERGE_EVERYTHING" })) },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Uses turbo")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied[0]).toMatchObject({ op: "QUARANTINE", reason: "unresolvable_target" })
+  })
+
+  it("does NOT quarantine the unambiguous no-neighbour ADD", async () => {
+    // Nothing to judge against is not a judge failure — it is a clean insert,
+    // and quarantining it would bury every genuinely new fact.
+    const deps = makeDeps({ findSimilar: async () => [] })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Uses turbo")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied[0]).toMatchObject({ op: "ADD" })
+    expect(deps.client.complete).not.toHaveBeenCalled()
+    expect(deps.persistInputs[0]?.trustState).toBeUndefined()
+  })
+
+  it("still honours a decidable judgement under quarantine mode", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("Prefers pnpm", { id: "keep" })],
+      client: { complete: jest.fn(async () => JSON.stringify({ op: "NOOP" })) },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [cand("Prefers pnpm")],
+        scope: "global",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied).toEqual([{ op: "NOOP" }])
+    expect(deps.persisted).toEqual([])
+  })
+})
+
+describe("consolidation op projections", () => {
+  const memory = existing("x", { id: "m1" })
+  const candidate = cand("x")
+
+  it.each<[ConsolidationOp, string | undefined]>([
+    [{ op: "ADD", memory, candidate }, "m1"],
+    [{ op: "CONFLICT", memory, targetId: "t1", candidate }, "m1"],
+    [{ op: "QUARANTINE", memory, candidate, reason: "judge_unavailable" }, "m1"],
+    [{ op: "UPDATE", targetId: "t1" }, "t1"],
+    [{ op: "DELETE", targetId: "t1" }, undefined],
+    [{ op: "NOOP" }, undefined],
+  ])("maps %p to memory id %p", (op, expected) => {
+    expect(consolidationOpMemoryId(op)).toBe(expected)
+  })
+
+  it.each<[ConsolidationOp, string | undefined]>([
+    [{ op: "ADD", memory, candidate }, "created"],
+    // A quarantined row was CREATED, not revised — the old copy-pasted ternary
+    // fell through to "revised" for any arm it did not name.
+    [{ op: "QUARANTINE", memory, candidate, reason: "judge_unavailable" }, "created"],
+    [{ op: "CONFLICT", memory, targetId: "t1", candidate }, "conflict"],
+    [{ op: "UPDATE", targetId: "t1" }, "revised"],
+    [{ op: "DELETE", targetId: "t1" }, undefined],
+    [{ op: "NOOP" }, undefined],
+  ])("maps %p to audit action %p", (op, expected) => {
+    expect(consolidationAuditAction(op)).toBe(expected)
   })
 })

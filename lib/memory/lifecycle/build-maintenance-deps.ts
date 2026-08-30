@@ -10,6 +10,10 @@
 import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { MemoryMaintenanceDeps } from "./maintenance"
+import {
+  consolidationAuditAction,
+  consolidationOpMemoryId,
+} from "@/lib/memory/consolidate/consolidator"
 
 export async function buildEpisodicMaintenanceDeps(
   params: { session: ChatSession | null | undefined; appSettings: AppSettings | null | undefined },
@@ -47,13 +51,9 @@ export async function buildEpisodicMaintenanceDeps(
         await import("@/lib/db/memory-governance")
       const contaminationState = input.contaminationState ?? "clean"
       for (const operation of operations) {
-        const memoryId =
-          operation.op === "ADD" || operation.op === "CONFLICT"
-            ? operation.memory.id
-            : operation.op === "UPDATE"
-              ? operation.targetId
-              : undefined
-        if (!memoryId) continue
+        const memoryId = consolidationOpMemoryId(operation)
+        const auditAction = consolidationAuditAction(operation)
+        if (!memoryId || !auditAction) continue
         await memDb.updateMemory(memoryId, {
           evidenceState: "supported",
           reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
@@ -69,12 +69,7 @@ export async function buildEpisodicMaintenanceDeps(
           reviewed: false,
         })
         await appendMemoryAuditEvent({
-          action:
-            operation.op === "CONFLICT"
-              ? "conflict"
-              : operation.op === "ADD"
-                ? "created"
-                : "revised",
+          action: auditAction,
           memoryId,
           sessionId: input.source?.sessionId,
           reason: "session_distillation",

@@ -27,7 +27,10 @@ import type {
   MemorySourceChannel,
   MemoryType,
 } from "@/types/memory/memory"
-import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
+import {
+  consolidationOpMemoryId,
+  type ConsolidationOp,
+} from "@/lib/memory/consolidate/consolidator"
 
 export interface MemoryAttribution {
   channel: MemorySourceChannel
@@ -199,9 +202,8 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     )
     const memoryId = added?.memory?.id
     const governedIds = applied.flatMap((op) => {
-      if (op.op === "ADD" || op.op === "CONFLICT") return [op.memory.id]
-      if (op.op === "UPDATE") return [op.targetId]
-      return []
+      const id = consolidationOpMemoryId(op)
+      return id ? [id] : []
     })
     if (governedIds.length > 0) {
       try {

@@ -37,6 +37,7 @@ export interface PersistMemoryInput {
   sourcePluginId?: string
   reviewStatus?: Memory["reviewStatus"]
   conflictWithIds?: string[]
+  trustState?: Memory["trustState"]
 }
 
 export interface ConsolidateDeps {
@@ -61,7 +62,48 @@ export type ConsolidationOp =
   | { op: "UPDATE"; targetId: string }
   | { op: "DELETE"; targetId: string }
   | { op: "CONFLICT"; memory: Memory; targetId: string; candidate: MemoryCandidate }
+  | {
+      /**
+       * The judge could not decide anything at all, and the caller asked to fail
+       * closed. The row is persisted but stamped `trustState: "quarantined"`, so
+       * `isMemoryEligibleForRetrieval` keeps it out of every prompt while the
+       * console can still surface it for review.
+       */
+      op: "QUARANTINE"
+      memory: Memory
+      candidate: MemoryCandidate
+      reason: QuarantineReason
+    }
   | { op: "NOOP" }
+
+/** Why a candidate was quarantined rather than merged. */
+export type QuarantineReason =
+  /** The judge call threw, or its response was not parsable JSON. */
+  | "judge_unavailable"
+  /** The judge named an operation or a target id that does not exist. */
+  | "unresolvable_target"
+
+/**
+ * The memory a consolidation op created or mutated, if any.
+ *
+ * Extracted because four call sites had each copy-pasted this same chain, which
+ * meant every new op arm silently defaulted to "no memory to bind" at all four —
+ * no evidence row, no audit event, no governance patch. One function makes a new
+ * arm a compile-time decision instead of an omission.
+ */
+export function consolidationOpMemoryId(op: ConsolidationOp): string | undefined {
+  switch (op.op) {
+    case "ADD":
+    case "CONFLICT":
+    case "QUARANTINE":
+      return op.memory.id
+    case "UPDATE":
+      return op.targetId
+    case "DELETE":
+    case "NOOP":
+      return undefined
+  }
+}
 
 export interface ConsolidateInput {
   candidates: MemoryCandidate[]
@@ -75,6 +117,19 @@ export interface ConsolidateInput {
   source?: { sessionId?: string; messageId?: string }
   /** API-surface attribution, stamped onto ADDed rows (external provenance). */
   attribution?: { channel: MemorySourceChannel; pluginId?: string }
+  /**
+   * What to do when the judge cannot produce a usable decision.
+   *
+   * `"add"` (the default, and the historical behavior) keeps the new fact: for
+   * personal memory a lost judge call should not lose something the user said.
+   *
+   * `"quarantine"` persists the row but stamps it `trustState: "quarantined"`,
+   * so it is excluded from retrieval until a human reviews it. Callers whose
+   * output is injected into prompts automatically — project mining — must use
+   * this: silently ADDing an unjudged claim is how a wrong fact reaches every
+   * later turn.
+   */
+  failureMode?: "add" | "quarantine"
 }
 
 export interface MemoryConsolidationNamespace {
@@ -136,7 +191,7 @@ async function persistCandidate(
   candidate: MemoryCandidate,
   input: ConsolidateInput,
   deps: ConsolidateDeps,
-  governance: Pick<PersistMemoryInput, "reviewStatus" | "conflictWithIds"> = {}
+  governance: Pick<PersistMemoryInput, "reviewStatus" | "conflictWithIds" | "trustState"> = {}
 ): Promise<Memory> {
   return deps.persist({
     scope: input.scope,
@@ -156,6 +211,56 @@ async function persistCandidate(
     sourcePluginId: input.attribution?.pluginId,
     ...governance,
   })
+}
+
+/**
+ * Audit action describing what a consolidation op did to its memory.
+ *
+ * Shared for the same reason as `consolidationOpMemoryId`: three call sites had
+ * copy-pasted a ternary whose fall-through was `"revised"`, so a newly added
+ * creating arm would have been recorded as an edit to a row that had just been
+ * created.
+ */
+export function consolidationAuditAction(
+  op: ConsolidationOp
+): "created" | "revised" | "conflict" | undefined {
+  switch (op.op) {
+    case "CONFLICT":
+      return "conflict"
+    case "ADD":
+    case "QUARANTINE":
+      return "created"
+    case "UPDATE":
+      return "revised"
+    case "DELETE":
+    case "NOOP":
+      return undefined
+  }
+}
+
+/**
+ * Apply the caller's failure mode when the judge produced nothing usable.
+ *
+ * Both modes PERSIST. Dropping the candidate would lose the fact silently and
+ * leave the user no signal that anything was mined at all; quarantining keeps it
+ * out of prompts (`isMemoryEligibleForRetrieval` excludes `"quarantined"`) while
+ * leaving it reviewable in the console.
+ */
+async function failClosed(
+  candidate: MemoryCandidate,
+  input: ConsolidateInput,
+  deps: ConsolidateDeps,
+  reason: QuarantineReason
+): Promise<ConsolidationOp> {
+  if (input.failureMode !== "quarantine") {
+    const memory = await persistCandidate(candidate, input, deps)
+    return { op: "ADD", memory, candidate }
+  }
+  const memory = await persistCandidate(candidate, input, deps, {
+    reviewStatus: "unreviewed",
+    trustState: "quarantined",
+  })
+  return { op: "QUARANTINE", memory, candidate, reason }
 }
 
 export async function consolidate(
@@ -194,10 +299,7 @@ export async function consolidate(
       })
       decision = extractJson<RawDecision>(raw)
     } catch {
-      // Safe default: keep the new fact (ADD) rather than risk losing it or
-      // mutating the wrong row.
-      const memory = await persistCandidate(candidate, input, deps)
-      applied.push({ op: "ADD", memory, candidate })
+      applied.push(await failClosed(candidate, input, deps, "judge_unavailable"))
       continue
     }
 
@@ -230,14 +332,15 @@ export async function consolidate(
       applied.push({ op: "CONFLICT", memory, targetId, candidate })
     } else if (op === "NOOP") {
       applied.push({ op: "NOOP" })
-    } else {
-      // ADD, or an UPDATE/DELETE whose targetId was missing/hallucinated (not in
-      // the candidate set). Keep the new fact rather than silently dropping it —
-      // the same safe default as the parse-failure path above. Falling through
-      // to NOOP here would lose a genuinely new memory whenever the model named
-      // a non-existent id.
+    } else if (op === "ADD") {
       const memory = await persistCandidate(candidate, input, deps)
       applied.push({ op: "ADD", memory, candidate })
+    } else {
+      // An UPDATE/DELETE/CONFLICT whose targetId was missing or hallucinated
+      // (not in the candidate set), or an operation name we do not recognise.
+      // The judge decided nothing usable, so this takes the configured failure
+      // mode — never a silent drop, which would lose a genuinely new fact.
+      applied.push(await failClosed(candidate, input, deps, "unresolvable_target"))
     }
   }
 
