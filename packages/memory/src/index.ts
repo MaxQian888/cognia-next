@@ -28,6 +28,9 @@ export * from "./retrieve/query-expansion"
 export * from "./extract/extractor"
 export * from "./extract/salience"
 export * from "./extract/project-path-normalize"
+export * from "./extract/project-windows"
+export * from "./extract/project-salience"
+export * from "./extract/project-extractor"
 export * from "./consolidate/consolidator"
 
 // Forgetting / decay
