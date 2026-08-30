@@ -278,6 +278,12 @@ import type {
   EvalScoreRow,
   EvalTaskRow,
 } from "./eval-lab"
+import type {
+  EvalObservationRow,
+  EvalOnlineBudgetRow,
+  EvalOnlinePolicyRow,
+  EvalOnlineQueueRow,
+} from "./eval-online-types"
 import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
@@ -907,6 +913,14 @@ export class CogniaDB extends Dexie {
   evalRecommendations!: Table<EvalRecommendationRow, string>
   evalConfigurationApplies!: Table<EvalConfigurationApplyRow, string>
   evalAssets!: Table<EvalAssetRow, string>
+  // v211 — Online evaluation. One observation envelope for every origin
+  // (offline / online / human) so there is a single definition of "passing";
+  // policies, a deduped work queue, and a per-day spend ledger. CRUD in
+  // `./eval-online.ts`, row types in `./eval-online-types.ts`.
+  evalObservations!: Table<EvalObservationRow, string>
+  evalOnlinePolicies!: Table<EvalOnlinePolicyRow, string>
+  evalOnlineQueue!: Table<EvalOnlineQueueRow, string>
+  evalOnlineBudget!: Table<EvalOnlineBudgetRow, string>
   // v82 — Judge calibration loop (eval spec §10). `calibrationItems` holds
   // human-gold-labeled (input, answer) pairs grouped into sets; `calibrationRuns`
   // holds one full agreement report (confusion matrix + Cohen's κ + per-item
@@ -4996,6 +5010,21 @@ export class CogniaDB extends Dexie {
       memoryEvidence:
         "&id, memoryId, kind, sessionId, messageId, validationState, createdAt, [memoryId+createdAt], [sessionId+messageId]",
     })
+
+    // v211 — Online evaluation (the local quality flywheel). `evalObservations`
+    // is a NEW table rather than a reshaped `evalScores`: that one indexes
+    // experiment/sample/scorer and cannot answer a trace-scoped question at
+    // all, and rewriting it would restate old rows' provenance as fact.
+    // `evalOnlineQueue.dedupeKey` is the idempotency key — a trace re-offered
+    // by a retry must not be scored, or charged, twice.
+    this.version(211).stores({
+      evalObservations:
+        "&id, origin, evaluatorVersionId, scope.runId, scope.experimentId, scope.caseId, scope.traceId, createdAt, [origin+createdAt], [scope.traceId+origin]",
+      evalOnlinePolicies: "&id, workspaceId, enabledFlag, updatedAt, [workspaceId+enabledFlag]",
+      evalOnlineQueue:
+        "&id, &dedupeKey, policyId, policyVersionId, traceId, state, enqueuedAt, [state+enqueuedAt], [policyId+state]",
+      evalOnlineBudget: "&id, policyId, day, [policyId+day]",
+    })
   }
 
   accountContentMigrations!: Table<
@@ -5282,6 +5311,12 @@ export type {
   EvalScoreRow,
   EvalTaskRow,
 } from "./eval-lab"
+export type {
+  EvalObservationRow,
+  EvalOnlineBudgetRow,
+  EvalOnlinePolicyRow,
+  EvalOnlineQueueRow,
+} from "./eval-online-types"
 export type { OpticalArchiveRow, OpticalArchiveFrame } from "./optical-archives"
 export type { TeamPrObservationRow } from "./team-pr-observations"
 export type { TraceAnnotationRow } from "./trace-annotations"

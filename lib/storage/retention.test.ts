@@ -119,6 +119,7 @@ describe("pruneRetainedTables", () => {
     expect(out).toEqual([
       { id: "agentTraces", removed: 1 },
       { id: "evalArtifacts", removed: 0 },
+      { id: "evalOnline", removed: 0 },
       { id: "workSubmissions", removed: 0 },
       { id: "ocrResults", removed: 0 },
       { id: "workflowAppData", removed: 0 },
@@ -131,6 +132,11 @@ describe("pruneRetainedTables", () => {
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("agentTraces")
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("evalArtifacts")
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("ocrResults")
+    // Declaring `executorId: "evalOnline"` in the governance catalog is a
+    // promise; `governedRetentionTargets()` throws if nothing implements it, so
+    // this pins that the online tables are actually swept rather than merely
+    // documented as swept.
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("evalOnline")
   })
 
   it("prunes stale OCR cache rows through the shared configured window", async () => {

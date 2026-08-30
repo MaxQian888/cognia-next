@@ -138,6 +138,10 @@ export const CORE_TABLE_NAMES = [
   "evalDatasetVersions",
   "evalDatasets",
   "evalExperiments",
+  "evalObservations",
+  "evalOnlineBudget",
+  "evalOnlinePolicies",
+  "evalOnlineQueue",
   "evalProjects",
   "evalRecommendations",
   "evalReviewBatches",
@@ -953,6 +957,30 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "evalArtifacts",
     reason: "Rows carry expiresAt and are removed by the central eval-artifact sweep.",
   },
+  evalObservations: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "evalOnline",
+    reason:
+      "Verdicts about production traces outlive the 30-day span window on purpose — a quality trend is the point — but not forever; the online sweep prunes them through createdAt.",
+  },
+  evalOnlineQueue: {
+    mode: "ttl",
+    days: 7,
+    enforcement: "central",
+    executorId: "evalOnline",
+    reason:
+      "Settled work items are bookkeeping. They are kept a week so a skipped-for-budget decision can still be explained, then swept.",
+  },
+  evalOnlineBudget: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "evalOnline",
+    reason:
+      "Per-day spend rows are the audit trail for what a policy cost; kept a quarter, then swept.",
+  },
   evalAssets: {
     mode: "ttl",
     enforcement: "central",
@@ -1083,6 +1111,20 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // spelling. Encrypting it would also mean the resume path could not read its
   // own journal without the cipher it is in the middle of installing.
   accountContentMigrations: "metadata-only",
+  // An observation carries `Score.reasoning` — a judge's prose about what the
+  // user asked and what the agent answered. The name matches none of the
+  // content-ish spellings the heuristic looks for, so it would default to
+  // `metadata-only` and store that rationale in the clear.
+  evalObservations: "encrypted-content",
+  // Ids, a state, a reservation and a skip reason. No content, and it is read
+  // on the trace-completion path where a cipher round-trip would be a cost for
+  // nothing.
+  evalOnlineQueue: "metadata-only",
+  // Selectors, sampling rates and a USD cap — configuration the operator wrote,
+  // not conversation.
+  evalOnlinePolicies: "metadata-only",
+  // Three numbers and a day key.
+  evalOnlineBudget: "metadata-only",
 }
 
 /**

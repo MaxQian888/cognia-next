@@ -25,3 +25,10 @@ export * from "./report"
 export * from "./gate"
 export * from "./scorers/index"
 export * from "./scorers/judge-client"
+
+// Versioned contracts for the quality flywheel: what an evaluator IS, what one
+// observation looks like whoever produced it, and when a policy scores a live
+// trace.
+export * from "./evaluator-spec"
+export * from "./observation"
+export * from "./online-policy"

@@ -46,7 +46,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(332)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(336)
     db.close()
   })
 
@@ -107,6 +107,7 @@ describe("DataTableCatalog", () => {
     expect(centralRetentionExecutorIds()).toEqual([
       "agentTraces",
       "evalArtifacts",
+      "evalOnline",
       "workSubmissions",
       "ocrResults",
       "workflowAppData",

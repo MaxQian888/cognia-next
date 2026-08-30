@@ -261,6 +261,58 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
+  fullSchemaIt("v211 adds the online-evaluation tables without touching data", async () => {
+    const name = `cognia-online-eval-v211-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(210).stores({
+      sessions: "id, updatedAt",
+      evalScores: "&id, experimentId, sampleId, scorerId, createdAt",
+    })
+    await legacy.open()
+    // A pre-envelope score row: no scope, no origin. It is read as `offline`,
+    // never rewritten — a migration that invents provenance produces records
+    // indistinguishable from real ones.
+    await legacy.table("evalScores").put({
+      id: "legacy-score",
+      experimentId: "exp-1",
+      sampleId: "sample-1",
+      scorerId: "tool-selection",
+      createdAt: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(211)
+
+    // `dedupeKey` is unique on purpose: it is the idempotency key that stops a
+    // re-offered trace being scored — and charged — twice.
+    expect(upgraded.evalOnlineQueue.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["dedupeKey", "state", "[state+enqueuedAt]", "[policyId+state]"])
+    )
+    expect(
+      upgraded.evalOnlineQueue.schema.indexes.find((index) => index.name === "dedupeKey")?.unique
+    ).toBe(true)
+    expect(upgraded.evalObservations.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["origin", "scope.traceId", "[origin+createdAt]"])
+    )
+    expect(upgraded.evalOnlinePolicies.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["workspaceId", "[workspaceId+enabledFlag]"])
+    )
+
+    // Purely additive: the legacy score row is untouched and the new tables
+    // start empty rather than being seeded from it.
+    expect(await upgraded.table("evalScores").get("legacy-score")).toMatchObject({
+      id: "legacy-score",
+      scorerId: "tool-selection",
+    })
+    expect(await upgraded.evalObservations.count()).toBe(0)
+    expect(await upgraded.evalOnlineBudget.count()).toBe(0)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
     const name = `cognia-external-agent-configs-v201-${Date.now()}`
     const legacy = new Dexie(name)
