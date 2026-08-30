@@ -10,6 +10,24 @@ function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`
 }
 
+/**
+ * How long a claimed memory job stays owned without a heartbeat.
+ *
+ * One constant rather than three literals, because the heartbeat period is
+ * derived from it: a worker that renews slower than the TTL is a worker whose
+ * job gets stolen mid-run.
+ */
+export const MEMORY_JOB_LEASE_TTL_MS = 10 * 60 * 1000
+
+/** Statuses a job never leaves. Reopening one would undo a user's cancel. */
+const TERMINAL_MEMORY_JOB_STATUSES: readonly MemoryJobStatus[] = [
+  "succeeded",
+  "no_output",
+  "skipped",
+  "failed",
+  "cancelled",
+]
+
 export type MemoryEvidenceDraft = Omit<MemoryEvidence, "id" | "createdAt"> &
   Partial<Pick<MemoryEvidence, "id" | "createdAt">>
 
@@ -295,7 +313,7 @@ export async function claimMemoryJob(
   id: string,
   workerId: string,
   now: number = Date.now(),
-  leaseTtlMs = 10 * 60 * 1000
+  leaseTtlMs = MEMORY_JOB_LEASE_TTL_MS
 ): Promise<MemoryJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
@@ -325,7 +343,7 @@ export async function claimMemoryJob(
 export async function claimNextMemoryJob(
   workerId: string,
   now: number = Date.now(),
-  leaseTtlMs = 10 * 60 * 1000
+  leaseTtlMs = MEMORY_JOB_LEASE_TTL_MS
 ): Promise<MemoryJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
@@ -354,6 +372,26 @@ export async function claimNextMemoryJob(
       .sort((left, right) => left.queuedAt - right.queuedAt)[0]
     if (!next) return undefined
 
+    // Reclaiming an expired lease is how a crashed worker's job gets finished,
+    // but nothing bounded it: a job that kills its worker every time was
+    // re-claimed forever, incrementing `attempt` and never reaching a terminal
+    // state. `maxAttempts` has been written on every job since the table
+    // existed and this is the first thing to read it.
+    if (next === expiredLease && (next.attempt ?? 0) >= (next.maxAttempts ?? 4)) {
+      const exhausted: MemoryJob = {
+        ...next,
+        status: "failed",
+        completedAt: now,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        heartbeatAt: undefined,
+        errorCode: "lease_expired_max_attempts",
+        resultCode: "retry_exhausted",
+      }
+      await db.memoryJobs.put(exhausted)
+      return undefined
+    }
+
     const claimed: MemoryJob = {
       ...next,
       status: "running",
@@ -370,13 +408,24 @@ export async function claimNextMemoryJob(
   })
 }
 
+/**
+ * Whether a completion actually landed.
+ *
+ * `"lost"` means the caller no longer owned the job: its lease expired and
+ * another worker claimed it, or a user cancelled it while it ran. Either way
+ * the row must not be overwritten, which is what makes cancellation terminal.
+ */
+export type MemoryJobCompletion = "finished" | "lost"
+
 export async function finishMemoryJob(
   id: string,
   status: "succeeded" | "no_output" | "skipped" | "failed" | "cancelled",
   resultCode: string,
-  now: number = Date.now()
-): Promise<void> {
-  await getDb().memoryJobs.update(id, {
+  now: number = Date.now(),
+  options: { workerId?: string } = {}
+): Promise<MemoryJobCompletion> {
+  const db = getDb()
+  const patch = {
     status,
     completedAt: now,
     leaseOwner: undefined,
@@ -384,6 +433,18 @@ export async function finishMemoryJob(
     heartbeatAt: undefined,
     errorCode: undefined,
     resultCode,
+  }
+  // Callers that pass no `workerId` keep the old unconditional behavior, so
+  // existing surfaces (the console, migrations) are unaffected.
+  if (!options.workerId) {
+    await db.memoryJobs.update(id, patch)
+    return "finished"
+  }
+  return db.transaction("rw", db.memoryJobs, async () => {
+    const job = await db.memoryJobs.get(id)
+    if (!job || job.status !== "running" || job.leaseOwner !== options.workerId) return "lost"
+    await db.memoryJobs.update(id, patch)
+    return "finished"
   })
 }
 
@@ -396,7 +457,7 @@ export async function heartbeatMemoryJob(
   id: string,
   workerId: string,
   now: number = Date.now(),
-  leaseTtlMs = 10 * 60 * 1000
+  leaseTtlMs = MEMORY_JOB_LEASE_TTL_MS
 ): Promise<MemoryJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
@@ -422,9 +483,7 @@ export async function cancelMemoryJob(
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
     const job = await db.memoryJobs.get(id)
-    if (!job || ["succeeded", "no_output", "skipped", "failed", "cancelled"].includes(job.status)) {
-      return job
-    }
+    if (!job || TERMINAL_MEMORY_JOB_STATUSES.includes(job.status)) return job
     const cancelled: MemoryJob = {
       ...job,
       status: "cancelled",
@@ -444,39 +503,47 @@ export async function failMemoryJob(
   id: string,
   errorCode: string,
   now: number = Date.now(),
-  options: { maxRetries?: number; baseDelayMs?: number } = {}
+  options: { maxRetries?: number; baseDelayMs?: number; workerId?: string } = {}
 ): Promise<MemoryJobStatus> {
   const db = getDb()
-  const job = await db.memoryJobs.get(id)
-  if (!job) return "failed"
-  const retryCount = job.retryCount + 1
-  const maxRetries = options.maxRetries ?? 3
-  if (retryCount <= maxRetries) {
-    const baseDelayMs = options.baseDelayMs ?? 1_000
+  return db.transaction("rw", db.memoryJobs, async () => {
+    const job = await db.memoryJobs.get(id)
+    if (!job) return "failed"
+    // A terminal job is never reopened. Without this a job cancelled while it
+    // ran came back as `retry_wait` on the losing worker's error path, so the
+    // cancel silently did nothing.
+    if (TERMINAL_MEMORY_JOB_STATUSES.includes(job.status)) return job.status
+    if (options.workerId && job.leaseOwner !== options.workerId) return job.status
+
+    const retryCount = job.retryCount + 1
+    const maxRetries = options.maxRetries ?? 3
+    if (retryCount <= maxRetries) {
+      const baseDelayMs = options.baseDelayMs ?? 1_000
+      await db.memoryJobs.update(id, {
+        status: "retry_wait",
+        retryCount,
+        nextAttemptAt: now + baseDelayMs * 2 ** (retryCount - 1),
+        errorCode,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        heartbeatAt: undefined,
+        resultCode: "retry_scheduled",
+      })
+      return "retry_wait"
+    }
+
     await db.memoryJobs.update(id, {
-      status: "retry_wait",
+      status: "failed",
       retryCount,
-      nextAttemptAt: now + baseDelayMs * 2 ** (retryCount - 1),
+      completedAt: now,
       errorCode,
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
       heartbeatAt: undefined,
-      resultCode: "retry_scheduled",
+      resultCode: "retry_exhausted",
     })
-    return "retry_wait"
-  }
-
-  await db.memoryJobs.update(id, {
-    status: "failed",
-    retryCount,
-    completedAt: now,
-    errorCode,
-    leaseOwner: undefined,
-    leaseExpiresAt: undefined,
-    heartbeatAt: undefined,
-    resultCode: "retry_exhausted",
+    return "failed"
   })
-  return "failed"
 }
 
 export async function pruneMemoryGovernanceData(

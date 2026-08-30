@@ -63,7 +63,9 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 import {
+  __resetMemoryDrainLock,
   drainMemoryJobs,
+  drainMemoryJobsAfterTurn,
   processMemoryJob,
   startMemoryJobWorker,
   type MemoryJobWorkerDeps,
@@ -97,6 +99,94 @@ function deps(
     process,
   }
 }
+
+describe("memory job lease handling", () => {
+  beforeEach(__resetMemoryDrainLock)
+
+  it("holds the lease open for the whole job and releases it after", async () => {
+    const stop = jest.fn()
+    const heartbeat = jest.fn(() => stop)
+    const d = { ...deps([job("a")]), heartbeat }
+    await drainMemoryJobs({ workerId: "w1" }, d)
+    expect(heartbeat).toHaveBeenCalledWith("a", "w1", expect.any(Function))
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the lease even when the job throws", async () => {
+    const stop = jest.fn()
+    const process = jest.fn(async () => {
+      throw new Error("boom")
+    })
+    const d = { ...deps([job("a")], process as never), heartbeat: jest.fn(() => stop) }
+    await drainMemoryJobs({}, d)
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  // The point of the fence: a worker that lost its job must not overwrite the
+  // row that the new owner, or the user's cancel, now controls.
+  it("writes no completion once the lease is lost mid-run", async () => {
+    let lose: () => void = () => {}
+    const heartbeat = jest.fn((_id: string, _w: string, onLeaseLost: () => void) => {
+      lose = onLeaseLost
+      return jest.fn()
+    })
+    const process = jest.fn(async () => {
+      lose()
+      return { status: "succeeded" as const, resultCode: "done" }
+    })
+    const d = { ...deps([job("a")], process), heartbeat }
+    await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
+    expect(d.finish).not.toHaveBeenCalled()
+    expect(d.fail).not.toHaveBeenCalled()
+  })
+
+  it("writes no failure once the lease is lost mid-run", async () => {
+    let lose: () => void = () => {}
+    const heartbeat = jest.fn((_id: string, _w: string, onLeaseLost: () => void) => {
+      lose = onLeaseLost
+      return jest.fn()
+    })
+    const process = jest.fn(async () => {
+      lose()
+      throw new Error("boom")
+    })
+    const d = { ...deps([job("a")], process as never), heartbeat }
+    await drainMemoryJobs({}, d)
+    expect(d.fail).not.toHaveBeenCalled()
+  })
+})
+
+describe("drainMemoryJobsAfterTurn", () => {
+  beforeEach(__resetMemoryDrainLock)
+
+  it("runs at most one job, leaving the backlog to the interval worker", async () => {
+    const d = deps([job("a"), job("b"), job("c")])
+    await expect(drainMemoryJobsAfterTurn({}, d)).resolves.toBe(1)
+    expect(d.process).toHaveBeenCalledTimes(1)
+  })
+
+  it("joins an in-flight drain instead of starting a second loop", async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const process = jest.fn(async () => {
+      await gate
+      return { status: "succeeded" as const, resultCode: "done" }
+    })
+    const d = deps([job("a"), job("b")], process)
+    const first = drainMemoryJobsAfterTurn({}, d)
+    const second = drainMemoryJobsAfterTurn({}, d)
+    release()
+    await Promise.all([first, second])
+    expect(d.process).toHaveBeenCalledTimes(1)
+  })
+
+  it("accepts a larger bound when a caller asks for one", async () => {
+    const d = deps([job("a"), job("b")])
+    await expect(drainMemoryJobsAfterTurn({ maxJobs: 2 }, d)).resolves.toBe(2)
+  })
+})
 
 describe("startMemoryJobWorker namespace repair", () => {
   it("runs the one-time unreadable-row repair on start", async () => {
@@ -169,8 +259,8 @@ describe("memory job worker", () => {
     const d = deps([job("a"), job("b")])
     await expect(drainMemoryJobs({ workerId: "test" }, d)).resolves.toBe(2)
     expect(d.process).toHaveBeenCalledTimes(2)
-    expect(d.finish).toHaveBeenCalledWith("a", { status: "succeeded", resultCode: "done" })
-    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" })
+    expect(d.finish).toHaveBeenCalledWith("a", { status: "succeeded", resultCode: "done" }, "test")
+    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" }, "test")
   })
 
   it("fails a job and continues draining later work", async () => {
@@ -180,8 +270,12 @@ describe("memory job worker", () => {
       .mockResolvedValueOnce({ status: "succeeded", resultCode: "done" })
     const d = deps([job("a"), job("b")], process)
     await drainMemoryJobs({}, d)
-    expect(d.fail).toHaveBeenCalledWith("a", "memory_job_processing_failed")
-    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" })
+    expect(d.fail).toHaveBeenCalledWith("a", "memory_job_processing_failed", "memory-job-worker")
+    expect(d.finish).toHaveBeenCalledWith(
+      "b",
+      { status: "succeeded", resultCode: "done" },
+      "memory-job-worker"
+    )
   })
 
   it("starts immediately and returns a teardown for the periodic timer", async () => {
@@ -437,10 +531,14 @@ describe("memory job worker", () => {
       mockGetSession.mockResolvedValue({ id: "s1" })
       const d = deps([miningJob({ projectId: undefined })], processMemoryJob)
       await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
-      expect(d.finish).toHaveBeenCalledWith("mine", {
-        status: "skipped",
-        resultCode: "project_missing",
-      })
+      expect(d.finish).toHaveBeenCalledWith(
+        "mine",
+        {
+          status: "skipped",
+          resultCode: "project_missing",
+        },
+        "memory-job-worker"
+      )
     })
 
     it("re-checks exactly the claim a targeted job names", async () => {
@@ -559,10 +657,14 @@ describe("memory job worker", () => {
         processMemoryJob
       )
       await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
-      expect(d.finish).toHaveBeenCalledWith("gone", {
-        status: "skipped",
-        resultCode: "source_missing",
-      })
+      expect(d.finish).toHaveBeenCalledWith(
+        "gone",
+        {
+          status: "skipped",
+          resultCode: "source_missing",
+        },
+        "memory-job-worker"
+      )
       expect(d.fail).not.toHaveBeenCalled()
     })
 
@@ -586,10 +688,14 @@ describe("memory job worker", () => {
         processMemoryJob
       )
       await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
-      expect(d.finish).toHaveBeenCalledWith("resized", {
-        status: "skipped",
-        resultCode: "snapshot_changed",
-      })
+      expect(d.finish).toHaveBeenCalledWith(
+        "resized",
+        {
+          status: "skipped",
+          resultCode: "snapshot_changed",
+        },
+        "memory-job-worker"
+      )
       expect(d.fail).not.toHaveBeenCalled()
     })
 
@@ -617,10 +723,11 @@ describe("memory job worker", () => {
     // loop completes it instead of retry-failing.
     const d = deps([job("terminal")], processMemoryJob)
     await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
-    expect(d.finish).toHaveBeenCalledWith("terminal", {
-      status: "skipped",
-      resultCode: "session_missing",
-    })
+    expect(d.finish).toHaveBeenCalledWith(
+      "terminal",
+      { status: "skipped", resultCode: "session_missing" },
+      "memory-job-worker"
+    )
     expect(d.fail).not.toHaveBeenCalled()
   })
 
@@ -681,6 +788,10 @@ describe("memory job worker", () => {
   it("backs off when the durable transcript checkpoint is unavailable", async () => {
     const d = deps([{ ...job("missing"), sessionId: "s1", dedupeKey: "invalid" }], processMemoryJob)
     await drainMemoryJobs({}, d)
-    expect(d.fail).toHaveBeenCalledWith("missing", "transcript_checkpoint_unavailable")
+    expect(d.fail).toHaveBeenCalledWith(
+      "missing",
+      "transcript_checkpoint_unavailable",
+      "memory-job-worker"
+    )
   })
 })

@@ -117,6 +117,75 @@ describe("durable memory jobs", () => {
     expect(await claimNextMemoryJob("worker-2", 1_001, 500)).toBeUndefined()
   })
 
+  it("refuses a completion from a worker that no longer owns the job", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker-1", 1_000, 50)
+    await claimNextMemoryJob("worker-2", 1_100, 50_000)
+
+    // worker-1 finally comes back with a result for a job it lost.
+    await expect(
+      finishMemoryJob("j1", "succeeded", "memories_applied", 2_000, { workerId: "worker-1" })
+    ).resolves.toBe("lost")
+    expect(await getMemoryJob("j1")).toMatchObject({
+      status: "running",
+      leaseOwner: "worker-2",
+    })
+  })
+
+  it("refuses a completion for a job the user cancelled mid-run", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker-1", 1_000, 50_000)
+    await cancelMemoryJob("j1", 1_500)
+
+    await expect(
+      finishMemoryJob("j1", "succeeded", "memories_applied", 2_000, { workerId: "worker-1" })
+    ).resolves.toBe("lost")
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "cancelled" })
+  })
+
+  it("keeps the unconditional completion for callers that own no lease", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker-1", 1_000, 50_000)
+    await expect(finishMemoryJob("j1", "succeeded", "done", 2_000)).resolves.toBe("finished")
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "succeeded" })
+  })
+
+  it("does not resurrect a cancelled job through the failure path", async () => {
+    // The losing worker's error handler used to reopen the row as `retry_wait`,
+    // so a cancel during a run silently did nothing.
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker-1", 1_000, 50_000)
+    await cancelMemoryJob("j1", 1_500)
+
+    await expect(failMemoryJob("j1", "boom", 2_000)).resolves.toBe("cancelled")
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "cancelled" })
+  })
+
+  it("ignores a failure reported by a worker that lost the lease", async () => {
+    await enqueueMemoryJob(draft)
+    await claimNextMemoryJob("worker-1", 1_000, 50)
+    await claimNextMemoryJob("worker-2", 1_100, 50_000)
+
+    await expect(failMemoryJob("j1", "boom", 2_000, { workerId: "worker-1" })).resolves.toBe(
+      "running"
+    )
+    expect(await getMemoryJob("j1")).toMatchObject({ leaseOwner: "worker-2", status: "running" })
+  })
+
+  it("stops reclaiming an expired lease once the attempts are spent", async () => {
+    // A job that kills its worker every time used to be re-claimed forever.
+    await enqueueMemoryJob({ ...draft, maxAttempts: 2 })
+    await claimNextMemoryJob("w1", 1_000, 10)
+    await claimNextMemoryJob("w2", 1_100, 10)
+    expect(await getMemoryJob("j1")).toMatchObject({ attempt: 2 })
+
+    expect(await claimNextMemoryJob("w3", 1_200, 10)).toBeUndefined()
+    expect(await getMemoryJob("j1")).toMatchObject({
+      status: "failed",
+      errorCode: "lease_expired_max_attempts",
+    })
+  })
+
   it("reclaims an expired lease", async () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("dead-worker", 1_000, 50)

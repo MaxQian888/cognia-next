@@ -14,6 +14,7 @@ import { listMemories, listProjectClaimsNeedingRecheck, updateMemory } from "@/l
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryEvidence, MemoryJob } from "@/types/memory/governance"
+import { startMemoryJobHeartbeat } from "@/lib/memory/lifecycle/job-heartbeat"
 import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-window"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
@@ -28,9 +29,11 @@ import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface MemoryJobWorkerDeps {
   claimNext: (workerId: string) => Promise<MemoryJob | undefined>
-  finish: (id: string, outcome: MemoryJobProcessOutcome) => Promise<void>
-  fail: (id: string, code: string) => Promise<unknown>
+  finish: (id: string, outcome: MemoryJobProcessOutcome, workerId: string) => Promise<unknown>
+  fail: (id: string, code: string, workerId: string) => Promise<unknown>
   process: (job: MemoryJob) => Promise<MemoryJobProcessOutcome>
+  /** Keeps the lease alive while `process` runs. Returns its own stopper. */
+  heartbeat?: (jobId: string, workerId: string, onLeaseLost: () => void) => () => void
 }
 
 export interface MemoryJobProcessOutcome {
@@ -53,22 +56,75 @@ export async function drainMemoryJobs(
   while (processed < maxJobs) {
     const job = await deps.claimNext(workerId)
     if (!job) break
+    let lost = false
+    const stopHeartbeat = deps.heartbeat?.(job.id, workerId, () => {
+      lost = true
+    })
     try {
       const outcome = await deps.process(job)
-      await deps.finish(job.id, outcome)
+      // A lost lease is not an error. The extraction may already have written
+      // memories, and the worker that stole the job will redo the work, which
+      // the consolidator dedupes. What must NOT happen is overwriting the row
+      // that the new owner (or the user's cancel) now controls.
+      if (!lost) await deps.finish(job.id, outcome, workerId)
     } catch (error) {
       if (error instanceof MemoryJobTerminalError) {
-        await deps.finish(job.id, { status: "skipped", resultCode: error.code })
+        if (!lost)
+          await deps.finish(job.id, { status: "skipped", resultCode: error.code }, workerId)
         processed += 1
         continue
       }
       const code =
         error instanceof MemoryJobProcessingError ? error.code : "memory_job_processing_failed"
-      await deps.fail(job.id, code)
+      if (!lost) await deps.fail(job.id, code, workerId)
+    } finally {
+      stopHeartbeat?.()
     }
     processed += 1
   }
   return processed
+}
+
+/**
+ * Serialises every drain in this process.
+ *
+ * The interval worker and the post-turn drain both call in, and a second
+ * concurrent loop would only fight the first for the same rows. Cross-window
+ * and cross-process races are already handled one level down, by the
+ * `db.transaction("rw")` inside `claimNextMemoryJob`: a second claimer sees a
+ * `running` row with a live lease and skips it. This lock is the cheap
+ * in-process half, not the correctness boundary, so nothing here needs a Web
+ * Lock on top.
+ */
+let inFlightDrain: Promise<number> | undefined
+
+function withDrainLock(run: () => Promise<number>): Promise<number> {
+  if (inFlightDrain) return inFlightDrain
+  const started = run().finally(() => {
+    inFlightDrain = undefined
+  })
+  inFlightDrain = started
+  return started
+}
+
+/**
+ * Run at most one job right after a turn, so a user does not wait up to the
+ * full interval to see what the turn learned.
+ *
+ * Bounded at one because a backlog is the interval worker's problem. In a
+ * backlog this may run an OLDER job than the turn's own, since claiming is FIFO
+ * by `queuedAt`. That is correct, and it is still bounded.
+ */
+export async function drainMemoryJobsAfterTurn(
+  options: DrainMemoryJobsOptions = {},
+  deps: MemoryJobWorkerDeps = defaultWorkerDeps
+): Promise<number> {
+  return withDrainLock(() => drainMemoryJobs({ maxJobs: 1, ...options }, deps))
+}
+
+/** Test hook: drop the in-process drain lock between cases. */
+export function __resetMemoryDrainLock(): void {
+  inFlightDrain = undefined
 }
 
 export interface StartMemoryJobWorkerOptions extends DrainMemoryJobsOptions {
@@ -82,16 +138,7 @@ export interface StartMemoryJobWorkerOptions extends DrainMemoryJobsOptions {
 
 export function startMemoryJobWorker(options: StartMemoryJobWorkerOptions = {}): () => void {
   const deps = options.deps ?? defaultWorkerDeps
-  let running = false
-  const tick = async () => {
-    if (running) return
-    running = true
-    try {
-      await drainMemoryJobs(options, deps)
-    } finally {
-      running = false
-    }
-  }
+  const tick = () => withDrainLock(() => drainMemoryJobs(options, deps))
   // Repair unreadable `workspace` rows once per start. It hangs off the worker
   // rather than off a renderer initializer because every host that can process
   // memory at all already starts this worker, and the repair is idempotent by
@@ -666,7 +713,10 @@ async function defaultRepairNamespaces(): Promise<unknown> {
 
 const defaultWorkerDeps: MemoryJobWorkerDeps = {
   claimNext: claimNextMemoryJob,
-  finish: (id, outcome) => finishMemoryJob(id, outcome.status, outcome.resultCode),
-  fail: failMemoryJob,
+  finish: (id, outcome, workerId) =>
+    finishMemoryJob(id, outcome.status, outcome.resultCode, Date.now(), { workerId }),
+  fail: (id, code, workerId) => failMemoryJob(id, code, Date.now(), { workerId }),
   process: processMemoryJob,
+  heartbeat: (jobId, workerId, onLeaseLost) =>
+    startMemoryJobHeartbeat(jobId, workerId, { onLeaseLost }),
 }
