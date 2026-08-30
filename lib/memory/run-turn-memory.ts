@@ -1,297 +1,35 @@
 /**
- * Shared post-turn long-term-memory pass: extract semantic/procedural memories
- * from a completed turn, then schedule idle episodic distillation + eviction.
+ * Desktop adapter for the post-turn memory pass.
  *
- * Lifted out of `hooks/chat/use-claude-chat.ts` (`runMemoryTasks`) so BOTH the
- * direct-chat hook and the team-chat hook drive the same write path. Previously
- * only direct chat wrote long-term memory, so multi-agent (team) conversations
- * never contributed to the store even though teammates already *read* it through
- * `resolveSendOptions` — this closes the team↔direct memory parity gap.
- *
- * The caller supplies the already-extracted `newPair` (so each hook keeps its own
- * text-extraction nuance — direct chat uses `extractAssistantText` for the reply
- * but `extractPlainText` for the rolling transcript) plus a `{ role, text }`
- * transcript used for recent-context and maintenance. Fire-and-forget at the call
- * site; this never throws — memory must never break a send.
+ * The decision and enqueue live in `enqueueTurnMemory`, which reads settings
+ * from Dexie so it works on every host. This wrapper keeps the renderer's
+ * Zustand settings as the fast path and keeps the exported signature the two
+ * chat hooks already call. Fire-and-forget at the call site: this never throws,
+ * because memory must never break a send.
  */
 
-import { getSession } from "@/lib/db/sessions"
-import { resolveCharacterById } from "@/lib/db/characters"
 import { useSettingsStore } from "@/stores/settings"
-import { resolveMemoryConfig } from "@/types/memory/memory"
 import {
-  appendMemoryAuditEvent,
-  bindMemoryGovernanceOutcome,
-  claimMemoryJob,
-  finishMemoryJob,
-  createMemoryEvidence,
-  enqueueMemoryJob,
-  failMemoryJob,
-} from "@/lib/db/memory-governance"
-import {
-  hasUntrustedMemoryContext,
-  type MemoryExternalContextSource,
-} from "@/lib/memory/control-plane/policy"
-import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
-import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
-import type { MemoryScope } from "@/types/memory/memory"
-import {
-  consolidationAuditAction,
-  consolidationOpMemoryId,
-} from "@/lib/memory/consolidate/consolidator"
-import { resolveMemoryAgentNamespace } from "@/lib/memory/twin-namespace"
-import { buildJobCheckpoint, transcriptJobIdentity } from "@/lib/memory/lifecycle/transcript-window"
+  enqueueTurnMemory,
+  type TurnMemoryInput,
+  type TurnTranscriptEntry,
+} from "@/lib/memory/lifecycle/enqueue-turn-memory"
+import { drainMemoryJobsAfterTurn } from "@/lib/memory/lifecycle/job-worker"
 
-export interface TurnTranscriptEntry {
-  /**
-   * Source message id. Optional only for legacy callers: without it the job
-   * falls back to count-based checkpointing, which replays the wrong content
-   * after a same-length edit. Every in-tree caller supplies it.
-   */
-  id?: string
-  role: string
-  text: string
-  parts?: readonly unknown[]
-}
-
-export interface TurnMemoryInput {
-  /** The just-finished turn's user prompt (already extracted to plain text). */
-  userText: string
-  /** The turn's assistant reply (for a team turn: the final member/supervisor reply). */
-  assistantText: string
-  /** Rolling `{ role, text }` view of the conversation for recent-context + distillation. */
-  transcript: TurnTranscriptEntry[]
-  /** Id of the turn's assistant message — stamped onto learned memories so chat chips can liveQuery them. */
-  assistantMessageId?: string
-  /** Context sources used by this turn; external sources contaminate automatic learning. */
-  externalContext?: MemoryExternalContextSource[]
-}
-
-export function resolveAutomaticMemoryScope(
-  _configured: ReturnType<typeof resolveMemoryConfig>["scopeDefault"],
-  session: { projectId?: string; characterId?: string },
-  writableScopes: readonly MemoryScope[] = ["global", "workspace", "character", "agent"]
-): MemoryScope | null {
-  // Automatic learning starts at the workspace boundary. Character/agent and
-  // branch/path narrowing require an explicit applicability rationale from the
-  // extractor and are therefore not inferred here.
-  if (session.projectId && writableScopes.includes("workspace")) return "workspace"
-  if (writableScopes.includes("global")) return "global"
-  return null
-}
+export type { TurnMemoryInput, TurnTranscriptEntry }
 
 export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): Promise<void> {
-  let claimedJobId: string | undefined
   try {
-    if (!input.userText.trim()) return
-
     const settings = useSettingsStore.getState().settings
-    if (!settings) return
-    const config = resolveMemoryConfig(settings.memory)
-    if (!config.enabled || config.temporary) return
-    const sessionRow = await getSession(sessionId).catch(() => undefined)
-    if (!sessionRow) return
-    const character = sessionRow.characterId
-      ? await resolveCharacterById(sessionRow.characterId).catch(() => undefined)
-      : undefined
-    const memoryAgentId = resolveMemoryAgentNamespace({
-      twinId: character?.twinId,
-      characterId: sessionRow.characterId,
-    })
-    const externalContext = input.externalContext ?? detectMemoryExternalContext(input.transcript)
-    const contaminationState = hasUntrustedMemoryContext(externalContext)
-      ? "external-context"
-      : "clean"
-    const policy = resolveAgentMemoryPolicy({
-      config,
-      session: sessionRow,
-      agentPolicy: character?.memoryPolicy,
-      externalContext,
-    })
-    if (!policy.canAutoLearn) {
-      await appendMemoryAuditEvent({
-        action: "learn-denied",
-        sessionId,
-        reason: policy.learnReason,
-        metadata: { externalContextCount: externalContext.length },
-      }).catch(() => undefined)
-      return
-    }
-    const automaticScope = resolveAutomaticMemoryScope(
-      config.scopeDefault,
-      sessionRow,
-      policy.writableScopes
-    )
-    if (!automaticScope) {
-      await appendMemoryAuditEvent({
-        action: "learn-denied",
-        sessionId,
-        reason: "agent_scope_policy",
-      }).catch(() => undefined)
-      return
-    }
-    const effectiveConfig = {
-      ...config,
-      scopeDefault: automaticScope,
-    }
-
-    const { buildAutoExtractionDeps, runMemoryExtraction, sessionProvenance } =
-      await import("@/lib/memory/write/run-memory-extraction")
-    const provenance = sessionProvenance(sessionRow)
-    // Pin the job to real message ids. The identity still ends in the message
-    // count, so a row whose checkpoint is ever lost still resolves through the
-    // legacy trailing-`:<n>` path in `resolveJobTranscriptWindow`.
-    const checkpoint = buildJobCheckpoint(input.transcript, sessionRow.transcriptRevision)
-    const turnIdentity = `${sessionId}:${transcriptJobIdentity(
-      checkpoint,
-      `turn:${input.transcript.length}`
-    )}`
-    const evidence = await Promise.all([
-      createMemoryEvidence({
-        kind: "message",
-        sourceId: `${turnIdentity}:user`,
-        sessionId,
-        contaminationState,
-        reviewed: false,
-        sourceRole: "user",
-      }),
-      createMemoryEvidence({
-        kind: "message",
-        sourceId: `${turnIdentity}:assistant`,
-        sessionId,
-        contaminationState,
-        reviewed: false,
-        sourceRole: "assistant",
-      }),
-    ])
-    const job = await enqueueMemoryJob(
-      {
-        dedupeKey: `turn-extraction:${turnIdentity}`,
-        kind: "turn-extraction",
-        checkpoint,
-        sessionId,
-        projectId: sessionRow.projectId,
-        characterId: sessionRow.characterId,
-        agentId: automaticScope === "agent" ? memoryAgentId : undefined,
-        scope: effectiveConfig.scopeDefault,
-        provenance,
-        evidenceIds: evidence.map((item) => item.id),
-      },
-      { reuseCompleted: true }
-    )
-    const deps = await buildAutoExtractionDeps(
-      { session: sessionRow, appSettings: settings },
-      effectiveConfig
-    )
-    const claimed = deps ? await claimMemoryJob(job.id, "renderer-turn-memory") : undefined
-    if (deps && claimed) {
-      claimedJobId = job.id
-      const result = await runMemoryExtraction(
-        {
-          newPair: { userText: input.userText, assistantText: input.assistantText },
-          recentMessages: input.transcript.slice(-10).map(({ role, text }) => ({ role, text })),
-          scope: effectiveConfig.scopeDefault,
-          characterId: sessionRow.characterId,
-          projectId: sessionRow.projectId,
-          agentId: automaticScope === "agent" ? memoryAgentId : undefined,
-          provenance,
-          source: { sessionId, messageId: input.assistantMessageId },
-          config: effectiveConfig,
-        },
-        deps
-      )
-      for (const operation of result.applied) {
-        const memoryId = consolidationOpMemoryId(operation)
-        const auditAction = consolidationAuditAction(operation)
-        if (!memoryId || !auditAction) continue
-        await bindMemoryGovernanceOutcome({
-          memoryId,
-          patch: {
-            evidenceState: "supported",
-            reviewStatus:
-              operation.op === "CONFLICT"
-                ? "conflict"
-                : operation.op === "ADD" && operation.memory.type === "procedural"
-                  ? "pending_instruction"
-                  : "unreviewed",
-            contaminationState,
-            sensitivity: "normal",
-          },
-          evidence: {
-            kind: "message",
-            sourceId: turnIdentity,
-            sessionId,
-            contaminationState,
-            reviewed: false,
-          },
-          audit: {
-            action: auditAction,
-            sessionId,
-            reason: "automatic_learning",
-          },
-        })
-      }
-      const producedOutput = result.applied.some((operation) => operation.op !== "NOOP")
-      await finishMemoryJob(
-        job.id,
-        producedOutput ? "succeeded" : "no_output",
-        producedOutput ? "memories_applied" : "nothing_durable"
-      )
-      claimedJobId = undefined
-    }
-
-    await appendMemoryAuditEvent({
-      action: "learn-allowed",
+    const result = await enqueueTurnMemory({
       sessionId,
-      reason: policy.learnReason,
-      metadata: { externalContextCount: externalContext.length },
-    }).catch(() => undefined)
-
-    // Project-context mining. Only CLOSED windows are queued from the live turn
-    // path — the trailing window is still growing, so its identity changes every
-    // turn and mining it here would re-mine overlapping text on every send. The
-    // idle maintenance tick flushes it once the conversation stops.
-    if (
-      effectiveConfig.mineProjectContext &&
-      sessionRow.projectId &&
-      policy.writableScopes.includes("workspace")
-    ) {
-      const { enqueueProjectMiningJobs } = await import("@/lib/memory/write/project-mining-enqueue")
-      await enqueueProjectMiningJobs({
-        sessionId,
-        projectId: sessionRow.projectId,
-        transcript: input.transcript
-          .filter((entry): entry is TurnTranscriptEntry & { id: string } => Boolean(entry.id))
-          .map((entry) => ({
-            id: entry.id,
-            role: entry.role,
-            text: entry.text,
-            parts: entry.parts,
-          })),
-        transcriptRevision: sessionRow.transcriptRevision,
-        scope: "workspace",
-        characterId: sessionRow.characterId,
-        provenance,
-        includeTrailing: false,
-      }).catch(() => undefined)
-    }
-
-    // Schedule idle episodic distillation + capacity/access-time eviction.
-    const { scheduleMemoryMaintenance } = await import("@/lib/memory/lifecycle/maintenance")
-    scheduleMemoryMaintenance({
-      sessionId,
-      session: sessionRow,
-      appSettings: settings,
-      transcript: input.transcript,
-      provenance,
-      contaminationState,
-      config: effectiveConfig,
-      agentId: memoryAgentId,
+      ...input,
+      ...(settings ? { settings } : {}),
     })
+    // One job, right now, so a user does not wait up to the worker interval to
+    // see what the turn learned. The backlog stays the interval worker's.
+    if (result.enqueued) await drainMemoryJobsAfterTurn()
   } catch (err) {
-    if (claimedJobId) {
-      await failMemoryJob(claimedJobId, "turn_extraction_failed").catch(() => undefined)
-    }
     console.warn("runTurnMemory failed", err)
   }
 }

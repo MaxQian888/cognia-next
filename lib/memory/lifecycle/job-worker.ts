@@ -15,6 +15,7 @@ import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import { startMemoryJobHeartbeat } from "@/lib/memory/lifecycle/job-heartbeat"
+import { recordMemoryJobOutcome } from "@/lib/memory/lifecycle/record-memory-outcome"
 import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-window"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
@@ -274,44 +275,17 @@ function lastCompletedPair(
   return undefined
 }
 
-async function recordRecoveredOperations(
-  job: MemoryJob,
-  operations: ConsolidationOp[],
-  contaminationState: "clean" | "external-context"
-): Promise<void> {
-  for (const operation of operations) {
-    const memoryId = consolidationOpMemoryId(operation)
-    const auditAction = consolidationAuditAction(operation)
-    if (!memoryId || !auditAction) continue
-    const addedType =
-      operation.op === "ADD" || operation.op === "CONFLICT" ? operation.memory.type : undefined
-    await updateMemory(memoryId, {
-      evidenceState: "supported",
-      reviewStatus:
-        operation.op === "CONFLICT"
-          ? "conflict"
-          : addedType === "procedural"
-            ? "pending_instruction"
-            : "unreviewed",
-      contaminationState,
-      sensitivity: "normal",
-    })
-    await createMemoryEvidence({
-      memoryId,
-      kind: "checkpoint",
-      sourceId: `recovered-job:${job.id}`,
-      sessionId: job.sessionId,
-      contaminationState,
-      reviewed: false,
-      sourceRole: "user",
-    })
-    await appendMemoryAuditEvent({
-      action: auditAction,
-      memoryId,
-      sessionId: job.sessionId,
-      reason: "recovered_job",
-    })
-  }
+/**
+ * The turn identity a `turn-extraction` job was queued under.
+ *
+ * `enqueueTurnMemory` builds the key as `turn-extraction:<turnIdentity>`, so
+ * stripping the prefix recovers the identity the inline path used to anchor its
+ * evidence to. That anchoring is what keeps a memory's provenance timeline
+ * pointing at the turn rather than at the job that happened to process it.
+ */
+function turnIdentityOf(job: MemoryJob): string {
+  const prefix = "turn-extraction:"
+  return job.dedupeKey?.startsWith(prefix) ? job.dedupeKey.slice(prefix.length) : `job:${job.id}`
 }
 
 /**
@@ -350,7 +324,13 @@ async function processTurnExtraction(job: MemoryJob): Promise<MemoryJobProcessOu
     },
     deps
   )
-  await recordRecoveredOperations(job, result.applied, context.contaminationState)
+  await recordMemoryJobOutcome({
+    job,
+    operations: result.applied,
+    contaminationState: context.contaminationState,
+    evidence: { kind: "message", sourceId: turnIdentityOf(job), sourceRole: "user" },
+    auditReason: "automatic_learning",
+  })
   return result.applied.some((operation) => operation.op !== "NOOP")
     ? {
         status: "succeeded",

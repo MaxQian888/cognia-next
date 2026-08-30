@@ -6,6 +6,10 @@ const mockEnqueueJob = jest.fn()
 const mockClaimJob = jest.fn()
 const mockCompleteJob = jest.fn()
 const mockFailJob = jest.fn()
+const mockDrainAfterTurn = jest.fn()
+jest.mock("./job-worker", () => ({
+  drainMemoryJobsAfterTurn: (...a: unknown[]) => mockDrainAfterTurn(...a),
+}))
 jest.mock("./build-maintenance-deps", () => ({
   buildEpisodicMaintenanceDeps: (...a: unknown[]) => mockBuildDeps(...a),
 }))
@@ -331,6 +335,8 @@ describe("scheduleMemoryMaintenance", () => {
     mockClaimJob.mockReset()
     mockCompleteJob.mockReset()
     mockFailJob.mockReset()
+    mockDrainAfterTurn.mockReset()
+    mockDrainAfterTurn.mockResolvedValue(1)
     __resetMaintenanceGuard()
     jest.useFakeTimers()
     mockBuildDeps.mockResolvedValue({
@@ -373,24 +379,38 @@ describe("scheduleMemoryMaintenance", () => {
     expect(mockBuildDeps).not.toHaveBeenCalled()
   })
 
-  it("schedules a maintenance pass and runs it on idle", async () => {
+  it("queues a maintenance pass and asks the drain to pick it up on idle", async () => {
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()
-    expect(mockBuildDeps).toHaveBeenCalledTimes(1)
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "session-distill" }),
+      { reuseCompleted: true }
+    )
+    expect(mockDrainAfterTurn).toHaveBeenCalledTimes(1)
   })
 
-  it("runs at most once per session per app run", async () => {
+  it("dedupes a repeated schedule onto one durable job", async () => {
+    // The guard is the durable dedupe key, not process-local state, so a second
+    // schedule for the same transcript resolves to the same queued row.
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()
-    expect(mockBuildDeps).toHaveBeenCalledTimes(1)
+    const distillKeys = mockEnqueueJob.mock.calls
+      .map(([draft]) => draft as { kind: string; dedupeKey: string })
+      .filter((draft) => draft.kind === "session-distill")
+      .map((draft) => draft.dedupeKey)
+    expect(distillKeys).toHaveLength(2)
+    expect(new Set(distillKeys).size).toBe(1)
   })
 
-  it("backs off durably when deps cannot be built", async () => {
-    mockBuildDeps.mockResolvedValue(null)
+  // Distillation itself is the worker's job now, so the scheduler no longer
+  // builds deps, claims the row it just queued, or reports its outcome.
+  it("never claims the job it queued", async () => {
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()
-    expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
+    expect(mockClaimJob).not.toHaveBeenCalled()
+    expect(mockCompleteJob).not.toHaveBeenCalled()
+    expect(mockFailJob).not.toHaveBeenCalled()
   })
 
   it("arms the claim re-check backstop only when mining is on", async () => {
@@ -487,7 +507,7 @@ describe("scheduleMemoryMaintenance", () => {
     )
   })
 
-  it("enqueues, claims and completes the durable session-distill job", async () => {
+  it("enqueues the durable session-distill job with a checkpointed identity", async () => {
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()
     expect(mockEnqueueJob).toHaveBeenCalledWith(
@@ -497,8 +517,6 @@ describe("scheduleMemoryMaintenance", () => {
       }),
       { reuseCompleted: true }
     )
-    expect(mockClaimJob).toHaveBeenCalledWith("job-1", "renderer-memory-maintenance")
-    expect(mockCompleteJob).toHaveBeenCalledWith("job-1", "succeeded", "maintenance_completed")
   })
 
   it("piggybacks a day-bucketed vector-reconcile enqueue on the maintenance tick", async () => {

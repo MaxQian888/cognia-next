@@ -246,43 +246,16 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
       },
       { reuseCompleted: true }
     )
+    // Enqueue only. This used to claim the job it had just queued and run the
+    // distillation inline, which meant the worker's own `session-distill`
+    // handler was dead code except after a crash, and the inline run held a
+    // lease it never renewed. The idle callback now just asks the shared drain
+    // to pick the job up early.
+    void job
     onIdle(() => {
       void (async () => {
-        try {
-          const { claimMemoryJob, finishMemoryJob, failMemoryJob } =
-            await import("@/lib/db/memory-governance")
-          const claimed = await claimMemoryJob(job.id, "renderer-memory-maintenance")
-          if (!claimed) return
-          const [{ buildEpisodicMaintenanceDeps }] = await Promise.all([
-            import("./build-maintenance-deps"),
-          ])
-          const deps = await buildEpisodicMaintenanceDeps(
-            { session: params.session, appSettings: params.appSettings },
-            config
-          )
-          if (!deps) {
-            await failMemoryJob(job.id, "dependencies_unavailable")
-            return
-          }
-          await runMemoryMaintenance(
-            {
-              transcript: params.transcript,
-              scope: config.scopeDefault,
-              characterId: params.session?.characterId,
-              projectId: params.session?.projectId,
-              agentId: config.scopeDefault === "agent" ? params.agentId : undefined,
-              provenance: params.provenance,
-              contaminationState: params.contaminationState,
-              source: { sessionId },
-              config,
-            },
-            deps
-          )
-          await finishMemoryJob(job.id, "succeeded", "maintenance_completed")
-        } catch {
-          const { failMemoryJob } = await import("@/lib/db/memory-governance")
-          await failMemoryJob(job.id, "maintenance_failed").catch(() => undefined)
-        }
+        const { drainMemoryJobsAfterTurn } = await import("./job-worker")
+        await drainMemoryJobsAfterTurn().catch(() => undefined)
       })()
     })
   })().catch(() => undefined)

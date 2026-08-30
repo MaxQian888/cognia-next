@@ -5,6 +5,7 @@ const mockGetSession = jest.fn()
 const mockListMessages = jest.fn()
 const mockAppendAudit = jest.fn()
 const mockCreateEvidence = jest.fn()
+const mockBindOutcome = jest.fn()
 const mockListMemories = jest.fn()
 const mockUpdateMemory = jest.fn()
 const mockBuildExtractionDeps = jest.fn()
@@ -30,6 +31,7 @@ jest.mock("@/lib/db/memory-governance", () => ({
   claimNextMemoryJob: jest.fn(),
   finishMemoryJob: jest.fn(),
   createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
+  bindMemoryGovernanceOutcome: (...args: unknown[]) => mockBindOutcome(...args),
   failMemoryJob: jest.fn(),
 }))
 jest.mock("@/lib/db/memories", () => ({
@@ -252,6 +254,7 @@ describe("memory job worker", () => {
     mockRunMaintenance.mockResolvedValue(undefined)
     mockAppendAudit.mockResolvedValue({})
     mockCreateEvidence.mockResolvedValue({})
+    mockBindOutcome.mockResolvedValue({})
     mockUpdateMemory.mockResolvedValue(undefined)
   })
 
@@ -310,13 +313,18 @@ describe("memory job worker", () => {
       }),
       expect.anything()
     )
-    expect(mockUpdateMemory).toHaveBeenCalledWith(
-      "m1",
-      expect.objectContaining({ evidenceState: "supported" })
+    // One transactional write, anchored to the TURN rather than to the job that
+    // happened to process it, so a memory's provenance timeline reads the same
+    // whether the drain ran it immediately or after a restart.
+    expect(mockBindOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryId: "m1",
+        patch: expect.objectContaining({ evidenceState: "supported" }),
+        evidence: expect.objectContaining({ kind: "message", sourceId: "s1:turn:2" }),
+        audit: expect.objectContaining({ reason: "automatic_learning" }),
+      })
     )
-    expect(mockCreateEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ memoryId: "m1", kind: "checkpoint" })
-    )
+    expect(mockUpdateMemory).not.toHaveBeenCalledWith("m1", expect.anything())
   })
 
   it("processes session distillation and vector reconciliation jobs", async () => {
@@ -757,10 +765,12 @@ describe("memory job worker", () => {
       ],
     })
     await processMemoryJob({ ...job("turn"), sessionId: "s1" })
-    expect(mockUpdateMemory).toHaveBeenCalledTimes(1)
-    expect(mockUpdateMemory).toHaveBeenCalledWith(
-      "m-upd",
-      expect.objectContaining({ reviewStatus: "unreviewed" })
+    expect(mockBindOutcome).toHaveBeenCalledTimes(1)
+    expect(mockBindOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryId: "m-upd",
+        patch: expect.objectContaining({ reviewStatus: "unreviewed" }),
+      })
     )
   })
 
