@@ -191,3 +191,102 @@ describe("MemoryInspector", () => {
     )
   })
 })
+
+describe("the project-claim section", () => {
+  const claim = (over: Partial<Memory> = {}) =>
+    mem({ projectMemoryKind: "constraint", text: "the repo pins rust to 1.77.2", ...over })
+
+  it("stays out of the way for a personal memory", () => {
+    setup({ memory: mem() })
+    expect(screen.queryByTestId("memory-claim-kind")).toBeNull()
+    expect(screen.queryByTestId("memory-claim-applicability")).toBeNull()
+  })
+
+  it("names the claim kind for a mined row", () => {
+    setup({ memory: claim() })
+    expect(within(screen.getByTestId("memory-claim-kind")).getByText("Constraint")).toBeTruthy()
+  })
+
+  it("shows when the evidence happened, not when the miner ran", () => {
+    // `createdAt` is today for a backfilled eight-month-old session; showing it
+    // would date every mined claim to the day mining was switched on.
+    setup({ memory: claim({ observedAt: NOW - 86_400_000 * 200 }) })
+    expect(screen.getByText("Observed")).toBeTruthy()
+  })
+
+  it("says a never-verified claim has never been verified", () => {
+    setup({ memory: claim() })
+    expect(screen.getByText("Never verified")).toBeTruthy()
+  })
+
+  it("renders the branch and path scope, naming the unscoped case", () => {
+    setup({ memory: claim() })
+    expect(screen.getByText("Every branch")).toBeTruthy()
+    expect(screen.getByText("Every path")).toBeTruthy()
+  })
+
+  it("shows why an automatic claim was narrowed", () => {
+    setup({ memory: claim({ scopeRationale: "seen only under src-tauri/" }) })
+    expect(screen.getByText(/seen only under src-tauri/)).toBeTruthy()
+  })
+
+  describe("applicability is three-valued, not two", () => {
+    it("applies when the claim is unscoped", () => {
+      setup({ memory: claim(), readerContext: { branch: "dev" } })
+      expect(
+        screen.getByTestId("memory-claim-applicability").getAttribute("data-applicability")
+      ).toBe("applies")
+    })
+
+    it("does not apply on another branch", () => {
+      setup({ memory: claim({ branch: "main" }), readerContext: { branch: "dev" } })
+      expect(
+        screen.getByTestId("memory-claim-applicability").getAttribute("data-applicability")
+      ).toBe("elsewhere")
+    })
+
+    it("cannot tell when the claim is path-scoped and no file is open", () => {
+      // Distinct from "does not apply": `matchesPath` answers false for a
+      // missing path, and collapsing the two would tell the user a claim is
+      // irrelevant when nothing has been checked.
+      setup({ memory: claim({ pathPattern: "src-tauri" }), readerContext: { branch: "dev" } })
+      expect(
+        screen.getByTestId("memory-claim-applicability").getAttribute("data-applicability")
+      ).toBe("unknown")
+    })
+
+    it("uses the retriever's own path predicate", () => {
+      setup({
+        memory: claim({ pathPattern: "src-tauri" }),
+        readerContext: { branch: "dev", path: "src-tauri/src/lib.rs" },
+      })
+      expect(
+        screen.getByTestId("memory-claim-applicability").getAttribute("data-applicability")
+      ).toBe("applies")
+    })
+
+    it("renders the badge inert rather than hiding it when the claim is elsewhere", () => {
+      // Rule 7: a missing badge would read as "applies".
+      setup({ memory: claim({ branch: "main" }), readerContext: { branch: "dev" } })
+      const badge = screen.getByTestId("memory-claim-applicability")
+      expect(badge.textContent).toBe("Does not apply where you are")
+    })
+  })
+
+  it("marks a claim out of date without archiving it", async () => {
+    const user = userEvent.setup()
+    const onMarkOutdated = jest.fn(async () => {})
+    const onArchive = jest.fn()
+    setup({ memory: claim(), onMarkOutdated, onArchive })
+    await user.click(screen.getByTestId("memory-claim-mark-outdated"))
+    expect(onMarkOutdated).toHaveBeenCalledWith("m1")
+    // An expired claim is still true history; archiving is a different intent
+    // with its own button.
+    expect(onArchive).not.toHaveBeenCalled()
+  })
+
+  it("offers no mark-outdated button when the host supplies no handler", () => {
+    setup({ memory: claim() })
+    expect(screen.queryByTestId("memory-claim-mark-outdated")).toBeNull()
+  })
+})

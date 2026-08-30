@@ -265,7 +265,16 @@ export async function listMemories(query: ListMemoriesQuery = {}): Promise<Memor
  * Active memories visible to a reader: the `global` base unioned with the
  * given character's override layer. This is the retriever's candidate pool.
  */
-function matchesPath(pattern: string | undefined, path: string | undefined): boolean {
+/**
+ * Does a memory's `pathPattern` apply to `path`?
+ *
+ * Exported because the inspector answers "does this claim apply where I am
+ * standing?" and must answer it with the SAME predicate `isVisibleToReader`
+ * uses. A second implementation in the UI would eventually disagree with the
+ * retriever, and the visible symptom would be a badge saying a claim applies
+ * to a file it is never recalled for.
+ */
+export function matchesPath(pattern: string | undefined, path: string | undefined): boolean {
   if (!pattern) return true
   if (!path) return false
   const normalizedPattern = pattern.replace(/^\.\//, "").replace(/\/\*\*?$/, "")

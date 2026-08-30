@@ -88,6 +88,19 @@
     },
     "auditTitle": "Audit history",
     "cancel": "Cancel",
+    "claim": {
+      "anyBranch": "Every branch",
+      "anyPath": "Every path",
+      "appliesElsewhere": "Does not apply where you are",
+      "appliesHere": "Applies where you are",
+      "markOutdated": "Mark out of date",
+      "markedOutdated": "Marked out of date",
+      "neverValidated": "Never verified",
+      "outdatedFailed": "Couldn't record that",
+      "rationaleLabel": "Why this was narrowed",
+      "scopeUnknown": "Cannot tell — no file is open",
+      "viewObservation": "Open the turn it came from"
+    },
     "close": "Close",
     "conflictGone": "The conflicting memory was deleted.",
     "conflictsWith": "Conflicts with",
@@ -101,16 +114,22 @@
     "fields": {
       "accessCount": "Recalled",
       "archivedAt": "Archived",
+      "branchScope": "Branch",
+      "claimKind": "Kind",
       "contamination": "Context trust",
       "created": "Created",
       "evidence": "Evidence",
+      "freshnessField": "Freshness",
       "importance": "Importance",
       "indexed": "Indexed",
       "key": "Key",
       "lastUsed": "Last used",
+      "observedAt": "Observed",
+      "pathScope": "Paths",
       "review": "Review",
       "scope": "Scope",
       "updated": "Updated",
+      "validatedAt": "Last verified",
       "version": "Version"
     },
     "importanceLabel": "Importance",
@@ -126,6 +145,7 @@
       "content": "Memory",
       "metrics": "Metrics",
       "origin": "Origin",
+      "projectClaim": "Project context",
       "status": "Status",
       "tags": "Tags"
     },
@@ -192,6 +212,12 @@
       "savedWithBackup": "Saved — previous version kept as {backup}"
     }
   },
+  "freshness": {
+    "expired": "Expired",
+    "fresh": "Verified",
+    "stale": "Needs re-checking",
+    "unknown": "Never checked"
+  },
   "governance": {
     "clean": "Clean",
     "conflict": "Conflict",
@@ -246,9 +272,14 @@
       "title": "No memories yet"
     },
     "filter": {
+      "branches": "Branch",
       "clear": "Clear filters",
+      "freshness": "Freshness",
       "label": "Filter",
+      "noWorkspace": "No workspace",
       "none": "Nothing to filter in this view",
+      "projectIds": "Workspace",
+      "projectMemoryKinds": "Kind",
       "provenances": "Source",
       "scopes": "Scope",
       "tags": "Tags",
@@ -308,6 +339,14 @@
       "needsReview": "Needs review",
       "pinned": "Pinned"
     }
+  },
+  "projectKind": {
+    "constraint": "Constraint",
+    "decision": "Decision",
+    "gotcha": "Gotcha",
+    "outcome": "Verified outcome",
+    "personal": "About you",
+    "state": "Project state"
   },
   "provenance": {
     "all": "All sources",

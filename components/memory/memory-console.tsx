@@ -54,6 +54,8 @@ import {
   type MemorySortKey,
 } from "@/lib/memory/history-filter"
 import { isEditableTarget } from "@/lib/shortcuts/dom"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useGitStore } from "@/stores/git/git-store"
 import type { Memory } from "@/types/memory/memory"
 import { cn } from "@/lib/utils"
 
@@ -107,6 +109,21 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
     [all, viewFilter, sort]
   )
   const facets = useMemo(() => collectMemoryFacets(viewRows), [viewRows])
+  // Workspace ids are opaque; the facet menu needs names. Read from the store
+  // rather than joining Dexie: the console already holds every memory in
+  // memory, and the project list is small and already loaded by the shell.
+  const projects = useProjectStore((state) => state.projects)
+  // The branch the Source Control indicator is already tracking — it is
+  // always-mounted from the status bar, so this is a store read, not a new
+  // watcher. There is deliberately no `path`: no file is open on /memory, and
+  // the badge says "cannot tell" rather than guessing.
+  const gitBranch = useGitStore((state) => state.status?.branch ?? undefined)
+  const readerContext = useMemo(() => ({ branch: gitBranch }), [gitBranch])
+  const projectNames = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const project of projects) map[project.id] = project.name
+    return map
+  }, [projects])
 
   const rows = useMemo(
     () =>
@@ -268,6 +285,14 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
     },
     [runManaged]
   )
+  // Deliberately `retrieval-feedback`, not `invalidate`. A claim that stopped
+  // being true is still real history — archiving it is a different intent with
+  // its own button. This marks it stale so it ranks below fresher claims and
+  // the re-check sweep looks at it sooner.
+  const handleMarkOutdated = useCallback(
+    (id: string) => runManaged({ kind: "retrieval-feedback", id, verdict: "outdated" }),
+    [runManaged]
+  )
   const handleTagClick = useCallback((tag: string) => {
     setFilter((prev) => {
       const tags = prev.tags ?? []
@@ -406,6 +431,7 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
             filter={filter}
             onFilterChange={setFilter}
             facets={facets}
+            projectNames={projectNames}
             sort={sort}
             onSortChange={setSort}
             density={density}
@@ -447,6 +473,8 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
                     }
                     onSelectMemory={setSelectedId}
                     onOpenResolver={conflictPartner ? () => setResolverOpen(true) : undefined}
+                    onMarkOutdated={handleMarkOutdated}
+                    readerContext={readerContext}
                   />
                 ),
                 defaultSize: 30,

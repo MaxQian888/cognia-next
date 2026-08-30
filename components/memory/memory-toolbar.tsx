@@ -49,6 +49,7 @@ export type MemoryDensity = "comfortable" | "compact"
 
 const SORT_KEYS: readonly MemorySortKey[] = ["recent", "importance", "accessed", "created"]
 const MAX_TAG_OPTIONS = 12
+const MAX_BRANCH_OPTIONS = 12
 
 export interface MemoryToolbarProps {
   view: MemoryQuickViewId
@@ -59,6 +60,14 @@ export interface MemoryToolbarProps {
   onFilterChange: (filter: MemoryFilter) => void
   /** Derived from the rows the current view matched. */
   facets: MemoryFacets
+  /**
+   * Workspace id → display name, so the Workspace facet is readable.
+   *
+   * Optional: an id with no entry renders as the raw id rather than
+   * disappearing, because a workspace deleted while its claims survive is
+   * exactly the case the user needs to be able to filter for.
+   */
+  projectNames?: Record<string, string>
   sort: MemorySortKey
   onSortChange: (sort: MemorySortKey) => void
   density: MemoryDensity
@@ -78,6 +87,7 @@ export function MemoryToolbar({
   filter,
   onFilterChange,
   facets,
+  projectNames,
   sort,
   onSortChange,
   density,
@@ -87,13 +97,19 @@ export function MemoryToolbar({
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
   const tProv = useTranslations("memory.provenance")
+  const tKind = useTranslations("memory.projectKind")
+  const tFresh = useTranslations("memory.freshness")
 
   const activeCount = countActiveMemoryFilters(filter)
   const hasFacets =
     facets.types.length > 0 ||
     facets.scopes.length > 0 ||
     facets.provenances.length > 0 ||
-    facets.tags.length > 0
+    facets.tags.length > 0 ||
+    facets.projectMemoryKinds.length > 0 ||
+    facets.projectIds.length > 0 ||
+    facets.branches.length > 0 ||
+    facets.freshness.length > 0
 
   return (
     <div className="flex items-center gap-2" data-testid="memory-toolbar">
@@ -208,6 +224,53 @@ export function MemoryToolbar({
             selected={filter.tags}
             render={(value) => value}
             onToggle={(value) => onFilterChange({ ...filter, tags: toggle(filter.tags, value) })}
+          />
+          {/*
+            The corpus partition, as one axis with six values. `personal` is the
+            ABSENCE of a `projectMemoryKind`, resolved by the same predicate the
+            retriever partitions on, so the console can never disagree with what
+            was actually recalled.
+          */}
+          <FacetGroup
+            label={t("filter.projectMemoryKinds")}
+            options={facets.projectMemoryKinds}
+            selected={filter.projectMemoryKinds}
+            render={(value) => tKind(value)}
+            onToggle={(value) =>
+              onFilterChange({
+                ...filter,
+                projectMemoryKinds: toggle(filter.projectMemoryKinds, value),
+              })
+            }
+          />
+          <FacetGroup
+            label={t("filter.projectIds")}
+            options={facets.projectIds}
+            selected={filter.projectIds}
+            // The unscoped row gets a name rather than an empty checkbox row —
+            // "no workspace" is a real answer to "which workspace", not a gap.
+            render={(value) => projectNames?.[value] || value || t("filter.noWorkspace")}
+            onToggle={(value) =>
+              onFilterChange({ ...filter, projectIds: toggle(filter.projectIds, value) })
+            }
+          />
+          <FacetGroup
+            label={t("filter.branches")}
+            options={facets.branches.slice(0, MAX_BRANCH_OPTIONS)}
+            selected={filter.branches}
+            render={(value) => value}
+            onToggle={(value) =>
+              onFilterChange({ ...filter, branches: toggle(filter.branches, value) })
+            }
+          />
+          <FacetGroup
+            label={t("filter.freshness")}
+            options={facets.freshness}
+            selected={filter.freshness}
+            render={(value) => tFresh(value)}
+            onToggle={(value) =>
+              onFilterChange({ ...filter, freshness: toggle(filter.freshness, value) })
+            }
           />
 
           {activeCount > 0 ? (

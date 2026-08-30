@@ -17,6 +17,7 @@ import { useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import Link from "next/link"
 import { buildSessionHref } from "@/lib/chat/message-permalink"
+import { matchesPath } from "@/lib/db/memories"
 import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
 import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import {
@@ -81,6 +82,19 @@ export interface MemoryInspectorProps {
   onSelectMemory?: (id: string) => void
   /** Open the guided conflict-disposition card for this memory's conflict pair. */
   onOpenResolver?: () => void
+  /**
+   * Where the user is standing, for the applicability read-out.
+   *
+   * Optional and honestly three-valued: an absent `path` means "cannot tell",
+   * which is a different answer from "does not apply" and is rendered as such.
+   */
+  readerContext?: { branch?: string; path?: string }
+  /**
+   * Record a claim as out of date. Distinct from `onArchive` on purpose: an
+   * expired claim is still true history, and archiving is a different intent
+   * that already has its own button.
+   */
+  onMarkOutdated?: (id: string) => void | Promise<void>
   className?: string
 }
 
@@ -108,6 +122,8 @@ export function MemoryInspector({
   navPosition,
   onSelectMemory,
   onOpenResolver,
+  readerContext,
+  onMarkOutdated,
   className,
 }: MemoryInspectorProps) {
   const t = useTranslations("memory.detail")
@@ -117,7 +133,22 @@ export function MemoryInspector({
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
   const tProv = useTranslations("memory.provenance")
+  const tKind = useTranslations("memory.projectKind")
+  const tFresh = useTranslations("memory.freshness")
   const format = useFormatter()
+  const [outdatedState, setOutdatedState] = useState<"idle" | "pending" | "done">("idle")
+  // Three-valued on purpose. `matchesPath` answers false for "no path given",
+  // which is indistinguishable from "the pattern excludes this file" — and
+  // those are different things to tell a user. Branch is checked the same way
+  // `isVisibleToReader` checks it: a claim with no branch applies everywhere.
+  const applicability: "applies" | "elsewhere" | "unknown" = (() => {
+    if (!memory.projectMemoryKind) return "unknown"
+    const branchOk = !memory.branch || memory.branch === readerContext?.branch
+    if (!branchOk) return "elsewhere"
+    if (!memory.pathPattern) return "applies"
+    if (!readerContext?.path) return "unknown"
+    return matchesPath(memory.pathPattern, readerContext.path) ? "applies" : "elsewhere"
+  })()
   const now = useNow()
 
   const [editing, setEditing] = useState(false)
@@ -375,6 +406,93 @@ export function MemoryInspector({
             ) : null}
           </Section>
 
+          {/*
+            Only for mined claims. A personal memory has no observation instant,
+            no branch/path applicability and no re-check, so rendering the
+            section empty for one would be six blank fields pretending to be
+            information.
+          */}
+          {memory.projectMemoryKind ? (
+            <Section title={t("sections.projectClaim")}>
+              <FieldGrid>
+                <Field
+                  label={t("fields.claimKind")}
+                  value={tKind(memory.projectMemoryKind)}
+                  testId="memory-claim-kind"
+                />
+                <Field
+                  label={t("fields.observedAt")}
+                  // `observedAt` is when the evidence HAPPENED; `createdAt` is
+                  // when Cognia learned it. Backfilling an old session makes
+                  // those months apart, so the section shows the one that is
+                  // about the project rather than about the miner.
+                  value={memory.observedAt ? at(memory.observedAt) : at(memory.createdAt)}
+                />
+                <Field
+                  label={t("fields.validatedAt")}
+                  value={memory.validatedAt ? since(memory.validatedAt) : t("claim.neverValidated")}
+                />
+                <Field
+                  label={t("fields.freshnessField")}
+                  value={tFresh(memory.staleness ?? "unknown")}
+                />
+                <Field
+                  label={t("fields.branchScope")}
+                  value={memory.branch || t("claim.anyBranch")}
+                  mono={Boolean(memory.branch)}
+                />
+                <Field
+                  label={t("fields.pathScope")}
+                  value={memory.pathPattern || t("claim.anyPath")}
+                  mono={Boolean(memory.pathPattern)}
+                />
+              </FieldGrid>
+              {memory.scopeRationale ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  <span className="font-medium">{t("claim.rationaleLabel")}: </span>
+                  {memory.scopeRationale}
+                </p>
+              ) : null}
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <Badge
+                  variant={applicability === "applies" ? "secondary" : "outline"}
+                  className={cn(
+                    "text-[10px]",
+                    // Inert, not hidden (CLAUDE.md rule 7): "does not apply
+                    // here" and "cannot tell" are answers the user needs, and a
+                    // missing badge would read as "applies".
+                    applicability !== "applies" && "text-muted-foreground"
+                  )}
+                  data-testid="memory-claim-applicability"
+                  data-applicability={applicability}
+                >
+                  {applicability === "applies"
+                    ? t("claim.appliesHere")
+                    : applicability === "elsewhere"
+                      ? t("claim.appliesElsewhere")
+                      : t("claim.scopeUnknown")}
+                </Badge>
+                {onMarkOutdated ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    disabled={outdatedState !== "idle"}
+                    data-testid="memory-claim-mark-outdated"
+                    onClick={() => {
+                      setOutdatedState("pending")
+                      void Promise.resolve(onMarkOutdated(memory.id))
+                        .then(() => setOutdatedState("done"))
+                        .catch(() => setOutdatedState("idle"))
+                    }}
+                  >
+                    {outdatedState === "done" ? t("claim.markedOutdated") : t("claim.markOutdated")}
+                  </Button>
+                ) : null}
+              </div>
+            </Section>
+          ) : null}
+
           <Section title={t("sections.metrics")}>
             <FieldGrid>
               <Field label={t("fields.importance")} value={String(memory.importance)} />
@@ -500,9 +618,19 @@ function FieldGrid({ children }: { children: React.ReactNode }) {
   return <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">{children}</dl>
 }
 
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Field({
+  label,
+  value,
+  mono,
+  testId,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  testId?: string
+}) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" data-testid={testId}>
       <dt className="text-[11px] text-muted-foreground">{label}</dt>
       <dd className={cn("truncate text-xs", mono && "font-mono")}>{value}</dd>
     </div>

@@ -11,6 +11,7 @@ describe("memory navigation config", () => {
       "overview",
       "learning",
       "retrieval",
+      "projectContext",
       "maintenance",
       "privacy",
     ])
@@ -19,6 +20,7 @@ describe("memory navigation config", () => {
 
   it("accepts known deep links and falls back for untrusted values", () => {
     expect(resolveMemoryPanel("retrieval")).toBe("retrieval")
+    expect(resolveMemoryPanel("projectContext")).toBe("projectContext")
     expect(resolveMemoryPanel("unknown")).toBe(DEFAULT_MEMORY_PANEL)
     expect(resolveMemoryPanel(null)).toBe(DEFAULT_MEMORY_PANEL)
   })

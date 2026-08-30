@@ -124,6 +124,10 @@
         "description": "Manage embedding privacy and destructive actions.",
         "label": "Privacy"
       },
+      "projectContext": {
+        "description": "Learn from this workspace's own chats, and decide whether to tell the model.",
+        "label": "Project context"
+      },
       "retrieval": {
         "description": "Tune recall quality, limits, and preview results.",
         "label": "Retrieval"
@@ -168,6 +172,35 @@
     "errors": {
       "failed": "The recall preview failed.",
       "unavailable": "Memory retrieval is not available with the current configuration."
+    }
+  },
+  "projectContext": {
+    "budget": {
+      "description": "Borrowed from whatever personal recall did not spend, so a turn's recall never exceeds {max} tokens in total.",
+      "label": "Project context budget (tokens)"
+    },
+    "gate": {
+      "injectionOff": "These only take effect once project context is injected.",
+      "memoryOff": "Long-term memory is off, so neither half runs.",
+      "temporary": "Temporary mode leaves no trace, so neither half runs."
+    },
+    "inject": {
+      "description": "Off by default. Adds a short, clearly-labelled block of observed project facts to each reply's context, with a source chip per fact. Also gives the chat a read-only tool for searching this workspace's history.",
+      "label": "Tell the model what was learned"
+    },
+    "intro": "Cognia can read this workspace's earlier conversations and keep what they established about the project, so a new chat does not start from nothing. Learning and telling the model are separate switches, and they ship with different defaults.",
+    "jobs": {
+      "failed": "{count, plural, one {# gave up after retries} other {# gave up after retries}}",
+      "pending": "{count, plural, =0 {Nothing queued} one {# job queued or running} other {# jobs queued or running}}",
+      "title": "Background work"
+    },
+    "mine": {
+      "description": "On by default. Mined facts land in /memory where you can review, correct, or delete them. Nothing is sent to the model until the switch below is on.",
+      "label": "Learn from this workspace's chats"
+    },
+    "topK": {
+      "description": "The most relevant facts, after the relevance floor. Fewer and more certain beats more and vaguer.",
+      "label": "Facts per reply"
     }
   },
   "queryExpansion": {

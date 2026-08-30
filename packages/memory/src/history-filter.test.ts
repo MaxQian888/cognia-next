@@ -8,6 +8,7 @@ import {
   filterAndSortMemories,
   findMemoryQuickView,
   MEMORY_QUICK_VIEWS,
+  resolveMemoryKindFacet,
 } from "./history-filter"
 
 let seq = 0
@@ -282,5 +283,113 @@ describe("facets", () => {
     expect(
       clearMemoryFacets({ query: "x", sort: "created", types: ["semantic"], tags: ["a"] })
     ).toEqual({ query: "x", sort: "created" })
+  })
+})
+
+describe("the project/personal partition axis", () => {
+  const personal = mem({ id: "p1", text: "the user prefers pnpm" })
+  const claim = mem({ id: "c1", projectMemoryKind: "constraint", text: "the repo pins rust" })
+  const decision = mem({ id: "c2", projectMemoryKind: "decision" })
+
+  it("reads an absent projectMemoryKind as personal — the same contract the retriever uses", () => {
+    expect(resolveMemoryKindFacet(personal)).toBe("personal")
+    expect(resolveMemoryKindFacet(claim)).toBe("constraint")
+  })
+
+  it("returns both corpora when the axis is unset, which is what every old caller passes", () => {
+    expect(
+      filterAndSortMemories([personal, claim])
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["c1", "p1"])
+    expect(
+      filterAndSortMemories([personal, claim], { projectMemoryKinds: [] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["c1", "p1"])
+  })
+
+  it("narrows to one claim kind", () => {
+    expect(
+      filterAndSortMemories([personal, claim, decision], {
+        projectMemoryKinds: ["constraint"],
+      }).map((m) => m.id)
+    ).toEqual(["c1"])
+  })
+
+  it("narrows to personal rows only", () => {
+    expect(
+      filterAndSortMemories([personal, claim, decision], {
+        projectMemoryKinds: ["personal"],
+      }).map((m) => m.id)
+    ).toEqual(["p1"])
+  })
+
+  it("counts every kind present, personal included", () => {
+    const facets = collectMemoryFacets([personal, claim, decision])
+    expect(facets.projectMemoryKinds).toEqual([
+      { value: "constraint", count: 1 },
+      { value: "decision", count: 1 },
+      { value: "personal", count: 1 },
+    ])
+  })
+})
+
+describe("workspace, branch and freshness axes", () => {
+  const rows = [
+    mem({ id: "a", projectId: "p1", branch: "main", staleness: "fresh" }),
+    mem({ id: "b", projectId: "p1", branch: "feat", staleness: "stale" }),
+    mem({ id: "c" }),
+  ]
+
+  it("filters by workspace, treating an unscoped row as the empty id", () => {
+    expect(
+      filterAndSortMemories(rows, { projectIds: ["p1"] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["a", "b"])
+    expect(filterAndSortMemories(rows, { projectIds: [""] }).map((m) => m.id)).toEqual(["c"])
+  })
+
+  it("filters by branch", () => {
+    expect(filterAndSortMemories(rows, { branches: ["main"] }).map((m) => m.id)).toEqual(["a"])
+  })
+
+  it("reads an unset staleness as unknown, so pre-sweep rows stay reachable", () => {
+    expect(filterAndSortMemories(rows, { freshness: ["unknown"] }).map((m) => m.id)).toEqual(["c"])
+    expect(
+      filterAndSortMemories(rows, { freshness: ["fresh", "stale"] })
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["a", "b"])
+  })
+
+  it("offers no branch option for rows that carry none", () => {
+    // Counting `""` for every personal memory would make "no branch" the
+    // biggest option on every install and bury the real branches.
+    const facets = collectMemoryFacets(rows)
+    expect(facets.branches.map((o) => o.value).sort()).toEqual(["feat", "main"])
+    expect(facets.projectIds.map((o) => o.value).sort()).toEqual(["", "p1"])
+    expect(facets.freshness.map((o) => o.value).sort()).toEqual(["fresh", "stale", "unknown"])
+  })
+})
+
+describe("the four new axes participate in the shared filter bookkeeping", () => {
+  const filter = {
+    query: "q",
+    sort: "recent" as const,
+    types: ["semantic" as const],
+    projectMemoryKinds: ["constraint" as const, "personal" as const],
+    projectIds: ["p1"],
+    branches: ["main"],
+    freshness: ["stale" as const],
+  }
+
+  it("counts every narrowed axis on the Filter badge", () => {
+    expect(countActiveMemoryFilters(filter)).toBe(6)
+  })
+
+  it("clears all of them while keeping query and sort", () => {
+    expect(clearMemoryFacets(filter)).toEqual({ query: "q", sort: "recent" })
   })
 })

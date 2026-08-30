@@ -88,6 +88,19 @@
     },
     "auditTitle": "审计历史",
     "cancel": "取消",
+    "claim": {
+      "anyBranch": "所有分支",
+      "anyPath": "所有路径",
+      "appliesElsewhere": "不适用于当前位置",
+      "appliesHere": "适用于当前位置",
+      "markOutdated": "标记为已过时",
+      "markedOutdated": "已标记为过时",
+      "neverValidated": "尚未核实",
+      "outdatedFailed": "未能记录",
+      "rationaleLabel": "为何收窄到此范围",
+      "scopeUnknown": "无法判断——当前未打开文件",
+      "viewObservation": "打开来源对话"
+    },
     "close": "关闭",
     "conflictGone": "冲突记忆已被删除。",
     "conflictsWith": "冲突对象",
@@ -101,16 +114,22 @@
     "fields": {
       "accessCount": "召回次数",
       "archivedAt": "归档于",
+      "branchScope": "分支",
+      "claimKind": "类别",
       "contamination": "上下文信任",
       "created": "创建于",
       "evidence": "证据",
+      "freshnessField": "新鲜度",
       "importance": "重要度",
       "indexed": "已索引",
       "key": "键",
       "lastUsed": "最近使用",
+      "observedAt": "观察于",
+      "pathScope": "路径",
       "review": "审核",
       "scope": "作用域",
       "updated": "更新于",
+      "validatedAt": "最近核实",
       "version": "版本"
     },
     "importanceLabel": "重要度",
@@ -126,6 +145,7 @@
       "content": "内容",
       "metrics": "指标",
       "origin": "归属",
+      "projectClaim": "项目上下文",
       "status": "状态",
       "tags": "标签"
     },
@@ -192,6 +212,12 @@
       "savedWithBackup": "已保存——原版本备份为 {backup}"
     }
   },
+  "freshness": {
+    "expired": "已过期",
+    "fresh": "已核实",
+    "stale": "需要重新核查",
+    "unknown": "尚未核查"
+  },
   "governance": {
     "clean": "干净",
     "conflict": "冲突",
@@ -246,9 +272,14 @@
       "title": "暂无记忆"
     },
     "filter": {
+      "branches": "分支",
       "clear": "清除筛选",
+      "freshness": "新鲜度",
       "label": "筛选",
+      "noWorkspace": "无工作区",
       "none": "当前视图没有可筛选的项",
+      "projectIds": "工作区",
+      "projectMemoryKinds": "类别",
       "provenances": "来源",
       "scopes": "作用域",
       "tags": "标签",
@@ -308,6 +339,14 @@
       "needsReview": "待审阅",
       "pinned": "置顶"
     }
+  },
+  "projectKind": {
+    "constraint": "约束",
+    "decision": "决策",
+    "gotcha": "陷阱",
+    "outcome": "已验证结果",
+    "personal": "关于你",
+    "state": "项目现状"
   },
   "provenance": {
     "all": "所有来源",

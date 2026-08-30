@@ -124,6 +124,10 @@
         "description": "管理向量化隐私和破坏性操作。",
         "label": "隐私"
       },
+      "projectContext": {
+        "description": "从本工作区自己的对话中学习，并决定是否告诉模型。",
+        "label": "项目上下文"
+      },
       "retrieval": {
         "description": "调整召回质量、限制并预览结果。",
         "label": "检索"
@@ -168,6 +172,35 @@
     "errors": {
       "failed": "召回预览失败。",
       "unavailable": "当前配置下无法使用记忆检索。"
+    }
+  },
+  "projectContext": {
+    "budget": {
+      "description": "只借用个人召回没有花掉的部分，因此单轮召回总量不会超过 {max} 个 token。",
+      "label": "项目上下文预算（token）"
+    },
+    "gate": {
+      "injectionOff": "只有在注入项目上下文后，这些设置才会生效。",
+      "memoryOff": "长期记忆已关闭，两半都不会运行。",
+      "temporary": "临时模式不留痕迹，两半都不会运行。"
+    },
+    "inject": {
+      "description": "默认关闭。会在每次回复的上下文里加入一小段明确标注的项目事实，并为每条事实附上来源。同时为对话提供一个只读工具，用于检索本工作区的历史。",
+      "label": "把学到的内容告诉模型"
+    },
+    "intro": "Cognia 可以阅读本工作区先前的对话，并保留其中确立的项目事实，让新会话不必从零开始。学习与告知模型是两个开关，默认值不同。",
+    "jobs": {
+      "failed": "{count, plural, other {# 个在重试后放弃}}",
+      "pending": "{count, plural, =0 {没有排队任务} other {# 个任务排队或运行中}}",
+      "title": "后台任务"
+    },
+    "mine": {
+      "description": "默认开启。挖掘出的事实会进入 /memory，可以审阅、纠正或删除。在下方开关打开前，不会发送给模型。",
+      "label": "从本工作区的对话中学习"
+    },
+    "topK": {
+      "description": "经过相关度下限后最相关的若干条。少而确定胜过多而含糊。",
+      "label": "每次回复的事实条数"
     }
   },
   "queryExpansion": {

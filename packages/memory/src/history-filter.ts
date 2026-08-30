@@ -7,13 +7,32 @@
  * never propose a filter that would return nothing.
  */
 
-import type {
-  Memory,
-  MemoryProvenance,
-  MemoryReviewStatus,
-  MemoryScope,
-  MemoryType,
+import {
+  isProjectClaim,
+  type Memory,
+  type MemoryProvenance,
+  type MemoryReviewStatus,
+  type MemoryScope,
+  type MemoryStaleness,
+  type MemoryType,
+  type ProjectMemoryKind,
 } from "./types/memory"
+
+/**
+ * The `projectMemoryKind` axis, as the console filters on it.
+ *
+ * `"personal"` is not a `ProjectMemoryKind` — it is the ABSENCE of one, which
+ * is the contract `isProjectClaim` owns. Spelling it as a filter value here
+ * lets the toolbar offer "personal" as one option among six without inventing
+ * a second enum on the row, and keeps the retriever and the console reading the
+ * same predicate.
+ */
+export type MemoryKindFacet = ProjectMemoryKind | "personal"
+
+/** Which side of the corpus partition a row is on, as a facet value. */
+export function resolveMemoryKindFacet(memory: Pick<Memory, "projectMemoryKind">): MemoryKindFacet {
+  return isProjectClaim(memory) ? (memory.projectMemoryKind as ProjectMemoryKind) : "personal"
+}
 
 export type MemorySortKey = "recent" | "importance" | "accessed" | "created"
 
@@ -44,6 +63,23 @@ export interface MemoryFilter {
    * promotes them, making them exactly as unreviewed as `unreviewed`.
    */
   reviewStatus?: MemoryReviewStatus | MemoryReviewStatus[]
+  /**
+   * Claim kinds, plus `"personal"` for rows on the other side of the partition.
+   * Empty/undefined = both corpora, which is what every existing caller passes.
+   */
+  projectMemoryKinds?: MemoryKindFacet[]
+  /** Workspace ids; empty/undefined = every workspace, including unscoped rows. */
+  projectIds?: string[]
+  /** Git branches a claim was observed on; empty/undefined = every branch. */
+  branches?: string[]
+  /**
+   * Freshness, reusing the existing `MemoryStaleness` union rather than a
+   * parallel one. An unset `staleness` reads as `"unknown"` here for the same
+   * reason an unset `reviewStatus` reads as `"unreviewed"` above: the rows that
+   * predate the re-check sweep must remain reachable through the filter that
+   * describes them.
+   */
+  freshness?: MemoryStaleness[]
   sort?: MemorySortKey
 }
 
@@ -67,6 +103,16 @@ export function filterAndSortMemories(memories: Memory[], filter: MemoryFilter =
   const allowReview = filter.reviewStatus
     ? new Set(Array.isArray(filter.reviewStatus) ? filter.reviewStatus : [filter.reviewStatus])
     : null
+  const allowKind =
+    filter.projectMemoryKinds && filter.projectMemoryKinds.length > 0
+      ? new Set(filter.projectMemoryKinds)
+      : null
+  const allowProject =
+    filter.projectIds && filter.projectIds.length > 0 ? new Set(filter.projectIds) : null
+  const allowBranch =
+    filter.branches && filter.branches.length > 0 ? new Set(filter.branches) : null
+  const allowFreshness =
+    filter.freshness && filter.freshness.length > 0 ? new Set(filter.freshness) : null
   const sort = filter.sort ?? "recent"
 
   const filtered = memories.filter((m) => {
@@ -80,6 +126,10 @@ export function filterAndSortMemories(memories: Memory[], filter: MemoryFilter =
     if (allowType && !allowType.has(m.type)) return false
     if (allowScope && !allowScope.has(m.scope)) return false
     if (allowProvenance && !allowProvenance.has(m.provenance)) return false
+    if (allowKind && !allowKind.has(resolveMemoryKindFacet(m))) return false
+    if (allowProject && !allowProject.has(m.projectId ?? "")) return false
+    if (allowBranch && !allowBranch.has(m.branch ?? "")) return false
+    if (allowFreshness && !allowFreshness.has(m.staleness ?? "unknown")) return false
     if (requiredTags) {
       const lower = m.tags.map((t) => t.toLowerCase())
       if (!requiredTags.every((t) => lower.includes(t))) return false
@@ -207,6 +257,11 @@ export interface MemoryFacets {
   scopes: MemoryFacetOption<MemoryScope>[]
   provenances: MemoryFacetOption<MemoryProvenance>[]
   tags: MemoryFacetOption<string>[]
+  projectMemoryKinds: MemoryFacetOption<MemoryKindFacet>[]
+  /** `""` is the unscoped row — rendered as "no workspace", never hidden. */
+  projectIds: MemoryFacetOption<string>[]
+  branches: MemoryFacetOption<string>[]
+  freshness: MemoryFacetOption<MemoryStaleness>[]
 }
 
 function toOptions<T extends string>(counts: Map<T, number>): MemoryFacetOption<T>[] {
@@ -225,17 +280,35 @@ export function collectMemoryFacets(memories: Memory[]): MemoryFacets {
   const scopes = new Map<MemoryScope, number>()
   const provenances = new Map<MemoryProvenance, number>()
   const tags = new Map<string, number>()
+  const kinds = new Map<MemoryKindFacet, number>()
+  const projectIds = new Map<string, number>()
+  const branches = new Map<string, number>()
+  const freshness = new Map<MemoryStaleness, number>()
   for (const m of memories) {
     types.set(m.type, (types.get(m.type) ?? 0) + 1)
     scopes.set(m.scope, (scopes.get(m.scope) ?? 0) + 1)
     provenances.set(m.provenance, (provenances.get(m.provenance) ?? 0) + 1)
     for (const tag of new Set(m.tags)) tags.set(tag, (tags.get(tag) ?? 0) + 1)
+    const kind = resolveMemoryKindFacet(m)
+    kinds.set(kind, (kinds.get(kind) ?? 0) + 1)
+    const projectId = m.projectId ?? ""
+    projectIds.set(projectId, (projectIds.get(projectId) ?? 0) + 1)
+    // Branch is only meaningful on rows that carry one. Counting `""` for every
+    // personal memory would make "no branch" the largest option on every
+    // install and bury the branches a user might actually want to filter by.
+    if (m.branch) branches.set(m.branch, (branches.get(m.branch) ?? 0) + 1)
+    const stale = m.staleness ?? "unknown"
+    freshness.set(stale, (freshness.get(stale) ?? 0) + 1)
   }
   return {
     types: toOptions(types),
     scopes: toOptions(scopes),
     provenances: toOptions(provenances),
     tags: toOptions(tags),
+    projectMemoryKinds: toOptions(kinds),
+    projectIds: toOptions(projectIds),
+    branches: toOptions(branches),
+    freshness: toOptions(freshness),
   }
 }
 
@@ -249,12 +322,26 @@ export function countActiveMemoryFilters(filter: MemoryFilter): number {
     (filter.types?.length ?? 0) +
     (filter.scopes?.length ?? 0) +
     (filter.provenances?.length ?? 0) +
-    (filter.tags?.length ?? 0)
+    (filter.tags?.length ?? 0) +
+    (filter.projectMemoryKinds?.length ?? 0) +
+    (filter.projectIds?.length ?? 0) +
+    (filter.branches?.length ?? 0) +
+    (filter.freshness?.length ?? 0)
   )
 }
 
 /** Drop every facet selection, keeping the query / sort / view axes. */
 export function clearMemoryFacets(filter: MemoryFilter): MemoryFilter {
-  const { types: _t, scopes: _s, provenances: _p, tags: _g, ...rest } = filter
+  const {
+    types: _t,
+    scopes: _s,
+    provenances: _p,
+    tags: _g,
+    projectMemoryKinds: _k,
+    projectIds: _i,
+    branches: _b,
+    freshness: _f,
+    ...rest
+  } = filter
   return rest
 }

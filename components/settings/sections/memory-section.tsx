@@ -36,6 +36,7 @@ import { DEFAULT_MEMORY_PANEL, type MemoryPanelId } from "@/components/settings/
 import { LearningPanel } from "@/components/settings/memory/panels/learning-panel"
 import { OverviewPanel } from "@/components/settings/memory/panels/overview-panel"
 import { RetrievalPanel } from "@/components/settings/memory/panels/retrieval-panel"
+import { ProjectContextPanel } from "@/components/settings/memory/panels/project-context-panel"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
@@ -63,6 +64,8 @@ export function MemorySection() {
         return <LearningPanel config={config} update={update} />
       case "retrieval":
         return <RetrievalPanel config={config} update={update} insights={insights} />
+      case "projectContext":
+        return <ProjectContextPanel config={config} update={update} insights={insights} />
       case "maintenance":
         return (
           <div className="grid gap-4 @md/memory-pane:grid-cols-2">
