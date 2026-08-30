@@ -54,6 +54,59 @@ describe("selectProjectMiningWindows", () => {
   })
 })
 
+describe("selectProjectMiningWindows tool projection", () => {
+  it("sizes windows on the tool-bearing text the worker will actually mine", () => {
+    // A one-line prose signal, a large tool body. Sizing on the search projection
+    // (which drops tool parts) would budget these as nearly free and then hand
+    // the model a window several times its token limit.
+    const body = `pnpm build failed in packages/memory ${"because ".repeat(200)}`
+    const build = (withParts: boolean): ProjectWindowMessage[] =>
+      Array.from({ length: 30 }, (_, index) => ({
+        id: `m${index}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        text: "pnpm build fails in packages/memory/src/index.ts because of the export",
+        ...(withParts
+          ? {
+              parts: [
+                {
+                  type: "text",
+                  text: "pnpm build fails in packages/memory/src/index.ts because of the export",
+                },
+                { type: "tool-Bash", state: "output-available", output: body },
+              ],
+            }
+          : {}),
+      }))
+
+    const bare = selectProjectMiningWindows(build(false), { includeTrailing: true })
+    const withTools = selectProjectMiningWindows(build(true), { includeTrailing: true })
+
+    // Same messages, far more real content once the tool bodies are attached.
+    expect(withTools[0]!.estimatedTokens).toBeGreaterThan(bare[0]!.estimatedTokens * 10)
+    // And still inside the window budget rather than overflowing it.
+    expect(Math.max(...withTools.map((w) => w.estimatedTokens))).toBeLessThan(6_500)
+  })
+
+  it("finds a window salient when the only project signal is in the tool output", () => {
+    // The prose says nothing; the failing command says everything. Before tool
+    // output reached this projection, this window scored zero.
+    const quiet: ProjectWindowMessage[] = Array.from({ length: 14 }, (_, index) => ({
+      id: `m${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      text: "ok",
+      parts: [
+        { type: "text", text: "ok" },
+        {
+          type: "tool-Bash",
+          state: "output-error",
+          errorText: "pnpm build failed: packages/memory/src/index.ts must be listed first",
+        },
+      ],
+    }))
+    expect(selectProjectMiningWindows(quiet, { includeTrailing: true }).length).toBeGreaterThan(0)
+  })
+})
+
 describe("projectMiningDedupeKey", () => {
   const window = {
     firstMessageId: "m0",

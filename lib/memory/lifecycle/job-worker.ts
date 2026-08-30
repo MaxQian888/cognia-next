@@ -439,12 +439,17 @@ async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOut
   )
   if (!deps) throw new MemoryJobProcessingError("dependencies_unavailable")
 
+  // Re-project the window with TOOL OUTPUT included. `loadJobContext` uses the
+  // shared search projection, which drops tool parts — correct for personal
+  // extraction, fatal here: a project's verified outcomes and gotchas live in
+  // what Read/Bash/Grep actually returned, not in the assistant's summary of it.
+  const { projectMiningMessageText } = await import("@/lib/memory/write/project-transcript-text")
   const messages = context.transcript
     .filter((entry): entry is typeof entry & { id: string } => Boolean(entry.id))
     .map((entry) => ({
       id: entry.id,
       role: entry.role,
-      text: entry.text,
+      text: entry.parts ? projectMiningMessageText(entry.parts) : entry.text,
       createdAt: entry.createdAt,
       parts: entry.parts,
     }))

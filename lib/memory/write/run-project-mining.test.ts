@@ -158,7 +158,7 @@ describe("runProjectMining consolidation", () => {
       observedAt: 2_000,
       confidence: 0.9,
       sourceRevision: "12",
-      extractor: { provider: "anthropic", model: "claude-haiku", promptVersion: "project-v1" },
+      extractor: { provider: "anthropic", model: "claude-haiku", promptVersion: "project-v2" },
     })
   })
 

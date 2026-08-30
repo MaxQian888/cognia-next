@@ -22,8 +22,12 @@ import { isProjectMemoryKind, PROJECT_MEMORY_KINDS, type ProjectMemoryKind } fro
  *
  * Stamped onto `Memory.extractor.promptVersion` so a bad prompt's output can be
  * found and re-mined in bulk instead of being indistinguishable from good rows.
+ *
+ * v2 — the caller now projects tool output into the transcript, so the prompt
+ * gained the `[tool N]` citation rule. v1 rows were mined from text alone and
+ * could not produce a grounded `outcome`.
  */
-export const PROJECT_PROMPT_VERSION = "project-v1"
+export const PROJECT_PROMPT_VERSION = "project-v2"
 
 /** Which participant's words support a claim. */
 export type ProjectClaimSupportRole = "user" | "assistant" | "tool"
@@ -101,6 +105,8 @@ function buildUserPrompt(input: ExtractProjectClaimsInput): string {
     "Rules:",
     "- Preserve exact file paths, commands, error strings, API and package names.",
     "  Do NOT generalize them away; they are what makes a fact findable later.",
+    "- A line beginning `[tool N]` is what a tool actually returned. To cite one,",
+    '  use {"kind":"tool-result","sourceId":"<messageId>:N"} with that same N.',
     "- An assistant merely PROPOSING or PLANNING something is not a fact. An",
     "  assistant claiming it finished something is not an outcome unless a tool",
     "  result in this slice shows it.",

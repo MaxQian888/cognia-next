@@ -178,6 +178,10 @@ describe("extractProjectClaims", () => {
   })
 
   it("exposes a prompt version so a bad prompt's output can be found in bulk", () => {
-    expect(PROJECT_PROMPT_VERSION).toBe("project-v1")
+    // Pinned to a literal on purpose: editing the prompt without bumping this
+    // makes rows from the old and new prompt indistinguishable, so the failure
+    // here is the reminder. v2 added the `[tool N]` citation rule when the
+    // extractor started being shown tool output.
+    expect(PROJECT_PROMPT_VERSION).toBe("project-v2")
   })
 })

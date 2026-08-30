@@ -346,6 +346,37 @@ describe("memory job worker", () => {
       })
     })
 
+    it("shows the miner what the tools actually returned, not just the prose", async () => {
+      // `loadJobContext` projects transcripts with the shared search helper,
+      // which drops tool parts. Mining on that can see the assistant CLAIM the
+      // suite passed but never the run that proves it, which makes the
+      // `outcome` claim kind — the one the prompt gates on tool evidence —
+      // impossible to produce.
+      mockListMessages.mockResolvedValue([
+        {
+          id: "m1",
+          role: "user",
+          metadata: { createdAt: 1_000 },
+          parts: [{ type: "text", text: "did the suite pass" }],
+        },
+        {
+          id: "m2",
+          role: "assistant",
+          metadata: { createdAt: 2_000 },
+          parts: [
+            { type: "text", text: "running it now" },
+            { type: "tool-Bash", state: "output-available", output: "42 passed, 0 failed" },
+          ],
+        },
+      ])
+      await processMemoryJob(miningJob())
+      const [input] = mockRunMining.mock.calls[0]! as [{ messages: { text: string }[] }]
+      expect(input.messages[1]!.text).toContain("42 passed, 0 failed")
+      // Labelled with the part index, because that index is the second half of
+      // a `tool-result` evidence sourceId.
+      expect(input.messages[1]!.text).toContain("[tool 1]")
+    })
+
     it("reports the miner's skip reason instead of a generic empty result", async () => {
       mockListMessages.mockResolvedValue(mined)
       mockRunMining.mockResolvedValue({ applied: [], skipReason: "not_salient" })

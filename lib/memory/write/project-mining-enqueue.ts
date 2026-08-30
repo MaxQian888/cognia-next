@@ -26,6 +26,7 @@ import {
   type ProjectWindowMessage,
 } from "@cognia/memory/extract/project-windows"
 import { assessProjectSalience } from "@cognia/memory/extract/project-salience"
+import { projectMiningMessageText } from "@/lib/memory/write/project-transcript-text"
 import type { MemoryProvenance, MemoryScope } from "@/types/memory/memory"
 import type { MemoryJob, MemoryJobCheckpoint } from "@/types/memory/governance"
 
@@ -44,11 +45,22 @@ export interface SelectProjectMiningWindowsOptions {
  * never produce anything never becomes a queue row at all — the queue is the
  * scarce resource, not the salience check.
  */
+/** Re-project each message the way the mining worker does. */
+function withMiningText(transcript: readonly ProjectWindowMessage[]): ProjectWindowMessage[] {
+  return transcript.map((message) =>
+    message.parts ? { ...message, text: projectMiningMessageText(message.parts) } : message
+  )
+}
+
 export function selectProjectMiningWindows(
   transcript: readonly ProjectWindowMessage[],
   options: SelectProjectMiningWindowsOptions
 ): ProjectMiningWindow[] {
-  const windows = buildProjectMiningWindows(transcript)
+  // Size and identify windows on the text the WORKER will actually mine, tool
+  // output included. Chunking on the shorter search projection would let a
+  // window budgeted at ~6000 tokens arrive at the model several times that
+  // size once the tool bodies are re-attached.
+  const windows = buildProjectMiningWindows(withMiningText(transcript))
   const closed = options.includeTrailing ? windows : windows.slice(0, -1)
   return closed.filter((window) => assessProjectSalience({ messages: window.messages }).salient)
 }
