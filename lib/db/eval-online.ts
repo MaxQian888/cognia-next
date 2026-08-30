@@ -18,7 +18,7 @@ import {
   type EvalOnlineQueueRow,
   type EvalOnlineQueueState,
 } from "./eval-online-types"
-import type { JudgeSamplingDecision } from "@cognia/eval-core"
+import { validateOnlineEvalPolicy, type JudgeSamplingDecision } from "@cognia/eval-core"
 
 // ── Policies ────────────────────────────────────────────────────────────────
 
@@ -37,7 +37,28 @@ export async function listEnabledOnlinePolicies(
     .toArray()
 }
 
+/**
+ * Thrown instead of writing a policy that cannot be honoured. The budget rule
+ * in particular is not advisory: an LLM judge with no daily cap, pointed at a
+ * production trace stream, is an unbounded bill.
+ */
+export class InvalidOnlineEvalPolicyError extends Error {
+  readonly problems: string[]
+  constructor(problems: string[]) {
+    super(`Invalid online evaluation policy: ${problems.join("; ")}`)
+    this.name = "InvalidOnlineEvalPolicyError"
+    this.problems = problems
+  }
+}
+
+/**
+ * Validation lives HERE, on the only write path, rather than in the caller.
+ * A rule enforced by whoever remembers to call the validator is a rule that
+ * holds until the second caller.
+ */
 export async function putOnlinePolicy(policy: EvalOnlinePolicyRow): Promise<void> {
+  const problems = validateOnlineEvalPolicy(policy)
+  if (problems.length > 0) throw new InvalidOnlineEvalPolicyError(problems)
   await getDb().evalOnlinePolicies.put({ ...policy, enabledFlag: policy.enabled ? 1 : 0 })
 }
 
@@ -88,11 +109,23 @@ export async function enqueueOnlineEval(
 }
 
 export async function claimQueuedOnlineEvals(limit: number): Promise<EvalOnlineQueueRow[]> {
-  return getDb()
-    .evalOnlineQueue.where("[state+enqueuedAt]")
-    .between(["queued", 0], ["queued", Infinity])
-    .limit(limit)
-    .toArray()
+  const db = getDb()
+  return db.transaction("rw", db.evalOnlineQueue, async () => {
+    const rows = await db.evalOnlineQueue
+      .where("[state+enqueuedAt]")
+      .between(["queued", 0], ["queued", Infinity])
+      .limit(limit)
+      .toArray()
+    const now = Date.now()
+    const claimed = rows.map((row) => ({
+      ...row,
+      state: "running" as const,
+      attempts: row.attempts + 1,
+      updatedAt: now,
+    }))
+    await db.evalOnlineQueue.bulkPut(claimed)
+    return claimed
+  })
 }
 
 export async function setOnlineEvalState(
@@ -179,10 +212,11 @@ export async function settleOnlineEvalBudget(
   reservedUsd: number,
   actualUsd: number,
   judged: boolean,
+  reservedAt: number,
   now = Date.now()
 ): Promise<void> {
   const db = getDb()
-  const day = budgetDayKey(now)
+  const day = budgetDayKey(reservedAt)
   const id = budgetRowId(policyId, day)
   await db.transaction("rw", db.evalOnlineBudget, async () => {
     const row = await db.evalOnlineBudget.get(id)
@@ -227,6 +261,15 @@ export interface OnlineEvalPruneCutoffs {
   queueBefore: number
   /** Budget rows for days before this epoch are removed. */
   budgetBefore: number
+  /**
+   * Unsettled rows older than this are abandoned and removed too.
+   *
+   * Without it, a row enqueued on a device whose worker never ran again — an
+   * app closed for good, a policy deleted mid-flight — is immortal, because the
+   * settled-only sweep can never reach it. Set far beyond the settled window so
+   * it only ever catches genuinely stranded work.
+   */
+  abandonedBefore: number
 }
 
 /**
@@ -251,9 +294,14 @@ export async function pruneOnlineEvalData(cutoffs: OnlineEvalPruneCutoffs): Prom
     .anyOf("done", "failed", "skipped")
     .filter((row) => row.updatedAt < cutoffs.queueBefore)
     .delete()
+  const abandoned = await db.evalOnlineQueue
+    .where("state")
+    .anyOf("queued", "running")
+    .filter((row) => row.enqueuedAt < cutoffs.abandonedBefore)
+    .delete()
   const budget = await db.evalOnlineBudget
     .where("day")
     .below(budgetDayKey(cutoffs.budgetBefore))
     .delete()
-  return observations + settled + budget
+  return observations + settled + abandoned + budget
 }

@@ -95,7 +95,7 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
     policy: "row-expiry",
     prune: () => pruneExpiredWorkflowAppData(Date.now()),
   },
-  // Online-evaluation bookkeeping (ADR-0101). Each of the three tables has its
+  // Online-evaluation bookkeeping. Each of the three tables has its
   // own window, and the windows are READ FROM THE CATALOG rather than restated
   // here — a constant copied out of a policy is a constant that drifts from it.
   evalOnline: {
@@ -108,6 +108,9 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
         observationsBefore: windowFor("evalObservations", 90),
         queueBefore: windowFor("evalOnlineQueue", 7),
         budgetBefore: windowFor("evalOnlineBudget", 90),
+        // Stranded work — enqueued on a device whose worker never came back.
+        // Far beyond the settled window so it only catches the genuinely lost.
+        abandonedBefore: now - 30 * MS_PER_DAY,
       })
     },
   },

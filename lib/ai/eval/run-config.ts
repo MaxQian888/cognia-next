@@ -16,7 +16,7 @@ import type { EvalRunConfig, TargetSpec, CaseSubset } from "@/types/eval/run-con
 import type { SaveCaseResultInput } from "@/lib/db/eval-run-cases"
 import { runDatasetEval } from "./index"
 import { repetitionVerdict, SCORING_VERSION } from "@cognia/eval-core"
-import { selectScorers } from "./scorer-select"
+import { selectScorers } from "@cognia/eval-core"
 import type { EvalTarget } from "@cognia/eval-core"
 
 export interface RunConfiguredDeps {

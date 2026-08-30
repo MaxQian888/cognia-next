@@ -24,6 +24,7 @@ export * from "./runner"
 export * from "./report"
 export * from "./gate"
 export * from "./scorers/index"
+export * from "./scorers/select"
 export * from "./scorers/judge-client"
 
 // Versioned contracts for the quality flywheel: what an evaluator IS, what one

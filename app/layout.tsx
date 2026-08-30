@@ -34,6 +34,7 @@ import { TelemetrySessionInitializer } from "@/components/providers/initializers
 import { ApprovalJournalInitializer } from "@/components/providers/initializers/approval-journal-initializer"
 import { AuditRetentionInitializer } from "@/components/providers/initializers/audit-retention-initializer"
 import { StorageRetentionInitializer } from "@/components/providers/initializers/storage-retention-initializer"
+import { OnlineEvalInitializer } from "@/components/providers/initializers/online-eval-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { IssueTrackerInitializer } from "@/components/providers/initializers/issue-tracker-initializer"
@@ -239,6 +240,7 @@ export default async function RootLayout({
                             <PlatformDesktopInitializers />
                             <AuditRetentionInitializer />
                             <StorageRetentionInitializer />
+                            <OnlineEvalInitializer />
                             <StoragePersistenceInitializer />
                             <ProjectStoreInitializer />
                             <IssueTrackerInitializer />

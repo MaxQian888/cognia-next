@@ -27,6 +27,13 @@ export {
   type AgentTraceTransportOptions,
 } from "./agent-trace-transport"
 export {
+  EvalOnlineTransport,
+  createEvalOnlineTransport,
+  candidateFromSpan,
+  isScorableRootSpan,
+  type EvalOnlineTransportDependencies,
+} from "./eval-online-transport"
+export {
   OtlpHttpTransport,
   createOtlpHttpTransport,
   type OtlpHttpTransportOptions,

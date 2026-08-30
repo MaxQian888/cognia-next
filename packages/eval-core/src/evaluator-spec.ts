@@ -176,3 +176,24 @@ export function isCalibratedJudge(spec: EvaluatorSpecV1): boolean {
   if (!reference) return false
   return reference.kappa >= 0.6 && reference.accuracy >= 0.8
 }
+
+/**
+ * Built-in evaluators need no storage: their whole definition is "which catalog
+ * scorer", so the version id encodes it — `builtin:tool-selection@1`. A table
+ * whose rows could each be reconstructed from their own primary key is a table
+ * that can disagree with itself.
+ */
+export const BUILT_IN_EVALUATOR_PREFIX = "builtin:"
+
+export function builtInEvaluatorVersionId(scorerId: string, revision = 1): string {
+  return `${BUILT_IN_EVALUATOR_PREFIX}${scorerId}@${revision}`
+}
+
+/** The catalog scorer id, or `undefined` when this is not a built-in version id. */
+export function parseBuiltInEvaluatorVersionId(versionId: string): string | undefined {
+  if (!versionId.startsWith(BUILT_IN_EVALUATOR_PREFIX)) return undefined
+  const body = versionId.slice(BUILT_IN_EVALUATOR_PREFIX.length)
+  const at = body.lastIndexOf("@")
+  const scorerId = at === -1 ? body : body.slice(0, at)
+  return ALL_SCORER_IDS.includes(scorerId) ? scorerId : undefined
+}

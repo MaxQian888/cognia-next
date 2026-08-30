@@ -61,6 +61,12 @@ import {
 } from "./transports/tauri-fetch-shim"
 import { extractLegacyTelemetrySecrets, persistLegacyTelemetrySecrets } from "./telemetry-secrets"
 import { isCredentiallessOtlpEndpoint, resolveOtlpEgressPolicy } from "./otlp-egress-policy"
+import { createEvalOnlineTransport } from "./transports/eval-online-transport"
+import {
+  getCachedOnlineEvalPolicies,
+  refreshOnlineEvalPolicyCache,
+} from "@/lib/ai/eval/online/policy-cache"
+import { enqueueOnlineEval } from "@/lib/db/eval-online"
 import {
   configureBehaviorEventExporters,
   createOtlpBehaviorEventExporter,
@@ -983,6 +989,28 @@ function applyTransportSettings(
     removeTransport("agent-trace")
     setAgentTraceWriter(transports.agentTraceOtlp ? dispatchSpanToTransports : null)
   }
+
+  // Online evaluation rides the same span fan-out. Registered unconditionally
+  // because it gates itself on POLICY: with none enabled the cache is empty and
+  // `log()` returns after one array check. Putting it behind its own setting
+  // would mean a policy the user just enabled does nothing until a reload.
+  //
+  // It is NOT added to the `setAgentTraceWriter` disjunction below, and that is
+  // deliberate. The worker reads a trace back out of the `agentTraces` table,
+  // so online evaluation depends on the agent-trace transport actually
+  // persisting spans. Keeping the feed alive with that transport off would
+  // enqueue traces whose spans were never stored — work that can only ever
+  // resolve to "nothing to score". Turning agent tracing off therefore turns
+  // online evaluation off, which is also the right answer for a consent
+  // toggle.
+  removeTransport("eval-online")
+  addTransport(
+    createEvalOnlineTransport({
+      loadPolicies: getCachedOnlineEvalPolicies,
+      enqueue: (input) => enqueueOnlineEval(input),
+    })
+  )
+  void refreshOnlineEvalPolicyCache()
 
   const genericOtlpMode = resolveOtlpEgressPolicy({
     isTauri: isTauri(),

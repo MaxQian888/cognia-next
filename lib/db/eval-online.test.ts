@@ -17,6 +17,7 @@ import {
   setOnlineEvalState,
   skipOnlineEval,
 } from "./eval-online"
+import { InvalidOnlineEvalPolicyError } from "./eval-online"
 import { budgetDayKey, queueDedupeKey, type EvalOnlinePolicyRow } from "./eval-online-types"
 import { buildObservation, type EvalObservationV1 } from "@cognia/eval-core"
 import { getDb } from "./schema"
@@ -160,6 +161,8 @@ describe("queue", () => {
     await setOnlineEvalState("q1", "done")
     const claimed = await claimQueuedOnlineEvals(10)
     expect(claimed.map((row) => row.id)).toEqual(["q2"])
+    expect(claimed[0]).toMatchObject({ state: "running", attempts: 1 })
+    expect(await claimQueuedOnlineEvals(10)).toEqual([])
   })
 
   it("records WHY a trace was skipped instead of dropping or retrying it", async () => {
@@ -229,6 +232,18 @@ describe("budget ledger", () => {
     // Yesterday's spend must not consume today's cap.
     expect(await reserveOnlineEvalBudget("p1", 4, 5, tuesday)).toBe(true)
   })
+
+  it("settles against the reservation day across UTC midnight", async () => {
+    const reservedAt = Date.parse("2026-08-30T23:59:00Z")
+    const settledAt = Date.parse("2026-08-31T00:01:00Z")
+    await reserveOnlineEvalBudget("p1", 2, 5, reservedAt)
+    await settleOnlineEvalBudget("p1", 2, 0.5, true, reservedAt, settledAt)
+    expect(await readBudget("p1", reservedAt)).toMatchObject({
+      reservedUsd: 0,
+      spentUsd: 0.5,
+      judgedCount: 1,
+    })
+  })
 })
 
 describe("observations", () => {
@@ -277,6 +292,7 @@ describe("pruneOnlineEvalData", () => {
       observationsBefore: 10 * DAY,
       queueBefore: 10 * DAY,
       budgetBefore: 10 * DAY,
+      abandonedBefore: 0,
     })
 
     expect(removed).toBe(1)
@@ -296,11 +312,71 @@ describe("pruneOnlineEvalData", () => {
       observationsBefore: 10 * DAY,
       queueBefore: 10 * DAY,
       budgetBefore: 10 * DAY,
+      abandonedBefore: 0,
     })
 
     expect((await getDb().evalObservations.toArray()).map((row) => row.id)).toEqual(["fresh"])
     expect((await getDb().evalOnlineBudget.toArray()).map((row) => row.day)).toEqual([
       budgetDayKey(20 * DAY),
     ])
+  })
+})
+
+describe("policy validation on the write path", () => {
+  it("refuses to store a judging policy with no daily cap", async () => {
+    // The invariant has to live on the write path. Enforced only in a
+    // validator the caller may forget, it holds until the second caller.
+    await expect(
+      putOnlinePolicy(
+        policy({ judgeEvaluatorVersionIds: ["rubric@1"], budget: { dailyUsdCap: 0 } })
+      )
+    ).rejects.toThrow(InvalidOnlineEvalPolicyError)
+    expect(await getDb().evalOnlinePolicies.count()).toBe(0)
+  })
+
+  it("reports every problem, not just the first", async () => {
+    await expect(
+      putOnlinePolicy(
+        policy({
+          name: "  ",
+          sampling: { judgeRate: 2, judgeDailyMax: 200 },
+        })
+      )
+    ).rejects.toMatchObject({ problems: expect.arrayContaining(["name is required"]) })
+  })
+
+  it("still stores a valid policy", async () => {
+    await putOnlinePolicy(policy())
+    expect(await getDb().evalOnlinePolicies.count()).toBe(1)
+  })
+})
+
+describe("abandoned queue rows", () => {
+  it("reaps unsettled work whose worker never came back", async () => {
+    // The settled-only sweep can never reach these, so without this they are
+    // immortal and the queue grows without bound.
+    await enqueueOnlineEval({
+      id: "stranded",
+      policyId: "p1",
+      policyVersionId: "p1@1",
+      traceId: "t-stranded",
+      now: 0,
+    })
+    await enqueueOnlineEval({
+      id: "recent",
+      policyId: "p1",
+      policyVersionId: "p1@1",
+      traceId: "t-recent",
+      now: 40 * 86_400_000,
+    })
+
+    await pruneOnlineEvalData({
+      observationsBefore: 0,
+      queueBefore: 0,
+      budgetBefore: 0,
+      abandonedBefore: 30 * 86_400_000,
+    })
+
+    expect((await getDb().evalOnlineQueue.toArray()).map((row) => row.id)).toEqual(["recent"])
   })
 })

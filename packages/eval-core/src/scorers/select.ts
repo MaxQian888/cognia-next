@@ -4,7 +4,7 @@
  * the id list, so reports keep a stable scorer ordering.
  */
 
-import type { Scorer } from "@/types/eval/eval"
+import type { Scorer } from "../domain/eval"
 
 export function selectScorers(all: Scorer[], ids: string[]): Scorer[] {
   if (!ids || ids.length === 0) return all

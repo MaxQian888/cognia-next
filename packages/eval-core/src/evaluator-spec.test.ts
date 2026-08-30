@@ -1,5 +1,7 @@
 import {
+  builtInEvaluatorVersionId,
   evaluatorConfigDigest,
+  parseBuiltInEvaluatorVersionId,
   isCalibratedJudge,
   normalizeEvaluatorConfig,
   validateEvaluatorSpec,
@@ -136,5 +138,30 @@ describe("isCalibratedJudge", () => {
 
   it("does not demand calibration from evaluators that use no judge", () => {
     expect(isCalibratedJudge(spec())).toBe(true)
+  })
+})
+
+describe("built-in evaluator version ids", () => {
+  it("round-trips a catalog scorer without needing a stored row", () => {
+    const id = builtInEvaluatorVersionId("tool-selection")
+    expect(id).toBe("builtin:tool-selection@1")
+    expect(parseBuiltInEvaluatorVersionId(id)).toBe("tool-selection")
+  })
+
+  it("refuses a scorer the catalog does not have", () => {
+    // `redundancy` vs the real `tool-redundancy` is the exact drift the catalog
+    // was introduced to stop; resolving it to nothing beats resolving it to a
+    // silently-absent evaluator.
+    expect(parseBuiltInEvaluatorVersionId("builtin:redundancy@1")).toBeUndefined()
+  })
+
+  it("ignores ids that are not built-in", () => {
+    expect(parseBuiltInEvaluatorVersionId("rubric-helpfulness@3")).toBeUndefined()
+  })
+
+  it("keeps the revision out of the resolved scorer id", () => {
+    expect(parseBuiltInEvaluatorVersionId(builtInEvaluatorVersionId("tool-args", 7))).toBe(
+      "tool-args"
+    )
   })
 })
