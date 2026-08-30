@@ -1,119 +1,157 @@
 const mockGetSettings = jest.fn()
 const mockGetSession = jest.fn()
-const mockBuildDeps = jest.fn()
-const mockConsolidate = jest.fn(async () => ({ applied: [] }))
-// Typed at creation: a zero-arg `jest.fn()` called with spread args trips
-// TS2556 under strict mode.
-const mockHasNoLeakingPii = jest.fn((..._args: unknown[]) => true)
+const mockResolvePolicy = jest.fn()
+const mockResolveTarget = jest.fn()
+const mockAuditRefusal = jest.fn()
+const mockStore = jest.fn()
+const mockResolveCharacter = jest.fn()
 
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: { getState: () => ({ settings: mockGetSettings() }) },
+jest.mock("@/lib/db/settings", () => ({ getSettings: (...a: unknown[]) => mockGetSettings(...a) }))
+jest.mock("@/lib/db/sessions", () => ({ getSession: (...a: unknown[]) => mockGetSession(...a) }))
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...a: unknown[]) => mockResolveCharacter(...a),
 }))
-jest.mock("@/lib/db/sessions", () => ({
-  getSession: (...a: unknown[]) => mockGetSession(...a),
+jest.mock("@/lib/memory/agent-policy", () => ({
+  resolvePersistedAgentMemoryPolicy: (...a: unknown[]) => mockResolvePolicy(...a),
 }))
-jest.mock("@/lib/memory/write/run-memory-extraction", () => ({
-  buildAutoExtractionDeps: (...a: unknown[]) => mockBuildDeps(...a),
+jest.mock("@/lib/memory/scope/resolve-write-target", () => ({
+  resolveMemoryWriteTarget: (...a: unknown[]) => mockResolveTarget(...a),
+  auditMemoryScopeRefusal: (...a: unknown[]) => mockAuditRefusal(...a),
 }))
-jest.mock("@cognia/redact", () => ({
-  hasNoLeakingPii: (...a: unknown[]) => mockHasNoLeakingPii(...a),
+jest.mock("@/lib/memory/api/store-memory", () => ({
+  storeMemoryCore: (...a: unknown[]) => mockStore(...a),
 }))
 
 import { rememberFact, EXPLICIT_MEMORY_IMPORTANCE } from "./remember-fact"
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockGetSettings.mockReturnValue({ memory: { enabled: true } })
+  mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
   mockGetSession.mockResolvedValue({ id: "ses_1", characterId: "char_1" })
-  mockBuildDeps.mockResolvedValue({ consolidate: mockConsolidate })
-  mockHasNoLeakingPii.mockReturnValue(true)
+  mockResolvePolicy.mockResolvedValue({ canCreate: true, writableScopes: ["global", "workspace"] })
+  mockResolveTarget.mockResolvedValue({
+    ok: true,
+    scope: "global",
+    scopeRationale: "global_fallback",
+  })
+  mockStore.mockResolvedValue({ ok: true, stored: true, consolidated: true, applied: ["ADD"] })
+  mockAuditRefusal.mockResolvedValue(undefined)
+  mockResolveCharacter.mockResolvedValue({ id: "char_1" })
 })
 
 describe("rememberFact", () => {
-  it("stores an explicit fact through the consolidator", async () => {
+  it("stores an explicit fact through the canonical core", async () => {
     const res = await rememberFact({ text: "I always use pnpm", sessionId: "ses_1" })
-    expect(res.ok).toBe(true)
-    expect(mockConsolidate).toHaveBeenCalledWith(
+    expect(res).toEqual({ ok: true, scope: "global" })
+    expect(mockStore).toHaveBeenCalledWith(
       expect.objectContaining({
-        candidates: [
-          { type: "semantic", text: "I always use pnpm", importance: EXPLICIT_MEMORY_IMPORTANCE },
-        ],
+        text: "I always use pnpm",
+        type: "semantic",
+        importance: EXPLICIT_MEMORY_IMPORTANCE,
         provenance: "explicit",
+        piiGate: "block",
         source: { sessionId: "ses_1" },
+        scopeRationale: "global_fallback",
       })
     )
   })
 
   it("trims the text before storing", async () => {
     await rememberFact({ text: "   spaced   " })
-    expect(mockConsolidate).toHaveBeenCalledWith(
-      expect.objectContaining({ candidates: [expect.objectContaining({ text: "spaced" })] })
-    )
+    expect(mockStore).toHaveBeenCalledWith(expect.objectContaining({ text: "spaced" }))
   })
 
   it("rejects empty text without touching the store", async () => {
-    const res = await rememberFact({ text: "   " })
-    expect(res).toEqual({ ok: false, reason: "empty" })
-    expect(mockBuildDeps).not.toHaveBeenCalled()
+    expect(await rememberFact({ text: "   " })).toEqual({ ok: false, reason: "empty" })
+    expect(mockStore).not.toHaveBeenCalled()
+    expect(mockResolveTarget).not.toHaveBeenCalled()
   })
 
-  it("honours an explicit scope over the configured default", async () => {
-    mockGetSettings.mockReturnValue({ memory: { enabled: true, scopeDefault: "global" } })
-    const res = await rememberFact({ text: "fact", scope: "workspace" })
+  // The bug this rewrite exists for: a workspace capture used to persist with
+  // `projectId: undefined`, which no reader can ever match.
+  it("always forwards a projectId for a workspace target", async () => {
+    mockResolveTarget.mockResolvedValue({
+      ok: true,
+      scope: "workspace",
+      projectId: "proj_1",
+      scopeRationale: "caller_explicit",
+    })
+    const res = await rememberFact({ text: "fact", scope: "workspace", sessionId: "ses_1" })
     expect(res).toEqual({ ok: true, scope: "workspace" })
-    expect(mockConsolidate).toHaveBeenCalledWith(expect.objectContaining({ scope: "workspace" }))
-  })
-
-  it("falls back to the configured default scope", async () => {
-    mockGetSettings.mockReturnValue({ memory: { enabled: true, scopeDefault: "global" } })
-    const res = await rememberFact({ text: "fact" })
-    expect(res).toEqual({ ok: true, scope: "global" })
-  })
-
-  it("passes characterId only for a character-scoped write", async () => {
-    await rememberFact({ text: "fact", scope: "global", sessionId: "ses_1" })
-    expect(mockConsolidate).toHaveBeenCalledWith(
-      expect.objectContaining({ characterId: undefined })
+    expect(mockStore).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "workspace", projectId: "proj_1" })
     )
   })
 
-  it("refuses when memory is disabled", async () => {
-    mockGetSettings.mockReturnValue({ memory: { enabled: false } })
+  it("passes the explicit pick and the configured default to the resolver", async () => {
+    mockGetSettings.mockResolvedValue({ memory: { enabled: true, scopeDefault: "global" } })
+    await rememberFact({ text: "fact", scope: "workspace" })
+    expect(mockResolveTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ requested: "workspace", configured: "global" })
+    )
+  })
+
+  it("refuses when memory is disabled, before resolving a target", async () => {
+    mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
     expect(await rememberFact({ text: "fact" })).toEqual({ ok: false, reason: "disabled" })
-    expect(mockBuildDeps).not.toHaveBeenCalled()
+    expect(mockResolveTarget).not.toHaveBeenCalled()
   })
 
   it("refuses while temporary mode is on", async () => {
-    mockGetSettings.mockReturnValue({ memory: { enabled: true, temporary: true } })
+    mockGetSettings.mockResolvedValue({ memory: { enabled: true, temporary: true } })
     expect(await rememberFact({ text: "fact" })).toEqual({ ok: false, reason: "temporary" })
-    expect(mockBuildDeps).not.toHaveBeenCalled()
+    expect(mockResolveTarget).not.toHaveBeenCalled()
   })
 
-  // The PII gate is mandatory on this path — both `/remember` and `#` rely on
-  // it being enforced here rather than at each call site.
-  it("refuses text that trips the PII gate, before any store call", async () => {
-    mockHasNoLeakingPii.mockReturnValue(false)
-    expect(await rememberFact({ text: "email me at a@b.com" })).toEqual({
+  it("reports a denied scope and writes one refusal audit row", async () => {
+    mockResolveTarget.mockResolvedValue({
       ok: false,
-      reason: "pii",
+      reason: "scope_denied",
+      attempted: ["workspace"],
     })
-    expect(mockBuildDeps).not.toHaveBeenCalled()
-    expect(mockConsolidate).not.toHaveBeenCalled()
+    expect(await rememberFact({ text: "fact", scope: "workspace", sessionId: "ses_1" })).toEqual({
+      ok: false,
+      reason: "denied",
+    })
+    expect(mockAuditRefusal).toHaveBeenCalledWith({
+      sessionId: "ses_1",
+      attempted: ["workspace"],
+      surface: "remember",
+    })
+    expect(mockStore).not.toHaveBeenCalled()
   })
 
-  it("reports unavailable when no memory deps can be built", async () => {
-    mockBuildDeps.mockResolvedValue(null)
-    expect(await rememberFact({ text: "fact" })).toEqual({ ok: false, reason: "unavailable" })
+  it.each([
+    ["pii_blocked", "pii"],
+    ["policy_denied", "denied"],
+    ["scope_denied", "denied"],
+    ["disabled", "disabled"],
+    ["temporary", "temporary"],
+  ])("maps the core's %s result onto %s", async (coreReason, expected) => {
+    mockStore.mockResolvedValue({ ok: false, reason: coreReason })
+    expect(await rememberFact({ text: "fact" })).toEqual({ ok: false, reason: expected })
   })
 
-  it("never throws — a consolidator failure becomes a typed result", async () => {
-    mockConsolidate.mockRejectedValueOnce(new Error("boom"))
+  it("treats a consolidator NOOP as success", async () => {
+    mockStore.mockResolvedValue({ ok: true, stored: false, consolidated: true, applied: ["NOOP"] })
+    expect(await rememberFact({ text: "fact" })).toEqual({ ok: true, scope: "global" })
+  })
+
+  it("never throws, a core failure becomes a typed result", async () => {
+    mockStore.mockRejectedValueOnce(new Error("boom"))
     expect(await rememberFact({ text: "fact" })).toEqual({ ok: false, reason: "failed" })
   })
 
   it("survives a session lookup failure", async () => {
     mockGetSession.mockRejectedValue(new Error("no session"))
-    const res = await rememberFact({ text: "fact", sessionId: "ses_missing" })
-    expect(res.ok).toBe(true)
+    expect((await rememberFact({ text: "fact", sessionId: "ses_missing" })).ok).toBe(true)
+  })
+
+  it("resolves the agent namespace from the session's character", async () => {
+    mockResolveCharacter.mockResolvedValue({ id: "char_1", twinId: "twin_9" })
+    await rememberFact({ text: "fact", sessionId: "ses_1" })
+    expect(mockResolveTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "twin:twin_9" })
+    )
   })
 })

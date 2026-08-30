@@ -450,6 +450,7 @@
         "workspace": "工作区记忆"
       },
       "storeError": {
+        "denied": "当前 Agent 不被允许在该作用域写入记忆。",
         "disabled": "长期记忆已关闭。",
         "empty": "请输入要记住的内容。",
         "failed": "无法存储这条记忆。",

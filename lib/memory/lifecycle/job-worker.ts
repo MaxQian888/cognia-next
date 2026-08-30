@@ -74,6 +74,10 @@ export async function drainMemoryJobs(
 export interface StartMemoryJobWorkerOptions extends DrainMemoryJobsOptions {
   intervalMs?: number
   deps?: MemoryJobWorkerDeps
+  /** Escape hatch for tests and for a host that must not touch stored rows. */
+  repairNamespaces?: boolean
+  /** Injected repair pass; defaults to `repairWorkspaceScopedMemories`. */
+  repair?: () => Promise<unknown>
 }
 
 export function startMemoryJobWorker(options: StartMemoryJobWorkerOptions = {}): () => void {
@@ -87,6 +91,13 @@ export function startMemoryJobWorker(options: StartMemoryJobWorkerOptions = {}):
     } finally {
       running = false
     }
+  }
+  // Repair unreadable `workspace` rows once per start. It hangs off the worker
+  // rather than off a renderer initializer because every host that can process
+  // memory at all already starts this worker, and the repair is idempotent by
+  // construction, so a no-op boot costs one indexed read.
+  if (options.repairNamespaces !== false) {
+    void (options.repair ?? defaultRepairNamespaces)().catch(() => undefined)
   }
   void tick()
   const timer = setInterval(() => void tick(), options.intervalMs ?? 30_000)
@@ -645,6 +656,12 @@ export async function processMemoryJob(job: MemoryJob): Promise<MemoryJobProcess
       throw new MemoryJobTerminalError(`unknown_job_kind:${String(exhaustive)}`)
     }
   }
+}
+
+async function defaultRepairNamespaces(): Promise<unknown> {
+  const { repairWorkspaceScopedMemories } =
+    await import("@/lib/memory/backfill/repair-workspace-scope")
+  return repairWorkspaceScopedMemories()
 }
 
 const defaultWorkerDeps: MemoryJobWorkerDeps = {

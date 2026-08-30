@@ -98,6 +98,41 @@ function deps(
   }
 }
 
+describe("startMemoryJobWorker namespace repair", () => {
+  it("runs the one-time unreadable-row repair on start", async () => {
+    const repair = jest.fn(async () => ({ repaired: 0, downgraded: 0 }))
+    const stop = startMemoryJobWorker({
+      repair,
+      deps: {
+        claimNext: async () => undefined,
+        finish: async () => {},
+        fail: async () => {},
+        process: async () => ({ status: "succeeded", resultCode: "ok" }),
+      },
+    })
+    stop()
+    await Promise.resolve()
+    expect(repair).toHaveBeenCalledTimes(1)
+  })
+
+  it("can be told not to touch stored rows", async () => {
+    const repair = jest.fn(async () => ({ repaired: 0, downgraded: 0 }))
+    const stop = startMemoryJobWorker({
+      repairNamespaces: false,
+      repair,
+      deps: {
+        claimNext: async () => undefined,
+        finish: async () => {},
+        fail: async () => {},
+        process: async () => ({ status: "succeeded", resultCode: "ok" }),
+      },
+    })
+    stop()
+    await Promise.resolve()
+    expect(repair).not.toHaveBeenCalled()
+  })
+})
+
 describe("memory job worker", () => {
   beforeEach(() => {
     jest.clearAllMocks()

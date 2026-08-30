@@ -95,6 +95,21 @@ export async function listMemoriesBySourceMessageId(messageId: string): Promise<
 }
 
 /**
+ * Rows whose scope promises a workspace but which carry no `projectId`.
+ *
+ * `isVisibleToReader` requires `memory.projectId === reader.projectId`, so
+ * every one of these is unreadable by construction. They exist because the
+ * explicit-capture path used to resolve a scope without resolving the id that
+ * scope requires. Indexed on `scope`, so this is a bounded read rather than a
+ * full-table scan, and it returns nothing at all on a healthy database.
+ */
+export async function listWorkspaceMemoriesMissingProject(limit: number): Promise<Memory[]> {
+  if (limit <= 0) return []
+  const rows = await getDb().memories.where("scope").equals("workspace").toArray()
+  return rows.filter((row) => !row.projectId).slice(0, limit)
+}
+
+/**
  * Active project claims that have gone longest without a re-check, oldest first.
  *
  * Uses the `projectMemoryKind` index rather than scanning every memory: the
@@ -138,6 +153,13 @@ export interface MemoryUpdatePatch {
   validatedAt?: Memory["validatedAt"]
   /** Hash over the ordered evidence set, for "did the support change" in O(1). */
   evidenceHash?: Memory["evidenceHash"]
+  /**
+   * Why the write chose this scope, from `resolveMemoryWriteTarget`. Already
+   * READ by the inspector, but until this patch carried it only the project
+   * miner could ever write one, so a deliberate capture's narrowing was
+   * unexplainable.
+   */
+  scopeRationale?: string
   /** When true, also bumps `version` (used by the consolidation UPDATE op). */
   bumpVersion?: boolean
 }
@@ -151,6 +173,22 @@ export async function updateMemory(id: string, patch: MemoryUpdatePatch): Promis
     next.version = (existing?.version ?? 0) + 1
   }
   await getDb().memories.update(id, next)
+}
+
+/**
+ * Move a memory to a different namespace.
+ *
+ * Deliberately NOT part of `MemoryUpdatePatch`. Changing `scope` or `projectId`
+ * changes who can ever read the row, so it is a different kind of operation
+ * from editing text or flipping a flag, and it should be greppable on its own.
+ * The only caller today is the one-time repair for `workspace`-scoped rows that
+ * were written without a `projectId` and were therefore unreadable.
+ */
+export async function relocateMemoryNamespace(
+  id: string,
+  next: { scope?: Memory["scope"]; projectId?: string; scopeRationale?: string }
+): Promise<void> {
+  await getDb().memories.update(id, { ...next, updatedAt: Date.now() })
 }
 
 /**

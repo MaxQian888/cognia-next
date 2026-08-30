@@ -60,6 +60,12 @@ export interface StoreMemoryCoreInput {
   attribution?: MemoryAttribution
   /** Agent whose CRUD/scope policy governs this write. */
   policyCharacterId?: string
+  /**
+   * Why the caller chose this scope, from `resolveMemoryWriteTarget`. Persisted
+   * so the inspector can explain a narrowed scope. Callers that already know
+   * their exact target (workflow node, plugin, MCP, RPC) leave it unset.
+   */
+  scopeRationale?: string
 }
 
 export type StoreMemoryCoreResult =
@@ -183,15 +189,20 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
       source: input.source,
       attribution: input.attribution,
     })
-    // Tags ride as a post-ADD patch — the consolidator's candidate shape is
-    // shared with LLM extraction, which never produces tags.
-    if (tags.length > 0) {
+    // Tags and the scope rationale ride as a post-ADD patch, because the
+    // consolidator's candidate shape is shared with LLM extraction and carries
+    // neither.
+    const postAddPatch = {
+      ...(tags.length > 0 ? { tags } : {}),
+      ...(input.scopeRationale ? { scopeRationale: input.scopeRationale } : {}),
+    }
+    if (Object.keys(postAddPatch).length > 0) {
       for (const op of applied) {
         if (op.op === "ADD" && op.memory?.id) {
           try {
-            await memDb.updateMemory(op.memory.id, { tags })
+            await memDb.updateMemory(op.memory.id, postAddPatch)
           } catch {
-            // Best-effort — the memory row itself already landed.
+            // Best-effort, the memory row itself already landed.
           }
         }
       }
@@ -282,6 +293,7 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     reviewStatus: input.provenance === "explicit" ? "verified" : "unreviewed",
     contaminationState: input.provenance === "external" ? "external-context" : "clean",
     sensitivity: "normal",
+    ...(input.scopeRationale ? { scopeRationale: input.scopeRationale } : {}),
   })
   try {
     const governance = await import("@/lib/db/memory-governance")
@@ -314,7 +326,10 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
       await sink.upsert(row.id, row.text)
       await memDb.updateMemory(row.id, { vectorDocId: row.id })
     } catch {
-      // BM25 recall still works without the vector.
+      // BM25 recall still works without the vector, but the row is now missing
+      // from the index. Report the drift so the reconcile threshold can fire.
+      const { noteMemoryVectorFailure } = await import("@/lib/memory/lifecycle/enqueue-reconcile")
+      noteMemoryVectorFailure()
     }
   }
   return {

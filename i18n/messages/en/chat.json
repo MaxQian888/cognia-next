@@ -450,6 +450,7 @@
         "workspace": "workspace memory"
       },
       "storeError": {
+        "denied": "This agent is not allowed to write memory in that scope.",
         "disabled": "Long-term memory is disabled.",
         "empty": "Type a fact to remember.",
         "failed": "The memory could not be stored.",

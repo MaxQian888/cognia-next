@@ -28,6 +28,11 @@ jest.mock("@/lib/db/memory-governance", () => ({
   appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...(args as [])),
 }))
 
+const mockNoteVectorFailure = jest.fn()
+jest.mock("@/lib/memory/lifecycle/enqueue-reconcile", () => ({
+  noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
+}))
+
 const mockResolvePolicy = jest.fn()
 jest.mock("@/lib/memory/agent-policy", () => ({
   resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
@@ -282,6 +287,42 @@ describe("storeMemoryCore", () => {
         tags: ["t1"],
       })
     )
+  })
+
+  it("persists the scope rationale on the consolidated path", async () => {
+    await storeMemoryCore({
+      text: "fact",
+      provenance: "explicit",
+      scopeRationale: "user_configured_default",
+    })
+    expect(mockUpdateMemory).toHaveBeenCalledWith(
+      "mem_added",
+      expect.objectContaining({ scopeRationale: "user_configured_default" })
+    )
+  })
+
+  it("persists the scope rationale on the degraded path", async () => {
+    mockBuildDeps.mockResolvedValue(null)
+    await storeMemoryCore({
+      text: "fact",
+      provenance: "explicit",
+      scopeRationale: "session_workspace",
+    })
+    expect(mockCreateMemory).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeRationale: "session_workspace" })
+    )
+  })
+
+  it("reports vector drift when the degraded path cannot index the new row", async () => {
+    // Without this the fact is BM25-findable but missing from the vector index,
+    // and nothing ever schedules a reconcile to notice.
+    mockBuildDeps.mockResolvedValue(null)
+    mockVectorSink.mockResolvedValue({
+      upsert: jest.fn().mockRejectedValue(new Error("no backend")),
+    })
+    const result = await storeMemoryCore({ text: "fact", provenance: "explicit" })
+    expect(result).toMatchObject({ ok: true, stored: true, consolidated: false })
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(1)
   })
 
   it("redact mode replaces PII and flags the result", async () => {

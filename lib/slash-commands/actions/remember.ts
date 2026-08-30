@@ -60,8 +60,14 @@ export async function dispatchRememberCommand(
         system:
           "That looks like it contains sensitive data (an email, key, or similar), so it was **not** saved to memory.",
       }
+    case "denied":
+      return {
+        system:
+          "This agent isn't allowed to write memory in that scope, so nothing was saved. Adjust its memory permissions in Settings.",
+        openMemory: true,
+      }
     case "unavailable":
-      return { system: "Couldn't reach the memory store right now — please try again." }
+      return { system: "Couldn't reach the memory store right now, please try again." }
     default:
       return { system: "Something went wrong saving that to memory." }
   }
