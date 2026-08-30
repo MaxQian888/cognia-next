@@ -27,6 +27,53 @@ export async function listMemoryEvidence(memoryId: string): Promise<MemoryEviden
   return getDb().memoryEvidence.where("memoryId").equals(memoryId).sortBy("createdAt")
 }
 
+/**
+ * Record a re-check verdict on one evidence row.
+ *
+ * Narrow by design: the sweep may write only what it learned. Widening this to
+ * a general patch would let a re-check silently rewrite `sourceId`, `messageId`
+ * or `excerptHash` — the very fields the NEXT re-check compares against, which
+ * would make the check self-confirming.
+ */
+export async function recordMemoryEvidenceVerdict(
+  id: string,
+  verdict: {
+    validationState: MemoryEvidence["validationState"]
+    validatedAt?: number
+    validationStrategy?: MemoryEvidence["validationStrategy"]
+  }
+): Promise<void> {
+  await getDb().memoryEvidence.update(id, {
+    validationState: verdict.validationState,
+    validatedAt: verdict.validatedAt ?? Date.now(),
+    ...(verdict.validationStrategy ? { validationStrategy: verdict.validationStrategy } : {}),
+  })
+}
+
+/**
+ * Mark every evidence row that cites one of `messageIds` as `revoked`.
+ *
+ * The source of truth for "which claims depended on this message" is the
+ * `messageId` index — this is what it exists for. Returns the affected memory
+ * ids so the caller can queue a re-check for each.
+ */
+export async function revokeMemoryEvidenceForMessages(
+  messageIds: readonly string[],
+  now: number = Date.now()
+): Promise<string[]> {
+  if (messageIds.length === 0) return []
+  const db = getDb()
+  const rows = await db.memoryEvidence
+    .where("messageId")
+    .anyOf([...messageIds])
+    .toArray()
+  if (rows.length === 0) return []
+  await db.memoryEvidence.bulkPut(
+    rows.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
+  )
+  return [...new Set(rows.map((row) => row.memoryId).filter((id): id is string => Boolean(id)))]
+}
+
 export async function deleteMemoryEvidence(memoryId: string): Promise<void> {
   await getDb().memoryEvidence.where("memoryId").equals(memoryId).delete()
 }

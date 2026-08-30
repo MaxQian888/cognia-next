@@ -181,8 +181,12 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
   void (async () => {
     // Piggyback the day-bucketed vector drift sweep on the same idle tick —
     // the worker loop drains it; at most one sweep per day.
-    const { enqueueDailyVectorReconcile } = await import("./enqueue-reconcile")
+    const { enqueueDailyVectorReconcile, enqueueDailyClaimRevalidation } =
+      await import("./enqueue-reconcile")
     void enqueueDailyVectorReconcile()
+    // Backstop for the claim re-check. The targeted trigger fires on deletion;
+    // this catches whatever a crash lost between the two.
+    if (config.mineProjectContext) void enqueueDailyClaimRevalidation()
 
     // The conversation has gone idle, so the trailing mining window is now
     // closed — this is the one place it gets queued. The live turn path

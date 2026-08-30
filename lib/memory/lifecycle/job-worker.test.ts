@@ -15,6 +15,9 @@ const mockTryBuildVectorSink = jest.fn()
 const mockBuildMiningDeps = jest.fn()
 const mockRunMining = jest.fn()
 const mockGetProject = jest.fn()
+const mockListClaimsNeedingRecheck = jest.fn()
+const mockBuildRevalidateDeps = jest.fn()
+const mockRevalidateClaim = jest.fn()
 
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => mockGetSettings() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: () => mockGetSession() }))
@@ -31,7 +34,12 @@ jest.mock("@/lib/db/memory-governance", () => ({
 }))
 jest.mock("@/lib/db/memories", () => ({
   listMemories: (...args: unknown[]) => mockListMemories(...args),
+  listProjectClaimsNeedingRecheck: (...args: unknown[]) => mockListClaimsNeedingRecheck(...args),
   updateMemory: (...args: unknown[]) => mockUpdateMemory(...args),
+}))
+jest.mock("@/lib/memory/lifecycle/revalidate-claim", () => ({
+  buildClaimRevalidationDeps: (...args: unknown[]) => mockBuildRevalidateDeps(...args),
+  revalidateClaim: (...args: unknown[]) => mockRevalidateClaim(...args),
 }))
 jest.mock("@/lib/memory/write/run-memory-extraction", () => ({
   buildAutoExtractionDeps: (...args: unknown[]) => mockBuildExtractionDeps(...args),
@@ -98,6 +106,9 @@ describe("memory job worker", () => {
     mockGetProject.mockResolvedValue({ id: "p1", name: "Cognia", roots: [] })
     mockBuildMiningDeps.mockResolvedValue({ extract: jest.fn(), consolidate: jest.fn() })
     mockRunMining.mockResolvedValue({ applied: [] })
+    mockListClaimsNeedingRecheck.mockResolvedValue([])
+    mockBuildRevalidateDeps.mockResolvedValue({})
+    mockRevalidateClaim.mockResolvedValue({ status: "revalidated" })
     mockListMessages.mockResolvedValue([
       { role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
       { role: "assistant", parts: [{ type: "text", text: "Noted." }] },
@@ -397,16 +408,43 @@ describe("memory job worker", () => {
       })
     })
 
-    it("does not silently run the reconciler for an unimplemented kind", async () => {
-      // The dispatch used to fall through to `processVectorReconcile`, so any
-      // new kind quietly did the wrong work. It now says so instead.
+    it("re-checks exactly the claim a targeted job names", async () => {
+      // The dispatch used to fall through to `processVectorReconcile`, so a new
+      // kind quietly did the wrong work.
       await expect(
-        processMemoryJob({ ...job("reval"), kind: "project-claim-revalidate" })
-      ).resolves.toEqual({
-        status: "skipped",
-        resultCode: "revalidation_not_implemented",
-      })
+        processMemoryJob({ ...job("reval"), kind: "project-claim-revalidate", memoryId: "mem9" })
+      ).resolves.toEqual({ status: "succeeded", resultCode: "claims_revalidated" })
+      expect(mockRevalidateClaim).toHaveBeenCalledWith("mem9", expect.anything())
+      expect(mockListClaimsNeedingRecheck).not.toHaveBeenCalled()
       expect(mockTryBuildVectorSink).not.toHaveBeenCalled()
+    })
+
+    it("sweeps the longest-unchecked claims when the job names none", async () => {
+      mockListClaimsNeedingRecheck.mockResolvedValue([{ id: "a" }, { id: "b" }])
+      await processMemoryJob({ ...job("sweep"), kind: "project-claim-revalidate" })
+      expect(mockRevalidateClaim).toHaveBeenCalledTimes(2)
+    })
+
+    it("audits an invalidation, so a user can find out a claim stopped being used", async () => {
+      mockRevalidateClaim.mockResolvedValue({
+        status: "invalidated",
+        verdict: { support: 0, counted: 0, revoked: true, staleness: "expired", invalidate: true },
+      })
+      const outcome = await processMemoryJob({
+        ...job("reval"),
+        kind: "project-claim-revalidate",
+        memoryId: "mem9",
+      })
+      expect(outcome).toEqual({ status: "succeeded", resultCode: "claims_invalidated" })
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "invalidated", memoryId: "mem9" })
+      )
+    })
+
+    it("reports an empty sweep instead of claiming success", async () => {
+      await expect(
+        processMemoryJob({ ...job("sweep"), kind: "project-claim-revalidate" })
+      ).resolves.toEqual({ status: "no_output", resultCode: "no_claims_to_recheck" })
     })
   })
 

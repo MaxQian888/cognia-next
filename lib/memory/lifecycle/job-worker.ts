@@ -10,7 +10,7 @@ import {
   createMemoryEvidence,
   failMemoryJob,
 } from "@/lib/db/memory-governance"
-import { listMemories, updateMemory } from "@/lib/db/memories"
+import { listMemories, listProjectClaimsNeedingRecheck, updateMemory } from "@/lib/db/memories"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryEvidence, MemoryJob } from "@/types/memory/governance"
@@ -497,6 +497,53 @@ async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOut
   }
 }
 
+/**
+ * How many claims one sweep pass re-checks.
+ *
+ * The drain budget is 20 jobs per 30s tick and each claim costs a handful of
+ * Dexie reads plus a redaction pass, so the sweep is deliberately shallow and
+ * runs daily: it exists to catch drift the targeted triggers missed (a crash
+ * between a deletion and its enqueue), not to be the primary path.
+ */
+const CLAIM_SWEEP_BATCH = 25
+
+async function processClaimRevalidation(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
+  const { buildClaimRevalidationDeps, revalidateClaim } =
+    await import("@/lib/memory/lifecycle/revalidate-claim")
+  const deps = await buildClaimRevalidationDeps()
+
+  const targets = job.memoryId
+    ? [job.memoryId]
+    : (await listProjectClaimsNeedingRecheck(CLAIM_SWEEP_BATCH)).map((memory) => memory.id)
+  if (targets.length === 0) {
+    return { status: "no_output", resultCode: "no_claims_to_recheck" }
+  }
+
+  let invalidated = 0
+  let revalidated = 0
+  for (const memoryId of targets) {
+    const result = await revalidateClaim(memoryId, deps)
+    if (result.status === "invalidated") {
+      invalidated += 1
+      // The console's activity view is how a user finds out a claim stopped
+      // being used. An invalidation with no audit row is indistinguishable
+      // from one that never happened.
+      await appendMemoryAuditEvent({
+        action: "invalidated",
+        memoryId,
+        reason: "evidence_revoked",
+        metadata: { support: result.verdict?.support ?? 0 },
+      }).catch(() => undefined)
+    } else if (result.status === "revalidated") {
+      revalidated += 1
+    }
+  }
+
+  if (invalidated > 0) return { status: "succeeded", resultCode: "claims_invalidated" }
+  if (revalidated > 0) return { status: "succeeded", resultCode: "claims_revalidated" }
+  return { status: "no_output", resultCode: "nothing_to_recheck" }
+}
+
 async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {
   const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
@@ -562,10 +609,7 @@ export async function processMemoryJob(job: MemoryJob): Promise<MemoryJobProcess
     case "project-mining":
       return processProjectMining(job)
     case "project-claim-revalidate":
-      // Written by the claim re-check sweep, which is not wired yet. Skipping is
-      // the honest outcome: the row is not lost, and it is visibly unhandled in
-      // the console rather than quietly succeeding.
-      return { status: "skipped", resultCode: "revalidation_not_implemented" }
+      return processClaimRevalidation(job)
     case "vector-reconcile":
       return processVectorReconcile()
     default: {

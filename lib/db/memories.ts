@@ -13,12 +13,13 @@
  * invariants.
  */
 
-import type {
-  Memory,
-  MemoryReaderContext,
-  MemoryScope,
-  MemoryStatus,
-  MemoryType,
+import {
+  PROJECT_MEMORY_KINDS,
+  type Memory,
+  type MemoryReaderContext,
+  type MemoryScope,
+  type MemoryStatus,
+  type MemoryType,
 } from "@/types/memory/memory"
 import { getDb } from "./schema"
 
@@ -87,6 +88,26 @@ export async function listMemoriesBySourceMessageId(messageId: string): Promise<
   if (!messageId) return []
   const rows = await getDb().memories.where("sourceMessageId").equals(messageId).toArray()
   return rows.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+/**
+ * Active project claims that have gone longest without a re-check, oldest first.
+ *
+ * Uses the `projectMemoryKind` index rather than scanning every memory: the
+ * personal corpus is the larger of the two on most installs and has no citation
+ * model to check. Rows never validated sort first — an unchecked claim is the
+ * one the sweep most needs to look at.
+ */
+export async function listProjectClaimsNeedingRecheck(limit: number): Promise<Memory[]> {
+  if (limit <= 0) return []
+  const rows = await getDb()
+    .memories.where("projectMemoryKind")
+    .anyOf([...PROJECT_MEMORY_KINDS])
+    .toArray()
+  return rows
+    .filter((row) => row.status === "active")
+    .sort((a, b) => (a.validatedAt ?? 0) - (b.validatedAt ?? 0))
+    .slice(0, limit)
 }
 
 export interface MemoryUpdatePatch {

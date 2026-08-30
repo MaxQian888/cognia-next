@@ -393,6 +393,28 @@ describe("scheduleMemoryMaintenance", () => {
     expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
   })
 
+  it("arms the claim re-check backstop only when mining is on", async () => {
+    scheduleMemoryMaintenance({ ...base, config: cfg() })
+    await jest.runAllTimersAsync()
+    expect(
+      mockEnqueueJob.mock.calls.filter(([draft]) => draft.kind === "project-claim-revalidate")
+    ).toHaveLength(1)
+
+    jest.clearAllMocks()
+    mockEnqueueJob.mockResolvedValue({ id: "job-1" })
+    mockClaimJob.mockResolvedValueOnce({ id: "job-1" })
+    __resetMaintenanceGuard()
+    scheduleMemoryMaintenance({
+      ...base,
+      sessionId: "s2",
+      config: cfg({ mineProjectContext: false }),
+    })
+    await jest.runAllTimersAsync()
+    expect(
+      mockEnqueueJob.mock.calls.filter(([draft]) => draft.kind === "project-claim-revalidate")
+    ).toEqual([])
+  })
+
   it("flushes the trailing mining window that the live turn path held back", async () => {
     // 26 salient messages: the live path queues the closed windows, this queues
     // the last one — without it a session that simply stops is never mined.

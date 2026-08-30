@@ -30,6 +30,7 @@ import {
   assessProjectSalience,
   type ProjectSalienceSignal,
 } from "@cognia/memory/extract/project-salience"
+import { projectMiningExcerpt } from "@cognia/memory/extract/project-excerpt"
 import { normalizeProjectPaths } from "@cognia/memory/extract/project-path-normalize"
 import {
   extractProjectClaims,
@@ -47,7 +48,7 @@ import {
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
-import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 
 /** Why a window produced nothing. Surfaced as the job's `resultCode`. */
 export type ProjectMiningSkipReason =
@@ -162,13 +163,19 @@ export async function runProjectMining(
     if (!salience.salient)
       return { applied: [], skipReason: "not_salient", signals: salience.signals }
 
-    const redact = deps.redact ?? ((text: string) => redactText(text).redacted)
+    // Redaction goes through the SHARED excerpt function the re-check sweep also
+    // calls. Deriving the excerpt here instead would let the two sides drift, and
+    // every claim would then look revoked on its first check — a hashing bug
+    // wearing the costume of evidence rot.
+    const excerptOptions = { roots, ...(deps.redact ? { redact: deps.redact } : {}) }
+    const prepared: { id: string; role: string; text: string }[] = []
+    for (const message of usable) {
+      const excerpt = projectMiningExcerpt(message.text, excerptOptions)
+      if (excerpt === undefined) return skipped("identifying_path")
+      prepared.push({ id: message.id, role: message.role, text: excerpt })
+    }
     const extractionInput: ExtractProjectClaimsInput = {
-      messages: normalized.map((message) => ({
-        id: message.id,
-        role: message.role,
-        text: redact(message.text),
-      })),
+      messages: prepared,
       ...(input.projectHint ? { projectHint: input.projectHint } : {}),
     }
     const redactedExcerpts = new Map(

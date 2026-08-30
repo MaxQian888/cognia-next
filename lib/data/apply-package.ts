@@ -940,6 +940,10 @@ async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
       row: {
         ...item,
         evidenceIds: item.evidenceIds.map((id) => evidenceIdMap.get(id) ?? id),
+        // A targeted job (`project-claim-revalidate`) names the row it acts on;
+        // the import remaps memory ids, so without this the restored job would
+        // point at whatever previously held that id — or at nothing.
+        ...(item.memoryId ? { memoryId: memoryIdMap.get(item.memoryId) ?? item.memoryId } : {}),
       },
       table: db.memoryJobs,
       kind: "memoryJobs",
@@ -1336,6 +1340,7 @@ function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
     "projectId",
     "characterId",
     "agentId",
+    "memoryId",
     "leaseOwner",
     "errorCode",
   ] as const) {

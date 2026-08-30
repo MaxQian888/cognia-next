@@ -186,6 +186,16 @@ export interface MemoryJob {
    * `dedupeKey`, so shipped databases keep working unchanged.
    */
   checkpoint?: MemoryJobCheckpoint
+  /**
+   * The single memory this job targets, for kinds that act on one row
+   * (`project-claim-revalidate`). Absent means "sweep": re-check the claims
+   * that have gone longest without one.
+   *
+   * A field rather than a slice of `dedupeKey`. Parsing state back out of a key
+   * is exactly what made the transcript checkpoint replay the wrong window, and
+   * a key is for deduping, not for carrying arguments.
+   */
+  memoryId?: string
   queuedAt: number
   startedAt?: number
   completedAt?: number
