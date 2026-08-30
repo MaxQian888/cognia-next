@@ -967,11 +967,11 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   },
   evalOnlineQueue: {
     mode: "ttl",
-    days: 7,
+    days: 30,
     enforcement: "central",
     executorId: "evalOnline",
     reason:
-      "Settled work items are bookkeeping. They are kept a week so a skipped-for-budget decision can still be explained, then swept.",
+      "Two windows, and the LONGER one is declared here because it is the table's real bound: settled work items are kept 7 days so a skipped-for-budget decision can still be explained, while work left unsettled by a session that never came back is reaped at 30. Declaring the 7 would understate the table by 4x.",
   },
   evalOnlineBudget: {
     mode: "ttl",

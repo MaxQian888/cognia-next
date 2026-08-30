@@ -140,8 +140,10 @@ describe("drainOnlineEvalQueue", () => {
     const { deps, setState } = harness()
     const result = await drainOnlineEvalQueue(20, deps)
     expect(result.evaluated).toBe(1)
+    // `claimQueuedOnlineEvals` already set `running` inside its claim
+    // transaction, so the worker only writes the terminal state.
     const states = setState.mock.calls.map((call) => call[1])
-    expect(states).toEqual(["running", "done"])
+    expect(states).toEqual(["done"])
   })
 
   it("writes observations for the trace it evaluated", async () => {
@@ -159,7 +161,7 @@ describe("drainOnlineEvalQueue", () => {
     const result = await drainOnlineEvalQueue(20, deps)
     expect(result.skipped).toBe(1)
     expect(result.evaluated).toBe(0)
-    expect(skip).toHaveBeenCalledWith("q1", "skipped-no-judge", 1_000)
+    expect(skip).toHaveBeenCalledWith("q1", "skipped-policy-gone", 1_000)
   })
 
   it("marks a row failed rather than retrying it forever", async () => {
@@ -175,10 +177,13 @@ describe("drainOnlineEvalQueue", () => {
     expect(setState).toHaveBeenLastCalledWith("q1", "failed", { error: "dexie closed" }, 1_000)
   })
 
-  it("counts an attempt on every claim, so a repeatedly-failing row is visible", async () => {
+  it("does not re-count an attempt the claim transaction already counted", async () => {
+    // The claim flips the row to `running` and increments; repeating it here
+    // made every pass count twice.
     const { deps, setState } = harness({ claim: async () => [row({ attempts: 2 })] })
     await drainOnlineEvalQueue(20, deps)
-    expect(setState.mock.calls[0]).toEqual(["q1", "running", { attempts: 3 }, 1_000])
+    expect(setState.mock.calls.map((call) => call[1])).toEqual(["done"])
+    expect(setState.mock.calls.some((call) => "attempts" in (call[2] ?? {}))).toBe(false)
   })
 
   describe("judge leg", () => {
@@ -200,6 +205,15 @@ describe("drainOnlineEvalQueue", () => {
       // Released with zero spend — the rubric call itself is not implemented
       // yet, and leaking the reservation would silently shrink the cap.
       expect(settle).toHaveBeenCalledWith("p1", JUDGE_COST_ESTIMATE_USD, 0, false, 1_000)
+    })
+
+    it("says the rubric is unimplemented rather than reusing 'no judge'", async () => {
+      // Working Rule 7: the judge leg is deliberately inert, and this pins it
+      // as inert AND distinguishable. "sampling chose this trace and nothing
+      // ran" must not read the same as "this policy has no judge".
+      const { deps } = harness({ policies: () => [judging()] })
+      const result = await drainOnlineEvalQueue(20, deps)
+      expect(result.judgeDecisions).toEqual({ "skipped-judge-unimplemented": 1 })
     })
 
     it("records a budget refusal as a decision instead of judging anyway", async () => {

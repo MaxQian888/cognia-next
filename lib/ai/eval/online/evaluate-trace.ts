@@ -12,6 +12,7 @@
 
 import {
   buildObservation,
+  builtInEvaluatorVersionId,
   deterministicScorers,
   parseBuiltInEvaluatorVersionId,
   safeScore,
@@ -95,17 +96,24 @@ export async function evaluateTraceDeterministically(
     scorers.map((scorer) => safeScore(scorer, prepared.sample, prepared.evalCase))
   )
 
-  const observations = scores.map((score, index) => {
-    const evaluatorVersionId = input.policy.deterministicEvaluatorVersionIds[index]
-    return buildObservation({
+  // Stamped from the SCORER, never from the policy's id list by index. Those
+  // are two different index spaces: `selectScorers` filters the factory list,
+  // so `scorers` is in catalog order while `deterministicEvaluatorVersionIds`
+  // is in author order — and unresolvable ids are dropped, so the arrays can
+  // differ in length too. Indexing one by the other attributes each score to
+  // whichever evaluator happens to sit at that position, and
+  // `evaluatorVersionId` is the indexed column whose whole purpose is making
+  // "this score came from that evaluator" answerable later.
+  const observations = scores.map((score, index) =>
+    buildObservation({
       id: input.newId(scorers[index].id),
       scope: { traceId: input.traceId, caseId: prepared.evalCase.id },
       origin: "online",
-      evaluatorVersionId: evaluatorVersionId ?? `builtin:${scorers[index].id}@1`,
+      evaluatorVersionId: builtInEvaluatorVersionId(scorers[index].id),
       score,
       createdAt: input.now,
     })
-  })
+  )
 
   return {
     observations,

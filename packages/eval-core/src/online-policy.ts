@@ -121,7 +121,16 @@ export function sampleFraction(traceId: string): number {
 }
 
 export type JudgeSamplingDecision =
-  "run" | "skipped-not-sampled" | "skipped-budget" | "skipped-daily-max" | "skipped-no-judge"
+  | "run"
+  | "skipped-not-sampled"
+  | "skipped-budget"
+  | "skipped-daily-max"
+  /** The policy configures no judge at all. */
+  | "skipped-no-judge"
+  /** The policy version was edited, disabled, or deleted while the row waited. */
+  | "skipped-policy-gone"
+  /** Sampling chose this trace, but the rubric call is not implemented yet. */
+  | "skipped-judge-unimplemented"
 
 export interface JudgeSamplingInput {
   policy: OnlineEvalPolicyV1

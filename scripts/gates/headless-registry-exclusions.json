@@ -26,6 +26,10 @@
       "symbols": ["attachManagedIdeBroker"],
       "reason": "The Tauri-event-bound entry point; the brain uses the sibling attachManagedIdeBrokerTransport (lib/plugin/ide/broker-runtime.ts:1184) with the companion transport plus content upload/redeem, registered as `managed-ide-broker` in lib/headless/runtimes/managed-ide-broker.ts. One subsystem, two host-specific attach points — not a gap."
     },
+    "components/providers/initializers/online-eval-initializer.tsx": {
+      "symbols": ["startOnlineEvalScheduler"],
+      "reason": "Drains the online-evaluation queue that the `eval-online` log transport fills. That transport exists only once `bootstrapLogger` configures the renderer transport graph, which the headless roster deliberately does not do. The producer is therefore absent in the brain, and the worker additionally reads spans back out of the Dexie `agentTraces` table that the renderer-side agent-trace transport populates. Registering the consumer alone would start a worker with nothing to consume and no span store to read. Register it together with a headless span feed, never before."
+    },
     "components/providers/initializers/remote-notification-initializer.tsx": {
       "symbols": ["installRemoteNotificationListener"],
       "reason": "The CLIENT side of `notification://remote` — it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."

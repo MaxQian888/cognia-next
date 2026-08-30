@@ -101,13 +101,20 @@ export async function drainOnlineEvalQueue(
   for (const row of rows) {
     const policy = policies.find((candidate) => candidate.versionId === row.policyVersionId)
     if (!policy) {
-      await deps.skip(row.id, "skipped-no-judge", deps.now())
+      // Distinct from "this policy has no judge": the policy version was
+      // edited, disabled, or deleted while this row waited. Reusing
+      // `skipped-no-judge` for it is the four-meanings collapse the enum
+      // exists to prevent.
+      await deps.skip(row.id, "skipped-policy-gone", deps.now())
       result.skipped += 1
       continue
     }
 
     try {
-      await deps.setState(row.id, "running", { attempts: row.attempts + 1 }, deps.now())
+      // No `setState("running")` here: `claimQueuedOnlineEvals` already flipped
+      // the row and counted the attempt inside its claim transaction, which is
+      // what stops two drains taking the same row. Repeating it here counted
+      // every attempt twice.
       const spans = await deps.loadSpans(row.traceId)
       const now = deps.now()
 
@@ -187,9 +194,10 @@ async function runJudgeLeg(
   // `decideJudgeSampling` and only one fit inside the cap.
   if (!reserved) return "skipped-budget"
 
-  // Release without spending — the judge call itself lands with the rubric
-  // evaluators. Charging nothing is the truth here, and the reservation must
-  // not be leaked either way.
+  // Release without spending — the judge CALL is not implemented yet. Charging
+  // nothing is the truth, and the reservation must not be leaked either way.
+  // Reported under its own reason so "sampling chose this trace and the rubric
+  // never ran" is not indistinguishable from "this policy has no judge".
   await deps.settle(policy.id, JUDGE_COST_ESTIMATE_USD, 0, false, deps.now())
-  return "skipped-no-judge"
+  return "skipped-judge-unimplemented"
 }

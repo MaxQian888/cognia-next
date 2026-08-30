@@ -49,6 +49,14 @@ export interface RetentionTarget {
 
 /** The tables the sweeper manages. Extensible — add a `{ id, prune }` entry to
  * bring another unbounded table under the same time-window policy. */
+/**
+ * How long a SETTLED online-eval work item is kept so a "skipped for budget"
+ * decision can still be explained. Shorter than the table's declared window,
+ * which bounds the unsettled rows and is therefore the outer bound the
+ * governance catalog records.
+ */
+const SETTLED_QUEUE_RETENTION_DAYS = 7
+
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
   // Sites build archives (ADR-0084). The cutoff carries the configured window;
   // the reference rules — serving deployments, the rollback target, anything
@@ -106,11 +114,13 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
         now - (policyForTable(table)?.retentionPolicy.days ?? fallbackDays) * MS_PER_DAY
       return pruneOnlineEvalData({
         observationsBefore: windowFor("evalObservations", 90),
-        queueBefore: windowFor("evalOnlineQueue", 7),
+        // Settled rows go early; the catalog declares the table's outer bound,
+        // which is the abandonment window, so the settled window is derived
+        // from it rather than restated as a second constant.
+        queueBefore: now - SETTLED_QUEUE_RETENTION_DAYS * MS_PER_DAY,
         budgetBefore: windowFor("evalOnlineBudget", 90),
         // Stranded work — enqueued on a device whose worker never came back.
-        // Far beyond the settled window so it only catches the genuinely lost.
-        abandonedBefore: now - 30 * MS_PER_DAY,
+        abandonedBefore: windowFor("evalOnlineQueue", 30),
       })
     },
   },

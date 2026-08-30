@@ -998,11 +998,14 @@ function applyTransportSettings(
   // It is NOT added to the `setAgentTraceWriter` disjunction below, and that is
   // deliberate. The worker reads a trace back out of the `agentTraces` table,
   // so online evaluation depends on the agent-trace transport actually
-  // persisting spans. Keeping the feed alive with that transport off would
-  // enqueue traces whose spans were never stored — work that can only ever
-  // resolve to "nothing to score". Turning agent tracing off therefore turns
-  // online evaluation off, which is also the right answer for a consent
-  // toggle.
+  // persisting spans; adding it to that disjunction would keep the feed alive
+  // with the store switched off. Note the disjunction has four terms, so with
+  // `agentTrace` off but OTLP (or Langfuse, or PostHog AI) on, spans still
+  // reach this transport and enqueue traces whose spans were never persisted.
+  // Those rows settle harmlessly — `queryByTrace` returns nothing, the worker
+  // records no observations and marks them done — but they are a wasted cycle,
+  // which is why online evaluation should follow the agent-trace consent
+  // toggle rather than the writer.
   removeTransport("eval-online")
   addTransport(
     createEvalOnlineTransport({

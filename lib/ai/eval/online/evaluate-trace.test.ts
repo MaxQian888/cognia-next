@@ -140,6 +140,39 @@ describe("evaluateTraceDeterministically", () => {
     expect(result).toEqual({ observations: [], graded: false })
   })
 
+  it("attributes each observation to the scorer that produced it, not to a list position", async () => {
+    // `selectScorers` filters the FACTORY list, so `scorers` comes back in
+    // catalog order (tool-selection before cost) while the policy names them
+    // the other way round. Indexing the policy array by the scorer index
+    // therefore swaps the two — and every prior test used a single id, so
+    // nothing caught it.
+    const result = await run(
+      [span(), toolSpan("Read", 0)],
+      [builtInEvaluatorVersionId("cost"), builtInEvaluatorVersionId("tool-selection")]
+    )
+    const byEvaluator = Object.fromEntries(
+      result.observations.map((observation) => [
+        observation.evaluatorVersionId,
+        observation.score.scorerId,
+      ])
+    )
+    expect(byEvaluator).toEqual({
+      "builtin:cost@1": "cost",
+      "builtin:tool-selection@1": "tool-selection",
+    })
+  })
+
+  it("attributes correctly when an unresolvable id shortens the scorer list", async () => {
+    // The arrays differ in LENGTH here, not just order.
+    const result = await run(
+      [span()],
+      ["builtin:not-a-scorer@1", builtInEvaluatorVersionId("tool-redundancy")]
+    )
+    expect(result.observations).toHaveLength(1)
+    expect(result.observations[0].evaluatorVersionId).toBe("builtin:tool-redundancy@1")
+    expect(result.observations[0].score.scorerId).toBe("tool-redundancy")
+  })
+
   it("grades when a scorer can actually decide", async () => {
     // `tool-redundancy` needs no reference — it reads the trajectory alone —
     // so this is the shape of a real online verdict.
