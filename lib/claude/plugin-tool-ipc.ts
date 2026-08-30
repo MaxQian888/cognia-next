@@ -657,9 +657,15 @@ export async function handlePluginToolExec(
     // result index and Dexie all live here. The runner pre-filters PII per hit,
     // so `assertSafePluginToolResult` is a backstop rather than the gate.
     if (isProjectHistorySearchTool(request.name)) {
+      const { recordProjectHistoryEvidence } = await import("./project-history-evidence-registry")
       const result = await runProjectHistorySearch(
         request.args,
-        await resolveProjectHistoryToolDeps(),
+        {
+          ...(await resolveProjectHistoryToolDeps()),
+          // Bound here rather than in the resolver: the evidence is keyed by the
+          // CALLING session, which only the request carries.
+          recordEvidence: (evidence) => recordProjectHistoryEvidence(request.sessionId, evidence),
+        },
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

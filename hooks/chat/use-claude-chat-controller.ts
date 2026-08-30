@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { makeUserMessage } from "@/lib/claude/adapter"
+import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
@@ -2305,6 +2306,12 @@ export function useClaudeChat() {
             sendOptions,
           },
         })
+        // Anything `project_history_search` deposited before this point belongs
+        // to a turn that never landed (aborted, errored, or interrupted) — its
+        // fold never ran to drain it. Clearing here rather than on the turn's
+        // way out avoids racing the fold, and states the rule plainly: a turn
+        // cites only what THIS turn read.
+        clearProjectHistoryEvidence(sessionId)
         // Cache finalized options before dispatch. A host can settle the turn
         // inside the awaited dispatch, and turnComplete reads this exact row to
         // persist pre-search sources on the assistant reply.

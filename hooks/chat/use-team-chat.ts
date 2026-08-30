@@ -7,12 +7,14 @@ import type { UIMessage } from "ai"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import { drainProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import {
   applySdkEvent,
   makeUserMessage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
   mergeProjectClaimSourcesIntoLastAssistant,
+  mergeProjectHistorySourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   mergeWebSearchSourcesIntoLastAssistant,
@@ -1530,6 +1532,13 @@ async function handleTeamEvent(
           tagged = mergeProjectClaimSourcesIntoLastAssistant(
             tagged,
             ctx?.options.projectContinuityContext
+          )
+          // Same drain-and-clear as the direct chat path: history the model
+          // READ has no `options.*` slot, and carrying it into the next turn
+          // would cite sources that turn never opened.
+          tagged = mergeProjectHistorySourcesIntoLastAssistant(
+            tagged,
+            drainProjectHistoryEvidence(evt.sessionId)
           )
           tagged = mergeProjectKnowledgeSourcesIntoLastAssistant(
             tagged,

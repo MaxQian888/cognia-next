@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 const applySdkEventMock = jest.fn()
 const mergeWebSearchSourcesMock = jest.fn((messages: unknown, _context?: unknown) => messages)
+const mergeProjectHistorySourcesMock = jest.fn((messages: unknown, _evidence?: unknown) => messages)
 
 jest.mock("@/lib/claude/adapter", () => {
   const actual = jest.requireActual("@/lib/claude/adapter")
@@ -9,6 +10,8 @@ jest.mock("@/lib/claude/adapter", () => {
     applySdkEvent: (...args: unknown[]) => applySdkEventMock(...args),
     mergeWebSearchSourcesIntoLastAssistant: (messages: unknown, context: unknown) =>
       mergeWebSearchSourcesMock(messages, context),
+    mergeProjectHistorySourcesIntoLastAssistant: (messages: unknown, evidence: unknown) =>
+      mergeProjectHistorySourcesMock(messages, evidence),
   }
 })
 
@@ -16,6 +19,11 @@ import { handleEvent, isTeamSubSession } from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
 import { clearSidecarLogTrail } from "@/lib/chat/sidecar-log-trail"
+import {
+  __clearAllProjectHistoryEvidenceForTesting,
+  drainProjectHistoryEvidence,
+  recordProjectHistoryEvidence,
+} from "@/lib/claude/project-history-evidence-registry"
 
 describe("Claude chat event seam", () => {
   it("exports event routing and filters team sub-sessions", () => {
@@ -150,5 +158,78 @@ describe("sidecar log frames", () => {
     // rather than undefined — what matters is that routine startup chatter
     // never gets presented as the reason a process died.
     expect(useChatStore.getState().sessions.s1!.errorDiagnostic?.message).toBe("")
+  })
+})
+
+describe("project-history evidence folding", () => {
+  afterEach(() => {
+    __clearAllProjectHistoryEvidenceForTesting()
+    mergeProjectHistorySourcesMock.mockClear()
+  })
+
+  async function runTurn(sessionId: string) {
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          ...(useChatStore.getState().sessions[sessionId] ?? {}),
+          messages: [],
+          status: "streaming",
+          pendingApprovals: [],
+        },
+      },
+      openSessionIds: [sessionId],
+      lastSendBySession: {
+        [sessionId]: { content: "q", options: {}, attemptIndex: 0 },
+      },
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "answer" }] }],
+      turnComplete: true,
+    })
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+    await handleEvent(
+      { type: "event", sessionId, event: { type: "result" } } as never,
+      { current: sessionId },
+      { current: [] },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry,
+        getExecutionHandle: () => undefined,
+      } as never
+    ).catch(() => {})
+  }
+
+  const evidence = {
+    id: "m-7",
+    kind: "message" as const,
+    sessionId: "s-old",
+    messageId: "m-7",
+    title: "Repo setup",
+    snippet: "pnpm workspaces",
+    createdAt: 10,
+  }
+
+  it("cites what the tool read during this turn", async () => {
+    recordProjectHistoryEvidence("s2", [evidence])
+    await runTurn("s2")
+    expect(mergeProjectHistorySourcesMock).toHaveBeenCalledWith(expect.any(Array), [evidence])
+  })
+
+  it("does not fold when the tool was never called", async () => {
+    await runTurn("s3")
+    expect(mergeProjectHistorySourcesMock).not.toHaveBeenCalled()
+  })
+
+  it("CLEARS the evidence, so the next turn cannot re-cite it", async () => {
+    recordProjectHistoryEvidence("s4", [evidence])
+    await runTurn("s4")
+    expect(mergeProjectHistorySourcesMock).toHaveBeenCalledTimes(1)
+    expect(drainProjectHistoryEvidence("s4")).toEqual([])
   })
 })

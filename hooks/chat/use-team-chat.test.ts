@@ -40,6 +40,8 @@ jest.mock("@/lib/claude/adapter", () => ({
   })),
   mergeAgentKnowledgeSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeMemorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+  mergeProjectClaimSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+  mergeProjectHistorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeProjectKnowledgeSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeTwinSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
   mergeWebSearchSourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),

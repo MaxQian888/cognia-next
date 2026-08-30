@@ -56,6 +56,7 @@ import type { ChatResultIndexRow } from "@/lib/db/chat-result-index"
 import { isSessionExposed } from "@/lib/chat/session-exposure"
 import { wrapUntrusted } from "@/lib/external-bridge/untrusted"
 import type { MessageSpan } from "@/lib/chat/mentions/message-reference"
+import type { ProjectHistoryEvidence } from "./project-history-evidence-registry"
 
 export const PROJECT_HISTORY_TOOL_NAME = "project_history_search"
 
@@ -259,6 +260,15 @@ export interface ProjectHistoryToolDeps {
     span: MessageSpan
   }) => Promise<string | null>
   now: () => number
+  /**
+   * Deposit what this call surfaced, so the turn's message can cite it.
+   *
+   * Optional and side-effecting on purpose: the search itself is pure, and a
+   * host that only wants the answer (the CLI, a test) simply omits it. The
+   * entries carry the UNFENCED text — the fence is for the model, the chip is
+   * for a human.
+   */
+  recordEvidence?: (evidence: readonly ProjectHistoryEvidence[]) => void
 }
 
 export interface ProjectHistoryToolContext {
@@ -370,7 +380,12 @@ export async function runProjectHistorySearch(
   const after = parseInstant(args.after)
   const before = parseInstant(args.before)
 
-  const hits: ProjectHistoryHit[] = []
+  // Each hit is carried with the UNFENCED text it was built from. The fenced
+  // copy is what the model reads; the raw copy is what the source chip renders,
+  // and `<untrusted_content>` in a UI card is noise. Pairing them here means the
+  // per-leg cap and the PII gate apply to both by construction — a chip can
+  // never cite something the model was not shown.
+  const hits: Array<{ hit: ProjectHistoryHit; evidence: ProjectHistoryEvidence }> = []
   const seenMessages = new Set<string>()
   const seenResults = new Set<string>()
   let withheldCount = 0
@@ -410,14 +425,25 @@ export async function runProjectHistorySearch(
           continue
         }
         hits.push({
-          kind: "message",
-          sessionId: result.sessionId,
-          sessionTitle: result.sessionTitle,
-          messageId: result.messageId,
-          role: result.role,
-          createdAt: result.createdAt,
-          snippet: wrapUntrusted(snippet),
-          matchedQuery: query,
+          hit: {
+            kind: "message",
+            sessionId: result.sessionId,
+            sessionTitle: result.sessionTitle,
+            messageId: result.messageId,
+            role: result.role,
+            createdAt: result.createdAt,
+            snippet: wrapUntrusted(snippet),
+            matchedQuery: query,
+          },
+          evidence: {
+            id: result.messageId,
+            kind: "message",
+            sessionId: result.sessionId,
+            messageId: result.messageId,
+            title: result.sessionTitle,
+            snippet,
+            createdAt: result.createdAt,
+          },
         })
       }
     }
@@ -482,16 +508,27 @@ export async function runProjectHistorySearch(
           continue
         }
         hits.push({
-          kind: "result",
-          sessionId: row.sessionId,
-          messageId: row.messageId,
-          resultId: row.resultId,
-          toolName: row.toolName,
-          title: row.title,
-          createdAt: row.createdAt,
-          preview: wrapUntrusted(preview),
-          bytes: row.bytes,
-          matchedQuery: query,
+          hit: {
+            kind: "result",
+            sessionId: row.sessionId,
+            messageId: row.messageId,
+            resultId: row.resultId,
+            toolName: row.toolName,
+            title: row.title,
+            createdAt: row.createdAt,
+            preview: wrapUntrusted(preview),
+            bytes: row.bytes,
+            matchedQuery: query,
+          },
+          evidence: {
+            id: row.resultId,
+            kind: "result",
+            sessionId: row.sessionId,
+            messageId: row.messageId,
+            title: `${row.toolName}: ${row.title}`,
+            snippet: preview,
+            createdAt: row.createdAt,
+          },
         })
       }
     }
@@ -500,16 +537,18 @@ export async function runProjectHistorySearch(
   // Newest first within each leg's cap: the most recent evidence about a
   // workspace is the evidence most likely to still be true.
   const messageHits = hits
-    .filter((hit): hit is ProjectHistoryMessageHit => hit.kind === "message")
-    .sort((a, b) => b.createdAt - a.createdAt)
+    .filter((entry) => entry.hit.kind === "message")
+    .sort((a, b) => b.hit.createdAt - a.hit.createdAt)
   const resultHits = hits
-    .filter((hit): hit is ProjectHistoryResultHit => hit.kind === "result")
-    .sort((a, b) => b.createdAt - a.createdAt)
+    .filter((entry) => entry.hit.kind === "result")
+    .sort((a, b) => b.hit.createdAt - a.hit.createdAt)
   if (messageHits.length > MAX_HITS_PER_LEG || resultHits.length > MAX_HITS_PER_LEG) partial = true
-  const surfaced: ProjectHistoryHit[] = [
+  const carried = [
     ...messageHits.slice(0, MAX_HITS_PER_LEG),
     ...resultHits.slice(0, MAX_HITS_PER_LEG),
   ]
+  const surfaced: ProjectHistoryHit[] = carried.map((entry) => entry.hit)
+  const evidence: ProjectHistoryEvidence[] = carried.map((entry) => entry.evidence)
 
   // ── Expansion leg ──────────────────────────────────────────────────────
   const windows: ProjectHistoryWindow[] = []
@@ -533,11 +572,25 @@ export async function runProjectHistorySearch(
         continue
       }
       windows.push({ sessionId, messageId, transcript: wrapUntrusted(transcript) })
+      evidence.push({
+        id: `window:${messageId}`,
+        kind: "message",
+        sessionId,
+        messageId,
+        title: session?.title ?? sessionId,
+        snippet: clip(transcript),
+        createdAt: session?.updatedAt ?? 0,
+      })
     } catch {
       // One unreadable message must not sink the other three.
       continue
     }
   }
+
+  // Only what is actually RETURNED is recorded. A hit the PII gate withheld, or
+  // one the per-leg cap trimmed, never reached the model — citing it would claim
+  // a source the answer does not rest on.
+  deps.recordEvidence?.(evidence)
 
   const coverage: ProjectHistoryCoverage = indexing
     ? "indexing"

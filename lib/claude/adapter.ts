@@ -25,6 +25,7 @@ import type {
   SourcesPartItem,
   ToolUseSummaryPart,
 } from "./parts-extensions"
+import type { ProjectHistoryEvidence } from "./project-history-evidence-registry"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { attachUsageToLastAssistant } from "@/lib/chat/message-run-metadata"
 import type { HookNoticePartData } from "./hooks"
@@ -1765,6 +1766,33 @@ export function mergeProjectClaimSourcesIntoLastAssistant(
     ...(claim.sourceSessionId && claim.sourceMessageId
       ? { messageRef: { sessionId: claim.sourceSessionId, messageId: claim.sourceMessageId } }
       : {}),
+  }))
+  return appendSourcesToLastAssistant(messages, sources)
+}
+
+/**
+ * Merge what `project_history_search` actually read into the same SourcesPart.
+ *
+ * Distinct from `project-claim`: a claim is a mined, consolidated sentence, and
+ * this is the raw turn or tool output the model went and looked at mid-answer.
+ * Showing them under one heading would make a paraphrase and its source
+ * indistinguishable, which is the confusion the deep path exists to remove.
+ *
+ * Every entry carries a `messageRef`, because a history hit is BY CONSTRUCTION
+ * a message that still exists — that is what the tool searched.
+ */
+export function mergeProjectHistorySourcesIntoLastAssistant(
+  messages: UIMessage[],
+  evidence: readonly ProjectHistoryEvidence[] | undefined | null
+): UIMessage[] {
+  if (!evidence || evidence.length === 0) return messages
+  const sources: SourcesPartItem[] = evidence.map((entry) => ({
+    id: `history-${entry.id}`,
+    title: entry.title.length > 80 ? entry.title.slice(0, 79).trimEnd() + "…" : entry.title,
+    snippet:
+      entry.snippet.length > 200 ? entry.snippet.slice(0, 199).trimEnd() + "…" : entry.snippet,
+    origin: "project-history",
+    messageRef: { sessionId: entry.sessionId, messageId: entry.messageId },
   }))
   return appendSourcesToLastAssistant(messages, sources)
 }

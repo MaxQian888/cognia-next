@@ -495,3 +495,68 @@ describe("expansion", () => {
     expect(result.windows?.[0].messageId).toBe("m-2")
   })
 })
+
+describe("evidence recorded for the source chips", () => {
+  it("records the UNFENCED text, so the chip is not a wall of fence tags", async () => {
+    const recordEvidence = jest.fn()
+    await runProjectHistorySearch(
+      { queries: ["pnpm"], scope: "messages" },
+      makeDeps({
+        recordEvidence,
+        searchMessages: async () => searchOutcome([{ messageId: "m-1" }]),
+      }),
+      ctx
+    )
+    expect(recordEvidence).toHaveBeenCalledTimes(1)
+    expect(recordEvidence.mock.calls[0][0]).toEqual([
+      {
+        id: "m-1",
+        kind: "message",
+        sessionId: "s-1",
+        messageId: "m-1",
+        title: "Earlier conversation",
+        snippet: "we standardised on pnpm workspaces",
+        createdAt: 1_000,
+      },
+    ])
+  })
+
+  it("names a tool result by what it ran, not by the conversation", async () => {
+    const recordEvidence = jest.fn()
+    await runProjectHistorySearch(
+      { queries: ["pnpm"], scope: "results" },
+      makeDeps({ recordEvidence, searchResults: async () => [resultRow()] }),
+      ctx
+    )
+    expect(recordEvidence.mock.calls[0][0][0]).toMatchObject({
+      id: "m-9:0",
+      kind: "result",
+      title: "Bash: pnpm test",
+      snippet: "42 passed",
+    })
+  })
+
+  it("never records a hit the PII gate withheld", async () => {
+    const recordEvidence = jest.fn()
+    await runProjectHistorySearch(
+      { queries: ["pnpm"], scope: "messages" },
+      makeDeps({
+        recordEvidence,
+        searchMessages: async () =>
+          searchOutcome([
+            { messageId: "m-1", snippet: { text: "mail someone@example.com", positions: [] } },
+          ]),
+      }),
+      ctx
+    )
+    expect(recordEvidence.mock.calls[0][0]).toEqual([])
+  })
+
+  it("records an expanded window too", async () => {
+    const recordEvidence = jest.fn()
+    await runProjectHistorySearch({ expand: ["m-1"] }, makeDeps({ recordEvidence }), ctx)
+    expect(recordEvidence.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ id: "window:m-1", messageId: "m-1", sessionId: "s-1" }),
+    ])
+  })
+})

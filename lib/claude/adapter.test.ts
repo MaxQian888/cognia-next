@@ -9,6 +9,7 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeWebSearchSourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
+  mergeProjectHistorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   resetStreamingToolInputs,
 } from "./adapter"
@@ -2344,5 +2345,80 @@ describe("applySdkEvent — session notices (permission-denied + rate-limit)", (
   it("status=allowed returns the same array identity when there is no notice", () => {
     const base = [{ id: "a1", role: "assistant", parts: [] }] as UIMessage[]
     expect(applySdkEvent(base, rateEvt("allowed")).messages).toBe(base)
+  })
+})
+
+describe("mergeProjectHistorySourcesIntoLastAssistant", () => {
+  const baseMessages: UIMessage[] = [
+    { id: "u1", role: "user", parts: [{ type: "text", text: "why pnpm?" } as never] },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "because…" } as never] },
+  ]
+  const entry = {
+    id: "m-7",
+    kind: "message" as const,
+    sessionId: "s-3",
+    messageId: "m-7",
+    title: "Repo setup",
+    snippet: "we standardised on pnpm workspaces",
+    createdAt: 10,
+  }
+
+  it("returns the same array when nothing was read", () => {
+    expect(mergeProjectHistorySourcesIntoLastAssistant(baseMessages, undefined)).toBe(baseMessages)
+    expect(mergeProjectHistorySourcesIntoLastAssistant(baseMessages, null)).toBe(baseMessages)
+    expect(mergeProjectHistorySourcesIntoLastAssistant(baseMessages, [])).toBe(baseMessages)
+  })
+
+  it("files the hits under their own origin, not under project-claim", () => {
+    const next = mergeProjectHistorySourcesIntoLastAssistant(baseMessages, [entry])
+    const part = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(part.sources).toHaveLength(1)
+    expect(part.sources[0].origin).toBe("project-history")
+    expect(part.sources[0].id).toBe("history-m-7")
+  })
+
+  it("always carries a jump anchor — a history hit is a message that exists", () => {
+    const next = mergeProjectHistorySourcesIntoLastAssistant(baseMessages, [entry])
+    const part = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(part.sources[0].messageRef).toEqual({ sessionId: "s-3", messageId: "m-7" })
+  })
+
+  it("clips a long title and snippet rather than growing the card", () => {
+    const next = mergeProjectHistorySourcesIntoLastAssistant(baseMessages, [
+      { ...entry, title: "t".repeat(200), snippet: "s".repeat(500) },
+    ])
+    const part = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(part.sources[0].title).toHaveLength(80)
+    expect(part.sources[0].snippet).toHaveLength(200)
+  })
+
+  it("coexists with claims on one SourcesPart instead of replacing them", () => {
+    const withClaim: UIMessage[] = [
+      baseMessages[0],
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "because…" } as never,
+          {
+            type: "sources",
+            sources: [
+              { id: "claim-c1", title: "pnpm", snippet: "pnpm", origin: "project-claim" },
+            ] as SourcesPartItem[],
+          } as never,
+        ],
+      },
+    ]
+    const next = mergeProjectHistorySourcesIntoLastAssistant(withClaim, [entry])
+    const part = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(part.sources.map((s) => s.origin)).toEqual(["project-claim", "project-history"])
   })
 })

@@ -7,6 +7,7 @@ import {
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
   mergeProjectClaimSourcesIntoLastAssistant,
+  mergeProjectHistorySourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   mergeWebSearchSourcesIntoLastAssistant,
@@ -37,6 +38,7 @@ import {
   recordSidecarLog,
   type SidecarLogFrame,
 } from "@/lib/chat/sidecar-log-trail"
+import { drainProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { drainSessionPeerMessages } from "@/lib/chat/session-peer-messaging"
 import { completeAttachedSession } from "@/lib/chat/attached-session"
 import { maybeDrainBackgroundResults } from "./background-result-runtime"
@@ -939,6 +941,19 @@ export async function handleEvent(
             projectClaimCtx
           )
           if (withClaims !== nextMessages) nextMessages = withClaims
+        }
+        // History the model went and READ mid-turn. Unlike every merge above
+        // it has no `options.*` slot — a tool call happens long after the
+        // options were built — so it is drained from the renderer registry the
+        // tool deposits into. The drain CLEARS: leaving it would re-cite these
+        // sources on the next turn, which never opened them.
+        const historyEvidence = drainProjectHistoryEvidence(sessionId)
+        if (historyEvidence.length > 0) {
+          const withHistory = mergeProjectHistorySourcesIntoLastAssistant(
+            nextMessages,
+            historyEvidence
+          )
+          if (withHistory !== nextMessages) nextMessages = withHistory
         }
         const projectKnowledgeCtx = last?.options.projectKnowledgeContext
         if (projectKnowledgeCtx) {
