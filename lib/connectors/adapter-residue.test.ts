@@ -82,6 +82,17 @@ async function seed(): Promise<void> {
     },
     { id: "p2", platform: "telegram", adapterId: KEEP, remoteUserId: "7", lastSeenAt: 1 },
   ] as never)
+  await db.larkMessageImports.bulkPut([
+    {
+      id: "i1",
+      adapterId: TARGET.id,
+      chatId: "oc_1",
+      sourceHash: "h1",
+      sessionId: "s1",
+      createdAt: 1,
+    },
+    { id: "i2", adapterId: KEEP, chatId: "oc_1", sourceHash: "h2", sessionId: "s2", createdAt: 1 },
+  ] as never)
   await db.conversationOverrides.bulkPut([
     { id: "c1", conversationKey: `telegram:${TARGET.id}:42`, updatedAt: 1 },
     { id: "c2", conversationKey: `telegram:${KEEP}:42`, updatedAt: 1 },
@@ -143,6 +154,27 @@ describe("reapAdapterResidue", () => {
     expect(await db.outboundQueue.get("o1")).toBeUndefined()
     expect(await db.platformIdentities.get("p1")).toBeUndefined()
     expect(await db.platformIdentities.get("p2")).toBeDefined()
+    expect(await db.larkMessageImports.get("i1")).toBeUndefined()
+    expect(await db.larkMessageImports.get("i2")).toBeDefined()
+  })
+
+  it("actually executes the [adapterId, minKey]...[adapterId, maxKey] range", async () => {
+    // `reap` swallows a throwing range into `failed`, so a key range the engine
+    // rejects looks exactly like a table that reaped nothing. Both halves are
+    // asserted here. The counts prove rows were matched, and the empty `failed`
+    // proves the range ran rather than throwing `DataError`.
+    //
+    // `Dexie.minKey` is `-Infinity`, which is a valid IndexedDB key. The spec's
+    // value-to-key algorithm rejects only `NaN` among numbers. What throws is
+    // `undefined` in a key position, and every cursor bound in this repo guards
+    // against that.
+    await seed()
+    const report = await reapAdapterResidue(TARGET)
+
+    expect(report.reaped["outboundQueue"]).toBe(1)
+    expect(report.reaped["platformIdentities"]).toBe(1)
+    expect(report.reaped["larkMessageImports"]).toBe(1)
+    expect(report.failed).toEqual([])
   })
 
   it("reaps per-conversation policy for this adapter's conversations only", async () => {

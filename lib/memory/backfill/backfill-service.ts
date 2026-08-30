@@ -60,12 +60,17 @@ async function pageSessions({
   limit: number
 }): Promise<ChatSession[]> {
   const table = getDb().sessions.where("[projectId+createdAt+id]")
-  // Prefix bounds built from strings, not from `Dexie.minKey` / `Dexie.maxKey`.
-  // Those sentinels are `-Infinity` and `[[]]`, and a non-finite number is not
-  // a valid IndexedDB key under a spec-following implementation, so the range
-  // threw `DataError` rather than returning an empty page. A shorter array
-  // sorts before every longer one sharing its prefix, which is all the lower
-  // bound needs, and `\uffff` is the sentinel the upper bound needs.
+  // Prefix bounds built from strings. A shorter array sorts before every longer
+  // one sharing its prefix, which is all the lower bound needs, and `\uffff`
+  // sorts after every other UTF-16 code unit, which is what the upper bound
+  // needs.
+  //
+  // `Dexie.minKey` / `Dexie.maxKey` would work here too. An earlier version of
+  // this comment claimed `-Infinity` is not a valid IndexedDB key, and that is
+  // wrong: the spec's value-to-key algorithm rejects only `NaN` among numbers,
+  // and both sentinels round-trip fine under `fake-indexeddb`. The bound that
+  // really does throw `DataError` is `undefined`, which is why the cursor arm
+  // below defaults `beforeSessionId` to `""` rather than passing it through.
   const lower = [projectId]
   const upper =
     beforeCreatedAt === undefined
