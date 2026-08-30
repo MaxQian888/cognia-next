@@ -117,6 +117,45 @@ export async function cancelMemoryJobsForSession(sessionId: string): Promise<num
   return cancelled
 }
 
+/**
+ * Withdraw every still-pending mining job a backfill run queued.
+ *
+ * A prefix scan of the existing `dedupeKey` index, which is why the run stamps
+ * its id into that key: cancelling otherwise means either a second index or a
+ * full table scan, and the queue is the one table a sweep can leave thousands
+ * of rows in.
+ *
+ * Only non-terminal rows are touched. A job that already produced claims stays
+ * completed, because those claims exist and the row is their record.
+ */
+export async function cancelMemoryJobsForRun(runId: string): Promise<number> {
+  if (!runId) return 0
+  const db = getDb()
+  const pending = await db.memoryJobs
+    .where("dedupeKey")
+    .startsWith(`project-mining:${runId}:`)
+    .toArray()
+  let cancelled = 0
+  for (const job of pending) {
+    if (job.status !== "queued" && job.status !== "running" && job.status !== "retry_wait") continue
+    await cancelMemoryJob(job.id)
+    cancelled += 1
+  }
+  return cancelled
+}
+
+/** Non-terminal mining jobs still attributable to a backfill run. */
+export async function countPendingMemoryJobsForRun(runId: string): Promise<number> {
+  if (!runId) return 0
+  const rows = await getDb()
+    .memoryJobs.where("dedupeKey")
+    .startsWith(`project-mining:${runId}:`)
+    .toArray()
+  return rows.filter(
+    (job) => job.status === "queued" || job.status === "running" || job.status === "retry_wait"
+  ).length
+}
+
 export async function deleteMemoryEvidence(memoryId: string): Promise<void> {
   await getDb().memoryEvidence.where("memoryId").equals(memoryId).delete()
 }

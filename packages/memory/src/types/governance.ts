@@ -211,6 +211,52 @@ export interface MemoryJob {
   resultCode?: string
 }
 
+/**
+ * Explicit history backfill (ADR-0069 project-context mining).
+ *
+ * One row per user-started sweep of a workspace's own conversation history. The
+ * row owns a lease and a keyset cursor and does nothing else: the actual mining
+ * is ordinary `project-mining` jobs, so a backfilled claim is byte-identical in
+ * provenance to one mined live.
+ */
+export type ProjectMiningRunStatus =
+  /** Created with an estimate, waiting for a person to agree to the cost. */
+  "preconsent" | "queued" | "running" | "paused" | "succeeded" | "failed" | "cancelled"
+
+export interface ProjectMiningRunEstimateRow {
+  sessions: number
+  messages: number
+  windows: number
+  estimatedInputTokens: number
+}
+
+export interface ProjectMiningRun {
+  id: string
+  projectId: string
+  status: ProjectMiningRunStatus
+  /** Counted once at creation, from index walks that never read `parts`. */
+  estimate: ProjectMiningRunEstimateRow
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  completedAt?: number
+  /**
+   * Keyset watermark: the oldest session already CHECKED, newest-first.
+   * Advanced on "checked" and not on "produced a claim", so an unproductive
+   * stretch of history cannot loop forever.
+   */
+  cursorCreatedAt?: number
+  cursorSessionId?: string
+  sessionsScanned: number
+  jobsEnqueued: number
+  claimsProduced: number
+  /** Same protocol as `claimMemoryJob`: owner, expiry, heartbeat. */
+  leaseOwner?: string
+  leaseExpiresAt?: number
+  heartbeatAt?: number
+  errorCode?: string
+}
+
 export type MemoryAuditAction =
   | "recall-allowed"
   | "recall-denied"

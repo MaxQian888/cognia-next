@@ -215,6 +215,15 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
       }).catch(() => undefined)
     }
 
+    // Advance any history backfill the user started for this workspace. The
+    // idle tick is the right driver for the same reason it flushes the trailing
+    // window: it is the moment the app has spare capacity, and the run's lease
+    // decides which open window actually does the step.
+    if (config.mineProjectContext && params.session?.projectId) {
+      const { tickWorkspaceBackfill } = await import("@/lib/memory/backfill/backfill-service")
+      void tickWorkspaceBackfill(params.session.projectId).catch(() => undefined)
+    }
+
     const { enqueueMemoryJob } = await import("@/lib/db/memory-governance")
     const { buildJobCheckpoint, transcriptJobIdentity } = await import("./transcript-window")
     const checkpoint = buildJobCheckpoint(params.transcript, params.session?.transcriptRevision)

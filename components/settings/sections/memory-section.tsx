@@ -25,6 +25,7 @@ import { BrainIcon } from "lucide-react"
 
 import { useMemoryInsights } from "@/hooks/memory/use-memory-insights"
 import { useSettingsStore } from "@/stores/settings"
+import { useProjectStore } from "@/stores/project/project-store"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
@@ -46,6 +47,7 @@ export function MemorySection() {
   const save = useSettingsStore((s) => s.save)
   const [activePanel, setActivePanel] = useState<MemoryPanelId>(DEFAULT_MEMORY_PANEL)
 
+  const activeProjectId = useProjectStore((state) => state.activeProjectId) ?? undefined
   const config = resolveMemoryConfig(settings?.memory)
   const insights = useMemoryInsights(config)
   const update = (patch: Partial<MemoryConfig>) => void save({ memory: { ...config, ...patch } })
@@ -65,7 +67,14 @@ export function MemorySection() {
       case "retrieval":
         return <RetrievalPanel config={config} update={update} insights={insights} />
       case "projectContext":
-        return <ProjectContextPanel config={config} update={update} insights={insights} />
+        return (
+          <ProjectContextPanel
+            config={config}
+            update={update}
+            insights={insights}
+            projectId={activeProjectId}
+          />
+        )
       case "maintenance":
         return (
           <div className="grid gap-4 @md/memory-pane:grid-cols-2">

@@ -5025,7 +5025,28 @@ export class CogniaDB extends Dexie {
         "&id, &dedupeKey, policyId, policyVersionId, traceId, state, enqueuedAt, [state+enqueuedAt], [policyId+state]",
       evalOnlineBudget: "&id, policyId, day, [policyId+day]",
     })
+
+    // v212 — explicit history backfill for project-context mining.
+    //
+    // `sessions` gains `[projectId+createdAt+id]`: the backfill pages newest to
+    // oldest through one workspace's conversations, and `[projectId+updatedAt]`
+    // cannot serve that walk. `id` is in the key because several sessions
+    // routinely share a `createdAt` millisecond, so a two-part cursor would
+    // re-read or skip the tied rows.
+    //
+    // `projectMiningRuns` is bookkeeping only. It holds a lease (same protocol
+    // as `memoryJobs`) and a cursor; the mining itself stays ordinary
+    // `project-mining` job rows, so a backfilled claim is indistinguishable in
+    // provenance from a live-mined one.
+    this.version(212).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], [projectId+createdAt+id], surfaceBindingKey, squadId",
+      projectMiningRuns: "&id, projectId, status, createdAt, [projectId+status]",
+    })
   }
+
+  // v212 — user-started history backfill runs (project-context mining).
+  projectMiningRuns!: Table<import("@/types/memory/governance").ProjectMiningRun, string>
 
   accountContentMigrations!: Table<
     {

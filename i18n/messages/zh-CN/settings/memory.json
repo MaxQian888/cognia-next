@@ -175,6 +175,25 @@
     }
   },
   "projectContext": {
+    "backfill": {
+      "cancel": "停止并放弃剩余部分",
+      "cancelFailed": "未能停止回填",
+      "confirm": "开始回填",
+      "confirmFailed": "未能开始回填",
+      "description": "把本工作区先前的每一段对话挖掘一次。新对话会在发生时被挖掘，这里覆盖的是开关打开之前的那些。",
+      "discard": "暂不",
+      "estimate": "{sessions} 段对话，约 {calls} 次模型调用，输入约 {tokens, number} 个 token。",
+      "estimateCaveat": "这是一个双向的估算：部分窗口在到达模型前就会被跳过，而工具输出较长的对话会高于平均值。",
+      "noWorkspace": "打开一个工作区后才能回填其历史。",
+      "pause": "暂停",
+      "pauseFailed": "未能暂停回填",
+      "progress": "已检查 {scanned, number} / {total, number} 段对话，学到 {claims} 条事实。",
+      "propose": "估算工作量",
+      "proposeFailed": "未能估算工作量",
+      "resume": "继续",
+      "resumeFailed": "未能继续回填",
+      "title": "回填本工作区的历史"
+    },
     "budget": {
       "description": "只借用个人召回没有花掉的部分，因此单轮召回总量不会超过 {max} 个 token。",
       "label": "项目上下文预算（token）"

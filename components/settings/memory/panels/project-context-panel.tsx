@@ -25,17 +25,25 @@ import { maxCombinedRecallTokens } from "@cognia/memory/runtime/recall-budget"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { Label } from "@/components/ui/label"
 import { GatedGroup, MemoryToggleRow } from "../memory-controls"
+import { ProjectBackfillCard } from "../project-backfill-card"
 
 export interface ProjectContextPanelProps {
   config: MemoryConfig
   update: (patch: Partial<MemoryConfig>) => void
   insights: MemoryInsights
+  /** The workspace a history sweep would cover. Absent means no active one. */
+  projectId?: string
 }
 
 /** Job kinds this panel is the home for. */
 const PROJECT_JOB_KINDS = ["project-mining", "project-claim-revalidate"] as const
 
-export function ProjectContextPanel({ config, update, insights }: ProjectContextPanelProps) {
+export function ProjectContextPanel({
+  config,
+  update,
+  insights,
+  projectId,
+}: ProjectContextPanelProps) {
   const t = useTranslations("settings.memory.projectContext")
 
   // A temporary chat leaves no trace by definition, so neither half can run.
@@ -121,6 +129,15 @@ export function ProjectContextPanel({ config, update, insights }: ProjectContext
             </p>
           </div>
         </GatedGroup>
+      </GatedGroup>
+
+      {/*
+        Under the switches, and gated with them. A sweep of a year of history
+        with mining turned off would queue thousands of jobs that all decline at
+        the config gate.
+      */}
+      <GatedGroup gated={gated || !config.mineProjectContext} className="space-y-4">
+        <ProjectBackfillCard projectId={projectId} />
       </GatedGroup>
 
       {/*

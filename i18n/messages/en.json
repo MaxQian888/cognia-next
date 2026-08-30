@@ -33181,6 +33181,25 @@
         }
       },
       "projectContext": {
+        "backfill": {
+          "cancel": "Stop and discard the rest",
+          "cancelFailed": "Couldn't stop the sweep",
+          "confirm": "Start the sweep",
+          "confirmFailed": "Couldn't start the sweep",
+          "description": "Mine every earlier conversation in this workspace once. New conversations are mined as they happen; this covers the ones from before the switch was on.",
+          "discard": "Not now",
+          "estimate": "{sessions, plural, one {# conversation} other {# conversations}}, about {calls, plural, one {# model call} other {# model calls}} over roughly {tokens, number} input tokens.",
+          "estimateCaveat": "An estimate in both directions: some windows are skipped before they reach a model, and conversations with long tool output cost more than the average.",
+          "noWorkspace": "Open a workspace to sweep its history.",
+          "pause": "Pause",
+          "pauseFailed": "Couldn't pause the sweep",
+          "progress": "{scanned, number} of {total, number} conversations checked, {claims, plural, one {# fact learned} other {# facts learned}}.",
+          "propose": "Estimate the work",
+          "proposeFailed": "Couldn't estimate the sweep",
+          "resume": "Resume",
+          "resumeFailed": "Couldn't resume the sweep",
+          "title": "Backfill this workspace's history"
+        },
         "budget": {
           "description": "Borrowed from whatever personal recall did not spend, so a turn's recall never exceeds {max} tokens in total.",
           "label": "Project context budget (tokens)"

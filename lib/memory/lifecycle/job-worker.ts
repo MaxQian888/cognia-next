@@ -413,6 +413,21 @@ function normalizeSourceRole(role: string | undefined): MemoryEvidence["sourceRo
     : undefined
 }
 
+/**
+ * The backfill run that queued this window, or null for a live-mined one.
+ *
+ * `project-mining:<runId>:<sessionId>:<first>:<last>:<count>` for a run, and
+ * `project-mining:<sessionId>:<first>:<last>:<count>` otherwise. The two are
+ * told apart by field count, not by pattern-matching the id, so a session id
+ * that happens to look like a run id cannot be misread.
+ */
+export function projectMiningRunIdOf(dedupeKey: string | undefined): string | null {
+  if (!dedupeKey) return null
+  const parts = dedupeKey.split(":")
+  if (parts[0] !== "project-mining") return null
+  return parts.length === 6 ? parts[1] : null
+}
+
 async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
   const context = await loadJobContext(job)
   const projectId = job.projectId ?? context.session.projectId
@@ -483,6 +498,19 @@ async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOut
       roleByMessageId,
       excerpts: result.redactedExcerpts,
     })
+  }
+
+  // Attribute the claims to the backfill run that queued this window, if any.
+  // The run id is recovered from the dedupe key rather than carried as a column:
+  // the key already has to hold it so a cancel can withdraw the run's queue with
+  // one prefix scan, and a second copy would be a second thing to keep in step.
+  const runId = projectMiningRunIdOf(job.dedupeKey)
+  if (runId) {
+    const applied = result.applied.filter((operation) => operation.op !== "NOOP").length
+    if (applied > 0) {
+      const { recordProjectMiningRunClaims } = await import("@/lib/db/project-mining-runs")
+      await recordProjectMiningRunClaims(runId, applied).catch(() => undefined)
+    }
   }
 
   if (result.applied.some((operation) => operation.op !== "NOOP")) {

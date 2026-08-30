@@ -313,6 +313,36 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
+  fullSchemaIt("v212 adds the backfill run table and the session keyset index", async () => {
+    const name = `cognia-project-mining-v212-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(211).stores({ sessions: "id, updatedAt, projectId" })
+    await legacy.open()
+    await legacy.table("sessions").put({ id: "s1", projectId: "p1", createdAt: 1, updatedAt: 1 })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(212)
+
+    // The backfill pages newest to oldest through one workspace, and several
+    // sessions routinely share a `createdAt` millisecond — so `id` has to be in
+    // the key or a two-part cursor would re-read or skip the tied rows.
+    expect(upgraded.sessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["[projectId+createdAt+id]", "[projectId+updatedAt]"])
+    )
+    expect(upgraded.projectMiningRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["projectId", "status", "[projectId+status]"])
+    )
+
+    // Purely additive: the existing session survives and no run is invented.
+    expect(await upgraded.sessions.get("s1")).toMatchObject({ id: "s1", projectId: "p1" })
+    expect(await upgraded.projectMiningRuns.count()).toBe(0)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
   fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
     const name = `cognia-external-agent-configs-v201-${Date.now()}`
     const legacy = new Dexie(name)

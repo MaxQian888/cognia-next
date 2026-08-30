@@ -12,6 +12,12 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => ({ reduce: true, durationScale: 1 }),
 }))
 
+jest.mock("../project-backfill-card", () => ({
+  ProjectBackfillCard: ({ projectId }: { projectId?: string }) => (
+    <div data-testid="backfill-card-stub" data-project={projectId ?? ""} />
+  ),
+}))
+
 const insights: MemoryInsights = {
   corpus: {
     stats: {
@@ -117,5 +123,26 @@ describe("ProjectContextPanel", () => {
     })
     expect(screen.getByText(/3 jobs queued or running/)).toBeTruthy()
     expect(screen.getByText(/1 gave up after retries/)).toBeTruthy()
+  })
+})
+
+describe("the history backfill control", () => {
+  it("is mounted, and told which workspace it would sweep", () => {
+    setup({ projectId: "p1" })
+    expect(screen.getByTestId("backfill-card-stub").getAttribute("data-project")).toBe("p1")
+  })
+
+  it("goes inert when mining is off, rather than queueing a sweep that declines every job", () => {
+    setup({ config: { ...DEFAULT_MEMORY_CONFIG, mineProjectContext: false }, projectId: "p1" })
+    const gated = document.querySelectorAll('[data-gated="true"]')
+    const card = screen.getByTestId("backfill-card-stub")
+    expect([...gated].some((node) => node.contains(card))).toBe(true)
+  })
+
+  it("is live when mining is on", () => {
+    setup({ projectId: "p1" })
+    const gated = document.querySelectorAll('[data-gated="true"]')
+    const card = screen.getByTestId("backfill-card-stub")
+    expect([...gated].some((node) => node.contains(card))).toBe(false)
   })
 })
