@@ -85,6 +85,7 @@ const AUDIT_ACTIONS: Record<MemoryAuditAction, true> = {
   conflict: true,
   pinned: true,
   unpinned: true,
+  feedback: true,
 }
 
 const EVIDENCE_KINDS: Record<MemoryEvidenceKind, true> = {

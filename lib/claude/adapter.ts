@@ -1715,6 +1715,7 @@ export function mergeMemorySourcesIntoLastAssistant(
   if (memoryContext.retrievedMemories.length === 0 && !memoryContext.degraded) return messages
   const memorySources: SourcesPartItem[] = memoryContext.retrievedMemories.map((m) => ({
     id: `memory-${m.id}`,
+    memoryRef: m.id,
     title: m.text.length > 80 ? m.text.slice(0, 79).trimEnd() + "…" : m.text,
     snippet: m.text.length > 200 ? m.text.slice(0, 199).trimEnd() + "…" : m.text,
     origin: "memory",
@@ -1759,6 +1760,7 @@ export function mergeProjectClaimSourcesIntoLastAssistant(
   if (!context || context.claims.length === 0) return messages
   const sources: SourcesPartItem[] = context.claims.map((claim) => ({
     id: `claim-${claim.id}`,
+    memoryRef: claim.id,
     title: claim.text.length > 80 ? claim.text.slice(0, 79).trimEnd() + "…" : claim.text,
     snippet: claim.text.length > 200 ? claim.text.slice(0, 199).trimEnd() + "…" : claim.text,
     origin: "project-claim",

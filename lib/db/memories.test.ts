@@ -14,6 +14,7 @@ import {
   listActiveProcedural,
   listMemories,
   listMemoriesBySourceMessageId,
+  recordRetrievalFeedback,
   setMemoriesPinned,
   setMemoryPinned,
   touchMemories,
@@ -375,4 +376,54 @@ it("stored row satisfies the Memory contract", async () => {
   const row = await createMemory(buildInput({ id: "m1" }))
   const typed: Memory = row
   expect(typed.id).toBe("m1")
+})
+
+describe("recordRetrievalFeedback", () => {
+  it("counts a helpful vote without touching updatedAt", async () => {
+    // The BM25 corpus cache signature is `${count}:${latest updatedAt}`, so a
+    // bump here would re-tokenise every memory on every thumbs-up. This
+    // assertion is the only thing that would catch that regression — it is
+    // invisible from the type signature and costs nothing until you profile.
+    const row = await createMemory(buildInput({ id: "m1" }))
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    expect(await recordRetrievalFeedback("m1", "helpful", 500)).toBe(true)
+    const after = await getMemory("m1")
+    expect(after?.retrievalFeedback).toEqual({ positive: 1, negative: 0, lastFeedbackAt: 500 })
+    expect(after?.updatedAt).toBe(row.updatedAt)
+  })
+
+  it("accumulates across votes", async () => {
+    await createMemory(buildInput({ id: "m1" }))
+    await recordRetrievalFeedback("m1", "helpful", 1)
+    await recordRetrievalFeedback("m1", "helpful", 2)
+    await recordRetrievalFeedback("m1", "wrong", 3)
+    expect((await getMemory("m1"))?.retrievalFeedback).toEqual({
+      positive: 2,
+      negative: 1,
+      lastFeedbackAt: 3,
+    })
+  })
+
+  it("marks an outdated memory stale but never conflicted", async () => {
+    await createMemory(buildInput({ id: "m1" }))
+    await recordRetrievalFeedback("m1", "outdated", 1)
+    const after = await getMemory("m1")
+    expect(after?.staleness).toBe("stale")
+    // `isMemoryEligibleForRetrieval` hard-excludes conflicted rows, so a vote
+    // must never produce one — a mis-click would silently and permanently take
+    // the memory out of recall from a control with no undo.
+    expect(after?.reviewStatus).toBeUndefined()
+    expect(after?.status).toBe("active")
+  })
+
+  it("leaves a re-check's freshness alone for the other two verdicts", async () => {
+    await createMemory(buildInput({ id: "m1" }))
+    await updateMemory("m1", { staleness: "fresh" })
+    await recordRetrievalFeedback("m1", "wrong", 1)
+    expect((await getMemory("m1"))?.staleness).toBe("fresh")
+  })
+
+  it("answers false for a memory deleted in another window", async () => {
+    expect(await recordRetrievalFeedback("gone", "helpful", 1)).toBe(false)
+  })
 })

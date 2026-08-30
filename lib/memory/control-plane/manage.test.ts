@@ -4,6 +4,7 @@ const mockUpdate = jest.fn()
 const mockPin = jest.fn()
 const mockDelete = jest.fn()
 const mockInvalidate = jest.fn()
+const mockFeedback = jest.fn()
 const mockList = jest.fn()
 const mockEvidence = jest.fn()
 const mockDeleteEvidence = jest.fn()
@@ -22,6 +23,7 @@ jest.mock("@/lib/db/memories", () => ({
   setMemoryPinned: (...args: unknown[]) => mockPin(...args),
   hardDeleteMemory: (...args: unknown[]) => mockDelete(...args),
   invalidateMemory: (...args: unknown[]) => mockInvalidate(...args),
+  recordRetrievalFeedback: (...args: unknown[]) => mockFeedback(...args),
   listMemories: (...args: unknown[]) => mockList(...args),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({ memory: {} })) }))
@@ -56,6 +58,7 @@ beforeEach(() => {
   mockGet.mockResolvedValue({ id: "m1", text: "old", version: 1 })
   mockStore.mockResolvedValue({ ok: true, memoryId: "new", stored: true })
   mockList.mockResolvedValue([])
+  mockFeedback.mockResolvedValue(true)
   mockEvidence.mockResolvedValue({
     id: "evidence-merge",
     sourceId: "conflict-merge:a:b",
@@ -332,5 +335,53 @@ describe("manageMemory", () => {
     const result = await manageMemory({ kind: "clear", query: { status: "invalidated" } })
     expect(mockList).toHaveBeenCalledWith({ status: "invalidated" })
     expect(result).toEqual({ ok: true, clearedCount: 3 })
+  })
+})
+
+describe("manageMemory retrieval-feedback", () => {
+  it("records the verdict and audits it, without patching the memory", async () => {
+    const result = await manageMemory({
+      kind: "retrieval-feedback",
+      id: "m1",
+      verdict: "helpful",
+    })
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+    expect(mockFeedback).toHaveBeenCalledWith("m1", "helpful")
+    // Not `updateMemory`: that always stamps `updatedAt` and would re-tokenise
+    // the whole BM25 corpus on every vote.
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockAudit).toHaveBeenCalledWith({
+      action: "feedback",
+      memoryId: "m1",
+      reason: "retrieval_helpful",
+    })
+  })
+
+  it.each(["wrong", "outdated"] as const)(
+    "never turns a %s verdict into a review status",
+    async (verdict) => {
+      await manageMemory({ kind: "retrieval-feedback", id: "m1", verdict })
+      expect(mockUpdate).not.toHaveBeenCalled()
+      expect(mockInvalidate).not.toHaveBeenCalled()
+      expect(mockAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "feedback", reason: `retrieval_${verdict}` })
+      )
+    }
+  )
+
+  it("reports not_found when the memory is gone, and writes no audit row", async () => {
+    mockFeedback.mockResolvedValue(false)
+    const result = await manageMemory({
+      kind: "retrieval-feedback",
+      id: "gone",
+      verdict: "helpful",
+    })
+    expect(result).toEqual({ ok: false, reason: "not_found" })
+    expect(mockAudit).not.toHaveBeenCalled()
+  })
+
+  it("does not write an evidence row — the counters are the record", async () => {
+    await manageMemory({ kind: "retrieval-feedback", id: "m1", verdict: "outdated" })
+    expect(mockEvidence).not.toHaveBeenCalled()
   })
 })

@@ -1907,6 +1907,11 @@
     "agentKnowledgeHeader": "Agent Knowledge Base excerpts ({count})",
     "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
     "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
+    "feedbackFailed": "Couldn't record that",
+    "feedbackHelpful": "This was helpful",
+    "feedbackOutdated": "This is out of date",
+    "feedbackRecorded": "Thanks — noted for ranking",
+    "feedbackWrong": "This didn't apply here",
     "originLabel": {
       "agentKnowledgeBase": "Agent KB",
       "anthropic": "Web",

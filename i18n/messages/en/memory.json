@@ -61,6 +61,7 @@
         "conflict": "Marked conflicting",
         "created": "Created",
         "deleted": "Deleted",
+        "feedback": "Feedback recorded",
         "invalidated": "Archived",
         "learn-allowed": "Learning allowed",
         "learn-denied": "Learning denied",

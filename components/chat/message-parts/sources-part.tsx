@@ -8,7 +8,7 @@
  * "View source" link that deep-links into the Twin workbench.
  */
 
-import { memo, useMemo } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import {
@@ -36,9 +36,12 @@ import {
   BookIcon,
   BrainIcon,
   ChevronDownIcon,
+  ClockAlertIcon,
   ExternalLinkIcon,
   FolderGit2Icon,
   SparklesIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
 } from "lucide-react"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 
@@ -294,6 +297,96 @@ const JumpToSourceButton = memo(function JumpToSourceButton({
   )
 })
 
+/**
+ * Vote on a memory the assistant just recalled.
+ *
+ * The three verdicts are deliberately not two. "Wrong" and "outdated" are
+ * different statements — one says the memory does not apply here, the other
+ * says it stopped being true — and only the second is a fact about the memory
+ * itself. Collapsing them would either mark good memories stale or leave no way
+ * to say a memory has expired.
+ *
+ * None of them removes the memory from recall. That is what makes a mis-click
+ * survivable on a control with no undo: a vote moves ranking, and the two
+ * destructive intents (correct it, archive it) keep their own confirmed entry
+ * points in `/memory`.
+ *
+ * Local `voted` state, not a store read: the row is a snapshot of one turn, and
+ * subscribing every chip to the memory table would turn a strip of citations
+ * into a live query per source.
+ */
+const RETRIEVAL_FEEDBACK_OPTIONS = [
+  { verdict: "helpful", labelKey: "feedbackHelpful", Icon: ThumbsUpIcon },
+  { verdict: "wrong", labelKey: "feedbackWrong", Icon: ThumbsDownIcon },
+  { verdict: "outdated", labelKey: "feedbackOutdated", Icon: ClockAlertIcon },
+] as const
+
+const MemoryFeedbackButtons = memo(function MemoryFeedbackButtons({
+  memoryId,
+}: {
+  memoryId: string
+}) {
+  const t = useTranslations("chat.sourcesPart")
+  const [voted, setVoted] = useState<string | null>(null)
+
+  const vote = useCallback(
+    (verdict: (typeof RETRIEVAL_FEEDBACK_OPTIONS)[number]["verdict"]) => {
+      setVoted(verdict)
+      void import("@/lib/memory/control-plane/manage")
+        .then(({ manageMemory }) =>
+          manageMemory({ kind: "retrieval-feedback", id: memoryId, verdict })
+        )
+        .then((result) => {
+          if (result.ok) toast.success(t("feedbackRecorded"))
+          else {
+            setVoted(null)
+            toast.error(t("feedbackFailed"))
+          }
+        })
+        .catch(() => {
+          setVoted(null)
+          toast.error(t("feedbackFailed"))
+        })
+    },
+    [memoryId, t]
+  )
+
+  return (
+    <span
+      className="ml-auto flex shrink-0 items-center gap-0.5"
+      data-testid="sources-part-feedback"
+    >
+      {RETRIEVAL_FEEDBACK_OPTIONS.map(({ verdict, labelKey, Icon }) => (
+        <button
+          key={verdict}
+          type="button"
+          disabled={voted !== null}
+          aria-pressed={voted === verdict}
+          title={t(labelKey)}
+          aria-label={t(labelKey)}
+          data-testid={`sources-part-feedback-${verdict}`}
+          className={cn(
+            "rounded-sm p-0.5 text-muted-foreground transition-colors",
+            "hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            "disabled:pointer-events-none disabled:opacity-40",
+            voted === verdict && "text-primary opacity-100"
+          )}
+          onClick={(event) => {
+            // The row can be wrapped in a link (a web source) and always sits
+            // inside a collapsible trigger's subtree; without this a vote also
+            // navigates or folds the strip away.
+            event.preventDefault()
+            event.stopPropagation()
+            vote(verdict)
+          }}
+        >
+          <Icon className="size-3" aria-hidden="true" />
+        </button>
+      ))}
+    </span>
+  )
+})
+
 function originIcon(origin: SourcesPartItem["origin"]) {
   if (origin === "project-claim" || origin === "project-history") {
     return (
@@ -365,6 +458,7 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
           {source.messageRef && !source.chunkRef && (
             <JumpToSourceButton messageRef={source.messageRef} />
           )}
+          {source.memoryRef && <MemoryFeedbackButtons memoryId={source.memoryRef} />}
         </div>
         {source.snippet && (
           <span

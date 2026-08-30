@@ -1907,6 +1907,11 @@
     "agentKnowledgeHeader": "Agent 知识库片段（{count}）",
     "citationsLabel": "{count, plural, other {# 个网页来源}}",
     "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
+    "feedbackFailed": "未能记录反馈",
+    "feedbackHelpful": "这条有帮助",
+    "feedbackOutdated": "这条已过时",
+    "feedbackRecorded": "已记录，将用于排序",
+    "feedbackWrong": "这条不适用",
     "originLabel": {
       "agentKnowledgeBase": "Agent 知识库",
       "anthropic": "网络",

@@ -317,6 +317,15 @@ export interface SourcesPartItem {
     sessionId: string
     messageId: string
   }
+  /**
+   * The memory row behind this chip, for `memory` and `project-claim`.
+   *
+   * Carried explicitly rather than recovered by stripping the `memory-` /
+   * `claim-` prefix off `id`: the id is a display key that already differs per
+   * origin, and parsing one to reach a foreign key is how the next origin ends
+   * up voting on the wrong row.
+   */
+  memoryRef?: string
 }
 
 export interface SourcesPart {

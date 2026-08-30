@@ -5,10 +5,12 @@ import {
   hardDeleteMemory,
   invalidateMemory,
   listMemories,
+  recordRetrievalFeedback,
   setMemoryPinned,
   updateMemory,
   type ListMemoriesQuery,
 } from "@/lib/db/memories"
+import type { RetrievalFeedbackVerdict } from "@cognia/memory/lifecycle/retrieval-feedback"
 import {
   appendMemoryAuditEvent,
   createMemoryEvidence,
@@ -42,6 +44,12 @@ export type ManageMemoryCommand =
     }
   | { kind: "pin"; id: string; pinned: boolean }
   | { kind: "review"; id: string; status: "verified" | "conflict" }
+  /**
+   * A verdict on a memory the user just saw recalled. Ranking only — see
+   * `applyRetrievalFeedback` for why `wrong` deliberately does NOT become
+   * `reviewStatus: "conflict"`.
+   */
+  | { kind: "retrieval-feedback"; id: string; verdict: RetrievalFeedbackVerdict }
   | { kind: "delete"; id: string }
   /**
    * Soft-delete (chat-chip 撤销 and conflict resolution): status →
@@ -247,6 +255,17 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
       action: command.status === "verified" ? "promoted" : "conflict",
       memoryId: command.id,
       reason: "user_review",
+    })
+    return { ok: true, memoryId: command.id }
+  }
+
+  if (command.kind === "retrieval-feedback") {
+    const written = await recordRetrievalFeedback(command.id, command.verdict)
+    if (!written) return { ok: false, reason: "not_found" }
+    await appendMemoryAuditEvent({
+      action: "feedback",
+      memoryId: command.id,
+      reason: `retrieval_${command.verdict}`,
     })
     return { ok: true, memoryId: command.id }
   }

@@ -61,6 +61,7 @@
         "conflict": "标记为冲突",
         "created": "创建",
         "deleted": "删除",
+        "feedback": "已记录反馈",
         "invalidated": "归档",
         "learn-allowed": "允许学习",
         "learn-denied": "拒绝学习",

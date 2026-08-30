@@ -224,6 +224,14 @@ export type MemoryAuditAction =
   | "conflict"
   | "pinned"
   | "unpinned"
+  /**
+   * A user's verdict on a recalled memory (helpful / wrong / outdated).
+   *
+   * On the AUDIT ledger, not as a `memoryEvidence` row: evidence is what the
+   * inspector's provenance timeline renders, and a per-vote entry there would
+   * bury the handful of rows that explain where a memory came from.
+   */
+  | "feedback"
 
 export interface MemoryAuditEvent {
   id: string

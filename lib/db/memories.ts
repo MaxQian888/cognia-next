@@ -21,6 +21,10 @@ import {
   type MemoryStatus,
   type MemoryType,
 } from "@/types/memory/memory"
+import {
+  applyRetrievalFeedback,
+  type RetrievalFeedbackVerdict,
+} from "@cognia/memory/lifecycle/retrieval-feedback"
 import { getDb } from "./schema"
 
 function newMemoryId(): string {
@@ -147,6 +151,36 @@ export async function updateMemory(id: string, patch: MemoryUpdatePatch): Promis
     next.version = (existing?.version ?? 0) + 1
   }
   await getDb().memories.update(id, next)
+}
+
+/**
+ * Record one user verdict on a recalled memory.
+ *
+ * A dedicated writer rather than `updateMemory` because of a constraint that is
+ * invisible from the type signature: `updateMemory` ALWAYS stamps `updatedAt`,
+ * and the BM25 corpus cache is keyed by `${count}:${latest updatedAt}`
+ * (`retriever.ts`). Routing feedback through the ordinary patch would
+ * re-tokenise the entire memory corpus on every single thumbs-up. `updatedAt`
+ * means "the content changed"; a vote does not change the content.
+ *
+ * `touchMemories` skips the stamp for the same reason and would be the
+ * precedent to follow if this ever grows a third caller.
+ *
+ * Returns false when the row is gone — a user can vote on a chip whose memory
+ * was deleted in another window.
+ */
+export async function recordRetrievalFeedback(
+  id: string,
+  verdict: RetrievalFeedbackVerdict,
+  now: number = Date.now()
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.memories, async () => {
+    const row = await db.memories.get(id)
+    if (!row) return false
+    await db.memories.update(id, applyRetrievalFeedback(row, verdict, now))
+    return true
+  })
 }
 
 /**

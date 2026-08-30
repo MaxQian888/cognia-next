@@ -13,7 +13,17 @@ jest.mock("@/lib/chat/cross-session-jump", () => ({
   jumpToSessionMessage: (...args: unknown[]) => mockJump(...args),
 }))
 const mockToastError = jest.fn()
-jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
+const mockToastSuccess = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+  },
+}))
+const mockManageMemory = jest.fn()
+jest.mock("@/lib/memory/control-plane/manage", () => ({
+  manageMemory: (...args: unknown[]) => mockManageMemory(...args),
+}))
 
 describe("SourcesPart", () => {
   it("returns null when no sources are present", () => {
@@ -390,5 +400,100 @@ describe("SourcesPart origin label catalogue", () => {
       "projectKnowledgeHeader",
     ]
     expect(headers.filter((key) => typeof block[key] !== "string")).toEqual([])
+  })
+})
+
+describe("retrieval feedback on a recalled memory", () => {
+  const part: SourcesPartType = {
+    type: "sources",
+    sources: [
+      { id: "memory-m1", memoryRef: "m1", title: "prefers pnpm", origin: "memory" },
+      { id: "t1", title: "doc.md", origin: "twin-rag" },
+    ],
+  }
+
+  beforeEach(() => {
+    mockManageMemory.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
+    mockManageMemory.mockResolvedValue({ ok: true, memoryId: "m1" })
+  })
+
+  it("offers the three verdicts only on rows that name a memory", () => {
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getAllByTestId("sources-part-feedback")).toHaveLength(1)
+    expect(screen.getByTestId("sources-part-feedback-helpful")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-feedback-wrong")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-feedback-outdated")).toBeTruthy()
+  })
+
+  it("also offers them on a mined project claim", () => {
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [
+            { id: "claim-c1", memoryRef: "c1", title: "pins rust", origin: "project-claim" },
+          ],
+        }}
+        defaultOpen
+      />
+    )
+    expect(screen.getByTestId("sources-part-feedback")).toBeTruthy()
+  })
+
+  it("does not offer them on a history hit, which is a message and not a memory", () => {
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [{ id: "history-m7", title: "Repo setup", origin: "project-history" }],
+        }}
+        defaultOpen
+      />
+    )
+    expect(screen.queryByTestId("sources-part-feedback")).toBeNull()
+  })
+
+  it.each(["helpful", "wrong", "outdated"] as const)("routes a %s vote", async (verdict) => {
+    render(<SourcesPart part={part} defaultOpen />)
+    screen.getByTestId(`sources-part-feedback-${verdict}`).click()
+    await waitFor(() =>
+      expect(mockManageMemory).toHaveBeenCalledWith({
+        kind: "retrieval-feedback",
+        id: "m1",
+        verdict,
+      })
+    )
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled())
+  })
+
+  it("locks the group after one vote so a double-click is not two votes", async () => {
+    render(<SourcesPart part={part} defaultOpen />)
+    const helpful = screen.getByTestId("sources-part-feedback-helpful")
+    helpful.click()
+    await waitFor(() => expect(helpful.getAttribute("aria-pressed")).toBe("true"))
+    expect(screen.getByTestId("sources-part-feedback-wrong").hasAttribute("disabled")).toBe(true)
+    helpful.click()
+    expect(mockManageMemory).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-opens the group and says so when the write fails", async () => {
+    mockManageMemory.mockResolvedValue({ ok: false, reason: "not_found" })
+    render(<SourcesPart part={part} defaultOpen />)
+    const helpful = screen.getByTestId("sources-part-feedback-helpful")
+    helpful.click()
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    expect(helpful.hasAttribute("disabled")).toBe(false)
+  })
+
+  it("labels every button in both locales", () => {
+    for (const messages of [en, zhCN]) {
+      const labels = messages.chat.sourcesPart as Record<string, string>
+      for (const key of ["feedbackHelpful", "feedbackWrong", "feedbackOutdated"]) {
+        expect(typeof labels[key]).toBe("string")
+        expect(labels[key].length).toBeGreaterThan(0)
+      }
+    }
   })
 })
