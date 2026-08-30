@@ -393,6 +393,40 @@ describe("scheduleMemoryMaintenance", () => {
     expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
   })
 
+  it("flushes the trailing mining window that the live turn path held back", async () => {
+    // 26 salient messages: the live path queues the closed windows, this queues
+    // the last one — without it a session that simply stops is never mined.
+    const projectTranscript = Array.from({ length: 26 }, (_, index) => ({
+      id: `m${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      text:
+        index % 2 === 0
+          ? "why does pnpm build fail in packages/memory/src/index.ts"
+          : "it must be in SERVER_ONLY_PACKAGES, because the static export breaks otherwise",
+    }))
+    scheduleMemoryMaintenance({
+      ...base,
+      session: { id: "s1", projectId: "p1", transcriptRevision: 5 } as never,
+      transcript: projectTranscript,
+      config: cfg(),
+    })
+    await jest.runAllTimersAsync()
+
+    const mining = mockEnqueueJob.mock.calls
+      .map(([draft]) => draft)
+      .filter((draft) => draft.kind === "project-mining")
+    expect(mining.length).toBeGreaterThan(0)
+    expect(mining.some((draft) => draft.checkpoint.lastMessageId === "m25")).toBe(true)
+  })
+
+  it("does not queue mining for a session with no workspace", async () => {
+    scheduleMemoryMaintenance({ ...base, config: cfg() })
+    await jest.runAllTimersAsync()
+    expect(mockEnqueueJob.mock.calls.filter(([draft]) => draft.kind === "project-mining")).toEqual(
+      []
+    )
+  })
+
   it("pins the distill job to a message-id checkpoint when the transcript carries ids", async () => {
     const withIds = transcript.map((entry, index) => ({ ...entry, id: `m${index + 1}` }))
     scheduleMemoryMaintenance({

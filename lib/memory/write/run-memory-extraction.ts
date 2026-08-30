@@ -181,6 +181,12 @@ export async function buildAutoExtractionDeps(
           topK: 5,
           relevanceFloor: 0,
           types: [candidate.type],
+          // CROSS-CORPUS GUARD, mirroring the project miner's. Without it the
+          // judge can be shown a mined project claim and answer UPDATE, folding
+          // a fact about the repo into a memory the user stated about
+          // themselves — and the row keeps its personal identity, so it goes on
+          // rendering under "What you remember about the user".
+          claimFilter: "personal-only",
         },
         memDeps
       ).catch(() => [])

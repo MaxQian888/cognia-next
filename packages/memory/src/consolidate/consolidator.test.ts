@@ -470,6 +470,97 @@ describe("failureMode", () => {
   })
 })
 
+describe("project claim attributes", () => {
+  const claim = {
+    projectMemoryKind: "constraint" as const,
+    observedAt: 1_600_000_000_000,
+    observedAtMessageId: "m2",
+    confidence: 0.8,
+    scopeRationale: "only in this repo",
+    extractor: { provider: "anthropic", model: "haiku", promptVersion: "project-v1" },
+    evidenceHash: "abc_3",
+    sourceRevision: "7",
+    evidence: [{ kind: "message" as const, sourceId: "m2" }],
+  }
+
+  it("forwards the claim vocabulary onto the persisted row", async () => {
+    const deps = makeDeps({ findSimilar: async () => [] })
+    await consolidate(
+      {
+        candidates: [{ ...cand("Rust is pinned to 1.77.2"), projectClaim: claim }],
+        scope: "workspace",
+        projectId: "p1",
+        provenance: "user",
+      },
+      deps
+    )
+    expect(deps.persistInputs[0]).toMatchObject({
+      projectMemoryKind: "constraint",
+      observedAt: 1_600_000_000_000,
+      confidence: 0.8,
+      scopeRationale: "only in this repo",
+      extractor: { promptVersion: "project-v1" },
+      evidenceHash: "abc_3",
+      sourceRevision: "7",
+    })
+  })
+
+  it("does not persist the caller's evidence bookkeeping as row columns", async () => {
+    // Evidence rows can only be written once `persist` has produced an id, so
+    // the refs ride on the candidate and are the CALLER's job — writing them
+    // here would produce rows pointing at a memory that does not exist yet.
+    const deps = makeDeps({ findSimilar: async () => [] })
+    await consolidate(
+      {
+        candidates: [{ ...cand("x"), projectClaim: claim }],
+        scope: "workspace",
+        projectId: "p1",
+        provenance: "user",
+      },
+      deps
+    )
+    expect(deps.persistInputs[0]).not.toHaveProperty("evidence")
+    expect(deps.persistInputs[0]).not.toHaveProperty("observedAtMessageId")
+  })
+
+  it("leaves a personal candidate's row untouched", async () => {
+    // The partition contract is "absent means personal". A plain candidate must
+    // not acquire a `projectMemoryKind` key at all, not even an undefined one —
+    // that column is indexed and its presence is what splits the two corpora.
+    const deps = makeDeps({ findSimilar: async () => [] })
+    await consolidate(
+      { candidates: [cand("I prefer dark mode")], scope: "global", provenance: "user" },
+      deps
+    )
+    expect(deps.persistInputs[0]).not.toHaveProperty("projectMemoryKind")
+  })
+
+  it("carries the claim through a quarantine, so the caller can still bind evidence", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("Rust is pinned")],
+      client: {
+        complete: async () => {
+          throw new Error("judge down")
+        },
+      },
+    })
+    const { applied } = await consolidate(
+      {
+        candidates: [{ ...cand("Rust is pinned to 1.77.2"), projectClaim: claim }],
+        scope: "workspace",
+        projectId: "p1",
+        provenance: "user",
+        failureMode: "quarantine",
+      },
+      deps
+    )
+    expect(applied[0]!.op).toBe("QUARANTINE")
+    expect(
+      applied[0]!.op === "QUARANTINE" ? applied[0]!.candidate.projectClaim?.evidence : undefined
+    ).toEqual([{ kind: "message", sourceId: "m2" }])
+  })
+})
+
 describe("consolidation op projections", () => {
   const memory = existing("x", { id: "m1" })
   const candidate = cand("x")

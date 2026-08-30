@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react"
+import { MEMORY_JOB_KINDS } from "@/types/memory/governance"
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 import type { Memory } from "@/types/memory/memory"
 
@@ -192,13 +193,11 @@ describe("useMemoryInsights", () => {
     expect(result.current.corpus.stats.active).toBe(0)
   })
 
-  it("always reports all three job kinds, even before rows load", async () => {
+  it("always reports every job kind, even before rows load", async () => {
+    // Derived, not hand-listed: the summary axis has to grow with the vocabulary
+    // or a new kind's queue depth silently stops being reported at all.
     const { result } = renderHook(() => useMemoryInsights(cfg()))
-    expect(result.current.jobs.map((j) => j.kind)).toEqual([
-      "turn-extraction",
-      "session-distill",
-      "vector-reconcile",
-    ])
+    expect(result.current.jobs.map((j) => j.kind)).toEqual([...MEMORY_JOB_KINDS])
     // Let the in-flight probe land before unmount, or its setState lands on a
     // torn-down tree and React warns.
     await waitFor(() => expect(result.current.retrievalMode).toBeDefined())

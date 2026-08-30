@@ -12,6 +12,9 @@ const mockRunExtraction = jest.fn()
 const mockBuildMaintenanceDeps = jest.fn()
 const mockRunMaintenance = jest.fn()
 const mockTryBuildVectorSink = jest.fn()
+const mockBuildMiningDeps = jest.fn()
+const mockRunMining = jest.fn()
+const mockGetProject = jest.fn()
 
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => mockGetSettings() }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: () => mockGetSession() }))
@@ -42,6 +45,13 @@ jest.mock("@/lib/memory/lifecycle/maintenance", () => ({
 }))
 jest.mock("@/lib/memory/runtime/build-deps", () => ({
   tryBuildMemoryVectorSink: (...args: unknown[]) => mockTryBuildVectorSink(...args),
+}))
+jest.mock("@/lib/memory/write/run-project-mining", () => ({
+  buildProjectMiningDeps: (...args: unknown[]) => mockBuildMiningDeps(...args),
+  runProjectMining: (...args: unknown[]) => mockRunMining(...args),
+}))
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ projects: { get: (...args: unknown[]) => mockGetProject(...args) } }),
 }))
 
 import {
@@ -85,6 +95,9 @@ describe("memory job worker", () => {
     jest.clearAllMocks()
     mockGetSettings.mockResolvedValue({ memory: { enabled: true, learnFromChats: true } })
     mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1" })
+    mockGetProject.mockResolvedValue({ id: "p1", name: "Cognia", roots: [] })
+    mockBuildMiningDeps.mockResolvedValue({ extract: jest.fn(), consolidate: jest.fn() })
+    mockRunMining.mockResolvedValue({ applied: [] })
     mockListMessages.mockResolvedValue([
       { role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
       { role: "assistant", parts: [{ type: "text", text: "Noted." }] },
@@ -218,6 +231,152 @@ describe("memory job worker", () => {
     expect(mockUpdateMemory).toHaveBeenCalledWith("fresh", { vectorDocId: "fresh" })
     // Only the orphan is swept.
     expect(del).toHaveBeenCalledWith(["orphan"])
+  })
+
+  describe("project mining dispatch", () => {
+    const mined = [
+      {
+        id: "m1",
+        role: "user",
+        metadata: { createdAt: 1_000 },
+        parts: [{ type: "text", text: "why does the build break" }],
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        metadata: { createdAt: 2_000 },
+        parts: [{ type: "text", text: "pnpm requires SERVER_ONLY_PACKAGES" }],
+      },
+    ]
+
+    function miningJob(overrides: Partial<MemoryJob> = {}): MemoryJob {
+      return {
+        ...job("mine"),
+        dedupeKey: "project-mining:s1:m1:m2:2",
+        kind: "project-mining",
+        sessionId: "s1",
+        projectId: "p1",
+        scope: "workspace",
+        checkpoint: {
+          transcriptRevision: 1,
+          firstMessageId: "m1",
+          lastMessageId: "m2",
+          messageCount: 2,
+        },
+        ...overrides,
+      }
+    }
+
+    it("routes a project-mining job to the miner, not to the vector reconciler", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      await processMemoryJob(miningJob())
+      expect(mockRunMining).toHaveBeenCalledTimes(1)
+      expect(mockTryBuildVectorSink).not.toHaveBeenCalled()
+    })
+
+    it("carries real source timestamps through so claims can date their evidence", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      await processMemoryJob(miningJob())
+      expect(mockRunMining).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          scope: "workspace",
+          messages: [
+            expect.objectContaining({ id: "m1", createdAt: 1_000 }),
+            expect.objectContaining({ id: "m2", createdAt: 2_000 }),
+          ],
+        }),
+        expect.anything()
+      )
+    })
+
+    it("writes one evidence row per citation, anchored to the source message", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      mockRunMining.mockResolvedValue({
+        applied: [
+          {
+            op: "QUARANTINE",
+            memory: { id: "mem1" },
+            reason: "judge_unavailable",
+            candidate: {
+              type: "semantic",
+              text: "The build needs SERVER_ONLY_PACKAGES.",
+              importance: 7,
+              projectClaim: {
+                projectMemoryKind: "constraint",
+                evidence: [
+                  { kind: "message", sourceId: "m2" },
+                  { kind: "tool-result", sourceId: "m2:3" },
+                  { kind: "code-location", sourceId: "next.config.ts" },
+                ],
+              },
+            },
+          },
+        ],
+        redactedExcerpts: new Map([["m2", "redacted body"]]),
+      })
+      await processMemoryJob(miningJob())
+
+      const kinds = mockCreateEvidence.mock.calls.map(([row]) => row.kind)
+      expect(kinds).toEqual(["message", "tool-result", "code-location"])
+
+      const [messageRow] = mockCreateEvidence.mock.calls[0]!
+      expect(messageRow).toMatchObject({
+        memoryId: "mem1",
+        // The messageId is what lets deleting a source message find and revoke
+        // the claims that depended on it.
+        messageId: "m2",
+        sourceRole: "assistant",
+        validationStrategy: "message-presence",
+      })
+      expect(messageRow.excerptHash).toEqual(expect.any(String))
+
+      // A tool citation points at a part of a message, so the anchor is the
+      // message id ahead of the colon.
+      expect(mockCreateEvidence.mock.calls[1]![0]).toMatchObject({
+        messageId: "m2",
+        validationStrategy: "tool-result-hash",
+      })
+
+      // `code-location` is deliberately dormant: recorded, never validated,
+      // contributing no support until a batched native stat exists.
+      expect(mockCreateEvidence.mock.calls[2]![0]).toMatchObject({
+        messageId: undefined,
+        validationStrategy: "none",
+      })
+    })
+
+    it("reports the miner's skip reason instead of a generic empty result", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      mockRunMining.mockResolvedValue({ applied: [], skipReason: "not_salient" })
+      await expect(processMemoryJob(miningJob())).resolves.toEqual({
+        status: "no_output",
+        resultCode: "not_salient",
+      })
+    })
+
+    it("skips — never retries — a mining job with no workspace to mine for", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      mockGetSession.mockResolvedValue({ id: "s1" })
+      const d = deps([miningJob({ projectId: undefined })], processMemoryJob)
+      await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
+      expect(d.finish).toHaveBeenCalledWith("mine", {
+        status: "skipped",
+        resultCode: "project_missing",
+      })
+    })
+
+    it("does not silently run the reconciler for an unimplemented kind", async () => {
+      // The dispatch used to fall through to `processVectorReconcile`, so any
+      // new kind quietly did the wrong work. It now says so instead.
+      await expect(
+        processMemoryJob({ ...job("reval"), kind: "project-claim-revalidate" })
+      ).resolves.toEqual({
+        status: "skipped",
+        resultCode: "revalidation_not_implemented",
+      })
+      expect(mockTryBuildVectorSink).not.toHaveBeenCalled()
+    })
   })
 
   describe("transcript window recovery", () => {

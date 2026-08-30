@@ -30,6 +30,11 @@ export async function recallAboutUser(
         topK: input.topK ?? 3,
         relevanceFloor: input.relevanceFloor ?? 0.2,
         types: ["semantic", "episodic"],
+        // This function's whole contract is "what the user has shared" — its
+        // output is rendered into the pet's prompt as things it knows ABOUT the
+        // user. Mined project claims are facts about a repository, and would
+        // read there as if the user had told the pet about their build system.
+        claimFilter: "personal-only",
         recencyHalfLifeDays: input.recencyHalfLifeDays,
       },
       deps

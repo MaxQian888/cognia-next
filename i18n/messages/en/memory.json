@@ -77,10 +77,12 @@
       "kinds": {
         "agent-finding": "Agent finding",
         "checkpoint": "Checkpoint",
+        "code-location": "Code location",
         "external": "External source",
         "file": "File",
         "manual": "Entered by hand",
-        "message": "Chat message"
+        "message": "Chat message",
+        "tool-result": "Tool result"
       }
     },
     "auditTitle": "Audit history",

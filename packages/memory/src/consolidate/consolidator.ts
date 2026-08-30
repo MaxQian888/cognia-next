@@ -15,8 +15,15 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
-import type { Memory, MemoryProvenance, MemoryScope, MemorySourceChannel } from "../types/memory"
+import type {
+  Memory,
+  MemoryProvenance,
+  MemoryScope,
+  MemorySourceChannel,
+  ProjectMemoryKind,
+} from "../types/memory"
 import type { MemoryCandidate } from "../extract/extractor"
+import type { ProjectClaimEvidenceRef } from "../extract/project-extractor"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface PersistMemoryInput {
@@ -38,6 +45,61 @@ export interface PersistMemoryInput {
   reviewStatus?: Memory["reviewStatus"]
   conflictWithIds?: string[]
   trustState?: Memory["trustState"]
+  /** Set only for mined project claims — see `ProjectClaimAttributes`. */
+  projectMemoryKind?: ProjectMemoryKind
+  observedAt?: number
+  confidence?: number
+  scopeRationale?: string
+  extractor?: Memory["extractor"]
+  evidenceHash?: string
+  sourceRevision?: string
+}
+
+/**
+ * Row fields that turn a consolidated candidate into a PROJECT claim.
+ *
+ * These ride on the candidate rather than on `ConsolidateInput` because they are
+ * per-claim, not per-batch: one mining window yields claims of different kinds,
+ * observed at different messages, with different evidence. `ConsolidateInput`
+ * carries only what the whole batch shares (namespace, provenance, source).
+ *
+ * `projectMemoryKind` is the partition axis itself — its PRESENCE on the stored
+ * row is what `isProjectClaim` reads, and therefore what keeps mined claims out
+ * of the personal recall section. Everything else here is provenance the console
+ * and the re-check sweep need.
+ */
+export interface ProjectClaimAttributes {
+  projectMemoryKind: ProjectMemoryKind
+  /** When the evidence happened, not when it was learned. */
+  observedAt?: number
+  /** The window message the claim was observed in. */
+  observedAtMessageId?: string
+  /** Extractor self-rating in [0,1]. */
+  confidence?: number
+  /** Why the claim was narrowed below workspace scope. */
+  scopeRationale?: string
+  extractor?: Memory["extractor"]
+  /** Hash over the ordered evidence set, for O(1) "did the support change". */
+  evidenceHash?: string
+  /** `ChatSession.transcriptRevision` at mining time, stringified. */
+  sourceRevision?: string
+  /**
+   * Evidence the extractor cited. Carried through consolidation UNPERSISTED —
+   * the caller writes the `memoryEvidence` rows once an op has produced a
+   * memory id, because that id does not exist until `persist` returns.
+   */
+  evidence?: readonly ProjectClaimEvidenceRef[]
+}
+
+/**
+ * A candidate on its way through consolidation.
+ *
+ * Widens `MemoryCandidate` rather than replacing it, so every existing caller
+ * (which passes plain `MemoryCandidate[]`) keeps compiling untouched and the
+ * personal path is bit-for-bit unchanged when `projectClaim` is absent.
+ */
+export interface ConsolidationCandidate extends MemoryCandidate {
+  projectClaim?: ProjectClaimAttributes
 }
 
 export interface ConsolidateDeps {
@@ -58,10 +120,10 @@ export interface ConsolidateDeps {
 }
 
 export type ConsolidationOp =
-  | { op: "ADD"; memory: Memory; candidate: MemoryCandidate }
+  | { op: "ADD"; memory: Memory; candidate: ConsolidationCandidate }
   | { op: "UPDATE"; targetId: string }
   | { op: "DELETE"; targetId: string }
-  | { op: "CONFLICT"; memory: Memory; targetId: string; candidate: MemoryCandidate }
+  | { op: "CONFLICT"; memory: Memory; targetId: string; candidate: ConsolidationCandidate }
   | {
       /**
        * The judge could not decide anything at all, and the caller asked to fail
@@ -71,7 +133,7 @@ export type ConsolidationOp =
        */
       op: "QUARANTINE"
       memory: Memory
-      candidate: MemoryCandidate
+      candidate: ConsolidationCandidate
       reason: QuarantineReason
     }
   | { op: "NOOP" }
@@ -106,7 +168,7 @@ export function consolidationOpMemoryId(op: ConsolidationOp): string | undefined
 }
 
 export interface ConsolidateInput {
-  candidates: MemoryCandidate[]
+  candidates: ConsolidationCandidate[]
   scope: MemoryScope
   characterId?: string
   projectId?: string
@@ -187,8 +249,31 @@ function buildDecidePrompt(candidate: MemoryCandidate, similar: Memory[]): strin
   ].join("\n")
 }
 
+/**
+ * The project-claim half of a persist input.
+ *
+ * `evidence` and `observedAtMessageId` are deliberately NOT forwarded: they are
+ * caller bookkeeping (evidence rows are written after the memory id exists), not
+ * columns on the memory row.
+ */
+function projectClaimFields(candidate: ConsolidationCandidate): Partial<PersistMemoryInput> {
+  const claim = candidate.projectClaim
+  if (!claim) return {}
+  // Omit absent fields rather than writing explicit `undefined`s: the row is
+  // spread straight into Dexie, and `projectMemoryKind` is an INDEXED column.
+  return {
+    projectMemoryKind: claim.projectMemoryKind,
+    ...(claim.observedAt !== undefined ? { observedAt: claim.observedAt } : {}),
+    ...(claim.confidence !== undefined ? { confidence: claim.confidence } : {}),
+    ...(claim.scopeRationale ? { scopeRationale: claim.scopeRationale } : {}),
+    ...(claim.extractor ? { extractor: claim.extractor } : {}),
+    ...(claim.evidenceHash ? { evidenceHash: claim.evidenceHash } : {}),
+    ...(claim.sourceRevision ? { sourceRevision: claim.sourceRevision } : {}),
+  }
+}
+
 async function persistCandidate(
-  candidate: MemoryCandidate,
+  candidate: ConsolidationCandidate,
   input: ConsolidateInput,
   deps: ConsolidateDeps,
   governance: Pick<PersistMemoryInput, "reviewStatus" | "conflictWithIds" | "trustState"> = {}
@@ -209,6 +294,7 @@ async function persistCandidate(
     sourceMessageId: input.source?.messageId,
     sourceChannel: input.attribution?.channel,
     sourcePluginId: input.attribution?.pluginId,
+    ...projectClaimFields(candidate),
     ...governance,
   })
 }
@@ -247,7 +333,7 @@ export function consolidationAuditAction(
  * leaving it reviewable in the console.
  */
 async function failClosed(
-  candidate: MemoryCandidate,
+  candidate: ConsolidationCandidate,
   input: ConsolidateInput,
   deps: ConsolidateDeps,
   reason: QuarantineReason

@@ -13,7 +13,7 @@ import {
 import { listMemories, updateMemory } from "@/lib/db/memories"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
-import type { MemoryJob } from "@/types/memory/governance"
+import type { MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-window"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
@@ -23,6 +23,7 @@ import {
   consolidationOpMemoryId,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
+import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface MemoryJobWorkerDeps {
@@ -108,11 +109,31 @@ function effectiveConfig(settings: AppSettings): MemoryConfig {
   return resolveMemoryConfig(settings.memory)
 }
 
+/**
+ * The stored timestamp `rowToUIMessage` stashes in metadata.
+ *
+ * Returns undefined rather than `Date.now()` when it is missing: this feeds a
+ * project claim's `observedAt`, whose entire purpose is to keep "when the
+ * evidence happened" separate from "when we learned it". Substituting now would
+ * reintroduce exactly the lie the field exists to prevent.
+ */
+function messageCreatedAt(message: { metadata?: unknown }): number | undefined {
+  const value = (message.metadata as { createdAt?: unknown } | undefined)?.createdAt
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
 async function loadJobContext(job: MemoryJob): Promise<{
   settings: AppSettings
   session: ChatSession
   config: MemoryConfig
-  transcript: Array<{ id?: string; role: string; text: string; parts?: readonly unknown[] }>
+  transcript: Array<{
+    id?: string
+    role: string
+    text: string
+    /** Source timestamp — project claims derive `observedAt` from it. */
+    createdAt?: number
+    parts?: readonly unknown[]
+  }>
   contaminationState: "clean" | "external-context"
   /** Set when the session advanced past the checkpoint but the window verified intact. */
   windowResultCode?: "revision_advanced_window_intact"
@@ -132,6 +153,7 @@ async function loadJobContext(job: MemoryJob): Promise<{
     id: message.id,
     role: message.role,
     text: extractPlainText(message.parts),
+    createdAt: messageCreatedAt(message),
     parts: message.parts,
   }))
   const window = resolveJobTranscriptWindow(job, fullTranscript, session.transcriptRevision)
@@ -312,6 +334,164 @@ async function processSessionDistill(job: MemoryJob): Promise<MemoryJobProcessOu
   }
 }
 
+/**
+ * Persist the governance trail for one mined claim: the row patch, one evidence
+ * row per citation, and the audit event.
+ *
+ * Evidence rows are written HERE and not by the consolidator because a claim's
+ * evidence can only be attached once `persist` has produced a memory id. The
+ * `messageId` on each row is what lets deletion of a source message find and
+ * revoke the claims that depended on it.
+ */
+async function recordProjectClaimOutcome(params: {
+  job: MemoryJob
+  operation: ConsolidationOp
+  contaminationState: "clean" | "external-context"
+  transcriptRevision?: number
+  roleByMessageId: Map<string, string>
+  excerpts: ReadonlyMap<string, string> | undefined
+}): Promise<void> {
+  const { job, operation } = params
+  const memoryId = consolidationOpMemoryId(operation)
+  const auditAction = consolidationAuditAction(operation)
+  if (!memoryId || !auditAction) return
+
+  await updateMemory(memoryId, {
+    evidenceState: "supported",
+    reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
+    contaminationState: params.contaminationState,
+    sensitivity: "normal",
+  })
+
+  const claim =
+    operation.op === "ADD" || operation.op === "CONFLICT" || operation.op === "QUARANTINE"
+      ? operation.candidate.projectClaim
+      : undefined
+
+  for (const reference of claim?.evidence ?? []) {
+    // `code-location` is checkable in principle but not on every shell, so it
+    // is recorded with strategy `none` and contributes no support. See ADR
+    // deviation #4 in the plan: making it real needs a batched native stat.
+    const messageId =
+      reference.kind === "code-location"
+        ? undefined
+        : (reference.sourceId.split(":")[0] ?? undefined)
+    const excerpt = messageId ? params.excerpts?.get(messageId) : undefined
+    await createMemoryEvidence({
+      memoryId,
+      kind: reference.kind,
+      sourceId: reference.sourceId,
+      sessionId: job.sessionId,
+      messageId,
+      sourceRole: normalizeSourceRole(
+        messageId ? params.roleByMessageId.get(messageId) : undefined
+      ),
+      excerptHash: excerpt !== undefined ? hashContent(excerpt) : undefined,
+      contaminationState: params.contaminationState,
+      reviewed: false,
+      sourceRevision: params.transcriptRevision,
+      validationStrategy:
+        reference.kind === "message"
+          ? "message-presence"
+          : reference.kind === "tool-result"
+            ? "tool-result-hash"
+            : "none",
+    })
+  }
+
+  await appendMemoryAuditEvent({
+    action: auditAction,
+    memoryId,
+    sessionId: job.sessionId,
+    reason: "project_mining",
+  })
+}
+
+function normalizeSourceRole(role: string | undefined): MemoryEvidence["sourceRole"] {
+  return role === "user" || role === "assistant" || role === "system" || role === "tool"
+    ? role
+    : undefined
+}
+
+async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
+  const context = await loadJobContext(job)
+  const projectId = job.projectId ?? context.session.projectId
+  // A claim with no workspace has nowhere to be recalled from; retrying cannot
+  // produce one, so this is terminal rather than a burned retry budget.
+  if (!projectId) throw new MemoryJobTerminalError("project_missing")
+
+  const [{ getDb }, { allRootPaths }] = await Promise.all([
+    import("@/lib/db/schema"),
+    import("@/lib/workspace/roots"),
+  ])
+  // Roots feed path normalization. A workspace row that has gone missing is not
+  // fatal — mining proceeds with no roots, which only means in-root absolute
+  // paths are not rewritten and the identifying-path gate refuses the window.
+  const project = await getDb()
+    .projects.get(projectId)
+    .catch(() => undefined)
+
+  const { buildProjectMiningDeps, runProjectMining } =
+    await import("@/lib/memory/write/run-project-mining")
+  const deps = await buildProjectMiningDeps(
+    { session: context.session, appSettings: context.settings },
+    context.config
+  )
+  if (!deps) throw new MemoryJobProcessingError("dependencies_unavailable")
+
+  const messages = context.transcript
+    .filter((entry): entry is typeof entry & { id: string } => Boolean(entry.id))
+    .map((entry) => ({
+      id: entry.id,
+      role: entry.role,
+      text: entry.text,
+      createdAt: entry.createdAt,
+      parts: entry.parts,
+    }))
+
+  const result = await runProjectMining(
+    {
+      messages,
+      projectId,
+      workspaceRoots: project ? allRootPaths(project) : [],
+      projectHint: project?.name,
+      // Claims describe the workspace, so they live at the workspace scope even
+      // when the job itself was queued under a narrower one.
+      scope: "workspace",
+      characterId: job.characterId,
+      agentId: job.agentId,
+      provenance: job.provenance,
+      source: { sessionId: job.sessionId },
+      transcriptRevision: context.session.transcriptRevision,
+      config: context.config,
+    },
+    deps
+  )
+
+  const roleByMessageId = new Map(messages.map((message) => [message.id, message.role]))
+  for (const operation of result.applied) {
+    await recordProjectClaimOutcome({
+      job,
+      operation,
+      contaminationState: context.contaminationState,
+      transcriptRevision: context.session.transcriptRevision,
+      roleByMessageId,
+      excerpts: result.redactedExcerpts,
+    })
+  }
+
+  if (result.applied.some((operation) => operation.op !== "NOOP")) {
+    return {
+      status: "succeeded",
+      resultCode: withWindowOutcome("claims_applied", context.windowResultCode),
+    }
+  }
+  return {
+    status: "no_output",
+    resultCode: withWindowOutcome(result.skipReason ?? "nothing_durable", context.windowResultCode),
+  }
+}
+
 async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {
   const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
@@ -360,10 +540,34 @@ async function processVectorReconcile(): Promise<MemoryJobProcessOutcome> {
     : { status: "no_output", resultCode: "already_consistent" }
 }
 
+/**
+ * Dispatch one job.
+ *
+ * EXHAUSTIVE SWITCH, deliberately — this was an `if / if / fall through to
+ * vector reconcile` chain, which meant every future job kind silently ran the
+ * reconciler instead of its own handler. The `never` assignment makes a new kind
+ * a compile error at exactly the place that has to handle it.
+ */
 export async function processMemoryJob(job: MemoryJob): Promise<MemoryJobProcessOutcome> {
-  if (job.kind === "turn-extraction") return processTurnExtraction(job)
-  if (job.kind === "session-distill") return processSessionDistill(job)
-  return processVectorReconcile()
+  switch (job.kind) {
+    case "turn-extraction":
+      return processTurnExtraction(job)
+    case "session-distill":
+      return processSessionDistill(job)
+    case "project-mining":
+      return processProjectMining(job)
+    case "project-claim-revalidate":
+      // Written by the claim re-check sweep, which is not wired yet. Skipping is
+      // the honest outcome: the row is not lost, and it is visibly unhandled in
+      // the console rather than quietly succeeding.
+      return { status: "skipped", resultCode: "revalidation_not_implemented" }
+    case "vector-reconcile":
+      return processVectorReconcile()
+    default: {
+      const exhaustive: never = job.kind
+      throw new MemoryJobTerminalError(`unknown_job_kind:${String(exhaustive)}`)
+    }
+  }
 }
 
 const defaultWorkerDeps: MemoryJobWorkerDeps = {

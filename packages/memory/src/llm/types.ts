@@ -41,4 +41,14 @@ export interface LlmClient {
   stream?(prompt: string, options?: LlmClientCallOptions): AsyncIterable<string>
   /** Cumulative tokens consumed since construction. Optional (mocks ignore it). */
   getUsageSnapshot?(): LlmUsageSnapshot
+  /**
+   * Which provider/model this client actually resolved to.
+   *
+   * Optional so mocks stay valid. Present on production clients so a caller that
+   * persists model-derived output (memory's `Memory.extractor`) can record what
+   * produced it — without that, output from a prompt or model later found to be
+   * bad is indistinguishable from good rows and cannot be re-derived in bulk.
+   */
+  readonly provider?: string
+  readonly model?: string
 }

@@ -91,6 +91,63 @@ beforeEach(() => {
   mockRunExtraction.mockResolvedValue({ applied: [] })
 })
 
+/** Long enough to close a mining window, and salient enough to clear the gate. */
+const PROJECT_TRANSCRIPT = Array.from({ length: 26 }, (_, index) => ({
+  id: `m${index}`,
+  role: index % 2 === 0 ? "user" : "assistant",
+  text:
+    index % 2 === 0
+      ? "why does pnpm build fail in packages/memory/src/index.ts"
+      : "it must be in SERVER_ONLY_PACKAGES, because the static export breaks otherwise",
+}))
+
+describe("runTurnMemory project mining", () => {
+  function miningDrafts() {
+    return mockEnqueueJob.mock.calls
+      .map(([draft]) => draft)
+      .filter((draft) => draft.kind === "project-mining")
+  }
+
+  it("queues closed mining windows for a project-bound session", async () => {
+    mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1", transcriptRevision: 3 })
+    await runTurnMemory("s1", { ...INPUT, transcript: PROJECT_TRANSCRIPT })
+
+    const drafts = miningDrafts()
+    expect(drafts.length).toBeGreaterThan(0)
+    expect(drafts[0]).toMatchObject({
+      kind: "project-mining",
+      projectId: "p1",
+      scope: "workspace",
+      checkpoint: expect.objectContaining({ firstMessageId: "m0", transcriptRevision: 3 }),
+    })
+    // The still-growing tail is left for the idle flush, so a send does not
+    // re-mine overlapping text every turn.
+    expect(drafts.some((draft) => draft.checkpoint.lastMessageId === "m25")).toBe(false)
+  })
+
+  it("queues nothing for a session with no workspace", async () => {
+    mockGetSession.mockResolvedValue({ id: "s1" })
+    await runTurnMemory("s1", { ...INPUT, transcript: PROJECT_TRANSCRIPT })
+    expect(miningDrafts()).toEqual([])
+  })
+
+  it("queues nothing when project mining is switched off", async () => {
+    setMemory({ mineProjectContext: false })
+    mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1" })
+    await runTurnMemory("s1", { ...INPUT, transcript: PROJECT_TRANSCRIPT })
+    expect(miningDrafts()).toEqual([])
+  })
+
+  it("queues nothing from small talk, however long the conversation", async () => {
+    mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1" })
+    await runTurnMemory("s1", {
+      ...INPUT,
+      transcript: PROJECT_TRANSCRIPT.map((entry) => ({ ...entry, text: "sounds good, thanks" })),
+    })
+    expect(miningDrafts()).toEqual([])
+  })
+})
+
 describe("runTurnMemory", () => {
   it("extracts the new pair and schedules maintenance on a clean enabled turn", async () => {
     await runTurnMemory("s1", INPUT)

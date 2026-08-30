@@ -115,6 +115,16 @@ export interface LlmClient {
    * always implement it.
    */
   getUsageSnapshot?(): LlmUsageSnapshot
+  /**
+   * Which provider/model this client actually resolved to.
+   *
+   * Optional so mocks stay valid. Present on production clients so a caller that
+   * persists model-derived output (memory's `Memory.extractor`) can record what
+   * produced it — without that, output from a prompt or model later found to be
+   * bad is indistinguishable from good rows and cannot be re-derived in bulk.
+   */
+  readonly provider?: string
+  readonly model?: string
 }
 
 /**
@@ -278,6 +288,8 @@ export function createLlmClient(config: LlmConfig): LlmClient {
   }
 
   return {
+    provider: config.provider,
+    model: config.model,
     async complete(prompt, options) {
       const model = await getModel()
       const result = await generateText({

@@ -247,6 +247,35 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
       metadata: { externalContextCount: externalContext.length },
     }).catch(() => undefined)
 
+    // Project-context mining. Only CLOSED windows are queued from the live turn
+    // path — the trailing window is still growing, so its identity changes every
+    // turn and mining it here would re-mine overlapping text on every send. The
+    // idle maintenance tick flushes it once the conversation stops.
+    if (
+      effectiveConfig.mineProjectContext &&
+      sessionRow.projectId &&
+      policy.writableScopes.includes("workspace")
+    ) {
+      const { enqueueProjectMiningJobs } = await import("@/lib/memory/write/project-mining-enqueue")
+      await enqueueProjectMiningJobs({
+        sessionId,
+        projectId: sessionRow.projectId,
+        transcript: input.transcript
+          .filter((entry): entry is TurnTranscriptEntry & { id: string } => Boolean(entry.id))
+          .map((entry) => ({
+            id: entry.id,
+            role: entry.role,
+            text: entry.text,
+            parts: entry.parts,
+          })),
+        transcriptRevision: sessionRow.transcriptRevision,
+        scope: "workspace",
+        characterId: sessionRow.characterId,
+        provenance,
+        includeTrailing: false,
+      }).catch(() => undefined)
+    }
+
     // Schedule idle episodic distillation + capacity/access-time eviction.
     const { scheduleMemoryMaintenance } = await import("@/lib/memory/lifecycle/maintenance")
     scheduleMemoryMaintenance({

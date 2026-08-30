@@ -77,10 +77,12 @@
       "kinds": {
         "agent-finding": "Agent 发现",
         "checkpoint": "检查点",
+        "code-location": "代码位置",
         "external": "外部来源",
         "file": "文件",
         "manual": "手动录入",
-        "message": "会话消息"
+        "message": "会话消息",
+        "tool-result": "工具结果"
       }
     },
     "auditTitle": "审计历史",

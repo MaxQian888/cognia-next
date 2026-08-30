@@ -145,8 +145,16 @@ export interface ScheduleMemoryMaintenanceParams {
   sessionId: string
   session: ChatSession | null | undefined
   appSettings: AppSettings | null | undefined
-  /** `id` pins the durable job checkpoint; see `./transcript-window`. */
-  transcript: { id?: string; role: string; text: string }[]
+  /**
+   * `id` pins the durable job checkpoint; see `./transcript-window`.
+   *
+   * `parts` is carried for the project-mining flush below: the salience gate
+   * reads it to tell a window where a local tool actually RAN from one that only
+   * talked about running it, and without it that structural signal never fires.
+   * (Timestamps are not needed here — this path only queues jobs; the worker
+   * reads real `createdAt`s from Dexie when it mines.)
+   */
+  transcript: { id?: string; role: string; text: string; parts?: readonly unknown[] }[]
   provenance: MemoryProvenance
   contaminationState?: MemoryContaminationState
   config: MemoryConfig
@@ -175,6 +183,33 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
     // the worker loop drains it; at most one sweep per day.
     const { enqueueDailyVectorReconcile } = await import("./enqueue-reconcile")
     void enqueueDailyVectorReconcile()
+
+    // The conversation has gone idle, so the trailing mining window is now
+    // closed — this is the one place it gets queued. The live turn path
+    // deliberately skips it (see `project-mining-enqueue`), so without this
+    // flush a short session would never be mined at all.
+    if (config.mineProjectContext && params.session?.projectId) {
+      const { enqueueProjectMiningJobs } = await import("@/lib/memory/write/project-mining-enqueue")
+      await enqueueProjectMiningJobs({
+        sessionId,
+        projectId: params.session.projectId,
+        transcript: params.transcript
+          .filter((entry): entry is (typeof params.transcript)[number] & { id: string } =>
+            Boolean(entry.id)
+          )
+          .map((entry) => ({
+            id: entry.id,
+            role: entry.role,
+            text: entry.text,
+            parts: entry.parts,
+          })),
+        transcriptRevision: params.session.transcriptRevision,
+        scope: "workspace",
+        characterId: params.session.characterId,
+        provenance: params.provenance,
+        includeTrailing: true,
+      }).catch(() => undefined)
+    }
 
     const { enqueueMemoryJob } = await import("@/lib/db/memory-governance")
     const { buildJobCheckpoint, transcriptJobIdentity } = await import("./transcript-window")

@@ -94,6 +94,8 @@ const EVIDENCE_KINDS: Record<MemoryEvidenceKind, true> = {
   manual: true,
   checkpoint: true,
   "agent-finding": true,
+  "tool-result": true,
+  "code-location": true,
 }
 
 const EXTERNAL_AGENTS: Record<ExternalAgentId, true> = {

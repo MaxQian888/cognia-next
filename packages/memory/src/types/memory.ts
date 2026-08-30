@@ -238,6 +238,15 @@ export interface MemoryConfig {
   learnFromChats: boolean
   /** Background per-turn extraction of semantic/procedural memories. */
   autoExtract: boolean
+  /**
+   * Background mining of durable PROJECT facts (state / constraint / decision /
+   * outcome / gotcha) out of project-bound sessions.
+   *
+   * Separate from `autoExtract` because they answer different questions:
+   * `autoExtract` learns about the USER, this learns about the WORKSPACE. A user
+   * who wants neither turns off `learnFromChats`, which gates both.
+   */
+  mineProjectContext: boolean
   /** Refuse automatic learning when a turn contains untrusted external context. */
   disableLearningOnExternalContext: boolean
   /** Default scope new auto-extracted memories land in. */
@@ -283,6 +292,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   useMemory: true,
   learnFromChats: true,
   autoExtract: true,
+  mineProjectContext: true,
   disableLearningOnExternalContext: true,
   scopeDefault: "global",
   hybridEnabled: true,
