@@ -126,4 +126,60 @@ describe("evaluateGate", () => {
     delete (legacy as Partial<EvalReport>).ungradedCaseCount
     expect(evaluateGate(legacy, { maxUngradedRatio: 0 }).passed).toBe(true)
   })
+
+  describe("inconclusive", () => {
+    const nothingGraded = () =>
+      report({ caseCount: 4, gradedCaseCount: 0, ungradedCaseCount: 4, passAt1: 0, passHatK: 0 })
+
+    it("reports no evidence as inconclusive, not as a total failure", () => {
+      // `passAt1` is 0 here because nothing was graded, not because the agent
+      // got everything wrong. Reading that zero as a breached floor is how
+      // "we learned nothing" used to be indistinguishable from "it failed".
+      const result = evaluateGate(nothingGraded(), { minPassAt1: 0.9, minPassHatK: 0.9 })
+      expect(result.verdict).toBe("inconclusive")
+      expect(result.failures).toHaveLength(0)
+      expect(result.inconclusiveReasons.join(" ")).toContain("no case produced a verdict")
+    })
+
+    it("keeps `passed` false for an inconclusive run so existing callers are unaffected", () => {
+      expect(evaluateGate(nothingGraded(), { minPassAt1: 0.9 }).passed).toBe(false)
+    })
+
+    it("is inconclusive when a required scorer graded nothing", () => {
+      const result = evaluateGate(
+        report({
+          scorers: { cost: agg("cost", 0, 0), "tool-selection": agg("tool-selection", 1) },
+        }),
+        { requiredScorerIds: ["cost"] }
+      )
+      expect(result.verdict).toBe("inconclusive")
+      expect(result.inconclusiveReasons.join(" ")).toContain("cost")
+    })
+
+    it("is inconclusive when a required scorer never ran at all", () => {
+      const result = evaluateGate(report(), { requiredScorerIds: ["judge-task-completion"] })
+      expect(result.verdict).toBe("inconclusive")
+      expect(result.inconclusiveReasons.join(" ")).toContain("judge-task-completion")
+    })
+
+    it("lets a real failure outrank missing evidence", () => {
+      const result = evaluateGate(report({ totalCostUsd: 5 }), {
+        maxTotalCostUsd: 1,
+        requiredScorerIds: ["judge-task-completion"],
+      })
+      expect(result.verdict).toBe("fail")
+      expect(result.failures.join(" ")).toContain("cost")
+      expect(result.inconclusiveReasons).not.toHaveLength(0)
+    })
+
+    it("still passes a fully-graded run with its required scorers present", () => {
+      const result = evaluateGate(report(), {
+        minPassAt1: 0.9,
+        requiredScorerIds: ["tool-selection"],
+      })
+      expect(result.verdict).toBe("pass")
+      expect(result.passed).toBe(true)
+      expect(result.inconclusiveReasons).toHaveLength(0)
+    })
+  })
 })

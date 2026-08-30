@@ -22,9 +22,29 @@ export interface GateThresholds {
    * pass still clears `minPassAt1` — a high pass rate over almost nothing.
    */
   maxUngradedRatio?: number
+  /**
+   * Scorers that MUST have produced at least one verdict for the gate to mean
+   * anything. Naming one here that graded nothing yields `inconclusive`, not a
+   * pass — distinct from {@link minScorerPassRate}, whose map form documents
+   * the opposite (absent scorers are ignored), because a floor says "if this
+   * ran, clear this bar" while this says "this had to run".
+   */
+  requiredScorerIds?: string[]
 }
 
+/**
+ * `inconclusive` is not a third flavour of failure — it means the run produced
+ * too little evidence to answer. Before it existed a run that graded NOTHING
+ * reported `passAt1: 0`, which every floor read as a catastrophic failure; "we
+ * learned nothing" and "the agent failed everything" were the same output.
+ */
+export type GateVerdict = "pass" | "fail" | "inconclusive"
+
 export interface GateResult {
+  /** Retained for existing callers; exactly `verdict === "pass"`. */
   passed: boolean
+  verdict: GateVerdict
   failures: string[]
+  /** Why the run could not be judged. Empty unless `verdict` is inconclusive. */
+  inconclusiveReasons: string[]
 }

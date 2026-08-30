@@ -7,9 +7,9 @@
  */
 
 import type { EvalReport, ScorerAggregate } from "./domain/eval"
-import type { GateThresholds, GateResult } from "./domain/gate"
+import type { GateThresholds, GateResult, GateVerdict } from "./domain/gate"
 
-export type { GateThresholds, GateResult } from "./domain/gate"
+export type { GateThresholds, GateResult, GateVerdict } from "./domain/gate"
 
 /**
  * True when this scorer actually produced verdicts. A scorer that graded
@@ -26,12 +26,36 @@ function graded(agg: ScorerAggregate): boolean {
 
 export function evaluateGate(report: EvalReport, thresholds: GateThresholds): GateResult {
   const failures: string[] = []
+  const inconclusiveReasons: string[] = []
 
-  if (thresholds.minPassHatK !== undefined && report.passHatK < thresholds.minPassHatK) {
-    failures.push(`passHatK ${report.passHatK.toFixed(3)} < ${thresholds.minPassHatK}`)
+  // A run that graded nothing reports `passAt1: 0`, which every floor below
+  // would read as total failure. No evidence is not a failing grade — say so
+  // and skip the rate checks rather than inventing a verdict from a zero that
+  // means "unknown". Legacy reports carry no count; leave those alone.
+  const wantsRates = thresholds.minPassHatK !== undefined || thresholds.minPassAt1 !== undefined
+  const noGradedCases = report.gradedCaseCount === 0
+  if (wantsRates && noGradedCases) {
+    inconclusiveReasons.push(
+      `no case produced a verdict (${report.caseCount} case(s), all ungraded)`
+    )
   }
-  if (thresholds.minPassAt1 !== undefined && report.passAt1 < thresholds.minPassAt1) {
-    failures.push(`passAt1 ${report.passAt1.toFixed(3)} < ${thresholds.minPassAt1}`)
+
+  if (!noGradedCases) {
+    if (thresholds.minPassHatK !== undefined && report.passHatK < thresholds.minPassHatK) {
+      failures.push(`passHatK ${report.passHatK.toFixed(3)} < ${thresholds.minPassHatK}`)
+    }
+    if (thresholds.minPassAt1 !== undefined && report.passAt1 < thresholds.minPassAt1) {
+      failures.push(`passAt1 ${report.passAt1.toFixed(3)} < ${thresholds.minPassAt1}`)
+    }
+  }
+
+  for (const scorerId of thresholds.requiredScorerIds ?? []) {
+    const aggregate = report.scorers[scorerId]
+    if (!aggregate) {
+      inconclusiveReasons.push(`required scorer ${scorerId} produced no observations`)
+    } else if (!graded(aggregate)) {
+      inconclusiveReasons.push(`required scorer ${scorerId} graded nothing`)
+    }
   }
 
   if (thresholds.minScorerPassRate !== undefined) {
@@ -74,5 +98,13 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     }
   }
 
-  return { passed: failures.length === 0, failures }
+  // A real failure outranks missing evidence: if something actually breached a
+  // floor, the run failed — the fact that a different scorer went unmeasured
+  // does not soften that.
+  const verdict: GateVerdict = failures.length
+    ? "fail"
+    : inconclusiveReasons.length
+      ? "inconclusive"
+      : "pass"
+  return { passed: verdict === "pass", verdict, failures, inconclusiveReasons }
 }

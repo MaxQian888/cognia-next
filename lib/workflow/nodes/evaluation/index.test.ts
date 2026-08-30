@@ -12,18 +12,33 @@ jest.mock("@/lib/ai/eval/service", () => ({
   })),
 }))
 jest.mock("@/lib/db/eval-runs", () => ({
-  getRun: jest.fn(async (id: string) =>
-    id === "r1"
-      ? {
-          runId: "r1",
-          datasetId: "d1",
-          passAt1: 0.9,
-          passHatK: 0.8,
-          totalCostUsd: 0.4,
-          scorers: {},
-        }
-      : undefined
-  ),
+  getRun: jest.fn(async (id: string) => {
+    if (id === "r1") {
+      return {
+        runId: "r1",
+        datasetId: "d1",
+        passAt1: 0.9,
+        passHatK: 0.8,
+        totalCostUsd: 0.4,
+        scorers: {},
+      }
+    }
+    if (id === "r-ungraded") {
+      // Nothing gradable: `passAt1` is 0 because no case produced a verdict.
+      return {
+        runId: "r-ungraded",
+        datasetId: "d1",
+        caseCount: 4,
+        gradedCaseCount: 0,
+        ungradedCaseCount: 4,
+        passAt1: 0,
+        passHatK: 0,
+        totalCostUsd: 0.4,
+        scorers: {},
+      }
+    }
+    return undefined
+  }),
 }))
 jest.mock("@/lib/db/eval-datasets", () => ({
   getDataset: jest.fn(async () => ({ id: "d1", gate: { minPassAt1: 0.95 } })),
@@ -125,8 +140,27 @@ describe("eval.gate", () => {
   it("gates a run against param thresholds (override wins over dataset gate)", async () => {
     const exec = getExecutor("eval.gate", 1)!
     const res = await exec.execute(ctx({ runId: "r1", minPassAt1: 0.8 }))
-    expect(res.output).toEqual({ passed: true, failures: [] })
+    expect(res.output).toEqual({
+      passed: true,
+      verdict: "pass",
+      failures: [],
+      inconclusiveReasons: [],
+    })
     expect(res.decision).toBe("pass")
+  })
+
+  it("routes an inconclusive run to the fail branch, on purpose", async () => {
+    // The gate is tri-state but this node has two branches. A run that graded
+    // nothing must not proceed down `pass`, so it fails closed — while the
+    // output still says `inconclusive` rather than pretending the agent failed.
+    const exec = getExecutor("eval.gate", 1)!
+    const res = await exec.execute(ctx({ runId: "r-ungraded", minPassAt1: 0.8 }))
+    expect(res.decision).toBe("fail")
+    expect((res.output as { verdict: string }).verdict).toBe("inconclusive")
+    expect((res.output as { failures: string[] }).failures).toHaveLength(0)
+    expect(
+      (res.output as { inconclusiveReasons: string[] }).inconclusiveReasons.join(" ")
+    ).toContain("no case produced a verdict")
   })
 
   it("falls back to the dataset gate and reports failures", async () => {

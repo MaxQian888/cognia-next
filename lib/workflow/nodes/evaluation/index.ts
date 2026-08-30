@@ -128,11 +128,14 @@ registerNodeExecutor({
       thresholds = dataset.gate
     }
     const result = evaluateGate(report, thresholds)
-    ctx.log(
-      result.passed ? "info" : "warn",
-      `eval.gate: ${result.passed ? "passed" : "failed"}`,
-      result
-    )
+    ctx.log(result.passed ? "info" : "warn", `eval.gate: ${result.verdict}`, result)
+    // The gate itself is tri-state, but this node keeps TWO branches on
+    // purpose: an `inconclusive` run routes to `fail` so a workflow never
+    // proceeds on evidence it does not have. The distinction is not lost —
+    // `output.verdict` and `output.inconclusiveReasons` carry it, and the log
+    // line names the real verdict. A third branch handle is a separate change:
+    // adding a decision value without declaring its handle silently skips
+    // every downstream node.
     return { output: result, decision: result.passed ? "pass" : "fail" }
   },
 })
