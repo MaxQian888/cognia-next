@@ -46,6 +46,10 @@ jest.mock("@/lib/db/memories", () => ({
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (...args: unknown[]) => enqueueMock(...args),
 }))
+// The mirror leg writes one audit row per mutation; keep the suite off Dexie.
+jest.mock("@/lib/db/memory-governance", () => ({
+  appendMemoryAuditEvent: jest.fn().mockResolvedValue(undefined),
+}))
 jest.mock("@/components/interactions/pull-to-refresh", () => ({
   PullToRefresh: ({
     children,
@@ -76,6 +80,7 @@ jest.mock("@/components/memory/memory-row", () => ({
       {memory.text}
       <button onClick={() => onPinToggle(memory.id, true)}>pin</button>
       <button onClick={() => onSave(memory.id, "updated")}>save</button>
+      <button onClick={() => onSave(memory.id, "mail me at bob@example.com")}>save-pii</button>
       <button onClick={() => onArchive(memory.id)}>forget</button>
     </div>
   ),
@@ -145,6 +150,20 @@ describe("<MemoryMobileBody />", () => {
     expect(pinMock).toHaveBeenCalledWith("m1", true)
     expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
     expect(invalidateMock).toHaveBeenCalledWith("m1")
+  })
+
+  it("refuses a PII edit before it reaches the queue", async () => {
+    // Queueing a write the desktop is going to reject would leave the mirror
+    // looking edited until the next pull silently undid it.
+    liveQuery.mockReturnValue([mem({ id: "m1" })])
+    const user = userEvent.setup()
+    render(<MemoryMobileBody />)
+
+    await user.click(screen.getByRole("button", { name: "save-pii" }))
+
+    expect(enqueueMock).not.toHaveBeenCalled()
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(mobileToastError).toHaveBeenCalled()
   })
 
   it("pull-to-refresh syncs memories down and swallows sync failures", async () => {

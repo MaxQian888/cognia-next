@@ -8,9 +8,10 @@
  * no hard-delete command on this surface, so the row is given `onArchive` and
  * no `onDelete` — `memory_forget` has always invalidated rather than erased.
  * The
- * mutations enter the durable mobile outbound queue and optimistically update
- * the local mirror only after enqueue succeeds. The desktop remains the
- * authority and applies the shared policy, PII, audit, and vector lifecycle.
+ * mutations enter the durable mobile outbound queue and only then update the
+ * local mirror, through `applyMirroredMemoryMutation` so the mirror leg carries
+ * the same validation, version bump and audit row the desktop writes. The
+ * desktop remains the authority for policy, PII, vectors and tombstones.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -23,14 +24,11 @@ import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { MemoryRow } from "@/components/memory/memory-row"
-import {
-  invalidateMemory,
-  listMemories,
-  setMemoryPinned,
-  updateMemory,
-} from "@/lib/db/memories"
+import { listMemories } from "@/lib/db/memories"
 import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
+import { applyMirroredMemoryMutation } from "@/lib/memory/api/mirror-memory"
 import { runSyncDown } from "@/lib/sync/companion-sync"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface MemoryMobileBodyProps {
   /** Scroll the deep-linked memory into view once (`/memory?id=` from chips). */
@@ -93,16 +91,23 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
       payload: { id, pinned },
       label: t("queueUpdateLabel"),
     })
-    await setMemoryPinned(id, pinned)
+    await applyMirroredMemoryMutation({ kind: "update", id, patch: { pinned } })
   }
 
   const handleSave = async (id: string, text: string): Promise<void> => {
+    // Checked before the enqueue, not after: the desktop authority will refuse
+    // this text anyway, and a queued write that is going to be rejected leaves
+    // the mirror looking edited until the next pull undoes it.
+    if (!hasNoLeakingPii(text)) {
+      toast.error(tErrors("pii_blocked"))
+      return
+    }
     await enqueueOutbound({
       command: "memory_update",
       payload: { id, text },
       label: t("queueUpdateLabel"),
     })
-    await updateMemory(id, { text, bumpVersion: true })
+    await applyMirroredMemoryMutation({ kind: "update", id, patch: { text } })
   }
 
   const handleForget = async (id: string): Promise<void> => {
@@ -111,7 +116,7 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
       payload: { id },
       label: t("queueForgetLabel"),
     })
-    await invalidateMemory(id)
+    await applyMirroredMemoryMutation({ kind: "forget", id })
   }
 
   return (

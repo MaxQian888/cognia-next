@@ -1,10 +1,29 @@
 /**
- * `/memory` controller — read-only listing of stored memories by reusing
- * `lib/db/memories`. Semantic recall (RAG via `applyTwinContext`) needs an
- * embedding provider + vector store the CLI can't reach, so v1 shows what's
- * stored without similarity search, and says so.
+ * `/memory` and `/remember` for the TUI.
+ *
+ * The writes used to call `createMemory` and `hardDeleteMemory` straight from
+ * `lib/db/memories`, which meant the CLI was the one surface with no PII gate,
+ * no agent policy, no consolidator (so no dedupe or supersede), no evidence, no
+ * audit row and no vector upsert. They now go through the same canonical funnel
+ * the desktop uses.
+ *
+ * `/remember` pins `scope: "global"` on purpose. The shared resolver's fallback
+ * ladder would otherwise land a CLI capture in the active workspace, which is a
+ * silent relocation of where CLI memories have always lived.
+ *
+ * Recall is still listing rather than similarity search here, but the reason is
+ * now read from the runtime instead of asserted: on a non-Tauri host the native
+ * vector provider is gated, so the honest answer is keyword-only.
  */
-import { createMemory, getMemory, hardDeleteMemory, listMemories } from "@/lib/db/memories"
+import { getMemory, listMemories } from "@/lib/db/memories"
+import { getSettings } from "@/lib/db/settings"
+import { manageMemory } from "@/lib/memory/control-plane/manage"
+import {
+  describeMemoryRetrievalMode,
+  type MemoryRetrievalMode,
+} from "@/lib/memory/runtime/build-deps"
+import { rememberFact, type RememberFactResult } from "@/lib/memory/write/remember-fact"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { Memory } from "@/types/memory/memory"
 
 import { ensureCliDb } from "../../db/bootstrap"
@@ -16,13 +35,39 @@ export interface MemoryDeps {
   ensureDb?: () => Promise<unknown>
   list?: () => Promise<Memory[]>
   get?: (id: string) => Promise<Memory | undefined>
-  /** Persist a new memory; defaults to `createMemory`. */
-  add?: (text: string) => Promise<Memory>
-  /** Hard-delete a memory by id; defaults to `hardDeleteMemory`. */
-  remove?: (id: string) => Promise<void>
+  /** Persist a new memory. Defaults to the canonical explicit-capture funnel. */
+  add?: (text: string) => Promise<RememberFactResult>
+  /** Delete a memory by id. Defaults to the audited control-plane delete. */
+  remove?: (id: string) => Promise<{ ok: boolean; reason?: string }>
+  /** What recall would actually do on this host. */
+  describeMode?: () => Promise<MemoryRetrievalMode>
 }
 
 const dbOf = (d: MemoryDeps) => d.ensureDb ?? (() => ensureCliDb())
+
+async function defaultDescribeMode(): Promise<MemoryRetrievalMode> {
+  const settings = await getSettings().catch(() => undefined)
+  return describeMemoryRetrievalMode(resolveMemoryConfig(settings?.memory))
+}
+
+/** One sentence naming the recall mode, and why, without inventing a reason. */
+function describeRecall(mode: MemoryRetrievalMode): string {
+  if (mode.kind === "off") {
+    return mode.reason === "temporary"
+      ? "Memory is paused by temporary mode. Showing what is already stored."
+      : "Long-term memory is turned off. Showing what is already stored."
+  }
+  if (mode.kind === "hybrid") {
+    return `Hybrid recall is available via ${mode.provider}. Showing stored memories.`
+  }
+  const why: Record<typeof mode.reason, string> = {
+    hybrid_disabled: "hybrid recall is turned off",
+    no_backend: "no embedding or vector backend is reachable from the CLI",
+    store_unsupported: "the configured vector store cannot search by embedding",
+    cloud_blocked: "cloud embedding is not permitted",
+  }
+  return `Recall is keyword-only because ${why[mode.reason]}. Showing stored memories.`
+}
 
 export async function memoryList(deps: MemoryDeps): Promise<void> {
   await dbOf(deps)()
@@ -31,10 +76,10 @@ export async function memoryList(deps: MemoryDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: "No memories stored." })
     return
   }
-  deps.dispatch({
-    type: "NOTICE",
-    message: "Semantic recall is desktop-only; showing stored memories.",
-  })
+  const mode = await (deps.describeMode ?? defaultDescribeMode)().catch(
+    (): MemoryRetrievalMode => ({ kind: "bm25", reason: "no_backend" })
+  )
+  deps.dispatch({ type: "NOTICE", message: describeRecall(mode) })
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
@@ -57,11 +102,20 @@ export async function memoryShow(id: string, deps: MemoryDeps): Promise<void> {
   deps.dispatch({ type: "NOTICE", message: `[${memory.type}] ${memory.text}` })
 }
 
+/** Copy for each way the canonical funnel can refuse a deliberate capture. */
+const ADD_REFUSAL: Record<string, string> = {
+  disabled: "Long-term memory is turned off, so nothing was saved.",
+  temporary: "Temporary mode is on, so nothing was saved.",
+  pii: "That looks like it contains sensitive data, so it was not saved.",
+  denied: "This agent is not allowed to write memory in that scope.",
+  unavailable: "The memory store is unavailable right now.",
+  failed: "Something went wrong saving that to memory.",
+}
+
 /**
- * Save a user-captured fact to long-term memory (`/remember` / `/memory add`).
- * Provenance is `explicit` and scope `global` — the same trust class the desktop
- * "记住 …" capture uses. Semantic recall stays desktop-only, but the fact is
- * stored and recall-eligible once an embedder is available.
+ * Save a user-captured fact to long-term memory (`/remember`, `/memory add`).
+ * Provenance is `explicit`, the same trust class the desktop capture uses, so
+ * the fact may become a procedural rule.
  */
 export async function memoryAdd(text: string, deps: MemoryDeps): Promise<void> {
   const body = text.trim()
@@ -70,21 +124,19 @@ export async function memoryAdd(text: string, deps: MemoryDeps): Promise<void> {
     return
   }
   await dbOf(deps)()
-  const add =
-    deps.add ??
-    ((t: string) =>
-      createMemory({
-        scope: "global",
-        type: "semantic",
-        text: t,
-        importance: 5,
-        provenance: "explicit",
-      }))
-  const memory = await add(body)
-  deps.dispatch({ type: "NOTICE", message: `Remembered: ${truncate(memory.text)}` })
+  const add = deps.add ?? ((t: string) => rememberFact({ text: t, scope: "global" }))
+  const result = await add(body)
+  if (!result.ok) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: ADD_REFUSAL[result.reason] ?? "Something went wrong saving that to memory.",
+    })
+    return
+  }
+  deps.dispatch({ type: "NOTICE", message: `Remembered: ${truncate(body)}` })
 }
 
-/** Hard-delete a stored memory by id (`/memory delete <id>`). */
+/** Delete a stored memory by id (`/memory delete <id>`). */
 export async function memoryDelete(id: string, deps: MemoryDeps): Promise<void> {
   const key = id.trim()
   if (!key) {
@@ -98,6 +150,14 @@ export async function memoryDelete(id: string, deps: MemoryDeps): Promise<void> 
     deps.dispatch({ type: "NOTICE", message: `Memory ${key} not found.` })
     return
   }
-  await (deps.remove ?? hardDeleteMemory)(key)
+  const remove = deps.remove ?? ((target: string) => manageMemory({ kind: "delete", id: target }))
+  const result = await remove(key)
+  if (!result.ok) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Could not delete memory ${key} (${result.reason ?? "failed"}).`,
+    })
+    return
+  }
   deps.dispatch({ type: "NOTICE", message: `Deleted memory ${key}.` })
 }
