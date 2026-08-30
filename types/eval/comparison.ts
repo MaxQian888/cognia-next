@@ -1,28 +1,9 @@
 /**
- * Run-comparison model. `lib/ai/eval/compare.ts:buildComparison` folds N
- * {@link import("./eval").EvalReport}s + their per-case verdicts into a
- * rows×runs grid the comparison view renders (delta + regression vs baseline).
+ * Re-export shim. The eval domain model now lives in `@cognia/eval-core` so
+ * the CLI, CI, and the app all compile against one definition — see
+ * `packages/eval-core/src/domain/comparison.ts`.
+ *
+ * This path is kept because ~83 modules import it; new code should import from
+ * `@cognia/eval-core` directly.
  */
-
-export interface ComparisonCell {
-  runId: string
-  /** scorerId → verdict for this case in this run. */
-  scores: Record<string, { value: number; passed: boolean }>
-  /** Did the case pass ALL applied scorers on repetition 1? */
-  passAt1: boolean
-  /** passAt1 (0/1) delta vs the baseline (first) run; undefined for baseline. */
-  delta?: number
-  /** Baseline passed but this run failed. */
-  regression: boolean
-}
-
-export interface ComparisonRow {
-  caseId: string
-  input: string
-  cells: ComparisonCell[]
-}
-
-export interface RunComparison {
-  runIds: string[]
-  rows: ComparisonRow[]
-}
+export * from "@cognia/eval-core/domain/comparison"

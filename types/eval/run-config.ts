@@ -1,70 +1,9 @@
 /**
- * Eval run configuration — the target matrix × scorer subset × repetitions ×
- * case subset that `lib/ai/eval/run-config.ts:runConfiguredEval` expands into
- * one pinned {@link import("./eval").EvalReport} per target variant.
+ * Re-export shim. The eval domain model now lives in `@cognia/eval-core` so
+ * the CLI, CI, and the app all compile against one definition — see
+ * `packages/eval-core/src/domain/run-config.ts`.
+ *
+ * This path is kept because ~83 modules import it; new code should import from
+ * `@cognia/eval-core` directly.
  */
-
-export type TargetKind = "chat" | "team" | "workflow" | "twin"
-
-export interface ChatTargetSpec {
-  kind: "chat"
-  label: string
-  providerId?: string
-  model: string
-  characterId?: string
-  cwd?: string
-  timeoutMs?: number
-}
-
-export interface TeamTargetSpec {
-  kind: "team"
-  label: string
-  teamId: string
-  timeoutMs?: number
-}
-
-export interface WorkflowTargetSpec {
-  kind: "workflow"
-  label: string
-  workflowId: string
-  /** Immutable workflow version used by deployment-quality evidence. */
-  versionId?: string
-  timeoutMs?: number
-}
-
-export interface TwinTargetSpec {
-  kind: "twin"
-  label: string
-  twinId: string
-  providerId?: string
-  model: string
-  timeoutMs?: number
-}
-
-export type TargetSpec = ChatTargetSpec | TeamTargetSpec | WorkflowTargetSpec | TwinTargetSpec
-
-/** Case-subset selector applied before a run. All fields are AND-combined. */
-export interface CaseSubset {
-  split?: string
-  capabilities?: string[]
-  failureModes?: string[]
-  caseIds?: string[]
-}
-
-export interface EvalRunConfig {
-  targets: TargetSpec[]
-  /** Scorer ids to apply; empty = all available. */
-  scorerIds: string[]
-  k: number
-  subset?: CaseSubset
-}
-
-/** Compact echo of the variant stored on a produced report. */
-export interface EvalRunConfigSummary {
-  targetKind: TargetKind
-  targetId?: string
-  targetVersionId?: string
-  scorerIds: string[]
-  k: number
-  subset?: CaseSubset
-}
+export * from "@cognia/eval-core/domain/run-config"
