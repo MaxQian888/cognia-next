@@ -258,11 +258,24 @@ export async function buildProjectMiningDeps(
   params: BuildProjectMiningDepsParams,
   config: MemoryConfig
 ): Promise<RunProjectMiningDeps | null> {
-  const { buildUtilityLlmClient } = await import("@/lib/ai/generation/utility-client")
-  const client = buildUtilityLlmClient({
+  // The configured Agent's utility model first, then one headless turn.
+  //
+  // Mining MUST reach a model on a plain subscription install, which
+  // `buildUtilityLlmClient` alone cannot do — it needs a renderer-visible API
+  // key, and a subscription's bearer never leaves the host (ADR-0025). Without
+  // the fallback this whole feature would be default-on and permanently inert
+  // for most users, reporting `dependencies_unavailable` forever.
+  //
+  // The cost shape is deliberate and is why the enqueue side queues windows
+  // rather than turns: one turn per closed ~12-message window that cleared the
+  // salience gate, not one per send.
+  const { buildAgentBackedLlmClient } = await import("@/lib/ai/generation/agent-backed-client")
+  const client = await buildAgentBackedLlmClient({
+    role: "utility",
     session: params.session ?? null,
     appSettings: params.appSettings ?? null,
-    featureId: "memory-extraction",
+    featureId: "memory-project-mining",
+    label: "Project context mining",
   })
   if (!client) return null
 
