@@ -1913,6 +1913,8 @@
       "cogniaWeb": "Cognia 联网",
       "footnote": "脚注",
       "memory": "记忆",
+      "projectClaim": "项目上下文",
+      "projectHistory": "项目历史",
       "projectKnowledge": "项目",
       "twinRag": "数字分身",
       "twinStyle": "风格"
@@ -1922,7 +1924,11 @@
     "retrievedChunksHeader": "检索片段（{count}）",
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
-    "viewSource": "查看原文"
+    "viewSource": "查看原文",
+    "projectClaimsHeader": "项目上下文（{count}）",
+    "projectHistoryHeader": "来自本项目历史（{count}）",
+    "viewInChat": "在会话中查看",
+    "jumpMissing": "该消息已不存在。"
   },
   "steer": {
     "accepted": "已送达",

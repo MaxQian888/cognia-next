@@ -1913,6 +1913,8 @@
       "cogniaWeb": "Cognia Web",
       "footnote": "Note",
       "memory": "Memory",
+      "projectClaim": "Project context",
+      "projectHistory": "Project history",
       "projectKnowledge": "Project",
       "twinRag": "Twin",
       "twinStyle": "Style"
@@ -1922,7 +1924,11 @@
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
-    "viewSource": "View source"
+    "viewSource": "View source",
+    "projectClaimsHeader": "Project context ({count})",
+    "projectHistoryHeader": "From this project's history ({count})",
+    "viewInChat": "View in chat",
+    "jumpMissing": "That message is no longer available."
   },
   "steer": {
     "accepted": "Delivered",

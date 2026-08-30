@@ -12,6 +12,7 @@ import {
   makeUserMessage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
+  mergeProjectClaimSourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   mergeWebSearchSourcesIntoLastAssistant,
@@ -1526,6 +1527,10 @@ async function handleTeamEvent(
           }
           tagged = mergeTwinSourcesIntoLastAssistant(tagged, ctx?.options.twinContext)
           tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.options.memoryContext)
+          tagged = mergeProjectClaimSourcesIntoLastAssistant(
+            tagged,
+            ctx?.options.projectContinuityContext
+          )
           tagged = mergeProjectKnowledgeSourcesIntoLastAssistant(
             tagged,
             ctx?.options.projectKnowledgeContext

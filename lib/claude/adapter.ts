@@ -1725,6 +1725,50 @@ export function mergeMemorySourcesIntoLastAssistant(
   })
 }
 
+/** Mined project claims stashed on `SendOptions.projectContinuityContext`. */
+export interface ProjectClaimSourcesContext {
+  claims: Array<{
+    id: string
+    kind: string
+    text: string
+    relevance: number
+    observedAt?: number
+    validatedAt?: number
+    sourceSessionId?: string
+    sourceMessageId?: string
+  }>
+  degraded?: boolean
+}
+
+/**
+ * Merge mined project claims onto the last assistant message's SourcesPart.
+ *
+ * Ids are prefixed `claim-`, not `memory-`: `mergeSources` dedupes by id, and a
+ * claim and a personal memory can legitimately share an underlying row id space.
+ * Collapsing them would drop one of the two and mislabel the survivor.
+ *
+ * `messageRef` is what separates this from every other origin — it lets the chip
+ * jump to the exact turn the fact was learned from instead of merely naming it.
+ * It is set only when BOTH ids are present; half an anchor is a dead button.
+ */
+export function mergeProjectClaimSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  context: ProjectClaimSourcesContext | undefined | null
+): UIMessage[] {
+  if (!context || context.claims.length === 0) return messages
+  const sources: SourcesPartItem[] = context.claims.map((claim) => ({
+    id: `claim-${claim.id}`,
+    title: claim.text.length > 80 ? claim.text.slice(0, 79).trimEnd() + "…" : claim.text,
+    snippet: claim.text.length > 200 ? claim.text.slice(0, 199).trimEnd() + "…" : claim.text,
+    origin: "project-claim",
+    score: claim.relevance,
+    ...(claim.sourceSessionId && claim.sourceMessageId
+      ? { messageRef: { sessionId: claim.sourceSessionId, messageId: claim.sourceMessageId } }
+      : {}),
+  }))
+  return appendSourcesToLastAssistant(messages, sources)
+}
+
 export interface AgentKnowledgeSourcesContext {
   retrievedChunks: Array<{
     chunk: {

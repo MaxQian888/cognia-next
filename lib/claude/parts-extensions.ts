@@ -264,8 +264,17 @@ export interface SourcesPartItem {
    * - `twin-rag`  — chunk pulled from the user's Digital Twin vector store
    * - `twin-style`— style few-shot sample selected for this turn
    * - `memory`    — long-term memory recalled for this turn (autonomous memory)
+   * - `project-claim` — a fact mined from this workspace's own chat history
+   * - `project-history` — a raw history hit the agent searched for mid-turn
    * - `project-knowledge` — active workspace knowledge file
    * - `footnote`  — markdown footnote definition in the assistant text
+   *
+   * `project-claim` and `project-history` are separate origins because they
+   * differ in what the user is being shown: a claim is a durable, reviewable row
+   * in `/memory`, while a history hit is a transcript excerpt that exists only
+   * for this turn. They are not split any finer than that — origin drives the
+   * label, the auto-open set and the partition, and both want the same treatment
+   * within their kind.
    */
   origin:
     | "anthropic"
@@ -274,6 +283,8 @@ export interface SourcesPartItem {
     | "twin-style"
     | "agent-knowledge-base"
     | "project-knowledge"
+    | "project-claim"
+    | "project-history"
     | "memory"
     | "footnote"
   /** Optional similarity / confidence score (0..1). */
@@ -294,6 +305,17 @@ export interface SourcesPartItem {
     knowledgeBaseId: string
     sourceId: string
     chunkId: string
+  }
+  /**
+   * The message this source came from, for `project-claim` / `project-history`.
+   *
+   * Without it a project source can only NAME the conversation it was learned
+   * from; with it the chip can jump the user to the exact turn, which is the
+   * difference between a citation and a claim you have to take on faith.
+   */
+  messageRef?: {
+    sessionId: string
+    messageId: string
   }
 }
 

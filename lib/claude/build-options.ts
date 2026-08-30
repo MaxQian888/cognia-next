@@ -1487,6 +1487,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // the Twin section (Twin = persona, Memory = durable user facts) — it never
   // replaces `baseSystem`. The runtime never throws; failures degrade silently.
   let memorySection = ""
+  // Hoisted: the project-claim section below borrows whatever the personal
+  // section left unspent, and borrowing is one-way precisely because this has to
+  // be packed before the leftover is knowable.
+  let personalRecallBudget: { limit: number; used: number } | undefined
   if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
     const memoryConfig = resolveMemoryConfig(appSettings?.memory)
     const memoryPolicy = resolveAgentMemoryPolicy({
@@ -1557,6 +1561,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             memorySection = result.systemPromptSection
           }
         }
+        personalRecallBudget = { limit: result.budget.limit, used: result.budget.used }
         if (result.retrievedMemories.length > 0 || result.proceduralCount > 0 || result.degraded) {
           opts.memoryContext = {
             retrievedMemories: result.retrievedMemories.map((m) => ({
@@ -1575,6 +1580,82 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         }
       } catch {
         // Memory runtime failure is non-fatal — keep the prompt as-is.
+      }
+    }
+  }
+
+  // --- Project-context claims (mined from this workspace's own history) -----
+  // A SIBLING of the memory block, not part of it: `applyProjectContinuityContext`
+  // has its own try/catch so a malformed claim cannot take the user's personal
+  // recall down with it. Everything expensive is reused rather than recomputed —
+  // the resolved policy, the scope-narrowed deps, the same reader, and above all
+  // `ctx.precomputedQueryEmbedding`, so this is a second vector SEARCH but not a
+  // second embed. That is what makes two retrievals per turn affordable.
+  let projectContinuitySection = ""
+  if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
+    const memoryConfig = resolveMemoryConfig(appSettings?.memory)
+    const projectId = session?.projectId ?? ctx.activeProject?.id
+    const { evaluateProjectRecallGate } = await import("@cognia/memory/runtime/recall-gate")
+    const gate = evaluateProjectRecallGate({
+      userMessage: ctx.memoryUserMessage,
+      projectId,
+      enableProjectContinuity: memoryConfig.enableProjectContinuity,
+      temporary: memoryConfig.temporary,
+    })
+    if (gate.allowed) {
+      try {
+        const memoryPolicy = resolveAgentMemoryPolicy({
+          config: memoryConfig,
+          session: session ?? undefined,
+          agentPolicy: character?.memoryPolicy,
+        })
+        // Claims live at workspace scope, so an Agent that may not read that
+        // scope may not read them — the same narrowing the personal path applies.
+        if (memoryPolicy.canRecall && memoryPolicy.readableScopes.includes("workspace")) {
+          const [{ applyProjectContinuityContext }, { resolveProjectRecallBudget }] =
+            await Promise.all([
+              import("@cognia/memory/runtime/project-continuity-context"),
+              import("@cognia/memory/runtime/recall-budget"),
+            ])
+          const { limit } = resolveProjectRecallBudget({
+            personalLimit: personalRecallBudget?.limit ?? memoryConfig.recallTokenBudget,
+            personalUsed: personalRecallBudget?.used ?? memoryConfig.recallTokenBudget,
+            projectBudget: memoryConfig.projectRecallTokenBudget,
+          })
+          const result = await applyProjectContinuityContext({
+            userMessage: ctx.memoryUserMessage,
+            reader: {
+              projectId,
+              branch: ctx.memoryBranch,
+              path: ctx.memoryPath,
+            },
+            topK: memoryConfig.projectRecallTopK,
+            relevanceFloor: memoryConfig.relevanceFloor,
+            maxTokens: limit,
+            enableQueryExpansion: memoryConfig.enableQueryExpansion,
+            recencyHalfLifeDays: memoryConfig.decayHalfLifeDays,
+            precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
+            deps: ctx.memoryDeps,
+          })
+          if (result.systemPromptSection) {
+            if (cacheOptimizationEnabled) {
+              dynamicTailSections.push(result.systemPromptSection)
+            } else {
+              projectContinuitySection = result.systemPromptSection
+            }
+          }
+          if (result.claims.length > 0 || result.degraded) {
+            opts.projectContinuityContext = {
+              claims: result.claims,
+              withheldCount: result.withheldCount,
+              budget: result.budget,
+              weak: result.weak,
+              degraded: result.degraded,
+            }
+          }
+        }
+      } catch {
+        // Non-fatal, and isolated from the personal section by construction.
       }
     }
   }
@@ -1871,6 +1952,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     personaSection,
     instructionSection,
     memorySection,
+    projectContinuitySection,
     projectKnowledgeSection,
     agentKnowledgeSection,
     modeSection,

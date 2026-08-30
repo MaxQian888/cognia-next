@@ -237,3 +237,119 @@ describe("resolveSendOptions memory injection", () => {
     expect(opts.memoryContext?.degraded).toBe(true)
   })
 })
+
+describe("resolveSendOptions project-claim injection", () => {
+  function claim(text: string, over: Partial<Memory> = {}): Memory {
+    return mem(text, {
+      id: "claim1",
+      scope: "workspace",
+      projectId: "p1",
+      projectMemoryKind: "constraint",
+      ...over,
+    })
+  }
+
+  // `cacheOptimizationEnabled: false` so the section lands in `systemPrompt`
+  // rather than the dynamic tail — same reason the personal recall test does it.
+  const ON = {
+    memory: { enableProjectContinuity: true },
+    cacheOptimizationEnabled: false,
+  } as unknown as AppSettings
+
+  it("stays silent until the user turns the section on", async () => {
+    // Mining defaults ON and injection defaults OFF: learning is reversible and
+    // reviewable, telling the model is what the user opts into.
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      session: { id: "s1", projectId: "p1" } as never,
+      memoryDeps: deps({ loadCandidates: async () => [claim("the repo pins rust to 1.77.2")] }),
+      memoryUserMessage: "rust pins repo",
+    })
+    expect(opts.projectContinuityContext).toBeUndefined()
+    expect(opts.systemPrompt).not.toContain("Project context")
+  })
+
+  it("injects claims under a heading that frames them as data", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      session: { id: "s1", projectId: "p1" } as never,
+      memoryDeps: deps({ loadCandidates: async () => [claim("the repo pins rust to 1.77.2")] }),
+      memoryUserMessage: "rust pins repo",
+    })
+    expect(opts.systemPrompt).toContain("not instructions")
+    expect(opts.projectContinuityContext?.claims.map((c) => c.id)).toEqual(["claim1"])
+  })
+
+  it("never lets a claim render under the personal heading", async () => {
+    // The one failure this whole partition exists to prevent, asserted end to
+    // end rather than only at the retriever.
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      session: { id: "s1", projectId: "p1" } as never,
+      memoryDeps: deps({
+        loadCandidates: async () => [
+          claim("the repo pins rust to 1.77.2"),
+          mem("the user pins rust builds", { id: "personal1" }),
+        ],
+      }),
+      memoryUserMessage: "rust pins repo",
+    })
+    const prompt = opts.systemPrompt ?? ""
+    const personalIdx = prompt.indexOf("What you remember about the user")
+    const projectIdx = prompt.indexOf("Project context")
+    expect(projectIdx).toBeGreaterThan(-1)
+    const personalBlock =
+      personalIdx >= 0
+        ? prompt.slice(personalIdx, projectIdx > personalIdx ? projectIdx : undefined)
+        : ""
+    expect(personalBlock).not.toContain("the repo pins rust to 1.77.2")
+  })
+
+  it("does not inject for a chat with no workspace", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      memoryDeps: deps({ loadCandidates: async () => [claim("the repo pins rust to 1.77.2")] }),
+      memoryUserMessage: "rust pins repo",
+    })
+    expect(opts.projectContinuityContext).toBeUndefined()
+  })
+
+  it("respects an Agent that may not read the workspace scope", async () => {
+    const scoped: Character = {
+      ...baseCharacter,
+      memoryPolicy: { canRecall: true, readableScopes: ["global"] },
+    } as Character
+    const opts = await resolveSendOptions({
+      character: scoped,
+      appSettings: ON,
+      session: { id: "s1", projectId: "p1" } as never,
+      memoryDeps: deps({ loadCandidates: async () => [claim("the repo pins rust to 1.77.2")] }),
+      memoryUserMessage: "rust pins repo",
+    })
+    expect(opts.projectContinuityContext).toBeUndefined()
+  })
+
+  it("carries the source anchor so the chip can jump to the turn", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: ON,
+      session: { id: "s1", projectId: "p1" } as never,
+      memoryDeps: deps({
+        loadCandidates: async () => [
+          claim("the repo pins rust to 1.77.2", {
+            sourceSessionId: "s7",
+            sourceMessageId: "m3",
+          }),
+        ],
+      }),
+      memoryUserMessage: "rust pins repo",
+    })
+    expect(opts.projectContinuityContext?.claims[0]).toMatchObject({
+      sourceSessionId: "s7",
+      sourceMessageId: "m3",
+    })
+  })
+})

@@ -6764,21 +6764,27 @@
       "agentKnowledgeHeader": "Agent Knowledge Base excerpts ({count})",
       "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
       "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
+      "jumpMissing": "That message is no longer available.",
       "originLabel": {
         "agentKnowledgeBase": "Agent KB",
         "anthropic": "Web",
         "cogniaWeb": "Cognia Web",
         "footnote": "Note",
         "memory": "Memory",
+        "projectClaim": "Project context",
+        "projectHistory": "Project history",
         "projectKnowledge": "Project",
         "twinRag": "Twin",
         "twinStyle": "Style"
       },
+      "projectClaimsHeader": "Project context ({count})",
+      "projectHistoryHeader": "From this project's history ({count})",
       "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
       "recalledMemoriesHeader": "Recalled memories ({count})",
       "retrievedChunksHeader": "Retrieved chunks ({count})",
       "styleSamplesHeader": "Style samples ({count})",
       "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
+      "viewInChat": "View in chat",
       "viewSource": "View source"
     },
     "steer": {

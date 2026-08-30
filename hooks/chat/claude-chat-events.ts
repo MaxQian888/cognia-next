@@ -6,6 +6,7 @@ import {
   extractUsage,
   mergeAgentKnowledgeSourcesIntoLastAssistant,
   mergeMemorySourcesIntoLastAssistant,
+  mergeProjectClaimSourcesIntoLastAssistant,
   mergeProjectKnowledgeSourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
   mergeWebSearchSourcesIntoLastAssistant,
@@ -928,6 +929,16 @@ export async function handleEvent(
           if (withMemory !== nextMessages) {
             nextMessages = withMemory
           }
+        }
+        // Mined project claims — the same lastSend-cache read, stashed by
+        // `resolveSendOptions` onto `options.projectContinuityContext`.
+        const projectClaimCtx = last?.options.projectContinuityContext
+        if (projectClaimCtx) {
+          const withClaims = mergeProjectClaimSourcesIntoLastAssistant(
+            nextMessages,
+            projectClaimCtx
+          )
+          if (withClaims !== nextMessages) nextMessages = withClaims
         }
         const projectKnowledgeCtx = last?.options.projectKnowledgeContext
         if (projectKnowledgeCtx) {

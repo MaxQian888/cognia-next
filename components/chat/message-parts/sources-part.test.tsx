@@ -2,9 +2,18 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { SourcesPart } from "./sources-part"
-import type { SourcesPart as SourcesPartType } from "@/lib/claude/parts-extensions"
+import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
+import en from "@/i18n/messages/en.json"
+import zhCN from "@/i18n/messages/zh-CN.json"
+
+const mockJump = jest.fn()
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  jumpToSessionMessage: (...args: unknown[]) => mockJump(...args),
+}))
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 
 describe("SourcesPart", () => {
   it("returns null when no sources are present", () => {
@@ -245,5 +254,141 @@ describe("SourcesPart", () => {
     }
     render(<SourcesPart part={part} />)
     expect(screen.getByTestId("sources-part-section-memory")).toBeTruthy()
+  })
+})
+
+describe("SourcesPart project origins", () => {
+  const claim: SourcesPartItem = {
+    id: "claim-m1",
+    title: "The repo pins Rust to 1.77.2",
+    origin: "project-claim",
+    messageRef: { sessionId: "s7", messageId: "m3" },
+  }
+
+  beforeEach(() => {
+    mockJump.mockReset().mockResolvedValue(true)
+    mockToastError.mockReset()
+  })
+
+  it("gives mined claims their own section, separate from personal memory", () => {
+    // A claim is a fact about the repository; a memory is a fact about the
+    // user. Sharing a section would tell the reader they are the same kind of
+    // thing, which is the same mistake the retriever partition exists to stop.
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [claim, { id: "memory-x", title: "prefers dark mode", origin: "memory" }],
+        }}
+        defaultOpen
+      />
+    )
+    expect(screen.getByTestId("sources-part-section-project-claim")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-section-memory")).toBeTruthy()
+  })
+
+  it("separates a searched history hit from a durable claim", () => {
+    render(
+      <SourcesPart
+        part={{
+          type: "sources",
+          sources: [
+            claim,
+            { id: "hist-1", title: "we switched to pnpm", origin: "project-history" },
+          ],
+        }}
+        defaultOpen
+      />
+    )
+    expect(screen.getByTestId("sources-part-section-project-claim")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-section-project-history")).toBeTruthy()
+  })
+
+  it("jumps in-app to the turn a claim was learned from", async () => {
+    render(<SourcesPart part={{ type: "sources", sources: [claim] }} defaultOpen />)
+    const button = screen.getByTestId("sources-part-jump")
+    // A <button>, not a <Link>: under the static export a query-param Link is a
+    // full page navigation, which throws away the point of an in-app jump.
+    expect(button.tagName).toBe("BUTTON")
+    button.click()
+    await waitFor(() => expect(mockJump).toHaveBeenCalledWith("s7", "m3", { align: "center" }))
+  })
+
+  it("says so when the source turn is gone instead of looking ignored", async () => {
+    // `jumpToSessionMessage` answers false for a deleted session, a compacted
+    // message, or a user who navigated away mid-wait. Swallowing that leaves a
+    // button that silently does nothing.
+    mockJump.mockResolvedValue(false)
+    render(<SourcesPart part={{ type: "sources", sources: [claim] }} defaultOpen />)
+    screen.getByTestId("sources-part-jump").click()
+    // `waitFor`, not microtask pumping: the handler awaits a dynamic import
+    // before the jump promise, so the number of ticks is an implementation
+    // detail this assertion should not encode.
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+  })
+
+  it("shows no jump affordance for a claim with no source anchor", () => {
+    // Half an anchor is a dead button, so the ref is only set when both ids are
+    // present — and the row must then render without one.
+    render(
+      <SourcesPart
+        part={{ type: "sources", sources: [{ ...claim, messageRef: undefined }] }}
+        defaultOpen
+      />
+    )
+    expect(screen.queryByTestId("sources-part-jump")).toBeNull()
+  })
+
+  it("auto-expands when project claims are the only sources", () => {
+    render(<SourcesPart part={{ type: "sources", sources: [claim] }} />)
+    expect(screen.getByTestId("sources-part-section-project-claim")).toBeTruthy()
+  })
+})
+
+describe("SourcesPart origin label catalogue", () => {
+  // `ORIGIN_LABEL_KEY` is a `Record<origin, string>`, so tsc catches a new
+  // origin — but nothing catches a key that has no translation, which renders
+  // as the raw key path. This is that gate, in both locales.
+  const ORIGINS: SourcesPartItem["origin"][] = [
+    "anthropic",
+    "cognia-web",
+    "twin-rag",
+    "twin-style",
+    "agent-knowledge-base",
+    "project-knowledge",
+    "project-claim",
+    "project-history",
+    "memory",
+    "footnote",
+  ]
+
+  it.each([
+    ["en", en],
+    ["zh-CN", zhCN],
+  ])("%s has a label for every origin", (_locale, messages) => {
+    const labels = (messages as { chat: { sourcesPart: { originLabel: Record<string, string> } } })
+      .chat.sourcesPart.originLabel
+    const missing = ORIGINS.filter((origin) => {
+      const key = origin.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase())
+      return typeof labels[key] !== "string"
+    })
+    expect(missing).toEqual([])
+  })
+
+  it.each([
+    ["en", en],
+    ["zh-CN", zhCN],
+  ])("%s has a header for every grouped section", (_locale, messages) => {
+    const block = (messages as { chat: { sourcesPart: Record<string, unknown> } }).chat.sourcesPart
+    const headers = [
+      "retrievedChunksHeader",
+      "styleSamplesHeader",
+      "recalledMemoriesHeader",
+      "projectClaimsHeader",
+      "projectHistoryHeader",
+      "agentKnowledgeHeader",
+      "projectKnowledgeHeader",
+    ]
+    expect(headers.filter((key) => typeof block[key] !== "string")).toEqual([])
   })
 })

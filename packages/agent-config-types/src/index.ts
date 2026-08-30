@@ -1003,6 +1003,33 @@ export interface SendOptions {
   }
 
   /**
+   * Mined project claims injected this turn (project-context mining).
+   *
+   * Set by `resolveSendOptions` when `applyProjectContinuityContext` recalled
+   * any. Mirrors `memoryContext`, with one addition: each claim carries the
+   * message it was observed in, so the chat's source chip can jump back to the
+   * conversation the fact was learned from rather than merely naming it.
+   * Stripped before the SDK call.
+   */
+  projectContinuityContext?: {
+    claims: Array<{
+      id: string
+      kind: import("@/types/memory/memory").ProjectMemoryKind
+      text: string
+      relevance: number
+      observedAt?: number
+      validatedAt?: number
+      sourceSessionId?: string
+      sourceMessageId?: string
+    }>
+    withheldCount: number
+    budget: { limit: number; used: number; truncated: boolean }
+    /** Retrieval was thin — claims existed but did not make it in. */
+    weak: boolean
+    degraded: boolean
+  }
+
+  /**
    * Project (workspace) knowledge-base context injected this turn (project-scoped
    * RAG). Set by `resolveSendOptions` when `applyProjectKnowledgeContext`
    * retrieved any chunks from the active workspace's knowledge files. Mirrors

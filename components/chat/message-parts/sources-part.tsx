@@ -30,12 +30,14 @@ import { Sources, SourcesContent, SourcesTrigger } from "@/components/ai-element
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { ExternalLink } from "@/components/shared/external-link"
+import { toast } from "sonner"
 import {
   AlertTriangleIcon,
   BookIcon,
   BrainIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
+  FolderGit2Icon,
   SparklesIcon,
 } from "lucide-react"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
@@ -55,40 +57,74 @@ const ORIGIN_LABEL_KEY: Record<SourcesPartItem["origin"], string> = {
   "twin-style": "twinStyle",
   "agent-knowledge-base": "agentKnowledgeBase",
   "project-knowledge": "projectKnowledge",
+  "project-claim": "projectClaim",
+  "project-history": "projectHistory",
   memory: "memory",
   footnote: "footnote",
 }
 
-// Origins that are "retrieval feedback" worth auto-expanding when they're the
-// only thing shown (twin chunks/style + recalled memory).
-const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = [
-  "twin-rag",
-  "twin-style",
-  "agent-knowledge-base",
-  "project-knowledge",
-  "memory",
+/**
+ * One grouped section per origin, in render order.
+ *
+ * A TABLE, not another `<section>` block. The five hand-written blocks this
+ * replaced were near-identical, and the partition beside them was a matching
+ * if-else chain — so every new origin meant editing two parallel lists and
+ * pasting a sixth copy of the same markup. `data-testid` was already systematic
+ * (`sources-part-section-<origin>`), which is what makes the table a drop-in.
+ *
+ * Order mirrors the system prompt: personal facts, then what was mined about the
+ * workspace, then what was searched for, then retrieved documents.
+ */
+const ORIGIN_SECTIONS: ReadonlyArray<{
+  origin: SourcesPartItem["origin"]
+  headerKey: string
+}> = [
+  { origin: "twin-rag", headerKey: "retrievedChunksHeader" },
+  { origin: "twin-style", headerKey: "styleSamplesHeader" },
+  { origin: "memory", headerKey: "recalledMemoriesHeader" },
+  { origin: "project-claim", headerKey: "projectClaimsHeader" },
+  { origin: "project-history", headerKey: "projectHistoryHeader" },
+  { origin: "agent-knowledge-base", headerKey: "agentKnowledgeHeader" },
+  { origin: "project-knowledge", headerKey: "projectKnowledgeHeader" },
 ]
+
+// Origins that are "retrieval feedback" worth auto-expanding when they're the
+// only thing shown — i.e. everything that gets its own grouped section.
+const AUTO_OPEN_ORIGINS: SourcesPartItem["origin"][] = ORIGIN_SECTIONS.map(
+  (section) => section.origin
+)
 
 function isOnlyRetrieval(sources: SourcesPartItem[]): boolean {
   return sources.length > 0 && sources.every((s) => AUTO_OPEN_ORIGINS.includes(s.origin))
 }
 
-function partition(sources: SourcesPartItem[]) {
-  const twinRag: SourcesPartItem[] = []
-  const twinStyle: SourcesPartItem[] = []
-  const memory: SourcesPartItem[] = []
-  const agentKnowledge: SourcesPartItem[] = []
-  const projectKnowledge: SourcesPartItem[] = []
+interface OriginSection {
+  origin: SourcesPartItem["origin"]
+  headerKey: string
+  items: SourcesPartItem[]
+}
+
+function partition(sources: SourcesPartItem[]): {
+  sections: OriginSection[]
+  other: SourcesPartItem[]
+} {
+  const byOrigin = new Map<SourcesPartItem["origin"], SourcesPartItem[]>()
   const other: SourcesPartItem[] = []
-  for (const s of sources) {
-    if (s.origin === "twin-rag") twinRag.push(s)
-    else if (s.origin === "twin-style") twinStyle.push(s)
-    else if (s.origin === "memory") memory.push(s)
-    else if (s.origin === "agent-knowledge-base") agentKnowledge.push(s)
-    else if (s.origin === "project-knowledge") projectKnowledge.push(s)
-    else other.push(s)
+  const grouped = new Set(AUTO_OPEN_ORIGINS)
+  for (const source of sources) {
+    if (!grouped.has(source.origin)) {
+      other.push(source)
+      continue
+    }
+    const bucket = byOrigin.get(source.origin)
+    if (bucket) bucket.push(source)
+    else byOrigin.set(source.origin, [source])
   }
-  return { twinRag, twinStyle, agentKnowledge, projectKnowledge, memory, other }
+  const sections = ORIGIN_SECTIONS.flatMap((spec) => {
+    const items = byOrigin.get(spec.origin)
+    return items && items.length > 0 ? [{ ...spec, items }] : []
+  })
+  return { sections, other }
 }
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
@@ -120,7 +156,7 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
   const open = defaultOpen ?? isRetrievalOnly
-  const { twinRag, twinStyle, agentKnowledge, projectKnowledge, memory, other } = buckets
+  const { sections, other } = buckets
 
   return (
     <>
@@ -144,72 +180,22 @@ export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) 
             "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
           )}
         >
-          {twinRag.length > 0 && (
-            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-rag">
-              <h4 className="text-[11px] font-medium text-muted-foreground">
-                {t("retrievedChunksHeader", { count: twinRag.length })}
-              </h4>
-              <div className="flex flex-col gap-1">
-                {twinRag.map((s) => (
-                  <SourceRow key={s.id} source={s} />
-                ))}
-              </div>
-            </section>
-          )}
-          {twinStyle.length > 0 && (
-            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-style">
-              <h4 className="text-[11px] font-medium text-muted-foreground">
-                {t("styleSamplesHeader", { count: twinStyle.length })}
-              </h4>
-              <div className="flex flex-col gap-1">
-                {twinStyle.map((s) => (
-                  <SourceRow key={s.id} source={s} />
-                ))}
-              </div>
-            </section>
-          )}
-          {memory.length > 0 && (
-            <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
-              <h4 className="text-[11px] font-medium text-muted-foreground">
-                {t("recalledMemoriesHeader", { count: memory.length })}
-              </h4>
-              <div className="flex flex-col gap-1">
-                {memory.map((s) => (
-                  <SourceRow key={s.id} source={s} />
-                ))}
-              </div>
-            </section>
-          )}
-          {agentKnowledge.length > 0 && (
+          {sections.map((section) => (
             <section
+              key={section.origin}
               className="flex flex-col gap-2"
-              data-testid="sources-part-section-agent-knowledge-base"
+              data-testid={`sources-part-section-${section.origin}`}
             >
               <h4 className="text-[11px] font-medium text-muted-foreground">
-                {t("agentKnowledgeHeader", { count: agentKnowledge.length })}
+                {t(section.headerKey, { count: section.items.length })}
               </h4>
               <div className="flex flex-col gap-1">
-                {agentKnowledge.map((source) => (
+                {section.items.map((source) => (
                   <SourceRow key={source.id} source={source} />
                 ))}
               </div>
             </section>
-          )}
-          {projectKnowledge.length > 0 && (
-            <section
-              className="flex flex-col gap-2"
-              data-testid="sources-part-section-project-knowledge"
-            >
-              <h4 className="text-[11px] font-medium text-muted-foreground">
-                {t("projectKnowledgeHeader", { count: projectKnowledge.length })}
-              </h4>
-              <div className="flex flex-col gap-1">
-                {projectKnowledge.map((source) => (
-                  <SourceRow key={source.id} source={source} />
-                ))}
-              </div>
-            </section>
-          )}
+          ))}
           {other.length > 0 && (
             <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
               <WebCitations sources={other} />
@@ -269,7 +255,54 @@ const WebCitations = memo(function WebCitations({ sources }: { sources: SourcesP
   )
 })
 
+/**
+ * Jump into the conversation a project source came from.
+ *
+ * A `<button>`, not a `<Link>`. `buildSessionHref` produces a query-param URL,
+ * and under the static export a `Link` to it is a full page navigation — which
+ * would throw away the point of an in-app jump.
+ *
+ * The `false` return is handled rather than swallowed: `jumpToSessionMessage`
+ * answers false for a deleted session, a compacted-away message, or a user who
+ * navigated during the wait. Ignoring it leaves a button that silently does
+ * nothing, which reads as broken rather than as "that turn is gone".
+ */
+const JumpToSourceButton = memo(function JumpToSourceButton({
+  messageRef,
+}: {
+  messageRef: NonNullable<SourcesPartItem["messageRef"]>
+}) {
+  const t = useTranslations("chat.sourcesPart")
+  return (
+    <button
+      type="button"
+      className="ml-auto text-[10px] text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-sm"
+      data-testid="sources-part-jump"
+      onClick={() => {
+        void import("@/lib/chat/cross-session-jump")
+          .then(({ jumpToSessionMessage }) =>
+            jumpToSessionMessage(messageRef.sessionId, messageRef.messageId, { align: "center" })
+          )
+          .then((landed) => {
+            if (!landed) toast.error(t("jumpMissing"))
+          })
+          .catch(() => toast.error(t("jumpMissing")))
+      }}
+    >
+      {t("viewInChat")}
+    </button>
+  )
+})
+
 function originIcon(origin: SourcesPartItem["origin"]) {
+  if (origin === "project-claim" || origin === "project-history") {
+    return (
+      <FolderGit2Icon
+        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+    )
+  }
   if (origin === "twin-style") {
     return (
       <SparklesIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -328,6 +361,9 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
             >
               {t("viewSource")}
             </Link>
+          )}
+          {source.messageRef && !source.chunkRef && (
+            <JumpToSourceButton messageRef={source.messageRef} />
           )}
         </div>
         {source.snippet && (

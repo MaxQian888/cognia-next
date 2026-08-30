@@ -6764,21 +6764,27 @@
       "agentKnowledgeHeader": "Agent 知识库片段（{count}）",
       "citationsLabel": "{count, plural, other {# 个网页来源}}",
       "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
+      "jumpMissing": "该消息已不存在。",
       "originLabel": {
         "agentKnowledgeBase": "Agent 知识库",
         "anthropic": "网络",
         "cogniaWeb": "Cognia 联网",
         "footnote": "脚注",
         "memory": "记忆",
+        "projectClaim": "项目上下文",
+        "projectHistory": "项目历史",
         "projectKnowledge": "项目",
         "twinRag": "数字分身",
         "twinStyle": "风格"
       },
+      "projectClaimsHeader": "项目上下文（{count}）",
+      "projectHistoryHeader": "来自本项目历史（{count}）",
       "projectKnowledgeHeader": "项目知识片段（{count}）",
       "recalledMemoriesHeader": "召回的记忆（{count}）",
       "retrievedChunksHeader": "检索片段（{count}）",
       "styleSamplesHeader": "风格样本（{count}）",
       "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
+      "viewInChat": "在会话中查看",
       "viewSource": "查看原文"
     },
     "steer": {
