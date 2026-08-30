@@ -49,6 +49,7 @@ export * from "./procedural"
 export * from "./history-filter"
 export * from "./runtime/apply-memory-context"
 export * from "./runtime/recall-budget"
+export * from "./runtime/recall-gate"
 export * from "./runtime/project-continuity-context"
 export * from "./runtime/provider-embedding-adapter"
 
