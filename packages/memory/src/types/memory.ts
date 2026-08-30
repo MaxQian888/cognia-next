@@ -263,6 +263,27 @@ export interface MemoryConfig {
   retrievalTopK: number
   /** Approximate token budget shared by all learned memories injected per turn. */
   recallTokenBudget: number
+  /**
+   * Whether mined project claims may be injected as their own prompt section.
+   *
+   * Default OFF, unlike `mineProjectContext`. Mining is cheap to leave on and
+   * reversible — the rows are visible in the console and deletable. Injection
+   * changes what the model is told about the project on every turn, which is
+   * the part a user should opt into after seeing what was actually learned.
+   */
+  enableProjectContinuity: boolean
+  /**
+   * Token budget for the project-claim section. SEPARATE from
+   * `recallTokenBudget`, not carved out of it.
+   *
+   * Splitting the existing 900 would have silently halved personal recall for
+   * every existing user on upgrade: `recallTokenBudget` is a number they set
+   * themselves in Settings, and after the procedural block takes its 360 a
+   * 450-token personal half leaves ~90 tokens — about one memory.
+   */
+  projectRecallTokenBudget: number
+  /** Max project claims injected per turn. A count cap, independent of the token cap. */
+  projectRecallTopK: number
   /** Below this fused-relevance score a memory is not injected. */
   relevanceFloor: number
   /** Eviction cap of active memories per scope. */
@@ -299,6 +320,9 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   allowCloudEmbedding: false,
   retrievalTopK: 8,
   recallTokenBudget: 900,
+  enableProjectContinuity: false,
+  projectRecallTokenBudget: 450,
+  projectRecallTopK: 4,
   relevanceFloor: 0.35,
   maxActivePerScope: 500,
   maxIdleDays: 0,
