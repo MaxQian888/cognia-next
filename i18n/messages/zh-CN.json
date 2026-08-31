@@ -20869,19 +20869,6 @@
       "updateResult": "成功 {ok} 个，失败 {failed} 个",
       "updating": "更新中…"
     },
-    "browse": {
-      "emptySection": "此分区暂无内容。",
-      "error": "市场错误：{message}",
-      "install": "安装",
-      "installing": "安装中…",
-      "loading": "正在加载市场…",
-      "searchPlaceholder": "在市场中搜索…",
-      "section": {
-        "featured": "精选",
-        "popular": "热门",
-        "recent": "最近上架"
-      }
-    },
     "card": {
       "actionsMenuAria": "{name} 的操作菜单",
       "capabilityChipAria": "{capability} 能力——共 {count} 项贡献",
@@ -21046,6 +21033,9 @@
       "oneOfVariant": "变体",
       "save": "保存",
       "saving": "保存中…",
+      "secretHide": "隐藏内容",
+      "secretShow": "显示内容",
+      "secretStorageNote": "与该插件的配置一起保存在本设备上，Cognia 不会同步它。",
       "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。",
       "validation": {
         "format": "必须是有效的 {format}。",
@@ -21058,27 +21048,6 @@
         "notNumber": "必须是数字。",
         "pattern": "必须匹配模式 {pattern}。"
       }
-    },
-    "configure": {
-      "action": "配置",
-      "actionAria": "配置 {name}",
-      "col": {
-        "action": "",
-        "plugin": "插件",
-        "state": "状态",
-        "version": "版本"
-      },
-      "empty": "尚未安装任何插件。",
-      "emptyFiltered": "没有插件匹配当前搜索。",
-      "hint": "为任意插件打开配置表单。未声明 manifest.configSchema 的插件无法在此处配置。",
-      "loading": "正在加载插件…",
-      "search": "搜索插件…",
-      "state": {
-        "configured": "已配置",
-        "noSchema": "无 schema",
-        "unconfigured": "未配置"
-      },
-      "title": "配置"
     },
     "conflict": {
       "abort": "中止",
@@ -21662,22 +21631,6 @@
       "importing": "导入中…",
       "title": "导入插件"
     },
-    "installed": {
-      "browseMarketplace": "浏览市场",
-      "colCapabilities": "能力数",
-      "colName": "名称",
-      "colSource": "来源",
-      "colStatus": "状态",
-      "colVersion": "版本",
-      "countEnabled": "{count} 已启用",
-      "countErrored": "{count} 异常",
-      "countLoading": "{count} 加载中",
-      "countTotal": "共 {count}",
-      "countUpdates": "{count} 个更新可用",
-      "empty": "尚未安装任何插件。",
-      "loading": "正在加载已安装的插件…",
-      "searchPlaceholder": "按名称或 id 搜索…"
-    },
     "license": {
       "custom": "自定义许可证",
       "hide": "隐藏许可证",
@@ -21782,9 +21735,6 @@
       "mirroredHint": "本设备镜像已配对的桌面端。改动会先入队，等桌面端上线后在那里生效。",
       "refresh": "刷新目录",
       "sectionsAria": "插件分区"
-    },
-    "modalRoot": {
-      "errorFallback": "插件弹窗渲染失败，详细信息请查看控制台。"
     },
     "openVsx": {
       "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限；cognia 校验的是下载文件的校验和，而不是代码的行为。",
@@ -22010,15 +21960,6 @@
       },
       "retry": "重试",
       "title": "{pluginName} 无法渲染"
-    },
-    "tabs": {
-      "analytics": "使用统计",
-      "browse": "市场",
-      "configure": "配置",
-      "devtools": "开发工具",
-      "installed": "已安装",
-      "permissions": "权限",
-      "scheduled": "定时任务"
     },
     "title": "插件",
     "toolbar": {

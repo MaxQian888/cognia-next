@@ -20869,19 +20869,6 @@
       "updateResult": "{ok} updated, {failed} failed",
       "updating": "Updating…"
     },
-    "browse": {
-      "emptySection": "Nothing to show in this section.",
-      "error": "Marketplace error: {message}",
-      "install": "Install",
-      "installing": "Installing…",
-      "loading": "Loading marketplace…",
-      "searchPlaceholder": "Search the marketplace…",
-      "section": {
-        "featured": "Featured",
-        "popular": "Popular",
-        "recent": "Recent"
-      }
-    },
     "card": {
       "actionsMenuAria": "Plugin actions for {name}",
       "capabilityChipAria": "{capability} capability — {count} contributions",
@@ -21046,6 +21033,9 @@
       "oneOfVariant": "Variant",
       "save": "Save",
       "saving": "Saving…",
+      "secretHide": "Hide value",
+      "secretShow": "Show value",
+      "secretStorageNote": "Stored with this plugin's configuration on this device. Cognia does not sync it.",
       "unsupportedField": "Unsupported field shape — fall back to raw JSON.",
       "validation": {
         "format": "Must be a valid {format}.",
@@ -21058,27 +21048,6 @@
         "notNumber": "Must be a number.",
         "pattern": "Must match pattern {pattern}."
       }
-    },
-    "configure": {
-      "action": "Configure",
-      "actionAria": "Configure {name}",
-      "col": {
-        "action": "",
-        "plugin": "Plugin",
-        "state": "State",
-        "version": "Version"
-      },
-      "empty": "No plugins are installed yet.",
-      "emptyFiltered": "No plugins match this search.",
-      "hint": "Open any plugin's configuration form. Plugins without a manifest.configSchema cannot be configured here.",
-      "loading": "Loading plugins…",
-      "search": "Search plugins…",
-      "state": {
-        "configured": "Configured",
-        "noSchema": "No schema",
-        "unconfigured": "Not configured"
-      },
-      "title": "Configure"
     },
     "conflict": {
       "abort": "Abort",
@@ -21662,22 +21631,6 @@
       "importing": "Importing…",
       "title": "Import plugin"
     },
-    "installed": {
-      "browseMarketplace": "Browse marketplace",
-      "colCapabilities": "Caps",
-      "colName": "Name",
-      "colSource": "Source",
-      "colStatus": "Status",
-      "colVersion": "Version",
-      "countEnabled": "{count} enabled",
-      "countErrored": "{count} errored",
-      "countLoading": "{count} loading",
-      "countTotal": "{count} total",
-      "countUpdates": "{count} update available",
-      "empty": "No plugins installed yet.",
-      "loading": "Loading installed plugins…",
-      "searchPlaceholder": "Search by name or id…"
-    },
     "license": {
       "custom": "Custom license",
       "hide": "Hide license",
@@ -21782,9 +21735,6 @@
       "mirroredHint": "This device mirrors your paired desktop. Changes are queued and applied there when it next comes online.",
       "refresh": "Refresh catalog",
       "sectionsAria": "Plugin sections"
-    },
-    "modalRoot": {
-      "errorFallback": "Plugin modal failed to render. Check the console for details."
     },
     "openVsx": {
       "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
@@ -22010,15 +21960,6 @@
       },
       "retry": "Retry",
       "title": "{pluginName} could not render"
-    },
-    "tabs": {
-      "analytics": "Analytics",
-      "browse": "Browse",
-      "configure": "Configure",
-      "devtools": "Devtools",
-      "installed": "Installed",
-      "permissions": "Permissions",
-      "scheduled": "Scheduled"
     },
     "title": "Plugins",
     "toolbar": {
