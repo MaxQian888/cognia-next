@@ -108,7 +108,14 @@ export function WorkspaceOverview() {
       }
     >
       <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col gap-4 p-4">
-        <TabsList className="w-fit" aria-label={t("workspace.viewsLabel")}>
+        <TabsList
+          // `w-fit` alone let the four triggers add up to 406px inside a 375px
+          // column, and the ancestor clipped the excess rather than scrolling
+          // it, so "Source Control" could not be reached on a phone. Same
+          // idiom the other narrow tab strips use.
+          className="w-fit max-w-full justify-start overflow-x-auto"
+          aria-label={t("workspace.viewsLabel")}
+        >
           <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
           <TabsTrigger value="environments">{t("workspace.environments")}</TabsTrigger>
           <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>

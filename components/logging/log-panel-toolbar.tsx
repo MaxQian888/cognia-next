@@ -1125,7 +1125,11 @@ function SearchWithHistory({
   const historyItems = useMemo(() => searchHistory, [searchHistory])
 
   return (
-    <div className="relative min-w-[12rem] flex-1">
+    // The 12rem floor is a desktop assumption: with the view toggle and the
+    // three trailing icon buttons it puts the bar at ~458px, so on a 375px
+    // screen "refresh" and "more actions" sat past the edge with nothing to
+    // scroll them into view. Below `sm` the field gives way instead.
+    <div className="relative min-w-0 flex-1 sm:min-w-[12rem]">
       <InputGroup className="h-8">
         <InputGroupAddon>
           <Search className="h-4 w-4" />

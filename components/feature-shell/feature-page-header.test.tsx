@@ -197,3 +197,40 @@ test("still renders the secondary row for controls when navigation is inline", (
   )
   expect(screen.getByLabelText("Search logs")).toBeInTheDocument()
 })
+
+test("every navigation and control slot can scroll its own overflow", () => {
+  // The header is `overflow-hidden`, so a slot that can neither shrink nor
+  // scroll does not spill visibly, it disappears: /eval shipped four secondary
+  // tabs of which two were unreachable at 375px, and /logs lost its refresh
+  // and overflow buttons the same way. The three slots have to agree.
+  const { rerender } = renderHeader(
+    <FeaturePageHeader
+      title="Logs"
+      navigation={<nav aria-label="Channels">Logs</nav>}
+      controls={<input aria-label="Search logs" />}
+    />
+  )
+
+  const secondary = screen
+    .getByRole("navigation", { name: "Channels" })
+    .closest("[data-slot='feature-header-secondary-navigation']")
+  expect(secondary).not.toBeNull()
+  expect(secondary).toHaveClass("overflow-x-auto")
+  expect(secondary).not.toHaveClass("shrink-0")
+  expect(screen.getByLabelText("Search logs").parentElement).toHaveClass("overflow-x-auto")
+
+  rerender(
+    <TooltipProvider>
+      <FeaturePageHeader
+        title="Logs"
+        navigation={<nav aria-label="Channels">Logs</nav>}
+        navigationPlacement="inline"
+      />
+    </TooltipProvider>
+  )
+  const inline = screen
+    .getByRole("navigation", { name: "Channels" })
+    .closest("[data-slot='feature-header-inline-navigation']")
+  expect(inline).toHaveClass("overflow-x-auto")
+  expect(inline).not.toHaveClass("shrink-0")
+})

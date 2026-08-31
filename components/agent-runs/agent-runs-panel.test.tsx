@@ -31,6 +31,30 @@ jest.mock("./run-detail-pane", () => ({
   ),
 }))
 
+let compact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compact,
+}))
+
+// The real one is a Drawer below `md`; the point under test is which surface
+// the detail lands in, not vaul's animation.
+jest.mock("@/components/shared/responsive-detail-sheet", () => ({
+  ResponsiveDetailSheet: ({
+    open,
+    title,
+    children,
+  }: {
+    open: boolean
+    title: string
+    children: React.ReactNode
+  }) =>
+    open ? (
+      <div data-testid="detail-drawer" data-title={title}>
+        {children}
+      </div>
+    ) : null,
+}))
+
 function row(over: Partial<UnifiedExecutionRow> = {}): UnifiedExecutionRow {
   return {
     rowId: "journal:run-1",
@@ -62,6 +86,7 @@ function state(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   cockpit = state()
   lastOptions = undefined
+  compact = false
 })
 
 describe("AgentRunsPanel", () => {
@@ -180,6 +205,37 @@ describe("AgentRunsPanel", () => {
     cockpit = state({ rows: [], allRows: [row()] })
     rerender(<AgentRunsPanel onSelect={jest.fn()} />)
     expect(screen.getByText("emptyFiltered")).toBeInTheDocument()
+  })
+
+  it("keeps the two-pane split when there is room for it", () => {
+    cockpit = state({ selectedRow: row() })
+    render(<AgentRunsPanel selectedId="run-1" onSelect={jest.fn()} />)
+    expect(screen.getByTestId("detail")).toBeInTheDocument()
+    expect(screen.queryByTestId("detail-drawer")).not.toBeInTheDocument()
+  })
+
+  it("moves the detail into a drawer on a narrow screen", () => {
+    // Side by side, the list held `max-w-sm shrink-0` and took the whole 375px
+    // column, leaving the detail pane off the right edge with the document
+    // scrolling sideways to reach it.
+    compact = true
+    cockpit = state({ selectedRow: row() })
+    const onSelect = jest.fn()
+    render(<AgentRunsPanel selectedId="run-1" onSelect={onSelect} />)
+
+    const drawer = screen.getByTestId("detail-drawer")
+    expect(within(drawer).getByTestId("detail")).toHaveTextContent("journal:run-1")
+    expect(drawer).toHaveAttribute("data-title", "Chat run")
+    // Exactly one copy of the detail, so nothing is rendered off-screen too.
+    expect(screen.getAllByTestId("detail")).toHaveLength(1)
+  })
+
+  it("clears the selection when the narrow drawer closes", () => {
+    compact = true
+    cockpit = state()
+    render(<AgentRunsPanel onSelect={jest.fn()} />)
+    // Nothing selected: no drawer, and the list still fills the column.
+    expect(screen.queryByTestId("detail-drawer")).not.toBeInTheDocument()
   })
 
   it("shows a live marker for queued and waiting work, not only running", () => {

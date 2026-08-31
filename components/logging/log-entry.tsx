@@ -223,30 +223,40 @@ export function LogEntry({
 
             <Icon className={cn("h-4 w-4 mt-0.5 shrink-0", iconColor)} />
 
-            <span className="text-xs text-muted-foreground font-mono shrink-0">{timeStr}</span>
+            {/*
+              One line on a wide screen, two on a narrow one. The timestamp and
+              the badges are all `shrink-0`, so on a 375px row they left the
+              message about ninety pixels and it broke at every hyphen, one
+              fragment per line. Below `sm` the message drops to its own
+              full-width line under the metadata; `sm:flex-nowrap` puts the
+              original single row back.
+            */}
+            <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 sm:flex-nowrap">
+              <span className="text-xs text-muted-foreground font-mono shrink-0">{timeStr}</span>
 
-            <Badge variant="outline" className="text-xs shrink-0 font-mono">
-              {log.module}
-            </Badge>
+              <Badge variant="outline" className="text-xs shrink-0 font-mono">
+                {log.module}
+              </Badge>
 
-            {log.traceId && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge variant="secondary" className="text-xs shrink-0 font-mono">
-                    {log.traceId.slice(0, 8)}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>
-                    {t("panel.traceId")}: {log.traceId}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            )}
+              {log.traceId && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="secondary" className="text-xs shrink-0 font-mono">
+                      {log.traceId.slice(0, 8)}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      {t("panel.traceId")}: {log.traceId}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
-            <span className="text-sm flex-1 break-words">
-              <HighlightedText text={log.message} query={searchQuery} useRegex={useRegex} />
-            </span>
+              <span className="w-full min-w-0 break-words text-sm sm:w-auto sm:flex-1">
+                <HighlightedText text={log.message} query={searchQuery} useRegex={useRegex} />
+              </span>
+            </div>
 
             <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
               {onToggleBookmark && (

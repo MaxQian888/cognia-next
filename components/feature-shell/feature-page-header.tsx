@@ -256,7 +256,13 @@ export function FeaturePageHeader({
 
         {inlineNavigation ? (
           <div
-            className="min-w-0 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            // Shrinks rather than holding its content width. The header is
+            // `overflow-hidden`, and the actions to its right are `shrink-0`,
+            // so a nav that refuses to give way pushes them past the edge and
+            // they are clipped, not wrapped: at 375px /logs lost both its
+            // refresh and overflow buttons that way. Yielding here moves the
+            // spill inside this box, where the scroll can reach it.
+            className="min-w-0 shrink overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             data-slot="feature-header-inline-navigation"
           >
             {inlineNavigation}
@@ -303,7 +309,19 @@ export function FeaturePageHeader({
 
       {hasSecondary ? (
         <div className="relative flex min-h-[var(--chrome-h)] min-w-0 items-center gap-2 border-t border-border/55 bg-muted/16 px-3 py-1.5 @md/feature-header:px-4">
-          {secondaryNavigation ? <div className="shrink-0">{secondaryNavigation}</div> : null}
+          {secondaryNavigation ? (
+            <div
+              // Same contract as the inline slot and as `controls` below. This
+              // was the one of the three that could neither shrink nor scroll,
+              // so a tab set wider than the row was simply cut off by the
+              // header's `overflow-hidden`: /eval shipped four tabs of which
+              // two could not be reached at 375px.
+              className="min-w-0 shrink overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-slot="feature-header-secondary-navigation"
+            >
+              {secondaryNavigation}
+            </div>
+          ) : null}
           {secondaryNavigation && controls ? (
             <span className="h-4 w-px shrink-0 bg-border/80" aria-hidden="true" />
           ) : null}

@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -195,6 +195,20 @@ describe("LogEntry rendering", () => {
     expect(screen.getByText("test-module")).toBeInTheDocument()
     expect(screen.getByText("boot complete")).toBeInTheDocument()
     expect(screen.getByTestId("log-entry-row")).toHaveAttribute("data-level", "info")
+  })
+
+  it("keeps the message on one line with the metadata, and lets it drop below on a narrow row", () => {
+    // The timestamp and both badges are `shrink-0`. On a 375px row that left
+    // the message roughly ninety pixels and it broke at every hyphen, one
+    // fragment per line. They now share a wrapper that wraps below `sm`, so
+    // the message takes a full-width line of its own instead.
+    renderWithTooltip(<LogHarness log={makeLog({ message: "boot complete" })} />)
+    const message = screen.getByText("boot complete")
+    const wrapper = message.closest(".flex-wrap")
+    expect(wrapper).not.toBeNull()
+    expect(wrapper).toHaveClass("sm:flex-nowrap")
+    expect(within(wrapper as HTMLElement).getByText("test-module")).toBeInTheDocument()
+    expect(message).toHaveClass("w-full", "sm:w-auto")
   })
 
   it("renders truncated traceId Badge when traceId is present", () => {

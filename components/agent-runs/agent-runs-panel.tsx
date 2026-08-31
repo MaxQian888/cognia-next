@@ -46,6 +46,8 @@ import {
   type ExecutionFilterKind,
   type UnifiedExecutionRow,
 } from "@/lib/execution/monitor-model"
+import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
 import { RunDetailPane } from "./run-detail-pane"
 
@@ -77,6 +79,7 @@ export function AgentRunsPanel({
       ...(selectedId ? { selectedId } : {}),
     })
   const actions = useRunControlActions()
+  const compact = useCompactLayout()
 
   /**
    * Deep links carry the RUN id; the row's own key is source-prefixed. Match on
@@ -146,7 +149,16 @@ export function AgentRunsPanel({
       />
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-full min-w-0 max-w-sm shrink-0 flex-col border-r">
+        {/*
+          The list keeps the whole column on a narrow screen. It used to hold
+          `max-w-sm shrink-0` there too, which at 375px meant it took every
+          pixel and left the detail pane sitting off the right edge, scrolling
+          the document sideways to reach 32px of nothing. The detail moves into
+          the drawer below instead.
+        */}
+        <div
+          className={cn("flex w-full min-w-0 flex-col", !compact && "max-w-sm shrink-0 border-r")}
+        >
           <ul className="min-h-0 flex-1 overflow-y-auto" aria-label={t("title")}>
             {!isLoading && rows.length === 0 && (
               <li className="p-4 text-center text-xs text-muted-foreground">
@@ -172,16 +184,32 @@ export function AgentRunsPanel({
           )}
         </div>
 
-        <div className="min-w-0 flex-1 overflow-y-auto p-4">
-          {selected ? (
-            <RunDetailPane row={selected} actions={actions} />
-          ) : (
-            <p className="pt-8 text-center text-sm text-muted-foreground">
-              {t("detail.selectPrompt")}
-            </p>
-          )}
-        </div>
+        {compact ? null : (
+          <div className="min-w-0 flex-1 overflow-y-auto p-4">
+            {selected ? (
+              <RunDetailPane row={selected} actions={actions} />
+            ) : (
+              <p className="pt-8 text-center text-sm text-muted-foreground">
+                {t("detail.selectPrompt")}
+              </p>
+            )}
+          </div>
+        )}
       </div>
+
+      {compact ? (
+        <ResponsiveDetailSheet
+          open={Boolean(selected)}
+          onOpenChange={(next) => {
+            if (!next) onSelect(null)
+          }}
+          title={selected?.label ?? t("title")}
+        >
+          <div className="min-h-0 overflow-y-auto px-4 pb-4">
+            {selected ? <RunDetailPane row={selected} actions={actions} /> : null}
+          </div>
+        </ResponsiveDetailSheet>
+      ) : null}
     </div>
   )
 }
