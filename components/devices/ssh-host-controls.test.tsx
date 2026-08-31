@@ -38,6 +38,28 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: { getState: () => ({}) },
 }))
 
+/**
+ * The probe reaches Tauri through `SshTerminalSession.connect`, which is the
+ * one seam it has: `useSshProbe` deliberately takes no injected runner from the
+ * component, so the card cannot be wired to a probe that is not the real one.
+ */
+// eslint-disable-next-line no-var -- same hoisting rule as `tauri`.
+var connectImpl: ((req: unknown) => Promise<unknown>) | undefined
+jest.mock("@/lib/terminal/ssh-session", () => ({
+  SshTerminalSession: {
+    connect: (req: unknown) =>
+      connectImpl
+        ? connectImpl(req)
+        : Promise.reject(new Error("no SSH connect stub installed for this test")),
+  },
+}))
+
+import {
+  getSshProbes,
+  readSshProbe,
+  resetSshProbesForTests,
+  sshProbeTarget,
+} from "@/lib/devices/ssh-probe-store"
 import type { DeviceRow } from "@/lib/devices/types"
 
 import { SshHostControls } from "./ssh-host-controls"
@@ -49,6 +71,10 @@ const PROFILE = {
   port: 22,
   username: "deploy",
   authMethod: "privateKey" as const,
+  // A key host with no path cannot produce a connect request at all, so the
+  // fixture carries one. Leaving it off would make every probe assertion here
+  // pass through the `invalid` branch instead of reaching a connection.
+  privateKeyPath: "~/.ssh/id_ed25519",
 }
 
 function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
@@ -77,6 +103,7 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
 beforeEach(() => {
   tauri = true
   sshHosts = [PROFILE]
+  connectImpl = undefined
 })
 
 it("opens a shell through the shared dock launcher", async () => {
@@ -244,4 +271,72 @@ it("shows no facts for a row whose profile is gone", () => {
   render(<SshHostControls row={row()} connect={jest.fn()} />)
   expect(screen.queryByTestId("ssh-forwards")).not.toBeInTheDocument()
   expect(screen.queryByText("devices.ssh.route.direct")).not.toBeInTheDocument()
+})
+
+/**
+ * The probe is the only presence signal a saved SSH host has, so the card is
+ * where its cost is stated and its answer is read.
+ */
+describe("Test connection", () => {
+  beforeEach(() => {
+    resetSshProbesForTests()
+  })
+
+  afterEach(() => {
+    resetSshProbesForTests()
+  })
+
+  it("never runs on its own, and says what running it costs", () => {
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    expect(screen.getByTestId("ssh-probe")).toBeEnabled()
+    expect(screen.getByTestId("ssh-probe-result")).toHaveTextContent("devices.ssh.probe.cost")
+    expect(getSshProbes().size).toBe(0)
+  })
+
+  it("records a reachable answer and shows the fingerprint it came back with", async () => {
+    connectImpl = jest.fn().mockResolvedValue({
+      hostKeyStatus: "verified",
+      hostKeyFingerprint: "SHA256:abcdefghijklmnopqrstuvwxyz",
+      kill: jest.fn().mockResolvedValue(undefined),
+    })
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("ssh-probe"))
+    expect(await screen.findByText("devices.ssh.probe.reachableVerified")).toBeInTheDocument()
+    expect(readSshProbe("s1", sshProbeTarget(PROFILE), Date.now())?.online).toBe(true)
+  })
+
+  /**
+   * `learned` means the probe itself made the trust decision. Saying so is the
+   * only notice the user gets that a key was accepted on their behalf.
+   */
+  it("says when the probe is what trusted the host key", async () => {
+    connectImpl = jest.fn().mockResolvedValue({
+      hostKeyStatus: "learned",
+      hostKeyFingerprint: "SHA256:zzz",
+      kill: jest.fn().mockResolvedValue(undefined),
+    })
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("ssh-probe"))
+    expect(await screen.findByText("devices.ssh.probe.reachableLearned")).toBeInTheDocument()
+  })
+
+  it("carries the native failure rather than a generic one", async () => {
+    connectImpl = jest.fn().mockRejectedValue(new Error("connection refused"))
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("ssh-probe"))
+    expect(await screen.findByTestId("ssh-probe-result")).toHaveTextContent("connection refused")
+    expect(readSshProbe("s1", sshProbeTarget(PROFILE), Date.now())?.online).toBe(false)
+  })
+
+  it("offers no test for a broken jump chain, which would probe the wrong machine", () => {
+    sshHosts = [{ ...PROFILE, jumpHostId: "gone" }]
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    expect(screen.getByTestId("ssh-probe")).toBeDisabled()
+  })
+
+  it("offers no test for a row whose profile is gone", () => {
+    sshHosts = []
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    expect(screen.getByTestId("ssh-probe")).toBeDisabled()
+  })
 })

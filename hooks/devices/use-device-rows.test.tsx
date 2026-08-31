@@ -3,6 +3,12 @@
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
+import {
+  recordSshProbe,
+  resetSshProbesForTests,
+  SSH_PROBE_TTL_MS,
+  sshProbeTarget,
+} from "@/lib/devices/ssh-probe-store"
 import { resetWanWakeOverridesForTests, wakeDeviceForWan } from "@/lib/signaling/wan-wake-overrides"
 
 import { useDeviceRows } from "./use-device-rows"
@@ -324,5 +330,71 @@ describe("useDeviceRows — WAN dormancy", () => {
     pushPhone(40)
     const result = await wanState()
     expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan?.state).toBe("disabled")
+  })
+})
+
+/**
+ * A saved SSH host has no presence of its own, so the only signal is an
+ * explicit Test connection. These pin that the answer travels from the probe
+ * store into the row, and that the two ways it can stop being true both put
+ * the row back on `unknown` rather than leaving a stale claim on screen.
+ */
+describe("useDeviceRows — SSH probe results", () => {
+  const PROFILE = {
+    id: "s1",
+    name: "prod-web-01",
+    host: "10.0.4.21",
+    port: 22,
+    username: "deploy",
+    authMethod: "privateKey" as const,
+  }
+
+  beforeEach(() => {
+    resetSshProbesForTests()
+    sshHostSettings = [PROFILE]
+  })
+
+  afterEach(() => {
+    resetSshProbesForTests()
+  })
+
+  async function sshRow() {
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    return result.current.rows.find((row) => row.ref === "ssh:s1")
+  }
+
+  it("stays unknown while nobody has asked", async () => {
+    expect(await sshRow()).toMatchObject({ reachability: "unknown" })
+  })
+
+  it("goes online once a probe has answered", async () => {
+    recordSshProbe("s1", {
+      online: true,
+      at: Date.now(),
+      fingerprint: "SHA256:a",
+      target: sshProbeTarget(PROFILE),
+    })
+    expect(await sshRow()).toMatchObject({ reachability: "online" })
+  })
+
+  /** Past the TTL the answer is a fact about a moment nobody has re-checked. */
+  it("falls back to unknown once the answer is older than the TTL", async () => {
+    recordSshProbe("s1", {
+      online: true,
+      at: Date.now() - SSH_PROBE_TTL_MS - 1,
+      target: sshProbeTarget(PROFILE),
+    })
+    expect(await sshRow()).toMatchObject({ reachability: "unknown" })
+  })
+
+  /** An answer recorded before the port changed describes a different machine. */
+  it("drops an answer recorded against the host's previous address", async () => {
+    recordSshProbe("s1", {
+      online: true,
+      at: Date.now(),
+      target: sshProbeTarget({ ...PROFILE, port: 2222 }),
+    })
+    expect(await sshRow()).toMatchObject({ reachability: "unknown" })
   })
 })

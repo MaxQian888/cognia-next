@@ -159,7 +159,8 @@
       "address": "Address",
       "auth": "Authentication",
       "route": "Route",
-      "forwards": "Port forwarding"
+      "forwards": "Port forwarding",
+      "hostKey": "Host key"
     },
     "auth": {
       "password": "Password",
@@ -179,7 +180,16 @@
     "forwardsNone": "No forwarding rules.",
     "forwardEnabled": "On",
     "forwardDisabled": "Off",
-    "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other."
+    "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other.",
+    "probe": {
+      "action": "Test connection",
+      "running": "Testing…",
+      "reachableVerified": "Reachable. The host key matched the one already trusted.",
+      "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
+      "unreachable": "Could not connect: {message}",
+      "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
+      "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward."
+    }
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",

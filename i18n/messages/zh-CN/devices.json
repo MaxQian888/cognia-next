@@ -159,7 +159,8 @@
       "address": "地址",
       "auth": "认证方式",
       "route": "连接路径",
-      "forwards": "端口转发"
+      "forwards": "端口转发",
+      "hostKey": "主机密钥"
     },
     "auth": {
       "password": "密码",
@@ -179,7 +180,16 @@
     "forwardsNone": "没有转发规则。",
     "forwardEnabled": "已启用",
     "forwardDisabled": "已停用",
-    "forwardsLoopback": "两端始终绑定 127.0.0.1。可从网络访问的转发会把一台机器变成另一台机器的开放中继。"
+    "forwardsLoopback": "两端始终绑定 127.0.0.1。可从网络访问的转发会把一台机器变成另一台机器的开放中继。",
+    "probe": {
+      "action": "测试连接",
+      "running": "测试中…",
+      "reachableVerified": "可达。主机密钥与已信任的一致。",
+      "reachableLearned": "可达。这是第一次连接，主机密钥已被信任并保存。",
+      "unreachable": "无法连接：{message}",
+      "invalid": "该配置无法生成连接（{reason}），因此没有联系过这台主机。请在 设置 → 终端 中修正。",
+      "cost": "测试会真正建立一次连接：它会经过每一个跳板并完成认证、在对方日志中留下记录、可能向 ssh-agent 索要口令，并在首次连接时信任主机密钥。它不会打开任何端口转发。"
+    }
   },
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",

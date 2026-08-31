@@ -9105,6 +9105,7 @@
         "address": "Address",
         "auth": "Authentication",
         "forwards": "Port forwarding",
+        "hostKey": "Host key",
         "route": "Route"
       },
       "forwardDisabled": "Off",
@@ -9113,6 +9114,15 @@
       "forwardsNone": "No forwarding rules.",
       "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
       "localOnlyTitle": "This machine only",
+      "probe": {
+        "action": "Test connection",
+        "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
+        "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
+        "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
+        "reachableVerified": "Reachable. The host key matched the one already trusted.",
+        "running": "Testing…",
+        "unreachable": "Could not connect: {message}"
+      },
       "route": {
         "broken": "Cannot be resolved",
         "direct": "Direct",

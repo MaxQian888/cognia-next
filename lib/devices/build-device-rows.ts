@@ -328,9 +328,14 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
  * Everything here is deliberately empty or `unknown`, and each blank is a fact
  * rather than a gap:
  *
- *  * **`reachability: "unknown"`** because nothing pings a saved SSH host.
- *    `offline` would claim knowledge nobody has, the same rule that keeps an
- *    unactivated remote Host out of that state.
+ *  * **`reachability` from an explicit Test connection, or `unknown`.** A saved
+ *    host carries no presence of its own, so until someone probes it there is
+ *    nothing to report, and `offline` would claim knowledge nobody has. A probe
+ *    answers directly rather than through `deriveReachability`: that function
+ *    reads a *stream* of presence, where a recent timestamp with `online:
+ *    false` means "was here, may not be able to act" and maps to
+ *    `recently-active`. A probe is not a stream. It is one question, and a
+ *    refusal to it means `offline` now, not "seen recently".
  *  * **No capabilities and no grants.** An SSH server never reported anything
  *    and holds no SecurityStore capability. A matrix of `absent` cells would
  *    invent twenty negative answers nobody gave.
@@ -343,11 +348,18 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
  *    has an answer over a bare SSH shell.
  */
 function buildSshHostRow(profile: SshHostInput, input: BuildDeviceRowsInput): DeviceRow {
-  // `lastSeenAt: 0` is what `deriveReachability` reads as "no evidence at
-  // all", which is the honest answer here and the same shape a remote Host
-  // that has never been connected carries. The rule stays in one place rather
-  // than being hardcoded to `unknown` at this call site.
-  const liveness: PlacementLiveness = { online: false, lastSeenAt: 0, source: "manifest" }
+  const probe = input.sshProbes?.get(profile.id)
+  /**
+   * `lastSeenAt: 0` is what `deriveReachability` reads as "no evidence at
+   * all", which is the honest answer for a host nobody has asked about and the
+   * same shape a remote Host that has never been connected carries. A probe
+   * replaces it with the moment it settled, in both directions: a refusal is
+   * evidence too, and dating it is what lets the card say how old the answer
+   * is.
+   */
+  const liveness: PlacementLiveness = probe
+    ? { online: probe.online, lastSeenAt: probe.at, source: "request" }
+    : { online: false, lastSeenAt: 0, source: "manifest" }
   return {
     ref: sshHostRef(profile),
     kind: "ssh-host",
@@ -355,8 +367,13 @@ function buildSshHostRow(profile: SshHostInput, input: BuildDeviceRowsInput): De
     isSelf: false,
     baseUrl: `ssh://${profile.username}@${profile.host}:${profile.port}`,
     adminState: "unknown",
-    reachability: deriveReachability(liveness, false, input.now),
+    reachability: probe
+      ? probe.online
+        ? "online"
+        : "offline"
+      : deriveReachability(liveness, false, input.now),
     liveness,
+    lastSeenAt: probe?.online ? probe.at : undefined,
     capabilities: [],
     capabilityReportMissing: true,
     grants: [],

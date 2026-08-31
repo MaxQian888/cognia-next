@@ -342,11 +342,11 @@ export interface RemoteHostInput {
  * builders stay a pure leaf, testable without the terminal store or the
  * russh bridge.
  *
- * There is no liveness field because there is no liveness source. Nothing
- * pings a saved SSH host, so its {@link DeviceRow.reachability} is always
- * `unknown`. Painting it `offline` would claim knowledge the client does not
- * have, which is the same rule `unknown ≠ offline` states for a remote Host
- * that has never been activated.
+ * There is no liveness field on the profile because a saved host carries no
+ * presence of its own. The only signal is an explicit Test connection, which
+ * arrives separately as {@link BuildDeviceRowsInput.sshProbes} so that an
+ * un-probed host still reports `unknown` rather than `offline`. That is the
+ * same rule `unknown ≠ offline` states for a remote Host nobody has activated.
  */
 export interface SshHostInput {
   id: string
@@ -359,6 +359,19 @@ export interface SshHostInput {
   credentialRef?: string
   /** Id of another profile this one is reached through. */
   jumpHostId?: string | null
+}
+
+/**
+ * Structural subset of `lib/devices/ssh-probe-store`' `SshProbeRecord`.
+ *
+ * Only the two fields the row derivation needs. The fingerprint and the target
+ * identity stay in the store, where the card and the staleness check read them.
+ */
+export interface SshProbeInput {
+  /** Whether the host answered. A refusal is a real `false`, not an absence. */
+  online: boolean
+  /** When the probe settled, as the timestamp the row's liveness carries. */
+  at: number
 }
 
 /** Structural subset of `lib/fleet/execution-workers`' `WorkerDeviceSummary`. */
@@ -427,6 +440,19 @@ export interface BuildDeviceRowsInput {
    * the desktop, which the row states rather than hides.
    */
   sshHosts: readonly SshHostInput[]
+  /**
+   * What an explicit Test connection last found, keyed by SSH profile id.
+   *
+   * Only entries that still describe the host are passed in: the caller has
+   * the profiles and the clock, so it drops an answer that has expired or that
+   * was recorded against a different address before this ever sees it. What
+   * arrives here is therefore always a fact about the row it names, which is
+   * what keeps the derivation pure.
+   *
+   * Absent means nobody has asked. It is not the same as `{ online: false }`,
+   * which means the host was asked and did not answer.
+   */
+  sshProbes?: ReadonlyMap<string, SshProbeInput>
   workers: readonly WorkerInput[]
   /** Keyed by `deviceId`. Live, in-process; empty after a renderer reload. */
   presence?: ReadonlyMap<string, DevicePresenceSummary>

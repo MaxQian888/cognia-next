@@ -20,6 +20,7 @@ import type {
   HostDeviceSummaryInput,
   LocalDeviceInput,
   RemoteHostInput,
+  SshHostInput,
   WorkerInput,
 } from "./types"
 
@@ -776,5 +777,60 @@ describe("buildDeviceWan", () => {
     const connectedInHub = selectSignalingDevices(rows, { now: WAN_NOW }).map((d) => d.deviceId)
     expect(connectedHere).toEqual(["fresh"])
     expect(connectedInHub).toEqual(connectedHere)
+  })
+})
+
+/**
+ * A saved SSH host carries no presence of its own, so the console painted every
+ * one of them `unknown` forever. An explicit Test connection is the only signal
+ * there is, and these pin what each of its three answers means.
+ */
+describe("SSH host reachability from a probe", () => {
+  const SSH: SshHostInput = {
+    id: "s1",
+    name: "prod-web-01",
+    host: "10.0.4.21",
+    port: 22,
+    username: "deploy",
+    authMethod: "agent",
+  }
+
+  function sshRow(sshProbes?: ReadonlyMap<string, { online: boolean; at: number }>) {
+    const rows = buildDeviceRows(input({ sshHosts: [SSH], sshProbes }))
+    const row = rows.find((candidate) => candidate.kind === "ssh-host")
+    if (!row) throw new Error("expected an ssh-host row")
+    return row
+  }
+
+  it("stays unknown until somebody asks", () => {
+    expect(sshRow().reachability).toBe("unknown")
+    expect(sshRow().lastSeenAt).toBeUndefined()
+  })
+
+  it("reports online, and dates the answer, once a probe succeeds", () => {
+    const row = sshRow(new Map([["s1", { online: true, at: NOW - 1_000 }]]))
+    expect(row.reachability).toBe("online")
+    expect(row.lastSeenAt).toBe(NOW - 1_000)
+  })
+
+  /**
+   * The distinction this exists to protect. `deriveReachability` reads a stream
+   * of presence, where a recent timestamp with `online: false` means "was here,
+   * may not be able to act" and maps to `recently-active`. A probe is one
+   * question, and a refusal to it means offline now.
+   */
+  it("reports offline for a refusal rather than recently-active", () => {
+    expect(sshRow(new Map([["s1", { online: false, at: NOW - 1_000 }]])).reachability).toBe(
+      "offline"
+    )
+  })
+
+  /** A refusal is evidence about a machine, not evidence it was reachable. */
+  it("does not claim a last-seen time for a host that refused", () => {
+    expect(sshRow(new Map([["s1", { online: false, at: NOW - 1_000 }]])).lastSeenAt).toBeUndefined()
+  })
+
+  it("ignores a probe recorded against some other host", () => {
+    expect(sshRow(new Map([["other", { online: true, at: NOW }]])).reachability).toBe("unknown")
   })
 })

@@ -9105,6 +9105,7 @@
         "address": "地址",
         "auth": "认证方式",
         "forwards": "端口转发",
+        "hostKey": "主机密钥",
         "route": "连接路径"
       },
       "forwardDisabled": "已停用",
@@ -9113,6 +9114,15 @@
       "forwardsNone": "没有转发规则。",
       "localOnlyBody": "SSH 使用这台电脑自己的身份连接，因此配对的手机或浏览器无法打开。这里仍然列出它，是为了让机器清单完整。",
       "localOnlyTitle": "仅限本机",
+      "probe": {
+        "action": "测试连接",
+        "cost": "测试会真正建立一次连接：它会经过每一个跳板并完成认证、在对方日志中留下记录、可能向 ssh-agent 索要口令，并在首次连接时信任主机密钥。它不会打开任何端口转发。",
+        "invalid": "该配置无法生成连接（{reason}），因此没有联系过这台主机。请在 设置 → 终端 中修正。",
+        "reachableLearned": "可达。这是第一次连接，主机密钥已被信任并保存。",
+        "reachableVerified": "可达。主机密钥与已信任的一致。",
+        "running": "测试中…",
+        "unreachable": "无法连接：{message}"
+      },
       "route": {
         "broken": "无法解析",
         "direct": "直连",

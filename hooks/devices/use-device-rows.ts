@@ -49,6 +49,13 @@ import {
   getWanWakeOverridesServerSnapshot,
   subscribeWanWakeOverrides,
 } from "@/lib/signaling/wan-wake-overrides"
+import {
+  getSshProbes,
+  getSshProbesServerSnapshot,
+  readSshProbe,
+  sshProbeTarget,
+  subscribeSshProbes,
+} from "@/lib/devices/ssh-probe-store"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -177,6 +184,18 @@ export function useDeviceRows(): UseDeviceRowsResult {
    */
   const sshHosts = useSettingsStore(selectSavedSshHosts)
   /**
+   * What an explicit Test connection last found, for the hosts above.
+   *
+   * A module-level map rather than a Dexie row on purpose (see
+   * `lib/devices/ssh-probe-store.ts`), so this is how the console subscribes
+   * to it, the same way it subscribes to the WAN wake overrides.
+   */
+  const sshProbes = useSyncExternalStore(
+    subscribeSshProbes,
+    getSshProbes,
+    getSshProbesServerSnapshot
+  )
+  /**
    * The WebRTC master switch. Absent means on, matching
    * `buildSignalingConfigPatch`, so the console and the hub agree about a
    * settings row that predates the toggle.
@@ -238,6 +257,27 @@ export function useDeviceRows(): UseDeviceRowsResult {
     }
   }, [refresh])
 
+  /**
+   * The probe answers that still describe the hosts they name.
+   *
+   * Two filters, both of which need something the row builder is pure of. An
+   * answer past its TTL is a fact about a moment nobody has re-checked, and an
+   * answer recorded before the host's address changed describes a different
+   * machine. Either one rendered as presence would be the console claiming
+   * knowledge it does not have, which is exactly what `unknown` was protecting.
+   *
+   * Recomputed on the same `now` the rows are judged against, so a result ages
+   * out of the list on the poll rather than only when something else changes.
+   */
+  const liveSshProbes = useMemo(() => {
+    const live = new Map<string, { online: boolean; at: number }>()
+    for (const profile of sshHosts ?? []) {
+      const record = readSshProbe(profile.id, sshProbeTarget(profile), now)
+      if (record) live.set(profile.id, { online: record.online, at: record.at })
+    }
+    return live
+  }, [sshHosts, sshProbes, now])
+
   const rows = useMemo(() => {
     // Presence lives in a plain in-process map with no subscription, so it is
     // re-read here on every `now` advance — the poll is the subscription.
@@ -256,6 +296,13 @@ export function useDeviceRows(): UseDeviceRowsResult {
       hostDevices: hostDevices ?? undefined,
       remoteHosts: hosts as unknown as readonly RemoteHostInput[],
       sshHosts: sshHosts ?? [],
+      /**
+       * Expiry and re-targeting are resolved here rather than in the builder.
+       * `readSshProbe` needs the clock and the host's current address, and the
+       * builder is pure of both, so what crosses into it is already only the
+       * answers that still describe the rows they name.
+       */
+      sshProbes: liveSshProbes,
       workers,
       presence: readPresence(deviceIds),
       sandboxConnections: connections.map((connection) => ({
@@ -277,6 +324,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     hostDevices,
     hosts,
     sshHosts,
+    liveSshProbes,
     workers,
     connections,
     activeHostId,

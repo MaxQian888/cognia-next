@@ -25,11 +25,19 @@
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { ArrowRightIcon, KeyRoundIcon, PlugZapIcon, SettingsIcon, TerminalIcon } from "lucide-react"
+import {
+  ArrowRightIcon,
+  KeyRoundIcon,
+  PlugZapIcon,
+  RadioIcon,
+  SettingsIcon,
+  TerminalIcon,
+} from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useSshProbe, type SshProbeState } from "@/hooks/devices/use-ssh-probe"
 import type { DeviceRow } from "@/lib/devices/types"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
 import {
@@ -43,7 +51,7 @@ import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
-import { DeviceFactList, DeviceFactRow } from "./device-visuals"
+import { DeviceFactList, DeviceFactRow, shortenFingerprint } from "./device-visuals"
 
 /** Default geometry for a session opened from a console row rather than a pane. */
 const DEFAULT_ROWS = 24
@@ -95,6 +103,8 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
    */
   const chain = useMemo(() => (profile ? resolveJumpChain(profile, hosts) : null), [profile, hosts])
   const chainBroken = Boolean(profile?.jumpHostId) && chain === null
+
+  const { state: probeState, probe } = useSshProbe(profile, hosts)
 
   const forwards = useMemo(() => {
     if (!profile) return []
@@ -193,6 +203,17 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           <DeviceFactRow label={t("facts.route")}>
             <SshRouteFact chain={chain} broken={chainBroken} />
           </DeviceFactRow>
+          {/*
+            Only ever from a connection this app made. There is no way to learn
+            a fingerprint without one, so an untested host shows nothing here
+            rather than a placeholder that reads as a missing value.
+          */}
+          {probeState.status === "settled" && probeState.outcome.kind === "reachable" ? (
+            <DeviceFactRow label={t("facts.hostKey")} mono>
+              {shortenFingerprint(probeState.outcome.hostKeyFingerprint) ??
+                probeState.outcome.hostKeyFingerprint}
+            </DeviceFactRow>
+          ) : null}
         </DeviceFactList>
       ) : null}
 
@@ -241,6 +262,21 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           )}
           {busy ? t("connecting") : t("connect")}
         </Button>
+        {/*
+          A real connection, so it is never automatic and it is never implied
+          by opening the page. What it costs is stated below rather than
+          discovered in an auth log.
+        */}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={probe}
+          disabled={!local || !profile || chainBroken || probeState.status === "probing"}
+          data-testid="ssh-probe"
+        >
+          <RadioIcon className="size-3.5" />
+          {probeState.status === "probing" ? t("probe.running") : t("probe.action")}
+        </Button>
         <Button asChild size="sm" variant="ghost" data-testid="ssh-edit">
           <Link href="/settings?section=terminal">
             <SettingsIcon className="size-3.5" />
@@ -248,6 +284,8 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           </Link>
         </Button>
       </div>
+
+      <SshProbeResult state={probeState} />
 
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid="ssh-connect-error">
@@ -259,6 +297,49 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         <TerminalIcon className="size-3" aria-hidden />
         {t("shellOnly")}
       </p>
+    </div>
+  )
+}
+
+/**
+ * What the last Test connection found, and what running one costs.
+ *
+ * The cost line is not decoration. A probe authenticates, so it lands in the
+ * target's and every bastion's auth log, it can raise an ssh-agent passphrase
+ * prompt, and on first contact it learns the host key through the same silent
+ * TOFU path a session uses. A button that quietly does all three should say so
+ * before it is pressed, not after somebody asks why a key trusted itself.
+ */
+function SshProbeResult({ state }: { state: SshProbeState }) {
+  const t = useTranslations("devices.ssh")
+  return (
+    <div className="space-y-1" data-testid="ssh-probe-result">
+      {state.status === "settled" ? (
+        <p
+          className={
+            state.outcome.kind === "reachable"
+              ? "text-xs text-emerald-600 dark:text-emerald-400"
+              : "text-xs text-destructive"
+          }
+          role="status"
+        >
+          {state.outcome.kind === "reachable"
+            ? /*
+                `learned` means this probe is what wrote the key. Saying so is
+                the only notice the user gets that a trust decision was made on
+                their behalf.
+              */
+              t(
+                state.outcome.hostKeyStatus === "learned"
+                  ? "probe.reachableLearned"
+                  : "probe.reachableVerified"
+              )
+            : state.outcome.kind === "unreachable"
+              ? t("probe.unreachable", { message: state.outcome.message })
+              : t("probe.invalid", { reason: state.outcome.reason })}
+        </p>
+      ) : null}
+      <p className="text-[11px] text-muted-foreground">{t("probe.cost")}</p>
     </div>
   )
 }
