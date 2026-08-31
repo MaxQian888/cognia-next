@@ -95,7 +95,6 @@ describe("nodeCatalogEntry", () => {
   it("exposes the native desktop UIA-event trigger", () => {
     const e = nodeCatalogEntry("trigger.desktop.event")
     expect(e.category).toBe("trigger")
-    expect(e.experimental).not.toBe(true)
     expect(e.desktopOnly).toBe(true)
     expect(e.description).toMatch(/native Windows UI Automation/i)
   })
@@ -347,5 +346,29 @@ describe("searchCatalog", () => {
     expect(out.some((e) => (e.kind as string) === "demo.action.format")).toBe(true)
     expect(seen).toContain("demo")
     __resetPluginCatalogForTesting()
+  })
+
+  /**
+   * `hidden` was declared on `NodeCatalogEntry` from the start and set by zero
+   * built-ins, while two kinds whose own descriptions said "not hand-authored"
+   * sat in the palette and failed non-retryably the moment they were dropped.
+   */
+  it("keeps the synthesizer-only team nodes out of the palette", () => {
+    for (const kind of ["action.team.task.dispatch", "action.team.reconcile"] as const) {
+      expect(nodeCatalogEntry(kind).hidden).toBe(true)
+    }
+    const palette = new Set(groupedCatalog().flatMap((g) => g.entries.map((e) => e.kind)))
+    expect(palette.has("action.team.task.dispatch" as never)).toBe(false)
+    expect(palette.has("action.team.reconcile" as never)).toBe(false)
+    // Still catalogued, so a synthesized graph renders a real label and icon.
+    expect(nodeCatalogEntry("action.team.task.dispatch").label).toBe("Dispatch team task")
+  })
+
+  it("sections the oversized actions group and leaves the others flat", () => {
+    const groups = groupedCatalog()
+    const actions = groups.find((g) => g.category === "action")
+    expect(actions?.sections?.length).toBeGreaterThan(5)
+    expect(actions?.sections?.[0]?.section).toBe("agents")
+    expect(groups.find((g) => g.category === "trigger")?.sections).toBeUndefined()
   })
 })

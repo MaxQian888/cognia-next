@@ -21444,8 +21444,8 @@
         "empty": "还没有日志。",
         "filter": "{pluginId} 的结构化日志，generation {generation}",
         "missing": {
-          "wasm-no-channel": "WASM 插件没有 per-plugin 输出通道。宿主用抛错上报失败，会出现在上方的尝试诊断里，而不是这里。",
-          "vscode-no-channel": "VS Code 扩展宿主不提供 output channel。`window:outputChannelAppend` 在明确不可用清单里，扩展往那里写会拿到能力错误，什么都不会被缓冲。"
+          "vscode-no-channel": "VS Code 扩展宿主不提供 output channel。`window:outputChannelAppend` 在明确不可用清单里，扩展往那里写会拿到能力错误，什么都不会被缓冲。",
+          "wasm-no-channel": "WASM 插件没有 per-plugin 输出通道。宿主用抛错上报失败，会出现在上方的尝试诊断里，而不是这里。"
         },
         "title": "运行时日志",
         "unverified": "正在显示 {pluginId} 的全部 generation。尚未验证过任何一次激活，这些行可能来自上一次加载。",
@@ -45673,6 +45673,13 @@
       }
     },
     "node": {
+      "agentSummary": {
+        "label": "智能体配置",
+        "members": "{count} 名成员",
+        "skills": "{count} 个技能",
+        "steps": "{count} 个步骤",
+        "tools": "{count} 个工具"
+      },
       "aiBadge": {
         "label": "AI 生成的节点",
         "title": "由工作流 AI 助手生成 — 按 Ctrl+Z 撤销。"
@@ -46793,7 +46800,24 @@
       "recent": "最近使用",
       "recentHint": "你最近添加的节点。",
       "removeFromFavorites": "取消收藏",
-      "searchPlaceholder": "搜索节点…"
+      "searchPlaceholder": "搜索节点…",
+      "section": {
+        "agents": "智能体与团队",
+        "connectors": "连接器",
+        "desktop": "桌面与桌宠",
+        "eval": "评测",
+        "files-git": "文件与源代码管理",
+        "goals": "目标",
+        "human": "人工介入",
+        "memory": "记忆与数字分身",
+        "mobile": "移动端",
+        "other": "其他",
+        "plans": "计划",
+        "scheduler": "定时调度",
+        "sites": "站点",
+        "skills-tools": "技能与工具",
+        "terminal": "终端"
+      }
     },
     "templateLibrary": {
       "create": "创建工作流",

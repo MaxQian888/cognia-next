@@ -30,5 +30,22 @@
   "recent": "最近使用",
   "recentHint": "你最近添加的节点。",
   "removeFromFavorites": "取消收藏",
-  "searchPlaceholder": "搜索节点…"
+  "searchPlaceholder": "搜索节点…",
+  "section": {
+    "agents": "智能体与团队",
+    "plans": "计划",
+    "goals": "目标",
+    "memory": "记忆与数字分身",
+    "skills-tools": "技能与工具",
+    "connectors": "连接器",
+    "human": "人工介入",
+    "scheduler": "定时调度",
+    "desktop": "桌面与桌宠",
+    "files-git": "文件与源代码管理",
+    "terminal": "终端",
+    "sites": "站点",
+    "mobile": "移动端",
+    "eval": "评测",
+    "other": "其他"
+  }
 }

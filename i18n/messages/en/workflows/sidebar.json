@@ -30,5 +30,22 @@
   "recent": "Recently used",
   "recentHint": "Nodes you've added most recently.",
   "removeFromFavorites": "Remove from favorites",
-  "searchPlaceholder": "Search nodes…"
+  "searchPlaceholder": "Search nodes…",
+  "section": {
+    "agents": "Agents & teams",
+    "plans": "Plans",
+    "goals": "Goals",
+    "memory": "Memory & twin",
+    "skills-tools": "Skills & tools",
+    "connectors": "Connectors",
+    "human": "Human in the loop",
+    "scheduler": "Scheduler",
+    "desktop": "Desktop & pet",
+    "files-git": "Files & source control",
+    "terminal": "Terminal",
+    "sites": "Sites",
+    "mobile": "Mobile",
+    "eval": "Evaluation",
+    "other": "Other"
+  }
 }

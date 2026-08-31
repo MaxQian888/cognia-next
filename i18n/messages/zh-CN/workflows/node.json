@@ -1,4 +1,11 @@
 {
+  "agentSummary": {
+    "label": "智能体配置",
+    "tools": "{count} 个工具",
+    "skills": "{count} 个技能",
+    "members": "{count} 名成员",
+    "steps": "{count} 个步骤"
+  },
   "aiBadge": {
     "label": "AI 生成的节点",
     "title": "由工作流 AI 助手生成 — 按 Ctrl+Z 撤销。"

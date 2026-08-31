@@ -1,4 +1,11 @@
 {
+  "agentSummary": {
+    "label": "Agent configuration",
+    "tools": "{count, plural, =1 {1 tool} other {# tools}}",
+    "skills": "{count, plural, =1 {1 skill} other {# skills}}",
+    "members": "{count, plural, =1 {1 member} other {# members}}",
+    "steps": "{count, plural, =1 {1 step} other {# steps}}"
+  },
   "aiBadge": {
     "label": "AI-authored node",
     "title": "Authored by the workflow-AI assistant — Ctrl+Z to revert."

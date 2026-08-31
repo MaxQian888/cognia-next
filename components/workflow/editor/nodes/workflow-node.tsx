@@ -13,6 +13,7 @@ import {
   Lock as LockIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
+import { agentNodeSummary, type AgentNodeSummary } from "@/lib/workflow/editor/agent-node-summary"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
@@ -109,6 +110,42 @@ function StatusCornerBadge({ status }: { status: NodeRunStatus }) {
     >
       <Icon className={cn("size-3", status === "running" && "animate-spin")} aria-hidden="true" />
     </span>
+  )
+}
+
+/**
+ * One compact line of an agent-shaped node's configuration. Rendered on the
+ * card so the canvas carries the shape of the run, with everything else (the
+ * prompt, credentials, temperature, schema, retry policy) left to the
+ * inspector.
+ */
+function AgentSummaryRow({ summary }: { summary: AgentNodeSummary }) {
+  const t = useTranslations("workflows.node.agentSummary")
+  const chips: Array<{ key: string; text: string }> = []
+  if (summary.model) chips.push({ key: "model", text: summary.model })
+  if (summary.persona) chips.push({ key: "persona", text: summary.persona })
+  if (summary.tools) chips.push({ key: "tools", text: t("tools", { count: summary.tools }) })
+  if (summary.skills) chips.push({ key: "skills", text: t("skills", { count: summary.skills }) })
+  if (summary.members)
+    chips.push({ key: "members", text: t("members", { count: summary.members }) })
+  if (summary.steps) chips.push({ key: "steps", text: t("steps", { count: summary.steps }) })
+  if (chips.length === 0) return null
+  return (
+    <div
+      className="mt-1 flex flex-wrap items-center gap-1"
+      data-testid="wf-node-agent-summary"
+      aria-label={t("label")}
+    >
+      {chips.map((chip) => (
+        <span
+          key={chip.key}
+          data-chip={chip.key}
+          className="max-w-[10rem] truncate rounded-pill bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
+        >
+          {chip.text}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -370,6 +407,13 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
   const showLastRun = !!effectiveLastRun && status === "idle"
+  // Which model, how many tools, how many teammates: the three facts that tell
+  // two agent nodes apart without opening either. Derived from params already
+  // on the node, so it costs a read and no fetch.
+  const agentSummary = useMemo(
+    () => agentNodeSummary(data.kind, data.params as Record<string, unknown> | undefined),
+    [data.kind, data.params]
+  )
   // Sticky note nodes use the user-picked color instead of the default
   // annotation palette — see `NoteConfig` in inspector/forms/index.tsx.
   const stickyColor =
@@ -542,6 +586,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             ) : null}
           </div>
           <div className="text-[10px] uppercase tracking-wide opacity-70">{data.kind}</div>
+          {agentSummary ? <AgentSummaryRow summary={agentSummary} /> : null}
           {data.notes ? (
             <div className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{data.notes}</div>
           ) : null}

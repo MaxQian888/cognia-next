@@ -15,6 +15,7 @@ import {
   type WorkflowNodeKind,
 } from "@/types/workflow/visual"
 import type { CapabilityId } from "@/lib/platform/capabilities"
+import { PALETTE_SECTIONS, paletteSection, type PaletteSection } from "./palette-sections"
 
 export interface NodeCatalogEntry {
   kind: WorkflowNodeKind
@@ -41,13 +42,6 @@ export interface NodeCatalogEntry {
    * {@link effectiveRequires}).
    */
   requires?: readonly CapabilityId[]
-  /**
-   * True if the node is authored but not yet driven by a real runtime
-   * producer — authors can drop it on a canvas but it will only fire in
-   * manual mode, never from the real event it advertises. The editor should
-   * badge these so users aren't misled into building workflows that never run.
-   */
-  experimental?: boolean
   /**
    * Set on plugin-contributed entries; absent for built-ins. Used by the
    * sidebar to render a per-plugin sub-group inside the "Plugin nodes"
@@ -312,6 +306,11 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     keywords: ["team", "agents", "multi", "supervisor"],
   },
   "action.team.task.dispatch": {
+    // Synthesizer-only: the executor needs the per-run TeamRunContext that
+    // only `runTeamLifecycle` registers, so a hand-placed copy always fails
+    // non-retryably. Kept in the catalog for its label and icon, out of the
+    // palette so it cannot be dropped. See diagnostics/checks/synthesizer-only.
+    hidden: true,
     label: "Dispatch team task",
     description:
       "Internal node emitted by the agent-team synthesizer per ADR-0022. One node per AgentTeamTask; selects a teammate from the per-run TeammatePool. Not hand-authored.",
@@ -319,6 +318,11 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     keywords: ["team", "task", "dispatch", "synthesized", "internal"],
   },
   "action.team.reconcile": {
+    // Synthesizer-only: the executor needs the per-run TeamRunContext that
+    // only `runTeamLifecycle` registers, so a hand-placed copy always fails
+    // non-retryably. Kept in the catalog for its label and icon, out of the
+    // palette so it cannot be dropped. See diagnostics/checks/synthesizer-only.
+    hidden: true,
     label: "Reconcile agent worktrees",
     description:
       "Under workspace isolation, reconcile the per-dispatch agent branches produced so far in this run — merge-all / select / pipeline. Runs inside a team run (reads the per-run worktree ledger).",
@@ -1514,10 +1518,37 @@ export function nodeCatalogEntry(kind: WorkflowNodeKind): NodeCatalogEntry {
  * group at the bottom; per-pluginId sub-grouping is the sidebar component's
  * responsibility (so it can pick its own sub-group label / icon).
  */
+export interface CatalogGroup {
+  category: WorkflowNodeCategory | "plugin"
+  entries: NodeCatalogEntry[]
+  /**
+   * Sub-sections, present only for a category big enough to need them (today:
+   * `action`, which holds 124 of the 177 built-in entries). Absent means "render
+   * `entries` as one flat list", which is what every other category does.
+   */
+  sections?: Array<{ section: PaletteSection; entries: NodeCatalogEntry[] }>
+}
+
+/** Split a group's entries into ordered palette sections, dropping empties. */
+function sectionsFor(entries: NodeCatalogEntry[]): CatalogGroup["sections"] {
+  const buckets = new Map<PaletteSection, NodeCatalogEntry[]>()
+  for (const entry of entries) {
+    const section = paletteSection(entry.kind)
+    if (!section) return undefined
+    const bucket = buckets.get(section)
+    if (bucket) bucket.push(entry)
+    else buckets.set(section, [entry])
+  }
+  return PALETTE_SECTIONS.flatMap((section) => {
+    const bucket = buckets.get(section)
+    return bucket && bucket.length > 0 ? [{ section, entries: bucket }] : []
+  })
+}
+
 export function groupedCatalog(opts?: {
   includeDesktopOnly?: boolean
   includeHidden?: boolean
-}): Array<{ category: WorkflowNodeCategory | "plugin"; entries: NodeCatalogEntry[] }> {
+}): CatalogGroup[] {
   const desktopOnly = opts?.includeDesktopOnly ?? true
   const includeHidden = opts?.includeHidden ?? false
   const order: WorkflowNodeCategory[] = [
@@ -1529,13 +1560,18 @@ export function groupedCatalog(opts?: {
     "io",
     "annotation",
   ]
-  const builtinGroups = order.map((category) => ({
-    category: category as WorkflowNodeCategory | "plugin",
-    entries: NODE_CATALOG.filter(
+  const builtinGroups: CatalogGroup[] = order.map((category) => {
+    const entries = NODE_CATALOG.filter(
       (e) =>
         e.category === category && (includeHidden || !e.hidden) && (desktopOnly || !e.desktopOnly)
-    ),
-  }))
+    )
+    const sections = sectionsFor(entries)
+    return {
+      category: category as WorkflowNodeCategory | "plugin",
+      entries,
+      ...(sections ? { sections } : {}),
+    }
+  })
   const pluginEntries = [...pluginCatalog.values()].filter(
     (e) => (includeHidden || !e.hidden) && (desktopOnly || !e.desktopOnly)
   )

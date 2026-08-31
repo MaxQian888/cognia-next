@@ -546,4 +546,23 @@ describe("locked nodes", () => {
     renderNode({ store })
     expect(screen.queryByTestId("wf-node-lock-badge")).toBeNull()
   })
+
+  it("summarises an agent node's model and tool count on the card", () => {
+    // Every mature builder puts the model and the tool count on the node
+    // itself. This one showed "Agent turn" and nothing else, so telling two
+    // agent nodes apart meant opening both inspectors.
+    renderNode({
+      kind: "action.agent.turn",
+      label: "Draft the reply",
+      params: { model: "anthropic/claude-opus-5", allowedTools: ["Read", "Write", "Bash"] },
+    })
+    const summary = screen.getByTestId("wf-node-agent-summary")
+    expect(summary.querySelector('[data-chip="model"]')?.textContent).toBe("claude-opus-5")
+    expect(summary.querySelector('[data-chip="tools"]')?.textContent).toContain("3")
+  })
+
+  it("renders no summary row for a node that carries no agent configuration", () => {
+    renderNode({ kind: "flow.branch", label: "Branch" })
+    expect(screen.queryByTestId("wf-node-agent-summary")).toBeNull()
+  })
 })

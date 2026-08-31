@@ -155,4 +155,15 @@ describe("NodeSearchSidebar", () => {
       expect(screen.getByTestId("wf-sidebar-demo.action.format")).toBeInTheDocument()
     })
   })
+
+  it("splits the oversized actions group into palette sections", () => {
+    // 124 of the 177 built-in entries share the `action` category, so before
+    // this the agent node sat in one flat list below every scheduler, git and
+    // mobile node.
+    mount()
+    expect(screen.getByTestId("wf-palette-section-agents")).toBeInTheDocument()
+    expect(screen.getByTestId("wf-palette-section-plans")).toBeInTheDocument()
+    // Triggers stay flat: that group already reads as one list.
+    expect(screen.queryByTestId("wf-palette-section-other")).toBeNull()
+  })
 })

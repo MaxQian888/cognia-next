@@ -25,8 +25,10 @@ import {
   subscribePluginCatalog,
   getPluginCatalogSnapshot,
   nodeCatalogEntry,
+  type CatalogGroup,
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
+import type { PaletteSection } from "@/lib/workflow/nodes/palette-sections"
 import { tNodeField } from "@/lib/workflow/i18n/node-translate"
 import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import { usePalettePreferencesStore } from "@/stores/workflow"
@@ -193,6 +195,8 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
                 title={t(`category.${group.category}`)}
                 hint={t(`hint.${group.category}`)}
                 entries={group.entries}
+                sections={group.sections}
+                sectionTitle={(section) => t(`section.${section}`)}
                 onAddNodeAtCenter={onAddNodeAtCenter}
               />
             ))}
@@ -212,11 +216,16 @@ function NodeCategoryGroup({
   title,
   hint,
   entries,
+  sections,
+  sectionTitle,
   onAddNodeAtCenter,
 }: {
   title: string
   hint: string
   entries: NodeCatalogEntry[]
+  /** Present only for a category too big to read as one list (today: actions). */
+  sections?: CatalogGroup["sections"]
+  sectionTitle?: (section: PaletteSection) => string
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
   const [open, setOpen] = useState(true)
@@ -237,9 +246,26 @@ function NodeCategoryGroup({
             view — the palette renders the full catalog unvirtualized, so this
             is the cheap 80% of a virtual list for plugin-heavy catalogs. */}
         <div className="px-2 pb-1 space-y-1 [content-visibility:auto] [contain-intrinsic-size:auto_300px]">
-          {entries.map((entry) => (
-            <NodeChip key={entry.kind} entry={entry} onAddNodeAtCenter={onAddNodeAtCenter} />
-          ))}
+          {sections && sectionTitle
+            ? sections.map(({ section, entries: sectionEntries }) => (
+                <div key={section} data-testid={`wf-palette-section-${section}`}>
+                  <p className="px-1 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                    {sectionTitle(section)}
+                  </p>
+                  <div className="space-y-1">
+                    {sectionEntries.map((entry) => (
+                      <NodeChip
+                        key={entry.kind}
+                        entry={entry}
+                        onAddNodeAtCenter={onAddNodeAtCenter}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            : entries.map((entry) => (
+                <NodeChip key={entry.kind} entry={entry} onAddNodeAtCenter={onAddNodeAtCenter} />
+              ))}
         </div>
       </CollapsibleContent>
     </Collapsible>
