@@ -7,6 +7,7 @@ import {
   incrementTemplateVersion,
   suggestTemplateVersionBump,
   validateTemplateDefinition,
+  verifyTemplateDefinitionHash,
   type TemplateCompatibility,
   type TemplateDefinitionEnvelope,
   type TemplateDependency,
@@ -25,7 +26,12 @@ import {
   type ExportedTemplatePackage,
   type InspectedTemplatePackage,
 } from "./package"
-import type { TemplateInstanceRecord, TemplateRepository, TemplateResourceRef } from "./repository"
+import type {
+  StoredTemplatePackage,
+  TemplateInstanceRecord,
+  TemplateRepository,
+  TemplateResourceRef,
+} from "./repository"
 
 export interface TemplateBinding {
   slotId: string
@@ -60,6 +66,19 @@ export interface TemplatePreflightPlan {
   issues: TemplatePreflightIssue[]
   operations: TemplateOperation[]
   requiresConfirmation: boolean
+}
+
+/** What `TemplateService.verifyPackage` can still establish without the bytes. */
+export interface TemplatePackageVerification {
+  key: string
+  trust: TemplateTrust
+  /** Whether the manifest carried a signature at import time. */
+  signed: boolean
+  definitions: Array<{
+    id: string
+    version: string
+    state: "verified" | "missing" | "hash-mismatch"
+  }>
 }
 
 export interface TemplateInstantiationResult {
@@ -397,12 +416,26 @@ export class TemplateService {
     return inspectTemplatePackage(bytes)
   }
 
+  /**
+   * Bundle one or more releases into a portable package.
+   *
+   * `description` and `compatibility` are on the manifest format and were the
+   * two fields the Studio's single caller never filled in, so every exported
+   * package arrived nameless beyond its title and claimed no platform range at
+   * all. `definitionIds` has always accepted a list, and the format allows 256
+   * of them.
+   */
   async exportPackage(input: {
     id: string
     version: string
     name: string
+    description?: string
+    compatibility?: TemplateCompatibility
     definitionIds: Array<{ id: string; version: string }>
   }): Promise<ExportedTemplatePackage> {
+    if (input.definitionIds.length === 0) {
+      throw new Error("Template package export needs at least one release")
+    }
     const definitions: TemplateDefinitionEnvelope[] = []
     for (const identity of input.definitionIds) {
       const definition = await this.repository.getRelease(identity.id, identity.version)
@@ -415,9 +448,167 @@ export class TemplateService {
       id: input.id,
       version: input.version,
       name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.compatibility
+        ? {
+            compatibility: {
+              platforms: [...input.compatibility.platforms],
+              ...(input.compatibility.minHostVersion
+                ? { minHostVersion: input.compatibility.minHostVersion }
+                : {}),
+              ...(input.compatibility.maxHostVersion
+                ? { maxHostVersion: input.compatibility.maxHostVersion }
+                : {}),
+            },
+          }
+        : {}),
       entrypoints: definitions.map((definition) => definition.id),
       definitions,
     })
+  }
+
+  /**
+   * Re-check an imported package without its bytes.
+   *
+   * The repository stores the manifest, the fingerprint and the definitions,
+   * not the zip, so the signature itself cannot be re-verified here. What can
+   * be re-checked is the pair that actually drifts: publisher trust, which
+   * flips from `signed-unknown` to `verified-publisher` the moment the user
+   * accepts that key elsewhere, and each stored release's own content hash,
+   * which catches a definition row that no longer hashes to what it claims.
+   */
+  async verifyPackage(key: string): Promise<TemplatePackageVerification> {
+    const storedPackage = (await this.repository.listPackages()).find(
+      (candidate) => candidate.key === key
+    )
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    const trust = await this.resolvePackageTrust(storedPackage.manifest.signature?.publicKey)
+    await this.repository.reconcilePackageTrust(key, trust)
+    const definitions: TemplatePackageVerification["definitions"] = []
+    for (const identity of storedPackage.manifest.definitions) {
+      const release = await this.repository.getRelease(identity.id, identity.version)
+      definitions.push({
+        id: identity.id,
+        version: identity.version,
+        state: !release
+          ? "missing"
+          : (await verifyTemplateDefinitionHash(release))
+            ? "verified"
+            : "hash-mismatch",
+      })
+    }
+    this.catalog.replaceSource("user", await this.repository.listDefinitions())
+    return {
+      key,
+      trust,
+      signed: Boolean(storedPackage.manifest.signature),
+      definitions,
+    }
+  }
+
+  /**
+   * Withdraw a package without deleting it.
+   *
+   * `StoredTemplatePackage.yankedAt` has been on the record type since the
+   * table was added and nothing ever set it. Yanking is the reversible half of
+   * `removePackage`: the releases stay installed, so anything already
+   * instantiated from them keeps working, and the row carries the mark that
+   * says not to build anything new on it.
+   */
+  async yankPackage(key: string, yanked: boolean): Promise<StoredTemplatePackage> {
+    const storedPackage = (await this.repository.listPackages()).find(
+      (candidate) => candidate.key === key
+    )
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    const next: StoredTemplatePackage = yanked
+      ? { ...storedPackage, yankedAt: storedPackage.yankedAt ?? this.now() }
+      : (({ yankedAt: _yankedAt, ...rest }) => rest)(storedPackage)
+    await this.repository.putPackage(next)
+    return next
+  }
+
+  /**
+   * Uninstall a package and the releases it brought.
+   *
+   * Instances built from those releases are not destroyed. They are marked
+   * `sourceUnavailableAt`, the same state `tombstoneCatalogSource` puts a
+   * plugin's instances into when the plugin goes away, so the instance card can
+   * offer to rebind rather than the row simply becoming a mystery.
+   */
+  async removePackage(key: string): Promise<{ definitions: number; instances: number }> {
+    const storedPackage = (await this.repository.listPackages()).find(
+      (candidate) => candidate.key === key
+    )
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    const orphanedIds = new Set(storedPackage.manifest.definitions.map((entry) => entry.id))
+    const definitions = await this.repository.removePackage(key)
+    let instances = 0
+    for (const instance of await this.repository.listInstances()) {
+      if (!orphanedIds.has(instance.source.definitionId)) continue
+      if (instance.sourceUnavailableAt) continue
+      await this.repository.putInstance({
+        ...instance,
+        sourceUnavailableAt: this.now(),
+        updatedAt: this.now(),
+      })
+      instances += 1
+    }
+    await this.hydrateCatalog()
+    return { definitions, instances }
+  }
+
+  /**
+   * Rebuild the package bytes from what the repository still holds.
+   *
+   * The signature cannot come back with them: the private key never entered
+   * this app, so a re-export is always unsigned even when the original was
+   * signed. Callers say so before handing the file over.
+   */
+  async reexportPackage(key: string): Promise<ExportedTemplatePackage> {
+    const storedPackage = (await this.repository.listPackages()).find(
+      (candidate) => candidate.key === key
+    )
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    const manifest = storedPackage.manifest
+    return this.exportPackage({
+      id: manifest.id,
+      version: manifest.version,
+      name: manifest.name,
+      ...(manifest.description ? { description: manifest.description } : {}),
+      ...(manifest.compatibility?.platforms
+        ? {
+            compatibility: {
+              platforms: [...manifest.compatibility.platforms],
+              ...(manifest.compatibility.minHostVersion
+                ? { minHostVersion: manifest.compatibility.minHostVersion }
+                : {}),
+              ...(manifest.compatibility.maxHostVersion
+                ? { maxHostVersion: manifest.compatibility.maxHostVersion }
+                : {}),
+            },
+          }
+        : {}),
+      definitionIds: manifest.definitions.map((entry) => ({
+        id: entry.id,
+        version: entry.version,
+      })),
+    })
+  }
+
+  /**
+   * Delete a draft outright.
+   *
+   * `repository.deleteDraft` existed for the migration rollback path only, so a
+   * draft created by mistake, or a conflict draft a clashing save forked off,
+   * could be edited forever but never removed. Releases are deliberately not
+   * reachable from here: a published version is immutable by construction and
+   * `deprecate` is the way to withdraw one.
+   */
+  async deleteDraft(id: string): Promise<void> {
+    const draft = await this.repository.getDraft(id)
+    if (!draft) throw new Error(`Template draft ${id} not found`)
+    await this.repository.deleteDraft(id)
+    await this.hydrateCatalog()
   }
 
   async importPackage(

@@ -184,6 +184,23 @@ export class DexieTemplateRepository implements TemplateRepository {
     })
   }
 
+  async removePackage(key: string): Promise<number> {
+    const db = getDb()
+    return db.transaction("rw", db.templatePackages, db.templateDefinitions, async () => {
+      const storedPackage = await db.templatePackages.get(key)
+      if (!storedPackage) throw new Error(`Template package ${key} not found`)
+      let removed = 0
+      for (const identity of storedPackage.manifest.definitions) {
+        const storageKey = releaseKey(identity.id, identity.version)
+        if (!(await db.templateDefinitions.get(storageKey))) continue
+        await db.templateDefinitions.delete(storageKey)
+        removed += 1
+      }
+      await db.templatePackages.delete(key)
+      return removed
+    })
+  }
+
   async putInstance(value: TemplateInstanceRecord): Promise<void> {
     await getDb().templateInstances.put(value)
   }

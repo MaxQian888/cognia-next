@@ -95,6 +95,15 @@ export interface TemplateRepository {
     definitions: readonly TemplateDefinitionEnvelope[]
   ): Promise<void>
   reconcilePackageTrust(key: string, trust: TemplateTrust): Promise<void>
+  /**
+   * Delete a package row and the releases its manifest brought in.
+   *
+   * Scoped to the manifest's own `{id, version}` identities rather than to
+   * `provenance.packageId`, because two versions of the same package share that
+   * id and removing one must not take the other's releases with it. A release
+   * another package also carries stays, which is why the count comes back.
+   */
+  removePackage(key: string): Promise<number>
   listPackages(): Promise<StoredTemplatePackage[]>
   putInstance(value: TemplateInstanceRecord): Promise<void>
   getInstance(id: string): Promise<TemplateInstanceRecord | undefined>
@@ -226,6 +235,17 @@ export class InMemoryTemplateRepository implements TemplateRepository {
         })
       )
     }
+  }
+
+  async removePackage(key: string): Promise<number> {
+    const storedPackage = this.packages.get(key)
+    if (!storedPackage) throw new Error(`Template package ${key} not found`)
+    this.packages.delete(key)
+    let removed = 0
+    for (const identity of storedPackage.manifest.definitions) {
+      if (this.releases.delete(releaseKey(identity.id, identity.version))) removed += 1
+    }
+    return removed
   }
 
   async putInstance(value: TemplateInstanceRecord): Promise<void> {

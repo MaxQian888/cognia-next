@@ -2,7 +2,7 @@ import JSZip from "jszip"
 import { generateKeyPairSync, sign } from "node:crypto"
 
 import { TemplateCatalog } from "./catalog"
-import { createTemplateDefinition } from "./contracts"
+import { createTemplateDefinition, TEMPLATE_API_VERSION } from "./contracts"
 import {
   exportTemplatePackage,
   templatePackageSignaturePayload,
@@ -378,5 +378,172 @@ describe("TemplateService lifecycle", () => {
     const detached = await service.detachInstance(instance.id)
     expect(detached.detachedAt).toBe(1_000)
     await expect(service.planUpdate(instance.id, second.version!)).rejects.toThrow(/detached/i)
+  })
+})
+
+describe("TemplateService package maintenance", () => {
+  async function importedPackage(trusted = false) {
+    const { bytes, publicKey } = await createSignedPackage()
+    const { repository, catalog, service } = makeService({
+      isPublisherTrusted: async (key) => trusted && key === publicKey,
+    })
+    const inspected = await service.importPackage(bytes, { source: "file", confirmed: true })
+    return {
+      repository,
+      catalog,
+      service,
+      key: `${inspected.manifest.id}@${inspected.manifest.version}`,
+    }
+  }
+
+  it("re-resolves publisher trust and confirms each release still hashes to its claim", async () => {
+    const { service } = await importedPackage(true)
+
+    const report = await service.verifyPackage("com.example.marketplace@1.0.0")
+
+    expect(report.signed).toBe(true)
+    expect(report.trust).toBe("verified-publisher")
+    expect(report.definitions).toEqual([
+      { id: "skill.marketplace", version: "1.0.0", state: "verified" },
+    ])
+  })
+
+  it("reports a release the repository no longer holds rather than claiming it is fine", async () => {
+    const { repository, service, key } = await importedPackage()
+    await repository.removePackage(key)
+    // The package row is gone with it, so re-import the manifest half only:
+    // what matters is that a manifest identity with no release reads "missing".
+    await repository.putPackage({
+      key,
+      manifest: {
+        schemaVersion: 1,
+        apiVersion: TEMPLATE_API_VERSION,
+        id: "com.example.marketplace",
+        version: "1.0.0",
+        name: "Marketplace package",
+        entrypoints: ["skill.marketplace"],
+        definitions: [
+          {
+            path: "definitions/skill.marketplace.json",
+            sha256: "0".repeat(64),
+            id: "skill.marketplace",
+            version: "1.0.0",
+          },
+        ],
+        assets: [],
+      },
+      fingerprint: "fingerprint",
+      trust: "unsigned",
+      importedAt: 1,
+      source: "file",
+    })
+
+    const report = await service.verifyPackage(key)
+
+    expect(report.definitions).toEqual([
+      { id: "skill.marketplace", version: "1.0.0", state: "missing" },
+    ])
+  })
+
+  it("marks a package yanked and takes the mark off again", async () => {
+    const { repository, service, key } = await importedPackage()
+
+    // `yankedAt` has been on the record type since the table existed and
+    // nothing ever wrote it.
+    expect((await service.yankPackage(key, true)).yankedAt).toBe(1_000)
+    expect((await repository.listPackages())[0].yankedAt).toBe(1_000)
+
+    expect((await service.yankPackage(key, false)).yankedAt).toBeUndefined()
+    expect((await repository.listPackages())[0].yankedAt).toBeUndefined()
+  })
+
+  it("removes a package and leaves its instances rebindable rather than mysterious", async () => {
+    const { repository, service, key } = await importedPackage()
+    const plan = await service.preflight({
+      definitionId: "skill.marketplace",
+      version: "1.0.0",
+      platform: "desktop",
+      bindings: {},
+    })
+    await service.instantiate({ plan, confirmed: true })
+
+    const removed = await service.removePackage(key)
+
+    expect(removed).toEqual({ definitions: 1, instances: 1 })
+    expect(await repository.listPackages()).toEqual([])
+    expect(await repository.getRelease("skill.marketplace", "1.0.0")).toBeUndefined()
+    // Not destroyed, just orphaned, so the instance card can offer to rebind.
+    expect((await repository.listInstances())[0].sourceUnavailableAt).toBe(1_000)
+  })
+
+  it("rebuilds the package bytes without the signature it can no longer produce", async () => {
+    const { service, key } = await importedPackage()
+
+    const reexported = await service.reexportPackage(key)
+
+    expect(reexported.manifest.id).toBe("com.example.marketplace")
+    expect(reexported.manifest.definitions).toHaveLength(1)
+    // The private key never entered this app, so a re-export is always
+    // unsigned even though the original arrived signed.
+    expect(reexported.manifest.signature).toBeUndefined()
+  })
+
+  it("carries the description and compatibility the manifest format allows", async () => {
+    const { service } = makeService()
+    await service.createDraft({
+      id: "user.skill.exported",
+      domain: "skill",
+      metadata: { name: "Exported" },
+      payload: { content: "x" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const released = await service.publish("user.skill.exported", {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+
+    const exported = await service.exportPackage({
+      id: "com.example.bundle",
+      version: "1.0.0",
+      name: "Bundle",
+      description: "Two of ours",
+      compatibility: { platforms: ["desktop"], minHostVersion: "2.0.0" },
+      definitionIds: [{ id: released.id, version: released.version! }],
+    })
+
+    expect(exported.manifest.description).toBe("Two of ours")
+    expect(exported.manifest.compatibility).toEqual({
+      platforms: ["desktop"],
+      minHostVersion: "2.0.0",
+    })
+  })
+
+  it("refuses an export with nothing in it", async () => {
+    const { service } = makeService()
+    await expect(
+      service.exportPackage({ id: "a", version: "1.0.0", name: "A", definitionIds: [] })
+    ).rejects.toThrow(/at least one release/)
+  })
+
+  it("deletes a draft and leaves published releases alone", async () => {
+    const { repository, service } = makeService()
+    await service.createDraft({
+      id: "user.skill.scratch",
+      domain: "skill",
+      metadata: { name: "Scratch" },
+      payload: { content: "x" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+
+    await service.deleteDraft("user.skill.scratch")
+
+    expect(await repository.getDraft("user.skill.scratch")).toBeUndefined()
+    await expect(service.deleteDraft("user.skill.scratch")).rejects.toThrow(/not found/)
   })
 })
