@@ -154,9 +154,9 @@ export class E2BWorkspaceBackend implements E2BBackend {
     } catch {
       // The handle is being reaped: a sandbox that is already gone, or an API
       // call that times out, must not reject and abort the caller's sweep.
-      // Drop the tracking entry so the pool cannot retain it forever.
-      this.pool.forget(handle.path)
-      return true
+      // Keep the released entry in the pool's cleanup ledger so a later
+      // owner release, handle removal, or shutdown disposal can retry it.
+      return false
     }
   }
 

@@ -2,37 +2,31 @@
  * @jest-environment jsdom
  */
 
-// One double for the SDK subpath the tools import, not six for the host
-// tables behind it.
-jest.mock("@cognia/plugin-sdk/api/resources", () => ({
-  listCharacters: jest.fn(async () => []),
-  listTwins: jest.fn(async () => []),
-  listSkills: jest.fn(async () => []),
-  listAdapterInstances: jest.fn(async () => []),
-  listMcpServers: jest.fn(async () => []),
-  listPlugins: jest.fn(async () => []),
-}))
-
-import {
-  listAdapterInstances,
-  listCharacters,
-  listMcpServers,
-  listPlugins,
-  listSkills,
-  listTwins,
-} from "@cognia/plugin-sdk/api/resources"
-import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
-import { buildResourceTools } from "./resource-tools"
+import type { PluginContext, PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
+import { buildResourceTools as buildResourceToolsWithApi } from "./resource-tools"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
 
 const mList = {
-  characters: listCharacters as jest.Mock,
-  twins: listTwins as jest.Mock,
-  skills: listSkills as jest.Mock,
-  connectors: listAdapterInstances as jest.Mock,
-  mcp: listMcpServers as jest.Mock,
-  plugins: listPlugins as jest.Mock,
+  characters: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listCharacters"]>,
+  twins: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listTwins"]>,
+  skills: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listSkills"]>,
+  connectors: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listAdapterInstances"]>,
+  mcp: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listMcpServers"]>,
+  plugins: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listPlugins"]>,
+}
+
+const resources = {
+  listCharacters: mList.characters,
+  listTwins: mList.twins,
+  listSkills: mList.skills,
+  listAdapterInstances: mList.connectors,
+  listMcpServers: mList.mcp,
+  listPlugins: mList.plugins,
+} as unknown as PluginContext["resources"]
+
+function buildResourceTools(): PluginTool[] {
+  return buildResourceToolsWithApi(resources)
 }
 
 function findTool(tools: PluginTool[], name: string): PluginTool {
@@ -57,6 +51,8 @@ describe("resource tools — happy path", () => {
         model: "claude-opus-4-7",
         skillIds: ["s1"],
         twinId: "t1",
+        createdAt: 0,
+        updatedAt: 0,
       },
       {
         id: "c2",
@@ -64,6 +60,8 @@ describe("resource tools — happy path", () => {
         avatarColor: "#fff",
         systemPrompt: "DO NOT LEAK",
         skillIds: [],
+        createdAt: 0,
+        updatedAt: 0,
       },
     ])
     const tool = findTool(buildResourceTools(), "wf_list_characters")
@@ -115,6 +113,8 @@ describe("resource tools — happy path", () => {
         description: "review pull requests",
         content: "MARKDOWN BODY",
         tags: ["github"],
+        createdAt: 0,
+        updatedAt: 0,
       },
     ])
     const tool = findTool(buildResourceTools(), "wf_list_skills")
@@ -133,9 +133,18 @@ describe("resource tools — happy path", () => {
         type: "telegram",
         displayName: "Main bot",
         enabled: true,
+        trigger: {
+          rules: [],
+          blockers: [],
+          storeUnmatchedInDraftMode: false,
+        },
+        defaultMode: "auto",
         transportMode: "longpoll",
+        mediaModelPolicy: "local_extract_only",
         settings: { botToken: "SECRET", custom: "x" },
         credentialsRef: { keyringService: "cognia", accounts: ["botToken"] },
+        createdAt: 0,
+        updatedAt: 0,
       },
     ])
     const tool = findTool(buildResourceTools(), "wf_list_connectors")
@@ -164,6 +173,8 @@ describe("resource tools — happy path", () => {
         transport: "stdio",
         enabled: true,
         config: { command: "node", args: ["--secret"] },
+        createdAt: 0,
+        updatedAt: 0,
       },
     ])
     const tool = findTool(buildResourceTools(), "wf_list_mcp_servers")

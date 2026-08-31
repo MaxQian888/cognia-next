@@ -3,30 +3,18 @@
  */
 
 import type { PluginContext } from "@cognia/plugin-sdk"
-// Doubled at the SDK subpaths the plugin imports, not the host modules behind
-// them. The git store double is gone entirely: the plugin reads the repo root
+// The git store double is gone entirely: the plugin reads the repo root
 // through `ctx.git.getRoot()` now, so the test supplies it on the context.
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterSlashCommandsByPlugin: jest.fn(),
-}))
 jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
   readHostCapabilities: () => ({ tauri: true }),
 }))
 
-import {
-  registerSlashCommand,
-  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
-} from "@cognia/plugin-sdk/api/slash-command"
 import webClonePlugin, {
   parseWebCloneArgs,
   resolveOutput,
   buildJob,
   runWebCloneCommand,
 } from "./index"
-
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -171,11 +159,10 @@ describe("plugin definition", () => {
     }
     // Declared, not imperatively registered — the manager owns registration
     // (namespacing, conflict detection, palette entry) and teardown.
-    expect(registerMock).not.toHaveBeenCalled()
     const commands = (webClonePlugin.manifest as { commands?: Array<{ id: string }> }).commands
     expect(commands?.map((c) => c.id)).toEqual(["web-clone"])
     expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
     expect(webClonePlugin.deactivate).toBeUndefined()
-    expect(unregisterMock).not.toHaveBeenCalled()
+    expect((webClonePlugin.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
   })
 })

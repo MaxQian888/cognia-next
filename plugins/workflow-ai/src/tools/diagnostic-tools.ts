@@ -13,8 +13,7 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import { formatToolError, resolveStore } from "../store-bridge"
-import { explainLastRun, explainValidation } from "@cognia/plugin-sdk/api/workflow-editor"
+import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
@@ -41,16 +40,10 @@ export function buildDiagnosticTools(): PluginTool[] {
       },
       execute: async (args) => {
         try {
-          const { workflowId, store } = resolveStore({
+          const { workflowId } = resolveStore({
             workflowId: args.workflowId as string | undefined,
           })
-          const s = store.getState()
-          const nodes = s.nodes.map((n) => ({
-            id: n.id,
-            label: n.data.label ?? n.id,
-            kind: n.data.kind,
-          }))
-          const issues = explainValidation(s.validationByStepId, nodes)
+          const issues = getWorkflowApi().explainEditorValidation(workflowId)
           return { ok: true, workflowId, issues }
         } catch (err) {
           return formatToolError(err)
@@ -73,16 +66,10 @@ export function buildDiagnosticTools(): PluginTool[] {
       },
       execute: async (args) => {
         try {
-          const { workflowId, store } = resolveStore({
+          const { workflowId } = resolveStore({
             workflowId: args.workflowId as string | undefined,
           })
-          const s = store.getState()
-          const nodes = s.nodes.map((n) => ({
-            id: n.id,
-            label: n.data.label ?? n.id,
-            kind: n.data.kind,
-          }))
-          const report = explainLastRun(s.lastRunByStepId, nodes)
+          const report = getWorkflowApi().explainEditorLastRun(workflowId)
           return { ok: true, workflowId, ...report }
         } catch (err) {
           return formatToolError(err)

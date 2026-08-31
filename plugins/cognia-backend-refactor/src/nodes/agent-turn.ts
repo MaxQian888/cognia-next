@@ -18,11 +18,10 @@
 
 import {
   defineWorkflowNode,
+  type PluginContext,
   type StepExecutionContext,
   type StepExecutionResult,
 } from "@cognia/plugin-sdk"
-import { runPluginAgentTurn } from "@cognia/plugin-sdk/api/agent-turn"
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../characters/pack"
 
 /** Unprefixed kind — the host prefixes the pluginId. */
@@ -38,11 +37,19 @@ interface AgentTurnParams {
   timeoutSec?: number
 }
 
+export interface AgentTurnRuntime {
+  tauri: boolean
+  runCharacterTurn: PluginContext["agent"]["runCharacterTurn"]
+}
+
 function isKnownRole(role: string): role is RefactorRole {
   return (REFACTOR_ROLES as readonly string[]).includes(role)
 }
 
-export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepExecutionResult> {
+export async function executeAgentTurn(
+  ctx: StepExecutionContext,
+  runtime: AgentTurnRuntime
+): Promise<StepExecutionResult> {
   const params = (ctx.params ?? {}) as AgentTurnParams
   const prompt = (params.prompt ?? "").trim()
   const cwd = params.cwd?.trim()
@@ -64,7 +71,7 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   // The SDK's host-shell probe rather than `ctx.capabilities`: a node executor
   // receives a StepExecutionContext, which carries no capabilities API (the
   // node is declared `desktopOnly`).
-  if (!readHostCapabilities().tauri) {
+  if (!runtime.tauri) {
     throw new Error(
       "agent.turn requires the desktop runtime: the tool-enabled Claude turn is driven through the Tauri sidecar."
     )
@@ -76,7 +83,7 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
       : AGENT_TURN_DEFAULT_TIMEOUT_SEC
   ctx.log?.("info", `agent.turn: running ${characterId} in ${cwd}`)
 
-  const result = await runPluginAgentTurn({
+  const result = await runtime.runCharacterTurn({
     characterId,
     prompt,
     cwd,
@@ -103,50 +110,52 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 }
 
-export const AGENT_TURN_NODE = defineWorkflowNode({
-  kind: AGENT_TURN_KIND,
-  typeVersion: 1,
-  category: "plugin",
-  label: "Refactor Agent Turn",
-  description:
-    "Run a role persona as a synchronous, tool-enabled Claude turn scoped to the target repo. This is the node that actually edits code.",
-  iconName: "Bot",
-  keywords: ["refactor", "agent", "claude", "code", "edit", "go"],
-  desktopOnly: true,
-  retryable: false,
-  paramsSchema: {
-    type: "object",
-    properties: {
-      role: {
-        type: "string",
-        enum: [...REFACTOR_ROLES],
-        description: "Role persona to run (ignored when characterId is set).",
+export function createAgentTurnNode(runtime: AgentTurnRuntime) {
+  return defineWorkflowNode({
+    kind: AGENT_TURN_KIND,
+    typeVersion: 1,
+    category: "plugin",
+    label: "Refactor Agent Turn",
+    description:
+      "Run a role persona as a synchronous, tool-enabled Claude turn scoped to the target repo. This is the node that actually edits code.",
+    iconName: "Bot",
+    keywords: ["refactor", "agent", "claude", "code", "edit", "go"],
+    desktopOnly: true,
+    retryable: false,
+    paramsSchema: {
+      type: "object",
+      properties: {
+        role: {
+          type: "string",
+          enum: [...REFACTOR_ROLES],
+          description: "Role persona to run (ignored when characterId is set).",
+        },
+        characterId: {
+          type: "string",
+          description: "Explicit character id; overrides role.",
+        },
+        prompt: { type: "string", description: "The instruction for this turn." },
+        cwd: {
+          type: "string",
+          description: "Absolute path to the target repo (becomes the agent's working directory).",
+        },
+        sessionId: {
+          type: "string",
+          description: "Reuse a specific chat session; otherwise reused/created per role.",
+        },
+        timeoutSec: {
+          type: "number",
+          description: "Turn timeout in seconds (default 600).",
+        },
       },
-      characterId: {
-        type: "string",
-        description: "Explicit character id; overrides role.",
-      },
-      prompt: { type: "string", description: "The instruction for this turn." },
-      cwd: {
-        type: "string",
-        description: "Absolute path to the target repo (becomes the agent's working directory).",
-      },
-      sessionId: {
-        type: "string",
-        description: "Reuse a specific chat session; otherwise reused/created per role.",
-      },
-      timeoutSec: {
-        type: "number",
-        description: "Turn timeout in seconds (default 600).",
-      },
+      required: ["prompt", "cwd"],
+      additionalProperties: false,
     },
-    required: ["prompt", "cwd"],
-    additionalProperties: false,
-  },
-  defaultParams: {
-    role: "refactorer",
-    prompt: "",
-    cwd: "{{ $vars.repoPath }}",
-  },
-  execute: executeAgentTurn,
-})
+    defaultParams: {
+      role: "refactorer",
+      prompt: "",
+      cwd: "{{ $vars.repoPath }}",
+    },
+    execute: (ctx) => executeAgentTurn(ctx, runtime),
+  })
+}

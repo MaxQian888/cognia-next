@@ -1,9 +1,3 @@
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
-import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
-import { unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import definition from "./index"
 import { getPipelineDb } from "./db/runtime"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
@@ -13,29 +7,15 @@ import { TOPIC_DISCOVERY_TEMPLATE } from "./workflow/template"
 import { WRITING_CREW_TEMPLATE } from "./team/template"
 import { PLUGIN_ID } from "./ids"
 
-// Doubled at the SDK subpaths the plugin imports, not the host registries.
-jest.mock("@cognia/plugin-sdk/api/character-pack", () => ({
-  registerCharacterPack: jest.fn(),
-  unregisterCharacterPacksByPlugin: jest.fn(),
-}))
-jest.mock("@cognia/plugin-sdk/api/workflow-template", () => ({
-  refreshAllWorkflowTemplateWarnings: jest.fn(),
-}))
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  unregisterSlashCommandsByPlugin: jest.fn(),
-}))
 jest.mock("./commands", () => ({ handleZhihuCommand: jest.fn(() => "opened") }))
-
-const mockRegisterPack = registerCharacterPack as jest.Mock
-const mockUnregisterPack = unregisterCharacterPacksByPlugin as jest.Mock
-const mockRefresh = refreshAllWorkflowTemplateWarnings as jest.Mock
-const mockUnregisterCommands = unregisterCommandsByPlugin as jest.Mock
 
 function buildCtx(withDexie = true) {
   const disposeNode = jest.fn()
   const registerNode = jest.fn(() => disposeNode)
   const registerTool = jest.fn()
   const registerMcpServerPreset = jest.fn()
+  const registerPack = jest.fn()
+  const refreshTemplateWarnings = jest.fn()
   const table = jest.fn(() => ({}))
   return {
     ctx: {
@@ -43,13 +23,21 @@ function buildCtx(withDexie = true) {
       pluginPath: "/plugins/zhihu-content-pipeline",
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
       agent: { registerMcpServerPreset, registerTool },
-      workflow: { registerNode, registerTrigger: jest.fn(() => jest.fn()) },
+      session: { startSeededSession: jest.fn() },
+      characterPacks: { register: registerPack },
+      workflow: {
+        registerNode,
+        registerTrigger: jest.fn(() => jest.fn()),
+        refreshTemplateWarnings,
+      },
       dexie: withDexie ? { table, rawDb: jest.fn() } : undefined,
     },
     registerNode,
     registerTool,
     registerMcpServerPreset,
+    registerPack,
     disposeNode,
+    refreshTemplateWarnings,
   }
 }
 
@@ -94,11 +82,16 @@ describe("zhihu-content-pipeline manifest", () => {
 
 describe("zhihu-content-pipeline activate (with dexie)", () => {
   it("registers pack, persist tools, and the save-topics node (presets ride the manifest)", async () => {
-    const { ctx, registerNode, registerTool, registerMcpServerPreset } = buildCtx(true)
+    const {
+      ctx,
+      registerNode,
+      registerTool,
+      registerMcpServerPreset,
+      registerPack,
+      refreshTemplateWarnings,
+    } = buildCtx(true)
     await definition.activate?.(ctx as never)
-    expect(mockRegisterPack).toHaveBeenCalledWith(ZHIHU_ROLE_PACK.id, ZHIHU_ROLE_PACK, {
-      pluginId: PLUGIN_ID,
-    })
+    expect(registerPack).toHaveBeenCalledWith(ZHIHU_ROLE_PACK)
     // MCP presets are declarative now (no broken zget wrapper) → no imperative registration.
     expect(registerMcpServerPreset).not.toHaveBeenCalled()
     expect(registerTool).toHaveBeenCalledTimes(2)
@@ -107,7 +100,7 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
       "zhihu_save_draft",
     ])
     expect(registerNode).toHaveBeenCalledTimes(1)
-    expect(mockRefresh).toHaveBeenCalledTimes(1)
+    expect(refreshTemplateWarnings).toHaveBeenCalledTimes(1)
   })
 
   it("publishes the pipeline DB and registers the /zhihu commands", async () => {
@@ -117,34 +110,28 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
     // `/zhihu` is manifest-declared; activate returns the handler hook.
   })
 
-  it("disposes the node, clears the DB, drops the pack + commands on deactivate", async () => {
+  it("disposes the node and clears the DB on deactivate", async () => {
     const { ctx, disposeNode } = buildCtx(true)
     await definition.activate?.(ctx as never)
     await definition.deactivate?.(ctx as never)
     expect(disposeNode).toHaveBeenCalledTimes(1)
     expect(getPipelineDb()).toBeNull()
-    expect(mockUnregisterPack).toHaveBeenCalledWith(PLUGIN_ID)
     // Command teardown belongs to the manager for declared commands.
-    expect(mockUnregisterCommands).not.toHaveBeenCalled()
   })
 })
 
 describe("zhihu-content-pipeline activate (without dexie)", () => {
   it("still registers pack + preset but skips tools/node and warns", async () => {
-    const { ctx, registerNode, registerTool } = buildCtx(false)
+    const { ctx, registerNode, registerTool, registerPack, refreshTemplateWarnings } =
+      buildCtx(false)
     await definition.activate?.(ctx as never)
-    expect(mockRegisterPack).toHaveBeenCalledTimes(1)
+    expect(registerPack).toHaveBeenCalledTimes(1)
     expect(registerTool).not.toHaveBeenCalled()
     expect(registerNode).not.toHaveBeenCalled()
-    expect(mockRefresh).not.toHaveBeenCalled()
+    expect(refreshTemplateWarnings).not.toHaveBeenCalled()
     expect(ctx.logger.warn).toHaveBeenCalled()
     // No Dexie → no pipeline DB published, but the /zhihu command still registers.
     expect(getPipelineDb()).toBeNull()
     // `/zhihu` is manifest-declared; activate returns the handler hook.
-  })
-
-  it("deactivate tolerates ctx without pluginId", async () => {
-    await definition.deactivate?.(undefined as never)
-    expect(mockUnregisterPack).not.toHaveBeenCalled()
   })
 })

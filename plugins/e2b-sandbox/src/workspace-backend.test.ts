@@ -159,6 +159,19 @@ describe("E2BWorkspaceBackend", () => {
     expect(backend.liveSandboxCount()).toBe(0)
   })
 
+  it("retains a failed remove for a later cleanup retry", async () => {
+    const sandbox = makeSandbox("sb-remove-retry")
+    sandbox.close.mockRejectedValueOnce(new Error("close failed"))
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+    const handle = await backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
+
+    await expect(backend.remove(handle)).resolves.toBe(false)
+    expect(backend.liveSandboxCount()).toBe(1)
+    await expect(backend.remove(handle)).resolves.toBe(true)
+    expect(sandbox.close).toHaveBeenCalledTimes(2)
+    expect(backend.liveSandboxCount()).toBe(0)
+  })
+
   it("remove returns false when no sandbox is tracked", async () => {
     const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => makeSandbox("sb-x") })
     const handle = {

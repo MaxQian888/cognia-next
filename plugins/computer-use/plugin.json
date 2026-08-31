@@ -12,7 +12,14 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["native:input", "native:screen"],
+  "permissions": [
+    "automation:read",
+    "automation:screenshot",
+    "automation:click",
+    "automation:type",
+    "automation:pointer",
+    "automation:window"
+  ],
   "activationEvents": ["startup", "onCommand:cu"],
   "runtimeCompatibility": {
     "browser": {
@@ -20,7 +27,7 @@
       "reason": "Requires Tauri Rust commands for screen capture and input synthesis \u2014 desktop only."
     },
     "tauri": {
-      "availability": "full",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "The plugin is a thin model-tool adapter over the canonical cognia-automation app-session commands."
     },

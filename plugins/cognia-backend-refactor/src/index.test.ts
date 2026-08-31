@@ -1,32 +1,29 @@
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
 import definition from "./index"
 import { REFACTOR_ROLE_PACK } from "./characters/pack"
-import { AGENT_TURN_NODE } from "./nodes/agent-turn"
 import { PLUGIN_ID } from "./ids"
-
-// Doubled at the SDK subpath the plugin imports, not the host registry behind it.
-jest.mock("@cognia/plugin-sdk/api/character-pack", () => ({
-  registerCharacterPack: jest.fn(),
-  unregisterCharacterPacksByPlugin: jest.fn(),
-}))
-
-const mockRegister = registerCharacterPack as jest.Mock
-const mockUnregister = unregisterCharacterPacksByPlugin as jest.Mock
 
 function buildCtx() {
   const disposeNode = jest.fn()
   const registerNode = jest.fn(() => disposeNode)
+  const registerPack = jest.fn()
+  const refreshTemplateWarnings = jest.fn()
   return {
     ctx: {
       pluginId: PLUGIN_ID,
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
-      workflow: { registerNode, registerTrigger: jest.fn(() => jest.fn()) },
+      workflow: {
+        registerNode,
+        registerTrigger: jest.fn(() => jest.fn()),
+        refreshTemplateWarnings,
+      },
+      capabilities: { tauri: true },
+      agent: { runCharacterTurn: jest.fn() },
+      characterPacks: { register: registerPack },
     },
     registerNode,
+    registerPack,
     disposeNode,
+    refreshTemplateWarnings,
   }
 }
 
@@ -67,24 +64,17 @@ describe("backend-refactor plugin manifest", () => {
 
 describe("backend-refactor activate/deactivate", () => {
   it("registers the role pack and the agent.turn node on activate", async () => {
-    const { ctx, registerNode } = buildCtx()
+    const { ctx, registerNode, registerPack, refreshTemplateWarnings } = buildCtx()
     await definition.activate?.(ctx as never)
-    expect(mockRegister).toHaveBeenCalledWith(REFACTOR_ROLE_PACK.id, REFACTOR_ROLE_PACK, {
-      pluginId: PLUGIN_ID,
-    })
-    expect(registerNode).toHaveBeenCalledWith(AGENT_TURN_NODE)
+    expect(registerPack).toHaveBeenCalledWith(REFACTOR_ROLE_PACK)
+    expect(registerNode).toHaveBeenCalledWith(expect.objectContaining({ kind: "agent.turn" }))
+    expect(refreshTemplateWarnings).toHaveBeenCalledTimes(1)
   })
 
-  it("disposes the node and drops the packs on deactivate", async () => {
+  it("disposes the node on deactivate", async () => {
     const { ctx, disposeNode } = buildCtx()
     await definition.activate?.(ctx as never)
     await definition.deactivate?.(ctx as never)
     expect(disposeNode).toHaveBeenCalledTimes(1)
-    expect(mockUnregister).toHaveBeenCalledWith(PLUGIN_ID)
-  })
-
-  it("deactivate tolerates ctx without pluginId", async () => {
-    await definition.deactivate?.(undefined as never)
-    expect(mockUnregister).not.toHaveBeenCalled()
   })
 })

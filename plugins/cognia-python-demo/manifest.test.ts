@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { validatePluginManifest } from "@cognia/plugin-sdk"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 import type { PluginManifest } from "@cognia/plugin-sdk"
 
 const manifest = JSON.parse(

@@ -8,21 +8,25 @@
  * per-chat RemoteChromiumEngine for cloud/headless sessions. Tool names and
  * arguments stay identical across both adapters.
  */
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { routeEngine } from "@cognia/plugin-sdk/api/browser"
-import { isBrowserDomainAuthorized, primeBrowserDomainGrants } from "@cognia/plugin-sdk/api/browser"
+import {
+  defineContextProvider,
+  definePlugin,
+  definePluginTool,
+  type PluginContext,
+  type PluginManifest,
+  type PluginToolRegistration,
+} from "@cognia/plugin-sdk"
 import type {
   BrowserActionResult,
   BrowserDialogState,
   BrowserSelection,
 } from "@cognia/plugin-sdk/api/browser"
-import {
-  saveBrowserAnnotation,
-  type BrowserAnnotationIntent,
-  type BrowserAnnotationRow,
-  type BrowserAnnotationSeverity,
+import type {
+  BrowserAnnotationIntent,
+  BrowserAnnotationRow,
+  BrowserAnnotationSeverity,
 } from "@cognia/plugin-sdk/api/browser"
-import { defineContextProvider } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
 /**
  * Last known preview URL — a fallback for when the live URL is unreadable
@@ -36,6 +40,7 @@ import { defineContextProvider } from "@cognia/plugin-sdk"
  * page resolves to `public` / untrusted instead, which is the safe direction.
  */
 let lastUrl: string | null = null
+let browser: PluginContext["browser"] | undefined
 
 /**
  * Routing context for one call.
@@ -45,12 +50,23 @@ let lastUrl: string | null = null
  * Chromium for a public site — could never fire.
  */
 function routingContext(url: string) {
-  return { domainAuthorized: isBrowserDomainAuthorized(url) }
+  return { domainAuthorized: browser?.isDomainAuthorized(url) ?? false }
+}
+
+/**
+ * The governed Browser API, or a throw. Every caller that PERSISTS through it
+ * must go via this rather than optional-chaining: `browser` is cleared on
+ * deactivate, and an executor already in flight would otherwise report success
+ * for a write that never happened.
+ */
+function browserApi(): NonNullable<PluginContext["browser"]> {
+  if (!browser) throw new Error("Browser API unavailable before plugin activation")
+  return browser
 }
 
 function engineFor() {
   const url = lastUrl ?? ""
-  return routeEngine(url, routingContext(url))
+  return browserApi().routeEngine(url, routingContext(url))
 }
 
 const ANNOTATION_INTENTS = ["fix", "change", "question", "approve"] as const
@@ -63,14 +79,14 @@ interface SelectionForRefResult {
 }
 
 /**
- * The session a tool call belongs to. `ctx.sessions` is captured at activation
+ * The session a tool call belongs to. `ctx.session` is captured at activation
  * because a tool executor is invoked through the plugin-tool IPC round trip
  * and never receives the context as an argument.
  */
-let sessions: PluginContext["sessions"] | undefined
+let session: PluginContext["session"] | undefined
 
 function activeSessionId(): string | undefined {
-  const sessionId = sessions?.getCurrentSessionId()
+  const sessionId = session?.getCurrentSessionId()
   return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined
 }
 
@@ -105,8 +121,7 @@ async function currentRoute() {
   } catch {
     // Preview not open / mid-navigation: fall back to the last known URL.
   }
-  const url = lastUrl ?? ""
-  return routeEngine(url, routingContext(url))
+  return engineFor()
 }
 
 async function withSnapshot(result: Record<string, unknown>, initialDelayMs?: number) {
@@ -145,30 +160,19 @@ function pendingDialogResponse(result: BrowserDialogState) {
   return { result, dialogPending: true, dialog: result.dialog }
 }
 
-interface RegisterToolArgs {
-  name: string
-  pluginId: string
-  definition: unknown
-  execute: (args: unknown) => Promise<unknown>
-}
+const manifest = manifestJson as unknown as PluginManifest
 
-const definition: PluginDefinition = {
-  manifest: {
-    id: "cognia-browser-tools",
-    name: "Browser Tools",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools"],
-    main: "src/index.ts",
-  } as never,
+const definition = definePlugin({
+  manifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("browser-tools activated")
-    sessions = ctx.sessions
+    session = ctx.session
+    browser = ctx.browser
 
     // Grants live in Dexie but `routeEngine` is synchronous, so warm a snapshot
     // once at activation. Failing to read it leaves nothing authorized, which
     // keeps every public origin on the embedded engine — the safe direction.
-    void primeBrowserDomainGrants().catch(() => undefined)
+    void browser.primeDomainGrants().catch(() => undefined)
 
     ctx.agent?.context?.registerProvider?.(
       defineContextProvider({
@@ -181,7 +185,7 @@ const definition: PluginDefinition = {
 
     const register = ctx.agent?.registerTool
     if (!register) return
-    const reg = (t: RegisterToolArgs) => register.call(ctx.agent, t as never)
+    const reg = (tool: PluginToolRegistration) => register(definePluginTool(tool))
 
     reg({
       name: "browser_navigate",
@@ -306,7 +310,7 @@ const definition: PluginDefinition = {
           createdAt: now,
           updatedAt: now,
         }
-        await saveBrowserAnnotation(annotation)
+        await browserApi().saveAnnotation(annotation)
         return { ok: true, annotation }
       },
     })
@@ -907,8 +911,11 @@ const definition: PluginDefinition = {
     })
   },
   deactivate: async () => {
-    // Tools are unregistered automatically by the runtime.
+    // Tools are unregistered automatically by the runtime. Drop the captured
+    // governed APIs so a stale executor cannot retain a disabled context.
+    session = undefined
+    browser = undefined
   },
-}
+})
 
 export default definition

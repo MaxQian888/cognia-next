@@ -1,10 +1,6 @@
 import type { PluginContext } from "@cognia/plugin-sdk"
 
-import { listSlashCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import anthropicSkills from "./index"
-
-/** Asserted against the real registry: this plugin must leave it untouched. */
-const PLUGIN_ID = "cognia-anthropic-skills"
 
 function makeCtx() {
   const skills: Array<{ id: string }> = []
@@ -45,7 +41,6 @@ describe("anthropic-skills (built-in)", () => {
     // for it to undo. Manifest-declared commands are unregistered by
     // `PluginManager.unregisterPluginSlashCommands`.
     expect(anthropicSkills.deactivate).toBeUndefined()
-    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
   })
 
   it("declares its slash command instead of registering it imperatively", async () => {
@@ -54,7 +49,6 @@ describe("anthropic-skills (built-in)", () => {
     // The manager owns registration for manifest-declared commands; a plugin
     // touching the registry itself skips namespacing, conflict detection,
     // aliases, the command-palette entry and teardown.
-    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
     expect(typeof hooks?.onCommand).toBe("function")
     const commands = (anthropicSkills.manifest as { commands?: Array<{ id: string }> }).commands
     expect(commands?.map((c) => c.id)).toEqual(["skill"])

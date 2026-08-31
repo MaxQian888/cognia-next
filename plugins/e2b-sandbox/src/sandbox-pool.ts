@@ -11,6 +11,7 @@ export interface E2BSandboxLease {
 interface PoolEntry extends E2BSandboxLease {
   ownerRefs: Set<string>
   ownerGroup?: string
+  handleReleased: boolean
   closing?: Promise<void>
 }
 
@@ -28,12 +29,16 @@ export class E2BSandboxPool {
       workspacePath,
       network,
       ownerRefs: new Set(),
+      handleReleased: false,
     })
   }
 
   forWorkspace(workspacePath: string): E2BSandboxLease {
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) throw new Error(`E2B backend: no live sandbox for handle ${workspacePath}`)
+    if (entry.handleReleased) {
+      throw new Error(`E2B backend: workspace handle ${workspacePath} has been released.`)
+    }
     return entry
   }
 
@@ -43,7 +48,9 @@ export class E2BSandboxPool {
       if (existingPath !== workspacePath) {
         throw new Error(`E2B runtime ${ownerRef} is already bound to ${existingPath}.`)
       }
-      return this.forWorkspace(existingPath)
+      const existing = this.byWorkspace.get(existingPath)
+      if (!existing) throw new Error(`E2B runtime ${ownerRef} is not bound to a live workspace.`)
+      return existing
     }
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) {
@@ -51,6 +58,7 @@ export class E2BSandboxPool {
         `E2B microVM requires an existing remote workspace; no live E2B workspace exists at ${workspacePath}.`
       )
     }
+    if (entry.handleReleased) throw new Error(`E2B workspace ${workspacePath} was released.`)
     if (entry.closing) throw new Error(`E2B workspace ${workspacePath} is closing.`)
     if (entry.ownerGroup && entry.ownerGroup !== ownerGroup) {
       throw new Error(`E2B workspace ${workspacePath} is owned by another runtime session.`)
@@ -64,20 +72,27 @@ export class E2BSandboxPool {
   forOwner(ownerRef: string): E2BSandboxLease {
     const workspacePath = this.workspaceByOwner.get(ownerRef)
     if (!workspacePath) throw new Error(`E2B runtime ${ownerRef} is not bound to a live workspace.`)
-    return this.forWorkspace(workspacePath)
+    const entry = this.byWorkspace.get(workspacePath)
+    if (!entry) throw new Error(`E2B runtime ${ownerRef} is not bound to a live workspace.`)
+    return entry
   }
 
   async releaseOwner(ownerRef: string): Promise<void> {
     const workspacePath = this.workspaceByOwner.get(ownerRef)
-    if (!workspacePath) return
+    if (!workspacePath) {
+      await this.retryReleasedWithoutOwners()
+      return
+    }
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) {
       this.workspaceByOwner.delete(ownerRef)
       return
     }
-    if (entry.ownerRefs.size > 1) {
+    if (entry.ownerRefs.size > 1 || !entry.handleReleased) {
       entry.ownerRefs.delete(ownerRef)
       this.workspaceByOwner.delete(ownerRef)
+      if (entry.ownerRefs.size === 0) entry.ownerGroup = undefined
+      await this.retryReleasedWithoutOwners()
       return
     }
     // Keep the final ownership link until close succeeds. A provider failure
@@ -87,8 +102,10 @@ export class E2BSandboxPool {
   }
 
   async removeWorkspace(workspacePath: string): Promise<boolean> {
-    if (!this.byWorkspace.has(workspacePath)) return false
-    await this.closeWorkspace(workspacePath)
+    const entry = this.byWorkspace.get(workspacePath)
+    if (!entry) return false
+    entry.handleReleased = true
+    if (entry.ownerRefs.size === 0) await this.closeWorkspace(workspacePath)
     return true
   }
 
@@ -131,5 +148,20 @@ export class E2BSandboxPool {
       )
     }
     await entry.closing
+  }
+
+  private async retryReleasedWithoutOwners(): Promise<void> {
+    const ready = [...this.byWorkspace.entries()]
+      .filter(([, entry]) => entry.handleReleased && entry.ownerRefs.size === 0)
+      .map(([workspacePath]) => workspacePath)
+    if (ready.length === 0) return
+    const settled = await Promise.allSettled(ready.map((path) => this.closeWorkspace(path)))
+    const failures = settled.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    )
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "E2B sandbox cleanup failed for multiple workspaces.")
+    }
   }
 }

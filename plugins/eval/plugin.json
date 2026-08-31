@@ -12,7 +12,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": ["tests:run", "ai:chat", "database:read", "database:write"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {

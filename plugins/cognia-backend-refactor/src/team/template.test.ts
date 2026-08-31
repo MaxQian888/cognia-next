@@ -1,20 +1,20 @@
+/** @cognia-host-integration-test */
 import { REVIEW_BOARD_TEMPLATE } from "./template"
 import { validateTemplateRequires } from "@cognia/plugin-sdk/api/agent-team-template"
 import { registerSkill, unregisterSkillsByPlugin } from "@cognia/plugin-sdk/api/skill"
 import { registerSubagent, unregisterSubagentsByPlugin } from "@cognia/plugin-sdk/api/subagent"
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
+import { createCharacterPacksAPI } from "@/lib/plugin/api/character-packs-api"
 import { REFACTOR_ROLE_PACK } from "../characters/pack"
 import { REFACTOR_SKILLS } from "../skills/definitions"
 import { REFACTOR_SUBAGENTS } from "../subagents/definitions"
 import { PLUGIN_ID } from "../ids"
 
+let unregisterPack: (() => void) | undefined
+
 function registerOwnContributions() {
   for (const s of REFACTOR_SKILLS) registerSkill(s.id, s, { pluginId: PLUGIN_ID })
   for (const sub of REFACTOR_SUBAGENTS) registerSubagent(sub.id, sub, { pluginId: PLUGIN_ID })
-  registerCharacterPack(REFACTOR_ROLE_PACK.id, REFACTOR_ROLE_PACK, { pluginId: PLUGIN_ID })
+  unregisterPack = createCharacterPacksAPI(PLUGIN_ID).register(REFACTOR_ROLE_PACK).unregister
 }
 
 /**
@@ -25,7 +25,8 @@ function registerOwnContributions() {
 function resetAll() {
   unregisterSkillsByPlugin(PLUGIN_ID)
   unregisterSubagentsByPlugin(PLUGIN_ID)
-  unregisterCharacterPacksByPlugin(PLUGIN_ID)
+  unregisterPack?.()
+  unregisterPack = undefined
 }
 
 beforeEach(resetAll)

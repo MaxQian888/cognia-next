@@ -11,14 +11,8 @@
  * Approval: never. Reads only.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import type { PluginContext, PluginTool } from "@cognia/plugin-sdk"
 import { formatToolError } from "../store-bridge"
-import { listCharacters } from "@cognia/plugin-sdk/api/resources"
-import { listTwins } from "@cognia/plugin-sdk/api/resources"
-import { listSkills } from "@cognia/plugin-sdk/api/resources"
-import { listAdapterInstances } from "@cognia/plugin-sdk/api/resources"
-import { listMcpServers } from "@cognia/plugin-sdk/api/resources"
-import { listPlugins } from "@cognia/plugin-sdk/api/resources"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 const EMPTY_PARAMS = {
@@ -26,7 +20,7 @@ const EMPTY_PARAMS = {
   properties: {},
 }
 
-export function buildResourceTools(): PluginTool[] {
+export function buildResourceTools(resources: PluginContext["resources"]): PluginTool[] {
   return [
     {
       name: "wf_list_characters",
@@ -41,7 +35,7 @@ export function buildResourceTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const rows = await listCharacters()
+          const rows = await resources.listCharacters()
           return {
             ok: true,
             characters: rows.map((c) => ({
@@ -80,7 +74,7 @@ export function buildResourceTools(): PluginTool[] {
       execute: async (args) => {
         try {
           const includeArchived = Boolean(args.includeArchived)
-          const rows = await listTwins({ includeArchived })
+          const rows = await resources.listTwins({ includeArchived })
           return {
             ok: true,
             twins: rows.map((t) => ({
@@ -108,7 +102,7 @@ export function buildResourceTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const rows = await listSkills()
+          const rows = await resources.listSkills()
           return {
             ok: true,
             skills: rows.map((s) => ({
@@ -136,7 +130,7 @@ export function buildResourceTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const rows = await listAdapterInstances()
+          const rows = await resources.listAdapterInstances()
           return {
             ok: true,
             connectors: rows.map((r) => ({
@@ -165,7 +159,7 @@ export function buildResourceTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const rows = await listMcpServers()
+          const rows = await resources.listMcpServers()
           return {
             ok: true,
             mcpServers: rows.map((m) => ({
@@ -193,7 +187,7 @@ export function buildResourceTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const rows = await listPlugins()
+          const rows = await resources.listPlugins()
           return {
             ok: true,
             plugins: rows.map((p) => ({

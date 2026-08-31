@@ -9,6 +9,7 @@
     "terminal:spawn",
     "terminal:write",
     "terminal:kill",
+    "database:write",
     "extension:ui",
     "session:read"
   ],

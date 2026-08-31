@@ -7,20 +7,9 @@
  * isolation breaks the migration path.
  */
 
-import {
-  getCharacterPack,
-  isOverlayCharacterId,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
+import { isOverlayCharacterId } from "@cognia/plugin-sdk/api/character-pack"
 import { parseLocalPackFile, serializeLocalPackFile } from "@cognia/plugin-sdk"
 import definition, { BUILTIN_LEGACY_ID_TO_LOCAL_ID, BUILTIN_PACK, BUILTIN_PLUGIN_ID } from "./index"
-
-// Plugin-scoped teardown: the same call the plugin manager makes on disable.
-// The host's registry-wide reset is not part of the author surface, and it
-// would also clear packs this plugin never registered.
-afterEach(() => {
-  unregisterCharacterPacksByPlugin(BUILTIN_PLUGIN_ID)
-})
 
 describe("cognia-builtin-characters plugin", () => {
   it("declares the character-pack capability with the expected pluginId", () => {
@@ -59,15 +48,15 @@ describe("cognia-builtin-characters plugin", () => {
     }
   })
 
-  it("activate() registers BUILTIN_PACK and deactivate() cleans up", async () => {
+  it("activate() registers BUILTIN_PACK through the scoped context API", async () => {
+    const register = jest.fn()
     const ctx = {
       pluginId: BUILTIN_PLUGIN_ID,
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+      characterPacks: { register },
     } as unknown as Parameters<NonNullable<typeof definition.activate>>[0]
     await definition.activate?.(ctx)
-    expect(getCharacterPack(BUILTIN_PACK.id)).toBeDefined()
-    await definition.deactivate?.(ctx)
-    expect(getCharacterPack(BUILTIN_PACK.id)).toBeUndefined()
+    expect(register).toHaveBeenCalledWith(BUILTIN_PACK)
   })
 
   it("BUILTIN_PACK round-trips through the canonical pack-file format", () => {

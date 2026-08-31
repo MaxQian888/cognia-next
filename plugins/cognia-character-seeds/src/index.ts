@@ -15,17 +15,12 @@
  *  4. Optionally re-register from `activate(ctx)` for dev-mode hot reload.
  *
  * The plugin manager's `OVERLAY_REGISTRY_CAPABILITIES["character-pack"]`
- * dispatch picks up the manifest declarations on enable; the imperative
- * `ctx.agent?.registerCharacterPack?.()` calls in `activate()` keep dev
- * hot-reload coherent, mirroring `anthropic-skills`.
+ * dispatch picks up the manifest declarations on enable; the scoped
+ * `ctx.characterPacks.register()` calls keep dev hot-reload coherent.
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineCharacterPack } from "@cognia/plugin-sdk"
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
 const WORKPLACE_SUITE = defineCharacterPack({
   id: "workplace-suite",
   name: "Workplace Suite",
@@ -109,15 +104,8 @@ const definition: PluginDefinition = {
     // Imperative path mirrors the declarative manifest registration so
     // the plugin still works under dev-mode hot reload before the
     // manifest walker runs.
-    registerCharacterPack(WORKPLACE_SUITE.id, WORKPLACE_SUITE, {
-      pluginId: ctx.pluginId,
-    })
-    registerCharacterPack(STUDY_BUDDIES.id, STUDY_BUDDIES, {
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) unregisterCharacterPacksByPlugin(ctx.pluginId)
+    ctx.characterPacks.register(WORKPLACE_SUITE)
+    ctx.characterPacks.register(STUDY_BUDDIES)
   },
 }
 

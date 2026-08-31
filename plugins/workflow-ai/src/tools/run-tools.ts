@@ -20,9 +20,8 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import { runWorkflow as runOrchestrator } from "@cognia/plugin-sdk/api/workflow-run"
 import type { TriggerEvent } from "@cognia/plugin-sdk"
-import { formatToolError, resolveStore } from "../store-bridge"
+import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -115,7 +114,7 @@ export function buildRunTools(): PluginTool[] {
           const runId = newRunId()
           ACTIVE_RUNS.set(runId, ac)
           try {
-            const result = await runOrchestrator({
+            const result = await getWorkflowApi().runWorkflow({
               workflow: wf,
               trigger,
               signal: ac.signal,
@@ -169,7 +168,7 @@ export function buildRunTools(): PluginTool[] {
           const trigger = pickTrigger(workflowId, args.payload)
           const ac = new AbortController()
           context.signal?.addEventListener("abort", () => ac.abort(), { once: true })
-          const result = await runOrchestrator({
+          const result = await getWorkflowApi().runWorkflow({
             workflow: wf,
             trigger,
             startStepId: stepId,

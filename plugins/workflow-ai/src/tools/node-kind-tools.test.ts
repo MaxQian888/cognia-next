@@ -1,13 +1,16 @@
 /**
  * @jest-environment jsdom
+ * @cognia-host-integration-test
  */
 import {
   addPluginCatalogEntry,
   getPluginCatalogSnapshot,
   removePluginCatalogEntry,
-} from "@cognia/plugin-sdk/api/workflow-template"
+} from "@/lib/workflow/nodes/catalog"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildNodeKindTools } from "./node-kind-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
 
@@ -18,6 +21,7 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
+  configureWorkflowApi(createWorkflowAuthorAPI() as never)
   // Remove the entries that are actually registered rather than wiping the
   // catalog: `removePluginCatalogEntry` is what a plugin calls on disable, and
   // the host's reset is not on the author surface.

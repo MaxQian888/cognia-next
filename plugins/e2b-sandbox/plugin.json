@@ -12,7 +12,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": ["native:process"],
   "configSchema": {
     "type": "object",
     "properties": {

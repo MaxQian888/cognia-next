@@ -4,17 +4,7 @@
 
 import type { PluginContext } from "@cognia/plugin-sdk"
 
-// Every double targets the SDK subpath the plugin imports, so the test
-// exercises the same surface a third-party recorder plugin would have.
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterSlashCommandsByPlugin: jest.fn(),
-}))
-
 const isTauriMock = jest.fn().mockReturnValue(true)
-jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
-  readHostCapabilities: () => ({ tauri: isTauriMock() }),
-}))
 
 const recordStatusMock = jest.fn()
 const openRecorderMock = jest.fn()
@@ -23,25 +13,9 @@ const statusSnapshotMock = jest.fn().mockReturnValue({
   phase: "idle",
   stepCount: 0,
 })
-jest.mock("@cognia/plugin-sdk/api/skill-recorder", () => ({
-  ...jest.requireActual("@cognia/plugin-sdk/api/skill-recorder"),
-  recordStatus: (...a: unknown[]) => recordStatusMock(...a),
-  openRecorder: (...a: unknown[]) => openRecorderMock(...a),
-  recorderStatusSnapshot: () => statusSnapshotMock(),
-}))
-
-import {
-  registerSlashCommand,
-  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
-} from "@cognia/plugin-sdk/api/slash-command"
-import {
-  clearRecorderAvailability,
-  getRecorderAvailability,
-} from "@cognia/plugin-sdk/api/skill-recorder"
 import plugin from "./index"
 
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
+let availability = { available: false, pluginId: null as string | null }
 
 function makeCtx() {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
@@ -61,13 +35,23 @@ function makeCtx() {
         tools[name] = execute
       },
     } as never,
+    capabilities: { tauri: isTauriMock() } as never,
+    recorder: {
+      publishAvailability: () => {
+        availability = { available: true, pluginId: "cognia-skill-recorder" }
+        return () => {
+          availability = { available: false, pluginId: null }
+        }
+      },
+      status: (...args: unknown[]) => recordStatusMock(...args),
+      open: (...args: unknown[]) => openRecorderMock(...args),
+      statusSnapshot: () => statusSnapshotMock(),
+    } as never,
   }
   return { ctx: ctx as PluginContext, tools, showToast }
 }
 
 beforeEach(() => {
-  registerMock.mockReset()
-  unregisterMock.mockReset()
   isTauriMock.mockReset().mockReturnValue(true)
   recordStatusMock.mockReset()
   openRecorderMock.mockReset()
@@ -76,16 +60,13 @@ beforeEach(() => {
     phase: "idle",
     stepCount: 0,
   })
-  // `clearRecorderAvailability()` IS the reset — the same call the plugin
-  // makes on deactivate.
-  clearRecorderAvailability()
+  availability = { available: false, pluginId: null }
 })
 
 describe("skill-recorder (built-in)", () => {
   it("declares its command instead of registering it, and registers the status tool", async () => {
     const { ctx, tools } = makeCtx()
     const hooks = await plugin.activate?.(ctx)
-    expect(registerMock).not.toHaveBeenCalled()
     expect(typeof hooks?.onCommand).toBe("function")
     const commands = (plugin.manifest as { commands?: Array<{ id: string }> }).commands
     expect(commands?.map((c) => c.id)).toEqual(["record-skill"])
@@ -118,10 +99,10 @@ describe("skill-recorder (built-in)", () => {
 
 describe("availability ownership", () => {
   it("publishes availability on activate", async () => {
-    expect(getRecorderAvailability().available).toBe(false)
+    expect(availability.available).toBe(false)
     const { ctx } = makeCtx()
     await plugin.activate?.(ctx)
-    expect(getRecorderAvailability()).toEqual({
+    expect(availability).toEqual({
       available: true,
       pluginId: "cognia-skill-recorder",
     })
@@ -131,7 +112,7 @@ describe("availability ownership", () => {
     const { ctx } = makeCtx()
     await plugin.activate?.(ctx)
     await plugin.deactivate?.(ctx)
-    expect(getRecorderAvailability()).toEqual({ available: false, pluginId: null })
+    expect(availability).toEqual({ available: false, pluginId: null })
   })
 })
 

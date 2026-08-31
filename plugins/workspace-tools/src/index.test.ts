@@ -4,13 +4,6 @@
 
 import type { PluginContext } from "@cognia/plugin-sdk"
 import type { PluginNodeDef } from "@cognia/plugin-sdk"
-// The plugin probes the host shell through the SDK, so that is what the test
-// replaces. Mocking `@/lib/tauri` used to work by accident and would now be a
-// no-op — the plugin no longer imports it.
-jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
-  readHostCapabilities: () => ({ tauri: false }),
-  getActiveWorkspaceRoot: () => undefined,
-}))
 
 // Controllable fs double so the desktop tool paths (list / read / search) can
 // run under jsdom without a real Tauri host. The factory is hoisted, so it
@@ -48,6 +41,7 @@ const makeDesktopCtx = () => {
   const ctx = {
     pluginId: "cognia-workspace-tools",
     capabilities: { tauri: true },
+    workspace: { getActiveRoot: () => WS },
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     agent: {
       registerTool: ({
@@ -81,6 +75,8 @@ const makeCtx = () => {
   const nodes: Record<string, PluginNodeDef> = {}
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-workspace-tools",
+    capabilities: { tauri: false } as never,
+    workspace: { getActiveRoot: () => WS } as never,
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
     agent: {
       registerTool: ({

@@ -4,6 +4,7 @@ import type {
   PluginContext,
   PluginDefinition,
   PluginModalProps,
+  PluginQuickActionInput,
   PluginViewProps,
   TreeDataProvider,
 } from "@cognia/plugin-sdk"
@@ -106,6 +107,67 @@ export function ReferenceTrayItem() {
   return <ReferenceBadge surfaceId="tray" />
 }
 
+export const selectionReferenceActions: PluginQuickActionInput[] = [
+  {
+    id: "selection-metadata",
+    title: "Selection metadata",
+    labelKey: "surfaces.selectionMetadata",
+    surfaces: ["selection"],
+    selection: { input: "metadata", output: "status" },
+    run: async (invocation) => ({
+      kind: "status",
+      message: invocation?.surface === "selection" ? invocation.selection.sourceApp : undefined,
+    }),
+  },
+  {
+    id: "selection-text-status",
+    title: "Selection text status",
+    labelKey: "surfaces.selectionText",
+    surfaces: ["selection"],
+    selection: { input: "text", output: "status" },
+    run: async (invocation) => ({
+      kind: "status",
+      message:
+        invocation?.surface === "selection"
+          ? String(Array.from(invocation.selection.text ?? "").length)
+          : undefined,
+    }),
+  },
+  {
+    id: "selection-preview",
+    title: "Preview selection",
+    labelKey: "surfaces.selectionPreview",
+    surfaces: ["selection"],
+    selection: { input: "text", output: "preview" },
+    run: async (invocation) => ({
+      kind: "text",
+      text: invocation?.surface === "selection" ? (invocation.selection.text ?? "") : "",
+    }),
+  },
+  {
+    id: "selection-copy",
+    title: "Copy transformed selection",
+    labelKey: "surfaces.selectionCopy",
+    surfaces: ["selection"],
+    selection: { input: "text", output: "copy" },
+    run: async (invocation) => ({
+      kind: "text",
+      text: invocation?.surface === "selection" ? (invocation.selection.text ?? "") : "",
+    }),
+  },
+  {
+    id: "selection-replace",
+    title: "Replace selection",
+    labelKey: "surfaces.selectionReplace",
+    surfaces: ["selection"],
+    selection: { input: "text", output: "replace", origins: ["accessibility"] },
+    run: async (invocation) => ({
+      kind: "text",
+      text: invocation?.surface === "selection" ? (invocation.selection.text ?? "").trim() : "",
+    }),
+  },
+]
+
 export function ReferenceConfig({ config, onSave }: ConfigComponentProps) {
   return (
     <Button type="button" onClick={() => void onSave({ ...config, crashSurface: "" })}>
@@ -118,6 +180,7 @@ const definition: PluginDefinition = {
   manifest: manifestJson as PluginDefinition["manifest"],
   activate: async (context: PluginContext) => {
     context.logger.info("ui-surface-reference activated")
+    context.quickActions.registerMany(selectionReferenceActions)
     return {
       onCommand: async (command) => command === "reference.open",
     }

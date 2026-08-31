@@ -3,22 +3,14 @@
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { startSeededSession } from "@cognia/plugin-sdk/api/agent-turn"
 import { ReviewModal } from "./review-modal"
-import { __setPipelineDbForTesting } from "../db/runtime"
+import { __setPipelineDbForTesting, setPluginSession } from "../db/runtime"
 import type { DraftRow, TopicRow } from "../db/tables"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("next-intl", () => ({ useLocale: () => "zh-CN" }))
-// One double for the SDK call the modal makes; the session/message/store
-// plumbing behind it belongs to `startSeededSession` and is pinned by that
-// module's own suite.
-jest.mock("@cognia/plugin-sdk/api/agent-turn", () => ({
-  startSeededSession: jest.fn(async () => ({ sessionId: "sess_1" })),
-}))
-
 const mockLive = useLiveQuery as jest.Mock
-const mockStartSeededSession = startSeededSession as jest.Mock
+const mockStartSeededSession = jest.fn(async () => ({ sessionId: "sess_1" }))
 
 const topics: TopicRow[] = [
   {
@@ -46,10 +38,14 @@ const fakeDb = {
 beforeEach(() => {
   jest.clearAllMocks()
   __setPipelineDbForTesting(fakeDb as never)
+  setPluginSession({ startSeededSession: mockStartSeededSession } as never)
   let call = 0
   mockLive.mockImplementation(() => (call++ % 2 === 0 ? topics : drafts))
 })
-afterEach(() => __setPipelineDbForTesting(null))
+afterEach(() => {
+  __setPipelineDbForTesting(null)
+  setPluginSession(null)
+})
 
 describe("ReviewModal", () => {
   it("renders candidate topics and drafts", () => {

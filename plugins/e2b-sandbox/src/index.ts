@@ -19,7 +19,6 @@ import type { PluginContext } from "@cognia/plugin-sdk"
 import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
 import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 import manifestJson from "../plugin.json"
-import { setMicrovmExec } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import type { E2BSandboxConnection } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
@@ -62,6 +61,7 @@ const E2B_PRESET = defineMcpServerPreset({
 // across activate/deactivate so the registration is torn down explicitly on
 // disable. Module-scoped because there's only ever one e2b plugin instance.
 let workspaceRegistrationDispose: (() => void) | undefined
+let microvmRegistrationDispose: (() => void) | undefined
 let configChangeDispose: (() => void) | undefined
 let sandboxConnection: E2BSandboxConnection = {}
 
@@ -87,6 +87,7 @@ const manifest = {
   type: "frontend",
   author: { name: manifestJson.author },
   capabilities: ["mcp-server-preset", "commands", "configuration"],
+  permissions: ["native:process"],
   configSchema: {
     ...manifestJson.configSchema,
     type: "object",
@@ -179,7 +180,9 @@ const definition = definePlugin({
     // an ephemeral Firecracker microVM instead of the OS sandbox. When
     // `@e2b/sdk` isn't installed the factory throws a clean install hint
     // at first call — strict-mode compliant (no silent fallback).
-    setMicrovmExec(buildMicrovmExec({ pool: sandboxPool }))
+    microvmRegistrationDispose = ctx.sandbox.registerMicrovmAdapter(
+      buildMicrovmExec({ pool: sandboxPool })
+    )
 
     // The slash command is declared in plugin.json so the manager owns
     // namespacing, command-palette registration, idle refresh, and teardown.
@@ -208,7 +211,8 @@ const definition = definePlugin({
     // teammates are working inside them right now — and closing those here
     // destroys in-flight runs the moment the plugin is toggled off. They are
     // owned by the handles that were issued and are reaped by `remove(handle)`.
-    setMicrovmExec(null)
+    microvmRegistrationDispose?.()
+    microvmRegistrationDispose = undefined
   },
 })
 

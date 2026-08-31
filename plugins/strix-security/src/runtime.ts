@@ -5,10 +5,11 @@
 
 import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
 import type { PluginDexieAPI } from "@cognia/plugin-sdk"
-import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
+import type { PluginSecurityScansAPI, PluginTerminalAPI } from "@cognia/plugin-sdk"
 export interface StrixRuntime {
   terminal: PluginTerminalAPI
   dexie: PluginDexieAPI
+  securityScans: PluginSecurityScansAPI
   /**
    * The workbench API the panel was registered through, so a running scan can
    * put a count on its own rail button. Null when registration was refused —

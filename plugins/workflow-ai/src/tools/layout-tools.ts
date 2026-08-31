@@ -11,13 +11,8 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import {
-  autoLayout,
-  applyAutoLayoutPositions,
-  ELK_DIRECTIONS,
-  type AutoLayoutDirection,
-} from "@cognia/plugin-sdk/api/workflow-editor"
-import { formatToolError, resolveStore } from "../store-bridge"
+import { ELK_DIRECTIONS, type AutoLayoutDirection } from "@cognia/plugin-sdk/api/workflow-editor"
+import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -52,10 +47,9 @@ export function buildLayoutTools(): PluginTool[] {
       },
       execute: async (args) => {
         try {
-          const { workflowId, store } = resolveStore({
+          const { workflowId } = resolveStore({
             workflowId: args.workflowId as string | undefined,
           })
-          const state = store.getState()
           // `direction` is part of the schema, i.e. a contract with the model —
           // it used to be `void`ed, so asking for TB silently produced LR and
           // still answered `{ ok: true }`. `autoLayout` now maps it onto
@@ -64,10 +58,8 @@ export function buildLayoutTools(): PluginTool[] {
             typeof args.direction === "string" && args.direction in ELK_DIRECTIONS
               ? (args.direction as AutoLayoutDirection)
               : undefined
-          const layoutResult = await autoLayout(state.nodes, state.edges, { direction })
-          const next = applyAutoLayoutPositions(state.nodes, layoutResult)
-          state.setNodes(next)
-          return { ok: true, workflowId, repositioned: next.length }
+          const repositioned = await getWorkflowApi().autoLayoutEditor(workflowId, direction)
+          return { ok: true, workflowId, repositioned }
         } catch (err) {
           return formatToolError(err)
         }

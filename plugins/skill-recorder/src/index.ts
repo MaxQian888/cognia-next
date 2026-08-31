@@ -23,13 +23,9 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
-import {
-  clearRecorderAvailability,
-  recordStatus,
-  setRecorderAvailability,
-} from "@cognia/plugin-sdk/api/skill-recorder"
 import manifestJson from "../plugin.json"
+
+let availabilityDispose: (() => void) | undefined
 
 const definition: PluginDefinition = {
   // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
@@ -42,7 +38,7 @@ const definition: PluginDefinition = {
 
     // Publish before anything else: the entry points read this to decide
     // whether to render at all.
-    setRecorderAvailability({ available: true, pluginId: ctx.pluginId })
+    availabilityDispose = ctx.recorder.publishAvailability()
 
     ctx.agent?.registerTool?.({
       name: "record_skill_status",
@@ -57,7 +53,7 @@ const definition: PluginDefinition = {
         },
       } as never,
       execute: async () => {
-        if (!readHostCapabilities().tauri) {
+        if (!ctx.capabilities.tauri) {
           return { ok: false as const, error: "desktop-only" }
         }
         try {
@@ -65,8 +61,7 @@ const definition: PluginDefinition = {
           // authority on whether capture is actually running. Prefer the store
           // when it has a session, so "paused" and "reviewing" are not reported
           // as "not recording".
-          const { recorderStatusSnapshot } = await import("@cognia/plugin-sdk/api/skill-recorder")
-          const local = recorderStatusSnapshot()
+          const local = ctx.recorder.statusSnapshot()
           if (local.phase !== "idle") {
             return {
               ok: true as const,
@@ -75,7 +70,7 @@ const definition: PluginDefinition = {
               stepCount: local.stepCount,
             }
           }
-          const status = await recordStatus()
+          const status = await ctx.recorder.status()
           return {
             ok: true as const,
             recording: status.recording,
@@ -95,12 +90,11 @@ const definition: PluginDefinition = {
     return {
       onCommand: async (command: string) => {
         if (command !== "record-skill") return false
-        if (!readHostCapabilities().tauri) {
+        if (!ctx.capabilities.tauri) {
           ctx.ui?.showToast?.("Skill recording is desktop-only.", "error")
           return true
         }
-        const { openRecorder } = await import("@cognia/plugin-sdk/api/skill-recorder")
-        openRecorder("plugin-command")
+        ctx.recorder.open("plugin-command")
         return true
       },
     }
@@ -108,7 +102,8 @@ const definition: PluginDefinition = {
   deactivate: async () => {
     // Withdraws every entry point at once. Without this the toolbar button and
     // the shortcut would survive a disable and fail at the preflight instead.
-    clearRecorderAvailability()
+    availabilityDispose?.()
+    availabilityDispose = undefined
   },
 }
 

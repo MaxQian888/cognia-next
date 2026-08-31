@@ -141,8 +141,11 @@ describe("buildMicrovmExec", () => {
 
     expect(a.exec).toHaveBeenCalledTimes(1)
     expect(b.exec).toHaveBeenCalledTimes(1)
-    expect(a.close).toHaveBeenCalledTimes(1)
+    expect(a.close).not.toHaveBeenCalled()
     expect(b.close).not.toHaveBeenCalled()
+
+    await pool.removeWorkspace("/remote/a")
+    expect(a.close).toHaveBeenCalledTimes(1)
   })
 
   it.each<[Partial<MicrovmRequest>, MicrovmCeiling | undefined, RegExp]>([
@@ -265,5 +268,29 @@ describe("buildMicrovmExec", () => {
       timed_out: true,
       stderr: "operation timed out",
     })
+  })
+
+  it("caps each E2B output stream on a UTF-8 boundary and marks truncation", async () => {
+    const pool = new E2BSandboxPool()
+    const vm = makeSandbox("vm")
+    vm.exec.mockResolvedValueOnce({
+      stdout: `aa${"😀".repeat(300_000)}`,
+      stderr: `aaa${"😀".repeat(300_000)}`,
+      exitCode: 0,
+    })
+    pool.addWorkspace("/remote/work", vm, "on")
+    const adapter = buildMicrovmExec({ pool })
+    await adapter.preflight?.("runtime:a", "/remote/work")
+
+    const result = await adapter.execute("runtime:a", payload())
+
+    expect(new TextEncoder().encode(result.stdout).length).toBeLessThanOrEqual(1_000_000)
+    expect(new TextEncoder().encode(result.stderr).length).toBeLessThanOrEqual(1_000_000)
+    expect(result.stdout.endsWith("... (truncated)")).toBe(true)
+    expect(result.stderr.endsWith("... (truncated)")).toBe(true)
+    expect(result.stdout).not.toContain("�")
+    expect(result.stderr).not.toContain("�")
+    expect(result.stdout_truncated).toBe(true)
+    expect(result.stderr_truncated).toBe(true)
   })
 })

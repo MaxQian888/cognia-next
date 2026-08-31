@@ -1,10 +1,17 @@
-import { EditorNotOpenError, formatToolError, resolveStore } from "./store-bridge"
+/** @cognia-host-integration-test */
 import {
-  createEditorStore,
+  configureWorkflowApi,
+  EditorNotOpenError,
+  formatToolError,
+  resolveStore,
+} from "./store-bridge"
+import {
   listEditorStores,
   registerEditorStore,
   unregisterEditorStore,
-} from "@cognia/plugin-sdk/api/workflow-editor"
+} from "@/lib/workflow/editor/store-registry"
+import { createEditorStore } from "@/lib/workflow/editor/store"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 function workflow(id: string): VisualWorkflow {
   return {
@@ -29,6 +36,7 @@ function workflow(id: string): VisualWorkflow {
 // host's reset is not on the author surface, and `unregisterEditorStore` is
 // what an editor calls when it closes.
 beforeEach(() => {
+  configureWorkflowApi(createWorkflowAuthorAPI() as never)
   for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
 })
 
@@ -36,14 +44,14 @@ describe("resolveStore", () => {
   it("returns the explicitly-named store when present", () => {
     const store = createEditorStore(workflow("wf_a"))
     registerEditorStore("wf_a", store)
-    expect(resolveStore({ workflowId: "wf_a" }).store).toBe(store)
+    expect(resolveStore({ workflowId: "wf_a" }).store.getState().workflowId).toBe("wf_a")
   })
 
   it("falls back to the sole open editor when workflowId is omitted", () => {
     const store = createEditorStore(workflow("wf_only"))
     registerEditorStore("wf_only", store)
     const resolved = resolveStore({})
-    expect(resolved.store).toBe(store)
+    expect(resolved.store.getState().workflowId).toBe("wf_only")
     expect(resolved.workflowId).toBe("wf_only")
   })
 

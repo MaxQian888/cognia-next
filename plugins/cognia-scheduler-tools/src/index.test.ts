@@ -3,6 +3,7 @@ import {
   type ManageScheduledTaskArgs,
   type SchedulerToolDeps,
 } from "./index"
+import definition from "./index"
 import { DEFAULT_PERMISSION_POLICY, type SchedulerPermissionPolicy } from "@cognia/plugin-sdk"
 function makeDeps(overrides: Partial<SchedulerToolDeps> = {}): {
   deps: SchedulerToolDeps
@@ -160,5 +161,34 @@ describe("runSchedulerToolAction", () => {
     const h = makeDeps()
     const r = await run({ action: "bogus" } as never, h.deps)
     expect(r.ok).toBe(false)
+  })
+})
+
+describe("scheduler-tools activation", () => {
+  it("registers a tool backed by the governed userScheduler context", async () => {
+    const registerTool = jest.fn()
+    const ctx = {
+      pluginId: "cognia-scheduler-tools",
+      logger: { info: jest.fn() },
+      agent: { registerTool },
+      userScheduler: {
+        getPolicy: jest.fn(async () => DEFAULT_PERMISSION_POLICY),
+        listTasks: jest.fn(async () => []),
+        createTask: jest.fn(),
+        deleteTask: jest.fn(),
+        runTaskNow: jest.fn(),
+      },
+    }
+
+    await definition.activate?.(ctx as never)
+    expect(registerTool).toHaveBeenCalledTimes(1)
+    const tool = registerTool.mock.calls[0]?.[0]
+    await expect(tool.execute({ action: "list" })).resolves.toEqual({
+      ok: true,
+      action: "list",
+      count: 0,
+      tasks: [],
+    })
+    expect(ctx.userScheduler.listTasks).toHaveBeenCalledTimes(1)
   })
 })

@@ -18,11 +18,6 @@ import {
   registerExternalAgentPreset as registerPreset,
   unregisterExternalAgentPresetsByPlugin as unregisterPresetsByPlugin,
 } from "@cognia/plugin-sdk/api/external-agent-preset"
-import {
-  getContextProvider,
-  registerContextProvidersForPlugin,
-  unregisterContextProvidersByPlugin,
-} from "@cognia/plugin-sdk/api/context-provider"
 const PLUGIN_ID = "cognia-external-agent-preset-example"
 
 describe("external-agent-preset-example plugin", () => {
@@ -31,7 +26,6 @@ describe("external-agent-preset-example plugin", () => {
   // presets and providers this plugin never contributed.
   beforeEach(() => {
     unregisterPresetsByPlugin(PLUGIN_ID)
-    unregisterContextProvidersByPlugin(PLUGIN_ID)
   })
 
   it("declares one external-agent preset + one context provider in its manifest", () => {
@@ -59,13 +53,14 @@ describe("external-agent-preset-example plugin", () => {
     expect(getPresetConfig("example-acp-cli")).toBeNull()
   })
 
-  it("registers its context provider through the bridge", async () => {
-    const importer = async () => ({ createEnvBannerProvider })
-    const result = await registerContextProvidersForPlugin(manifest, "/plugins/example", {
-      importer,
+  it("declares a resolvable context-provider factory", async () => {
+    const contribution = manifest.contextProviders?.[0]
+    expect(contribution).toMatchObject({
+      id: "env-banner",
+      entry: "src/context-provider.ts",
+      export: "createEnvBannerProvider",
     })
-    expect(result.registered).toBe(1)
-    expect(getContextProvider(`${PLUGIN_ID}:env-banner`)).toBeDefined()
+    expect(typeof createEnvBannerProvider).toBe("function")
   })
 
   it("the context provider contributes a banner for a non-empty prompt", () => {

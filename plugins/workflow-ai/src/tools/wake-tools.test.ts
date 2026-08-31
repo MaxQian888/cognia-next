@@ -1,11 +1,11 @@
 const emitWorkflowWaitEvent = jest.fn(async (event: Record<string, unknown>) => event)
-// Doubled at the SDK subpath the tools import, not the host table.
-jest.mock("@cognia/plugin-sdk/api/workflow-run", () => ({
-  createWorkflowWaitEvent: (input: Record<string, unknown>) => ({ id: "event_1", ...input }),
-  emitWorkflowWaitEvent: (event: Record<string, unknown>) => emitWorkflowWaitEvent(event),
-}))
 import { buildWakeTools } from "./wake-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
+configureWorkflowApi({
+  emitWaitEvent: (input: Record<string, unknown>) =>
+    emitWorkflowWaitEvent({ id: "event_1", ...input }),
+} as never)
 const tool = buildWakeTools().find((t) => t.name === "wf_emit_workflow_event")!
 const exec = (args: Record<string, unknown>) => tool.execute(args, { config: {} } as never)
 

@@ -24,13 +24,6 @@ import type {
   TaskExecutionTriggerSource,
   TaskTrigger,
 } from "@cognia/plugin-sdk"
-import {
-  createUserScheduledTask,
-  deleteUserScheduledTask,
-  getSchedulerPermissionPolicy,
-  listUserScheduledTasks,
-  runUserScheduledTaskNow,
-} from "@cognia/plugin-sdk/api/scheduled-task"
 /** Task types an agent is allowed to schedule (never raw "script" by default). */
 const AGENT_CREATABLE_TYPES: ScheduledTaskType[] = [
   "chat",
@@ -55,19 +48,18 @@ export interface SchedulerToolDeps {
 }
 
 /**
- * The production wiring: the SDK's user-scheduled-task surface. This is the
- * whole reason the plugin needs `@cognia/plugin-sdk/api/scheduled-task` rather
- * than `ctx.scheduler` — the latter owns tasks a PLUGIN creates for itself,
+ * The production wiring uses `ctx.userScheduler`. This is separate from
+ * `ctx.scheduler` — the latter owns tasks a PLUGIN creates for itself,
  * keyed by a handler name, and cannot see the user's schedule or the
  * permission policy guarding it.
  */
-function defaultDeps(): SchedulerToolDeps {
+function defaultDeps(ctx: PluginContext): SchedulerToolDeps {
   return {
-    getPolicy: getSchedulerPermissionPolicy,
-    listTasks: listUserScheduledTasks,
-    createTask: createUserScheduledTask,
-    deleteTask: deleteUserScheduledTask,
-    runTaskNow: runUserScheduledTaskNow,
+    getPolicy: ctx.userScheduler.getPolicy,
+    listTasks: ctx.userScheduler.listTasks,
+    createTask: ctx.userScheduler.createTask,
+    deleteTask: ctx.userScheduler.deleteTask,
+    runTaskNow: ctx.userScheduler.runTaskNow,
   }
 }
 
@@ -209,6 +201,7 @@ const definition: PluginDefinition = {
     version: "0.1.0",
     type: "frontend",
     capabilities: ["tools", "scheduler"],
+    permissions: ["settings:read", "database:read", "database:write", "agent:control"],
     main: "src/index.ts",
   } as never,
   activate: async (ctx: PluginContext) => {
@@ -257,7 +250,7 @@ const definition: PluginDefinition = {
       } as never,
       execute: async (rawArgs: unknown) => {
         try {
-          const deps = defaultDeps()
+          const deps = defaultDeps(ctx)
           return await runSchedulerToolAction(rawArgs as ManageScheduledTaskArgs, deps)
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) }

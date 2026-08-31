@@ -14,12 +14,6 @@
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineWorkflowNode } from "@cognia/plugin-sdk"
-// `readHostCapabilities()` is the fallback when the host does not expose
-// `ctx.capabilities` (ADR-0026 §5 §C migration path).
-import {
-  getActiveWorkspaceRoot,
-  readHostCapabilities,
-} from "@cognia/plugin-sdk/api/host-environment"
 
 interface ListFilesArgs {
   path?: string
@@ -51,16 +45,17 @@ const NO_WORKSPACE = {
 /**
  * Resolve the open workspace root. This used to be a verbatim copy of the
  * CLI-tools executor's resolution — two implementations of "where is the user
- * working", each free to drift. Both now call the one host resolver, published
- * to authors as `@cognia/plugin-sdk/api/host-environment`.
+ * working", each free to drift. Activation captures the host-owned
+ * `ctx.workspace.getActiveRoot()` result for tool executors.
  */
 function workspaceRoot(): string | undefined {
   if (workspaceRootOverride !== undefined) return workspaceRootOverride ?? undefined
-  return getActiveWorkspaceRoot()
+  return activeWorkspaceRoot
 }
 
 /** Test seam: `null` = "no workspace open", a string = that root. */
 let workspaceRootOverride: string | null | undefined
+let activeWorkspaceRoot: string | undefined
 
 /** @internal test-only */
 export function __setWorkspaceRootForTesting(root: string | null | undefined): void {
@@ -175,18 +170,15 @@ async function symlinkEscapeError(
 }
 
 /**
- * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
- * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
- * direct `readHostCapabilities().tauri` import. Module-scoped so the tool executors (which
- * don't receive the plugin context as an argument) can read it without
- * threading `ctx` through every call site.
+ * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`.
+ * Module-scoped so tool executors can read it without retaining the complete
+ * plugin context.
  */
 let tauriHostFlag: boolean | undefined
 let disposeWorkflowNodes: Array<() => void> = []
 
 function resolveTauriHost(): boolean {
-  if (tauriHostFlag !== undefined) return tauriHostFlag
-  return readHostCapabilities().tauri
+  return tauriHostFlag ?? false
 }
 
 async function listFiles(args: ListFilesArgs): Promise<unknown> {
@@ -455,7 +447,8 @@ const definition: PluginDefinition = {
     disposeWorkflowNodes = []
     // Resolve the platform once at activate time and cache for the
     // executors below. Prefer ADR-0026 §5 §C `ctx.capabilities.tauri`.
-    tauriHostFlag = ctx.capabilities?.tauri ?? readHostCapabilities().tauri
+    tauriHostFlag = ctx.capabilities.tauri
+    activeWorkspaceRoot = ctx.workspace.getActiveRoot()
     ctx.logger?.info(
       `workspace-tools activated (${tauriHostFlag ? "desktop" : "browser fallback"})`
     )
@@ -511,6 +504,7 @@ const definition: PluginDefinition = {
     for (const dispose of disposeWorkflowNodes) dispose()
     disposeWorkflowNodes = []
     tauriHostFlag = undefined
+    activeWorkspaceRoot = undefined
   },
 }
 

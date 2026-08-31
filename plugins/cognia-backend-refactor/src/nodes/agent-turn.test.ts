@@ -8,21 +8,17 @@
  * modules behind it is the point: this plugin sees only the published surface.
  */
 
-import { runPluginAgentTurn } from "@cognia/plugin-sdk/api/agent-turn"
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
-import { AGENT_TURN_NODE, executeAgentTurn } from "./agent-turn"
+import type { StepExecutionContext } from "@cognia/plugin-sdk"
+import { createAgentTurnNode, executeAgentTurn as executeAgentTurnWithRuntime } from "./agent-turn"
 import { roleCharacterId } from "../characters/pack"
 
-jest.mock("@cognia/plugin-sdk/api/agent-turn", () => ({
-  runPluginAgentTurn: jest.fn(),
-  PluginAgentTurnError: class extends Error {},
-}))
-jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
-  readHostCapabilities: jest.fn(() => ({ tauri: true })),
-}))
+const mRun = jest.fn()
+const runtime = { tauri: true, runCharacterTurn: mRun }
+const AGENT_TURN_NODE = createAgentTurnNode(runtime)
 
-const mRun = runPluginAgentTurn as jest.Mock
-const mCapabilities = readHostCapabilities as jest.Mock
+function executeAgentTurn(ctx: StepExecutionContext) {
+  return executeAgentTurnWithRuntime(ctx, runtime)
+}
 
 function makeCtx(params: Record<string, unknown>) {
   return {
@@ -40,7 +36,7 @@ function makeCtx(params: Record<string, unknown>) {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mCapabilities.mockReturnValue({ tauri: true })
+  runtime.tauri = true
   mRun.mockResolvedValue({ sessionId: "sess-new", text: "done", messageId: "m1" })
 })
 
@@ -76,7 +72,7 @@ describe("executeAgentTurn", () => {
   })
 
   it("rejects outside the desktop runtime, before starting a turn", async () => {
-    mCapabilities.mockReturnValue({ tauri: false })
+    runtime.tauri = false
     await expect(
       executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
     ).rejects.toThrow(/desktop runtime/)

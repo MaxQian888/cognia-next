@@ -1,20 +1,19 @@
 /**
  * @jest-environment jsdom
+ * @cognia-host-integration-test
  */
 
-import type { Transport } from "@cognia/plugin-sdk/api/host-environment"
-import { setTransport } from "@cognia/plugin-sdk/api/host-environment"
-import {
-  setMicrovmExec,
-  type MicrovmExecPayload,
-  type MicrovmResult,
-} from "@cognia/plugin-sdk/api/sandbox"
-import { sandboxSessionRuntime } from "@cognia/plugin-sdk/api/sandbox"
+import { __setSandboxOsExecForTesting, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { createSandboxAPI } from "@/lib/plugin/api/sandbox-api"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+import type { MicrovmExecPayload, MicrovmResult } from "@cognia/plugin-sdk/api/sandbox"
 import type { SandboxResourcePolicy } from "@cognia/plugin-sdk/api/sandbox"
 
 import definition, { SANDBOXED_TOOL_NAMES } from "./index"
 import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 const OK: MicrovmResult = { exit_code: 0, stdout: "", stderr: "", duration: 1, timed_out: false }
+const PLUGIN_ID = definition.manifest.id
 
 interface RecordedCall {
   name: string
@@ -29,14 +28,10 @@ function installTransport(results: MicrovmResult[] = []): {
 } {
   const calls: RecordedCall[] = []
   const queue = [...results]
-  const fake: Transport = {
-    call: jest.fn(async (name: string, args?: Record<string, unknown>) => {
-      calls.push({ name, args })
-      return (queue.shift() ?? OK) as never
-    }),
-    subscribe: jest.fn(() => () => undefined),
-  }
-  setTransport(fake)
+  __setSandboxOsExecForTesting(async (payload) => {
+    calls.push({ name: "sandbox_exec", args: payload as unknown as Record<string, unknown> })
+    return queue.shift() ?? OK
+  })
   return { calls, queue }
 }
 
@@ -46,6 +41,7 @@ async function collectTools(): Promise<Map<string, PluginTool>> {
   await definition.activate?.({
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
     agent: { registerTool: (t: PluginTool) => tools.set(t.name, t) },
+    sandbox: createSandboxAPI(PLUGIN_ID),
   } as unknown as Parameters<NonNullable<typeof definition.activate>>[0])
   return tools
 }
@@ -69,12 +65,17 @@ async function bindRuntime(options?: {
 }
 
 beforeEach(async () => {
+  getPermissionGuard().registerPlugin(PLUGIN_ID, definition.manifest.permissions ?? [])
   await sandboxSessionRuntime.releaseSession("s1")
   // `setMicrovmExec(null)` IS the reset: the bridge holds exactly one
   // adapter, and clearing it is the same call a provider plugin makes on
   // deactivate. The host's `__resetMicrovmBridgeForTesting` does nothing more.
   setMicrovmExec(null)
   await bindRuntime()
+})
+
+afterEach(() => {
+  getPermissionGuard().unregisterPlugin(PLUGIN_ID)
 })
 
 describe("cognia-sandboxed-tools registration", () => {

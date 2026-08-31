@@ -20,19 +20,14 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
 import { PLUGIN_ID } from "./ids"
 import { I18N_MESSAGES } from "./i18n"
 import { REFACTOR_ROLE_PACK } from "./characters/pack"
-import { AGENT_TURN_NODE } from "./nodes/agent-turn"
+import { createAgentTurnNode } from "./nodes/agent-turn"
 import { REFACTOR_SKILLS } from "./skills/definitions"
 import { REFACTOR_SUBAGENTS } from "./subagents/definitions"
 import { REVIEW_BOARD_TEMPLATE } from "./team/template"
 import { REFACTOR_PIPELINE_TEMPLATE } from "./workflow/template"
-import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
 /**
  * Disposer for the custom workflow node. The plugin manager also tears down
  * a plugin's node registrations on disable (`teardownPluginWorkflowRegistrations`),
@@ -56,6 +51,7 @@ const definition: PluginDefinition = {
       "workflow-template",
     ],
     main: "src/index.ts",
+    permissions: ["agent:control"],
     characterPacks: [REFACTOR_ROLE_PACK],
     skills: REFACTOR_SKILLS,
     subagents: REFACTOR_SUBAGENTS,
@@ -67,25 +63,25 @@ const definition: PluginDefinition = {
     ctx.logger?.info("backend-refactor plugin activated")
     // Imperative registration mirrors the declarative manifest so the pack
     // is present under dev hot-reload before the manifest walker runs.
-    registerCharacterPack(REFACTOR_ROLE_PACK.id, REFACTOR_ROLE_PACK, {
-      pluginId: ctx.pluginId,
-    })
+    ctx.characterPacks.register(REFACTOR_ROLE_PACK)
     // The agent.turn node carries a runtime `execute`, so it can't ride the
     // declarative manifest path — register it through the first-class plugin
     // node API (auto-prefixes the kind, adds the editor palette entry).
-    disposeAgentTurn = ctx.workflow.registerNode(AGENT_TURN_NODE)
+    disposeAgentTurn = ctx.workflow.registerNode(
+      createAgentTurnNode({
+        tauri: ctx.capabilities.tauri,
+        runCharacterTurn: ctx.agent.runCharacterTurn,
+      })
+    )
     // The agent.turn catalog entry only exists after the line above, so the
     // workflow-template `requires.pluginNodeKinds` check can lag depending on
     // enable-order. Refresh now so the pipeline template's warning reflects
     // the just-registered node regardless of dispatch order.
-    refreshAllWorkflowTemplateWarnings()
+    ctx.workflow.refreshTemplateWarnings()
   },
-  deactivate: async (ctx?: PluginContext) => {
+  deactivate: async () => {
     disposeAgentTurn?.()
     disposeAgentTurn = null
-    if (ctx?.pluginId) {
-      unregisterCharacterPacksByPlugin(ctx.pluginId)
-    }
   },
 }
 

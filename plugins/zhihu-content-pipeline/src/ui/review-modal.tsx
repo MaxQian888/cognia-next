@@ -12,10 +12,9 @@
  */
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { startSeededSession } from "@cognia/plugin-sdk/api/agent-turn"
 import type { PluginModalProps } from "@cognia/plugin-sdk"
 import { Button } from "@cognia/plugin-ui"
-import { getPipelineDb } from "../db/runtime"
+import { getPipelineDb, getPluginSession } from "../db/runtime"
 import type { DraftRow, TopicRow } from "../db/tables"
 import { startWritingForTopic } from "./start-writing"
 import { usePluginT } from "./use-plugin-t"
@@ -23,6 +22,7 @@ import { usePluginT } from "./use-plugin-t"
 export function ReviewModal({ onClose }: PluginModalProps) {
   const t = usePluginT()
   const db = getPipelineDb()
+  const session = getPluginSession()
 
   const topics = useLiveQuery<TopicRow[] | undefined>(
     () => (db ? db.listTopics("candidate") : Promise.resolve([])),
@@ -34,9 +34,9 @@ export function ReviewModal({ onClose }: PluginModalProps) {
   )
 
   async function onStart(topic: TopicRow) {
-    if (!db) return
+    if (!db || !session) return
     await startWritingForTopic(topic, {
-      startSeededSession,
+      startSeededSession: session.startSeededSession,
       markTopicStatus: (id, status) => db.setTopicStatus(id, status),
     })
     onClose()

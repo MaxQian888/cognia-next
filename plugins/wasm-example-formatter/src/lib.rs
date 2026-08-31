@@ -112,16 +112,20 @@ fn format_via_rustfmt(payload: Vec<u8>) -> Result<Vec<u8>, String> {
     let request: FormatRequest =
         serde_json::from_slice(&payload).map_err(|e| format!("parse FormatRequest: {e}"))?;
 
-    let args = request
-        .args
-        .unwrap_or_else(|| vec!["--emit".into(), "stdout".into(), "--edition".into(), "2021".into()]);
+    let args = request.args.unwrap_or_else(|| {
+        vec![
+            "--emit".into(),
+            "stdout".into(),
+            "--edition".into(),
+            "2021".into(),
+        ]
+    });
 
     // Write source to the plugin data dir. WASI gives us `/` mapped to
     // `<app_data>/cognia/plugins/<id>/data/` so the file path is
     // sandbox-safe.
     let tmp_path = "/format-input.rs";
-    std::fs::write(tmp_path, request.source.as_bytes())
-        .map_err(|e| format!("write input: {e}"))?;
+    std::fs::write(tmp_path, request.source.as_bytes()).map_err(|e| format!("write input: {e}"))?;
 
     let mut combined_args: Vec<String> = args.clone();
     combined_args.push(tmp_path.into());
@@ -131,7 +135,7 @@ fn format_via_rustfmt(payload: Vec<u8>) -> Result<Vec<u8>, String> {
         env: Vec::new(),
         timeout_ms: Some(10_000),
     };
-    let result = process::exec("rustfmt".into(), combined_args, exec_options)?;
+    let result = process::exec("rustfmt", &combined_args, &exec_options)?;
 
     let formatted = String::from_utf8_lossy(&result.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&result.stderr).into_owned();

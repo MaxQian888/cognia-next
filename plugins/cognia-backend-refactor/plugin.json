@@ -19,6 +19,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
+  "permissions": ["agent:control"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {

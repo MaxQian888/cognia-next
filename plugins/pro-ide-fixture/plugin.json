@@ -46,7 +46,7 @@
       "reason": "The managed Pro IDE proxy pathway requires the embedded code-server — desktop only."
     },
     "tauri": {
-      "availability": "available",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "Enabling the plugin builds and activates a signed proxy VSIX; the broker then calls provideFixtureLenses over the agent channel."
     },

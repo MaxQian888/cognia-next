@@ -3,7 +3,6 @@
  */
 
 import type { PluginContext } from "@cognia/plugin-sdk"
-import { listSlashCommandsByPlugin } from "@cognia/plugin-sdk/api/slash-command"
 import promptTemplatesPlugin from "./index"
 
 /**
@@ -12,8 +11,6 @@ import promptTemplatesPlugin from "./index"
  * registry alone, and "the registry has nothing of mine in it" is a stronger
  * claim than "the function I stubbed was not called".
  */
-const PLUGIN_ID = "cognia-prompt-templates"
-
 function makeCtx() {
   const store = new Map<string, unknown>()
   const storage = {
@@ -72,8 +69,6 @@ describe("prompt-templates (built-in)", () => {
   it("declares four commands instead of registering them", async () => {
     const { ctx } = makeCtx()
     await promptTemplatesPlugin.activate?.(ctx)
-    // The manager owns registration for manifest-declared commands.
-    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
     const commands = (promptTemplatesPlugin.manifest as { commands?: Array<{ id: string }> })
       .commands
     expect(commands?.map((c) => c.id).sort()).toEqual([
@@ -170,6 +165,5 @@ describe("prompt-templates (built-in)", () => {
 
   it("leaves command teardown to the manager", async () => {
     expect(promptTemplatesPlugin.deactivate).toEqual(expect.any(Function))
-    expect(listSlashCommandsByPlugin(PLUGIN_ID)).toEqual([])
   })
 })

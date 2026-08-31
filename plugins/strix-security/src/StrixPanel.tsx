@@ -36,11 +36,7 @@ import { sortBySeverity } from "./lib/parse-reports"
 import { suppressedFingerprints, toScanReport } from "./lib/triage"
 import { runPreflight } from "./lib/preflight"
 import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./lib/strix-runner"
-import {
-  securityScanExecutionRunId,
-  syncSecurityScanExecutionRun,
-} from "@cognia/plugin-sdk/api/security-findings"
-import { registerSecurityScanRunController } from "@cognia/plugin-sdk/api/security-findings"
+import { securityScanExecutionRunId } from "@cognia/plugin-sdk/api/security-findings"
 import { PreflightBanner } from "./components/preflight-banner"
 import { ScanForm } from "./components/scan-form"
 import { ScanConsole } from "./components/scan-console"
@@ -75,6 +71,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
 
   const dexie = rt?.dexie ?? null
   const terminal = rt?.terminal ?? null
+  const securityScans = rt?.securityScans ?? null
 
   const runs = useLiveQuery(() => (dexie ? listRuns(dexie) : Promise.resolve([])), [dexie]) ?? []
   const findings =
@@ -185,7 +182,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
 
   const onStart = useCallback(
     async (opts: ScanOptions) => {
-      if (!terminal || !dexie) return
+      if (!terminal || !dexie || !securityScans) return
       setConsoleText("")
       const controller = new AbortController()
       let unregisterController: (() => void) | undefined
@@ -203,7 +200,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
           onConsole: (txt) => setConsoleText((prev) => prev + txt),
           onRun: (r) => {
             setSelectedRunId(r.runId)
-            unregisterController ??= registerSecurityScanRunController(
+            unregisterController ??= securityScans.registerRunController(
               securityScanExecutionRunId(r.runId),
               controller
             )
@@ -211,7 +208,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
             // in the task cockpit alongside every other long-running thing.
             // Best-effort: a projection failure must never take down a scan
             // that is otherwise working.
-            void syncSecurityScanExecutionRun(r).catch(() => undefined)
+            void securityScans.syncExecutionRun(r).catch(() => undefined)
           },
         })
         await setPref(dexie, "lastTarget", opts.target)
@@ -222,7 +219,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
         abortRef.current = null
       }
     },
-    [terminal, dexie]
+    [terminal, dexie, securityScans]
   )
 
   // Announce a running scan on the panel's own rail button. Without it the

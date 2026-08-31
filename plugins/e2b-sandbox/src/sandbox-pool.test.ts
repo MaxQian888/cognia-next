@@ -23,7 +23,7 @@ describe("E2BSandboxPool", () => {
     expect(() => pool.claim("runtime:c", "/missing")).toThrow(/no live E2B workspace/)
   })
 
-  it("keeps a shared generation alive until its final owner releases", async () => {
+  it("keeps the sandbox alive until both the handle and final runtime owner release", async () => {
     const pool = new E2BSandboxPool()
     const vm = sandbox("vm-1")
     pool.addWorkspace("/remote/a", vm, "on")
@@ -35,6 +35,9 @@ describe("E2BSandboxPool", () => {
     expect(pool.forOwner("runtime:b").sandbox).toBe(vm)
 
     await pool.releaseOwner("runtime:b")
+    expect(vm.close).not.toHaveBeenCalled()
+
+    await expect(pool.removeWorkspace("/remote/a")).resolves.toBe(true)
     expect(vm.close).toHaveBeenCalledTimes(1)
   })
 
@@ -64,7 +67,7 @@ describe("E2BSandboxPool", () => {
     expect(() => pool.claim("runtime:a", "/remote/b")).toThrow(/already bound/)
   })
 
-  it("reports remove results and rejects claims while a workspace closes", async () => {
+  it("drains a released handle while existing runtime owners keep executing", async () => {
     const pool = new E2BSandboxPool()
     let finishClose: (() => void) | undefined
     const vm = sandbox("vm-a")
@@ -76,19 +79,27 @@ describe("E2BSandboxPool", () => {
     )
     pool.addWorkspace("/remote/a", vm, "on")
 
+    pool.claim("runtime:a", "/remote/a", "session:a")
     const removal = pool.removeWorkspace("/remote/a")
-    expect(() => pool.claim("runtime:a", "/remote/a")).toThrow(/is closing/)
-    finishClose?.()
     await expect(removal).resolves.toBe(true)
+    expect(() => pool.claim("runtime:b", "/remote/a", "session:a")).toThrow(/released/)
+    expect(pool.forOwner("runtime:a").sandbox).toBe(vm)
+    expect(vm.close).not.toHaveBeenCalled()
+
+    const release = pool.releaseOwner("runtime:a")
+    expect(() => pool.claim("runtime:c", "/remote/a")).toThrow(/released|closing/)
+    finishClose?.()
+    await expect(release).resolves.toBeUndefined()
     await expect(pool.removeWorkspace("/remote/a")).resolves.toBe(false)
     await expect(pool.releaseOwner("missing-owner")).resolves.toBeUndefined()
   })
 
-  it("release closes and forgets an owned sandbox exactly once", async () => {
+  it("closes an already released handle exactly once when its final owner exits", async () => {
     const pool = new E2BSandboxPool()
     const vm = sandbox("vm-1")
     pool.addWorkspace("/remote/a", vm, "on")
     pool.claim("runtime:a", "/remote/a")
+    await pool.removeWorkspace("/remote/a")
 
     await Promise.all([pool.releaseOwner("runtime:a"), pool.releaseOwner("runtime:a")])
 
@@ -116,6 +127,7 @@ describe("E2BSandboxPool", () => {
     vm.close.mockRejectedValueOnce(new Error("provider unavailable"))
     pool.addWorkspace("/remote/a", vm, "on")
     pool.claim("runtime:a", "/remote/a")
+    await pool.removeWorkspace("/remote/a")
 
     await expect(pool.releaseOwner("runtime:a")).rejects.toThrow(/provider unavailable/)
     expect(pool.liveSandboxCount()).toBe(1)

@@ -5,6 +5,7 @@
   "description": "Lets an in-chat agent create, list, cancel, and run scheduled tasks (gated by the scheduler permission policy).",
   "type": "frontend",
   "capabilities": ["tools", "scheduler"],
+  "permissions": ["settings:read", "database:read", "database:write", "agent:control"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",

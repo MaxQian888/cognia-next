@@ -21,6 +21,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
+  "permissions": ["session:write"],
   "activationEvents": ["startup", "onCommand:zhihu"],
   "dexie": {
     "tables": [

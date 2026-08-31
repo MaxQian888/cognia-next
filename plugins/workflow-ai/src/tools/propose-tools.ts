@@ -20,8 +20,8 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import { formatToolError, resolveStore } from "../store-bridge"
-import { useProposalStore, type ProposalPayload } from "@cognia/plugin-sdk/api/workflow-editor"
+import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
+import type { ProposalPayload } from "@cognia/plugin-sdk/api/workflow-editor"
 import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 import { coerceProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
@@ -217,7 +217,7 @@ export function buildProposeTools(): PluginTool[] {
           }
           const proposalId = nextProposalId()
           const opCount = summarizeOps(ops)
-          const payload: ProposalPayload = useProposalStore.getState().openProposal(workflowId, {
+          const payload: ProposalPayload = getWorkflowApi().stageProposal({
             proposalId,
             workflowId,
             summary,

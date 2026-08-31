@@ -14,10 +14,7 @@ import { useFormatter, useTranslations } from "next-intl"
 import { ClipboardListIcon } from "lucide-react"
 
 import type { ToolResultRendererProps } from "@cognia/plugin-sdk/api/tool-renderer"
-import { McpCardShell, useParsedOutput } from "@cognia/plugin-sdk/api/tool-renderer"
-import { Button } from "@cognia/plugin-ui"
-import { CopyFeedbackIcon } from "@cognia/plugin-sdk/api/tool-renderer"
-import { useCopy } from "@cognia/plugin-sdk/api/tool-renderer"
+import { Button, CopyFeedbackIcon, ToolCard, useCopy, useParsedToolOutput } from "@cognia/plugin-ui"
 interface ClipboardEntry {
   text: string
   capturedAt: number
@@ -35,7 +32,7 @@ export const CLIPBOARD_PREVIEW_ENTRIES = 5
 export function ClipboardHistoryCard({ part }: ToolResultRendererProps) {
   const t = useTranslations("chat.toolCards.clipboardHistory")
   const format = useFormatter()
-  const parsed = useParsedOutput<ClipboardListOutput>((part as { output?: unknown }).output)
+  const parsed = useParsedToolOutput<ClipboardListOutput>((part as { output?: unknown }).output)
   const [showAll, setShowAll] = useState(false)
   const { copied, copy } = useCopy()
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
@@ -47,7 +44,7 @@ export function ClipboardHistoryCard({ part }: ToolResultRendererProps) {
   const visible = showAll ? entries : entries.slice(0, CLIPBOARD_PREVIEW_ENTRIES)
 
   return (
-    <McpCardShell
+    <ToolCard
       title={t("title")}
       badge={t("count", { count: entries.length })}
       testId="clipboard-history-card"
@@ -107,6 +104,6 @@ export function ClipboardHistoryCard({ part }: ToolResultRendererProps) {
           )}
         </div>
       </div>
-    </McpCardShell>
+    </ToolCard>
   )
 }

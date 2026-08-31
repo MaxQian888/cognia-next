@@ -24,10 +24,6 @@
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { defineCharacterPack } from "@cognia/plugin-sdk"
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
 export const BUILTIN_PACK = defineCharacterPack({
   id: "builtin",
   name: "Cognia Built-ins",
@@ -139,12 +135,7 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("cognia-builtin-characters activated")
-    registerCharacterPack(BUILTIN_PACK.id, BUILTIN_PACK, {
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) unregisterCharacterPacksByPlugin(ctx.pluginId)
+    ctx.characterPacks.register(BUILTIN_PACK)
   },
 }
 

@@ -1,5 +1,4 @@
 import type { PluginContext } from "@cognia/plugin-sdk"
-jest.mock("@cognia/plugin-sdk/api/sandbox", () => ({ setMicrovmExec: jest.fn() }))
 
 const fakeBackend = { kind: "e2b-backend" }
 jest.mock("./workspace-backend", () => ({
@@ -9,12 +8,10 @@ jest.mock("./workspace-backend", () => ({
 const fakeExec = { kind: "microvm-exec", dispose: jest.fn(async () => undefined) }
 jest.mock("./microvm-exec", () => ({ buildMicrovmExec: jest.fn(() => fakeExec) }))
 
-import { setMicrovmExec } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
 import e2bSandbox from "./index"
 
-const setMicrovmExecMock = setMicrovmExec as jest.Mock
 const E2BWorkspaceBackendMock = E2BWorkspaceBackend as jest.Mock
 const buildMicrovmExecMock = buildMicrovmExec as jest.Mock
 
@@ -25,6 +22,8 @@ function makeCtx(opts: { workspace?: boolean; config?: Record<string, unknown> }
   const showToast = jest.fn()
   const config = opts.config ?? {}
   const configUnsubscribe = jest.fn()
+  const unregisterMicrovmAdapter = jest.fn()
+  const registerMicrovmAdapter = jest.fn(() => unregisterMicrovmAdapter)
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-e2b-sandbox",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
@@ -42,6 +41,7 @@ function makeCtx(opts: { workspace?: boolean; config?: Record<string, unknown> }
     } as never,
     ui: { showToast } as never,
     workspace: opts.workspace ? ({ registerBackend } as never) : undefined,
+    sandbox: { registerMicrovmAdapter } as never,
   }
   return {
     ctx: ctx as PluginContext,
@@ -50,11 +50,12 @@ function makeCtx(opts: { workspace?: boolean; config?: Record<string, unknown> }
     unregister,
     showToast,
     configUnsubscribe,
+    registerMicrovmAdapter,
+    unregisterMicrovmAdapter,
   }
 }
 
 beforeEach(() => {
-  setMicrovmExecMock.mockReset()
   E2BWorkspaceBackendMock.mockClear()
   buildMicrovmExecMock.mockClear()
   fakeExec.dispose.mockClear()
@@ -119,11 +120,11 @@ describe("e2b-sandbox (built-in)", () => {
   })
 
   it("wires the microvm exec adapter on activate and clears it on deactivate", async () => {
-    const { ctx } = makeCtx({ workspace: true })
+    const { ctx, registerMicrovmAdapter, unregisterMicrovmAdapter } = makeCtx({ workspace: true })
     await e2bSandbox.activate?.(ctx)
-    expect(setMicrovmExecMock).toHaveBeenCalledWith(fakeExec)
+    expect(registerMicrovmAdapter).toHaveBeenCalledWith(fakeExec)
     await e2bSandbox.deactivate?.(ctx)
-    expect(setMicrovmExecMock).toHaveBeenLastCalledWith(null)
+    expect(unregisterMicrovmAdapter).toHaveBeenCalledTimes(1)
   })
 
   it("does not close live workspaces on deactivate", async () => {

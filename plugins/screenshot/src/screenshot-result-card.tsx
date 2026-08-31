@@ -15,10 +15,12 @@
 import { useTranslations } from "next-intl"
 import { CameraIcon } from "lucide-react"
 
-import type { ToolResultRendererProps } from "@cognia/plugin-sdk/api/tool-renderer"
-import { McpCardShell, blockMediaSrc, parseOutputJson } from "@cognia/plugin-sdk/api/tool-renderer"
-import type { McpResultBlock } from "@cognia/plugin-sdk/api/tool-renderer"
-import { ImageBlock } from "@cognia/plugin-sdk/api/tool-renderer"
+import {
+  blockMediaSrc,
+  type McpResultBlock,
+  type ToolResultRendererProps,
+} from "@cognia/plugin-sdk/api/tool-renderer"
+import { parseToolOutput, PluginImage, ToolCard } from "@cognia/plugin-ui"
 interface ContentBlockLike {
   type?: string
   text?: string
@@ -28,7 +30,7 @@ interface ContentBlockLike {
 export function screenshotBlocks(part: unknown): McpResultBlock[] {
   const p = part as { mcpContent?: unknown; output?: unknown }
   if (Array.isArray(p.mcpContent)) return p.mcpContent as McpResultBlock[]
-  const parsed = parseOutputJson(p.output) as { content?: unknown } | null
+  const parsed = parseToolOutput(p.output) as { content?: unknown } | null
   if (parsed && Array.isArray(parsed.content)) return parsed.content as McpResultBlock[]
   return []
 }
@@ -48,12 +50,12 @@ export function ScreenshotResultCard({ part }: ToolResultRendererProps) {
     .join(" ")
 
   return (
-    <McpCardShell title={t("title")} testId="screenshot-result-card">
+    <ToolCard title={t("title")} testId="screenshot-result-card">
       <div className="flex items-start gap-2">
         <CameraIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="max-w-md">
-            <ImageBlock src={src} alt={t("alt")} />
+            <PluginImage src={src} alt={t("alt")} />
           </div>
           {note && (
             <p className="text-[11px] text-muted-foreground" data-testid="screenshot-result-note">
@@ -62,6 +64,6 @@ export function ScreenshotResultCard({ part }: ToolResultRendererProps) {
           )}
         </div>
       </div>
-    </McpCardShell>
+    </ToolCard>
   )
 }

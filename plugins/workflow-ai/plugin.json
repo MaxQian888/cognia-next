@@ -10,7 +10,7 @@
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "permissions": [],
+  "permissions": ["workflow:read", "canvas:write", "canvas:run", "session:read", "connectors:send"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {

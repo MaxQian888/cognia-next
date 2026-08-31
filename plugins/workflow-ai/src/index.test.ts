@@ -1,10 +1,16 @@
+/** @cognia-host-integration-test */
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import { buildWorkflowAiTools } from "./index"
 import {
   WORKFLOW_RUNNER_TOOL_NAME,
   WORKFLOW_RUNNER_TOOL_DEFINITION,
 } from "@cognia/plugin-sdk/api/workflow-run"
 describe("buildWorkflowAiTools", () => {
-  const tools = buildWorkflowAiTools()
+  const tools = buildWorkflowAiTools(
+    createWorkflowAuthorAPI() as PluginContext["workflow"],
+    {} as PluginContext["resources"]
+  )
   const names = tools.map((t) => t.name)
 
   it("composes every tool family, including the wake tool", () => {

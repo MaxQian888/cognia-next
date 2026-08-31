@@ -16,23 +16,8 @@
  * `getSharedOcrRegistry()` this dispatcher reads from.
  */
 
-import type {
-  OcrInput,
-  OcrResult,
-  PluginContext,
-  PluginDefinition,
-  UserOcrSettings,
-} from "@cognia/plugin-sdk"
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
-import {
-  buildOcrDeps,
-  buildOcrResultPart,
-  extract,
-  getSharedOcrRegistry,
-  handleOcrSlashCommand,
-  loadUserOcrSettings,
-  type ExtractDeps,
-} from "@cognia/plugin-sdk/api/ocr-provider"
+import type { OcrInput, OcrResult, PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import { buildOcrResultPart, buildOcrSecurityEnvelope } from "@cognia/plugin-sdk/api/ocr-provider"
 import { OcrResultCard } from "./ocr-result-card"
 import manifestJson from "../plugin.json"
 
@@ -45,98 +30,46 @@ export interface OcrToolInput {
 }
 
 interface OcrPluginConfig {
-  /** Caller can swap in custom deps in tests — defaults to lazy lookup. */
-  buildDeps?: () => ExtractDeps | null
-  /** Screen-OCR capture override (tests). Defaults to `lib/automation/ocr-screen`. */
-  captureScreen?: (languages?: string[]) => Promise<OcrResult>
-  /** Custom settings — defaults to DEFAULT_OCR_SETTINGS when no store is wired. */
-  getSettings?: () => UserOcrSettings
+  runtime?: Pick<PluginContext["ocr"], "extract" | "extractFile" | "extractScreen" | "isReady">
 }
-
-/**
- * Read a file from disk into the `ResolvedSource` shape `extract` wants.
- *
- * Desktop-only: the browser has no path-addressable filesystem. Without this
- * `buildOcrDeps` left `filePathResolver` undefined, so EVERY `file-path`
- * extraction — including the documented `/ocr <path>` usage — threw
- * "file-path source requires a filePathResolver".
- */
-async function readFilePathSource(path: string): Promise<{
-  blob: Blob
-  mimeType: string
-  bytes: Uint8Array
-}> {
-  if (!readHostCapabilities().tauri) {
-    throw new Error("file-path OCR requires the desktop app (no filesystem access in the browser).")
-  }
-  const { readFile } = await import("@tauri-apps/plugin-fs")
-  const bytes = await readFile(path)
-  const mimeType = mimeFromPath(path)
-  return { blob: new Blob([bytes as BlobPart], { type: mimeType }), mimeType, bytes }
-}
-
-const EXT_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  webp: "image/webp",
-  gif: "image/gif",
-  bmp: "image/bmp",
-  tif: "image/tiff",
-  tiff: "image/tiff",
-  heic: "image/heic",
-  pdf: "application/pdf",
-}
-
-function mimeFromPath(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? ""
-  return EXT_MIME[ext] ?? "application/octet-stream"
-}
-
-/** Exported so tests can assert the resolvers the plugin actually supplies. */
-export async function defaultDepsBuilder(
-  config: OcrPluginConfig = {}
-): Promise<ExtractDeps | null> {
-  const registry = getSharedOcrRegistry()
-  if (registry.list().length === 0) return null
-  // Read the USER's OCR settings. `buildOcrDeps` falls back to
-  // DEFAULT_OCR_SETTINGS, so the tool used to silently ignore the configured
-  // provider, languages and format while its own description promised
-  // "routes … based on settings".
-  const settings = config.getSettings?.() ?? (await loadUserOcrSettings())
-  return buildOcrDeps({ registry, settings, filePathResolver: readFilePathSource })
-}
-
-/** Best-effort read of the persisted OCR settings; falls back to the defaults. */
-// `loadUserOcrSettings` comes from the SDK — see the import above.
 
 export async function runOcrTool(
   input: OcrToolInput,
   config: OcrPluginConfig = {}
-): Promise<{ ok: true; result: OcrResult } | { ok: false; error: string; code?: string }> {
+): Promise<
+  | {
+      ok: true
+      result: OcrResult
+      provenance: { kind: "ocr"; providerId: string; sourceKind: OcrToolInput["source"]["kind"] }
+      security: { untrusted: true; pii: "unreviewed" }
+      untrustedNotice: string
+    }
+  | { ok: false; error: string; code?: string }
+> {
+  const success = (result: OcrResult) => ({
+    ok: true as const,
+    result,
+    ...buildOcrSecurityEnvelope(result, input.source.kind),
+  })
   // `screen` mode captures the desktop and OCRs it (renderer composition; the
   // capture half is gated by the automation permission layer). It builds its
   // own deps via `ocrScreen`, so it runs before the registry-deps check and
   // needs no `source.value`.
-  if (input.source.kind === "screen") {
-    try {
-      const capture = config.captureScreen ?? defaultCaptureScreen
-      const result = await capture(input.languages)
-      return { ok: true, result }
-    } catch (err) {
-      const code = (err as { code?: string }).code
-      return { ok: false, error: err instanceof Error ? err.message : String(err), code }
+  const runtime = config.runtime
+  if (!runtime || !runtime.isReady()) {
+    return {
+      ok: false,
+      error: "OCR runtime is not ready — no providers registered yet.",
     }
   }
 
-  const deps = config.buildDeps ? config.buildDeps() : await defaultDepsBuilder(config)
-  if (!deps) {
-    return {
-      ok: false,
-      error:
-        "OCR runtime is not ready — no providers registered yet. " +
-        "Providers contributed via ADR-0026 §2 §A `ctx.ocr.registerProvider(...)` " +
-        "or `manifest.ocrProviders[]` populate the shared registry at activate time.",
+  if (input.source.kind === "screen") {
+    try {
+      const result = await runtime.extractScreen({ languages: input.languages })
+      return success(result)
+    } catch (err) {
+      const code = (err as { code?: string }).code
+      return { ok: false, error: err instanceof Error ? err.message : String(err), code }
     }
   }
 
@@ -152,8 +85,16 @@ export async function runOcrTool(
     providerId: input.provider && input.provider !== "auto" ? input.provider : undefined,
   }
   try {
-    const result = await extract(ocrInput, deps)
-    return { ok: true, result }
+    const result =
+      source.kind === "file-path"
+        ? await runtime.extractFile(source.path, {
+            languages: input.languages,
+            format: input.format,
+            pageRange: input.pageRange,
+            providerId: input.provider && input.provider !== "auto" ? input.provider : undefined,
+          })
+        : await runtime.extract(ocrInput)
+    return success(result)
   } catch (err) {
     const code = (err as { code?: string }).code
     const message = err instanceof Error ? err.message : String(err)
@@ -179,17 +120,6 @@ function mapToolSource(source: OcrToolInput["source"]): OcrInput["source"] | nul
 function extractMime(dataUrl: string): string {
   const m = /^data:([^;,]+)/.exec(dataUrl)
   return m ? m[1]! : "application/octet-stream"
-}
-
-/**
- * Capture the screen and OCR it. Dynamically imports the automation client so
- * the screen-OCR path doesn't pull desktop automation into the base bundle for
- * the common image/PDF cases. The capture is gated by the automation
- * permission layer (surface/tier) on the Rust side.
- */
-async function defaultCaptureScreen(languages?: string[]): Promise<OcrResult> {
-  const { ocrScreen } = await import("@cognia/plugin-sdk/api/ocr-provider")
-  return ocrScreen({ languages })
 }
 
 const TOOL_NAME = "ocr.extract"
@@ -254,7 +184,8 @@ export const ocrPluginDefinition: PluginDefinition = {
           "Extract text and structured Markdown from any image or PDF. Routes to one of 17 cloud or on-device OCR providers based on settings or the supplied provider id.",
         parametersSchema: TOOL_PARAMETERS,
       } as never,
-      execute: async (args: Record<string, unknown>) => runOcrTool(args as unknown as OcrToolInput),
+      execute: async (args: Record<string, unknown>) =>
+        runOcrTool(args as unknown as OcrToolInput, { runtime: ctx.ocr }),
     })
 
     // gap4 — render the recognized text as a rich `ocr-result` chat card
@@ -275,12 +206,11 @@ export const ocrPluginDefinition: PluginDefinition = {
     return {
       onCommand: async (command: string, args: string[]) => {
         if (command !== "ocr") return false
-        const deps = await defaultDepsBuilder()
-        if (!deps) {
+        if (!ctx.ocr.isReady()) {
           ctx.ui?.showToast?.("OCR runtime is not ready.", "error")
           return true
         }
-        const out = await handleOcrSlashCommand({ argv: args.join(" "), deps })
+        const out = await ctx.ocr.runSlashCommand(args.join(" "))
         // On success emit the rich `ocr-result` card into the active chat
         // rather than a plain text bubble.
         if (out.result) {

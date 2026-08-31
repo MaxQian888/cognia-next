@@ -1,4 +1,4 @@
-import { validatePluginManifest } from "@cognia/plugin-sdk"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 
 import { manifest } from "./index"
 

@@ -1,16 +1,7 @@
-// Doubled at the SDK subpath the plugin imports, not the host module behind it.
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterSlashCommandsByPlugin: jest.fn(),
-}))
 jest.mock("./StrixPanel", () => ({ StrixPanel: () => null }))
 jest.mock("./runtime", () => ({ setStrixRuntime: jest.fn(), clearStrixRuntime: jest.fn() }))
 
 import definition from "./index"
-import {
-  registerSlashCommand,
-  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
-} from "@cognia/plugin-sdk/api/slash-command"
 import { clearStrixRuntime, setStrixRuntime } from "./runtime"
 import type { PluginContext } from "@cognia/plugin-sdk"
 const disposePanel = jest.fn()
@@ -22,6 +13,7 @@ function fakeCtx(over: Partial<PluginContext> = {}): PluginContext {
     pluginId: "strix-security",
     dexie: {} as never,
     terminal: {} as never,
+    securityScans: { syncExecutionRun: jest.fn(), registerRunController: jest.fn() } as never,
     contextPanels: { register, reveal, setBadge: jest.fn() },
     logger: { info: jest.fn(), error: jest.fn() },
     ...over,
@@ -46,7 +38,7 @@ describe("strix-security plugin lifecycle", () => {
     )
     // The slash command is DECLARED (manifest.commands[]) and handled by the
     // hook returned from activate — the plugin must not touch the registry.
-    expect(registerSlashCommand).not.toHaveBeenCalled()
+    expect((definition.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
   })
 
   it("hands the panel the workbench API so a running scan can badge its own button", async () => {
@@ -111,7 +103,7 @@ describe("strix-security plugin lifecycle", () => {
     await definition.deactivate?.(fakeCtx())
     expect(disposePanel).toHaveBeenCalledTimes(1)
     // Command teardown is the manager's job for declared commands.
-    expect(unregisterCommandsByPlugin).not.toHaveBeenCalled()
+    expect((definition.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
     expect(clearStrixRuntime).toHaveBeenCalledTimes(1)
   })
 })

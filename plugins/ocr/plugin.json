@@ -12,7 +12,13 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": [
+    "media:image:read",
+    "database:write",
+    "native:filesystem",
+    "automation:screenshot",
+    "native:screen"
+  ],
   "activationEvents": ["startup", "onCommand:ocr"],
   "runtimeCompatibility": {
     "browser": {

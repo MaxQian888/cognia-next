@@ -14,9 +14,8 @@
 
 import { ScreenshotResultCard } from "./screenshot-result-card"
 import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { buildOcrSecurityEnvelope } from "@cognia/plugin-sdk/api/ocr-provider"
 import manifestJson from "../plugin.json"
-import { captureScreenshot } from "@cognia/plugin-sdk/api/automation"
-import { buildOcrDeps, extract } from "@cognia/plugin-sdk/api/ocr-provider"
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
@@ -53,9 +52,11 @@ interface CaptureResult {
   error?: string
 }
 
-async function performCapture(): Promise<CaptureResult> {
+async function performCapture(
+  automation: Pick<PluginContext["automation"], "captureDisplay">
+): Promise<CaptureResult> {
   try {
-    const file = await captureScreenshot()
+    const file = await automation.captureDisplay()
     if (!file) {
       return { ok: false, error: "user-cancelled-or-unsupported" }
     }
@@ -115,7 +116,11 @@ interface OcrTextBlock {
   confidence?: number
 }
 
-async function performCaptureOcr(languages?: string[]): Promise<
+async function performCaptureOcr(
+  automation: Pick<PluginContext["automation"], "captureDisplay">,
+  ocr: Pick<PluginContext["ocr"], "extract">,
+  languages?: string[]
+): Promise<
   | {
       ok: true
       text: string
@@ -126,17 +131,14 @@ async function performCaptureOcr(languages?: string[]): Promise<
   | { ok: false; error: string }
 > {
   try {
-    const file = await captureScreenshot()
+    const file = await automation.captureDisplay()
     if (!file) return { ok: false, error: "user-cancelled-or-unsupported" }
     const base64 = await fileToBase64(file)
     const mimeType = file.type || "image/png"
-    const result = await extract(
-      {
-        source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${base64}`, mimeType },
-        languages,
-      },
-      buildOcrDeps()
-    )
+    const result = await ocr.extract({
+      source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${base64}`, mimeType },
+      languages,
+    })
     // Surface per-block geometry (when the provider emits it) so callers can map
     // text to a location. Coordinates are relative to the captured image — for
     // an actionable screen click prefer the gated click_text / find_text tools.
@@ -151,6 +153,7 @@ async function performCaptureOcr(languages?: string[]): Promise<
       markdown: result.combinedMarkdown,
       providerId: result.providerId,
       blocks,
+      ...buildOcrSecurityEnvelope(result, "screen"),
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -180,7 +183,7 @@ const definition: PluginDefinition = {
           additionalProperties: false,
         },
       } as never,
-      execute: async () => captureToToolResult(await performCapture()),
+      execute: async () => captureToToolResult(await performCapture(ctx.automation)),
     })
 
     ctx.agent?.registerTool?.({
@@ -203,7 +206,8 @@ const definition: PluginDefinition = {
           additionalProperties: false,
         },
       } as never,
-      execute: (args?: { languages?: string[] }) => performCaptureOcr(args?.languages),
+      execute: (args?: { languages?: string[] }) =>
+        performCaptureOcr(ctx.automation, ctx.ocr, args?.languages),
     })
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
@@ -214,7 +218,7 @@ const definition: PluginDefinition = {
     return {
       onCommand: async (command: string) => {
         if (command !== "screenshot") return false
-        const result = await performCapture()
+        const result = await performCapture(ctx.automation)
         ctx.ui?.showToast?.(
           result.ok
             ? `Captured ${result.filename ?? "screenshot.png"} (${result.size ?? 0} bytes).${

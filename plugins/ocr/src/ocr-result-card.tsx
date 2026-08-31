@@ -7,21 +7,13 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Badge, Button } from "@cognia/plugin-ui"
-import { createPluginLogger, readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
+import { Badge, Button, PluginImage, useCopy } from "@cognia/plugin-ui"
+import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import {
-  COMPOSER_APPEND_EVENT,
+  dispatchComposerAppend,
   type MessagePartRendererProps,
 } from "@cognia/plugin-sdk/api/message-renderer"
 import { type OcrResultPart, type OcrSourceRef } from "@cognia/plugin-sdk/api/ocr-provider"
-import { ImageBlock, useCopy } from "@cognia/plugin-sdk/api/tool-renderer"
-
-/**
- * Plugin-scoped logger for a card that renders outside `activate(ctx)`, so a
- * clipboard failure is attributed to this plugin rather than to whichever host
- * module it borrowed a logger from.
- */
-const cardLogger = createPluginLogger("cognia-ocr")
 
 function isOcrResultPart(part: unknown): part is OcrResultPart {
   const p = part as { type?: unknown; text?: unknown }
@@ -68,7 +60,7 @@ export function OcrResultCard({ part }: MessagePartRendererProps) {
   // shape isn't in it, so narrow via `unknown`.
   const ocr: OcrResultPart | null = isOcrResultPart(part) ? (part as OcrResultPart) : null
   const t = useTranslations("chat.ocrResult")
-  const { copied, copy } = useCopy({ logger: cardLogger, scope: "ocr" })
+  const { copied, copy } = useCopy({ scope: "ocr" })
   const thumbnail = useThumbnailSrc(ocr?.sourceRef)
 
   if (!ocr) return null
@@ -84,7 +76,7 @@ export function OcrResultCard({ part }: MessagePartRendererProps) {
       </div>
 
       {thumbnail ? (
-        <ImageBlock src={thumbnail} alt={t("thumbnailAlt")} title={t("thumbnailAlt")} />
+        <PluginImage src={thumbnail} alt={t("thumbnailAlt")} title={t("thumbnailAlt")} />
       ) : null}
 
       {ocr.text.trim().length > 0 ? (
@@ -128,11 +120,7 @@ export function OcrResultCard({ part }: MessagePartRendererProps) {
           className="h-7 text-xs"
           data-testid="ocr-result-ask"
           disabled={ocr.text.trim().length === 0}
-          onClick={() =>
-            window.dispatchEvent(
-              new CustomEvent(COMPOSER_APPEND_EVENT, { detail: { text: ocr.text } })
-            )
-          }
+          onClick={() => dispatchComposerAppend({ text: ocr.text })}
         >
           {t("askAbout")}
         </Button>

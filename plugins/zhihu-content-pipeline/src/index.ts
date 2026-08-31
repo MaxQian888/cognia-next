@@ -26,11 +26,6 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import {
-  registerCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
-import { refreshAllWorkflowTemplateWarnings } from "@cognia/plugin-sdk/api/workflow-template"
 import { I18N_MESSAGES } from "./i18n"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
@@ -39,7 +34,7 @@ import { makePersistTools } from "./tools/persist"
 import { makeSaveTopicsNode } from "./nodes/save-topics"
 import { TOPIC_DISCOVERY_TEMPLATE } from "./workflow/template"
 import { WRITING_CREW_TEMPLATE } from "./team/template"
-import { setPipelineDbFromDexie } from "./db/runtime"
+import { setPipelineDbFromDexie, setPluginSession } from "./db/runtime"
 import { handleZhihuCommand } from "./commands"
 import manifestJson from "../plugin.json"
 
@@ -71,7 +66,7 @@ const definition: PluginDefinition = {
     // present under dev hot-reload before the manifest walker runs. The MCP
     // presets ride the declarative manifest (all npx/uvx-spawnable); zget is
     // not a preset — roles run it via Bash, the workflow via a terminal node.
-    registerCharacterPack(ZHIHU_ROLE_PACK.id, ZHIHU_ROLE_PACK, { pluginId: ctx.pluginId })
+    ctx.characterPacks.register(ZHIHU_ROLE_PACK)
 
     // The persist tools and the save-topics node both need the live Dexie
     // handle (agents/nodes can't reach `ctx.dexie` themselves), so they're
@@ -79,6 +74,7 @@ const definition: PluginDefinition = {
     // runtime singleton also lets the review modal read the tables. Without
     // dexie the pack/skills/presets/templates still work.
     setPipelineDbFromDexie(ctx.dexie)
+    setPluginSession(ctx.session)
     if (ctx.dexie) {
       for (const tool of makePersistTools(ctx.dexie)) {
         ctx.agent.registerTool(tool)
@@ -88,7 +84,7 @@ const definition: PluginDefinition = {
       // workflow template's `requires.pluginNodeKinds` warning can lag on
       // enable-order. Refresh now so the template reflects the just-registered
       // node regardless of dispatch order.
-      refreshAllWorkflowTemplateWarnings()
+      ctx.workflow.refreshTemplateWarnings()
     } else {
       ctx.logger?.warn(
         "zhihu-content-pipeline: no Dexie handle — persistence (save-topics node, save tools) disabled"
@@ -106,13 +102,11 @@ const definition: PluginDefinition = {
       },
     }
   },
-  deactivate: async (ctx?: PluginContext) => {
+  deactivate: async () => {
     disposeSaveTopics?.()
     disposeSaveTopics = null
     setPipelineDbFromDexie(null)
-    if (ctx?.pluginId) {
-      unregisterCharacterPacksByPlugin(ctx.pluginId)
-    }
+    setPluginSession(null)
   },
 }
 

@@ -1,12 +1,13 @@
+/** @cognia-host-integration-test */
 import { REFACTOR_PIPELINE_TEMPLATE } from "./template"
-import { validateWorkflowTemplateRequires } from "@cognia/plugin-sdk/api/workflow-template"
+import { validateWorkflowTemplateRequires } from "@/lib/plugin/registries/workflow-template-registry"
 import {
   addPluginCatalogEntry,
   removePluginCatalogEntry,
   type NodeCatalogEntry,
-} from "@cognia/plugin-sdk/api/workflow-template"
-import { projectPluginWorkflowTemplate } from "@cognia/plugin-sdk/api/workflow-template"
-import { validateGraphIntegrity } from "@cognia/plugin-sdk/api/workflow-template"
+} from "@/lib/workflow/nodes/catalog"
+import { projectPluginWorkflowTemplate } from "@/lib/workflow/templates/project-plugin-workflow-template"
+import { validateGraphIntegrity } from "@/lib/workflow/definition/validate"
 import { nodeKind, PLUGIN_ID } from "../ids"
 
 const AGENT_TURN = nodeKind("agent.turn")

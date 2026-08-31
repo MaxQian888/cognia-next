@@ -14,18 +14,14 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
-// Doubled at the SDK subpaths the card imports, not the host modules behind
-// them. Mocking `@/lib/platform/detect` in particular used to reach past the
-// card into the host's keyring store and break unrelated modules.
 const copy = jest.fn()
-jest.mock("@cognia/plugin-sdk/api/tool-renderer", () => ({
-  ...jest.requireActual("@cognia/plugin-sdk/api/tool-renderer"),
-  ImageBlock: ({ src }: { src: string }) => <img data-testid="ocr-thumb" src={src} alt="" />,
+jest.mock("@cognia/plugin-ui", () => ({
+  ...jest.requireActual("@cognia/plugin-ui"),
+  PluginImage: ({ src }: { src: string }) => <img data-testid="ocr-thumb" src={src} alt="" />,
   useCopy: () => ({ copied: false, copy }),
 }))
 jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
   readHostCapabilities: () => ({ tauri: false, platform: "web" }),
-  createPluginLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }))
 
 function part(over: Partial<OcrResultPart> = {}): OcrResultPart {

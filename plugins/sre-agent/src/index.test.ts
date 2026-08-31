@@ -1,5 +1,5 @@
 import type { PluginContext, PluginTool } from "@cognia/plugin-sdk"
-import { findPluginManifestParityIssues } from "@cognia/plugin-sdk"
+import { findPluginManifestParityIssues } from "@cognia/plugin-sdk/manifest"
 import packagedManifest from "../plugin.json"
 import definition, { manifest } from "./index"
 

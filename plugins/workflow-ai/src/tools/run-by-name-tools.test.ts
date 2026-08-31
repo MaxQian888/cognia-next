@@ -1,11 +1,14 @@
+/** @cognia-host-integration-test */
 import {
   createDbTestFixture,
   listCallbackBindings,
   seedPlatformBoundSession,
   seedRunningInboundJob,
-} from "@cognia/plugin-sdk/api/testing"
-import { createWorkflow } from "@cognia/plugin-sdk/api/workflow-run"
+} from "@/lib/plugin/api/testing"
+import { createWorkflow } from "@/lib/db/workflows"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import { buildRunByNameTools } from "./run-by-name-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
 async function seedSession(opts: { sessionId: string; bindToIM?: boolean }): Promise<void> {
   await seedPlatformBoundSession({
@@ -22,6 +25,7 @@ async function seedSession(opts: { sessionId: string; bindToIM?: boolean }): Pro
   })
 }
 
+configureWorkflowApi(createWorkflowAuthorAPI() as never)
 const tools = buildRunByNameTools()
 const listTool = tools.find((t) => t.name === "wf_list_workflows")!
 const runByNameTool = tools.find((t) => t.name === "wf_run_workflow_by_name")!
@@ -185,10 +189,9 @@ describe("wf_run_workflow_by_name", () => {
       mode: "initiator",
       allowedUserIds: ["u_requester"],
     })
-    expect(
-      (approveBinding?.payload?.triggeredFrom as { initiator?: { remoteUserId?: string } })
-        ?.initiator?.remoteUserId
-    ).toBe("u_requester")
+    const payload = approveBinding?.payload as
+      { triggeredFrom?: { initiator?: { remoteUserId?: string } } } | undefined
+    expect(payload?.triggeredFrom?.initiator?.remoteUserId).toBe("u_requester")
   })
 })
 

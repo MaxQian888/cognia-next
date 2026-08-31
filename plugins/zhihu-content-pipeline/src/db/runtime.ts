@@ -9,10 +9,11 @@
  * the plugin's code at runtime.
  */
 
-import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { PluginDexieAPI, PluginSessionAPI } from "@cognia/plugin-sdk"
 import { createPipelineDb, type PipelineDb } from "./tables"
 
 let pipelineDb: PipelineDb | null = null
+let pluginSession: PluginSessionAPI | null = null
 
 /** Publish (or clear) the pipeline DB from a live `ctx.dexie` handle. */
 export function setPipelineDbFromDexie(dexie: PluginDexieAPI | undefined | null): void {
@@ -22,6 +23,14 @@ export function setPipelineDbFromDexie(dexie: PluginDexieAPI | undefined | null)
 /** The live pipeline DB, or null when the plugin has no Dexie handle. */
 export function getPipelineDb(): PipelineDb | null {
   return pipelineDb
+}
+
+export function setPluginSession(session: PluginSessionAPI | null): void {
+  pluginSession = session
+}
+
+export function getPluginSession(): PluginSessionAPI | null {
+  return pluginSession
 }
 
 /** Test-only: inject a fake DB. */

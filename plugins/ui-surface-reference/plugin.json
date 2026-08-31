@@ -24,7 +24,13 @@
     "configuration",
     "commands"
   ],
-  "permissions": ["extension:ui", "session:read", "settings:read", "settings:write"],
+  "permissions": [
+    "extension:ui",
+    "session:read",
+    "settings:read",
+    "settings:write",
+    "selection:read"
+  ],
   "main": "src/index.tsx",
   "styles": "styles.css",
   "extensions": [
@@ -194,6 +200,11 @@
         "surfaces.toolRenderer": "Tool renderer",
         "surfaces.modal": "Modal",
         "surfaces.quickAction": "Quick action",
+        "surfaces.selectionMetadata": "Selection metadata",
+        "surfaces.selectionText": "Selection text status",
+        "surfaces.selectionPreview": "Preview selection",
+        "surfaces.selectionCopy": "Copy transformed selection",
+        "surfaces.selectionReplace": "Replace selection",
         "surfaces.tray": "Tray item",
         "surfaces.config": "Configuration"
       },
@@ -210,6 +221,11 @@
         "surfaces.toolRenderer": "工具渲染器",
         "surfaces.modal": "模态框",
         "surfaces.quickAction": "快捷操作",
+        "surfaces.selectionMetadata": "选区元数据",
+        "surfaces.selectionText": "选区文本状态",
+        "surfaces.selectionPreview": "预览选区结果",
+        "surfaces.selectionCopy": "复制转换后的选区",
+        "surfaces.selectionReplace": "替换选区",
         "surfaces.tray": "托盘项",
         "surfaces.config": "配置"
       }

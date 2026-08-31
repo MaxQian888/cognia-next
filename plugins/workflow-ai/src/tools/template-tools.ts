@@ -20,14 +20,8 @@
 
 import type { PluginTool } from "@cognia/plugin-sdk"
 import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@cognia/plugin-sdk"
-import { formatToolError, resolveStore } from "../store-bridge"
-import {
-  getCopilotTemplate,
-  listCopilotTemplates,
-  materializeCopilotTemplate,
-  type CopilotSlotValues,
-} from "@cognia/plugin-sdk/api/workflow-editor"
-import { useProposalStore } from "@cognia/plugin-sdk/api/workflow-editor"
+import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
+import type { CopilotSlotValues } from "@cognia/plugin-sdk/api/workflow-editor"
 import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
 import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 const PLUGIN_ID = "cognia-workflow-ai"
@@ -146,23 +140,25 @@ export function buildTemplateTools(): PluginTool[] {
       },
       execute: async () => {
         try {
-          const templates = listCopilotTemplates().map((t) => ({
-            id: t.id,
-            label: t.label,
-            description: t.description,
-            iconName: t.iconName,
-            tags: t.tags ?? [],
-            slots: t.slots.map((s) => ({
-              key: s.key,
-              type: s.type,
-              label: s.label,
-              description: s.description,
-              placeholder: s.placeholder,
-              options: s.options,
-              required: !!s.required,
-              defaultValue: s.defaultValue,
-            })),
-          }))
+          const templates = getWorkflowApi()
+            .listCopilotTemplates()
+            .map((t) => ({
+              id: t.id,
+              label: t.label,
+              description: t.description,
+              iconName: t.iconName,
+              tags: t.tags ?? [],
+              slots: t.slots.map((s) => ({
+                key: s.key,
+                type: s.type,
+                label: s.label,
+                description: s.description,
+                placeholder: s.placeholder,
+                options: s.options,
+                required: !!s.required,
+                defaultValue: s.defaultValue,
+              })),
+            }))
           return { ok: true, templates }
         } catch (err) {
           return formatToolError(err)
@@ -203,7 +199,7 @@ export function buildTemplateTools(): PluginTool[] {
           })
           const templateId = String(args.templateId ?? "")
           const slots = (args.slots as CopilotSlotValues | undefined) ?? {}
-          const materialize = materializeCopilotTemplate(templateId, slots)
+          const materialize = getWorkflowApi().materializeCopilotTemplate(templateId, slots)
           if (!materialize.ok) {
             return {
               ok: false,
@@ -225,19 +221,18 @@ export function buildTemplateTools(): PluginTool[] {
           const { ops } = templateToProposalOps(materialize.workflow, existing, shortId)
           const proposalId = nextProposalId()
           const summary = `Apply template "${materialize.template.label.en}" — ${ops.filter((o) => o.type === "add_node").length} nodes`
-          const payload = useProposalStore.getState().openProposal(workflowId, {
+          const payload = getWorkflowApi().stageProposal({
             proposalId,
             workflowId,
             summary,
             ops,
             baseRevision: workflowEditorRevision(state),
           })
-          const template = getCopilotTemplate(templateId)
           return {
             ok: true,
             workflowId,
             proposalId: payload.proposalId,
-            templateId: template?.id ?? templateId,
+            templateId: materialize.template.id,
             summary: payload.summary,
             opCount: summarizeOps(ops),
             messageParts: [

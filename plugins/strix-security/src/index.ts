@@ -45,6 +45,7 @@ const definition: PluginDefinition = {
         terminal: ctx.terminal,
         dexie,
         contextPanels: ctx.contextPanels ?? null,
+        securityScans: ctx.securityScans,
       })
     } else {
       ctx.logger?.error?.("strix-security: ctx.dexie unavailable — panel will be inert")

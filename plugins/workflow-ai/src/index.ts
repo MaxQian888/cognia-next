@@ -28,10 +28,15 @@ import { buildResourceTools } from "./tools/resource-tools"
 import { buildNodeKindTools } from "./tools/node-kind-tools"
 import { buildDiagnosticTools } from "./tools/diagnostic-tools"
 import { buildWakeTools } from "./tools/wake-tools"
+import { clearWorkflowApi, configureWorkflowApi } from "./store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
-export function buildWorkflowAiTools(): PluginTool[] {
+export function buildWorkflowAiTools(
+  workflow: PluginContext["workflow"],
+  resources: PluginContext["resources"]
+): PluginTool[] {
+  configureWorkflowApi(workflow)
   return [
     ...buildReadTools(),
     ...buildMutateTools(),
@@ -41,7 +46,7 @@ export function buildWorkflowAiTools(): PluginTool[] {
     ...buildRunTools(),
     ...buildRunByNameTools(),
     ...buildRunTypedTools(),
-    ...buildResourceTools(),
+    ...buildResourceTools(resources),
     ...buildNodeKindTools(),
     ...buildDiagnosticTools(),
     ...buildWakeTools(),
@@ -59,6 +64,8 @@ const I18N_MESSAGES = {
   },
 } as const
 
+let registeredToolNames: string[] = []
+
 const definition: PluginDefinition = {
   manifest: {
     id: PLUGIN_ID,
@@ -67,14 +74,16 @@ const definition: PluginDefinition = {
     type: "frontend",
     capabilities: ["tools", "commands"],
     main: "src/index.ts",
-    permissions: [],
+    permissions: ["workflow:read", "canvas:write", "canvas:run", "session:read", "connectors:send"],
     // ADR-0026 §5 §D — declarative i18n. Auto-wired on enable / disable.
     i18n: { locales: I18N_MESSAGES },
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("workflow-ai plugin activated")
     if (ctx.agent?.registerTool) {
-      for (const tool of buildWorkflowAiTools()) {
+      const tools = buildWorkflowAiTools(ctx.workflow, ctx.resources)
+      registeredToolNames = tools.map((tool) => tool.name)
+      for (const tool of tools) {
         ctx.agent.registerTool(tool)
       }
     } else {
@@ -87,11 +96,13 @@ const definition: PluginDefinition = {
     if (ctx?.pluginId) {
       // i18n teardown handled by the manager (manifest.i18n path).
       if (ctx.agent?.unregisterTool) {
-        for (const tool of buildWorkflowAiTools()) {
-          ctx.agent.unregisterTool(tool.name)
+        for (const name of registeredToolNames) {
+          ctx.agent.unregisterTool(name)
         }
       }
     }
+    registeredToolNames = []
+    clearWorkflowApi()
   },
 }
 

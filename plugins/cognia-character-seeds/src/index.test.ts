@@ -7,23 +7,12 @@
  * authors clone it verbatim.
  */
 
-import {
-  getCharacterPack,
-  unregisterCharacterPacksByPlugin,
-} from "@cognia/plugin-sdk/api/character-pack"
 import definition from "./index"
 import type { PluginCharacterPackDef } from "@cognia/plugin-sdk"
 function manifestPacks(): PluginCharacterPackDef[] {
   const m = definition.manifest as unknown as { characterPacks?: PluginCharacterPackDef[] }
   return m.characterPacks ?? []
 }
-
-/** The id the manifest declares — teardown is scoped to it, as on disable. */
-const PLUGIN_ID = "cognia-character-seeds"
-
-afterEach(() => {
-  unregisterCharacterPacksByPlugin(PLUGIN_ID)
-})
 
 describe("cognia-character-seeds plugin", () => {
   it("declares the character-pack capability and two demo packs", () => {
@@ -49,24 +38,18 @@ describe("cognia-character-seeds plugin", () => {
     }
   })
 
-  it("activate() registers both packs and deactivate() cleans them up", async () => {
+  it("activate() registers both packs through the scoped context API", async () => {
+    const register = jest.fn()
     const ctx = {
       pluginId: "cognia-character-seeds",
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+      characterPacks: { register },
     } as unknown as Parameters<NonNullable<typeof definition.activate>>[0]
 
     await definition.activate?.(ctx)
-    for (const pack of manifestPacks()) {
-      expect(getCharacterPack(pack.id)).toBeDefined()
-    }
-
-    await definition.deactivate?.(ctx)
-    for (const pack of manifestPacks()) {
-      expect(getCharacterPack(pack.id)).toBeUndefined()
-    }
-  })
-
-  it("deactivate() without a pluginId is a no-op (does not throw)", async () => {
-    await expect(definition.deactivate?.(undefined)).resolves.not.toThrow?.()
+    expect(register.mock.calls.map(([pack]) => pack.id)).toEqual([
+      "workplace-suite",
+      "study-buddies",
+    ])
   })
 })

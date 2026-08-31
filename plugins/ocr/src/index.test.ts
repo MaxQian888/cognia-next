@@ -1,216 +1,158 @@
 /** @jest-environment jsdom */
-import { createNullOcrCache, createNullOcrPageCache } from "@cognia/plugin-sdk"
-import "fake-indexeddb/auto"
-import {
-  defaultDepsBuilder,
-  ocrPluginDefinition,
-  runOcrTool,
-  TOOL_PARAMETERS,
-  type OcrToolInput,
-} from "./index"
-import { createOcrRegistry, getSharedOcrRegistry } from "@cognia/plugin-sdk/api/ocr-provider"
-import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@cognia/plugin-sdk"
-function makeProvider(): OcrProvider {
-  return {
-    id: "mock",
-    label: "Mock",
-    category: "document-cloud",
-    shells: { browser: true, tauri: true, capacitor: true },
-    credentialKeys: [],
-    async extract(): Promise<OcrResult> {
-      return {
-        providerId: "mock",
-        pages: [{ pageNumber: 1, markdown: "# Hello", text: "Hello" }],
-        combinedMarkdown: "# Hello",
-        combinedText: "Hello",
-        languages: [],
-        durationMs: 0,
-        cached: false,
-      }
-    },
-  }
+
+import type { OcrResult, PluginContext } from "@cognia/plugin-sdk"
+import { OcrError } from "@cognia/plugin-sdk/api/ocr-provider"
+import { ocrPluginDefinition, runOcrTool, TOOL_PARAMETERS, type OcrToolInput } from "./index"
+
+const result: OcrResult = {
+  providerId: "mock",
+  pages: [{ pageNumber: 1, markdown: "Hello", text: "Hello", blocks: [] }],
+  combinedMarkdown: "Hello",
+  combinedText: "Hello",
+  languages: ["en"],
+  durationMs: 1,
+  cached: false,
 }
 
-function makeDeps() {
-  const registry = createOcrRegistry()
-  registry.register(makeProvider())
+function makeRuntime(overrides: Record<string, unknown> = {}) {
   return {
-    registry,
-    settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "mock" },
-    platform: "web" as const,
-    credentialsResolver: async () => ({ secrets: {} }),
-    cache: createNullOcrCache(),
-    pageCache: createNullOcrPageCache(),
+    isReady: jest.fn(() => true),
+    extract: jest.fn(async () => result),
+    extractFile: jest.fn(async () => result),
+    extractScreen: jest.fn(async () => result),
+    runSlashCommand: jest.fn(async () => ({ system: "Hello", result })),
+    ...overrides,
   }
 }
-
-describe("ocrPluginDefinition", () => {
-  it("declares the cognia-ocr manifest", () => {
-    expect(ocrPluginDefinition.manifest).toMatchObject({
-      id: "cognia-ocr",
-      name: "OCR",
-      capabilities: expect.arrayContaining(["tools", "commands"]),
-    })
-  })
-
-  it("registers the ocr.extract tool when activated", async () => {
-    const registerTool = jest.fn()
-    await ocrPluginDefinition.activate({
-      pluginId: "cognia-ocr",
-      logger: { info: () => {}, warn: () => {}, error: () => {} },
-      agent: { registerTool },
-    } as unknown as Parameters<typeof ocrPluginDefinition.activate>[0])
-    expect(registerTool).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "ocr.extract",
-        pluginId: "cognia-ocr",
-      })
-    )
-  })
-})
 
 describe("runOcrTool", () => {
-  const baseInput: OcrToolInput = {
-    source: { kind: "data_url", value: "data:image/png;base64,YWJj" },
-    languages: ["en"],
-  }
-
-  it("returns { ok: true, result } on success", async () => {
-    const out = await runOcrTool(baseInput, { buildDeps: makeDeps })
-    expect(out.ok).toBe(true)
-    if (out.ok) {
-      expect(out.result.providerId).toBe("mock")
-      expect(out.result.pages[0]!.markdown).toContain("Hello")
-    }
-  })
-
-  it("supports attachment_id sources with the snake_case shape", async () => {
-    const attachmentResolver = jest.fn(async () => ({
-      blob: new Blob([new Uint8Array([1, 2, 3])]),
-      mimeType: "image/png",
-    }))
-    const deps = { ...makeDeps(), attachmentResolver }
-    const out = await runOcrTool(
-      { source: { kind: "attachment_id", value: "att_1" } },
-      { buildDeps: () => deps }
-    )
-    expect(out.ok).toBe(true)
-    expect(attachmentResolver).toHaveBeenCalledWith("att_1")
-  })
-
-  it("threads the provider override to extract", async () => {
-    const registry = createOcrRegistry()
-    registry.register({ ...makeProvider(), id: "explicit" })
-    const out = await runOcrTool(
-      { ...baseInput, provider: "explicit" },
-      {
-        buildDeps: () => ({
-          registry,
-          settings: { ...DEFAULT_OCR_SETTINGS },
-          platform: "web",
-          credentialsResolver: async () => ({ secrets: {} }),
-          cache: createNullOcrCache(),
-          pageCache: createNullOcrPageCache(),
-        }),
-      }
-    )
-    expect(out.ok).toBe(true)
-    if (out.ok) expect(out.result.providerId).toBe("explicit")
-  })
-
-  it("rejects unknown source kinds", async () => {
-    const out = await runOcrTool(
-      // @ts-expect-error — exercising the runtime guard
-      { source: { kind: "magic", value: "x" } },
-      { buildDeps: makeDeps }
-    )
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.error).toMatch(/Unknown source kind/)
-  })
-
-  it("returns ok:false with code when extract throws", async () => {
-    const registry = createOcrRegistry()
-    registry.register({
-      ...makeProvider(),
-      id: "boom",
-      async extract() {
-        const { OcrError } = await import("@cognia/plugin-sdk/api/ocr-provider")
-        throw new OcrError("rate_limited", "boom", "slow")
-      },
-    })
-    const out = await runOcrTool(
-      { source: { kind: "data_url", value: "data:image/png;base64,YWJj" } },
-      {
-        buildDeps: () => ({
-          registry,
-          settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "boom" },
-          platform: "web",
-          credentialsResolver: async () => ({ secrets: {} }),
-          cache: createNullOcrCache(),
-          pageCache: createNullOcrPageCache(),
-        }),
-      }
-    )
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.code).toBe("rate_limited")
-  })
-
-  it("reports runtime-not-ready when no deps are available", async () => {
-    const out = await runOcrTool(baseInput, { buildDeps: () => null })
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.error).toMatch(/runtime is not ready/i)
-  })
-
-  it("screen mode captures + OCRs via the injected captureScreen", async () => {
-    const captureScreen = jest.fn(async () => ({
-      providerId: "windows-media-ocr",
-      pages: [{ pageNumber: 1, markdown: "SCREEN", text: "SCREEN" }],
-      combinedMarkdown: "SCREEN",
-      combinedText: "SCREEN",
+  it("routes data URLs through ctx.ocr.extract with all overrides", async () => {
+    const runtime = makeRuntime()
+    const input: OcrToolInput = {
+      source: { kind: "data_url", value: "data:image/png;base64,YWJj" },
       languages: ["en"],
-      durationMs: 1,
-      cached: false,
-    }))
-    const out = await runOcrTool(
-      { source: { kind: "screen" }, languages: ["en"] },
-      { captureScreen }
-    )
-    expect(out.ok).toBe(true)
-    if (out.ok) expect(out.result.combinedText).toBe("SCREEN")
-    expect(captureScreen).toHaveBeenCalledWith(["en"])
+      provider: "mock",
+      format: "markdown",
+      pageRange: "1",
+    }
+    await expect(runOcrTool(input, { runtime })).resolves.toEqual({
+      ok: true,
+      result,
+      provenance: { kind: "ocr", providerId: "mock", sourceKind: "data_url" },
+      security: { untrusted: true, pii: "unreviewed" },
+      untrustedNotice: expect.stringMatching(/untrusted.*sensitive personal data/i),
+    })
+    expect(runtime.extract).toHaveBeenCalledWith({
+      source: {
+        kind: "data-url",
+        dataUrl: "data:image/png;base64,YWJj",
+        mimeType: "image/png",
+      },
+      languages: ["en"],
+      providerId: "mock",
+      format: "markdown",
+      pageRange: "1",
+    })
   })
 
-  it("screen mode surfaces a capture failure as ok:false", async () => {
-    const captureScreen = jest.fn(async () => {
-      throw new Error("automation disabled")
+  it("routes file paths and screen capture through their governed methods", async () => {
+    const runtime = makeRuntime()
+    await runOcrTool(
+      { source: { kind: "file_path", value: "/tmp/a.png" }, provider: "auto" },
+      { runtime }
+    )
+    expect(runtime.extractFile).toHaveBeenCalledWith("/tmp/a.png", {
+      languages: undefined,
+      format: undefined,
+      pageRange: undefined,
+      providerId: undefined,
     })
-    const out = await runOcrTool({ source: { kind: "screen" } }, { captureScreen })
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.error).toMatch(/automation disabled/)
+
+    await runOcrTool({ source: { kind: "screen" }, languages: ["zh"] }, { runtime })
+    expect(runtime.extractScreen).toHaveBeenCalledWith({ languages: ["zh"] })
+  })
+
+  it("rejects missing, unknown, and unavailable sources", async () => {
+    const runtime = makeRuntime()
+    await expect(runOcrTool({ source: { kind: "data_url" } }, { runtime })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Unknown source kind/),
+    })
+    await expect(
+      runOcrTool({ source: { kind: "magic", value: "x" } } as never, { runtime })
+    ).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/Unknown source kind/) })
+    await expect(
+      runOcrTool(
+        { source: { kind: "data_url", value: "data:image/png;base64,AA==" } },
+        { runtime: makeRuntime({ isReady: () => false }) }
+      )
+    ).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/not ready/i) })
+  })
+
+  it("preserves typed OCR error codes", async () => {
+    const runtime = makeRuntime({
+      extract: jest.fn(async () => {
+        throw new OcrError("rate_limited", "mock", "slow")
+      }),
+    })
+    await expect(
+      runOcrTool({ source: { kind: "data_url", value: "data:image/png;base64,AA==" } }, { runtime })
+    ).resolves.toEqual({ ok: false, error: "slow", code: "rate_limited" })
   })
 })
 
-describe("file-path source wiring", () => {
-  // `buildOcrDeps` leaves `filePathResolver` undefined unless a caller supplies
-  // one, and the plugin supplied nothing — so `/ocr <path>` (the usage string
-  // the slash command itself prints) threw
-  // "file-path source requires a filePathResolver" 100% of the time.
-  it("supplies a filePathResolver to the extract deps", async () => {
-    const registry = getSharedOcrRegistry()
-    registry.register(makeProvider())
-    const deps = await defaultDepsBuilder()
-    expect(deps).not.toBeNull()
-    expect(typeof deps?.filePathResolver).toBe("function")
+describe("OCR plugin activation", () => {
+  it("registers the tool and renderer against context-owned APIs", async () => {
+    const registerTool = jest.fn()
+    const registerPartRenderer = jest.fn(() => jest.fn())
+    const runtime = makeRuntime()
+    const ctx = {
+      pluginId: "cognia-ocr",
+      logger: { info: jest.fn() },
+      agent: { registerTool },
+      ocr: runtime,
+      chat: { appendMessagePart: jest.fn() },
+      messagePart: { registerPartRenderer },
+      ui: { showToast: jest.fn() },
+    } as unknown as PluginContext
+
+    const hooks = await ocrPluginDefinition.activate?.(ctx)
+    expect(registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "ocr.extract" }))
+    expect(registerPartRenderer).toHaveBeenCalledWith("ocr-result", expect.any(Function))
+
+    const tool = registerTool.mock.calls[0]?.[0]
+    await tool.execute({ source: { kind: "data_url", value: "data:image/png;base64,AA==" } })
+    expect(runtime.extract).toHaveBeenCalledTimes(1)
+
+    expect(await hooks?.onCommand?.("other", [])).toBe(false)
+    expect(await hooks?.onCommand?.("ocr", ["/tmp/a.png"])).toBe(true)
+    expect(runtime.runSlashCommand).toHaveBeenCalledWith("/tmp/a.png")
   })
 
-  it("does not advertise a source kind nothing can resolve", () => {
-    // `attachment_id` has no producer anywhere in the app, so offering it to
-    // the model only ever yields a guaranteed resolver error.
+  it("reports unavailable OCR without invoking the slash runtime", async () => {
+    const runtime = makeRuntime({ isReady: () => false })
+    const showToast = jest.fn()
+    const ctx = {
+      pluginId: "cognia-ocr",
+      logger: { info: jest.fn() },
+      agent: { registerTool: jest.fn() },
+      ocr: runtime,
+      chat: { appendMessagePart: jest.fn() },
+      messagePart: { registerPartRenderer: jest.fn() },
+      ui: { showToast },
+    } as unknown as PluginContext
+    const hooks = await ocrPluginDefinition.activate?.(ctx)
+    expect(await hooks?.onCommand?.("ocr", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith("OCR runtime is not ready.", "error")
+    expect(runtime.runSlashCommand).not.toHaveBeenCalled()
+  })
+
+  it("advertises only resolvable source kinds", () => {
     const kinds = (
       TOOL_PARAMETERS as unknown as {
         properties: { source: { properties: { kind: { enum: string[] } } } }
       }
     ).properties.source.properties.kind.enum
-    expect([...kinds]).toEqual(["data_url", "file_path", "screen"])
+    expect(kinds).toEqual(["data_url", "file_path", "screen"])
   })
 })

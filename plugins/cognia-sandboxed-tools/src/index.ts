@@ -31,14 +31,16 @@ import type {
   PluginToolContext,
 } from "@cognia/plugin-sdk"
 import type { MicrovmExecPayload } from "@cognia/plugin-sdk/api/sandbox"
-import {
-  HOST_FALLBACK_RUNTIME_REF,
-  SandboxRuntimeError,
-  sandboxSessionRuntime,
-} from "@cognia/plugin-sdk/api/sandbox"
+import { SandboxRuntimeError } from "@cognia/plugin-sdk/api/sandbox"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
+let sandbox: PluginContext["sandbox"] | undefined
+
+function requireSandbox(): PluginContext["sandbox"] {
+  if (!sandbox) throw new Error("Sandboxed Tools context is unavailable")
+  return sandbox
+}
 
 const TOOL_SANDBOX_BASH = "sandbox_bash"
 const TOOL_SANDBOX_EDIT = "sandbox_edit"
@@ -216,6 +218,8 @@ interface SandboxResultShape {
   stderr: string
   duration: number
   timed_out: boolean
+  stdout_truncated?: boolean
+  stderr_truncated?: boolean
 }
 
 /**
@@ -232,7 +236,7 @@ async function dispatchSandbox(
   payload: MicrovmExecPayload,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
-  return sandboxSessionRuntime.executeSandbox(requireRuntimeRef(ctx), payload)
+  return requireSandbox().execute(requireRuntimeRef(ctx), payload)
 }
 
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
@@ -241,7 +245,7 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
   const runtimeRef = requireRuntimeRef(ctx)
   const explicitWritable = args.writable && args.writable.length > 0 ? args.writable : null
   const narrowedExplicitWritable = explicitWritable
-    ? sandboxSessionRuntime.clampRequest(runtimeRef, {
+    ? requireSandbox().clampRequest(runtimeRef, {
         writable: explicitWritable,
         readable: [],
         targetFiles: [],
@@ -257,7 +261,7 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
   // Clamp the model-supplied resource caps + network down to the per-session
   // ceiling (character override beats the app default). The model cannot widen
   // past the configured policy because this is the only path to `sandbox_exec`.
-  const request = sandboxSessionRuntime.clampRequest(runtimeRef, {
+  const request = requireSandbox().clampRequest(runtimeRef, {
     writable,
     readable: args.readable ?? [],
     targetFiles: [],
@@ -289,7 +293,7 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
  * (the always-on Rust floor still rejects system / app-data targets).
  */
 function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "path"): void {
-  sandboxSessionRuntime.assertWritablePath(requireRuntimeRef(ctx), path, label)
+  requireSandbox().assertWritablePath(requireRuntimeRef(ctx), path, label)
 }
 
 /**
@@ -315,7 +319,7 @@ function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "p
  */
 function requireRuntimeRef(ctx: PluginToolContext): string {
   if (ctx.sandboxRuntimeRef) return ctx.sandboxRuntimeRef
-  const recovered = sandboxSessionRuntime.activeRefForSession(ctx.sessionId)
+  const recovered = requireSandbox().activeRefForSession(ctx.sessionId)
   if (recovered) return recovered
   if (ctx.sessionId) {
     throw new SandboxRuntimeError(
@@ -324,7 +328,7 @@ function requireRuntimeRef(ctx: PluginToolContext): string {
         "Reopen the conversation or re-send to re-establish it."
     )
   }
-  return HOST_FALLBACK_RUNTIME_REF
+  return requireSandbox().hostFallbackRuntimeRef
 }
 
 function parentDir(p: string): string {
@@ -353,7 +357,7 @@ async function sandboxReadFile(
   // gate a read (`narrowRequiredWriteScope` throws for a path outside the
   // roots), then restore the single target: the Rust `policy_for` rejects an
   // `edit` / `write` / `text_editor` request whose `target_files` is empty.
-  const clamped = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
+  const clamped = requireSandbox().clampRequest(requireRuntimeRef(ctx), {
     writable: [],
     readable: Array.from(new Set([...readable, path])),
     targetFiles: [],
@@ -398,7 +402,7 @@ async function sandboxWriteFile(
   ctx: PluginToolContext,
   env?: Record<string, string>
 ): Promise<SandboxResultShape> {
-  const request = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
+  const request = requireSandbox().clampRequest(requireRuntimeRef(ctx), {
     writable: [],
     readable,
     targetFiles: [path],
@@ -577,7 +581,7 @@ const definition: PluginDefinition = {
     type: "frontend",
     capabilities: ["tools"],
     main: "src/index.ts",
-    permissions: ["native:filesystem", "native:process"],
+    permissions: ["native:filesystem", "native:process", "session:read"],
     i18n: {
       locales: {
         en: {
@@ -599,6 +603,7 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("cognia-sandboxed-tools plugin activated")
+    sandbox = ctx.sandbox
     if (ctx.agent?.registerTool) {
       for (const tool of buildPluginTools()) {
         ctx.agent.registerTool(tool)
@@ -615,6 +620,7 @@ const definition: PluginDefinition = {
         ctx.agent.unregisterTool(name)
       }
     }
+    sandbox = undefined
   },
 }
 

@@ -29,18 +29,8 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import {
-  approvalActorScope,
-  buildApprovalSurface,
-  findWorkflowById,
-  findWorkflowByName,
-  listWorkflowSummaries,
-  recordCallbackBinding,
-  resolveWorkflowTriggerOrigin,
-  type A2UISegmentContent,
-  type WorkflowSummary,
-} from "@cognia/plugin-sdk/api/workflow-run"
-import { formatToolError } from "../store-bridge"
+import type { A2UISegmentContent, WorkflowSummary } from "@cognia/plugin-sdk/api/workflow-run"
+import { formatToolError, getWorkflowApi } from "../store-bridge"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 function newBindingId(): string {
@@ -79,7 +69,7 @@ export function buildRunByNameTools(): PluginTool[] {
       execute: async (args) => {
         try {
           const limit = clampInt(args.limit, 50, 1, 200)
-          const summaries = await listWorkflowSummaries(limit)
+          const summaries = await getWorkflowApi().listWorkflowSummaries(limit)
           return { ok: true, count: summaries.length, workflows: summaries }
         } catch (err) {
           return formatToolError(err)
@@ -119,7 +109,7 @@ export function buildRunByNameTools(): PluginTool[] {
             return { ok: false, error: { code: "invalid-name", message: "name is required" } }
           }
 
-          const triggeredFrom = await resolveWorkflowTriggerOrigin(context.sessionId)
+          const triggeredFrom = await getWorkflowApi().resolveTriggerOrigin(context.sessionId)
           if (!triggeredFrom) {
             return {
               ok: false,
@@ -131,7 +121,7 @@ export function buildRunByNameTools(): PluginTool[] {
             }
           }
 
-          const lookup = await findWorkflowByName(name)
+          const lookup = await getWorkflowApi().findWorkflowByName(name)
           if (!lookup.ok && lookup.reason === "not-found") {
             return {
               ok: false,
@@ -169,9 +159,9 @@ export function buildRunByNameTools(): PluginTool[] {
             triggeredFrom,
           }
 
-          const actorScope = approvalActorScope(triggeredFrom)
+          const actorScope = getWorkflowApi().approvalActorScope(triggeredFrom)
           await Promise.all([
-            recordCallbackBinding({
+            getWorkflowApi().recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
               actionId: approveActionId,
               kind: "wf_approve",
@@ -182,7 +172,7 @@ export function buildRunByNameTools(): PluginTool[] {
               actorScope,
               allowedActions: ["approve", "cancel"],
             }),
-            recordCallbackBinding({
+            getWorkflowApi().recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
               actionId: cancelActionId,
               kind: "wf_cancel",
@@ -195,7 +185,7 @@ export function buildRunByNameTools(): PluginTool[] {
             }),
           ])
 
-          const surface = buildApprovalSurface({
+          const surface = getWorkflowApi().buildApprovalSurface({
             bindingId,
             workflowName: resolvedName,
             summary,
@@ -243,7 +233,7 @@ export function buildRunByNameTools(): PluginTool[] {
           if (name.length === 0) {
             return { ok: false, error: { code: "invalid-name", message: "name is required" } }
           }
-          const triggeredFrom = await resolveWorkflowTriggerOrigin(context.sessionId)
+          const triggeredFrom = await getWorkflowApi().resolveTriggerOrigin(context.sessionId)
           if (!triggeredFrom) {
             return {
               ok: false,
@@ -255,7 +245,7 @@ export function buildRunByNameTools(): PluginTool[] {
             }
           }
 
-          const lookup = await findWorkflowByName(name)
+          const lookup = await getWorkflowApi().findWorkflowByName(name)
           if (!lookup.ok && lookup.reason === "not-found") {
             return {
               ok: false,
@@ -296,9 +286,9 @@ export function buildRunByNameTools(): PluginTool[] {
             createdBy: "claude-tool",
           }
 
-          const actorScope = approvalActorScope(triggeredFrom)
+          const actorScope = getWorkflowApi().approvalActorScope(triggeredFrom)
           await Promise.all([
-            recordCallbackBinding({
+            getWorkflowApi().recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
               actionId: approveActionId,
               kind: "wf_fanout_approve",
@@ -309,7 +299,7 @@ export function buildRunByNameTools(): PluginTool[] {
               actorScope,
               allowedActions: ["approve", "cancel"],
             }),
-            recordCallbackBinding({
+            getWorkflowApi().recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
               actionId: cancelActionId,
               kind: "wf_fanout_cancel",
@@ -391,7 +381,7 @@ function buildFanoutApprovalSurface(input: {
 }
 
 async function readWorkflowSummary(workflowId: string): Promise<string | undefined> {
-  const desc = (await findWorkflowById(workflowId))?.description?.trim()
+  const desc = (await getWorkflowApi().findWorkflowById(workflowId))?.description?.trim()
   return desc && desc.length > 0 ? desc : undefined
 }
 

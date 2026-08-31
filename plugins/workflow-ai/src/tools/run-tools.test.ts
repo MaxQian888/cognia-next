@@ -1,5 +1,6 @@
 /**
  * @jest-environment jsdom
+ * @cognia-host-integration-test
  */
 
 /**
@@ -13,20 +14,17 @@
 
 const runWorkflowMock = jest.fn()
 
-// Doubled at the SDK subpath the tools import, not the host orchestrator.
-jest.mock("@cognia/plugin-sdk/api/workflow-run", () => ({
-  runWorkflow: (...args: unknown[]) => runWorkflowMock(...args),
-}))
-
 import {
-  createEditorStore,
   listEditorStores,
   registerEditorStore,
   unregisterEditorStore,
-} from "@cognia/plugin-sdk/api/workflow-editor"
+} from "@/lib/workflow/editor/store-registry"
+import { createEditorStore } from "@/lib/workflow/editor/store"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import { buildRunTools, __resetActiveRunsForTesting } from "./run-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -59,6 +57,9 @@ beforeEach(() => {
   for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
   __resetActiveRunsForTesting()
   runWorkflowMock.mockReset()
+  const workflowApi = createWorkflowAuthorAPI()
+  workflowApi.runWorkflow = (...args) => runWorkflowMock(...args)
+  configureWorkflowApi(workflowApi as never)
   const store = createEditorStore(workflow("wf_a"))
   store.getState().addNode("trigger.manual", { x: 0, y: 0 })
   registerEditorStore("wf_a", store)

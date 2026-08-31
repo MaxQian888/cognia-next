@@ -16,8 +16,127 @@
  * undoable actions so manual edits and AI edits share one history stack.
  */
 
-import { getEditorStore, listEditorStores } from "@cognia/plugin-sdk/api/workflow-editor"
-import type { EditorStore } from "@cognia/plugin-sdk/api/workflow-editor"
+import type { PluginContext, WorkflowNodeData, WorkflowNodeKind } from "@cognia/plugin-sdk"
+import type {
+  PluginWorkflowEditorSnapshot,
+  PluginWorkflowEditorMutationResult,
+} from "@cognia/plugin-sdk/context"
+import type { ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
+
+type WorkflowApi = PluginContext["workflow"]
+
+let activeWorkflowApi: WorkflowApi | undefined
+
+export function configureWorkflowApi(api: WorkflowApi): void {
+  activeWorkflowApi = api
+}
+
+export function clearWorkflowApi(): void {
+  activeWorkflowApi = undefined
+}
+
+export function getWorkflowApi(): WorkflowApi {
+  if (!activeWorkflowApi)
+    throw new Error("Workflow API is unavailable because the plugin is inactive.")
+  return activeWorkflowApi
+}
+
+type EditorSnapshot = PluginWorkflowEditorSnapshot
+
+interface EditorStateFacade extends EditorSnapshot {
+  addNode(
+    kind: WorkflowNodeKind,
+    position: { x: number; y: number },
+    overrides?: Partial<WorkflowNodeData>
+  ): string
+  removeNodes(ids: string[]): void
+  removeEdges(ids: string[]): void
+  connect(input: {
+    source: string
+    target: string
+    sourceHandle?: string
+    targetHandle?: string
+  }): string | null
+  updateEdgeData(id: string, patch: Record<string, unknown>): boolean
+  updateNodeData(id: string, patch: Partial<WorkflowNodeData>): void
+  revalidateNode(
+    id: string
+  ): Extract<PluginWorkflowEditorMutationResult, { kind: "revalidate-node" }>["validation"]
+  applyProposalOps(
+    ops: ReadonlyArray<ProposalOp>
+  ): Extract<PluginWorkflowEditorMutationResult, { kind: "apply-proposal" }>
+  setNodes(nodes: EditorSnapshot["nodes"]): void
+  groupSelected(ids: string[]): string | null
+  setSelectedNodes(ids: string[]): void
+  setViewport(viewport: EditorSnapshot["viewport"]): void
+  pulseNode(id: string, durationMs: number): void
+  toWorkflow(): EditorSnapshot["workflow"]
+}
+
+interface EditorStoreFacade {
+  getState(): EditorStateFacade
+}
+
+function mutation<TKind extends PluginWorkflowEditorMutationResult["kind"]>(
+  workflowId: string,
+  command: Parameters<WorkflowApi["mutateEditor"]>[1],
+  kind: TKind
+): Extract<PluginWorkflowEditorMutationResult, { kind: TKind }> {
+  const result = getWorkflowApi().mutateEditor(workflowId, command)
+  if (result.kind !== kind) throw new Error(`Unexpected workflow mutation result: ${result.kind}`)
+  return result as Extract<PluginWorkflowEditorMutationResult, { kind: TKind }>
+}
+
+function editorStore(editor: EditorSnapshot): EditorStoreFacade {
+  const workflowId = editor.workflowId
+  return {
+    getState: () => {
+      const resolved = getWorkflowApi().resolveEditor(workflowId)
+      if (!resolved.ok) throw new EditorNotOpenError({ kind: "not-open", requestedId: workflowId })
+      const snapshot = resolved.editor
+      return {
+        ...snapshot,
+        addNode: (kind, position, overrides) =>
+          mutation(
+            workflowId,
+            { kind: "add-node", nodeKind: kind, position, overrides },
+            "add-node"
+          ).nodeId,
+        removeNodes: (ids) => {
+          mutation(workflowId, { kind: "remove-nodes", ids }, "remove-nodes")
+        },
+        removeEdges: (ids) => {
+          mutation(workflowId, { kind: "remove-edges", ids }, "remove-edges")
+        },
+        connect: (input) => mutation(workflowId, { kind: "connect", ...input }, "connect").edgeId,
+        updateEdgeData: (id, patch) =>
+          mutation(workflowId, { kind: "update-edge", id, patch }, "update-edge").updated,
+        updateNodeData: (id, patch) => {
+          mutation(workflowId, { kind: "update-node", id, patch }, "update-node")
+        },
+        revalidateNode: (id) =>
+          mutation(workflowId, { kind: "revalidate-node", id }, "revalidate-node").validation,
+        applyProposalOps: (ops) =>
+          mutation(workflowId, { kind: "apply-proposal", ops }, "apply-proposal"),
+        setNodes: (nodes) => {
+          mutation(workflowId, { kind: "set-nodes", nodes }, "set-nodes")
+        },
+        groupSelected: (ids) =>
+          mutation(workflowId, { kind: "group-nodes", ids }, "group-nodes").groupId,
+        setSelectedNodes: (ids) => {
+          mutation(workflowId, { kind: "select-nodes", ids }, "select-nodes")
+        },
+        setViewport: (viewport) => {
+          mutation(workflowId, { kind: "set-viewport", viewport }, "set-viewport")
+        },
+        pulseNode: (id, durationMs) => {
+          mutation(workflowId, { kind: "pulse-node", id, durationMs }, "pulse-node")
+        },
+        toWorkflow: () => snapshot.workflow,
+      }
+    },
+  }
+}
 export type StoreResolutionFailure =
   { kind: "not-open"; requestedId?: string } | { kind: "ambiguous"; openIds: string[] }
 
@@ -49,20 +168,16 @@ export interface ResolveStoreInput {
  */
 export function resolveStore(input: ResolveStoreInput): {
   workflowId: string
-  store: EditorStore
+  store: EditorStoreFacade
 } {
-  if (input.workflowId) {
-    const store = getEditorStore(input.workflowId)
-    if (!store) throw new EditorNotOpenError({ kind: "not-open", requestedId: input.workflowId })
-    return { workflowId: input.workflowId, store }
+  const resolved = getWorkflowApi().resolveEditor(input.workflowId)
+  if (resolved.ok) {
+    return { workflowId: resolved.editor.workflowId, store: editorStore(resolved.editor) }
   }
-  const open = listEditorStores()
-  if (open.length === 1) return open[0]
-  if (open.length === 0) throw new EditorNotOpenError({ kind: "not-open" })
-  throw new EditorNotOpenError({
-    kind: "ambiguous",
-    openIds: open.map((o) => o.workflowId),
-  })
+  if (resolved.reason === "ambiguous") {
+    throw new EditorNotOpenError({ kind: "ambiguous", openIds: resolved.openIds })
+  }
+  throw new EditorNotOpenError({ kind: "not-open", requestedId: resolved.requestedId })
 }
 
 /**

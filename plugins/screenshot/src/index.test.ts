@@ -3,34 +3,11 @@
  */
 
 import type { PluginContext } from "@cognia/plugin-sdk"
-// Mocked at the SDK subpaths the plugin imports, not at the host modules
-// behind them: a plugin's test should be able to run against the published
-// surface alone, the same way a third-party plugin's would.
-jest.mock("@cognia/plugin-sdk/api/automation", () => ({
-  captureScreenshot: jest.fn(),
-}))
-
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterSlashCommandsByPlugin: jest.fn(),
-}))
 
 const extractMock = jest.fn()
-jest.mock("@cognia/plugin-sdk/api/ocr-provider", () => ({
-  extract: (...a: unknown[]) => extractMock(...a),
-  buildOcrDeps: () => ({}),
-}))
+const captureMock = jest.fn()
 
-import { captureScreenshot } from "@cognia/plugin-sdk/api/automation"
-import {
-  registerSlashCommand,
-  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
-} from "@cognia/plugin-sdk/api/slash-command"
 import screenshotPlugin, { captureToToolResult } from "./index"
-
-const captureMock = captureScreenshot as jest.Mock
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 
 const makeCtx = () => {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
@@ -48,14 +25,14 @@ const makeCtx = () => {
         tools[name] = execute
       },
     } as never,
+    ocr: { extract: extractMock } as never,
+    automation: { captureDisplay: captureMock } as never,
   }
   return { ctx: ctx as PluginContext, tools }
 }
 
 beforeEach(() => {
   captureMock.mockReset()
-  registerMock.mockReset()
-  unregisterMock.mockReset()
 })
 
 describe("screenshot (built-in)", () => {
@@ -67,7 +44,6 @@ describe("screenshot (built-in)", () => {
     // returned hook — the supported shape. The plugin must NOT touch the
     // slash registry itself: doing so skipped the manager's namespacing,
     // conflict detection, aliases, command-palette entry and teardown.
-    expect(registerMock).not.toHaveBeenCalled()
     expect(typeof hooks?.onCommand).toBe("function")
     const commands = (screenshotPlugin.manifest as { commands?: Array<{ id: string }> }).commands
     expect(commands?.map((c) => c.id)).toEqual(["screenshot"])
@@ -161,6 +137,11 @@ describe("screenshot (built-in)", () => {
     }
     expect(result.ok).toBe(true)
     expect(result.text).toBe("HI")
+    expect(result).toMatchObject({
+      provenance: { kind: "ocr", providerId: "tesseract-wasm", sourceKind: "screen" },
+      security: { untrusted: true, pii: "unreviewed" },
+      untrustedNotice: expect.stringMatching(/untrusted/i),
+    })
     expect(result.blocks).toEqual([
       { text: "HI", bbox: { x: 1, y: 2, width: 3, height: 4 }, confidence: 0.9 },
     ])
@@ -246,7 +227,6 @@ describe("screenshot (built-in)", () => {
   it("has no imperative teardown left to do", async () => {
     const { ctx } = makeCtx()
     await screenshotPlugin.deactivate?.(ctx)
-    // The manager unregisters manifest-declared commands itself.
-    expect(unregisterMock).not.toHaveBeenCalled()
+    expect(screenshotPlugin.deactivate).toBeUndefined()
   })
 })

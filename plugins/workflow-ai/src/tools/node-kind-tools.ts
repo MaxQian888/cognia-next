@@ -12,14 +12,8 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import { formatToolError } from "../store-bridge"
-import {
-  NODE_CATALOG,
-  getPluginCatalogSnapshot,
-  nodeCatalogEntry,
-  type NodeCatalogEntry,
-} from "@cognia/plugin-sdk/api/workflow-template"
-import type { WorkflowNodeKind } from "@cognia/plugin-sdk"
+import { formatToolError, getWorkflowApi } from "../store-bridge"
+import type { NodeCatalogEntry } from "@cognia/plugin-sdk/api/workflow-template"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 interface ListedEntry {
@@ -75,7 +69,7 @@ export function buildNodeKindTools(): PluginTool[] {
         try {
           const includeDesktopOnly = args.includeDesktopOnly !== false
           const categoryFilter = typeof args.category === "string" ? args.category : undefined
-          const all = [...NODE_CATALOG, ...getPluginCatalogSnapshot()]
+          const all = getWorkflowApi().listNodeCatalog()
           const filtered = all.filter((e) => {
             if (e.hidden) return false
             if (!includeDesktopOnly && e.desktopOnly) return false
@@ -122,21 +116,15 @@ export function buildNodeKindTools(): PluginTool[] {
               error: { code: "missing-kind", message: "Argument 'kind' is required." },
             }
           }
-          // Try built-in catalog first; fall back to plugin snapshot.
-          const builtIn = NODE_CATALOG.find((e) => e.kind === kind)
-          const pluginEntry = builtIn
-            ? undefined
-            : getPluginCatalogSnapshot().find((e) => e.kind === kind)
-          const entry = builtIn ?? pluginEntry
+          const entries = getWorkflowApi().listNodeCatalog()
+          const entry = entries.find((candidate) => candidate.kind === kind)
           if (!entry) {
-            // Use `nodeCatalogEntry` to surface the synthesized fallback for
-            // truly unknown kinds — gives the agent a clear "no such kind" cue.
             return {
               ok: false,
               error: {
                 code: "unknown-kind",
                 message: `No node kind "${kind}" in catalog (built-in or plugin).`,
-                detail: nodeCatalogEntry(kind as WorkflowNodeKind),
+                detail: getWorkflowApi().getNodeCatalogEntry(kind),
               },
             }
           }

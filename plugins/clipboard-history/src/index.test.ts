@@ -3,15 +3,8 @@
  */
 
 import type { PluginContext } from "@cognia/plugin-sdk"
-// Mocked at the SDK subpaths the plugin imports, not at the host modules
-// behind them.
 jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
   readHostCapabilities: () => ({ tauri: false }),
-}))
-
-jest.mock("@cognia/plugin-sdk/api/slash-command", () => ({
-  registerSlashCommand: jest.fn(),
-  unregisterSlashCommandsByPlugin: jest.fn(),
 }))
 
 // Virtual double for the desktop clipboard read path.
@@ -24,14 +17,7 @@ jest.mock(
   { virtual: true }
 )
 
-import {
-  registerSlashCommand,
-  unregisterSlashCommandsByPlugin as unregisterCommandsByPlugin,
-} from "@cognia/plugin-sdk/api/slash-command"
 import clipboardHistory from "./index"
-
-const registerMock = registerSlashCommand as jest.Mock
-const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 
 function makeCtx(config: Record<string, unknown> = {}) {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
@@ -72,8 +58,7 @@ function makeCtx(config: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  registerMock.mockReset()
-  unregisterMock.mockReset()
+  jest.clearAllMocks()
 })
 
 describe("clipboard-history (built-in)", () => {
@@ -85,7 +70,7 @@ describe("clipboard-history (built-in)", () => {
       "clipboard_history_clear",
       "clipboard_history_list",
     ])
-    expect(registerMock).not.toHaveBeenCalled()
+    expect((clipboardHistory.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
   })
 
   it("registers the clipboard_history_list result card when the host offers the API (ADR-0127)", async () => {
@@ -147,7 +132,7 @@ describe("clipboard-history (built-in)", () => {
     const { ctx } = makeCtx()
     await clipboardHistory.activate?.(ctx)
     await clipboardHistory.deactivate?.(ctx)
-    expect(unregisterMock).not.toHaveBeenCalled()
+    expect((clipboardHistory.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
   })
 
   it("the declared command reports empty and formatted buffers", async () => {

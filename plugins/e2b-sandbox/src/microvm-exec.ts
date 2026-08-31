@@ -8,6 +8,9 @@ import type {
 import { MicrovmAdapterError } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BSandboxPool, type E2BSandboxLease } from "./sandbox-pool"
 
+const MAX_OUTPUT_BYTES = 1_000_000
+const TRUNCATION_MARKER = "\n... (truncated)"
+
 export interface MicrovmExecOptions {
   pool: E2BSandboxPool
   /** Override `Date.now()` for deterministic timing in tests. */
@@ -55,21 +58,28 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
           cwd: payload.command.cwd,
           timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
         })
+        const stdout = truncateUtf8(result.stdout, MAX_OUTPUT_BYTES)
+        const stderr = truncateUtf8(result.stderr, MAX_OUTPUT_BYTES)
         return {
           exit_code: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          stdout: stdout.text,
+          stderr: stderr.text,
           duration: Math.max(0, now() - started),
           timed_out: false,
+          stdout_truncated: stdout.truncated,
+          stderr_truncated: stderr.truncated,
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
+        const stderr = truncateUtf8(message, MAX_OUTPUT_BYTES)
         return {
           exit_code: -1,
           stdout: "",
-          stderr: message,
+          stderr: stderr.text,
           duration: Math.max(0, now() - started),
           timed_out: /timed?[ _-]?out/i.test(message),
+          stdout_truncated: false,
+          stderr_truncated: stderr.truncated,
         }
       }
     },
@@ -81,6 +91,25 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
     dispose() {
       return opts.pool.dispose()
     },
+  }
+}
+
+function truncateUtf8(text: string, cap: number): { text: string; truncated: boolean } {
+  const encoder = new TextEncoder()
+  const bytes = encoder.encode(text)
+  if (bytes.length <= cap) return { text, truncated: false }
+  const marker = encoder.encode(TRUNCATION_MARKER)
+  const contentCap = Math.max(0, cap - marker.length)
+  let end = contentCap
+  // `end` is an exclusive byte index. If it lands inside a multibyte code
+  // point, back up through continuation bytes and exclude that code point's
+  // leading byte too. Decoding a raw slice with replacement can grow the
+  // result by up to two bytes and violates both UTF-8 fidelity and the cap.
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1
+  const decoder = new TextDecoder("utf-8", { fatal: false })
+  return {
+    text: decoder.decode(bytes.slice(0, end)) + TRUNCATION_MARKER,
+    truncated: true,
   }
 }
 

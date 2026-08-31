@@ -1,15 +1,18 @@
 /**
  * @jest-environment jsdom
+ * @cognia-host-integration-test
  */
 import {
-  createEditorStore,
   listEditorStores,
   registerEditorStore,
   unregisterEditorStore,
-} from "@cognia/plugin-sdk/api/workflow-editor"
+} from "@/lib/workflow/editor/store-registry"
+import { createEditorStore } from "@/lib/workflow/editor/store"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildDiagnosticTools } from "./diagnostic-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
 
@@ -39,6 +42,7 @@ function findTool(tools: PluginTool[], name: string): PluginTool {
 }
 
 beforeEach(() => {
+  configureWorkflowApi(createWorkflowAuthorAPI() as never)
   for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
 })
 

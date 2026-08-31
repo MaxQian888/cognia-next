@@ -13,8 +13,7 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import { createWorkflowWaitEvent, emitWorkflowWaitEvent } from "@cognia/plugin-sdk/api/workflow-run"
-import { formatToolError } from "../store-bridge"
+import { formatToolError, getWorkflowApi } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -59,16 +58,14 @@ export function buildWakeTools(): PluginTool[] {
               error: { code: "invalid-event-key", message: "eventKey is required" },
             }
           }
-          const event = await emitWorkflowWaitEvent(
-            createWorkflowWaitEvent({
-              key: eventKey,
-              ...(typeof args.correlationId === "string" && args.correlationId.trim()
-                ? { correlationId: args.correlationId.trim() }
-                : {}),
-              source: "wf_emit_workflow_event",
-              ...(args.data !== undefined ? { data: args.data } : {}),
-            })
-          )
+          const event = await getWorkflowApi().emitWaitEvent({
+            key: eventKey,
+            ...(typeof args.correlationId === "string" && args.correlationId.trim()
+              ? { correlationId: args.correlationId.trim() }
+              : {}),
+            source: "wf_emit_workflow_event",
+            ...(args.data !== undefined ? { data: args.data } : {}),
+          })
           return {
             ok: true,
             eventKey,

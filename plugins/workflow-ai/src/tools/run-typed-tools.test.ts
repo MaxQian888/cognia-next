@@ -1,7 +1,12 @@
-import { createDbTestFixture } from "@cognia/plugin-sdk/api/testing"
-import { createWorkflow, publishWorkflow } from "@cognia/plugin-sdk/api/workflow-run"
+/** @cognia-host-integration-test */
+import { createDbTestFixture } from "@/lib/plugin/api/testing"
+import { createWorkflow } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import { buildRunTypedTools } from "./run-typed-tools"
+import { configureWorkflowApi } from "../store-bridge"
 
+configureWorkflowApi(createWorkflowAuthorAPI() as never)
 const tool = buildRunTypedTools().find((t) => t.name === "wf_run_workflow_typed")!
 
 // Use the shared fixture rather than a per-test delete()+reopen. This suite is

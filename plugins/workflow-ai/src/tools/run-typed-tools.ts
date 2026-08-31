@@ -16,20 +16,17 @@
  */
 
 import type { PluginTool } from "@cognia/plugin-sdk"
-import {
-  WORKFLOW_RUNNER_TOOL_NAME,
-  WORKFLOW_RUNNER_TOOL_DEFINITION,
-} from "@cognia/plugin-sdk/api/workflow-run"
-import { executeRunWorkflowTyped } from "@cognia/plugin-sdk/api/workflow-run"
+import { getWorkflowApi } from "../store-bridge"
 const PLUGIN_ID = "cognia-workflow-ai"
 
 export function buildRunTypedTools(): PluginTool[] {
+  const runner = getWorkflowApi().getRunnerToolDefinition()
   return [
     {
-      name: WORKFLOW_RUNNER_TOOL_NAME,
+      name: runner.name,
       pluginId: PLUGIN_ID,
-      definition: WORKFLOW_RUNNER_TOOL_DEFINITION,
-      execute: async (args) => executeRunWorkflowTyped(args),
+      definition: runner.definition,
+      execute: async (args) => getWorkflowApi().executeRunWorkflowTyped(args),
     },
   ]
 }

@@ -15,176 +15,23 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import {
-  createBrowserEvalOrchestrator,
-  deterministicScorers,
-  EvalProjectService,
-  getRunDetail,
-  listDatasetSummaries,
-  loadEvalAppSettings,
-  loadEvalRuntimeContext,
-  loadOrCreateEvalArtifactKey,
-  runCalibration,
-  runEvalService,
-  SCORING_VERSION,
-  type TargetSpec,
+import type {
+  PluginEvalProjectArgs as EvalProjectV2Args,
+  PluginRunCalibrationArgs as RunCalibrationArgs,
+  PluginRunDatasetArgs as RunDatasetArgs,
 } from "@cognia/plugin-sdk/api/eval"
-import { APP_VERSION } from "@cognia/plugin-sdk/api/host-environment"
-export interface RunDatasetArgs {
-  datasetId: string
-  targetKind?: "chat" | "team" | "workflow"
-  model?: string
-  characterId?: string
-  teamId?: string
-  workflowId?: string
-  scorerIds?: string[]
-  k?: number
-  split?: string
-  capabilities?: string[]
+
+let evalApi: PluginContext["eval"] | undefined
+
+function requireEvalAPI(): PluginContext["eval"] {
+  if (!evalApi) throw new Error("Eval plugin context is unavailable")
+  return evalApi
 }
 
-function buildTarget(args: RunDatasetArgs): TargetSpec {
-  const kind = args.targetKind ?? "chat"
-  if (kind === "team") {
-    if (!args.teamId) throw new Error("eval_run_dataset: teamId is required for a team target")
-    return { kind, label: args.teamId, teamId: args.teamId }
-  }
-  if (kind === "workflow") {
-    if (!args.workflowId) {
-      throw new Error("eval_run_dataset: workflowId is required for a workflow target")
-    }
-    return { kind, label: args.workflowId, workflowId: args.workflowId }
-  }
-  if (!args.model) throw new Error("eval_run_dataset: model is required for a chat target")
-  return {
-    kind: "chat",
-    label: args.model,
-    model: args.model,
-    ...(args.characterId ? { characterId: args.characterId } : {}),
-  }
-}
-
-async function loadAppSettings() {
-  return loadEvalAppSettings()
-}
-
-export async function runEvalDatasetTool(args: RunDatasetArgs) {
-  if (!args.datasetId) throw new Error("eval_run_dataset: datasetId is required")
-  const result = await runEvalService({
-    datasetId: args.datasetId,
-    config: {
-      targets: [buildTarget(args)],
-      scorerIds: args.scorerIds ?? [],
-      k: typeof args.k === "number" && args.k >= 1 ? Math.floor(args.k) : 1,
-      ...(args.split || args.capabilities?.length
-        ? {
-            subset: {
-              ...(args.split ? { split: args.split } : {}),
-              ...(args.capabilities?.length ? { capabilities: args.capabilities } : {}),
-            },
-          }
-        : {}),
-    },
-    appSettings: await loadAppSettings(),
-  })
-  const report = result.reports[0]
-  if (!report) throw new Error("eval_run_dataset: produced no report")
-  return {
-    runIds: result.reports.map((r) => r.runId),
-    targetLabel: report.targetLabel,
-    passAt1: report.passAt1,
-    passHatK: report.passHatK,
-    totalCostUsd: report.totalCostUsd,
-    ...(result.gatePassed !== undefined ? { gatePassed: result.gatePassed } : {}),
-    ...(result.gates ? { gates: result.gates } : {}),
-    deterministicOnly: result.deterministicOnly,
-  }
-}
-
-export interface RunCalibrationArgs {
-  setId: string
-  judgeModel?: string
-}
-
-export async function runCalibrationTool(args: RunCalibrationArgs) {
-  if (!args.setId) throw new Error("eval_run_calibration: setId is required")
-  const row = await runCalibration({
-    setId: args.setId,
-    appSettings: await loadAppSettings(),
-    ...(args.judgeModel ? { judgeModel: args.judgeModel } : {}),
-  })
-  return {
-    runId: row.runId,
-    criterion: row.criterion,
-    judgeModel: row.judgeModel,
-    itemCount: row.itemCount,
-    scoredCount: row.scoredCount,
-    erroredCount: row.erroredCount,
-    metrics: row.metrics,
-  }
-}
-
-export interface EvalProjectV2Args {
-  action:
-    "preflight" | "start" | "pause" | "resume" | "cancel" | "status" | "report" | "extend-budget"
-  projectId?: string
-  experimentId?: string
-  budgetCap?: number
-}
-
-async function loadEvalRuntime() {
-  const runtime = await loadEvalRuntimeContext()
-  if (!runtime) throw new Error("eval_project_v2: an unlocked account and settings are required")
-  return runtime
-}
-
-export async function runEvalProjectV2Tool(args: EvalProjectV2Args) {
-  const service = new EvalProjectService()
-  if (args.action === "preflight") {
-    if (!args.projectId) throw new Error("eval_project_v2: projectId is required")
-    return service.verifiedPreflight(args.projectId)
-  }
-  if (args.action === "start") {
-    if (!args.projectId) throw new Error("eval_project_v2: projectId is required")
-    const { settings, accountId } = await loadEvalRuntime()
-    const verified = await service.verifiedPreflight(args.projectId)
-    if (!verified.result.ok) return verified
-    const experiment = await service.start(args.projectId, {
-      appVersion: APP_VERSION,
-      scorerVersions: Object.fromEntries(
-        deterministicScorers().map((scorer) => [scorer.id, String(SCORING_VERSION)])
-      ),
-      randomSeed: crypto.getRandomValues(new Uint32Array(1))[0],
-      environmentCompatibility: verified.environmentCompatibility,
-    })
-    const orchestrator = createBrowserEvalOrchestrator({
-      appSettings: settings,
-      artifactKey: await loadOrCreateEvalArtifactKey(accountId),
-    })
-    void orchestrator.run(experiment.id)
-    return { experimentId: experiment.id, state: experiment.state }
-  }
-  if (!args.experimentId) throw new Error("eval_project_v2: experimentId is required")
-  if (args.action === "pause") await service.pause(args.experimentId)
-  if (args.action === "cancel") await service.cancel(args.experimentId)
-  if (args.action === "extend-budget") {
-    if (typeof args.budgetCap !== "number") {
-      throw new Error("eval_project_v2: budgetCap is required for extend-budget")
-    }
-    await service.extendBudget(args.experimentId, args.budgetCap)
-  }
-  if (args.action === "resume") {
-    const { settings, accountId } = await loadEvalRuntime()
-    await service.resume(args.experimentId)
-    void createBrowserEvalOrchestrator({
-      appSettings: settings,
-      artifactKey: await loadOrCreateEvalArtifactKey(accountId),
-    }).run(args.experimentId)
-  }
-  return args.action === "report"
-    ? service.report(args.experimentId)
-    : service.status(args.experimentId)
-}
+export const runEvalDatasetTool = (args: RunDatasetArgs) => requireEvalAPI().runDataset(args)
+export const runCalibrationTool = (args: RunCalibrationArgs) =>
+  requireEvalAPI().runCalibration(args)
+export const runEvalProjectV2Tool = (args: EvalProjectV2Args) => requireEvalAPI().runProject(args)
 
 const LIST_DEF = {
   name: "eval_list_datasets",
@@ -290,14 +137,16 @@ export const evalPluginDefinition: PluginDefinition = {
     type: "frontend",
     capabilities: ["tools"],
     main: "src/index.ts",
+    permissions: ["tests:run", "ai:chat", "database:read", "database:write"],
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("eval plugin activated")
+    evalApi = ctx.eval
     ctx.agent?.registerTool?.({
       name: LIST_DEF.name,
       pluginId: ctx.pluginId,
       definition: LIST_DEF as never,
-      execute: async () => listDatasetSummaries(),
+      execute: async () => ctx.eval.listDatasets(),
     })
     ctx.agent?.registerTool?.({
       name: PROJECT_V2_DEF.name,
@@ -319,7 +168,7 @@ export const evalPluginDefinition: PluginDefinition = {
       definition: GET_DEF as never,
       execute: async (args: Record<string, unknown>) => {
         const runId = typeof args.runId === "string" ? args.runId : ""
-        const detail = await getRunDetail(runId)
+        const detail = await ctx.eval.getRun(runId)
         if (!detail) throw new Error(`eval_get_run: run "${runId}" not found`)
         return detail
       },
@@ -332,7 +181,9 @@ export const evalPluginDefinition: PluginDefinition = {
         runCalibrationTool(args as unknown as RunCalibrationArgs),
     })
   },
-  deactivate: async () => {},
+  deactivate: async () => {
+    evalApi = undefined
+  },
 }
 
 export default evalPluginDefinition

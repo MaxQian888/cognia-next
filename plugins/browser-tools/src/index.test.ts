@@ -63,15 +63,37 @@ jest.mock("@cognia/plugin-sdk/api/browser", () => {
 })
 jest.mock("@cognia/plugin-sdk", () => ({
   defineContextProvider: (p: unknown) => p,
+  definePlugin: (p: unknown) => p,
+  definePluginTool: (tool: unknown) => tool,
 }))
 import definition from "./index"
 import * as browserModule from "@cognia/plugin-sdk/api/browser"
-import { saveBrowserAnnotation } from "@cognia/plugin-sdk/api/browser"
 
-const engine = (browserModule as unknown as { __engine: Record<string, jest.Mock> }).__engine
-const setLiveUrl = (browserModule as unknown as { __setUrl: (u: string) => void }).__setUrl
-const saveBrowserAnnotationMock = saveBrowserAnnotation as jest.Mock
-/** `ctx.sessions.getCurrentSessionId` — the plugin's only session lookup. */
+const browserTestModule = browserModule as unknown as {
+  __engine: Record<string, jest.Mock>
+  __setUrl: (url: string) => void
+  routeEngine: (
+    url: string,
+    context?: { domainAuthorized?: boolean }
+  ) => {
+    engine: Record<string, jest.Mock>
+    tier: string
+    untrusted: boolean
+  }
+  isBrowserDomainAuthorized: (url: string) => boolean
+  primeBrowserDomainGrants: () => Promise<string[]>
+  saveBrowserAnnotation: jest.Mock
+}
+const engine = browserTestModule.__engine
+const setLiveUrl = browserTestModule.__setUrl
+const saveBrowserAnnotationMock = browserTestModule.saveBrowserAnnotation
+const browserApi = {
+  routeEngine: browserTestModule.routeEngine,
+  isDomainAuthorized: browserTestModule.isBrowserDomainAuthorized,
+  primeDomainGrants: browserTestModule.primeBrowserDomainGrants,
+  saveAnnotation: browserTestModule.saveBrowserAnnotation,
+}
+/** `ctx.session.getCurrentSessionId` — the plugin's only session lookup. */
 const activeSessionMock = jest.fn<string | null, []>(() => "session-1")
 
 type Tools = Record<string, (args: unknown) => Promise<unknown>>
@@ -92,7 +114,8 @@ async function collectTools(): Promise<Tools> {
   const ctx = {
     pluginId: "cognia-browser-tools",
     logger: { info: jest.fn() },
-    sessions: { getCurrentSessionId: activeSessionMock },
+    session: { getCurrentSessionId: activeSessionMock },
+    browser: browserApi,
     agent: {
       registerTool: (t: { name: string; execute: (a: unknown) => Promise<unknown> }) => {
         tools[t.name] = t.execute
@@ -109,7 +132,8 @@ async function collectRegistrations(): Promise<Record<string, ToolRegistration>>
   await definition.activate!({
     pluginId: "cognia-browser-tools",
     logger: { info: jest.fn() },
-    sessions: { getCurrentSessionId: activeSessionMock },
+    session: { getCurrentSessionId: activeSessionMock },
+    browser: browserApi,
     agent: {
       registerTool: (tool: ToolRegistration) => {
         registrations[tool.name] = tool
@@ -730,7 +754,13 @@ describe("browser-tools plugin", () => {
   })
 
   it("ignores activation when the host exposes no registerTool", async () => {
-    const ctx = { pluginId: "cognia-browser-tools", logger: { info: jest.fn() }, agent: {} }
+    const ctx = {
+      pluginId: "cognia-browser-tools",
+      logger: { info: jest.fn() },
+      session: { getCurrentSessionId: activeSessionMock },
+      browser: browserApi,
+      agent: {},
+    }
     await expect(definition.activate!(ctx as never)).resolves.toBeUndefined()
   })
 
@@ -739,6 +769,8 @@ describe("browser-tools plugin", () => {
     const ctx = {
       pluginId: "cognia-browser-tools",
       logger: { info: jest.fn() },
+      session: { getCurrentSessionId: activeSessionMock },
+      browser: browserApi,
       agent: {
         registerTool: jest.fn(),
         context: { registerProvider: (p: { provide: () => string }) => providers.push(p) },
