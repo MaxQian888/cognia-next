@@ -23,10 +23,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
-import { pickDirectory } from "@/lib/files/file-bridge"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { gitWorktreeAdd, runGitUserAction } from "@/lib/git/commands"
 import { isRemoteGitTarget } from "@/lib/git/target"
-import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { asGitError } from "@/types/git"
 
@@ -60,14 +59,15 @@ export function NewWorktreeForm({
   const remote = isRemoteGitTarget(rootDir)
   const can = canMutate ?? (() => true)
   // "Is this target addressed by a relative path" and "does a directory picker
-  // exist" are different questions. `pickDirectory` resolves to null off Tauri,
-  // so a button shown on the first question alone opens nothing on web and
-  // mobile, and the read-only field beside it makes the form uncompletable.
-  const hasNativePicker = isTauri()
+  // exist" are different questions. A button shown on the first question alone
+  // opens nothing on web and mobile, and the read-only field beside it makes
+  // the form uncompletable. The second question has one shared answer.
+  const directoryPicker = useDirectoryPicker()
+  const hasNativePicker = directoryPicker.available
 
   const chooseDirectory = async () => {
     try {
-      const selected = await pickDirectory()
+      const selected = await directoryPicker.browse()
       if (selected) setPath(selected)
     } catch (err) {
       toast.error(t("worktrees.error", { message: errorDetail(err) }))

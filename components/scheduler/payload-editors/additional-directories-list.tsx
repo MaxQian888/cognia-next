@@ -13,7 +13,7 @@ import { useTranslations } from "next-intl"
 import { Plus, Trash2, FolderOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { isTauri } from "@/lib/tauri"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 
 export interface AdditionalDirectoriesListProps {
   value: string[] | undefined
@@ -52,21 +52,15 @@ export function AdditionalDirectoriesList({
     [rows, onChange]
   )
 
+  // One shared answer to "is there a picker", instead of a hand-rolled lazy
+  // import plus its own `isTauri()` gate. See `useDirectoryPicker`.
+  const directoryPicker = useDirectoryPicker()
   const pickFolder = useCallback(
     async (index: number) => {
-      if (!isTauri()) return
-      try {
-        // Lazy-import so the web build doesn't blow up when @tauri-apps/plugin-dialog
-        // isn't present.
-        const dialog = await import("@tauri-apps/plugin-dialog").catch(() => null)
-        if (!dialog?.open) return
-        const picked = await dialog.open({ directory: true, multiple: false })
-        if (typeof picked === "string" && picked) setRow(index, picked)
-      } catch {
-        /* user cancelled or plugin unavailable */
-      }
+      const picked = await directoryPicker.browse().catch(() => null)
+      if (picked) setRow(index, picked)
     },
-    [setRow]
+    [directoryPicker, setRow]
   )
 
   return (
@@ -84,13 +78,13 @@ export function AdditionalDirectoriesList({
             className="h-9 font-mono text-xs"
             data-testid={`${testId}-row-${idx}`}
           />
-          {isTauri() && (
+          {directoryPicker.available && (
             <Button
               type="button"
               size="icon"
               variant="outline"
-              onClick={() => pickFolder(idx)}
-              disabled={disabled}
+              onClick={() => void pickFolder(idx)}
+              disabled={disabled || directoryPicker.busy}
               aria-label={t("additionalDirectories.pickFolder")}
               data-testid={`${testId}-pick-${idx}`}
             >

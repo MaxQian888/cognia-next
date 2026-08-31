@@ -29,7 +29,7 @@ import {
   XIcon,
   ZapIcon,
 } from "lucide-react"
-import { open as openDialog } from "@tauri-apps/plugin-dialog"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -370,14 +370,13 @@ export function SessionSettingsSheet({
     setPresetId(resolvedId ?? "")
   }, [open, session, presets])
 
+  // The session's working directory is typed or picked, never browsed against
+  // a paired host: this override sits at the top of the cwd chain and a path
+  // chosen on another machine would name nothing where the turn actually runs.
+  const directoryPicker = useDirectoryPicker({ title: t("pickDirTitle") })
   const handlePickDir = async () => {
-    if (!isTauri()) return
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: t("pickDirTitle"),
-    })
-    if (typeof picked === "string") setForm((f) => ({ ...f, workingDir: picked }))
+    const picked = await directoryPicker.browse()
+    if (picked) setForm((f) => ({ ...f, workingDir: picked }))
   }
 
   const handleMemoryOverride = async (
@@ -889,15 +888,20 @@ export function SessionSettingsSheet({
                           <XIcon className="size-3.5" />
                         </InputGroupButton>
                       )}
-                      <InputGroupButton
-                        size="icon-xs"
-                        variant="outline"
-                        onClick={handlePickDir}
-                        disabled={!isTauri()}
-                        aria-label={t("pickDirAria")}
-                      >
-                        <FolderOpenIcon className="size-3.5" />
-                      </InputGroupButton>
+                      {/* Absent, not disabled: the field is the control where
+                          no picker exists, and a permanently-dead addon button
+                          inside an InputGroup reads as a broken control. */}
+                      {directoryPicker.available && (
+                        <InputGroupButton
+                          size="icon-xs"
+                          variant="outline"
+                          onClick={handlePickDir}
+                          disabled={directoryPicker.busy}
+                          aria-label={t("pickDirAria")}
+                        >
+                          <FolderOpenIcon className="size-3.5" />
+                        </InputGroupButton>
+                      )}
                     </InputGroupAddon>
                   </InputGroup>
                   {!form.workingDir && fallbackCwd && (

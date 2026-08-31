@@ -6,7 +6,7 @@
 
 import { useTranslations } from "next-intl"
 import { FolderOpenIcon } from "lucide-react"
-import { open as openDialog } from "@tauri-apps/plugin-dialog"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -21,7 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import { isTauri } from "@/lib/tauri"
 import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 
@@ -45,15 +44,17 @@ export function AdvancedSection({ state, onPatch, defaultOpen = false }: Advance
   const customModes = useCustomModeStore((s) => s.customModes)
   const customModeList = Object.values(customModes)
 
+  // A preset's working directory is a plain path the caller types or picks. It
+  // is deliberately NOT browsed against a paired host: a preset outlives the
+  // host that was active when it was saved, so a path chosen there could name
+  // nothing on the machine that later runs it.
+  const directoryPicker = useDirectoryPicker({
+    title: safeT("pickWorkingDir", "Select working directory"),
+  })
   const handlePickDir = async () => {
-    if (!isTauri()) return
     try {
-      const picked = await openDialog({
-        directory: true,
-        multiple: false,
-        title: safeT("pickWorkingDir", "Select working directory"),
-      })
-      if (typeof picked === "string") onPatch({ workingDir: picked })
+      const picked = await directoryPicker.browse()
+      if (picked) onPatch({ workingDir: picked })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -75,16 +76,21 @@ export function AdvancedSection({ state, onPatch, defaultOpen = false }: Advance
             placeholder={safeT("editor.workingDirPlaceholder", "/path/to/project (optional)")}
             className="font-mono text-xs"
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => void handlePickDir()}
-            disabled={!isTauri()}
-            aria-label={safeT("editor.pickWorkingDir", "Pick directory")}
-          >
-            <FolderOpenIcon className="size-4" />
-          </Button>
+          {/* Absent rather than disabled: the input beside it is the control
+              where no picker exists, so a permanently-dead button would only
+              add noise. */}
+          {directoryPicker.available && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => void handlePickDir()}
+              disabled={directoryPicker.busy}
+              aria-label={safeT("editor.pickWorkingDir", "Pick directory")}
+            >
+              <FolderOpenIcon className="size-4" />
+            </Button>
+          )}
         </div>
       </div>
 

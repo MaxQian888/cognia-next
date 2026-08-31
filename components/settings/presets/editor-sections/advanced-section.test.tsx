@@ -53,9 +53,11 @@ describe("AdvancedSection", () => {
     expect(onPatch).toHaveBeenCalledWith({ workingDir: "/tmp/project" })
   })
 
-  it("disables the pick-directory button when not running under Tauri", () => {
+  it("offers no pick-directory button where no picker exists", () => {
+    // It used to render disabled. The path input beside it is the control on
+    // such a shell, so a permanently-dead button only added noise.
     render(<AdvancedSection state={emptyEditorState()} onPatch={jest.fn()} defaultOpen />)
-    expect(screen.getByLabelText("Pick directory")).toBeDisabled()
+    expect(screen.queryByLabelText("Pick directory")).not.toBeInTheDocument()
   })
 
   it("invokes onPatch when isDefault toggle changes", () => {
