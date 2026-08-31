@@ -1768,6 +1768,11 @@ export function CharacterEditor({
   const tSandbox = useTranslations("settings.characters.editor.sandbox")
   const tAccount = useTranslations("settings.characters.editor.account")
   const [s, setS] = useState<EditorState>(initial)
+  // The cua-desktop tier runs shell and file work inside the bound desktop, so
+  // it needs one. `validateSandboxSessionBinding` requires
+  // `computerTarget === "bound"`, and Computer Use has to be on for a target to
+  // mean anything at all.
+  const hasBoundDesktop = s.enableComputerUse && s.computerUseTarget !== "local"
   const [allowToolsText, setAllowToolsText] = useState(initial.allowedTools.join(", "))
   const [denyToolsText, setDenyToolsText] = useState(initial.disallowedTools.join(", "))
   const [envSecretValues, setEnvSecretValues] = useState<Record<string, string>>({})
@@ -2501,14 +2506,24 @@ export function CharacterEditor({
               <SelectItem value="inherit">{tSandbox("tier.inherit")}</SelectItem>
               <SelectItem value="os">{tSandbox("tier.os")}</SelectItem>
               <SelectItem value="microvm">{tSandbox("tier.microvm")}</SelectItem>
-              <SelectItem value="cua-desktop" disabled>
+              {/*
+                The tier runs shell and file work inside the bound desktop, so
+                it is meaningless without one: `validateSandboxSessionBinding`
+                requires `computerTarget === "bound"`. Offering it while the
+                target is local would save a combination that can only ever be
+                refused at send time. It is disabled for that reason and not
+                hidden, so the requirement is discoverable.
+              */}
+              <SelectItem value="cua-desktop" disabled={!hasBoundDesktop}>
                 {tSandbox("tier.cuaDesktop")}
               </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">{tSandbox("tier.description")}</p>
-          {s.sandboxTier === "cua-desktop" && (
-            <p className="text-[10px] text-destructive">{tSandbox("tier.cuaDesktopUnavailable")}</p>
+          {!hasBoundDesktop && (
+            <p className="text-[10px] text-muted-foreground">
+              {tSandbox("tier.cuaDesktopNeedsBoundDesktop")}
+            </p>
           )}
         </div>
         <div className="space-y-1">

@@ -211,12 +211,12 @@
       },
       "tier": {
         "cuaDesktop": "Bound sandbox desktop",
-        "cuaDesktopUnavailable": "Unavailable: this desktop currently proves remote GUI isolation only; sandbox shell and file operations are disabled.",
         "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
         "inherit": "Inherit app default",
         "label": "Sandbox tier",
         "microvm": "microVM (e2b)",
-        "os": "OS sandbox"
+        "os": "OS sandbox",
+        "cuaDesktopNeedsBoundDesktop": "Runs shell and file work inside the bound desktop. Needs a bound machine whose provider carries it, so pick a sandbox connection under Computer Use first."
       }
     },
     "skills": "Skills",

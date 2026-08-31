@@ -61,6 +61,25 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (fn: () => unknown) => fn(),
 }))
 
+// The `useLiveQuery` stub above ignores the initial-value argument, so the
+// sandbox hook's own `?? []` never applies and its query Promise would reach
+// the picker. Supply the list directly, which also lets the cua-desktop tier
+// tests exercise a bound desktop.
+jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
+  useSandboxConnections: () => ({
+    connections: [{ id: "connection-1", name: "docker desktop" }],
+    create: jest.fn(),
+    update: jest.fn(),
+    remove: jest.fn(),
+    provision: jest.fn(),
+    start: jest.fn(),
+    suspend: jest.fn(),
+    resume: jest.fn(),
+    stop: jest.fn(),
+    refreshHealth: jest.fn(),
+  }),
+}))
+
 jest.mock("@/lib/db/characters", () => ({
   listCharacters: () => mockCharacterList,
   createCharacter: jest.fn(async () => ({ id: "new" })),
@@ -209,14 +228,39 @@ function renderEditor(
 }
 
 describe("CharacterEditor — v2 fields", () => {
-  it("keeps a legacy cua-desktop tier visible but disabled with an explanation", async () => {
-    renderEditor(baseInitial({ sandboxTier: "cua-desktop" }))
+  it("keeps the cua-desktop tier visible but disabled while nothing is bound", async () => {
+    // The tier runs shell and file work inside the bound desktop, so without
+    // one it can only ever be refused at send time. Disabled and explained
+    // rather than hidden, so the requirement is discoverable.
+    renderEditor(baseInitial({ sandboxTier: "cua-desktop", computerUseTarget: "local" }))
     await act(async () => {
       await Promise.resolve()
     })
-    expect(screen.getByText("tier.cuaDesktopUnavailable")).toBeInTheDocument()
+    expect(screen.getByText("tier.cuaDesktopNeedsBoundDesktop")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("character-sandbox-tier"))
     expect(screen.getByRole("option", { name: "tier.cuaDesktop" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
+  it("offers the cua-desktop tier once a desktop is bound", async () => {
+    // `docker exec` carries shell and file work into the container, so the
+    // tier is selectable. Leaving it permanently disabled would ship the whole
+    // path unreachable.
+    renderEditor(
+      baseInitial({
+        sandboxTier: "cua-desktop",
+        enableComputerUse: true,
+        computerUseTarget: "connection-1",
+      })
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.queryByText("tier.cuaDesktopNeedsBoundDesktop")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("character-sandbox-tier"))
+    expect(screen.getByRole("option", { name: "tier.cuaDesktop" })).not.toHaveAttribute(
       "aria-disabled",
       "true"
     )

@@ -211,12 +211,12 @@
       },
       "tier": {
         "cuaDesktop": "绑定的沙箱桌面",
-        "cuaDesktopUnavailable": "暂不可用：该桌面目前只能证明远程 GUI 隔离，沙箱 shell 与文件操作已禁用。",
         "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
         "inherit": "继承应用默认",
         "label": "沙盒层级",
         "microvm": "microVM（e2b）",
-        "os": "OS 沙盒"
+        "os": "OS 沙盒",
+        "cuaDesktopNeedsBoundDesktop": "让 shell 与文件操作在绑定的桌面内执行。需要一台所属 provider 支持该能力的已绑定机器，请先在「Computer Use」下选择一个沙盒连接。"
       }
     },
     "skills": "技能",
