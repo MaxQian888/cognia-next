@@ -48,7 +48,8 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => mockRows),
 }))
 
-import { PluginCategorySidebar } from "./plugin-category-sidebar"
+import { CAPABILITY_META } from "./plugin-capabilities"
+import { PluginCategorySidebar, splitCapabilityRows } from "./plugin-category-sidebar"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
@@ -72,5 +73,39 @@ describe("PluginCategorySidebar", () => {
     render(<PluginCategorySidebar />)
     const button = screen.getByText("capability.python").closest("button")
     expect(button).toBeDisabled()
+  })
+})
+
+/**
+ * `PluginCapability` has 69 members and `CAPABILITY_META` names 18, so a
+ * curated-only rail could not filter on the other 51 even when installed
+ * plugins declared them: the rail had no row and the axis was unreachable.
+ */
+describe("splitCapabilityRows", () => {
+  it("keeps the curated rows in their declared order, counts and all", () => {
+    const { curated } = splitCapabilityRows({ tools: 3 })
+    expect(curated[0]).toMatchObject({ id: "tools", count: 3 })
+    expect(curated.map((row) => row.id)).toEqual(CAPABILITY_META.map((meta) => meta.id))
+  })
+
+  it("surfaces an uncurated capability the library actually declares", () => {
+    const { other } = splitCapabilityRows({ tools: 1, "pet-items": 2, subagents: 1 })
+    expect(other).toEqual([
+      { id: "pet-items", count: 2 },
+      { id: "subagents", count: 1 },
+    ])
+  })
+
+  // A curated row with no rows is still shown (disabled) so the rail keeps a
+  // stable shape. An uncurated one at zero has nothing to offer at all.
+  it("omits an uncurated capability nothing declares", () => {
+    const { other } = splitCapabilityRows({ "pet-items": 0 })
+    expect(other).toEqual([])
+  })
+
+  it("never lists a curated capability twice", () => {
+    const { curated, other } = splitCapabilityRows({ tools: 5 })
+    expect(other.some((row) => row.id === "tools")).toBe(false)
+    expect(curated.filter((row) => row.id === "tools")).toHaveLength(1)
   })
 })

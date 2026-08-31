@@ -172,3 +172,41 @@ describe("PluginDetailOverview", () => {
     expect(card.textContent).toContain("1.2.3")
   })
 })
+
+/**
+ * `manifest.screenshots` and `manifest.keywords` existed in the manifest type
+ * with no renderer anywhere, and `PluginFilters.tag` was declared and applied
+ * by nothing. The chips are what tie the last two together.
+ */
+describe("manifest metadata that had no renderer", () => {
+  const renderOverview = (manifestExtras: Record<string, unknown>) => {
+    mockPlugin = makePlugin({
+      manifest: { ...makePlugin().manifest, ...manifestExtras } as PluginRow["manifest"],
+    })
+    usePluginsStore.setState({ filters: { ...usePluginsStore.getState().filters, tag: null } })
+    return render(<PluginDetailOverview pluginId="alpha" />)
+  }
+
+  it("renders the screenshot gallery when the manifest ships previews", () => {
+    renderOverview({ screenshots: ["https://example.test/a.png"] })
+    expect(screen.getByTestId("plugin-screenshot-gallery")).toBeInTheDocument()
+  })
+
+  it("renders no gallery block when there are no previews", () => {
+    renderOverview({})
+    expect(screen.queryByTestId("plugin-screenshot-gallery")).toBeNull()
+  })
+
+  it("renders keyword chips and writes the tag facet when one is clicked", () => {
+    renderOverview({ keywords: ["ocr", "screenshot"] })
+    const chips = screen.getByTestId("plugin-keyword-chips")
+    expect(chips).toHaveTextContent("ocr")
+    fireEvent.click(screen.getByText("ocr"))
+    expect(usePluginsStore.getState().filters.tag).toBe("ocr")
+  })
+
+  it("renders no keyword block when the manifest advertises none", () => {
+    renderOverview({})
+    expect(screen.queryByTestId("plugin-keyword-chips")).toBeNull()
+  })
+})

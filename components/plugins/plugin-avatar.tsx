@@ -8,12 +8,23 @@
 //      stable seed) so every plugin still has a distinct visual.
 //
 // `manifest.icon` and `manifest.screenshots` exist in the manifest type but
-// were never rendered in the installed library before this; the avatar gives
+// were never rendered in the installed library before this. The avatar gives
 // the list/grid/detail surfaces a real marketplace look.
+//
+// Callers should pass `resolvedIcon` whenever they have it. The host already
+// classifies every icon into lucide / inline / remote / file / public with a
+// path-traversal guard and stores the result on `Plugin.resolvedIcon` and
+// `PluginRegistryEntry.resolvedIcon`, and nothing read either field: every
+// surface handed over the raw `manifest.icon` string, whose relative form
+// (`assets/icon.png`) fails the image test below and silently degraded to a
+// letter. `icon` remains supported for callers that only have the raw string.
 
-import { createElement } from "react"
+import { createElement, useMemo } from "react"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
+import { usePluginIconSrc } from "@/hooks/plugins/use-plugin-icon-src"
+import { resolvePluginIcon } from "@/lib/plugin/utils/icon"
 import { cn } from "@/lib/utils"
+import type { PluginResolvedIcon } from "@/types/plugin"
 
 const PALETTE = [
   "bg-rose-500",
@@ -47,8 +58,20 @@ function colorFor(seed: string): string {
 
 interface Props {
   name: string
-  /** Manifest icon — Lucide name or data/URL. */
+  /** Raw manifest icon — Lucide name or data/URL. */
   icon?: string
+  /**
+   * The host's already-resolved icon. Preferred over `icon`: it is the only
+   * form that can render a plugin-relative asset path.
+   */
+  resolvedIcon?: PluginResolvedIcon
+  /**
+   * The plugin's install root (`PluginRow.path`). Given this, the avatar
+   * resolves `icon` itself through the SAME `resolvePluginIcon` the host uses,
+   * so a Dexie row is enough and no caller has to reach into the runtime
+   * store for `Plugin.resolvedIcon`.
+   */
+  pluginRoot?: string
   /** Stable seed for the fallback colour (plugin id preferred). */
   seed?: string
   /** Square px size. */
@@ -56,8 +79,52 @@ interface Props {
   className?: string
 }
 
-export function PluginAvatar({ name, icon, seed, size = 20, className }: Props) {
+export function PluginAvatar({
+  name,
+  icon,
+  resolvedIcon,
+  pluginRoot,
+  seed,
+  size = 20,
+  className,
+}: Props) {
   const dimension = { width: size, height: size }
+  const effectiveResolved = useMemo(
+    () => resolvedIcon ?? resolvePluginIcon({ icon, pluginRoot }),
+    [resolvedIcon, icon, pluginRoot]
+  )
+  const resolved = usePluginIconSrc(effectiveResolved)
+
+  if (resolved?.kind === "image") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- data/remote/asset-protocol plugin icon, next/image can't optimize arbitrary plugin URLs in static export
+      <img
+        src={resolved.src}
+        alt=""
+        aria-hidden
+        style={dimension}
+        className={cn("shrink-0 rounded-md object-cover", className)}
+        data-testid="plugin-avatar-image"
+      />
+    )
+  }
+
+  const resolvedLucide = resolved?.kind === "lucide" ? resolveIcon(resolved.name) : null
+  if (resolvedLucide) {
+    return (
+      <span
+        aria-hidden
+        style={dimension}
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center rounded-md bg-muted text-foreground",
+          className
+        )}
+        data-testid="plugin-avatar-lucide"
+      >
+        {createElement(resolvedLucide, { className: "size-[62%]" })}
+      </span>
+    )
+  }
 
   if (icon && isImageSrc(icon)) {
     return (

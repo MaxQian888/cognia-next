@@ -124,6 +124,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
       <PluginAvatar
         name={plugin.name}
         icon={(plugin.manifest as { icon?: string })?.icon}
+        pluginRoot={plugin.path}
         seed={plugin.id}
         size={24}
         className="shrink-0"

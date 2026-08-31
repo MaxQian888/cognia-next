@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginLicense } from "../_shared/plugin-license"
+import { PluginScreenshotGallery } from "../_shared/plugin-screenshot-gallery"
 import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
@@ -45,6 +46,7 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
   const rowState = usePluginRow(pluginId)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
+  const setFilters = usePluginsStore((s) => s.setFilters)
   const [manifestOpen, setManifestOpen] = useState(false)
   // verificationSnapshot / lastKnownGoodVerification live on the in-memory
   // PluginManager store, not the Dexie row — subscribe directly so the
@@ -137,6 +139,19 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
           <MetaRow label={t("metaLastUsedAt")} value={new Date(plugin.lastUsedAt).toISOString()} />
         )}
       </Card>
+
+      {/* Both of these existed in the manifest type and had no renderer
+          anywhere: a plugin could ship previews and advertise keywords, and
+          the product showed neither. */}
+      <PluginScreenshotGallery
+        screenshots={(plugin.manifest as { screenshots?: string[] }).screenshots}
+        pluginRoot={plugin.path}
+      />
+
+      <PluginKeywordChips
+        keywords={(plugin.manifest as { keywords?: string[] }).keywords}
+        onSelect={(keyword) => setFilters({ tag: keyword, query: "" })}
+      />
 
       <PluginDependencyPanel manifest={plugin.manifest as unknown as PluginManifest} />
 
@@ -258,5 +273,47 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="font-mono text-right break-all min-w-0">{value}</span>
     </div>
+  )
+}
+
+/**
+ * `manifest.keywords` had no renderer either, and `PluginFilters.tag` was
+ * declared and applied by nothing. Making the chips write the tag facet is
+ * what turns both from dead declarations into one working affordance.
+ */
+function PluginKeywordChips({
+  keywords,
+  onSelect,
+}: {
+  keywords: string[] | undefined
+  onSelect: (keyword: string) => void
+}) {
+  const t = useTranslations("plugins.detail")
+  const values = Array.isArray(keywords)
+    ? keywords.filter((k): k is string => typeof k === "string" && k.trim() !== "")
+    : []
+  if (values.length === 0) return null
+  return (
+    <Card className="space-y-2 p-3" data-testid="plugin-keyword-chips">
+      <div className="text-xs font-semibold">{t("keywords")}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {values.map((keyword) => (
+          <Badge
+            key={keyword}
+            asChild
+            variant="outline"
+            className="cursor-pointer text-xs hover:bg-accent"
+          >
+            <button
+              type="button"
+              onClick={() => onSelect(keyword)}
+              aria-label={t("keywordFilterAria", { keyword })}
+            >
+              {keyword}
+            </button>
+          </Badge>
+        ))}
+      </div>
+    </Card>
   )
 }

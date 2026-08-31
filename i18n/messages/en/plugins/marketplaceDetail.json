@@ -8,6 +8,7 @@
   "installing": "Installing…",
   "license": "License",
   "optional": "Optional permissions",
+  "publishedAt": "Published {date}",
   "rawManifest": "View raw manifest",
   "rawManifestTitle": "Raw manifest",
   "readme": "README",

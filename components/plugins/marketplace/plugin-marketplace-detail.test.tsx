@@ -222,3 +222,51 @@ describe("PluginMarketplaceDetail", () => {
     expect(screen.queryByText("rawManifest")).not.toBeInTheDocument()
   })
 })
+
+/**
+ * `getVersions` has always returned `changelog` and `publishedAt` beside the
+ * version string, and the loose client signature discarded them at the type
+ * boundary. The picker offered bare numbers, so a user choosing between two
+ * releases had nothing to choose on.
+ */
+describe("version notes", () => {
+  it("shows the selected version's changelog and publish date", async () => {
+    getVersionsMock.mockResolvedValue([
+      { version: "2.0.0", changelog: "Adds OCR", publishedAt: "2026-01-02" },
+      { version: "1.0.0", changelog: "First release" },
+    ] as never)
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={{ id: "p1", name: "P1", version: "2.0.0", type: "plugin" }}
+        installed={false}
+        installing={false}
+        onClose={jest.fn()}
+        onInstall={jest.fn()}
+        onUninstall={jest.fn()}
+      />
+    )
+    const notes = await screen.findByTestId("plugin-marketplace-version-notes")
+    expect(notes).toHaveTextContent("Adds OCR")
+    // The suite's next-intl mock returns the bare key, so the interpolated
+    // date is not in the DOM; the presence of the row is what is assertable.
+    expect(notes).toHaveTextContent("publishedAt")
+  })
+
+  it("renders no notes block when the registry supplies none", async () => {
+    getVersionsMock.mockResolvedValue([{ version: "2.0.0" }, { version: "1.0.0" }] as never)
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={{ id: "p1", name: "P1", version: "2.0.0", type: "plugin" }}
+        installed={false}
+        installing={false}
+        onClose={jest.fn()}
+        onInstall={jest.fn()}
+        onUninstall={jest.fn()}
+      />
+    )
+    await screen.findByTestId("plugin-marketplace-version-picker")
+    expect(screen.queryByTestId("plugin-marketplace-version-notes")).toBeNull()
+  })
+})

@@ -56,3 +56,67 @@ describe("PluginAvatar", () => {
     expect(node.style.height).toBe("32px")
   })
 })
+
+/**
+ * The host has always resolved `manifest.icon` into a lucide / inline /
+ * remote / file / public classification and stored it, and nothing read the
+ * result: every surface passed the raw string, whose relative form
+ * (`assets/icon.png`) fails the image test and degraded to a letter.
+ */
+describe("resolved icons", () => {
+  it("resolves a plugin-relative asset path from the install root", () => {
+    // A `file` transport needs the asset protocol, which jsdom does not have,
+    // so this asserts the resolution happened by way of the honest fallback
+    // rather than a broken <img>.
+    render(<PluginAvatar name="Widgets" icon="assets/icon.png" pluginRoot="/plugins/widgets" />)
+    expect(screen.queryByTestId("plugin-avatar-image")).toBeNull()
+    expect(screen.getByTestId("plugin-avatar-initial")).toBeInTheDocument()
+  })
+
+  it("renders an inline icon supplied as a resolved value", () => {
+    render(
+      <PluginAvatar
+        name="Widgets"
+        resolvedIcon={{
+          kind: "image",
+          src: "data:image/png;base64,AA",
+          original: "data:image/png;base64,AA",
+          transport: "inline",
+        }}
+      />
+    )
+    expect(screen.getByTestId("plugin-avatar-image")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AA"
+    )
+  })
+
+  it("renders a lucide glyph supplied as a resolved value", () => {
+    render(
+      <PluginAvatar
+        name="Widgets"
+        resolvedIcon={{ kind: "lucide", name: "Wrench", original: "Wrench" }}
+      />
+    )
+    expect(screen.getByTestId("plugin-avatar-lucide")).toBeInTheDocument()
+  })
+
+  it("prefers an explicit resolvedIcon over the raw string", () => {
+    render(
+      <PluginAvatar
+        name="Widgets"
+        icon="https://example.test/raw.png"
+        resolvedIcon={{
+          kind: "image",
+          src: "https://example.test/resolved.png",
+          original: "x",
+          transport: "remote",
+        }}
+      />
+    )
+    expect(screen.getByTestId("plugin-avatar-image")).toHaveAttribute(
+      "src",
+      "https://example.test/resolved.png"
+    )
+  })
+})

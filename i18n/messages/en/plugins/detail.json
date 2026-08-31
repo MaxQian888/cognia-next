@@ -50,14 +50,8 @@
     "switchAria": "Trust this plugin's frontend code",
     "title": "Trust frontend code"
   },
-  "logs": {
-    "aria": "Python host log entries",
-    "clear": "Clear",
-    "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
-    "exited": "Host process exited",
-    "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
-    "streamEnd": "— stream ended —"
-  },
+  "keywordFilterAria": "Filter by keyword {keyword}",
+  "keywords": "Keywords",
   "lifecycle": {
     "activating": "Activating",
     "dirty": "Cleanup required",
@@ -67,6 +61,14 @@
     "retrying": "Retrying cleanup",
     "stopping": "Stopping",
     "waiting": "Waiting for service"
+  },
+  "logs": {
+    "aria": "Python host log entries",
+    "clear": "Clear",
+    "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
+    "exited": "Host process exited",
+    "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
+    "streamEnd": "— stream ended —"
   },
   "metaAuthor": "Author",
   "metaCreatedAt": "Installed at",
@@ -153,6 +155,8 @@
   "rollback": "Rollback…",
   "rollbackAria": "Rollback {name}",
   "runtimeContributions": "Runtime contributions",
+  "screenshotAlt": "Screenshot {index}",
+  "screenshots": "Screenshots",
   "sectionAnalytics": "Analytics",
   "sectionBackup": "Backup",
   "sectionDependencies": "Dependency graph",

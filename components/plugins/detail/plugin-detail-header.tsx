@@ -80,6 +80,7 @@ export function PluginDetailHeader({ plugin }: Props) {
         <PluginAvatar
           name={plugin.name}
           icon={(plugin.manifest as { icon?: string })?.icon}
+          pluginRoot={plugin.path}
           seed={plugin.id}
           size={36}
           className="mt-0.5"

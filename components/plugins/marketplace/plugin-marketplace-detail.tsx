@@ -196,8 +196,16 @@ function InstallSection({
   onUninstall: (id: string) => void
 }) {
   const t = useTranslations("plugins.marketplaceDetail")
-  const [versions, setVersions] = useState<string[]>([entry.version])
+  /**
+   * The registry's `getVersions` has always returned `changelog` and
+   * `publishedAt` alongside the version string (`marketplace.ts` parses both),
+   * and the loose `MarketplaceClient` signature threw them away at the type
+   * boundary, so the picker offered bare version numbers and a user choosing
+   * between two releases had nothing to choose on.
+   */
+  const [versions, setVersions] = useState<VersionOption[]>([{ version: entry.version }])
   const [selected, setSelected] = useState<string>(entry.version)
+  const selectedVersion = versions.find((v) => v.version === selected)
 
   // Reset internal version state when the entry changes via the React 19
   // "compare prev during render" pattern (so we don't trip
@@ -219,11 +227,21 @@ function InstallSection({
         if (!client.getVersions) return
         const list = await client.getVersions(entry.id)
         if (cancelled) return
-        const names = list.map((v) => v.version).filter((v): v is string => typeof v === "string")
-        if (names.length === 0) return
+        const options = list
+          .filter(
+            (v): v is { version: string } & Record<string, unknown> => typeof v.version === "string"
+          )
+          .map((v) => ({
+            version: v.version,
+            changelog: typeof v.changelog === "string" ? v.changelog : undefined,
+            publishedAt: typeof v.publishedAt === "string" ? v.publishedAt : undefined,
+          }))
+        if (options.length === 0) return
         // Surface the entry's `version` field at the top if the registry
         // omitted it (latest is usually first in the response).
-        const merged = names.includes(entry.version) ? names : [entry.version, ...names]
+        const merged = options.some((v) => v.version === entry.version)
+          ? options
+          : [{ version: entry.version }, ...options]
         setVersions(merged)
         setSelected(entry.version)
       } catch {
@@ -264,8 +282,8 @@ function InstallSection({
           <SelectContent>
             <SelectGroup>
               {versions.map((v) => (
-                <SelectItem key={v} value={v}>
-                  {v}
+                <SelectItem key={v.version} value={v.version}>
+                  {v.version}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -280,8 +298,29 @@ function InstallSection({
         installingLabel={t("installing")}
         variant="default"
       />
+      {(selectedVersion?.changelog || selectedVersion?.publishedAt) && (
+        <div
+          className="basis-full space-y-1 rounded-md border bg-muted/30 p-2 text-xs"
+          data-testid="plugin-marketplace-version-notes"
+        >
+          {selectedVersion.publishedAt && (
+            <div className="text-muted-foreground">
+              {t("publishedAt", { date: selectedVersion.publishedAt })}
+            </div>
+          )}
+          {selectedVersion.changelog && (
+            <p className="line-clamp-6 whitespace-pre-wrap">{selectedVersion.changelog}</p>
+          )}
+        </div>
+      )}
     </>
   )
+}
+
+interface VersionOption {
+  version: string
+  changelog?: string
+  publishedAt?: string
 }
 
 /**

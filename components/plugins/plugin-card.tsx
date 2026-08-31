@@ -101,6 +101,7 @@ export const PluginCard = memo(function PluginCard({
         <PluginAvatar
           name={plugin.name}
           icon={(plugin.manifest as { icon?: string })?.icon}
+          pluginRoot={plugin.path}
           seed={plugin.id}
           size={28}
           className="mt-0.5"

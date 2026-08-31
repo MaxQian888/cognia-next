@@ -50,14 +50,8 @@
     "switchAria": "信任此插件的前端代码",
     "title": "信任前端代码"
   },
-  "logs": {
-    "aria": "Python 宿主日志条目",
-    "clear": "清空",
-    "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
-    "exited": "宿主进程已退出",
-    "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
-    "streamEnd": "— 流式输出结束 —"
-  },
+  "keywordFilterAria": "按关键词 {keyword} 筛选",
+  "keywords": "关键词",
   "lifecycle": {
     "activating": "正在激活",
     "dirty": "需要清理",
@@ -67,6 +61,14 @@
     "retrying": "正在重试清理",
     "stopping": "正在停止",
     "waiting": "正在等待服务"
+  },
+  "logs": {
+    "aria": "Python 宿主日志条目",
+    "clear": "清空",
+    "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+    "exited": "宿主进程已退出",
+    "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
+    "streamEnd": "— 流式输出结束 —"
   },
   "metaAuthor": "作者",
   "metaCreatedAt": "安装时间",
@@ -153,6 +155,8 @@
   "rollback": "回滚…",
   "rollbackAria": "回滚 {name}",
   "runtimeContributions": "运行时贡献",
+  "screenshotAlt": "截图 {index}",
+  "screenshots": "截图",
   "sectionAnalytics": "使用统计",
   "sectionBackup": "备份",
   "sectionDependencies": "依赖图",

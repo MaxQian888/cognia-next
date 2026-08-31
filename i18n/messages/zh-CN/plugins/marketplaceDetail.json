@@ -8,6 +8,7 @@
   "installing": "安装中…",
   "license": "许可",
   "optional": "可选权限",
+  "publishedAt": "发布于 {date}",
   "rawManifest": "查看原始 manifest",
   "rawManifestTitle": "原始 manifest",
   "readme": "README",
