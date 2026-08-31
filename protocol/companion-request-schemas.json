@@ -4227,6 +4227,9 @@
       },
       "additionalProperties": false
     },
+    "fs_workspace_roots": {
+      "type": "object"
+    },
     "fs_write_workspace_file": {
       "type": "object",
       "required": [

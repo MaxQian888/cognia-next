@@ -14684,6 +14684,59 @@
       "outputTyped": true
     },
     {
+      "name": "fs_workspace_roots",
+      "category": "development",
+      "resource": "workspace-files",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "fs_workspace_roots (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceRootsReport",
+        "description": "Directories this Host will browse. `source` says why a root is allowed and therefore where it can be changed: `desktop-project` is registered by the active desktop project, `headless-workspaces-dir` is COGNIA_WORKSPACES_DIR and is fixed when the server starts.",
+        "required": [
+          "roots"
+        ],
+        "properties": {
+          "roots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "source"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "desktop-project",
+                    "headless-workspaces-dir"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "fs_write_workspace_file",
       "category": "development",
       "resource": "workspace-files",
@@ -44245,5 +44298,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "81e50fa49725025409ca57b3e9c444a7ac54b10a47f7ee6469b59cf3ce521fe7"
+  "catalogHash": "16e7f8892618a4407161b8ce8a47cfefcf33b14335dafbdb9c3b28fe5ecc08cd"
 }

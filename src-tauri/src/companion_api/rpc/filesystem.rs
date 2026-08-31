@@ -69,6 +69,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_pin",
     "task_workspace_resolve_conflict",
     "task_workspace_prune",
+    "fs_workspace_roots",
     "fs_list_workspace_dir",
     "fs_stat_workspace_file",
     "fs_create_workspace_dir",
@@ -859,6 +860,35 @@ pub(super) async fn dispatch(
         // File-tree browser: list children / stat one path (reads), and
         // mkdir / delete / rename / copy (CONTROL-gated writes). All use the
         // `root` + `relPath` sandbox shape of the read/write variants above.
+        // The one command a client can issue *before* it knows anything. Every
+        // other entry point here takes a `root` the caller had to already know,
+        // and a caller that guesses wrong gets a refusal it has no way to act
+        // on. The headless answer is produced by the enforcement path itself
+        // (`validate_workspace_root` creates and canonicalizes the directory),
+        // so the reported root is by construction a root this Host accepts.
+        "fs_workspace_roots" => {
+            if let Some(services) = host.headless() {
+                let policy = services.spawn_policy.clone();
+                tokio::task::spawn_blocking(move || {
+                    let requested = policy.workspaces_dir().to_string_lossy().into_owned();
+                    policy.validate_workspace_root(&requested)
+                })
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?
+                .map(|path| crate::files::WorkspaceRootsReport {
+                    roots: vec![crate::files::WorkspaceRoot {
+                        path,
+                        source: crate::files::WORKSPACE_ROOT_SOURCE_HEADLESS.to_string(),
+                    }],
+                })
+                .map_err(|error| {
+                    RpcError::internal(format!("workspaces root unavailable: {error}"))
+                })
+                .and_then(to_json)
+            } else {
+                to_json(crate::files::fs_workspace_roots())
+            }
+        }
         "fs_list_workspace_dir" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: Option<String> = optional(&args, "relPath")?;

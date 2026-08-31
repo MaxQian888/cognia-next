@@ -866,7 +866,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "task_workspace_pin",
     "task_workspace_prune",
     // File-tree browser: list/stat (reads) + mkdir/delete/rename/copy (writes),
-    // all root-relative + path-traversal checked.
+    // all root-relative + path-traversal checked. `fs_workspace_roots` is the
+    // entry point that tells a client which roots those paths may sit under.
+    "fs_workspace_roots",
     "fs_list_workspace_dir",
     "fs_stat_workspace_file",
     "fs_create_workspace_dir",
@@ -1339,7 +1341,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_resource_download_open",
     "task_resource_download_read_chunk",
     "task_resource_download_close",
-    // File-tree browser reads — same (root, relPath) returns the same listing/stat.
+    // File-tree browser reads — same (root, relPath) returns the same listing/stat,
+    // and the roots report is a pure read of the Host's own confinement.
+    "fs_workspace_roots",
     "fs_list_workspace_dir",
     "fs_stat_workspace_file",
     // Terminal session listings.

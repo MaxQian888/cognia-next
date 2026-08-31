@@ -402,6 +402,7 @@ commands.allow = [
   "fs_set_allowed_roots",
   "fs_stat_workspace_file",
   "fs_walk_workspace",
+  "fs_workspace_roots",
   "fs_write_workspace_file",
   "gateway_create_key",
   "gateway_decision_response",

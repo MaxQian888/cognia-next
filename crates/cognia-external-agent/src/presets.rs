@@ -179,6 +179,14 @@ impl SpawnPolicy {
         Self::new(workspaces_dir, smoke)
     }
 
+    /// The server-owned workspaces directory every confined path resolves
+    /// under. Exposed so the Host can *report* the root it enforces: a remote
+    /// client has no other way to learn where it is allowed to browse, and
+    /// guessing costs it a refusal it cannot interpret.
+    pub fn workspaces_dir(&self) -> &Path {
+        &self.workspaces_dir
+    }
+
     /// Resolve a client-supplied workspace root against the server-owned
     /// workspaces directory. This is the filesystem RPC trust boundary: a
     /// caller may choose a workspace below the root, never redefine the root.
@@ -673,6 +681,26 @@ mod tests {
         assert!(policy
             .validate_workspace_root(tmp.path().to_str().unwrap())
             .is_err());
+    }
+
+    #[test]
+    fn workspaces_dir_reports_the_root_validation_enforces() {
+        let (tmp, policy) = policy(false);
+        let reported = policy.workspaces_dir().to_path_buf();
+        assert_eq!(reported, tmp.path().join("workspaces"));
+        // The reported root has to be one the client can actually browse, so
+        // it must survive the same validation every other path goes through.
+        std::fs::create_dir_all(&reported).unwrap();
+        assert_eq!(
+            PathBuf::from(
+                policy
+                    .validate_workspace_root(reported.to_str().unwrap())
+                    .unwrap()
+            )
+            .canonicalize()
+            .unwrap(),
+            reported.canonicalize().unwrap()
+        );
     }
 
     // ── Policy matrix: env ───────────────────────────────────────────────────

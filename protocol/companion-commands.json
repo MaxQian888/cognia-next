@@ -5499,6 +5499,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "fs_workspace_roots",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "fs_write_workspace_file",
       "target": "execution",
       "operation": "write",

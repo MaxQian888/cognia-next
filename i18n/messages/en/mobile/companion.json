@@ -437,5 +437,17 @@
     "historyClearing": "Clearing…",
     "historyCleared": "Cleared",
     "historyClearFailed": "The recorded submissions could not be cleared."
+  },
+  "workspaceRoots": {
+    "description": "Folders this Host lets a connected client open. Everything else is refused.",
+    "empty": "This Host did not report any folders. It is probably running a build from before this was added.",
+    "hintDesktop": "Change it by mounting folders in the workspace you are using on that machine.",
+    "hintHeadless": "Change it where the server is launched: COGNIA_WORKSPACES_DIR, or pnpm dev:headless --workspaces-dir PATH. The Host reads it once at startup, so it needs a restart.",
+    "loadError": "Could not read the allowed folders from this Host.",
+    "loading": "Reading the allowed folders…",
+    "refresh": "Reload the allowed folders",
+    "sourceDesktop": "Registered by the active project",
+    "sourceHeadless": "Fixed when the server started",
+    "title": "Folders this Host allows"
   }
 }

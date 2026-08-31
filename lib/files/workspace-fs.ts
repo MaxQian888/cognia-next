@@ -18,6 +18,7 @@ import {
   type RawWorkspaceStat,
   type RawWorkspaceContentMatch,
   type WorkspaceEntry,
+  type WorkspaceRoot,
   type WorkspaceStat,
   type WorkspaceContentMatch,
 } from "@/lib/files/types"
@@ -29,6 +30,42 @@ export interface WorkspaceContentSearchOptions {
   caseSensitive?: boolean
   /** Cap the number of returned matches (Rust hard-limit: 500). */
   maxResults?: number
+}
+
+/**
+ * Ask the Host which directories it will browse.
+ *
+ * Nothing else in this module can be called without already knowing a `root`,
+ * and a client that guesses one gets a refusal it cannot act on. That is the
+ * whole reason this exists: the confinement differs per Host (a headless server
+ * browses only `COGNIA_WORKSPACES_DIR`, a desktop browses what the active
+ * project registered) and the client has no other way to learn it.
+ *
+ * Resolves to an empty list rather than throwing when the Host is too old to
+ * know the command. An empty list means "this Host did not say", NOT "nothing
+ * is browsable", so callers must keep whatever fallback they had instead of
+ * rendering a dead end.
+ */
+export async function listWorkspaceRoots(): Promise<WorkspaceRoot[]> {
+  let report: { roots?: unknown } | null
+  try {
+    report = await transport.call<{ roots?: unknown } | null>("fs_workspace_roots")
+  } catch {
+    return []
+  }
+  const roots = report?.roots
+  if (!Array.isArray(roots)) return []
+  return roots.filter(isWorkspaceRoot)
+}
+
+function isWorkspaceRoot(value: unknown): value is WorkspaceRoot {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as { path?: unknown; source?: unknown }
+  return (
+    typeof candidate.path === "string" &&
+    candidate.path.length > 0 &&
+    (candidate.source === "desktop-project" || candidate.source === "headless-workspaces-dir")
+  )
 }
 
 /**

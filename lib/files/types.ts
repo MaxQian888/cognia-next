@@ -13,6 +13,21 @@ export interface WorkspaceEntry {
   mtimeMs: number | null
 }
 
+/**
+ * Why a root is browsable, which is also the only thing that says where it can
+ * be changed. A `desktop-project` root was registered by the active desktop
+ * project and moves with it. A `headless-workspaces-dir` root is
+ * `COGNIA_WORKSPACES_DIR`, read once when the server process starts, so no
+ * client can widen it and the UI must not pretend otherwise.
+ */
+export type WorkspaceRootSource = "desktop-project" | "headless-workspaces-dir"
+
+/** One directory the Host will browse. */
+export interface WorkspaceRoot {
+  path: string
+  source: WorkspaceRootSource
+}
+
 /** Raw shape coming back from the Rust side (snake_case fields). */
 export interface RawWorkspaceEntry {
   rel_path: string

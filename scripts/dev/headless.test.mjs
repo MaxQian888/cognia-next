@@ -463,6 +463,33 @@ test("dry-run prints a redacted launch plan without writing development state", 
   await assert.rejects(access(dataDir), { code: "ENOENT" })
 })
 
+test("--workspaces-dir is what a client is allowed to browse, and serve owns it", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-roots-"))
+  const dataDir = path.join(root, "data")
+  const workspaces = path.join(root, "elsewhere")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const env = { COGNIA_MASTER_KEY: "a".repeat(64) }
+
+  // Unset, the Host confines clients to <data dir>/workspaces and the variable
+  // is simply absent rather than pinned to a guess.
+  const fallback = await run(["--dry-run", "--data-dir", dataDir, "--port", "28900"], env)
+  assert.equal(fallback.code, 0, fallback.stderr)
+  assert.equal(JSON.parse(fallback.stdout).launch.environment.COGNIA_WORKSPACES_DIR, undefined)
+
+  const pinned = await run(
+    ["--dry-run", "--data-dir", dataDir, "--port", "28900", "--workspaces-dir", workspaces],
+    env
+  )
+  assert.equal(pinned.code, 0, pinned.stderr)
+  assert.equal(JSON.parse(pinned.stdout).launch.environment.COGNIA_WORKSPACES_DIR, workspaces)
+
+  // The other actions do not launch a server, so accepting the flag there would
+  // silently do nothing.
+  const onToken = await run(["token", "--data-dir", dataDir, "--workspaces-dir", workspaces], env)
+  assert.equal(onToken.code, 2, onToken.stdout)
+  assert.match(onToken.stderr, /token only accepts --data-dir/)
+})
+
 test("the browser listener is off unless a port is named, and forwarded when it is", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-browser-"))
   const dataDir = path.join(root, "data")

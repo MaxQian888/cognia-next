@@ -437,5 +437,17 @@
     "historyClearing": "正在清除…",
     "historyCleared": "已清除",
     "historyClearFailed": "无法清除提交记录。"
+  },
+  "workspaceRoots": {
+    "description": "该主机允许已连接客户端打开的目录，其余一律拒绝。",
+    "empty": "该主机没有报告任何目录，它运行的多半是加入此功能之前的版本。",
+    "hintDesktop": "在那台机器上，通过给工作区挂载文件夹来修改。",
+    "hintHeadless": "在启动服务器的地方修改：COGNIA_WORKSPACES_DIR，或 pnpm dev:headless --workspaces-dir PATH。主机只在启动时读取一次，改完需要重启。",
+    "loadError": "无法从该主机读取允许的目录。",
+    "loading": "正在读取允许的目录…",
+    "refresh": "重新读取允许的目录",
+    "sourceDesktop": "由当前项目注册",
+    "sourceHeadless": "服务器启动时固定",
+    "title": "该主机允许的目录"
   }
 }

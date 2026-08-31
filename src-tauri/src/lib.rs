@@ -968,6 +968,7 @@ pub fn run() {
             task_workspace::task_workspace_prune,
             task_workspace::task_workspace_watch,
             task_workspace::task_workspace_stop_watch,
+            files::fs_workspace_roots,
             files::fs_list_workspace_dir,
             files::fs_walk_workspace,
             files::fs_stat_workspace_file,

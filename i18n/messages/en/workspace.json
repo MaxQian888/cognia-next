@@ -160,10 +160,15 @@
       "loadRefused": "The Host refused this path. It only browses inside its own workspaces root.",
       "loading": "Loading folders…",
       "openFolder": "Open {name}",
+      "openRootAction": "Browse {path}",
       "pathLabel": "Server path",
       "pathPlaceholder": "/path/on/server",
+      "rootDesktop": "Registered by the active project",
+      "rootHeadless": "Fixed when the server started (COGNIA_WORKSPACES_DIR)",
+      "rootsLabel": "Folders this Host allows",
       "title": "Choose a server folder",
-      "up": "Go to parent folder"
+      "up": "Go to parent folder",
+      "upConfined": "This Host only browses inside the folders listed above."
     },
     "removeDir": "Remove directory",
     "removeRoot": "Remove folder",

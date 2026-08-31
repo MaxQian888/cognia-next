@@ -44,6 +44,7 @@ const cliOptionsSchema = z
     skipBuild: z.boolean().default(false),
     recoverSecretStore: z.boolean().default(false),
     tenantId: z.string().trim().min(1, "--tenant-id must not be empty").optional(),
+    workspacesDir: z.string().trim().min(1, "--workspaces-dir must not be empty").optional(),
   })
   .refine(({ check, dryRun }) => !(check && dryRun), {
     message: "--check and --dry-run cannot be combined",
@@ -60,9 +61,11 @@ const cliOptionsSchema = z
       gateway,
       localDebug,
       tenantId,
+      workspacesDir,
     }) =>
       action !== "token" ||
-      (!advertiseUrl &&
+      (!workspacesDir &&
+        !advertiseUrl &&
         !allowRemoteTerminal &&
         !browserListenerPort &&
         !check &&
@@ -83,9 +86,11 @@ const cliOptionsSchema = z
       gateway,
       localDebug,
       recoverSecretStore,
+      workspacesDir,
     }) =>
       action !== "pair" ||
-      (!allowRemoteTerminal &&
+      (!workspacesDir &&
+        !allowRemoteTerminal &&
         !browserListenerPort &&
         !check &&
         !dryRun &&
@@ -111,9 +116,11 @@ const cliOptionsSchema = z
       gateway,
       localDebug,
       recoverSecretStore,
+      workspacesDir,
     }) =>
       action !== "browser-enroll" ||
-      (!advertiseUrl &&
+      (!workspacesDir &&
+        !advertiseUrl &&
         !allowRemoteTerminal &&
         !check &&
         !deviceName &&
@@ -172,6 +179,10 @@ function createProgram() {
     .option(
       "--browser-listener-port <port>",
       "serve: also bind the plaintext loopback listener a browser tab can reach without a certificate (27891 by default in dev:web-headless); off unless passed. browser-enroll: the already-bound listener the enrollment advertises (27891 when omitted)."
+    )
+    .option(
+      "--workspaces-dir <path>",
+      "serve: the only directory tree remote clients may browse and run in (COGNIA_WORKSPACES_DIR). Defaults to <data dir>/workspaces. Read once at startup."
     )
     .option("--skip-build", "Reuse existing headless build artifacts.")
     .option(
@@ -343,6 +354,7 @@ function launchEnvironment(options, paths, secret, env, localDebug) {
     COGNIA_SIDECAR_SCRIPT: paths.sidecar,
     COGNIA_VSCODE_EXT_HOST_SCRIPT: paths.vscodeHost,
   }
+  if (options.workspacesDir) childEnv.COGNIA_WORKSPACES_DIR = options.workspacesDir
   if (options.gateway) childEnv.COGNIA_GATEWAY = "1"
   if (localDebug) {
     childEnv.COGNIA_APIFOX_ENV_PATH = localDebug.environmentPath
@@ -376,6 +388,7 @@ function redactedEnvironment(childEnv) {
     "COGNIA_PUBLIC_URL",
     "COGNIA_SIDECAR_SCRIPT",
     "COGNIA_VSCODE_EXT_HOST_SCRIPT",
+    "COGNIA_WORKSPACES_DIR",
   ]) {
     if (childEnv[key] !== undefined) {
       selected[key] =

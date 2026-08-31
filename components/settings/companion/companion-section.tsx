@@ -44,6 +44,7 @@ import { SyncStatusCard } from "./sync-status-card"
 import { LogtoLoginCard } from "./logto-login-card"
 import { CollaborationCard } from "./collaboration-card"
 import { RemoteBrowserCard } from "./remote-browser-card"
+import { WorkspaceRootsCard } from "./workspace-roots-card"
 import { BrowserAccessCard } from "./browser-access-card"
 import { BrowserCompanionCard } from "./browser-companion-card"
 
@@ -252,6 +253,11 @@ export function CompanionSection() {
             transport switch it depends on. */}
         <BrowserCompanionCard />
         <PairedDevicesSummary />
+        {/* Under pairing because it answers a question only a paired
+            client asks: now that I am connected, which folders may I open?
+            Read-only, since a headless Host takes its root from the
+            environment it was started with and no client may widen it. */}
+        <WorkspaceRootsCard />
       </CompanionGroup>
       <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
         <RemoteBrowserCard />

@@ -262,6 +262,74 @@ pub fn is_remote_workspace_path_allowed(path: &str) -> bool {
         && is_path_within_roots(path, &roots)
 }
 
+/// Wire name for a root the active desktop project registered.
+pub const WORKSPACE_ROOT_SOURCE_DESKTOP: &str = "desktop-project";
+/// Wire name for the server-owned workspaces directory
+/// (`COGNIA_WORKSPACES_DIR`), the only root a headless Host will browse.
+pub const WORKSPACE_ROOT_SOURCE_HEADLESS: &str = "headless-workspaces-dir";
+
+/// One directory a client may browse, and why it is allowed.
+///
+/// `source` exists because the two Hosts confine browsing for different
+/// reasons, and the UI has to say which. A desktop root is one the local user's
+/// active project registered and can change from the app. A headless root is
+/// fixed at process start by `COGNIA_WORKSPACES_DIR` and can only be changed
+/// where the server is launched. Collapsing them into a bare path list would
+/// leave a remote user staring at a directory with no way to learn why it is
+/// the only one, which is exactly the dead end this report exists to remove.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceRoot {
+    pub path: String,
+    pub source: String,
+}
+
+/// What `fs_workspace_roots` answers. An object rather than a bare array so a
+/// later field cannot turn into a breaking shape change on a wire the headless
+/// and mobile planes schema-check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceRootsReport {
+    pub roots: Vec<WorkspaceRoot>,
+}
+
+/// The roots a **remote** client may browse: the same registry
+/// [`is_remote_workspace_path_allowed`] enforces, minus anything that no longer
+/// resolves on disk. A registered-but-missing root is not browsable, and
+/// offering it would only send the client into a refusal it cannot act on.
+///
+/// Sorted because the registry is a `HashSet`. Without this, two calls against
+/// an unchanged registry return the same roots in a different order and the
+/// picker's list reshuffles under the user.
+pub fn remote_workspace_roots() -> Vec<String> {
+    let mut roots: Vec<String> = active_workspace_roots_registry()
+        .read()
+        .map(|guard| guard.iter().cloned().collect())
+        .unwrap_or_default();
+    roots.retain(|root| Path::new(root).canonicalize().is_ok());
+    roots.sort();
+    roots
+}
+
+/// Report the browsable roots to the **local renderer**.
+///
+/// Desktop listing itself is not confined to these. `fs_list_workspace_dir`
+/// resolves any absolute root the local user picked through a file dialog, and
+/// narrowing that here would break browsing your own projects. They are the
+/// starting points a picker should offer, not a fence. The fence for a *remote*
+/// caller is applied in the companion RPC layer, which builds this same report
+/// from whichever Host is answering.
+#[tauri::command]
+pub fn fs_workspace_roots() -> WorkspaceRootsReport {
+    WorkspaceRootsReport {
+        roots: remote_workspace_roots()
+            .into_iter()
+            .map(|path| WorkspaceRoot {
+                path,
+                source: WORKSPACE_ROOT_SOURCE_DESKTOP.to_string(),
+            })
+            .collect(),
+    }
+}
+
 /// Pure containment check: does `path` resolve inside one of `roots`? Never
 /// creates directories. Resolves the deepest EXISTING ancestor and canonicalizes
 /// it (so symlinks in the ancestry are followed — the real guard a lexical check
@@ -2204,6 +2272,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn workspace_roots_report_lists_only_resolvable_registered_roots() {
+        let present = make_sandbox("roots-present");
+        let missing =
+            std::env::temp_dir().join(format!("cognia-roots-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&missing);
+        set_allowed_roots(vec![
+            present.to_string_lossy().to_string(),
+            missing.to_string_lossy().to_string(),
+        ]);
+
+        let roots = remote_workspace_roots();
+        let present_key = normalize_root(&present.to_string_lossy());
+        let missing_key = normalize_root(&missing.to_string_lossy());
+        assert!(roots.contains(&present_key), "{roots:?}");
+        // A registered root that no longer exists is withheld. Offering it
+        // would hand the picker a starting point the Host itself refuses.
+        assert!(!roots.contains(&missing_key), "{roots:?}");
+        // Stable order, so the picker's list does not reshuffle between calls.
+        let mut sorted = roots.clone();
+        sorted.sort();
+        assert_eq!(roots, sorted);
+
+        let report = fs_workspace_roots();
+        assert_eq!(report.roots.len(), roots.len());
+        assert!(
+            report
+                .roots
+                .iter()
+                .all(|root| root.source == WORKSPACE_ROOT_SOURCE_DESKTOP)
+        );
+        assert!(report.roots.iter().any(|root| root.path == present_key));
+
+        let _ = std::fs::remove_dir_all(&present);
     }
 
     #[test]

@@ -160,10 +160,15 @@
       "loadRefused": "主机拒绝了这个路径，它只允许浏览自己的工作区根目录之内。",
       "loading": "正在加载文件夹…",
       "openFolder": "打开 {name}",
+      "openRootAction": "浏览 {path}",
       "pathLabel": "服务器路径",
       "pathPlaceholder": "/服务器上的路径",
+      "rootDesktop": "由当前项目注册",
+      "rootHeadless": "服务器启动时固定（COGNIA_WORKSPACES_DIR）",
+      "rootsLabel": "该主机允许的目录",
       "title": "选择服务器文件夹",
-      "up": "前往上一级文件夹"
+      "up": "前往上一级文件夹",
+      "upConfined": "该主机只允许浏览上面列出的目录。"
     },
     "removeDir": "移除目录",
     "removeRoot": "移除文件夹",

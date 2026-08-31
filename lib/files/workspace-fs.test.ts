@@ -4,6 +4,7 @@ import {
   createWorkspaceDir,
   deleteWorkspaceEntry,
   listWorkspaceDir,
+  listWorkspaceRoots,
   readWorkspaceFile,
   renameWorkspaceEntry,
   searchWorkspaceContent,
@@ -198,5 +199,50 @@ describe("mutating wrappers", () => {
   it("propagates transport rejections", async () => {
     jest.spyOn(transport, "call").mockRejectedValueOnce(new Error("path escapes workspace"))
     await expect(deleteWorkspaceEntry("/repo", "../evil")).rejects.toThrow("path escapes workspace")
+  })
+})
+
+describe("listWorkspaceRoots", () => {
+  it("returns the roots the Host reports", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce({
+      roots: [{ path: "/srv/workspaces", source: "headless-workspaces-dir" }],
+    })
+    await expect(listWorkspaceRoots()).resolves.toEqual([
+      { path: "/srv/workspaces", source: "headless-workspaces-dir" },
+    ])
+    expect(callSpy).toHaveBeenCalledWith("fs_workspace_roots")
+  })
+
+  it("resolves empty instead of throwing when the Host does not know the command", async () => {
+    // A Host predating this command answers `unknown_command`. That is "this
+    // Host did not say", not "nothing is browsable", and the picker still has a
+    // fallback starting path to fall back to, so a throw here would turn an old
+    // Host into a dead dialog.
+    jest.spyOn(transport, "call").mockRejectedValueOnce(
+      Object.assign(new Error("unknown command"), {
+        code: "unknown_command",
+        retryable: false,
+      })
+    )
+    await expect(listWorkspaceRoots()).resolves.toEqual([])
+  })
+
+  it("drops entries that are not a usable root", async () => {
+    jest.spyOn(transport, "call").mockResolvedValueOnce({
+      roots: [
+        { path: "/srv/ok", source: "desktop-project" },
+        { path: "", source: "desktop-project" },
+        { path: "/srv/unknown", source: "something-else" },
+        null,
+      ],
+    })
+    await expect(listWorkspaceRoots()).resolves.toEqual([
+      { path: "/srv/ok", source: "desktop-project" },
+    ])
+  })
+
+  it("tolerates a response that is not the report shape", async () => {
+    jest.spyOn(transport, "call").mockResolvedValueOnce(null)
+    await expect(listWorkspaceRoots()).resolves.toEqual([])
   })
 })

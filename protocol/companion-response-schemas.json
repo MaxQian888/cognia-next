@@ -4887,6 +4887,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "WorkspaceRootsReport": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceRootsReport",
+      "description": "Directories this Host will browse. `source` says why a root is allowed and therefore where it can be changed: `desktop-project` is registered by the active desktop project, `headless-workspaces-dir` is COGNIA_WORKSPACES_DIR and is fixed when the server starts.",
+      "required": ["roots"],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "source"],
+            "properties": {
+              "path": { "type": "string" },
+              "source": {
+                "type": "string",
+                "enum": ["desktop-project", "headless-workspaces-dir"]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -5765,6 +5789,9 @@
     },
     "fs_stat_workspace_file": {
       "$ref": "#/$defs/LegacyRecord"
+    },
+    "fs_workspace_roots": {
+      "$ref": "#/$defs/WorkspaceRootsReport"
     },
     "fs_write_workspace_file": {
       "$ref": "#/$defs/NullResult"
