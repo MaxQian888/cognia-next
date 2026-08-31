@@ -6,9 +6,7 @@
  * engine against a configured Provider, and restores the durable turn.
  */
 
-import type { Page } from "@playwright/test"
-
-import { expect, test } from "@/tests/e2e/fixtures/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 interface PersistedChatRow {

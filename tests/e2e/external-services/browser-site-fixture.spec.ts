@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 import { startExternalServiceFixture } from "../fixtures/external-service-site/server"
 

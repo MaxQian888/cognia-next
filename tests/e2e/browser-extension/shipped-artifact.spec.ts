@@ -89,7 +89,7 @@ test.describe("the shipped extension", () => {
     expect(stored).toEqual({})
   })
 
-  test("registers the capture shortcut the manifest declares", async ({ serviceWorker }) => {
+  test("registers the capture command the manifest declares", async ({ serviceWorker }) => {
     // The keyboard command is one of the three gestures that grant
     // `activeTab`, and the only one with a readable registration — Chrome
     // exposes no way to enumerate context menus. If the manifest and the
@@ -106,9 +106,12 @@ test.describe("the shipped extension", () => {
     // and Windows, "\u2325\u21e7C" on macOS), so pinning the rendered string
     // would fail on whichever runner is not the one it was written on.
     expect(manifest.commands?.["capture-page"]?.suggested_key?.default).toBe("Alt+Shift+C")
-    // What the registration proves is that Chrome bound it at all — an
-    // unbound command is one whose shortcut silently does nothing.
-    expect(capture?.shortcut).not.toBe("")
+    // `getAll()` returning the named command proves Chrome accepted the
+    // registration. Its `shortcut` may legitimately be blank: Chrome leaves a
+    // suggested key unbound when it conflicts with the browser, the OS, or
+    // another extension. The active binding is user state, not an install-time
+    // invariant, so the shipped-artifact contract must not require it.
+    expect(capture?.name).toBe("capture-page")
   })
 
   test("its manifest on disk is the one Chrome loaded", async ({ serviceWorker }) => {

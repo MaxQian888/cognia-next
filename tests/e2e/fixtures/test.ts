@@ -8,6 +8,7 @@ export type {
   ConsoleMessage,
   Locator,
   Page,
+  Route,
   WebSocketRoute,
 } from "@playwright/test"
 

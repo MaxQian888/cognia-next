@@ -173,13 +173,15 @@ test.describe("observability — durable trace drill-down", () => {
     await expect(primaryTrace).toContainText("invoke_agent · Release Auditor")
     await expect(page.getByTestId(`trace-row-${SECONDARY_TRACE_ID}`)).toHaveCount(0)
 
+    await page.setViewportSize({ width: 900, height: 800 })
     await page.reload({ waitUntil: "domcontentloaded" })
     // The filter bar collapses behind one trigger when the channel is narrow,
     // so assert the count on the bar rather than on a control that only exists
     // in one of the two layouts.
     await expect(page.getByTestId("variable-filter-bar")).toContainText("1")
     const collapsed = page.getByTestId("filter-collapsed-trigger")
-    if ((await collapsed.count()) > 0) await collapsed.click()
+    await expect(collapsed).toBeVisible()
+    await collapsed.click()
     await page.getByTestId("filter-model").click()
     await expect(page.getByTestId(`filter-model-option-${PRIMARY_MODEL}`)).toHaveAttribute(
       "aria-pressed",

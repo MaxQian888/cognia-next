@@ -66,14 +66,14 @@ jest.mock("@/lib/plugin/core/manager", () => ({
 }))
 
 const setLanguage = jest.fn(async () => undefined)
-const setState = jest.fn()
+let mockSettingsLoaded = true
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: {
-    getState: () => ({ setLanguage }),
-    // Wrapped rather than passed by reference: jest hoists this factory above
-    // the `const`, so reading the spy here directly would hit the TDZ.
-    setState: (...args: unknown[]) => setState(...args),
-  },
+  useSettingsStore: Object.assign(
+    (selector: (state: { loaded: boolean }) => unknown) => selector({ loaded: mockSettingsLoaded }),
+    {
+      getState: () => ({ setLanguage }),
+    }
+  ),
 }))
 
 import { PluginSurfaceReferenceHarness } from "./plugin-surface-reference-harness"
@@ -177,6 +177,7 @@ describe("PluginSurfaceReferenceHarness", () => {
     expect(enablePlugin).not.toHaveBeenCalled()
 
     managerInitialized = true
+    mockSettingsLoaded = true
     await waitFor(() => expect(enablePlugin).toHaveBeenCalledWith(PLUGIN_ID, "e2e-reference"))
   })
 
@@ -282,7 +283,21 @@ describe("PluginSurfaceReferenceHarness", () => {
     window.history.replaceState({}, "", "/e2e/plugin-ui-surfaces?pluginSurfaceLocale=zh-CN")
     renderHarness()
     await waitFor(() => expect(setLanguage).toHaveBeenCalledWith("zh-CN"))
-    await waitFor(() => expect(setState).toHaveBeenCalledWith({ loaded: true }))
+  })
+
+  it("waits for settings hydration before applying the requested locale", async () => {
+    mockSettingsLoaded = false
+    const view = renderHarness()
+    expect(setLanguage).not.toHaveBeenCalled()
+
+    mockSettingsLoaded = true
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <PluginSurfaceReferenceHarness force />
+      </NextIntlClientProvider>
+    )
+
+    await waitFor(() => expect(setLanguage).toHaveBeenCalledWith("en"))
   })
 
   it("defaults to English when no locale is requested", async () => {

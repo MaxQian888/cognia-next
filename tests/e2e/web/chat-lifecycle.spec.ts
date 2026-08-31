@@ -4,9 +4,7 @@
  * slow/error scenarios remain hermetic under Playwright's fully-parallel mode.
  */
 
-import type { Page } from "@playwright/test"
-
-import { expect, test } from "@/tests/e2e/fixtures/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { createMockAnthropicServer, type MockAnthropicServer } from "../mocks/anthropic/server"
 import {
   ensureCogniaAccount,

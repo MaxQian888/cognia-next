@@ -1,6 +1,4 @@
-import type { Page, Route } from "@playwright/test"
-
-import { expect, test } from "@/tests/e2e/fixtures/test"
+import { expect, test, type Page, type Route } from "@/tests/e2e/fixtures/test"
 
 const ORG_ID = "org_e2e000000000000000000"
 const USER_ID = "usr_e2e000000000000000000"

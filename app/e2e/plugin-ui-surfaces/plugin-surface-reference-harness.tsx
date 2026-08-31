@@ -78,6 +78,7 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
   const [pluginReady, setPluginReady] = useState(false)
   const modalOpened = useRef(false)
   const plugin = usePluginStore((state) => state.plugins[PLUGIN_ID])
+  const settingsLoaded = useSettingsStore((state) => state.loaded)
   const pluginT = useTranslations()
 
   // Route match read through the store protocol rather than an effect: the
@@ -96,7 +97,7 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
     contextPanelRegistry.getRevision
   )
   useEffect(() => {
-    if (!active) return
+    if (!active || !settingsLoaded) return
     const requested =
       new URLSearchParams(window.location.search).get("pluginSurfaceLocale") === "zh-CN"
         ? "zh-CN"
@@ -104,9 +105,10 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
     void useSettingsStore
       .getState()
       .setLanguage(requested)
-      .then(() => useSettingsStore.setState({ loaded: true }))
-      .catch((error) => setBootError(String(error)))
-  }, [active])
+      .catch((error) => {
+        setBootError(String(error))
+      })
+  }, [active, settingsLoaded])
 
   useEffect(() => {
     if (!active || pluginReady || !plugin || plugin.status === "loading") {
@@ -220,9 +222,10 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
             />
           </SurfaceCase>
         ) : null}
-        {/* The production PluginModalRoot is mounted globally in app/layout;
-            this marker keeps the reference inventory ordered without creating
-            a second root that would render every declared modal twice. */}
+        {/* The lightweight E2E page mounts the production PluginModalRoot next
+            to this harness. This marker keeps the reference inventory ordered
+            without creating a second root that would render every declared
+            modal twice. */}
         <SurfaceCase id="modal" label={label("surfaces.modal", "Modal")}>
           {null}
         </SurfaceCase>
