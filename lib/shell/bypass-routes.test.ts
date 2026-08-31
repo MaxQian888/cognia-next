@@ -20,6 +20,10 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/selection-toolbar")).toBe(true)
     expect(isShellBypassRoute("/selection-toolbar.html")).toBe(true)
     expect(isShellBypassRoute("/tray-panel")).toBe(true)
+    // The skill recorder's always-on-top controller strip is the same kind of
+    // frameless window: rail, title bar and the finish-setup bar must not paint
+    // inside a 420x56 overlay.
+    expect(isShellBypassRoute("/recorder-controller")).toBe(true)
   })
 
   test("matches nested bypass route", () => {

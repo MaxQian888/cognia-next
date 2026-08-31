@@ -3,10 +3,10 @@
  *
  * These are deep-link / overlay screens: the mobile pairing flow, OAuth
  * callbacks, the share target, a canvas join link, and the small frameless
- * Tauri windows (pet overlay/popup, island, selection toolbar, tray panel).
- * They own the whole viewport and keep the document scroll, so anything the
- * shells normally paint around a route — rail, title bar, tab bar, persistent
- * notices — must not appear on them.
+ * Tauri windows (pet overlay/popup, island, selection toolbar, tray panel,
+ * skill-recorder controller strip). They own the whole viewport and keep the
+ * document scroll, so anything the shells normally paint around a route — rail,
+ * title bar, tab bar, persistent notices — must not appear on them.
  *
  * Lives in `lib/` rather than next to `DesktopAppShell` because the list has
  * two kinds of consumer now: the shells that skip their chrome, and chrome
@@ -23,6 +23,7 @@ const BYPASS_PREFIXES = [
   "/island",
   "/selection-toolbar",
   "/tray-panel",
+  "/recorder-controller",
 ]
 
 export function isShellBypassRoute(pathname: string | null | undefined): boolean {

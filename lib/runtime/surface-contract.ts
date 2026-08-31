@@ -381,6 +381,13 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   // no runtime here to classify, and its reachability tracks the `?api=` host
   // rather than this app's connection state.
   "/portal",
+  // The skill recorder's always-on-top controller strip, opened only by
+  // `src-tauri/src/recorder_window/mod.rs` at `WebviewUrl::App`. Nothing
+  // navigates here. Same category as `/selection-toolbar` and `/tray-panel`,
+  // and a contract could not bind anyway: `resolveRuntimeTarget` returns null
+  // on Tauri, so the boundary short-circuits on `!snapshot.target` in the only
+  // shell that ever opens this window.
+  "/recorder-controller",
   "/selection-toolbar",
   "/share-target",
   // A public, read-only document served by the lightweight route shell — it
