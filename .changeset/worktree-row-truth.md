@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+A worktree row now says which branch it is on, how much disk it is using, when it was last used, and what asked for it. The branch only ever reached the screen as a fallback in the Base column, so a worktree that had a branch was exactly the case that did not show one, and its HEAD was never rendered at all. Size and last-used have been on the host's registry record since it shipped and were dropped on the way to the UI, which left the one surface that lists worktrees unable to answer "what is taking up the disk" or "is anything still using this". The owner is now a link rather than a label, so a directory a squad or a scheduled task created takes you to it. The list is also grouped: locked, conflicted and prunable rows sort above the healthy ones instead of sitting in host order, where a worktree that needed a decision read the same as one that did not until the fourth column. The owner label for a squad-owned directory said "Agent Team", a name the app retired.

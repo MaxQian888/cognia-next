@@ -46965,6 +46965,11 @@
       "actions": "操作",
       "adopt": "接管已导入环境",
       "archive": "归档环境",
+      "bands": {
+        "active": "使用中",
+        "attention": "需要处理",
+        "dormant": "闲置"
+      },
       "base": "基线",
       "baseNone": "—",
       "bases": {
@@ -47003,13 +47008,15 @@
       "loading": "正在加载执行环境",
       "locked": "已锁定",
       "makePermanent": "设为永久环境",
+      "neverUsed": "从未使用",
       "open": "打开环境",
+      "openOwner": "打开{owner}",
       "otherWorkspaces": "{count, plural, other {另有 # 个环境不属于本工作区}}",
       "ownerTypes": {
         "imported": "导入发现",
         "scheduled": "定时任务",
         "session": "会话",
-        "team": "Agent Team",
+        "team": "小队",
         "user": "用户"
       },
       "ownership": {

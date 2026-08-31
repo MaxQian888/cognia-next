@@ -4716,6 +4716,11 @@ fn environment_summary_from_git(
         prune_reason: row.prune_reason,
         base: record.map(|record| record.base.clone()),
         pinned,
+        // Both come from the Registry row, so a worktree Git knows about but
+        // the Registry does not stays `None` rather than reporting a zero that
+        // would read as "empty".
+        size_bytes: record.and_then(|record| record.size_bytes),
+        last_used_at: record.map(|record| record.last_used_at),
         allowed_actions,
     }
 }
@@ -4742,6 +4747,8 @@ fn environment_summary_from_record(record: &WorkspaceRecord) -> crate::Workspace
         prune_reason: None,
         base: Some(record.base.clone()),
         pinned: record.pinned,
+        size_bytes: record.size_bytes,
+        last_used_at: Some(record.last_used_at),
         allowed_actions: environment_actions(
             ownership,
             Some(record.state),

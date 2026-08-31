@@ -646,6 +646,13 @@ pub enum WorkspaceEnvironmentAction {
     Archive,
     Restore,
     Delete,
+    /// Reserved. `environment_actions` never emits `Review`, `Handoff` or
+    /// `Publish`, and `environment_actions_only_advertise_executable_lifecycle_and_git_operations`
+    /// pins that it must not: an inventory row is a directory, and reviewing or
+    /// handing off a *turn's* changes is the bundle handoff API's job, not this
+    /// one's. They stay in the vocabulary because the transport contract is
+    /// shared with that API. Adding one here without a producer would put a
+    /// button in the UI that nothing answers.
     Review,
     Handoff,
     CreateBranchHere,
@@ -679,6 +686,19 @@ pub struct WorkspaceEnvironmentSummary {
     pub prune_reason: Option<String>,
     pub base: Option<WorkspaceBaseSpec>,
     pub pinned: bool,
+    /// On-disk size of the environment, when the Registry knows it.
+    ///
+    /// Present on `WorkspaceRecord` since the registry shipped, and dropped by
+    /// this projection until now, which left the one surface that lists
+    /// worktrees unable to answer "what is actually taking up the disk". `None`
+    /// for a directory found on disk that no Registry row claims, and for a
+    /// managed row whose size has not been measured yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// When the environment was last acquired, same provenance and same reason
+    /// as `size_bytes`. `None` for an unclaimed directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
     pub allowed_actions: Vec<WorkspaceEnvironmentAction>,
 }
 

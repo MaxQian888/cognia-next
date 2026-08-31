@@ -65,7 +65,7 @@
       "imported": "Imported discovery",
       "scheduled": "Scheduled task",
       "session": "Session",
-      "team": "Agent Team",
+      "team": "Squad",
       "user": "User"
     },
     "ownership": {
@@ -99,7 +99,14 @@
     },
     "title": "Execution environments",
     "unpin": "Unpin environment",
-    "create": "New worktree"
+    "create": "New worktree",
+    "bands": {
+      "active": "Active",
+      "attention": "Needs attention",
+      "dormant": "Dormant"
+    },
+    "neverUsed": "Never used",
+    "openOwner": "Open {owner}"
   },
   "manage": {
     "activeBadge": "Active",

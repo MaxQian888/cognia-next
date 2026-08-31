@@ -19,6 +19,7 @@ import { ADOPTION_ORIGINS } from "./adopt-candidates"
 import { WORKSPACE_CAPABILITY_KINDS } from "./capability-overlay"
 import { PINNABLE_PANELS, FOLLOWING_PANELS } from "./panel-follow"
 import { PROVISIONING_CANDIDATE_KINDS, PROVISIONING_RISK_KEYS } from "./provisioning-inference"
+import type { WorkspaceOwnerType } from "@/lib/task-workspace/types"
 
 const LOCALES = ["en", "zh-CN"] as const
 
@@ -44,12 +45,44 @@ function provisioningMessages(locale: string): Record<string, Record<string, str
 /** The three capability states the toggle group renders. */
 const CAPABILITY_STATES = ["inherit", "on", "off"] as const
 
+/**
+ * The bands the environment inventory sorts rows into, and the owner kinds it
+ * names beside each one. Both are built as `t(`bands.${x}`)` /
+ * `t(`ownerTypes.${x}`)` in `components/workspace/workspace-environment-list`,
+ * so `lint:i18n` cannot see either.
+ *
+ * Re-listed rather than imported for `ownerTypes`: the union lives in
+ * `lib/task-workspace/types.ts` as `WorkspaceOwnerType`, a type with no runtime
+ * value, so there is nothing to import. The `satisfies` below is what keeps the
+ * list honest — dropping a member of the union makes it a type error here.
+ */
+const ENVIRONMENT_BANDS = ["attention", "active", "dormant"] as const
+const ENVIRONMENT_OWNER_TYPES = [
+  "user",
+  "imported",
+  "session",
+  "team",
+  "scheduled",
+] as const satisfies readonly WorkspaceOwnerType[]
+
 describe.each(LOCALES)("workspace dynamic keys — %s", (locale) => {
   const messages = workspaceMessages(locale)
 
   it("has a label for every capability state", () => {
     const states = (messages.capabilities?.state ?? {}) as Record<string, string>
     const missing = CAPABILITY_STATES.filter((state) => !states[state])
+    expect(missing).toEqual([])
+  })
+
+  it("has a label for every environment band", () => {
+    const bands = (messages.environments?.bands ?? {}) as Record<string, string>
+    const missing = ENVIRONMENT_BANDS.filter((band) => !bands[band])
+    expect(missing).toEqual([])
+  })
+
+  it("has a label for every environment owner kind", () => {
+    const owners = (messages.environments?.ownerTypes ?? {}) as Record<string, string>
+    const missing = ENVIRONMENT_OWNER_TYPES.filter((owner) => !owners[owner])
     expect(missing).toEqual([])
   })
 

@@ -65,7 +65,7 @@
       "imported": "导入发现",
       "scheduled": "定时任务",
       "session": "会话",
-      "team": "Agent Team",
+      "team": "小队",
       "user": "用户"
     },
     "ownership": {
@@ -99,7 +99,14 @@
     },
     "title": "执行环境",
     "unpin": "取消固定环境",
-    "create": "新建工作树"
+    "create": "新建工作树",
+    "bands": {
+      "active": "使用中",
+      "attention": "需要处理",
+      "dormant": "闲置"
+    },
+    "neverUsed": "从未使用",
+    "openOwner": "打开{owner}"
   },
   "manage": {
     "activeBadge": "活动",

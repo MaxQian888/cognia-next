@@ -251,6 +251,12 @@ export interface WorkspaceMaintenanceResult {
 
 export type WorkspaceEnvironmentOwnership = "main" | "manual" | "managed" | "imported" | "permanent"
 
+/**
+ * `review`, `handoff` and `publish` are reserved: the host's
+ * `environment_actions` never emits them and a Rust test pins that it must not.
+ * An inventory row is a directory, and reviewing or handing off a *turn's*
+ * changes belongs to the bundle handoff API. Do not render a control for them.
+ */
 export type WorkspaceEnvironmentAction =
   | "open"
   | "remove"
@@ -290,6 +296,15 @@ export interface WorkspaceEnvironmentSummary {
   pruneReason: string | null
   base: WorkspaceBaseSpec | null
   pinned: boolean
+  /**
+   * On-disk size, when the host's Registry knows it. Absent for a directory
+   * found on disk that no Registry row claims, and for a managed row whose
+   * size has not been measured yet, so a missing value means "not measured",
+   * never "empty".
+   */
+  sizeBytes?: number
+  /** When the environment was last acquired. Same provenance as `sizeBytes`. */
+  lastUsedAt?: number
   allowedActions: WorkspaceEnvironmentAction[]
 }
 

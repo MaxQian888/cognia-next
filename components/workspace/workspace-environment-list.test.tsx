@@ -3,6 +3,9 @@
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: { error?: string }) =>
     values?.error ? `${key}:${values.error}` : key,
+  // The row reports when an environment was last used. A relative time needs
+  // no locale data to be asserted on, so the mock returns a stable marker.
+  useFormatter: () => ({ relativeTime: () => "relative-time" }),
 }))
 
 const listMock = jest.fn()
@@ -38,7 +41,7 @@ jest.mock("@/lib/workspace/open-folder", () => ({
   openPathAsWorkspace: (...args: unknown[]) => openMock(...args),
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { WorkspaceEnvironmentSummary } from "@/lib/task-workspace/types"
@@ -366,5 +369,121 @@ describe("WorkspaceEnvironmentList — workspace scoping", () => {
     )
     expect(screen.getByTestId("workspace-environment-unclaimed")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-environments-scope-toggle")).not.toBeInTheDocument()
+  })
+
+  /**
+   * `branch` used to reach the screen only as a fallback in the Base column,
+   * so the rows that HAD a branch were exactly the ones that did not show one.
+   * `head` was projected by the host and rendered nowhere at all.
+   */
+  it("names the branch and the short HEAD the worktree is on", async () => {
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-git:manual")).toBeInTheDocument()
+    )
+    const row = screen.getByTestId("workspace-environment-git:manual")
+    expect(within(row).getByText("feature/a")).toBeInTheDocument()
+    expect(within(row).getByText("2222222")).toBeInTheDocument()
+  })
+
+  it("shortens a full-length HEAD to seven characters", async () => {
+    listMock.mockResolvedValue([{ ...manual, head: "0123456789abcdef0123456789abcdef01234567" }])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-git:manual")).toBeInTheDocument()
+    )
+    expect(screen.getByText("0123456")).toBeInTheDocument()
+  })
+
+  /**
+   * Both facts live on the host's Registry row and were dropped by the
+   * projection, which left this list unable to say what is taking up the disk
+   * or whether anything still uses a directory.
+   */
+  it("reports the footprint the host now sends", async () => {
+    listMock.mockResolvedValue([{ ...managed, sizeBytes: 1024 * 1024 * 3, lastUsedAt: 1_700_000 }])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-ws-1")).toBeInTheDocument()
+    )
+    const row = screen.getByTestId("workspace-environment-ws-1")
+    expect(within(row).getByText("3 MB")).toBeInTheDocument()
+    expect(within(row).getByText("relative-time")).toBeInTheDocument()
+  })
+
+  /**
+   * A missing size means "the Registry has not measured this", never "empty",
+   * so the row must not render a confident 0 B.
+   */
+  it("says a directory was never used rather than inventing a footprint", async () => {
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-git:manual")).toBeInTheDocument()
+    )
+    const row = screen.getByTestId("workspace-environment-git:manual")
+    expect(within(row).getByText("neverUsed")).toBeInTheDocument()
+    expect(within(row).queryByText("0 B")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The list was one flat run in host order, so a locked or prunable row read
+   * the same as a healthy one until the fourth column.
+   */
+  it("puts the rows that need a decision first", async () => {
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-band-attention")).toBeInTheDocument()
+    )
+    const bands = screen.getAllByTestId(/^workspace-environment-band-/)
+    expect(bands[0]).toHaveAttribute("data-testid", "workspace-environment-band-attention")
+    // `managed` is locked and `prunableManual` is prunable; `manual` is neither.
+    const attention = within(bands[0] as HTMLElement).getByText(/^2$/)
+    expect(attention).toBeInTheDocument()
+  })
+
+  it("drops a band entirely rather than showing an empty heading", async () => {
+    listMock.mockResolvedValue([manual])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-band-active")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("workspace-environment-band-attention")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environment-band-dormant")).not.toBeInTheDocument()
+  })
+
+  /**
+   * A worktree exists because something asked for it. Naming that something
+   * and then leaving the reader to find it by hand is the gap this closes.
+   */
+  it("links a squad-owned environment to the squad that owns it", async () => {
+    listMock.mockResolvedValue([{ ...managed, ownerType: "team", ownerRef: "squad-7" }])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-ws-1")).toBeInTheDocument()
+    )
+    const link = screen.getByRole("link", { name: /squad-7/ })
+    expect(link).toHaveAttribute("href", "/squads?id=squad-7")
+  })
+
+  /**
+   * A `user` row has nowhere to go, so it stays plain text instead of a
+   * control that does nothing.
+   */
+  it("leaves an owner with no destination as text", async () => {
+    listMock.mockResolvedValue([{ ...managed, ownerType: "user", ownerRef: "someone" }])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-ws-1")).toBeInTheDocument()
+    )
+    expect(screen.queryByRole("link", { name: /someone/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/someone/)).toBeInTheDocument()
   })
 })

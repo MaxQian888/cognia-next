@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   ArchiveIcon,
   GitBranchPlusIcon,
@@ -14,7 +16,7 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
 } from "lucide-react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 
 import {
   AlertDialog,
@@ -58,6 +60,8 @@ import type {
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
 import { Surface } from "@/components/surface/surface"
+import { formatBytes } from "@/lib/agent/utils"
+import { useSessionStore } from "@/stores/chat/session-store"
 import { cn } from "@/lib/utils"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
@@ -107,6 +111,37 @@ export interface WorkspaceEnvironmentListProps {
  */
 const COMPACT_WIDTH = 640
 
+/**
+ * Which band a row belongs to.
+ *
+ * The list used to be one flat run ordered by whatever the host returned, so a
+ * conflicted worktree and a healthy one read the same until you got to the
+ * fourth column. Every comparable tool sorts by "does a human need to do
+ * something here" first (GitKraken's agent cards, Vibe Kanban's
+ * Needs-Attention / Running / Idle accordion), and it is the one ordering a
+ * directory list can derive without extra round trips.
+ */
+type EnvironmentBand = "attention" | "active" | "dormant"
+
+const BAND_ORDER: readonly EnvironmentBand[] = ["attention", "active", "dormant"]
+
+export function bandOf(row: WorkspaceEnvironmentSummary): EnvironmentBand {
+  // Locked, conflicted or prunable: something is wrong, or something can be
+  // reclaimed. Either way the row is asking for a decision.
+  if (row.locked || row.prunable || row.state === "conflict") return "attention"
+  // Archived and restorable rows still exist on disk but nothing runs in them.
+  if (row.state === "archived" || row.state === "restorable") return "dormant"
+  if (row.state === "removing" || row.state === "removed") return "dormant"
+  return "active"
+}
+
+/** Short HEAD, the length every Git UI settled on. */
+function shortHead(head: string | null): string | null {
+  if (!head) return null
+  const trimmed = head.trim()
+  return trimmed.length > 7 ? trimmed.slice(0, 7) : trimmed
+}
+
 function hasAction(row: WorkspaceEnvironmentSummary, action: WorkspaceEnvironmentAction) {
   return row.allowedActions.includes(action)
 }
@@ -131,6 +166,12 @@ export function WorkspaceEnvironmentList({
   canMutate = () => true,
 }: WorkspaceEnvironmentListProps) {
   const t = useTranslations("workspace.environments")
+  // next-intl's formatter IS the shared relative-time implementation here.
+  // `lib/scheduler/format-utils#formatRelativeTime` looks like the reusable one
+  // but is forward-looking (it answers "Overdue" for anything in the past),
+  // because it exists for next-run times.
+  const format = useFormatter()
+  const router = useRouter()
   const [rows, setRows] = useState<WorkspaceEnvironmentSummary[] | null>(null)
   const [showAllProjects, setShowAllProjects] = useState(false)
   // Scoping happens here rather than in the query: the host answers with every
@@ -144,6 +185,22 @@ export function WorkspaceEnvironmentList({
   // Counted independently of the toggle, so the way back is always offered.
   const otherProjectCount =
     rows === null || !projectId ? 0 : rows.filter((row) => row.projectId !== projectId).length
+  // Bands are derived, not stored, so a row that stops being prunable moves out
+  // of the attention band on the next load without anybody writing a flag.
+  const bands = useMemo(() => {
+    if (scoped === null) return null
+    const byBand = new Map<EnvironmentBand, WorkspaceEnvironmentSummary[]>()
+    for (const row of scoped) {
+      const band = bandOf(row)
+      const bucket = byBand.get(band)
+      if (bucket) bucket.push(row)
+      else byBand.set(band, [row])
+    }
+    return BAND_ORDER.map((band) => ({ band, rows: byBand.get(band) ?? [] })).filter(
+      (group) => group.rows.length > 0
+    )
+  }, [scoped])
+
   const { pendingKey: pendingId, error, setError, clearError, run } = useWorkspaceActionController()
   // Per command, not per host. A device can hold `workspace.write` and still
   // lack the `host.admin` an interactive command needs, so `remove`, `prune`
@@ -321,40 +378,145 @@ export function WorkspaceEnvironmentList({
   // cells twice is how a control ends up on the wide layout and not the narrow
   // one, so the parts are built here and both containers place them.
 
-  const renderIdentity = (row: WorkspaceEnvironmentSummary) => (
-    <>
-      <div className="truncate font-mono text-xs" title={row.path}>
-        {row.path}
-      </div>
-      <div className="flex flex-wrap gap-1 pt-1">
-        {row.locked ? (
-          <Badge variant="outline" title={row.lockReason ?? undefined}>
-            {t("locked")}
-          </Badge>
+  /**
+   * The owner as a place you can go, not just a string.
+   *
+   * A worktree exists because something asked for it, and until now the row
+   * named that something and then left the reader to find it by hand. Only the
+   * owners this app can actually navigate to become links; a `user` or
+   * `imported` row has no destination and stays plain text rather than a
+   * control that goes nowhere.
+   */
+  const renderOwner = (row: WorkspaceEnvironmentSummary) => {
+    if (!row.ownerType) return null
+    const label = t(`ownerTypes.${row.ownerType}`)
+    const ref = row.ownerRef
+    if (!ref) return <span>{label}</span>
+
+    const linkClass = "underline decoration-dotted underline-offset-2 hover:text-foreground"
+    if (row.ownerType === "team") {
+      return (
+        <Link
+          href={`/squads?id=${encodeURIComponent(ref)}`}
+          className={linkClass}
+          title={t("openOwner", { owner: label })}
+        >
+          {label} · {ref}
+        </Link>
+      )
+    }
+    if (row.ownerType === "scheduled") {
+      return (
+        <Link href="/scheduler" className={linkClass} title={t("openOwner", { owner: label })}>
+          {label} · {ref}
+        </Link>
+      )
+    }
+    if (row.ownerType === "session") {
+      return (
+        <button
+          type="button"
+          className={cn(linkClass, "text-left")}
+          title={t("openOwner", { owner: label })}
+          onClick={() => {
+            // Follows the session only. The guild/workspace follow is
+            // `focusSession`'s job and it needs a `ChatSession` record this
+            // list does not hold; the inventory is already workspace-scoped,
+            // so the common case lands correctly either way.
+            useSessionStore.getState().setActiveSession(ref)
+            router.push("/")
+          }}
+        >
+          {label} · {ref}
+        </button>
+      )
+    }
+    return (
+      <span>
+        {label} · {ref}
+      </span>
+    )
+  }
+
+  const renderIdentity = (row: WorkspaceEnvironmentSummary) => {
+    const head = shortHead(row.head)
+    const owner = renderOwner(row)
+    return (
+      <>
+        <div className="truncate font-mono text-xs" title={row.path}>
+          {row.path}
+        </div>
+        {/*
+          Branch and HEAD used to be invisible here: `branch` only appeared as a
+          fallback in the Base column when there was no base, so a worktree with
+          a branch was exactly the case that did not show one, and `head` was
+          projected by the host and never rendered at all.
+        */}
+        {row.branch || head ? (
+          <div className="flex min-w-0 items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
+            {row.branch ? (
+              <>
+                <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+                <span className="truncate font-mono" title={row.branch}>
+                  {row.branch}
+                </span>
+              </>
+            ) : null}
+            {row.branch && head ? (
+              <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/50" />
+            ) : null}
+            {head ? (
+              <span className="shrink-0 font-mono" title={row.head ?? undefined}>
+                {head}
+              </span>
+            ) : null}
+          </div>
         ) : null}
-        {row.prunable ? (
-          <Badge variant="outline" title={row.pruneReason ?? undefined}>
-            {t("prunable")}
-          </Badge>
-        ) : null}
-      </div>
-    </>
-  )
+        {/*
+          Footprint. `sizeBytes` and `lastUsedAt` have been on the host's
+          Registry row since it shipped and were dropped by the projection, so
+          the one surface that lists worktrees could not answer "what is taking
+          up the disk" or "is anything still using this".
+        */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pt-0.5 text-[11px] text-muted-foreground">
+          <span title={row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleString() : undefined}>
+            {row.lastUsedAt ? format.relativeTime(new Date(row.lastUsedAt)) : t("neverUsed")}
+          </span>
+          {row.sizeBytes !== undefined ? (
+            <>
+              <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/50" />
+              <span className="tabular-nums">{formatBytes(row.sizeBytes)}</span>
+            </>
+          ) : null}
+          {owner ? (
+            <>
+              <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/50" />
+              <span className="min-w-0 truncate">{owner}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-1 pt-1">
+          {row.locked ? (
+            <Badge variant="outline" title={row.lockReason ?? undefined}>
+              {t("locked")}
+            </Badge>
+          ) : null}
+          {row.prunable ? (
+            <Badge variant="outline" title={row.pruneReason ?? undefined}>
+              {t("prunable")}
+            </Badge>
+          ) : null}
+        </div>
+      </>
+    )
+  }
 
   const renderKind = (row: WorkspaceEnvironmentSummary) => (
-    <>
-      <div className="flex flex-col items-start gap-1">
-        <Badge variant={row.ownership === "managed" ? "secondary" : "outline"}>
-          {t(`ownership.${row.ownership}`)}
-        </Badge>
-        {row.ownerType ? (
-          <span className="text-xs text-muted-foreground">
-            {t(`ownerTypes.${row.ownerType}`)}
-            {row.ownerRef ? ` · ${row.ownerRef}` : null}
-          </span>
-        ) : null}
-      </div>
-    </>
+    // The owner moved into the identity block, where it sits beside the other
+    // provenance facts instead of hanging under an unrelated badge.
+    <Badge variant={row.ownership === "managed" ? "secondary" : "outline"}>
+      {t(`ownership.${row.ownership}`)}
+    </Badge>
   )
 
   const renderActions = (row: WorkspaceEnvironmentSummary) => (
@@ -599,56 +761,93 @@ export function WorkspaceEnvironmentList({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {scoped.map((row) => (
-                  <TableRow
-                    key={row.environmentId}
-                    data-testid={`workspace-environment-${row.environmentId}`}
-                  >
-                    <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
-                    <TableCell>{renderKind(row)}</TableCell>
-                    {presentation === "page" ? (
-                      <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
-                    ) : null}
-                    {presentation === "page" ? (
-                      <TableCell className="font-mono text-xs">
-                        {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
+                {(bands ?? []).map((group) => (
+                  <Fragment key={group.band}>
+                    {/*
+                      A spanning header row rather than one table per band, so
+                      every band keeps the same column widths. Three narrow
+                      tables stacked would make the same path column three
+                      different widths down the page.
+                    */}
+                    <TableRow
+                      className="hover:bg-transparent"
+                      data-testid={`workspace-environment-band-${group.band}`}
+                    >
+                      <TableCell
+                        colSpan={presentation === "page" ? 5 : 3}
+                        className="bg-muted/40 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                      >
+                        {t(`bands.${group.band}`)}
+                        <span className="ml-1.5 font-normal tabular-nums">{group.rows.length}</span>
                       </TableCell>
-                    ) : null}
-                    <TableCell>{renderActions(row)}</TableCell>
-                  </TableRow>
+                    </TableRow>
+                    {group.rows.map((row) => (
+                      <TableRow
+                        key={row.environmentId}
+                        data-testid={`workspace-environment-${row.environmentId}`}
+                      >
+                        <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
+                        <TableCell>{renderKind(row)}</TableCell>
+                        {presentation === "page" ? (
+                          <TableCell>
+                            {row.state ? t(`states.${row.state}`) : t("stateNone")}
+                          </TableCell>
+                        ) : null}
+                        {presentation === "page" ? (
+                          <TableCell className="font-mono text-xs">
+                            {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
+                          </TableCell>
+                        ) : null}
+                        <TableCell>{renderActions(row)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
           )}
 
-          {/* Narrow container: one card per row, same parts. */}
+          {/* Narrow container: one card per row, same parts, same bands. */}
           {compact ? (
-            <ul className="flex flex-col gap-2">
-              {scoped.map((row) => (
-                <Surface asChild key={row.environmentId} radius="panel">
-                  <li
-                    data-testid={`workspace-environment-card-${row.environmentId}`}
-                    className="flex flex-col gap-2 border p-3"
+            <div className="flex flex-col gap-3">
+              {(bands ?? []).map((group) => (
+                <section key={group.band} className="flex flex-col gap-2">
+                  <h3
+                    className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    data-testid={`workspace-environment-band-${group.band}`}
                   >
-                    <div className="min-w-0">{renderIdentity(row)}</div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      {renderKind(row)}
-                      {presentation === "page" ? (
-                        <span className="text-xs text-muted-foreground">
-                          {row.state ? t(`states.${row.state}`) : t("stateNone")}
-                        </span>
-                      ) : null}
-                      {presentation === "page" ? (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
-                        </span>
-                      ) : null}
-                    </div>
-                    {renderActions(row)}
-                  </li>
-                </Surface>
+                    {t(`bands.${group.band}`)}
+                    <span className="ml-1.5 font-normal tabular-nums">{group.rows.length}</span>
+                  </h3>
+                  <ul className="flex flex-col gap-2">
+                    {group.rows.map((row) => (
+                      <Surface asChild key={row.environmentId} radius="panel">
+                        <li
+                          data-testid={`workspace-environment-card-${row.environmentId}`}
+                          className="flex flex-col gap-2 border p-3"
+                        >
+                          <div className="min-w-0">{renderIdentity(row)}</div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {renderKind(row)}
+                            {presentation === "page" ? (
+                              <span className="text-xs text-muted-foreground">
+                                {row.state ? t(`states.${row.state}`) : t("stateNone")}
+                              </span>
+                            ) : null}
+                            {presentation === "page" ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
+                              </span>
+                            ) : null}
+                          </div>
+                          {renderActions(row)}
+                        </li>
+                      </Surface>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           ) : null}
         </>
       )}
