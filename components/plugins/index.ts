@@ -25,7 +25,6 @@ export { AuditLogEntry } from "./audit-log-entry"
 export { PluginPermissionReview, PermissionRow } from "./plugin-permission-review"
 export { PluginExtensionSlot } from "./plugin-extension-slot"
 export { PluginBackupPanel, __resetPluginBackupClientForTests } from "./plugin-backup-panel"
-export { PluginDevtoolsPanel } from "./plugin-devtools-panel"
 export { PluginDiscovery } from "./plugin-discovery"
 export { PluginNavSidebar } from "./plugin-nav-sidebar"
 
