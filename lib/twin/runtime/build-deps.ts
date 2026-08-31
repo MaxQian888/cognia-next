@@ -1,10 +1,14 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@cognia/vector/store"
-import { embeddingProviderRequiresApiKey } from "@cognia/provider-embedding/embedding-catalog"
+import {
+  embeddingProviderRequiresApiKey,
+  embeddingProviderRequiresBaseURL,
+} from "@cognia/provider-embedding/embedding-catalog"
 import { createLlmRerankScorer, lexicalRerankScorer } from "./reranker"
 import { createLlmClient, createTwinLanguageModel } from "@/lib/twin/distill/llm"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { TwinRuntimeSettings } from "@/types/twin"
+import { getTwinVectorConfigId } from "./vector-credentials"
 
 export type TwinDepsForBuild = TwinRuntimeDepsForBuild
 
@@ -17,8 +21,23 @@ export type TwinRuntimeAdapterBuildResult =
 
 type StoreConfig = Parameters<typeof createVectorStore>[0]
 
-export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): StoreConfig | null {
-  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !settings.embedding.apiKey) {
+function hasRequiredEmbeddingConfiguration(settings: TwinRuntimeSettings): boolean {
+  const embedding = settings.embedding
+  if (!embedding.model.trim()) return false
+  if (embeddingProviderRequiresApiKey(embedding.provider) && !embedding.apiKey.trim()) return false
+  if (embeddingProviderRequiresBaseURL(embedding.provider) && !embedding.baseURL?.trim())
+    return false
+  return true
+}
+
+export function deriveTwinVectorStoreConfig(
+  settings: TwinRuntimeSettings,
+  options: { requireEmbeddingCredentials?: boolean } = {}
+): StoreConfig | null {
+  if (
+    (options.requireEmbeddingCredentials ?? true) &&
+    !hasRequiredEmbeddingConfiguration(settings)
+  ) {
     return null
   }
   const storage = settings.storage
@@ -35,6 +54,7 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
       return storage.qdrant?.url
         ? {
             provider: "qdrant",
+            configId: getTwinVectorConfigId("qdrant"),
             embeddingConfig: embedding,
             embeddingApiKey,
             qdrantUrl: storage.qdrant.url,
@@ -45,6 +65,7 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
       return storage.pinecone?.apiKey && storage.pinecone.indexName
         ? {
             provider: "pinecone",
+            configId: getTwinVectorConfigId("pinecone"),
             embeddingConfig: embedding,
             embeddingApiKey,
             pineconeApiKey: storage.pinecone.apiKey,
@@ -56,6 +77,7 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
       return storage.weaviate?.url
         ? {
             provider: "weaviate",
+            configId: getTwinVectorConfigId("weaviate"),
             embeddingConfig: embedding,
             embeddingApiKey,
             weaviateUrl: storage.weaviate.url,
@@ -66,6 +88,7 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
       return storage.milvus?.address
         ? {
             provider: "milvus",
+            configId: getTwinVectorConfigId("milvus"),
             embeddingConfig: embedding,
             embeddingApiKey,
             milvusAddress: storage.milvus.address,
@@ -74,9 +97,10 @@ export function deriveTwinVectorStoreConfig(settings: TwinRuntimeSettings): Stor
           }
         : null
     case "chroma":
-      return storage.chroma?.mode === "embedded" || storage.chroma?.serverUrl
+      return storage.chroma?.mode === "server" && storage.chroma.serverUrl
         ? {
             provider: "chroma",
+            configId: getTwinVectorConfigId("chroma"),
             embeddingConfig: embedding,
             embeddingApiKey,
             chromaMode: storage.chroma?.mode,
@@ -101,7 +125,7 @@ export async function buildTwinRuntimeAdapters(
   if ((options.requireEnabled ?? true) && !settings.workerEnabled) {
     return { ready: false, reason: "disabled" }
   }
-  if (embeddingProviderRequiresApiKey(settings.embedding.provider) && !settings.embedding.apiKey) {
+  if (!hasRequiredEmbeddingConfiguration(settings)) {
     return { ready: false, reason: "missing-embedding-credentials" }
   }
   const storeConfig = deriveTwinVectorStoreConfig(settings)

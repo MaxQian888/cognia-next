@@ -294,6 +294,15 @@ describe("PasteSourceInput", () => {
     })
     expect(props.onStaged).toHaveBeenCalledWith([STAGED])
   })
+
+  it("does not offer binary or repository-only formats for pasted text", () => {
+    render(<PasteSourceInput {...makeProps()} />)
+    fireEvent.click(screen.getByLabelText(/format/i))
+
+    expect(screen.queryByRole("option", { name: "pdf" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "git-repo" })).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "code" })).toBeInTheDocument()
+  })
 })
 
 describe("GitSourceInput", () => {

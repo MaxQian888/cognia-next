@@ -1,6 +1,10 @@
 import type { TwinRuntimeSettings } from "@/types/twin"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
-import { buildTwinRuntimeAdapters, tryBuildTwinDeps } from "./build-deps"
+import {
+  buildTwinRuntimeAdapters,
+  deriveTwinVectorStoreConfig,
+  tryBuildTwinDeps,
+} from "./build-deps"
 
 jest.mock("@/lib/db/twin-runtime-settings", () => ({
   getTwinRuntimeSettings: jest.fn(),
@@ -52,7 +56,11 @@ describe("tryBuildTwinDeps", () => {
     expect(deps).toBeDefined()
     expect(deps?.vectorBackend).toBe("qdrant")
     expect(createVectorStore).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "qdrant", qdrantUrl: "http://q" })
+      expect.objectContaining({
+        provider: "qdrant",
+        configId: "twin-runtime-qdrant",
+        qdrantUrl: "http://q",
+      })
     )
   })
 
@@ -208,13 +216,6 @@ describe("tryBuildTwinDeps", () => {
     expect((await tryBuildTwinDeps())?.vectorBackend).toBe("milvus")
   })
 
-  it("builds chroma deps in embedded mode", async () => {
-    getTwinRuntimeSettings.mockResolvedValue(
-      settings({ storage: { vectorBackend: "chroma", chroma: { mode: "embedded" } } })
-    )
-    expect((await tryBuildTwinDeps())?.vectorBackend).toBe("chroma")
-  })
-
   it("builds chroma deps in server mode (serverUrl path)", async () => {
     getTwinRuntimeSettings.mockResolvedValue(
       settings({
@@ -238,6 +239,70 @@ describe("tryBuildTwinDeps", () => {
   it("builds native deps without further config", async () => {
     getTwinRuntimeSettings.mockResolvedValue(settings({ storage: { vectorBackend: "native" } }))
     expect((await tryBuildTwinDeps())?.vectorBackend).toBe("native")
+  })
+
+  it.each([
+    [
+      "pinecone",
+      { vectorBackend: "pinecone", pinecone: { apiKey: "p", indexName: "idx" } },
+      "twin-runtime-pinecone",
+    ],
+    [
+      "weaviate",
+      { vectorBackend: "weaviate", weaviate: { url: "http://w" } },
+      "twin-runtime-weaviate",
+    ],
+    [
+      "milvus",
+      { vectorBackend: "milvus", milvus: { address: "localhost:19530" } },
+      "twin-runtime-milvus",
+    ],
+    [
+      "chroma",
+      { vectorBackend: "chroma", chroma: { mode: "server", serverUrl: "http://c" } },
+      "twin-runtime-chroma",
+    ],
+  ] as const)("derives the Rust registry config id for %s", (_provider, storage, configId) => {
+    expect(deriveTwinVectorStoreConfig(settings({ storage }))).toMatchObject({ configId })
+  })
+
+  it("rejects the removed Chroma embedded mode instead of building a dead adapter", () => {
+    expect(
+      deriveTwinVectorStoreConfig(
+        settings({ storage: { vectorBackend: "chroma", chroma: { mode: "embedded" } } })
+      )
+    ).toBeNull()
+  })
+
+  it("requires the endpoint configured by local embedding providers", () => {
+    const localEmbedding = settings({
+      embedding: {
+        ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding,
+        provider: "ollama",
+        apiKey: "",
+        baseURL: "",
+      },
+      storage: { vectorBackend: "native" },
+    })
+
+    expect(deriveTwinVectorStoreConfig(localEmbedding)).toBeNull()
+    expect(
+      deriveTwinVectorStoreConfig(localEmbedding, { requireEmbeddingCredentials: false })
+    ).toMatchObject({ provider: "native" })
+  })
+
+  it("requires a non-empty embedding model for an enabled runtime", () => {
+    expect(
+      deriveTwinVectorStoreConfig(
+        settings({
+          embedding: {
+            ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding,
+            model: "",
+          },
+          storage: { vectorBackend: "native" },
+        })
+      )
+    ).toBeNull()
   })
 
   it("returns undefined when qdrant url is missing", async () => {
@@ -274,6 +339,19 @@ describe("buildTwinRuntimeAdapters", () => {
       buildTwinRuntimeAdapters(
         settings({
           embedding: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding, apiKey: "" },
+        })
+      )
+    ).resolves.toMatchObject({ ready: false, reason: "missing-embedding-credentials" })
+
+    await expect(
+      buildTwinRuntimeAdapters(
+        settings({
+          embedding: {
+            ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding,
+            provider: "ollama",
+            apiKey: "",
+            baseURL: "",
+          },
         })
       )
     ).resolves.toMatchObject({ ready: false, reason: "missing-embedding-credentials" })

@@ -24,7 +24,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { isTauri } from "@/lib/tauri"
-import { listSupportedExtensions, listSupportedFormats } from "@/lib/twin/ingest"
+import {
+  BINARY_TWIN_FORMATS,
+  listSupportedExtensions,
+  listSupportedFormats,
+} from "@/lib/twin/ingest"
 import {
   stageFile,
   stageGitRepo,
@@ -53,6 +57,9 @@ const FILE_PICKER_ACCEPT = listSupportedExtensions()
   .join(",")
 
 const FORMATS: TwinSourceFormat[] = listSupportedFormats() as TwinSourceFormat[]
+const PASTE_FORMATS = FORMATS.filter(
+  (format) => format !== "git-repo" && !BINARY_TWIN_FORMATS.has(format)
+)
 
 /** Per-file diagnostic emitted alongside the staged batch. */
 export interface FileNotice {
@@ -336,7 +343,7 @@ export function PasteSourceInput({ busy, onStaged, onError }: SourceInputProps) 
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FORMATS.map((f) => (
+              {PASTE_FORMATS.map((f) => (
                 <SelectItem key={f} value={f}>
                   {f}
                 </SelectItem>

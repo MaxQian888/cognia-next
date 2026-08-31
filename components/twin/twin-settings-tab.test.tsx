@@ -13,6 +13,8 @@ import "fake-indexeddb/auto"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+let mockRuntimeSettings: unknown
+
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
 jest.mock("@/lib/utils", () => ({
@@ -33,6 +35,11 @@ jest.mock("@/lib/tauri/opener", () => ({
 
 jest.mock("@cognia/vector/readiness", () => ({
   verifyVectorBackendReadiness: jest.fn(),
+}))
+
+jest.mock("@/lib/twin/runtime/vector-credentials", () => ({
+  getTwinVectorConfigId: (provider: string) => `twin-runtime-${provider}`,
+  persistTwinVectorCredentials: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@tauri-apps/api/core", () => ({
@@ -142,6 +149,9 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn((fn: () => unknown, _deps: unknown[], defaultVal: unknown) => {
     // Return defaultVal synchronously — all tests only care about RuntimeConfigCard.
     void fn
+    if (defaultVal && typeof defaultVal === "object" && "workerEnabled" in defaultVal) {
+      return mockRuntimeSettings ?? defaultVal
+    }
     return defaultVal
   }),
 }))
@@ -183,6 +193,8 @@ function renderTab() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRuntimeSettings = DEFAULT_TWIN_RUNTIME_SETTINGS
+  mockedSave.mockResolvedValue(undefined)
   // Default: not running under Tauri
   mockedIsTauri.mockReturnValue(false)
 })
@@ -216,9 +228,10 @@ describe("TwinSettingsTab — native vector backend", () => {
     mockedUsePlatform.mockReturnValue("web")
     renderTab()
 
-    const select = screen.getByLabelText("Backend") as HTMLSelectElement
-    const options = Array.from(select.options).map((o) => o.value)
-    expect(options).not.toContain("native")
+    expect(screen.queryByLabelText("Backend")).toBeNull()
+    expect(
+      screen.getByText(/vector backends are available in the desktop app/i)
+    ).toBeInTheDocument()
   })
 
   // 2. Selecting native saves via saveTwinRuntimeSettings
@@ -328,10 +341,11 @@ describe("TwinSettingsTab — native vector backend", () => {
     const select = screen.getByLabelText("Backend") as HTMLSelectElement
     await user.selectOptions(select, "native")
 
-    const testBtn = screen.getByRole("button", { name: /test connection/i })
+    const testBtn = screen.getByRole("button", { name: /save and test connection/i })
     await user.click(testBtn)
 
     await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalled()
       expect(mockedVerify).toHaveBeenCalledWith(
         expect.objectContaining({
           provider: "native",
@@ -339,7 +353,152 @@ describe("TwinSettingsTab — native vector backend", () => {
         })
       )
       expect(screen.getByText(/operational/i)).toBeInTheDocument()
+      expect(screen.getByText(/^saved /i)).toBeInTheDocument()
     })
+  })
+
+  it("does not probe the backend when save-and-test persistence fails", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedSave.mockRejectedValue(new Error("keyring locked"))
+    const user = userEvent.setup()
+    renderTab()
+
+    await user.selectOptions(screen.getByLabelText("Backend"), "native")
+    await user.click(screen.getByRole("button", { name: /save and test connection/i }))
+
+    await waitFor(() =>
+      expect(mockedToast.error).toHaveBeenCalledWith(expect.stringContaining("keyring locked"))
+    )
+    expect(mockedVerify).not.toHaveBeenCalled()
+    expect(screen.queryByText(/^saved /i)).not.toBeInTheDocument()
+  })
+
+  it("tests a cloud backend through the same config id used by the runtime", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockRuntimeSettings = {
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS,
+      embedding: {
+        ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding,
+        apiKey: "embedding-key",
+      },
+      storage: {
+        vectorBackend: "qdrant",
+        qdrant: { url: "http://localhost:6334", apiKey: "qdrant-key" },
+      },
+    }
+    mockedVerify.mockResolvedValue({ state: "operational", diagnostic: undefined })
+    const user = userEvent.setup()
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: /save and test connection/i }))
+
+    await waitFor(() =>
+      expect(mockedVerify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "qdrant",
+          configId: "twin-runtime-qdrant",
+          qdrantUrl: "http://localhost:6334",
+        })
+      )
+    )
+    expect(mockedSave).toHaveBeenCalledWith(mockRuntimeSettings)
+  })
+
+  it("does not expose the removed Chroma embedded mode", async () => {
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedIsTauri.mockReturnValue(true)
+    const user = userEvent.setup()
+    renderTab()
+
+    await user.selectOptions(screen.getByLabelText("Backend"), "chroma")
+
+    expect(screen.queryByLabelText("Mode")).toBeNull()
+    expect(screen.getByText("Server URL")).toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      "pinecone",
+      [
+        ["API key", "pinecone-key"],
+        ["Index name", "knowledge-index"],
+      ],
+      { pinecone: { apiKey: "pinecone-key", indexName: "knowledge-index" } },
+    ],
+    [
+      "weaviate",
+      [["URL", "https://weaviate.example"]],
+      { weaviate: { url: "https://weaviate.example" } },
+    ],
+    ["milvus", [["Address", "localhost:19530"]], { milvus: { address: "localhost:19530" } }],
+  ] as const)("edits and saves the %s backend controls", async (backend, fields, expected) => {
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedIsTauri.mockReturnValue(true)
+    const user = userEvent.setup()
+    renderTab()
+
+    await user.selectOptions(screen.getByLabelText("Backend"), backend)
+    const vectorFieldset = screen.getByText("Vector store").closest("fieldset") as HTMLElement
+    for (const [label, value] of fields) {
+      const input = within(vectorFieldset).getByText(label).parentElement?.querySelector("input")
+      expect(input).not.toBeNull()
+      await user.type(input as HTMLInputElement, value)
+    }
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() =>
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storage: expect.objectContaining({ vectorBackend: backend, ...expected }),
+        })
+      )
+    )
+  })
+
+  it("surfaces save failures instead of reporting a false success", async () => {
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedIsTauri.mockReturnValue(true)
+    mockedSave.mockRejectedValue(new Error("keyring locked"))
+    const user = userEvent.setup()
+    renderTab()
+
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() =>
+      expect(mockedToast.error).toHaveBeenCalledWith(expect.stringContaining("keyring locked"))
+    )
+  })
+
+  it("does not save an enabled worker whose embedding or vector config is incomplete", () => {
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedIsTauri.mockReturnValue(true)
+    mockRuntimeSettings = {
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS,
+      workerEnabled: true,
+      storage: { vectorBackend: "qdrant", qdrant: { url: "" } },
+    }
+    renderTab()
+
+    expect(screen.getByText(/complete the embedding, vector, and distill LLM/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /save runtime settings/i })).toBeDisabled()
+  })
+
+  it("does not save an enabled worker without its required distill LLM credential", () => {
+    mockedUsePlatform.mockReturnValue("tauri")
+    mockedIsTauri.mockReturnValue(true)
+    mockRuntimeSettings = {
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS,
+      workerEnabled: true,
+      embedding: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding, apiKey: "embedding-key" },
+      storage: { vectorBackend: "native" },
+      llm: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.llm, apiKey: "" },
+    }
+    renderTab()
+
+    expect(screen.getByText(/complete the embedding, vector, and distill LLM/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /save runtime settings/i })).toBeDisabled()
   })
 
   // 4a. Reset: cancel does NOT call invoke

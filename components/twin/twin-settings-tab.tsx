@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { invoke } from "@tauri-apps/api/core"
@@ -54,6 +54,8 @@ import { TwinOverviewCard } from "./twin-overview-card"
 import { TwinCronCard } from "./twin-cron-card"
 import { TwinInjectLogCard } from "./twin-inject-log-card"
 import { TwinSettingsPluginSlot } from "./twin-plugin-slots"
+import { deriveTwinVectorStoreConfig } from "@/lib/twin/runtime/build-deps"
+import { isTwinWorkerConfigComplete } from "@/lib/twin/worker-runtime"
 
 const VECTOR_BACKENDS: VectorBackend[] = [
   "qdrant",
@@ -128,11 +130,8 @@ function RuntimeConfigCard() {
   // Hide the "native" option when not running under Tauri — it requires
   // the Tauri IPC bridge and will never work in the web browser.
   const platform = usePlatform()
-  const visibleBackends = useMemo(
-    () => VECTOR_BACKENDS.filter((b) => b !== "native" || platform === "tauri"),
-    [platform]
-  )
-
+  const workerConfigurationIncomplete =
+    platform === "tauri" && settings.workerEnabled && !isTwinWorkerConfigComplete(settings)
   // Sync the form whenever Dexie reports new settings AND the user hasn't
   // started editing locally. Side-effects only — no setState during render.
   useEffect(() => {
@@ -146,12 +145,17 @@ function RuntimeConfigCard() {
     setSettings(next)
   }
 
-  const handleSave = async () => {
+  const persistSettings = async (): Promise<boolean> => {
     setSaving(true)
     try {
       await saveTwinRuntimeSettings(settings)
       dirtyRef.current = false
       setSavedAt(Date.now())
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(t("saveFailed", { message }))
+      return false
     } finally {
       setSaving(false)
     }
@@ -239,7 +243,7 @@ function RuntimeConfigCard() {
 
   return (
     <Card className="flex flex-col gap-4 p-4">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-1 @sm/twin:flex-row @sm/twin:items-center @sm/twin:justify-between">
         <h3 className="text-sm font-medium">{t("runtimeTitle")}</h3>
         {savedAt ? (
           <span className="text-muted-foreground text-xs">
@@ -252,12 +256,16 @@ function RuntimeConfigCard() {
         <Switch
           id="twin-worker-enabled"
           checked={settings.workerEnabled}
+          disabled={platform !== "tauri"}
           onCheckedChange={(v) => updateField({ ...settings, workerEnabled: v })}
         />
         <Label htmlFor="twin-worker-enabled" className="text-sm">
           {t("workerToggleLabel")}
         </Label>
       </div>
+      {platform !== "tauri" ? (
+        <p className="text-muted-foreground text-xs">{t("workerDesktopOnly")}</p>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <Switch
@@ -379,50 +387,70 @@ function RuntimeConfigCard() {
         <FieldGroup legend={t("distillLlm")} fields={distillFields} />
       </div>
 
-      <fieldset className="border-border flex flex-col gap-3 rounded border p-3">
-        <legend className="text-muted-foreground px-1 text-xs uppercase tracking-wide">
-          {t("vectorStore")}
-        </legend>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="twin-vector-backend">{t("backend")}</Label>
-          <Select
-            value={settings.storage.vectorBackend}
-            onValueChange={(next) =>
-              updateField({
-                ...settings,
-                storage: {
-                  ...settings.storage,
-                  vectorBackend: next as VectorBackend,
-                },
-              })
-            }
-          >
-            <SelectTrigger
-              id="twin-vector-backend"
-              aria-label={t("backend")}
-              className="w-full @sm/twin:w-[16rem]"
+      {platform === "tauri" ? (
+        <fieldset className="border-border flex min-w-0 flex-col gap-3 rounded border p-3">
+          <legend className="text-muted-foreground px-1 text-xs uppercase tracking-wide">
+            {t("vectorStore")}
+          </legend>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="twin-vector-backend">{t("backend")}</Label>
+            <Select
+              value={settings.storage.vectorBackend}
+              onValueChange={(next) =>
+                updateField({
+                  ...settings,
+                  storage: {
+                    ...settings.storage,
+                    vectorBackend: next as VectorBackend,
+                  },
+                })
+              }
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {visibleBackends.map((b) => (
-                <SelectItem key={b} value={b}>
-                  {b === "native" ? t("backendNativeDisplay") : b}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <BackendSpecificFields
-          settings={settings}
-          onPatch={(patch) =>
-            updateField({ ...settings, storage: { ...settings.storage, ...patch } })
-          }
-        />
-      </fieldset>
+              <SelectTrigger
+                id="twin-vector-backend"
+                aria-label={t("backend")}
+                className="w-full @sm/twin:w-[16rem]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {VECTOR_BACKENDS.map((b) => (
+                  <SelectItem key={b} value={b}>
+                    {t(`backendDisplay.${b}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <BackendSpecificFields
+            settings={settings}
+            onPatch={(patch) =>
+              updateField({ ...settings, storage: { ...settings.storage, ...patch } })
+            }
+          />
+          <VectorBackendReadiness
+            settings={settings}
+            saving={saving}
+            persistSettings={persistSettings}
+          />
+        </fieldset>
+      ) : (
+        <fieldset className="border-border rounded border p-3">
+          <legend className="text-muted-foreground px-1 text-xs uppercase tracking-wide">
+            {t("vectorStore")}
+          </legend>
+          <p className="text-muted-foreground text-xs">{t("vectorDesktopOnly")}</p>
+        </fieldset>
+      )}
 
-      <div className="flex items-center justify-end gap-2">
-        <Button onClick={() => void handleSave()} disabled={saving}>
+      <div className="flex flex-col gap-2 @xs/twin:flex-row @xs/twin:items-center @xs/twin:justify-end">
+        {workerConfigurationIncomplete ? (
+          <p className="text-destructive text-xs">{t("workerConfigurationIncomplete")}</p>
+        ) : null}
+        <Button
+          onClick={() => void persistSettings()}
+          disabled={saving || workerConfigurationIncomplete}
+        >
           {saving ? (
             <>
               <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
@@ -523,44 +551,31 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
     )
   }
   if (backend === "chroma") {
-    const c = settings.storage.chroma ?? { mode: "embedded" }
-    const tChromaMode = (mode: "embedded" | "server") =>
-      mode === "embedded" ? t("chromaModeEmbedded") : t("chromaModeServer")
+    const c = settings.storage.chroma ?? { mode: "server" }
+    // Embedded Chroma is retired. A row persisted under it points at nothing a
+    // server URL could replace, and `deriveTwinVectorStoreConfig` now returns
+    // null for it — so say that plainly instead of leaving the user with an
+    // empty field and a silently stopped worker. The mode normalises to
+    // "server" on the first edit below.
+    const retiredEmbedded = c.mode === "embedded"
     return (
-      <div className="grid gap-3 @sm/twin:grid-cols-2">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="twin-chroma-mode">{t("mode")}</Label>
-          <Select
-            value={c.mode}
-            onValueChange={(next) =>
-              onPatch({ chroma: { ...c, mode: next as "embedded" | "server" } })
-            }
-          >
-            <SelectTrigger
-              id="twin-chroma-mode"
-              aria-label={t("mode")}
-              className="w-full @sm/twin:w-[12rem]"
-            >
-              <SelectValue>{tChromaMode(c.mode)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="embedded">{tChromaMode("embedded")}</SelectItem>
-              <SelectItem value="server">{tChromaMode("server")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {c.mode === "server" ? (
-          <Field
-            label={t("serverUrl")}
-            value={c.serverUrl ?? ""}
-            onChange={(v) => onPatch({ chroma: { ...c, serverUrl: v || undefined } })}
-          />
+      <div className="space-y-1">
+        {retiredEmbedded ? (
+          <p className="text-destructive text-xs" role="status">
+            {t("chromaEmbeddedRetired")}
+          </p>
         ) : null}
+        <Field
+          label={t("serverUrl")}
+          value={c.serverUrl ?? ""}
+          onChange={(v) => onPatch({ chroma: { ...c, mode: "server", serverUrl: v || undefined } })}
+        />
+        <p className="text-muted-foreground text-xs">{t("chromaServerOnly")}</p>
       </div>
     )
   }
   if (backend === "native") {
-    return <NativeBackendFields settings={settings} />
+    return <NativeBackendFields />
   }
   return null
 }
@@ -576,16 +591,8 @@ function stateVariant(state: ReadinessState): "default" | "secondary" | "destruc
   return "destructive"
 }
 
-function stateLabel(state: ReadinessState): string {
-  if (!state) return ""
-  return state.charAt(0).toUpperCase() + state.slice(1)
-}
-
-function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
+function NativeBackendFields() {
   const t = useTranslations("twin.settings")
-  const [testLoading, setTestLoading] = useState(false)
-  const [testState, setTestState] = useState<ReadinessState>(null)
-  const [testCode, setTestCode] = useState<string | undefined>(undefined)
 
   const handleOpenFolder = async () => {
     if (!isTauri()) return
@@ -599,30 +606,6 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
     } catch {
       // No-op: if Tauri isn't available or the path doesn't exist yet, silently
       // skip — the file might not exist until the first vector write.
-    }
-  }
-
-  const handleTestConnection = async () => {
-    setTestLoading(true)
-    setTestState(null)
-    setTestCode(undefined)
-    try {
-      const result = await verifyVectorBackendReadiness({
-        provider: "native",
-        embeddingConfig: {
-          provider: settings.embedding.provider,
-          model: settings.embedding.model,
-          baseURL: settings.embedding.baseURL,
-        },
-        embeddingApiKey: settings.embedding.apiKey,
-        native: {},
-      })
-      setTestState(result.state)
-      setTestCode(result.diagnostic?.code)
-    } catch {
-      setTestState("degraded")
-    } finally {
-      setTestLoading(false)
     }
   }
 
@@ -645,31 +628,6 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
         {t("openDataFolder")}
       </Button>
 
-      {/* Test connection */}
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void handleTestConnection()}
-          disabled={testLoading}
-        >
-          {testLoading ? (
-            <>
-              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
-              {t("testing")}
-            </>
-          ) : (
-            t("testConnection")
-          )}
-        </Button>
-        {testState !== null && (
-          <Badge variant={stateVariant(testState)}>
-            {stateLabel(testState)}
-            {testCode ? ` — ${testCode}` : ""}
-          </Badge>
-        )}
-      </div>
-
       {/* Reset vector store (two-step confirm) */}
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -690,6 +648,69 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+function VectorBackendReadiness({
+  settings,
+  saving,
+  persistSettings,
+}: {
+  settings: TwinRuntimeSettings
+  saving: boolean
+  persistSettings: () => Promise<boolean>
+}) {
+  const t = useTranslations("twin.settings")
+  const [testLoading, setTestLoading] = useState(false)
+  const [testState, setTestState] = useState<ReadinessState>(null)
+  const [testCode, setTestCode] = useState<string | undefined>(undefined)
+  const config = deriveTwinVectorStoreConfig(settings, { requireEmbeddingCredentials: false })
+
+  const handleTestConnection = async () => {
+    if (!config) return
+    setTestLoading(true)
+    setTestState(null)
+    setTestCode(undefined)
+    try {
+      if (!(await persistSettings())) return
+      const result = await verifyVectorBackendReadiness(config)
+      setTestState(result.state)
+      setTestCode(result.diagnostic?.code)
+    } catch {
+      setTestState("degraded")
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t pt-3 @sm/twin:flex-row @sm/twin:items-center">
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full @sm/twin:w-auto"
+        onClick={() => void handleTestConnection()}
+        disabled={saving || testLoading || !config}
+      >
+        {testLoading ? (
+          <>
+            <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+            {t("testing")}
+          </>
+        ) : (
+          t("saveAndTestConnection")
+        )}
+      </Button>
+      {!config ? (
+        <p className="text-muted-foreground text-xs">{t("completeVectorConfiguration")}</p>
+      ) : null}
+      {testState !== null ? (
+        <Badge variant={stateVariant(testState)} className="w-fit max-w-full break-all">
+          {t(`readiness.${testState}`)}
+          {testCode ? ` — ${testCode}` : ""}
+        </Badge>
+      ) : null}
     </div>
   )
 }
