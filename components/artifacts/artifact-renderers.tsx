@@ -21,7 +21,7 @@ import {
   resolveRegisteredArtifactRenderer,
   type PluginArtifactRenderer,
 } from "@/lib/artifacts"
-import type { Artifact, ArtifactRuntimeHealth } from "@/types"
+import type { Artifact, ArtifactChartType, ArtifactRuntimeHealth } from "@/types"
 import type { ChartDataPoint } from "./chart-renderer"
 import { getArtifactRuntimeAdapter } from "./runtime-adapters"
 
@@ -59,7 +59,7 @@ function ChartLoading() {
 export function ChartRenderer(props: {
   content: string
   className?: string
-  chartType?: "line" | "bar" | "pie" | "doughnut" | "area" | "scatter" | "radar"
+  chartType?: ArtifactChartType
   chartData?: ChartDataPoint[]
 }) {
   return (
@@ -250,7 +250,7 @@ export function ArtifactRenderer({
   type: string
   content: string
   className?: string
-  chartType?: "line" | "bar" | "pie" | "doughnut" | "area" | "scatter" | "radar"
+  chartType?: ArtifactChartType
   chartData?: ChartDataPoint[]
   artifact?: Artifact
 }) {

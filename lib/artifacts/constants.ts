@@ -270,7 +270,7 @@ export const DETECTION_PATTERNS = {
   ],
   chart: [
     /\[\s*{\s*"name"\s*:\s*"[^"]+"\s*,\s*"value"\s*:/,
-    /{\s*"type"\s*:\s*"(line|bar|pie|area|scatter|radar)"/,
+    /{\s*"type"\s*:\s*"(line|bar|pie|doughnut|area|scatter|radar)"/,
     /{\s*"data"\s*:\s*\[/,
   ],
   math: [

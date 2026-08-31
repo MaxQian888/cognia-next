@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CHART_COLORS } from "@/lib/artifacts"
 import { loggers } from "@cognia/logging"
-import type { ChartDataPoint } from "@/types"
+import type { ArtifactChartType, ChartDataPoint } from "@/types"
 import {
   LineChart,
   Line,
@@ -44,7 +44,7 @@ export type { ChartDataPoint } from "@/types"
 interface ChartRendererProps {
   content: string
   className?: string
-  chartType?: "line" | "bar" | "pie" | "doughnut" | "area" | "scatter" | "radar"
+  chartType?: ArtifactChartType
   chartData?: ChartDataPoint[]
 }
 

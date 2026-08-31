@@ -78,6 +78,12 @@ describe("useStreamingArtifact", () => {
     expect(result.current).toBeNull()
   })
 
+  it("stays quiet when artifact authoring is switched off", () => {
+    setArtifactSettings({ agentAuthoring: false })
+    const { result } = renderHook(() => useStreamingArtifact("s1"))
+    expect(result.current).toBeNull()
+  })
+
   it("honours the user's minLines threshold", () => {
     setArtifactSettings({ minLines: 50 })
     const { result } = renderHook(() => useStreamingArtifact("s1"))

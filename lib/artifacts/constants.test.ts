@@ -41,6 +41,12 @@ describe("artifact type tables", () => {
     expect(Object.keys(MERMAID_TYPE_NAMES).length).toBeGreaterThan(0)
     expect(CHART_COLORS.length).toBeGreaterThan(0)
   })
+
+  it("keeps doughnut in the shared chart detector union", () => {
+    expect(
+      DETECTION_PATTERNS.chart.some((pattern) => pattern.test('{"type":"doughnut","data":[]}'))
+    ).toBe(true)
+  })
 })
 
 describe("isRunnableArtifactType", () => {

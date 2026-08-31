@@ -100,7 +100,18 @@ function headingFor(sel: ContextSelectionRef): string {
     case "external": {
       const sourceTitle = sel.sourceTitle ? `, window "${sel.sourceTitle}"` : ""
       const truncation = sel.truncated ? " (truncated to 20,000 characters)" : ""
-      return `Selection from app "${sel.sourceApp}"${sourceTitle}${truncation}:`
+      const origin =
+        sel.origin === "ocr"
+          ? " (captured via OCR; recognition errors are possible)"
+          : sel.origin === "clipboard"
+            ? " (captured from the clipboard)"
+            : ""
+      const sourceUrl = sel.sourceUrl ? `, source ${sel.sourceUrl}` : ""
+      const capturedAt =
+        typeof sel.capturedAt === "number" && Number.isFinite(sel.capturedAt)
+          ? `, captured at ${new Date(sel.capturedAt).toISOString()}`
+          : ""
+      return `Selection from app "${sel.sourceApp}"${sourceTitle}${origin}${truncation}${sourceUrl}${capturedAt}:`
     }
     case "entity": {
       const noun = ENTITY_NOUNS[sel.entityKind]

@@ -75,7 +75,7 @@ export function useStreamingArtifact(sessionId?: string): StreamingArtifact | nu
     if (status !== "streaming") return null
     // Honour the same opt-out auto-creation honours, so the placeholder never
     // promises an artifact the turn-complete handler will decline to create.
-    if (artifacts?.autoCreate === false) return null
+    if (artifacts?.autoCreate === false || artifacts?.agentAuthoring === false) return null
 
     const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
     const text = assistantText(lastAssistant)
@@ -87,5 +87,12 @@ export function useStreamingArtifact(sessionId?: string): StreamingArtifact | nu
       minLines: artifacts?.minLines ?? DEFAULT_DETECTION_CONFIG.minLines,
       enabledTypes: artifacts?.enabledTypes ?? DEFAULT_DETECTION_CONFIG.enabledTypes,
     })
-  }, [artifacts?.autoCreate, artifacts?.enabledTypes, artifacts?.minLines, messages, status])
+  }, [
+    artifacts?.agentAuthoring,
+    artifacts?.autoCreate,
+    artifacts?.enabledTypes,
+    artifacts?.minLines,
+    messages,
+    status,
+  ])
 }

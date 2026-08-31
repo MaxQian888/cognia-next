@@ -120,6 +120,28 @@ describe("formatContextSelectionsForLLM — non-artifact kinds", () => {
     expect(out).toContain("selected text")
   })
 
+  it("marks OCR text as fallible and includes sanitized source provenance", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "external",
+        candidateId: "candidate-ocr",
+        sourceApp: "Preview",
+        sourceTitle: "Scanned form",
+        sourceUrl: "https://example.com/forms/scan",
+        capturedAt: 1_725_000_000_000,
+        origin: "ocr",
+        truncated: false,
+        title: "Scanned form",
+        snapshot: "recognised text",
+        comment: "",
+      },
+    ])
+
+    expect(out).toContain("captured via OCR; recognition errors are possible")
+    expect(out).toContain("https://example.com/forms/scan")
+    expect(out).toContain("captured at 2024-08-30T06:40:00.000Z")
+  })
+
   it("keeps every kind in one block, in staging order", () => {
     const out = formatContextSelectionsForLLM([
       sel({ title: "Art" }),

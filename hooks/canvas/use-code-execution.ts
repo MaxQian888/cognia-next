@@ -45,7 +45,7 @@ export function useCodeExecution(): UseCodeExecutionReturn {
   const [isExecuting, setIsExecuting] = useState(false)
   const [result, setResult] = useState<CodeSandboxExecutionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   const isDesktop = useNativeStore((state) => state.isDesktop)
   // ADR-0028 — Canvas Python executes through the OS sandbox backend rather
@@ -62,7 +62,9 @@ export function useCodeExecution(): UseCodeExecutionReturn {
     ): Promise<CodeSandboxExecutionResult> => {
       setIsExecuting(true)
       setError(null)
-      abortRef.current = false
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
 
       try {
         const execResult = await executeCodeWithSandboxPriority({
@@ -70,10 +72,12 @@ export function useCodeExecution(): UseCodeExecutionReturn {
           language,
           isDesktop,
           stdin: options.stdin,
+          timeoutMs: options.timeout,
+          signal: controller.signal,
           sandboxed: sandboxEnabled,
         })
 
-        if (!abortRef.current) {
+        if (!controller.signal.aborted) {
           setResult(execResult)
         }
 
@@ -100,16 +104,18 @@ export function useCodeExecution(): UseCodeExecutionReturn {
         setResult(errorResult)
         return errorResult
       } finally {
-        if (!abortRef.current) {
+        if (!controller.signal.aborted) {
           setIsExecuting(false)
         }
+        if (abortRef.current === controller) abortRef.current = null
       }
     },
     [isDesktop, sandboxEnabled]
   )
 
   const cancel = useCallback(() => {
-    abortRef.current = true
+    abortRef.current?.abort()
+    abortRef.current = null
     setIsExecuting(false)
   }, [])
 

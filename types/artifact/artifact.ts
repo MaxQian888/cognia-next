@@ -142,6 +142,10 @@ export interface ExternalSelectionRef extends ContextSelectionBase {
   candidateId: string
   sourceApp: string
   sourceTitle?: string
+  /** Sanitized http(s) source URL, without credentials, query, or fragment. */
+  sourceUrl?: string
+  /** Native capture time in Unix milliseconds. */
+  capturedAt?: number
   /**
    * How the text was obtained, and therefore how much to trust it. `ocr` means
    * it was read off the screen because the accessibility API exposed none, so
@@ -312,7 +316,7 @@ export interface ArtifactMetadata {
   wordCount?: number
 
   // For charts
-  chartType?: "line" | "bar" | "pie" | "doughnut" | "area" | "scatter"
+  chartType?: ArtifactChartType
   dataSource?: string
 
   // For HTML/React previews
@@ -606,7 +610,7 @@ export interface AnalysisOutput {
 
   // Chart data
   chartConfig?: {
-    type: "line" | "bar" | "pie" | "area" | "scatter" | "radar"
+    type: ArtifactChartType
     data: ChartDataPoint[]
     options?: Record<string, unknown>
   }
@@ -615,6 +619,9 @@ export interface AnalysisOutput {
   summary?: string
   statistics?: Record<string, number>
 }
+
+/** Chart kinds accepted by artifact metadata, detection, and rendering. */
+export type ArtifactChartType = "line" | "bar" | "pie" | "doughnut" | "area" | "scatter" | "radar"
 
 export interface ChartDataPoint {
   name: string

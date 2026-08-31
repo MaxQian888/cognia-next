@@ -159,7 +159,43 @@ describe("useCodeExecution", () => {
       language: "ts",
       isDesktop: true,
       stdin: "in",
+      timeoutMs: undefined,
+      signal: expect.any(AbortSignal),
       sandboxed: false,
+    })
+  })
+
+  it("forwards the requested timeout and aborts the active iframe run on cancel", async () => {
+    let capturedSignal: AbortSignal | undefined
+    executeMock.mockImplementationOnce(
+      (args: unknown) =>
+        new Promise((resolve) => {
+          capturedSignal = (args as { signal: AbortSignal }).signal
+          capturedSignal.addEventListener("abort", () =>
+            resolve({
+              success: false,
+              sandbox: "iframe",
+              stdout: "",
+              stderr: "",
+              durationMs: 0,
+              error: "aborted",
+            })
+          )
+        })
+    )
+    const { result } = renderHook(() => useCodeExecution())
+    let run!: Promise<unknown>
+    act(() => {
+      run = result.current.execute("while(true){}", "js", { timeout: 1234 })
+    })
+
+    expect(executeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 1234, signal: expect.any(AbortSignal) })
+    )
+    act(() => result.current.cancel())
+    expect(capturedSignal?.aborted).toBe(true)
+    await act(async () => {
+      await run
     })
   })
 
