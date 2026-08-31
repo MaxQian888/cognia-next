@@ -1,10 +1,11 @@
+import type { SandboxClient } from "@/lib/automation/sandbox-client"
 import type { SandboxConnectionRow } from "@/types/sandbox"
 import {
   hasSandboxConnectionLifecycleAdapter,
   runSandboxConnectionOperation,
   serializeSandboxConnectionOperation,
 } from "./connection-lifecycle"
-import { defaultSandboxCapabilities } from "./connection-capabilities"
+import { defaultSandboxCapabilities, SANDBOX_CAPABILITY_REVISION } from "./connection-capabilities"
 import { SandboxCapabilityError } from "./lifecycle-contract"
 
 function row(overrides: Partial<SandboxConnectionRow> = {}): SandboxConnectionRow {
@@ -16,6 +17,7 @@ function row(overrides: Partial<SandboxConnectionRow> = {}): SandboxConnectionRo
     config: { provider: "docker", image: "image", host: "127.0.0.1", port: 0 },
     state: "uninitialized",
     capabilities: defaultSandboxCapabilities("docker", "computer-server"),
+    capabilitiesRevision: SANDBOX_CAPABILITY_REVISION,
     lastHealthStatus: "unknown",
     createdAt: 1,
     updatedAt: 1,
@@ -23,47 +25,182 @@ function row(overrides: Partial<SandboxConnectionRow> = {}): SandboxConnectionRo
   }
 }
 
-describe("runSandboxConnectionOperation", () => {
-  const client = {
-    start: jest.fn(async () => 49160),
+function fakeClient(overrides: Partial<SandboxClient> = {}): SandboxClient {
+  return {
+    create: jest.fn(async () => ({ containerId: "c1", port: 0 })),
+    start: jest.fn(async () => ({ containerId: "c1", port: 49160 })),
+    suspend: jest.fn(async () => undefined),
+    resume: jest.fn(async () => ({ containerId: "c1", port: 49160 })),
     stop: jest.fn(async () => undefined),
+    delete: jest.fn(async () => undefined),
+    inspect: jest.fn(async () => ({
+      containerId: "c1",
+      status: "running",
+      running: true,
+      paused: false,
+      networkMode: "bridge",
+      nanoCpus: 0,
+      memoryBytes: 0,
+    })),
     health: jest.fn(async () => true),
-  }
+    exec: jest.fn(async () => ({
+      exitCode: 0,
+      stdout: "container-host",
+      stderr: "",
+      durationMs: 4,
+      timedOut: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    })),
+    readFile: jest.fn(async () => "file contents"),
+    ...overrides,
+  } as SandboxClient
+}
 
-  beforeEach(() => jest.clearAllMocks())
-
+describe("runSandboxConnectionOperation", () => {
   it("dispatches Docker lifecycle operations through the checked adapter", async () => {
-    await expect(runSandboxConnectionOperation(row(), "start", client)).resolves.toEqual({
+    const client = fakeClient()
+    await expect(runSandboxConnectionOperation(row(), "start", { client })).resolves.toMatchObject({
+      containerId: "c1",
       port: 49160,
     })
     await expect(
-      runSandboxConnectionOperation(row({ state: "running" }), "health", client)
-    ).resolves.toEqual({ health: true })
-    await expect(
-      runSandboxConnectionOperation(row({ state: "running" }), "stop", client)
+      runSandboxConnectionOperation(row({ state: "running" }), "stop", { client })
     ).resolves.toEqual({})
 
-    expect(client.start).toHaveBeenCalledWith("conn-1", "image")
-    expect(client.health).toHaveBeenCalledWith("conn-1")
+    expect(client.start).toHaveBeenCalledWith("conn-1", "image", undefined)
     expect(client.stop).toHaveBeenCalledWith("conn-1")
   })
 
-  it("deletes through the existing stop/remove command", async () => {
-    await runSandboxConnectionOperation(row(), "delete", client)
-    expect(client.stop).toHaveBeenCalledWith("conn-1")
+  it("deletes the container instead of merely stopping it", async () => {
+    // The previous adapter implemented `delete` as `stop`, which only looked
+    // correct because containers were created with `--rm`. Without `--rm` that
+    // leaves the machine on disk forever, unreachable from a deleted row.
+    const client = fakeClient()
+    await runSandboxConnectionOperation(row({ state: "running" }), "delete", { client })
+    expect(client.delete).toHaveBeenCalledWith("conn-1")
+    expect(client.stop).not.toHaveBeenCalled()
+  })
+
+  it("suspends with pause rather than stop", async () => {
+    // `docker stop` would lose the desktop session that suspend exists to keep.
+    const client = fakeClient()
+    await runSandboxConnectionOperation(row({ state: "running" }), "suspend", { client })
+    expect(client.suspend).toHaveBeenCalledWith("conn-1")
+    expect(client.stop).not.toHaveBeenCalled()
+    expect(client.delete).not.toHaveBeenCalled()
+  })
+
+  it("resumes a suspended machine", async () => {
+    const client = fakeClient()
+    await expect(
+      runSandboxConnectionOperation(row({ state: "suspended" }), "resume", { client })
+    ).resolves.toMatchObject({ port: 49160 })
+    expect(client.resume).toHaveBeenCalledWith("conn-1")
+  })
+
+  it("reports health from Docker's own state plus a live exec probe", async () => {
+    const client = fakeClient()
+    const result = await runSandboxConnectionOperation(row({ state: "running" }), "health", {
+      client,
+    })
+    expect(result.health).toBe(true)
+    expect(result.healthReport).toMatchObject({ reachable: true, state: "running" })
+    expect(client.inspect).toHaveBeenCalledWith("conn-1")
+    expect(client.health).toHaveBeenCalledWith("conn-1")
+  })
+
+  it("calls a running container unreachable when the exec channel is dead", async () => {
+    const client = fakeClient({ health: jest.fn(async () => false) })
+    const result = await runSandboxConnectionOperation(row({ state: "running" }), "health", {
+      client,
+    })
+    expect(result.health).toBe(false)
+    expect(result.healthReport).toMatchObject({ reachable: false, state: "running" })
+  })
+
+  it("does not probe exec on a paused container, and reports it suspended", async () => {
+    const client = fakeClient({
+      inspect: jest.fn(async () => ({
+        containerId: "c1",
+        status: "paused",
+        running: true,
+        paused: true,
+        networkMode: "bridge",
+        nanoCpus: 0,
+        memoryBytes: 0,
+      })),
+    })
+    const result = await runSandboxConnectionOperation(row({ state: "running" }), "health", {
+      client,
+    })
+    expect(result.healthReport).toMatchObject({ reachable: false, state: "suspended" })
+    expect(client.health).not.toHaveBeenCalled()
+  })
+
+  it("reports an absent container as uninitialized rather than stopped", async () => {
+    const client = fakeClient({ inspect: jest.fn(async () => null) })
+    const result = await runSandboxConnectionOperation(row({ state: "running" }), "health", {
+      client,
+    })
+    expect(result.healthReport).toMatchObject({ reachable: false, state: "uninitialized" })
+  })
+
+  it("carries the frozen container policy into create and start", async () => {
+    const client = fakeClient()
+    const confined = row({
+      config: {
+        provider: "docker",
+        image: "image",
+        host: "127.0.0.1",
+        port: 0,
+        networkMode: "none",
+        cpus: "1.5",
+        memoryMb: 2048,
+        workspaceMount: { hostPath: "/host/ws", containerPath: "/workspace" },
+      },
+    })
+    await runSandboxConnectionOperation(confined, "create", { client })
+    expect(client.create).toHaveBeenCalledWith("conn-1", "image", {
+      networkMode: "none",
+      cpus: "1.5",
+      memoryMb: 2048,
+      workspaceHostPath: "/host/ws",
+      workspaceContainerPath: "/workspace",
+    })
   })
 
   it("refuses providers without a real adapter before touching Docker", async () => {
+    const client = fakeClient()
     const cloud = row({
       provider: "cua-cloud",
       config: { provider: "cua-cloud", instanceName: "desk", host: "example.com", port: 443 },
       capabilities: defaultSandboxCapabilities("cua-cloud", "computer-server"),
     })
-    await expect(runSandboxConnectionOperation(cloud, "start", client)).rejects.toMatchObject<
+    await expect(runSandboxConnectionOperation(cloud, "start", { client })).rejects.toMatchObject<
       Partial<SandboxCapabilityError>
-    >({ code: "not-implemented", operation: "start" })
+    >({
+      code: "not-implemented",
+      operation: "start",
+    })
     expect(client.start).not.toHaveBeenCalled()
     expect(client.stop).not.toHaveBeenCalled()
+  })
+
+  it("refuses workspaceExec while the capability is withdrawn", async () => {
+    // Until the exec path is proven to run inside the container, the driver
+    // restriction keeps this closed. The refusal is the feature.
+    const client = fakeClient()
+    await expect(
+      runSandboxConnectionOperation(row({ state: "running" }), "workspaceExec", {
+        client,
+        exec: { argv: ["hostname"] },
+      })
+    ).rejects.toMatchObject<Partial<SandboxCapabilityError>>({
+      code: "unsupported-operation",
+      operation: "workspaceExec",
+    })
+    expect(client.exec).not.toHaveBeenCalled()
   })
 })
 

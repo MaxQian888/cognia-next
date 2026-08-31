@@ -67,6 +67,12 @@ export type SandboxConnectionProvider = "docker" | "cua-cloud" | "lume"
  */
 export type SandboxConnectionDriver = "computer-server" | "cua-driver"
 
+/** A single host directory bound into the container. */
+export interface SandboxWorkspaceMount {
+  hostPath: string
+  containerPath: string
+}
+
 export interface DockerSandboxConfig {
   /** Container image, e.g. `ghcr.io/trycua/cua-xfce:latest`. */
   image: string
@@ -76,6 +82,28 @@ export interface DockerSandboxConfig {
   port: number
   /** Docker container id once created. */
   containerId?: string
+
+  // ── Container policy, frozen in at create time ──
+  //
+  // Docker fixes all four when the container is made. `docker exec` cannot
+  // change a running container's network mode or its cpu/memory ceiling, so a
+  // per-call policy request can only be *attested* against these, never
+  // enforced on top of them. They are recorded here so an execution asking for
+  // something stricter than the machine actually got is refused rather than
+  // run under a weaker confinement than the caller believes.
+
+  /** `--network`. Absent means Docker's default bridge network. */
+  networkMode?: string
+  /** `--cpus`, e.g. `"1.5"`. Absent means the cpu allowance is uncapped. */
+  cpus?: string
+  /** `--memory`, in MiB. Absent means memory is uncapped. */
+  memoryMb?: number
+  /**
+   * The one host directory visible inside the machine. Host paths mean nothing
+   * to a container, so without a mount there is no path a workspace write can
+   * legitimately target.
+   */
+  workspaceMount?: SandboxWorkspaceMount
 }
 
 export interface CuaCloudSandboxConfig {
@@ -194,6 +222,13 @@ export interface SandboxConnectionRow {
   config: SandboxProviderConfig
   state: SandboxLifecycleState
   capabilities: SandboxCapabilities
+  /**
+   * Which release of the default capability matrix `capabilities` was derived
+   * from. A row behind the current revision is recomputed from defaults on
+   * read, which is the only way a connection created before an adapter existed
+   * can ever learn that one now does. Absent means revision 1.
+   */
+  capabilitiesRevision?: number
   /** Present only for providers that authenticate (cua.ai Cloud). */
   credentialRef?: SandboxCredentialRef
   lastHealthStatus: SandboxHealthStatus

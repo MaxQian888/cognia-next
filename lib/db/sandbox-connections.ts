@@ -3,7 +3,10 @@ import {
   migrateSandboxConnectionRow,
   syncLegacySandboxMirrors,
 } from "@/lib/sandbox/connection-migration"
-import { defaultSandboxCapabilities } from "@/lib/sandbox/connection-capabilities"
+import {
+  defaultSandboxCapabilities,
+  SANDBOX_CAPABILITY_REVISION,
+} from "@/lib/sandbox/connection-capabilities"
 import type {
   SandboxConnectionDriver,
   SandboxConnectionProvider,
@@ -96,6 +99,7 @@ export function createSandboxConnectionRow(input: {
     config: input.config,
     state: "uninitialized",
     capabilities: defaultSandboxCapabilities(provider, input.driver),
+    capabilitiesRevision: SANDBOX_CAPABILITY_REVISION,
     ...(input.credentialRef ? { credentialRef: input.credentialRef } : {}),
     lastHealthStatus: "unknown",
     createdAt: input.now,

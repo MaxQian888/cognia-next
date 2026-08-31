@@ -1,5 +1,5 @@
-import type { SandboxLifecycleState } from "@/types/sandbox"
-import { defaultSandboxCapabilities } from "./connection-capabilities"
+import type { SandboxCapabilities, SandboxLifecycleState } from "@/types/sandbox"
+import { SANDBOX_LIFECYCLE_OPERATIONS } from "./connection-capabilities"
 import {
   SandboxCapabilityError,
   assertSandboxOperationAllowed,
@@ -7,13 +7,31 @@ import {
   type SandboxOperationContext,
   type SandboxProviderAdapter,
 } from "./lifecycle-contract"
+import type { SandboxLifecycleOperation } from "@/types/sandbox"
+
+/**
+ * An explicit capability fixture, everything supported unless overridden.
+ *
+ * These tests are about the contract's own gating, not about which
+ * provider/driver pairs happen to have an adapter today. Deriving the fixture
+ * from the live default matrix coupled them together, so narrowing a
+ * provider's defaults elsewhere turned every case here red for a reason that
+ * had nothing to do with the contract.
+ */
+function caps(overrides: Partial<SandboxCapabilities> = {}): SandboxCapabilities {
+  const base = {} as Record<SandboxLifecycleOperation, boolean>
+  for (const operation of SANDBOX_LIFECYCLE_OPERATIONS) base[operation] = true
+  return Object.freeze({ ...base, ...overrides })
+}
 
 function ctx(overrides: Partial<SandboxOperationContext> = {}): SandboxOperationContext {
   return {
     connectionId: "conn-1",
     provider: "docker",
     driver: "cua-driver",
-    capabilities: defaultSandboxCapabilities("docker", "cua-driver"),
+    // Suspend and resume are the withheld pair these tests use to exercise the
+    // unsupported-operation branch.
+    capabilities: caps({ suspend: false, resume: false }),
     state: "running",
     ...overrides,
   }
@@ -94,7 +112,7 @@ describe("assertSandboxOperationAllowed", () => {
   it("refuses suspend/resume on a cloud connection in the wrong state", () => {
     const cloud = ctx({
       provider: "cua-cloud",
-      capabilities: defaultSandboxCapabilities("cua-cloud", "cua-driver"),
+      capabilities: caps(),
       state: "stopped",
     })
     expect(() => assertSandboxOperationAllowed(cloud, "suspend")).toThrow(/not valid while/)
@@ -109,15 +127,31 @@ describe("runSandboxOperation", () => {
     provider: "docker",
     driver: "cua-driver",
     stop: jest.fn(async () => {}),
-    workspaceExec: jest.fn(async () => ({ exitCode: 0, stdout: "ok", stderr: "" })),
+    workspaceExec: jest.fn(async () => ({
+      exitCode: 0,
+      stdout: "ok",
+      stderr: "",
+      durationMs: 3,
+      timedOut: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    })),
   }
 
   it("dispatches a supported operation", async () => {
     await expect(
       runSandboxOperation(adapter, ctx(), "workspaceExec", (a) =>
-        a.workspaceExec?.(ctx(), { command: "ls" })
+        a.workspaceExec?.(ctx(), { argv: ["ls"] })
       )
-    ).resolves.toEqual({ exitCode: 0, stdout: "ok", stderr: "" })
+    ).resolves.toEqual({
+      exitCode: 0,
+      stdout: "ok",
+      stderr: "",
+      durationMs: 3,
+      timedOut: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    })
   })
 
   it("refuses an unsupported operation without invoking the adapter", async () => {

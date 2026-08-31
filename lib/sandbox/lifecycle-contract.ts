@@ -82,8 +82,15 @@ export interface SandboxGuiRequest {
 }
 
 export interface SandboxExecRequest {
-  command: string
+  /**
+   * Argument vector. Every adapter passes these through as separate arguments
+   * and never joins them into a shell string, so a path or an environment
+   * value containing a space or a quote cannot become a second command.
+   */
+  argv: string[]
   cwd?: string
+  env?: Record<string, string>
+  stdin?: string
   timeoutMs?: number
 }
 
@@ -91,6 +98,14 @@ export interface SandboxExecResult {
   exitCode: number
   stdout: string
   stderr: string
+  durationMs: number
+  /**
+   * The adapter gave up waiting. The process inside the machine may still be
+   * running, so this is not the same as "the work stopped".
+   */
+  timedOut: boolean
+  stdoutTruncated: boolean
+  stderrTruncated: boolean
 }
 
 /**

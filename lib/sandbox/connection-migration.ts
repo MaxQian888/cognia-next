@@ -21,7 +21,7 @@ import type {
   SandboxLifecycleState,
   SandboxProviderConfig,
 } from "@/types/sandbox"
-import { defaultSandboxCapabilities } from "./connection-capabilities"
+import { defaultSandboxCapabilities, SANDBOX_CAPABILITY_REVISION } from "./connection-capabilities"
 
 /** Driver every pre-Epic-5 row implicitly used. */
 export const LEGACY_SANDBOX_DRIVER: SandboxConnectionDriver = "computer-server"
@@ -104,6 +104,7 @@ export function migrateSandboxConnectionRow(
     config,
     state: inferLegacyLifecycleState(legacy),
     capabilities: defaultSandboxCapabilities(provider, driver),
+    capabilitiesRevision: SANDBOX_CAPABILITY_REVISION,
     lastHealthStatus: legacy.lastHealthStatus ?? "unknown",
     ...(legacy.lastHealthError !== undefined ? { lastHealthError: legacy.lastHealthError } : {}),
     ...(legacy.lastHealthCheckAt !== undefined
@@ -120,11 +121,36 @@ export function migrateSandboxConnectionRow(
 }
 
 /**
- * Existing rows may persist capabilities from an older optimistic matrix.
- * Reads may only narrow those claims; they never widen an adapter handshake.
+ * Reconcile a stored capability matrix with the current defaults.
+ *
+ * Two different claims are stored in one field, and they have opposite rules.
+ *
+ *   * **Defaults** are this application's own ground truth about what a
+ *     provider/driver pair supports. They move in both directions across
+ *     releases: an adapter gets built, or an over-claim gets withdrawn. A row
+ *     written under an older revision must be recomputed, otherwise a
+ *     connection created before the adapter existed could never learn that it
+ *     now does, and the new controls would stay greyed out on every database
+ *     except a freshly created one.
+ *   * **Handshake narrowing** is per-connection, discovered at runtime when a
+ *     peer turns out to support less than advertised. That may only ever
+ *     remove, and it is preserved within a revision.
+ *
+ * `capabilitiesRevision` is what tells the two apart. Without it the safe rule
+ * (only narrow) silently swallows every future widening.
  */
 function normalizeStoredCapabilities(row: SandboxConnectionRow): SandboxConnectionRow {
   const supported = defaultSandboxCapabilities(row.provider, row.driver)
+  const storedRevision = row.capabilitiesRevision ?? 1
+
+  if (storedRevision < SANDBOX_CAPABILITY_REVISION) {
+    return {
+      ...row,
+      capabilities: supported,
+      capabilitiesRevision: SANDBOX_CAPABILITY_REVISION,
+    }
+  }
+
   const capabilities = Object.freeze(
     Object.fromEntries(
       Object.entries(row.capabilities).map(([operation, enabled]) => [

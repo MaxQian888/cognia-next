@@ -23,11 +23,31 @@ describe("defaultSandboxCapabilities", () => {
 
   it("exposes only the implemented Docker/computer-server operations", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
-    expect(caps.suspend).toBe(false)
-    expect(caps.resume).toBe(false)
+    expect(caps.create).toBe(true)
     expect(caps.start).toBe(true)
     expect(caps.stop).toBe(true)
     expect(caps.delete).toBe(true)
+    expect(caps.health).toBe(true)
+    expect(caps.gui).toBe(true)
+  })
+
+  it("claims suspend and resume only because pause and unpause implement them", () => {
+    // `docker pause` SIGSTOPs the container's processes and keeps its memory
+    // resident, so the desktop session survives and this is a real suspend.
+    // The claim would be false if the adapter used `docker stop`, which is a
+    // different machine on the way back.
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
+    expect(caps.suspend).toBe(true)
+    expect(caps.resume).toBe(true)
+  })
+
+  it("keeps Docker workspace shell and files withdrawn until exec is proven", () => {
+    // The driver restriction removes both. They are unlocked only once
+    // `docker exec` is shown to run inside the selected container, not because
+    // the provider could in principle support them.
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
+    expect(caps.workspaceRead).toBe(false)
+    expect(caps.workspaceExec).toBe(false)
   })
 
   it("keeps cua-cloud and lume rows readable without unsupported actions", () => {
@@ -78,6 +98,11 @@ describe("narrowSandboxCapabilities", () => {
     expect(narrowed.start).toBe(true)
   })
 
+  it("never widens", () => {
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
+    expect(narrowSandboxCapabilities(caps, []).workspaceExec).toBe(false)
+  })
+
   it("does not mutate the input", () => {
     const caps = defaultSandboxCapabilities("cua-cloud", "cua-driver")
     narrowSandboxCapabilities(caps, ["gui"])
@@ -91,7 +116,7 @@ describe("narrowSandboxCapabilities", () => {
 
   it("never re-enables an already-false capability", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
-    expect(narrowSandboxCapabilities(caps, ["suspend"]).suspend).toBe(false)
+    expect(narrowSandboxCapabilities(caps, ["workspaceExec"]).workspaceExec).toBe(false)
   })
 })
 
@@ -99,6 +124,6 @@ describe("supportsSandboxOperation", () => {
   it("reads the matrix", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(supportsSandboxOperation(caps, "start")).toBe(true)
-    expect(supportsSandboxOperation(caps, "suspend")).toBe(false)
+    expect(supportsSandboxOperation(caps, "workspaceExec")).toBe(false)
   })
 })

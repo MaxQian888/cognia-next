@@ -20,6 +20,25 @@ import type {
   SandboxLifecycleOperation,
 } from "@/types/sandbox"
 
+/**
+ * Bumped whenever {@link PROVIDER_CAPABILITIES} or {@link DRIVER_RESTRICTIONS}
+ * changes what a pair supports.
+ *
+ * A stored row carries the matrix it was written with, and reads may only ever
+ * narrow that (see `connection-migration.ts`). That rule protects a real
+ * property: a handshake which discovers the peer supports less must not be
+ * undone by a later read. But it also means a row written before an adapter
+ * existed can never learn that one now does, because `false && true` is still
+ * false. Every existing connection would show the new controls greyed out
+ * forever, and only a fresh database would look correct.
+ *
+ * The revision separates the two claims. Defaults are this application's own
+ * ground truth and move in both directions across releases, so a row behind the
+ * current revision is recomputed from defaults. Handshake narrowing is
+ * per-connection and still only ever removes, within a revision.
+ */
+export const SANDBOX_CAPABILITY_REVISION = 2
+
 /** Every operation, in a stable order for iteration and display. */
 export const SANDBOX_LIFECYCLE_OPERATIONS: readonly SandboxLifecycleOperation[] = [
   "create",
@@ -45,14 +64,26 @@ function caps(overrides: Partial<Record<SandboxLifecycleOperation, boolean>>): S
  * Capabilities backed by a production adapter in this repository. Provider
  * documentation is not an implementation: compatibility rows stay readable,
  * but only Docker/computer-server currently has lifecycle and GUI wiring.
+ *
+ * Docker claims `suspend` and `resume` because the adapter implements them
+ * with `docker pause` / `docker unpause`, which SIGSTOP the container's
+ * processes and keep its memory resident. That is a real suspend: the desktop
+ * session is still there afterwards. `docker stop` is not, and must never be
+ * used to stand in for one.
  */
 const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabilities> = {
   docker: caps({
+    create: true,
     start: true,
+    suspend: true,
+    resume: true,
     stop: true,
     delete: true,
     health: true,
     gui: true,
+    // `workspaceRead` / `workspaceExec` stay off here and are removed again by
+    // DRIVER_RESTRICTIONS below. They are unlocked only once the exec path is
+    // proven to run inside the selected container.
   }),
   "cua-cloud": caps({}),
   lume: caps({}),
