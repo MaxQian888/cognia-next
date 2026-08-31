@@ -37,6 +37,7 @@ export type DiagnosticCode =
   | "kindRetired"
   | "desktopOnlyInWeb"
   | "joinPolicyInLoop"
+  | "synthesizerOnly"
 
 export interface Diagnostic {
   /** Stable identity across recomputes — `diagId(code, {nodeId,edgeId,field})`. */

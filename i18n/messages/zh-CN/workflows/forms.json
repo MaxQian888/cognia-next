@@ -2326,6 +2326,12 @@
       "placeholder": "step_"
     }
   },
+  "planStepDispatch": {
+    "stepId": {
+      "hint": "本节点执行计划中的哪一步。由合成器写入。",
+      "label": "步骤 ID"
+    }
+  },
   "planUpdateDraft": {
     "configJson": {
       "hint": "局部 PlanConfig 补丁。",

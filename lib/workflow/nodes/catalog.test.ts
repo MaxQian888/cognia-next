@@ -43,10 +43,17 @@ describe("NODE_CATALOG", () => {
     }
   })
 
-  it("excludes synthesizer-only pattern kinds from the palette", () => {
-    const kinds = new Set(NODE_CATALOG.map((e) => e.kind))
-    expect(kinds.has("pattern.synthesize" as never)).toBe(false)
-    expect(kinds.has("pattern.judge-panel" as never)).toBe(false)
+  it("excludes synthesizer-only pattern kinds from the palette but not the catalog", () => {
+    // They used to be absent from the catalog entirely, which meant a
+    // synthesized graph opened in the editor rendered each one as its raw kind
+    // string under a generic `Box`. Catalogued and hidden gives them a real
+    // label and icon while keeping them un-droppable.
+    const palette = new Set(groupedCatalog().flatMap((g) => g.entries.map((e) => e.kind)))
+    for (const kind of ["pattern.synthesize", "pattern.judge-panel"] as const) {
+      expect(palette.has(kind)).toBe(false)
+      expect(nodeCatalogEntry(kind).hidden).toBe(true)
+      expect(nodeCatalogEntry(kind).label).not.toBe(kind)
+    }
   })
 
   it("each category has at least one entry", () => {

@@ -28,5 +28,6 @@
   "runWithWarnings": "Running with {count} warning(s).",
   "savedWithWarnings": "Saved with {count} warning(s).",
   "selfParent": "A node can't be its own container.",
+  "synthesizerOnly": "This node is emitted by the {lifecycle, select, team {agent-team} plan {plan} other {}} synthesizer and needs that run's context. Run it through action.team.run (or action.plan.run) instead of this workflow's Run button.",
   "title": "Problems"
 }

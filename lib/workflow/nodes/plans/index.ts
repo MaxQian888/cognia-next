@@ -10,6 +10,7 @@ import type {
 } from "@/types/agent/plan"
 import { registerNodeExecutor } from "../registry"
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
+import type { PlanRunContext } from "@/lib/agent/plan/plan-run-context"
 import { listAllPlans, listPlanEvents } from "@/lib/db/plans"
 import { getSession } from "@/lib/db/sessions"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
@@ -312,6 +313,57 @@ registerNodeExecutor({
 // the kind-specific work (agent_turn / approval_gate / sub_workflow), and
 // writes the terminal status back. Retryable so the orchestrator re-runs
 // transient failures per the plan's error policy.
+/**
+ * Build a `PlanRunContext` for a workflow the plan runtime is NOT driving.
+ *
+ * `/plan to-workflow` writes a durable, editable workflow whose body is
+ * `action.plan.step.dispatch` nodes, and its own copy tells the user "the
+ * workflow is now yours to edit and re-run". Pressing Run on it always failed
+ * with `no PlanRunContext registered`, because only `runPlan` registered one.
+ *
+ * The context is five fields, so the standalone path rebuilds it from the
+ * node's `planId` rather than duplicating the runtime: the same plan snapshot,
+ * the same `resolvePlanExecutionRoot`, and the runtime's own `setStepStatus`
+ * as the writer, so step statuses land in exactly one place either way.
+ *
+ * Registered for the run so sibling step nodes reuse it, and torn down when
+ * the run's abort signal fires.
+ */
+async function bootstrapPlanRunContext(
+  runId: string,
+  planId: string
+): Promise<PlanRunContext | undefined> {
+  const [{ getPlan }, planRunCtx, { resolvePlanExecutionRoot }] = await Promise.all([
+    import("@/lib/db/plans"),
+    import("@/lib/agent/plan/plan-run-context"),
+    import("@/lib/agent/plan/step-workspace"),
+  ])
+  // Re-check under await: two step nodes can reach this concurrently, and the
+  // first one to finish should win rather than both registering a context.
+  const existing = planRunCtx.getPlanRunContext(runId)
+  if (existing) return existing
+
+  const plan = await getPlan(planId)
+  if (!plan) return undefined
+
+  const executionRoot = await resolvePlanExecutionRoot(plan).catch(() => undefined)
+  const runtime = getPlanRuntime()
+  const ctx: PlanRunContext = {
+    runId,
+    planId,
+    plan,
+    ...(plan.characterId ? { characterId: plan.characterId } : {}),
+    ...(executionRoot ? { executionRoot: executionRoot.root } : {}),
+    writer: {
+      setStepStatus: async (stepId, status, patch) => {
+        await runtime.setStepStatus(planId, stepId, status, patch)
+      },
+    },
+  }
+  planRunCtx.registerPlanRunContext(ctx)
+  return ctx
+}
+
 registerNodeExecutor({
   kind: "action.plan.step.dispatch",
   typeVersion: 1,
@@ -325,10 +377,11 @@ registerNodeExecutor({
       import("@/lib/agent/plan/plan-run-context"),
       import("@/lib/agent/plan/step-dispatch"),
     ])
-    const runCtx = getPlanRunContext(ctx.runId)
+    const runCtx =
+      getPlanRunContext(ctx.runId) ?? (await bootstrapPlanRunContext(ctx.runId, params.planId))
     if (!runCtx) {
       throw nonRetryable(
-        `action.plan.step.dispatch: no PlanRunContext registered for runId=${ctx.runId}`
+        `action.plan.step.dispatch: plan ${params.planId} not found, and no PlanRunContext is registered for runId=${ctx.runId}`
       )
     }
     return dispatchPlanStepNode(runCtx, params.stepId, ctx.signal)

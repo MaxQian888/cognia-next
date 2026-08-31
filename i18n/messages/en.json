@@ -41767,6 +41767,7 @@
       "runWithWarnings": "Running with {count} warning(s).",
       "savedWithWarnings": "Saved with {count} warning(s).",
       "selfParent": "A node can't be its own container.",
+      "synthesizerOnly": "This node is emitted by the {lifecycle, select, team {agent-team} plan {plan} other {}} synthesizer and needs that run's context. Run it through action.team.run (or action.plan.run) instead of this workflow's Run button.",
       "title": "Problems"
     },
     "edgeInspector": {
@@ -44342,6 +44343,12 @@
           "placeholder": "step_"
         }
       },
+      "planStepDispatch": {
+        "stepId": {
+          "hint": "Which step of the plan this node runs. Set by the synthesizer.",
+          "label": "Step id"
+        }
+      },
       "planUpdateDraft": {
         "configJson": {
           "hint": "Partial PlanConfig patch.",
@@ -46117,6 +46124,12 @@
             "description": "Update one plan step's status and recompute plan progress counts.",
             "label": "Set plan step status"
           },
+          "step": {
+            "dispatch": {
+              "description": "Runs one step of an agent plan. Emitted by /plan to-workflow and by the plan runtime, one node per plan step.",
+              "label": "Dispatch plan step"
+            }
+          },
           "updateDraft": {
             "description": "Patch a non-executing plan's title, steps, config, or metadata.",
             "label": "Update plan draft"
@@ -46299,6 +46312,10 @@
             "dispatch": {
               "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored.",
               "label": "Dispatch team task"
+            },
+            "review": {
+              "description": "Blocking lead review of a teammate's output. Emitted by the agent-team synthesizer when task review is enabled.",
+              "label": "Review team task"
             }
           },
           "update": {
@@ -46521,6 +46538,32 @@
         "extract": {
           "description": "Run OCR on an image or PDF (URL, base64, or screen) and output its text.",
           "label": "Extract text (OCR)"
+        }
+      },
+      "pattern": {
+        "adversarial-verify": {
+          "description": "Runs independent skeptics against each finding, optionally one per lens. Majority-refute kills the finding.",
+          "label": "Adversarial verify"
+        },
+        "completeness-critic": {
+          "description": "Asks what is still missing: a modality not run, a claim unverified, a source unread. Its answer becomes the next round.",
+          "label": "Completeness critic"
+        },
+        "judge-panel": {
+          "description": "Generates one attempt per angle, scores each with a panel of judges, and surfaces the winner plus the ranking.",
+          "label": "Judge panel"
+        },
+        "loop-until-dry": {
+          "description": "Keeps spawning finders until N consecutive rounds add nothing new. Composed by the ultracode planner.",
+          "label": "Loop until dry"
+        },
+        "multi-modal-sweep": {
+          "description": "Fans out one finder per search modality, each blind to what the others surface. Composed by the ultracode planner.",
+          "label": "Multi-modal sweep"
+        },
+        "synthesize": {
+          "description": "Folds the surviving findings into one answer. The last phase of an ultracode composition.",
+          "label": "Synthesize"
         }
       },
       "trigger": {

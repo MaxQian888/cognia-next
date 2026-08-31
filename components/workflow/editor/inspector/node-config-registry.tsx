@@ -103,6 +103,7 @@ import {
   PlanRejectConfig,
   PlanRefineConfig,
   PlanSetStepStatusConfig,
+  PlanStepDispatchConfig,
   PlanTransitionConfig,
   PlanUpdateDraftConfig,
   SchedulerExecutionGetConfig,
@@ -245,6 +246,9 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.plan.delete": PlanTransitionConfig,
   "action.plan.run": PlanTransitionConfig,
   "action.plan.setStepStatus": PlanSetStepStatusConfig,
+  // Synthesizer-emitted, but `/plan to-workflow` hands the author a durable
+  // workflow full of these, so it needs a real form and not the JSON fallback.
+  "action.plan.step.dispatch": PlanStepDispatchConfig,
   "action.scheduler.task.create": SchedulerTaskCreateConfig,
   "action.scheduler.task.get": SchedulerTaskIdConfig,
   "action.scheduler.task.list": SchedulerTaskListConfig,

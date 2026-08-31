@@ -12,6 +12,34 @@
         "label": "请求审批"
       }
     },
+    "artifact": {
+      "create": {
+        "description": "把内容存成一个新的 artifact —— 图表、文档、代码、SVG、HTML 或图示。",
+        "label": "创建 Artifact"
+      },
+      "export": {
+        "description": "把 artifact 渲染成字节 —— 源码、PNG 或 PDF —— 交给后续步骤写盘或发送。图表栅格化需要其预览在屏幕上。",
+        "label": "导出 Artifact"
+      },
+      "get": {
+        "description": "完整读取某个 artifact，或列出会话里的全部 artifact。",
+        "label": "读取 Artifact"
+      },
+      "update": {
+        "description": "写入新内容，旧内容留作一个版本。遵守「应用前先审阅」设置。",
+        "label": "更新 Artifact"
+      }
+    },
+    "canvas": {
+      "create": {
+        "description": "用给定内容新建一个可编辑的画布文档。",
+        "label": "创建画布文档"
+      },
+      "get": {
+        "description": "完整读取某个画布文档，或列出会话里的全部文档。",
+        "label": "读取画布文档"
+      }
+    },
     "character": {
       "create": {
         "description": "新建一个角色（员工）。",
@@ -75,29 +103,29 @@
       }
     },
     "editor": {
+      "applyEdit": {
+        "description": "把已写入磁盘的文件反映为可撤销的编辑器内改动，而不是一次生硬的外部重载。磁盘始终是真相源。",
+        "label": "在编辑器中反映改动"
+      },
       "open": {
-        "label": "在编辑器中打开",
-        "description": "在 Pro IDE 中打开文件并定位到指定行。默认使用当前绑定的 Pro IDE 工作区。"
-      },
-      "reveal": {
-        "label": "在编辑器资源管理器中定位",
-        "description": "在 Pro IDE 的文件资源管理器中定位某个路径，但不打开它。"
-      },
-      "showDiff": {
-        "label": "展示差异以供审阅",
-        "description": "在 Pro IDE 原生差异视图中，将建议内容与磁盘上的文件并排展示。建议内容只存在于内存中，绝不写入磁盘。"
+        "description": "在 Pro IDE 中打开文件并定位到指定行。默认使用当前绑定的 Pro IDE 工作区。",
+        "label": "在编辑器中打开"
       },
       "readActive": {
-        "label": "读取当前编辑器",
-        "description": "读取用户正在查看的内容：聚焦的文件、选区、选中文本、诊断信息、已打开的编辑器。进入运行上下文前会经过 PII 筛查。"
+        "description": "读取用户正在查看的内容：聚焦的文件、选区、选中文本、诊断信息、已打开的编辑器。进入运行上下文前会经过 PII 筛查。",
+        "label": "读取当前编辑器"
       },
-      "applyEdit": {
-        "label": "在编辑器中反映改动",
-        "description": "把已写入磁盘的文件反映为可撤销的编辑器内改动，而不是一次生硬的外部重载。磁盘始终是真相源。"
+      "reveal": {
+        "description": "在 Pro IDE 的文件资源管理器中定位某个路径，但不打开它。",
+        "label": "在编辑器资源管理器中定位"
       },
       "saveAll": {
-        "label": "保存编辑器缓冲区",
-        "description": "把 Pro IDE 中未保存的缓冲区刷入磁盘，使后续步骤读到的正是用户当前看到的内容。用 'path' 可只保存单个文件。"
+        "description": "把 Pro IDE 中未保存的缓冲区刷入磁盘，使后续步骤读到的正是用户当前看到的内容。用 'path' 可只保存单个文件。",
+        "label": "保存编辑器缓冲区"
+      },
+      "showDiff": {
+        "description": "在 Pro IDE 原生差异视图中，将建议内容与磁盘上的文件并排展示。建议内容只存在于内存中，绝不写入磁盘。",
+        "label": "展示差异以供审阅"
       }
     },
     "git": {
@@ -305,6 +333,12 @@
         "description": "更新单个计划步骤的状态并重新计算计划进度。",
         "label": "设置计划步骤状态"
       },
+      "step": {
+        "dispatch": {
+          "description": "执行一个 Agent 计划步骤。由 /plan to-workflow 与计划运行时产出，每步一个节点。",
+          "label": "派发计划步骤"
+        }
+      },
       "updateDraft": {
         "description": "修改非执行中计划的标题、步骤、配置或元数据。",
         "label": "更新计划草稿"
@@ -487,6 +521,10 @@
         "dispatch": {
           "description": "由智能体团队合成器生成的内部节点，每个团队任务一个，不可手工编排。",
           "label": "派发团队任务"
+        },
+        "review": {
+          "description": "由 lead 对队友产出做阻塞式评审。启用任务评审时由 agent-team 合成器产出。",
+          "label": "评审团队任务"
         }
       },
       "update": {
@@ -530,34 +568,6 @@
       "rag": {
         "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。",
         "label": "数字分身 RAG"
-      }
-    },
-    "artifact": {
-      "create": {
-        "label": "创建 Artifact",
-        "description": "把内容存成一个新的 artifact —— 图表、文档、代码、SVG、HTML 或图示。"
-      },
-      "update": {
-        "label": "更新 Artifact",
-        "description": "写入新内容，旧内容留作一个版本。遵守「应用前先审阅」设置。"
-      },
-      "get": {
-        "label": "读取 Artifact",
-        "description": "完整读取某个 artifact，或列出会话里的全部 artifact。"
-      },
-      "export": {
-        "label": "导出 Artifact",
-        "description": "把 artifact 渲染成字节 —— 源码、PNG 或 PDF —— 交给后续步骤写盘或发送。图表栅格化需要其预览在屏幕上。"
-      }
-    },
-    "canvas": {
-      "create": {
-        "label": "创建画布文档",
-        "description": "用给定内容新建一个可编辑的画布文档。"
-      },
-      "get": {
-        "label": "读取画布文档",
-        "description": "完整读取某个画布文档，或列出会话里的全部文档。"
       }
     }
   },
@@ -700,18 +710,6 @@
     }
   },
   "knowledge": {
-    "source": {
-      "description": "创建或增量更新具有稳定标识的知识库来源。",
-      "label": "知识来源"
-    },
-    "parse": {
-      "description": "将一个已持久化来源解析为受保护的运行级产物。",
-      "label": "解析知识"
-    },
-    "transform": {
-      "description": "在分块前规范化解析内容并执行 PII 脱敏。",
-      "label": "转换知识"
-    },
     "chunk": {
       "description": "创建包含稳定位置元数据的格式感知知识分块。",
       "label": "知识分块"
@@ -724,6 +722,10 @@
       "description": "在发布前校验向量数量和维度。",
       "label": "校验知识索引"
     },
+    "parse": {
+      "description": "将一个已持久化来源解析为受保护的运行级产物。",
+      "label": "解析知识"
+    },
     "publish": {
       "description": "原子发布经过校验的不可变索引修订。",
       "label": "发布知识修订"
@@ -731,12 +733,46 @@
     "retrieve": {
       "description": "从冻结的知识库修订中检索经过 ACL 过滤的知识分块。",
       "label": "检索知识"
+    },
+    "source": {
+      "description": "创建或增量更新具有稳定标识的知识库来源。",
+      "label": "知识来源"
+    },
+    "transform": {
+      "description": "在分块前规范化解析内容并执行 PII 脱敏。",
+      "label": "转换知识"
     }
   },
   "ocr": {
     "extract": {
       "description": "对图片或 PDF（URL、base64 或屏幕）执行 OCR 并输出文本。",
       "label": "提取文本（OCR）"
+    }
+  },
+  "pattern": {
+    "adversarial-verify": {
+      "description": "为每条发现派出多个独立质疑者，可按视角分工。多数质疑成立即淘汰该发现。",
+      "label": "对抗式验证"
+    },
+    "completeness-critic": {
+      "description": "追问还缺什么：哪种检索没跑、哪条结论没验证、哪份资料没读。其答案成为下一轮的输入。",
+      "label": "完整性审查"
+    },
+    "judge-panel": {
+      "description": "每个切入角度产出一份方案，由多名独立评委打分，给出优胜方案与完整排名。",
+      "label": "评审团"
+    },
+    "loop-until-dry": {
+      "description": "持续派出 finder，直到连续 N 轮没有任何新发现。由 ultracode 规划器编排。",
+      "label": "循环至无新增"
+    },
+    "multi-modal-sweep": {
+      "description": "每种检索方式派出一个 finder，彼此不知道对方找到了什么。由 ultracode 规划器编排。",
+      "label": "多模态扫描"
+    },
+    "synthesize": {
+      "description": "把存活下来的发现收敛成一个答案。ultracode 编排的最后一个阶段。",
+      "label": "汇总成稿"
     }
   },
   "trigger": {

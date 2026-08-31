@@ -661,3 +661,31 @@ export function PlanSetStepStatusConfig({ params, onChange }: ConfigProps) {
     </FieldGroup>
   )
 }
+
+/**
+ * `action.plan.step.dispatch` is synthesizer-emitted (`hidden` in the catalog),
+ * but `/plan to-workflow` writes a durable workflow made of these, so an author
+ * WILL select one. It used to fall through to the raw-JSON editor.
+ */
+export function PlanStepDispatchConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.planStepDispatch")
+  const stepId = readString(params, "stepId")
+  return (
+    <FieldGroup>
+      <PlanIdField params={params} onChange={onChange} id="plan-step-dispatch-id" />
+      <Field
+        label={t("stepId.label")}
+        htmlFor="plan-step-dispatch-step"
+        hint={t("stepId.hint")}
+        name="stepId"
+        required
+      >
+        <Input
+          id="plan-step-dispatch-step"
+          value={stepId}
+          onChange={(e) => onChange(patchParam(params, "stepId", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}

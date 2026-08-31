@@ -16,6 +16,7 @@ import { checkLoopBodyJoinPolicy, checkReachability } from "./checks/graph-struc
 import { checkExpressionRefs } from "./checks/expression-refs"
 import { checkCredentials, checkKindAvailability } from "./checks/availability"
 import { checkDesktopOnly } from "./checks/desktop-only"
+import { checkSynthesizerOnly } from "./checks/synthesizer-only"
 import type { Diagnostic, DiagnosticCode, DiagnosticsInput, DiagnosticsResult } from "./types"
 
 /** Per-node Zod param validation → one diagnostic per failing field. */
@@ -89,6 +90,7 @@ export function runDiagnostics(input: DiagnosticsInput): DiagnosticsResult {
     ...checkCredentials(workflow),
     ...(isKindAvailable ? checkKindAvailability(workflow, isKindAvailable) : []),
     ...checkDesktopOnly(workflow, isWeb),
+    ...checkSynthesizerOnly(workflow),
   ]
   return indexDiagnostics(all)
 }

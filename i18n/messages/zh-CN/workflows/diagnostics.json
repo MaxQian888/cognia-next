@@ -28,5 +28,6 @@
   "runWithWarnings": "运行中（含 {count} 条警告）。",
   "savedWithWarnings": "已保存（含 {count} 条警告）。",
   "selfParent": "节点不能将自身作为容器。",
+  "synthesizerOnly": "该节点由{lifecycle, select, team {agent-team} plan {计划} other {}}合成器产出，需要那次运行的上下文。请通过 action.team.run（或 action.plan.run）驱动，而不是本工作流的运行按钮。",
   "title": "问题"
 }

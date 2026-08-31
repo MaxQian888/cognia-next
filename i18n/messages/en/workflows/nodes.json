@@ -12,6 +12,34 @@
         "label": "Request approval"
       }
     },
+    "artifact": {
+      "create": {
+        "description": "Save content as a new artifact — chart, document, code, SVG, HTML or diagram.",
+        "label": "Create artifact"
+      },
+      "export": {
+        "description": "Render an artifact to bytes — source, PNG or PDF — for a later step to write or send. Rasterising a chart needs its preview on screen.",
+        "label": "Export artifact"
+      },
+      "get": {
+        "description": "Read one artifact in full, or list the artifacts in a conversation.",
+        "label": "Read artifact"
+      },
+      "update": {
+        "description": "Write new content to an artifact, keeping the old one as a version. Honours “Review before apply”.",
+        "label": "Update artifact"
+      }
+    },
+    "canvas": {
+      "create": {
+        "description": "Open a new editable Canvas document with the given content.",
+        "label": "Create Canvas document"
+      },
+      "get": {
+        "description": "Read one Canvas document in full, or list the documents in a conversation.",
+        "label": "Read Canvas document"
+      }
+    },
     "character": {
       "create": {
         "description": "Creates a new character (employee) row.",
@@ -75,29 +103,29 @@
       }
     },
     "editor": {
+      "applyEdit": {
+        "description": "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth.",
+        "label": "Reflect edit in editor"
+      },
       "open": {
-        "label": "Open in editor",
-        "description": "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace."
-      },
-      "reveal": {
-        "label": "Reveal in editor explorer",
-        "description": "Reveal a path in the Pro IDE file explorer without opening it."
-      },
-      "showDiff": {
-        "label": "Show diff for review",
-        "description": "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk."
+        "description": "Open a file in the Pro IDE and reveal a line. Defaults to the bound Pro IDE workspace.",
+        "label": "Open in editor"
       },
       "readActive": {
-        "label": "Read active editor",
-        "description": "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run."
+        "description": "Read what the user is looking at: focused file, selection, selected text, diagnostics, open editors. PII-screened before it enters the run.",
+        "label": "Read active editor"
       },
-      "applyEdit": {
-        "label": "Reflect edit in editor",
-        "description": "Reflect an already-written file as an undo-able in-editor edit instead of a bare external reload. Disk stays the source of truth."
+      "reveal": {
+        "description": "Reveal a path in the Pro IDE file explorer without opening it.",
+        "label": "Reveal in editor explorer"
       },
       "saveAll": {
-        "label": "Save editor buffers",
-        "description": "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'."
+        "description": "Flush dirty Pro IDE buffers to disk so later steps read what the user is actually looking at. Narrow it to one file with 'path'.",
+        "label": "Save editor buffers"
+      },
+      "showDiff": {
+        "description": "Show proposed content beside a file in the Pro IDE's native diff view. The proposal is served from memory and never written to disk.",
+        "label": "Show diff for review"
       }
     },
     "git": {
@@ -305,6 +333,12 @@
         "description": "Update one plan step's status and recompute plan progress counts.",
         "label": "Set plan step status"
       },
+      "step": {
+        "dispatch": {
+          "description": "Runs one step of an agent plan. Emitted by /plan to-workflow and by the plan runtime, one node per plan step.",
+          "label": "Dispatch plan step"
+        }
+      },
       "updateDraft": {
         "description": "Patch a non-executing plan's title, steps, config, or metadata.",
         "label": "Update plan draft"
@@ -487,6 +521,10 @@
         "dispatch": {
           "description": "Internal node emitted by the agent-team synthesizer. One node per team task. Not hand-authored.",
           "label": "Dispatch team task"
+        },
+        "review": {
+          "description": "Blocking lead review of a teammate's output. Emitted by the agent-team synthesizer when task review is enabled.",
+          "label": "Review team task"
         }
       },
       "update": {
@@ -530,34 +568,6 @@
       "rag": {
         "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
         "label": "Twin RAG"
-      }
-    },
-    "artifact": {
-      "create": {
-        "label": "Create artifact",
-        "description": "Save content as a new artifact — chart, document, code, SVG, HTML or diagram."
-      },
-      "update": {
-        "label": "Update artifact",
-        "description": "Write new content to an artifact, keeping the old one as a version. Honours “Review before apply”."
-      },
-      "get": {
-        "label": "Read artifact",
-        "description": "Read one artifact in full, or list the artifacts in a conversation."
-      },
-      "export": {
-        "label": "Export artifact",
-        "description": "Render an artifact to bytes — source, PNG or PDF — for a later step to write or send. Rasterising a chart needs its preview on screen."
-      }
-    },
-    "canvas": {
-      "create": {
-        "label": "Create Canvas document",
-        "description": "Open a new editable Canvas document with the given content."
-      },
-      "get": {
-        "label": "Read Canvas document",
-        "description": "Read one Canvas document in full, or list the documents in a conversation."
       }
     }
   },
@@ -700,18 +710,6 @@
     }
   },
   "knowledge": {
-    "source": {
-      "description": "Create or incrementally update a stable Knowledge Base source.",
-      "label": "Knowledge source"
-    },
-    "parse": {
-      "description": "Parse one persisted source into a protected run-scoped artifact.",
-      "label": "Parse knowledge"
-    },
-    "transform": {
-      "description": "Normalize and PII-redact parsed content before chunking.",
-      "label": "Transform knowledge"
-    },
     "chunk": {
       "description": "Create format-aware chunks with stable position metadata.",
       "label": "Chunk knowledge"
@@ -724,6 +722,10 @@
       "description": "Validate vector counts and dimensions before publication.",
       "label": "Validate knowledge index"
     },
+    "parse": {
+      "description": "Parse one persisted source into a protected run-scoped artifact.",
+      "label": "Parse knowledge"
+    },
     "publish": {
       "description": "Atomically publish a validated immutable index generation.",
       "label": "Publish knowledge revision"
@@ -731,12 +733,46 @@
     "retrieve": {
       "description": "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
       "label": "Retrieve knowledge"
+    },
+    "source": {
+      "description": "Create or incrementally update a stable Knowledge Base source.",
+      "label": "Knowledge source"
+    },
+    "transform": {
+      "description": "Normalize and PII-redact parsed content before chunking.",
+      "label": "Transform knowledge"
     }
   },
   "ocr": {
     "extract": {
       "description": "Run OCR on an image or PDF (URL, base64, or screen) and output its text.",
       "label": "Extract text (OCR)"
+    }
+  },
+  "pattern": {
+    "adversarial-verify": {
+      "description": "Runs independent skeptics against each finding, optionally one per lens. Majority-refute kills the finding.",
+      "label": "Adversarial verify"
+    },
+    "completeness-critic": {
+      "description": "Asks what is still missing: a modality not run, a claim unverified, a source unread. Its answer becomes the next round.",
+      "label": "Completeness critic"
+    },
+    "judge-panel": {
+      "description": "Generates one attempt per angle, scores each with a panel of judges, and surfaces the winner plus the ranking.",
+      "label": "Judge panel"
+    },
+    "loop-until-dry": {
+      "description": "Keeps spawning finders until N consecutive rounds add nothing new. Composed by the ultracode planner.",
+      "label": "Loop until dry"
+    },
+    "multi-modal-sweep": {
+      "description": "Fans out one finder per search modality, each blind to what the others surface. Composed by the ultracode planner.",
+      "label": "Multi-modal sweep"
+    },
+    "synthesize": {
+      "description": "Folds the surviving findings into one answer. The last phase of an ultracode composition.",
+      "label": "Synthesize"
     }
   },
   "trigger": {

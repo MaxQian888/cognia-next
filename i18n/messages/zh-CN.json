@@ -41767,6 +41767,7 @@
       "runWithWarnings": "运行中（含 {count} 条警告）。",
       "savedWithWarnings": "已保存（含 {count} 条警告）。",
       "selfParent": "节点不能将自身作为容器。",
+      "synthesizerOnly": "该节点由{lifecycle, select, team {agent-team} plan {计划} other {}}合成器产出，需要那次运行的上下文。请通过 action.team.run（或 action.plan.run）驱动，而不是本工作流的运行按钮。",
       "title": "问题"
     },
     "edgeInspector": {
@@ -44342,6 +44343,12 @@
           "placeholder": "step_"
         }
       },
+      "planStepDispatch": {
+        "stepId": {
+          "hint": "本节点执行计划中的哪一步。由合成器写入。",
+          "label": "步骤 ID"
+        }
+      },
       "planUpdateDraft": {
         "configJson": {
           "hint": "局部 PlanConfig 补丁。",
@@ -46117,6 +46124,12 @@
             "description": "更新单个计划步骤的状态并重新计算计划进度。",
             "label": "设置计划步骤状态"
           },
+          "step": {
+            "dispatch": {
+              "description": "执行一个 Agent 计划步骤。由 /plan to-workflow 与计划运行时产出，每步一个节点。",
+              "label": "派发计划步骤"
+            }
+          },
           "updateDraft": {
             "description": "修改非执行中计划的标题、步骤、配置或元数据。",
             "label": "更新计划草稿"
@@ -46299,6 +46312,10 @@
             "dispatch": {
               "description": "由智能体团队合成器生成的内部节点，每个团队任务一个，不可手工编排。",
               "label": "派发团队任务"
+            },
+            "review": {
+              "description": "由 lead 对队友产出做阻塞式评审。启用任务评审时由 agent-team 合成器产出。",
+              "label": "评审团队任务"
             }
           },
           "update": {
@@ -46521,6 +46538,32 @@
         "extract": {
           "description": "对图片或 PDF（URL、base64 或屏幕）执行 OCR 并输出文本。",
           "label": "提取文本（OCR）"
+        }
+      },
+      "pattern": {
+        "adversarial-verify": {
+          "description": "为每条发现派出多个独立质疑者，可按视角分工。多数质疑成立即淘汰该发现。",
+          "label": "对抗式验证"
+        },
+        "completeness-critic": {
+          "description": "追问还缺什么：哪种检索没跑、哪条结论没验证、哪份资料没读。其答案成为下一轮的输入。",
+          "label": "完整性审查"
+        },
+        "judge-panel": {
+          "description": "每个切入角度产出一份方案，由多名独立评委打分，给出优胜方案与完整排名。",
+          "label": "评审团"
+        },
+        "loop-until-dry": {
+          "description": "持续派出 finder，直到连续 N 轮没有任何新发现。由 ultracode 规划器编排。",
+          "label": "循环至无新增"
+        },
+        "multi-modal-sweep": {
+          "description": "每种检索方式派出一个 finder，彼此不知道对方找到了什么。由 ultracode 规划器编排。",
+          "label": "多模态扫描"
+        },
+        "synthesize": {
+          "description": "把存活下来的发现收敛成一个答案。ultracode 编排的最后一个阶段。",
+          "label": "汇总成稿"
         }
       },
       "trigger": {

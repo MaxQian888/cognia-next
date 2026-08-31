@@ -1382,6 +1382,78 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "StickyNote",
     keywords: ["note", "sticky", "comment"],
   },
+  // ── Synthesizer-emitted kinds ─────────────────────────────────────────────
+  //
+  // All `hidden`, so none reaches the palette: their executors need a run
+  // context (`TeamRunContext` / `PlanRunContext`) that only the team or plan
+  // lifecycle registers, and a hand-placed copy fails non-retryably. They are
+  // catalogued anyway because a synthesized graph IS openable in the editor
+  // (`/plan to-workflow` writes a durable one), and without an entry every
+  // node rendered as its raw kind string under a generic `Box`.
+  "action.plan.step.dispatch": {
+    label: "Dispatch plan step",
+    description:
+      "Runs one step of an agent plan. Emitted by `/plan to-workflow` and by the plan runtime, one node per plan step.",
+    iconName: "ListChecks",
+    keywords: ["plan", "step", "dispatch"],
+    hidden: true,
+  },
+  "action.team.task.review": {
+    label: "Review team task",
+    description:
+      "Blocking lead review of a teammate's output (ADR-0071). Emitted by the agent-team synthesizer when task review is enabled.",
+    iconName: "ClipboardCheck",
+    keywords: ["team", "review", "task"],
+    hidden: true,
+  },
+  "pattern.multi-modal-sweep": {
+    label: "Multi-modal sweep",
+    description:
+      "Fans out one finder per search modality, each blind to what the others surface. Composed by the ultracode planner.",
+    iconName: "Radar",
+    keywords: ["ultracode", "pattern", "sweep", "find"],
+    hidden: true,
+  },
+  "pattern.loop-until-dry": {
+    label: "Loop until dry",
+    description:
+      "Keeps spawning finders until N consecutive rounds add nothing new. Composed by the ultracode planner.",
+    iconName: "RefreshCw",
+    keywords: ["ultracode", "pattern", "loop", "exhaustive"],
+    hidden: true,
+  },
+  "pattern.adversarial-verify": {
+    label: "Adversarial verify",
+    description:
+      "Runs independent skeptics against each finding, optionally one per lens. Majority-refute kills the finding.",
+    iconName: "ShieldQuestion",
+    keywords: ["ultracode", "pattern", "verify", "refute"],
+    hidden: true,
+  },
+  "pattern.judge-panel": {
+    label: "Judge panel",
+    description:
+      "Generates one attempt per angle, scores each with a panel of judges, and surfaces the winner plus the ranking.",
+    iconName: "Scale",
+    keywords: ["ultracode", "pattern", "judge", "score"],
+    hidden: true,
+  },
+  "pattern.completeness-critic": {
+    label: "Completeness critic",
+    description:
+      "Asks what is still missing: a modality not run, a claim unverified, a source unread. Its answer becomes the next round.",
+    iconName: "SearchCheck",
+    keywords: ["ultracode", "pattern", "critic", "coverage"],
+    hidden: true,
+  },
+  "pattern.synthesize": {
+    label: "Synthesize",
+    description:
+      "Folds the surviving findings into one answer. The last phase of an ultracode composition.",
+    iconName: "Combine",
+    keywords: ["ultracode", "pattern", "synthesize", "merge"],
+    hidden: true,
+  },
   "annotation.group": {
     label: "Group frame",
     description: "Visual group around several nodes. Has no execution.",

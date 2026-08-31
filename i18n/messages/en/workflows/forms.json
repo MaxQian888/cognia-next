@@ -2326,6 +2326,12 @@
       "placeholder": "step_"
     }
   },
+  "planStepDispatch": {
+    "stepId": {
+      "hint": "Which step of the plan this node runs. Set by the synthesizer.",
+      "label": "Step id"
+    }
+  },
   "planUpdateDraft": {
     "configJson": {
       "hint": "Partial PlanConfig patch.",

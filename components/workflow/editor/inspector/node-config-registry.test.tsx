@@ -13,18 +13,17 @@ import {
 // Kinds that intentionally fall back to the raw-JSON editor (no dedicated form).
 // Keep this list tight — adding a kind here must be a deliberate decision.
 const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
-  // The kinds below are synthesizer-emitted only — they carry NO palette /
-  // catalog entry (see `lib/workflow/nodes/catalog.ts` and the "not placed by
-  // users in the editor" comments in `types/workflow/visual.ts`), so the
-  // inspector never opens a dedicated form for them. They are built by the
-  // synthesizer at run time and validated by their executors:
-  //   • `action.plan.step.dispatch` — one-per-PlanStep (Unified Plan Execution
-  //     Hub, ADR-0045).
+  // The kinds below are synthesizer-emitted. They are `hidden` in the catalog
+  // so the palette never offers them, and they are built by the synthesizer at
+  // run time and validated by their executors:
   //   • the six `pattern.*` kinds — ultracode orchestration nodes emitted by
   //     `synthesize-ultracode.ts` (ADR-0022 addendum).
   //   • `action.team.task.review` — one-per-task blocking lead review, emitted
   //     by `synthesize-workflow.ts` when `taskReview.enabled` (ADR-0071).
-  "action.plan.step.dispatch",
+  //
+  // `action.plan.step.dispatch` is deliberately NOT here any more:
+  // `/plan to-workflow` writes a durable workflow made of those nodes and
+  // hands it to the author, so one of them WILL be selected in the inspector.
   "action.team.task.review",
   "pattern.multi-modal-sweep",
   "pattern.loop-until-dry",

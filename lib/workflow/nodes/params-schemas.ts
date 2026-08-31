@@ -12,6 +12,7 @@
 
 import { z } from "zod"
 import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
+import { VERIFIER_LENSES } from "@/types/agent/ultracode"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
 /**
@@ -460,6 +461,15 @@ export const PLAN_STEP_KIND_VALUES = [
   "approval_gate",
   "editor_review",
 ] as const
+
+/**
+ * Every ultracode pattern node names the team it fans out through and the
+ * objective its agents work toward. Mirrors `PatternParamsBase`.
+ */
+const PatternParamsBase = z.object({
+  teamId: requiredString("required"),
+  objective: requiredString("required"),
+})
 
 const PlanStepKind = z.enum(PLAN_STEP_KIND_VALUES)
 
@@ -2202,15 +2212,30 @@ export const PARAMS_SCHEMAS = {
     path: z.string().optional(),
     autoStart: z.boolean().optional(),
   }),
-  // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted only — the
-  // params are shaped by `synthesize-ultracode.ts`, validated by the pattern
-  // executors at run time, so the definition-level schema stays permissive.
-  "pattern.multi-modal-sweep": z.object({}).passthrough(),
-  "pattern.loop-until-dry": z.object({}).passthrough(),
-  "pattern.adversarial-verify": z.object({}).passthrough(),
-  "pattern.judge-panel": z.object({}).passthrough(),
-  "pattern.completeness-critic": z.object({}).passthrough(),
-  "pattern.synthesize": z.object({}).passthrough(),
+  // Ultracode patterns (ADR-0022 addendum). Synthesizer-emitted, so nobody
+  // hand-types these params, but a permissive `passthrough()` meant the
+  // inspector could not tell an author what a pattern node on their canvas
+  // actually needs, and a malformed one only failed at run time. The shapes
+  // are `types/agent/ultracode.ts`'s.
+  "pattern.multi-modal-sweep": PatternParamsBase.extend({
+    modalities: z.array(z.string()).min(1),
+  }),
+  "pattern.loop-until-dry": PatternParamsBase.extend({
+    finderPrompt: requiredString("required"),
+    dryRoundsToStop: numberRange(1),
+    maxRounds: numberRange(1),
+    findersPerRound: numberRange(1).optional(),
+  }),
+  "pattern.adversarial-verify": PatternParamsBase.extend({
+    skepticsPerFinding: numberRange(1),
+    lenses: z.array(z.enum(VERIFIER_LENSES)).optional(),
+  }),
+  "pattern.judge-panel": PatternParamsBase.extend({
+    angles: z.array(z.string()).min(1),
+    judgesPerAttempt: numberRange(1),
+  }),
+  "pattern.completeness-critic": PatternParamsBase,
+  "pattern.synthesize": PatternParamsBase,
 } satisfies Record<WorkflowNodeKind, z.ZodTypeAny>
 
 /**
