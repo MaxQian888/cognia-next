@@ -24,6 +24,7 @@ import {
   type ConfigComponent,
 } from "@/lib/plugin/bridge/config-component-bridge"
 import type { PluginManifest } from "@/types/plugin/plugin"
+import { EyeIcon, EyeOffIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -685,6 +686,21 @@ function renderInput(args: RenderArgs) {
   const { field, fieldPath, id, value, errors, onChange, t } = args
   switch (field.type) {
     case "string": {
+      // `configSchema.properties[].secret` was validated in full
+      // (`validation.ts`: string-only, no `default`, top-level only) and the
+      // form had no branch for it, so a field a plugin declared as a secret
+      // rendered as an ordinary text box: typed in the clear, shoulder-
+      // surfable, and indistinguishable from a nickname.
+      if (field.raw.secret === true) {
+        return (
+          <SecretInput
+            id={id}
+            value={typeof value === "string" ? value : ""}
+            onChange={onChange}
+            t={t}
+          />
+        )
+      }
       const long = typeof field.raw.format === "string" && field.raw.format === "textarea"
       const Comp = long ? Textarea : Input
       return (
@@ -955,6 +971,57 @@ function OneOfGroup({
           onChange={(v) => onChange({ ...value, __variant: variantKey, [childKey]: v })}
         />
       ))}
+    </div>
+  )
+}
+
+/**
+ * A masked input for a `secret: true` config field.
+ *
+ * The note under it states where the value actually goes. The type's own
+ * documentation promises `ctx.configuration.getSecret(path)` / `hasSecret()`,
+ * and neither method exists on the configuration API, so a secret field is
+ * saved with the rest of the plugin's config like any other string. Masking
+ * the input without saying that would imply keyring-grade handling the host
+ * does not do yet.
+ */
+function SecretInput({
+  id,
+  value,
+  onChange,
+  t,
+}: {
+  id: string
+  value: string
+  onChange: (next: string) => void
+  t: (key: string) => string
+}) {
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <Input
+          id={id}
+          type={revealed ? "text" : "password"}
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid={`config-secret-${id}`}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label={revealed ? t("secretHide") : t("secretShow")}
+          onClick={() => setRevealed((prev) => !prev)}
+          data-testid={`config-secret-toggle-${id}`}
+        >
+          {revealed ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">{t("secretStorageNote")}</p>
     </div>
   )
 }

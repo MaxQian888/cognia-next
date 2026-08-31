@@ -459,4 +459,56 @@ describe("PluginConfigFormContent", () => {
       })
     )
   })
+
+  /**
+   * `configSchema.properties[].secret` was validated in full (string-only, no
+   * `default`, top-level only) and the form had no branch for it, so a field a
+   * plugin declared as a secret rendered as an ordinary text box.
+   */
+  describe("secret fields", () => {
+    const secretPlugin = () => ({
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: { apiKey: { type: "string", secret: true } },
+        },
+      },
+      config: {},
+    })
+
+    it("masks the value and offers a reveal toggle", () => {
+      mockPlugin = secretPlugin()
+      renderForm()
+      const input = screen.getByTestId("config-secret-plugin-config-apiKey") as HTMLInputElement
+      expect(input.type).toBe("password")
+      fireEvent.click(screen.getByTestId("config-secret-toggle-plugin-config-apiKey"))
+      expect(
+        (screen.getByTestId("config-secret-plugin-config-apiKey") as HTMLInputElement).type
+      ).toBe("text")
+    })
+
+    // Masking without saying where the value goes would imply keyring-grade
+    // handling the host does not do: `ctx.configuration.getSecret` does not
+    // exist, so a secret is saved with the rest of the config.
+    it("states where the value is stored", () => {
+      mockPlugin = secretPlugin()
+      renderForm()
+      expect(screen.getByText("secretStorageNote")).toBeInTheDocument()
+    })
+
+    it("leaves an ordinary string field unmasked", () => {
+      mockPlugin = {
+        ...schemaPlugin,
+        manifest: {
+          id: "p_conf",
+          configSchema: { type: "object", properties: { nickname: { type: "string" } } },
+        },
+        config: {},
+      }
+      renderForm()
+      expect(screen.queryByTestId("config-secret-plugin-config-nickname")).toBeNull()
+    })
+  })
 })

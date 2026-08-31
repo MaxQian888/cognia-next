@@ -13,6 +13,9 @@
   "oneOfVariant": "Variant",
   "save": "Save",
   "saving": "Saving…",
+  "secretHide": "Hide value",
+  "secretShow": "Show value",
+  "secretStorageNote": "Stored with this plugin's configuration on this device. Cognia does not sync it.",
   "unsupportedField": "Unsupported field shape — fall back to raw JSON.",
   "validation": {
     "format": "Must be a valid {format}.",

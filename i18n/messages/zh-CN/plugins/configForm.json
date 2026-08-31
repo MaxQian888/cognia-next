@@ -13,6 +13,9 @@
   "oneOfVariant": "变体",
   "save": "保存",
   "saving": "保存中…",
+  "secretHide": "隐藏内容",
+  "secretShow": "显示内容",
+  "secretStorageNote": "与该插件的配置一起保存在本设备上，Cognia 不会同步它。",
   "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。",
   "validation": {
     "format": "必须是有效的 {format}。",

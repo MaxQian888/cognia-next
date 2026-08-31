@@ -24,7 +24,7 @@ jest.mock("@/hooks/plugins", () => ({
 }))
 
 import { usePluginsStore } from "@/stores/plugins"
-import { PluginLibraryHeader } from "./plugin-library-header"
+import { PluginLibraryHeader, visibleSortModes } from "./plugin-library-header"
 
 beforeEach(() => {
   usePluginsStore.setState({
@@ -178,5 +178,34 @@ describe("PluginLibraryHeader", () => {
     })
     render(<PluginLibraryHeader />)
     expect(screen.queryByTestId("plugin-library-result-count")).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * `manifest.rating` is written only by a registry sync, and for a long time by
+ * nothing at all, so this option sorted by a field that was always undefined:
+ * picking it did nothing and explained nothing.
+ */
+describe("visibleSortModes", () => {
+  it("drops rating when no installed plugin carries one", () => {
+    expect(visibleSortModes([{ manifest: {} }], "name")).toEqual(["name", "updated", "usage"])
+  })
+
+  it("offers rating once the catalog has stamped one", () => {
+    expect(visibleSortModes([{ manifest: { rating: 4.5 } }], "name")).toContain("rating")
+  })
+
+  // Zero is a real rating, and distinct from an absent one.
+  it("treats a zero rating as a rating", () => {
+    expect(visibleSortModes([{ manifest: { rating: 0 } }], "name")).toContain("rating")
+  })
+
+  // A selection must not vanish under the user when the last rated row goes.
+  it("keeps rating while it is the active sort", () => {
+    expect(visibleSortModes([{ manifest: {} }], "rating")).toContain("rating")
+  })
+
+  it("never drops the other three", () => {
+    expect(visibleSortModes([], "name")).toEqual(["name", "updated", "usage"])
   })
 })

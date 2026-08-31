@@ -33,6 +33,27 @@ import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
 const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
 
+/**
+ * Drop "rating" when no installed plugin carries one.
+ *
+ * `manifest.rating` is written only by a registry sync, and for a long time by
+ * nothing at all, so the option sorted by a field that was always undefined:
+ * picking it did exactly nothing and said exactly nothing about why. Same rule
+ * as `visibleSegments` applies to a zero-count segment, and the same carve-out
+ * for the active value so a selection cannot vanish under the user.
+ *
+ * `rating === 0` is a real rating, and distinct from an absent one.
+ */
+export function visibleSortModes(
+  rows: ReadonlyArray<{ manifest: unknown }>,
+  active: PluginSortMode
+): PluginSortMode[] {
+  const anyRated = rows.some(
+    (row) => typeof (row.manifest as { rating?: unknown })?.rating === "number"
+  )
+  return SORT_MODES.filter((mode) => mode !== "rating" || anyRated || active === "rating")
+}
+
 export interface PluginLibraryHeaderProps {
   /** Forwarded to `PluginSectionToolbar`; the phone body passes "stacked". */
   layout?: PluginSectionToolbarProps["layout"]
@@ -49,7 +70,7 @@ export function PluginLibraryHeader({ layout }: PluginLibraryHeaderProps = {}) {
   const setQuery = usePluginsStore((s) => s.setQuery)
   const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
-  const { filtered, totals, loading } = usePlugins()
+  const { all, filtered, totals, loading } = usePlugins()
   // Library's status axis rides the toolbar's segments slot — the same
   // control Governance's view picker uses, and no longer a second copy of
   // the left rail's old sub-items.
@@ -94,7 +115,7 @@ export function PluginLibraryHeader({ layout }: PluginLibraryHeaderProps = {}) {
               </span>
             </SelectTrigger>
             <SelectContent>
-              {SORT_MODES.map((mode) => (
+              {visibleSortModes(all, sort).map((mode) => (
                 <SelectItem key={mode} value={mode}>
                   {tSort(`sortMode.${mode}` as never)}
                 </SelectItem>
