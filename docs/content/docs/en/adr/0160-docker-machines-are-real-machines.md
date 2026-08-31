@@ -1,9 +1,9 @@
 ---
-title: "0160: Docker machines are real machines, and the session follows"
+title: "0160 — Docker machines are real machines, and the session follows"
 description: "Containers stop being scratch processes: an explicit create/start/suspend/resume/stop/delete lifecycle backed by docker inspect, adoption by stable name, and a bound session's shell and file work running inside the machine under an attested policy."
 ---
 
-# ADR 0160: Docker machines are real machines
+# ADR 0160 — Docker machines are real machines
 
 **Status:** Accepted  
 **Date:** 2026-08-31  

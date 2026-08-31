@@ -1,9 +1,9 @@
 ---
-title: "0160：Docker 机器是真的机器，会话跟着一起跑"
+title: "0160 — Docker 机器是真的机器，会话跟着一起跑"
 description: "容器不再是一次性进程：显式的 create/start/suspend/resume/stop/delete 生命周期，以 docker inspect 为唯一真相源，按稳定名字接管既有容器，并让已绑定会话的 shell 与文件操作在受背书的策略下于机器内执行。"
 ---
 
-# ADR 0160：Docker 机器是真的机器
+# ADR 0160 — Docker 机器是真的机器
 
 **Status:** Accepted  
 **日期：** 2026-08-31  
