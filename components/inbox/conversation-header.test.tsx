@@ -79,6 +79,49 @@ jest.mock("@/hooks/connectors/use-adapter-health", () => ({
   useAdapterHealth: (id: string | null | undefined) => mockUseAdapterHealth(id),
 }))
 
+const mockWriteRoute = jest.fn<string, []>(() => "local")
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  useInboxWriteRoute: () => mockWriteRoute(),
+  mutateConversationOverride: jest.fn().mockResolvedValue({ route: "local" }),
+}))
+
+// The chip's vocabulary is the four presets, resolved from the axes. Stubbing
+// the resolver keeps this suite about the header's own wiring, which is what
+// preset it hands down and whether it hands down a live control at all.
+/**
+ * The header reads the axes and the target; the override dialog it mounts
+ * reads the provenance of every field. Build the whole shape from one helper
+ * so a test that only cares about the axes cannot half-populate it and take
+ * the dialog down with it.
+ */
+function effectiveConfigStub(
+  patch: {
+    autonomy?: string
+    engagement?: string
+    target?: { kind: string; id?: string }
+  } = {}
+) {
+  const src = (source = "adapter-default") => ({ source })
+  return {
+    autonomy: { effective: patch.autonomy ?? "act", ...src() },
+    engagement: { effective: patch.engagement ?? "inline", ...src() },
+    authority: { effective: undefined, ...src("system-default") },
+    mode: { effective: "auto", ...src() },
+    target: { effective: patch.target ?? { kind: "direct" }, ...src("system-default") },
+    character: { effective: undefined, ...src("system-default") },
+    behavior: {
+      inboundActivationPolicy: { effective: "mention_activates", ...src("system-default") },
+      activeRunDispatchMode: { effective: "queue", ...src("system-default") },
+      activationTtlMs: { effective: undefined, ...src("system-default") },
+    },
+  }
+}
+
+const mockEffectiveConfig = jest.fn<unknown, [unknown?]>(() => effectiveConfigStub())
+jest.mock("@/hooks/connectors/use-im-effective-config", () => ({
+  useImEffectiveConfig: (input: unknown) => mockEffectiveConfig(input),
+}))
+
 const mockUseLastInbound = jest.fn<number | null, [unknown?]>(() => null)
 jest.mock("@/hooks/connectors/use-last-inbound", () => ({
   useLastInboundForConversation: (key: string | null | undefined) => mockUseLastInbound(key),
@@ -122,6 +165,10 @@ beforeEach(() => {
   mockRequeueAdapter.mockResolvedValue(true)
   mockUseLastInbound.mockReset()
   mockUseLastInbound.mockReturnValue(null)
+  mockWriteRoute.mockReset()
+  mockWriteRoute.mockReturnValue("local")
+  mockEffectiveConfig.mockReset()
+  mockEffectiveConfig.mockReturnValue(effectiveConfigStub())
   mockUseAdapterHealth.mockReturnValue({
     current: { state: "running", reason: undefined, lastActivityAt: 0 },
     buckets: [],
@@ -141,7 +188,6 @@ describe("ConversationHeader", () => {
         sessionId="s1"
         title="My Telegram Chat"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -160,7 +206,6 @@ describe("ConversationHeader", () => {
         sessionId="s-dock"
         title="Dock"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -169,20 +214,48 @@ describe("ConversationHeader", () => {
     expect(toggle.className).not.toContain("hidden")
   })
 
-  it("renders the live mode switcher chip in desktop mode", () => {
-    ;(isTauri as jest.Mock).mockReturnValue(true)
+  // The chip names the preset the stored axes add up to, not the legacy
+  // three-value mirror. `observe` + `human` is `silent`.
+  it("renders the live behaviour chip with the resolved preset", () => {
+    mockEffectiveConfig.mockReturnValue(
+      effectiveConfigStub({ autonomy: "observe", engagement: "human" })
+    )
     render(
       <ConversationHeader
         conversationKey="ck2"
         sessionId="s2"
         title="Test"
         platform="discord"
-        currentMode="manual"
         policy={EMPTY_POLICY}
       />
     )
-    expect(screen.getByTestId("mode-switcher-trigger")).toBeInTheDocument()
-    expect(screen.getAllByText("Manual").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByTestId("mode-switcher-trigger")).toHaveAttribute("data-selection", "silent")
+  })
+
+  // A team-bound conversation runs in the background, which is `delegate`. The
+  // header has to pass the target down or the chip would call this `assistant`
+  // and offer to un-delegate it by accident.
+  it("passes the effective target down so delegate is reachable", () => {
+    mockEffectiveConfig.mockReturnValue(
+      effectiveConfigStub({
+        engagement: "background",
+        target: { kind: "team", id: "t1" },
+      })
+    )
+    render(
+      <ConversationHeader
+        conversationKey="ck2b"
+        sessionId="s2b"
+        title="Test"
+        platform="discord"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.getByTestId("mode-switcher-trigger")).toHaveAttribute(
+      "data-selection",
+      "delegate"
+    )
+    expect(screen.getByTestId("mode-option-delegate")).not.toBeDisabled()
   })
 
   it("renders the policy info chip", () => {
@@ -192,49 +265,46 @@ describe("ConversationHeader", () => {
         sessionId="s3"
         title="Test"
         platform="slack"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
     expect(screen.getByTestId("policy-info-trigger")).toBeInTheDocument()
   })
 
-  it("renders a static disabled badge in web mode (isTauri=false)", () => {
-    ;(isTauri as jest.Mock).mockReturnValue(false)
+  // Only a shell with nowhere to send the write gets the read-only badge. The
+  // gate used to be `isTauri()`, which disabled the control on a paired phone
+  // whose write `mutateConversationOverride` would have relayed just fine.
+  it("renders a static disabled badge only when the write has no route", () => {
+    mockWriteRoute.mockReturnValue("unavailable")
     render(
       <ConversationHeader
         conversationKey="ck4"
         sessionId="s4"
         title="Web test"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
-    // Web mode renders a static, read-only badge — NOT a live <ModeSwitcher>.
-    // The static badge shows the localized mode label and has aria-disabled.
     const disabled = screen.getByTestId("mode-switcher-disabled")
-    expect(disabled).toBeInTheDocument()
     expect(disabled).toHaveAttribute("aria-disabled", "true")
-    expect(disabled).toHaveTextContent("Auto")
+    expect(disabled).toHaveTextContent("Assistant")
     // The live dropdown trigger must not render — that was the bug we fixed
     // (Radix portals the menu past the pointer-events-none wrapper).
     expect(screen.queryByTestId("mode-switcher-trigger")).not.toBeInTheDocument()
   })
 
-  it("renders mode switcher directly in desktop mode (isTauri=true)", () => {
-    ;(isTauri as jest.Mock).mockReturnValue(true)
+  it.each(["local", "remote"])("renders the live chip on a %s write route", (route) => {
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+    mockWriteRoute.mockReturnValue(route)
     render(
       <ConversationHeader
         conversationKey="ck5"
         sessionId="s5"
-        title="Desktop test"
+        title="Routed test"
         platform="discord"
-        currentMode="manual"
         policy={EMPTY_POLICY}
       />
     )
-    // In desktop mode there is no disabled wrapper
     expect(screen.queryByTestId("mode-switcher-disabled")).not.toBeInTheDocument()
     expect(screen.getByTestId("mode-switcher-trigger")).toBeInTheDocument()
   })
@@ -247,7 +317,6 @@ describe("ConversationHeader", () => {
         sessionId="s6"
         title="Character chat"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
         characterId="c1"
       />
@@ -264,7 +333,6 @@ describe("ConversationHeader", () => {
         sessionId="s7"
         title="No character"
         platform="discord"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -278,7 +346,6 @@ describe("ConversationHeader", () => {
         sessionId="s8"
         title="Mobile chrome"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -306,7 +373,6 @@ describe("ConversationHeader", () => {
         sessionId="s9"
         title="Back test"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -327,7 +393,6 @@ describe("ConversationHeader", () => {
         sessionId="s10"
         title="Deep-link test"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -361,7 +426,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-running"
         title="Healthy"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -384,7 +448,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-down"
         title="Offline"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -409,7 +472,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-deg"
         title="Degraded"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -424,7 +486,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-li"
         title="Last inbound test"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -441,7 +502,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-li-none"
         title="Empty inbox"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -465,7 +525,6 @@ describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
         sessionId="s-rec"
         title="Reconnect test"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -488,7 +547,6 @@ describe("ConversationHeader — callback-bindings inspector (B3)", () => {
         sessionId="s-bind"
         title="Bindings"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )
@@ -509,7 +567,6 @@ describe("ConversationHeader — callback-bindings inspector (B3)", () => {
         sessionId="s-bind-web"
         title="Bindings web"
         platform="telegram"
-        currentMode="auto"
         policy={EMPTY_POLICY}
       />
     )

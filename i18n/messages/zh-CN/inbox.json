@@ -200,7 +200,7 @@
     "lastInboundJustNow": "刚刚收到消息",
     "lastInboundMinutes": "{minutes} 分钟前收到消息",
     "lastInboundTooltip": "最近一条入站消息：{time}",
-    "modeSwitchDesktopOnly": "切换模式需要桌面端",
+    "modeSwitchRequiresHost": "切换模式需要已配对的宿主",
     "more": "更多",
     "moreAttention": "更多 — 有待处理项",
     "openContact": "联系人资料",
@@ -528,12 +528,24 @@
     "none": "没有更早的消息"
   },
   "modeSwitcher": {
-    "aria": "切换模式",
-    "modes": {
-      "auto": "自动",
+    "aria": "切换行为模式",
+    "presets": {
+      "assistant": "助理",
+      "delegate": "委派",
       "draft": "草稿",
-      "manual": "手动"
-    }
+      "silent": "静默",
+      "custom": "自定义"
+    },
+    "presetHelp": {
+      "assistant": "在会话里直接回答，自行处理。",
+      "delegate": "把工作放到后台执行并回报进度。",
+      "draft": "写好回复，等你确认后再发。",
+      "silent": "只记录会话，由人来回答。"
+    },
+    "unavailable": {
+      "delegate_needs_target": "需要先绑定团队或工作流。"
+    },
+    "customHelp": "当前轴组合不对应任何命名模式。打开会话设置可以逐项调整。"
   },
   "notices": {
     "collapse": "收起通知",

@@ -30,6 +30,7 @@ jest.mock("@/components/ui/sidebar", () => ({
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/db/conversation-overrides", () => ({
+  ASSIGNMENT_ROUTING_MARKER_CLEAR: {},
   effectiveStatus: () => "open",
   setConversationStatus: jest.fn(),
   setConversationAssignee: jest.fn(),
@@ -39,6 +40,31 @@ jest.mock("@/hooks/connectors/use-conversation-overrides", () => ({
   useConversationOverride: () => undefined,
 }))
 jest.mock("@/hooks/connectors/use-conversation-labels", () => ({ useConversationLabels: () => [] }))
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  useInboxWriteRoute: () => "local",
+  mutateConversationOverride: jest.fn(),
+}))
+// The chip renders one control whichever preset it lands on, so the budget
+// only needs the resolver to answer at all. Full shape because the override
+// dialog the header mounts reads every field's provenance.
+jest.mock("@/hooks/connectors/use-im-effective-config", () => {
+  const src = { source: "adapter-default" }
+  return {
+    useImEffectiveConfig: () => ({
+      autonomy: { effective: "act", ...src },
+      engagement: { effective: "inline", ...src },
+      authority: { effective: undefined, ...src },
+      mode: { effective: "auto", ...src },
+      target: { effective: { kind: "direct" }, ...src },
+      character: { effective: undefined, ...src },
+      behavior: {
+        inboundActivationPolicy: { effective: "mention_activates", ...src },
+        activeRunDispatchMode: { effective: "queue", ...src },
+        activationTtlMs: { effective: undefined, ...src },
+      },
+    }),
+  }
+})
 // Full shape — `decideBadge` reads `health.current.state`, which the real hook
 // always populates.
 jest.mock("@/hooks/connectors/use-adapter-health", () => ({
@@ -89,7 +115,6 @@ function renderHeader() {
           sessionId="s1"
           title="Budget check"
           platform="telegram"
-          currentMode="auto"
           policy={POLICY}
         />
       </TooltipProvider>

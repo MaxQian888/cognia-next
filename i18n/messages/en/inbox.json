@@ -200,7 +200,7 @@
     "lastInboundJustNow": "Last message just now",
     "lastInboundMinutes": "Last message {minutes}min ago",
     "lastInboundTooltip": "Newest inbound message at {time}",
-    "modeSwitchDesktopOnly": "Mode switching requires the desktop app",
+    "modeSwitchRequiresHost": "Mode switching needs a paired host",
     "more": "More",
     "moreAttention": "More — needs attention",
     "openContact": "Contact profile",
@@ -528,12 +528,24 @@
     "none": "No earlier messages"
   },
   "modeSwitcher": {
-    "aria": "Switch mode",
-    "modes": {
-      "auto": "Auto",
+    "aria": "Switch behaviour",
+    "presets": {
+      "assistant": "Assistant",
+      "delegate": "Delegate",
       "draft": "Draft",
-      "manual": "Manual"
-    }
+      "silent": "Silent",
+      "custom": "Custom"
+    },
+    "presetHelp": {
+      "assistant": "Answers in the thread, acting on its own.",
+      "delegate": "Runs the work in the background and reports back.",
+      "draft": "Writes a reply and holds it for you to send.",
+      "silent": "Records the conversation. A person answers it."
+    },
+    "unavailable": {
+      "delegate_needs_target": "Needs a team or workflow bound first."
+    },
+    "customHelp": "These axes match no named mode. Open conversation settings to edit them."
   },
   "notices": {
     "collapse": "Hide notices",

@@ -70,10 +70,6 @@ jest.mock("@/components/chat/chat-view", () => ({
   },
 }))
 
-jest.mock("@/components/chat/use-resolved-connector-mode", () => ({
-  useResolvedConnectorMode: () => "auto",
-}))
-
 const mockSelect = jest.fn()
 const directChat = {
   send: jest.fn(),

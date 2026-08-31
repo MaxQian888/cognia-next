@@ -28,6 +28,7 @@ import { ConversationOverrideDialog } from "./overrides/conversation-override-di
 import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
 import { ConversationHeaderOverflow } from "./conversation-header-overflow"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
+import { useImEffectiveConfig } from "@/hooks/connectors/use-im-effective-config"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
@@ -36,8 +37,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { isTauri } from "@/lib/tauri"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import {
+  imModePresetFor,
+  IM_MODE_CUSTOM,
+  type ImModePresetId,
+} from "@/lib/connectors/composition/im-mode-presets"
+import { useInboxWriteRoute } from "@/lib/connectors/inbox-writes"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
+import type { TriggerPolicy } from "@/types/connectors/policy"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
 interface ConversationHeaderProps {
@@ -45,7 +52,6 @@ interface ConversationHeaderProps {
   sessionId: string
   title: string
   platform: PlatformKind
-  currentMode: ConnectorMode
   /** The RESOLVED policy; `undefined` while the adapter row is still loading. */
   policy: TriggerPolicy | undefined
   characterId?: string
@@ -53,7 +59,8 @@ interface ConversationHeaderProps {
   providerOverride?: string
   /** Current ConversationOverrideRow.modelOverride, if set. */
   modelOverride?: string
-  onModeChange?: (mode: ConnectorMode) => void
+  /** Fires after a successful behaviour write, with the preset that landed. */
+  onModeChange?: (preset: ImModePresetId) => void
 }
 
 export function ConversationHeader({
@@ -61,7 +68,6 @@ export function ConversationHeader({
   sessionId,
   title,
   platform,
-  currentMode,
   policy,
   characterId,
   providerOverride,
@@ -69,7 +75,7 @@ export function ConversationHeader({
   onModeChange,
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
-  const tModes = useTranslations("inbox.modeSwitcher.modes")
+  const tPresets = useTranslations("inbox.modeSwitcher.presets")
   const desktop = isTauri()
   const character = useCharacter(characterId)
   const router = useRouter()
@@ -85,6 +91,28 @@ export function ConversationHeader({
   } catch {
     parsedAdapterId = ""
   }
+
+  // The chip speaks the four behaviour presets, so it needs the resolved axes
+  // and the execution target, not the legacy mirror. Live row on purpose: an
+  // SLA escalation or another shell rewriting the mode has to show up here.
+  const effectiveConfig = useImEffectiveConfig({
+    adapterId: parsedAdapterId,
+    override: overrideRow ?? null,
+  })
+  const selection = effectiveConfig
+    ? imModePresetFor({
+        autonomy: effectiveConfig.autonomy.effective,
+        engagement: effectiveConfig.engagement.effective,
+      })
+    : IM_MODE_CUSTOM
+  const targetKind = effectiveConfig?.target.effective.kind ?? "direct"
+
+  // ADR-0131: the override write is routed, not desktop-only. A paired phone
+  // mirrors locally and relays the authoritative write to its host, so gating
+  // this on `isTauri()` disabled a control that works. Only `"unavailable"`
+  // (a standalone tab, an unpaired phone) has nowhere to send the write.
+  const writeRoute = useInboxWriteRoute()
+  const canSwitchMode = writeRoute !== "unavailable"
 
   // Mobile back: prefer router.back() so we restore the previous Inbox list /
   // scope; fall back to /inbox when this is a fresh deep-link load with no
@@ -149,13 +177,16 @@ export function ConversationHeader({
 
       {/* The one control that answers "what will the next turn run as" earns
           its place in the strip; every other setting lives behind `⋯`.
-          Live ModeSwitcher on desktop, static disabled badge on web. */}
-      {desktop ? (
+          Live ModeSwitcher wherever the write can be routed, static disabled
+          badge where it cannot. */}
+      {canSwitchMode ? (
         <ModeSwitcher
           conversationKey={conversationKey}
           sessionId={sessionId}
-          currentMode={currentMode}
-          onModeChange={onModeChange}
+          selection={selection}
+          targetKind={targetKind}
+          onOpenAdvanced={() => setOverrideDialogOpen(true)}
+          onSelectionChange={onModeChange}
         />
       ) : (
         <Tooltip>
@@ -166,10 +197,10 @@ export function ConversationHeader({
               data-testid="mode-switcher-disabled"
               aria-disabled="true"
             >
-              {tModes(currentMode)}
+              {tPresets(selection)}
             </Badge>
           </TooltipTrigger>
-          <TooltipContent>{t("modeSwitchDesktopOnly")}</TooltipContent>
+          <TooltipContent>{t("modeSwitchRequiresHost")}</TooltipContent>
         </Tooltip>
       )}
 

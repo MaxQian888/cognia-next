@@ -27,7 +27,6 @@ import { PageLoading } from "@/components/ui/loading-states"
 import { ChatPane } from "@/components/chat/chat-view"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
-import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connector-mode"
 import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -68,12 +67,6 @@ function ConversationDetail({
             .first(),
     [conversationKey]
   )
-
-  // Bind the resolved connector mode via the three-layer lookup (adapter →
-  // character platformDefaults → conversation override). The hook returns
-  // null for non-platform sessions; we fall back to "auto" to keep
-  // ConversationHeader's prop contract.
-  const resolvedMode = useResolvedConnectorMode(session ?? null)
 
   // The header's policy read-out used to be handed `defaultPrivateChatPolicy()`
   // — a literal, not this bot's policy — so it described a bot nobody had
@@ -152,7 +145,6 @@ function ConversationDetail({
     "history.fetch"
   )
   const isTeamSession = session.kind === "team" && Boolean(session.teamId)
-  const currentMode = resolvedMode ?? "auto"
 
   const send = isTeamSession ? teamChat.send : directChat.send
   const handleSend = (
@@ -194,7 +186,6 @@ function ConversationDetail({
           sessionId={session.id}
           title={session.title}
           platform={platform}
-          currentMode={currentMode}
           policy={resolvedBinding?.trigger}
           characterId={session.characterId}
         />

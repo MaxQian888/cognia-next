@@ -12,9 +12,7 @@ import { useTranslations } from "next-intl"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConversationOverrideForm } from "./conversation-override-form"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import { getDb } from "@/lib/db/schema"
-import { useLiveQuery } from "dexie-react-hooks"
-import { resolveImEffectiveConfig } from "@/lib/connectors/effective-config"
+import { useImEffectiveConfig } from "@/hooks/connectors/use-im-effective-config"
 
 export interface ConversationOverrideDialogProps {
   open: boolean
@@ -28,17 +26,10 @@ export interface ConversationOverrideDialogProps {
 export function ConversationOverrideDialog(props: ConversationOverrideDialogProps) {
   const { open, onOpenChange, adapterId, conversationKey, sessionId, initialRow } = props
   const t = useTranslations("inbox.conversationOverride")
-  const effectiveConfig = useLiveQuery(async () => {
-    if (typeof window === "undefined") return undefined
-    const adapter = await getDb().adapterInstances.get(adapterId)
-    if (!adapter) return undefined
-    return resolveImEffectiveConfig({
-      adapter,
-      override: initialRow ?? null,
-      rule: null,
-      system: { mode: adapter.defaultMode ?? "auto", characterId: adapter.defaultCharacterId },
-    })
-  }, [adapterId, initialRow])
+  // `initialRow`, not a live read: the form seeds its own state from that row,
+  // so re-resolving under a concurrent write would relabel fields the operator
+  // is in the middle of editing. The header chip passes a live row instead.
+  const effectiveConfig = useImEffectiveConfig({ adapterId, override: initialRow ?? null })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
