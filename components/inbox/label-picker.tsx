@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LabelChip } from "./label-chip"
+import { LabelChip } from "@/components/labels/label-chip"
 import { useConversationLabels } from "@/hooks/connectors/use-conversation-labels"
 import { mutateConversationOverride } from "@/lib/connectors/inbox-writes"
 
@@ -55,7 +55,12 @@ export function LabelPicker({ conversationKey, sessionId, selectedIds }: LabelPi
       {catalog
         .filter((l) => selected.has(l.id))
         .map((l) => (
-          <LabelChip key={l.id} label={l} onRemove={() => void toggle(l.id, false)} />
+          <LabelChip
+            key={l.id}
+            label={l}
+            onRemove={() => void toggle(l.id, false)}
+            removeLabel={t("removeAria", { name: l.name })}
+          />
         ))}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

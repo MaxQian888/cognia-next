@@ -12,18 +12,11 @@ import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
 import { isPlatformKind, type PlatformKind } from "@/types/connectors/platform-kind"
 import { listPluginConnectors } from "@/lib/connectors/plugin-connector-registry"
-import { PluginConnectorConfigDialog } from "../forms/plugin-connector-config"
-import { TelegramConfigDialog } from "../forms/telegram-config"
-import { LarkConfigDialog } from "../forms/lark-config"
-import { DiscordConfigDialog } from "../forms/discord-config"
-import { SlackConfigDialog } from "../forms/slack-config"
-import { OneBotConfigDialog } from "../forms/onebot-config"
-import { WeComConfigDialog } from "../forms/wecom-config"
-import { WeChatPersonalConfigDialog } from "../forms/wechat-personal-config"
-import { MatrixConfigDialog } from "../forms/matrix-config"
-import { QQOfficialConfigDialog } from "../forms/qq-official-config"
-import { WechatOaConfigDialog } from "../forms/wechat-oa-config"
-import { DingTalkConfigDialog } from "../forms/dingtalk-config"
+import {
+  AdapterConfigDialog,
+  CONFIGURABLE_KINDS,
+  isConfigurableKind,
+} from "../adapter-config-dialog"
 import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
 import { AdapterSidebar, type AdapterStatusFilter } from "../adapters/adapter-sidebar"
 import { getPlatformMeta } from "../adapters/platform-meta"
@@ -37,43 +30,12 @@ import { SettingsListDetail } from "@/components/settings/common/settings-master
 // kinds are NOT listed here — they are resolved at render time from the
 // registry and configured by the schema-driven `PluginConnectorConfigDialog`,
 // because their set changes whenever a plugin is enabled or disabled.
-type ConfigurableKind =
-  | "telegram"
-  | "lark"
-  | "discord"
-  | "slack"
-  | "onebot"
-  | "wecom"
-  | "wechat-personal"
-  | "matrix"
-  | "qq-official"
-  | "wechat-oa"
-  | "dingtalk"
-
-const CONFIGURABLE_KINDS: ConfigurableKind[] = [
-  "telegram",
-  "lark",
-  "discord",
-  "slack",
-  "onebot",
-  "wecom",
-  "wechat-personal",
-  "matrix",
-  "qq-official",
-  "wechat-oa",
-  "dingtalk",
-]
-
 // Platforms the union reserves but that have no factory / dialog yet
 // (`ConnectorMeta.status === "planned"`). Shown in the picker as disabled
 // "Planned" cards so the roadmap is visible without a dead click target.
 const PLANNED_KINDS: readonly PlatformKind[] = listConnectorMetadata()
   .filter((meta) => meta.status === "planned")
   .map((meta) => meta.type)
-
-function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
-  return (CONFIGURABLE_KINDS as PlatformKind[]).includes(kind)
-}
 
 type EditingDialog = {
   /**
@@ -357,89 +319,13 @@ export function AdaptersTab() {
         onPick={onPickPlatform}
       />
 
-      {/* Per-platform configuration dialogs. Only the dialog matching the
-       * active `editing.kind` is open at any time so cross-platform state
-       * cannot leak between forms. Mounting them all lets the dispatcher
-       * stay a pure switch on `editing.kind`. */}
-      {/* Schema-driven fallback for every contributed kind. Mounted once and
-       * keyed by kind so switching between two contributions cannot carry
-       * state, the same rule the bespoke dialogs follow by being separate
-       * components. */}
-      {editing && !isConfigurableKind(editing.kind) && (
-        <PluginConnectorConfigDialog
-          key={editing.kind}
-          open
-          kind={editing.kind}
-          onOpenChange={closeDialog}
-          onCreated={setSelectedAdapterId}
-          row={editing.row}
-        />
-      )}
-      <TelegramConfigDialog
-        open={editing?.kind === "telegram"}
+      {/* One dispatcher for every platform's credential dialog, shared with
+       * the detail panel so adding a twelfth platform is one edit. */}
+      <AdapterConfigDialog
+        kind={editing?.kind ?? null}
+        row={editing?.row ?? null}
         onOpenChange={closeDialog}
         onCreated={setSelectedAdapterId}
-        row={editing?.kind === "telegram" ? editing.row : null}
-      />
-      <LarkConfigDialog
-        open={editing?.kind === "lark"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "lark" ? editing.row : null}
-      />
-      <DiscordConfigDialog
-        open={editing?.kind === "discord"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "discord" ? editing.row : null}
-      />
-      <SlackConfigDialog
-        open={editing?.kind === "slack"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "slack" ? editing.row : null}
-      />
-      <OneBotConfigDialog
-        open={editing?.kind === "onebot"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "onebot" ? editing.row : null}
-      />
-      <WeComConfigDialog
-        open={editing?.kind === "wecom"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "wecom" ? editing.row : null}
-      />
-      <WeChatPersonalConfigDialog
-        open={editing?.kind === "wechat-personal"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "wechat-personal" ? editing.row : null}
-      />
-      <MatrixConfigDialog
-        open={editing?.kind === "matrix"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "matrix" ? editing.row : null}
-      />
-      <QQOfficialConfigDialog
-        open={editing?.kind === "qq-official"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "qq-official" ? editing.row : null}
-      />
-      <WechatOaConfigDialog
-        open={editing?.kind === "wechat-oa"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "wechat-oa" ? editing.row : null}
-      />
-      <DingTalkConfigDialog
-        open={editing?.kind === "dingtalk"}
-        onOpenChange={closeDialog}
-        onCreated={setSelectedAdapterId}
-        row={editing?.kind === "dingtalk" ? editing.row : null}
       />
     </div>
   )

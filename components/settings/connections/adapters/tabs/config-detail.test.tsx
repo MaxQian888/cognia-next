@@ -14,6 +14,12 @@ import { NextIntlClientProvider } from "next-intl"
 // Sub-component mocks — prevent rendering entire form dialogs + whoami panels
 // ---------------------------------------------------------------------------
 
+jest.mock("@/components/settings/connections/forms/plugin-connector-config", () => ({
+  PluginConnectorConfigDialog: ({ kind }: { kind: string }) => (
+    <div data-testid="plugin-connector-dialog">{kind}</div>
+  ),
+}))
+
 jest.mock("@/components/settings/connections/forms/lark-config", () => ({
   LarkConfigDialog: ({
     open,
@@ -585,5 +591,28 @@ describe("ConfigDetail — expanded stable provider dialogs", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wechat-oa-config-dialog")).toBeInTheDocument()
     })
+  })
+})
+
+// The panel used to carry its own copy of the eleven-way dialog ladder, and
+// that copy had no plugin fallback: a contributed adapter's Edit credentials
+// button opened nothing at all. Sharing the dispatcher with the list fixed it.
+describe("ConfigDetail: contributed platform", () => {
+  it("opens the schema-driven dialog for a kind with no bespoke form", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("acme" as never)} />))
+    expect(screen.queryByTestId("plugin-connector-dialog")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-connector-dialog")).toHaveTextContent("acme")
+    })
+  })
+
+  it("leaves every bespoke dialog closed for a contributed kind", async () => {
+    render(withIntl(<ConfigDetail row={makeRow("acme" as never)} />))
+    fireEvent.click(screen.getByTestId("config-detail-edit"))
+    await waitFor(() => screen.getByTestId("plugin-connector-dialog"))
+    for (const kind of ["telegram", "lark", "slack", "discord"]) {
+      expect(screen.queryByTestId(`${kind}-config-dialog`)).not.toBeInTheDocument()
+    }
   })
 })

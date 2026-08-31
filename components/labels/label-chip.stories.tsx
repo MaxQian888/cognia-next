@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { LabelChip } from "./label-chip"
-import type { ConversationLabelRow } from "@/lib/db/crm-types"
+import type { LabelRow } from "@/types/labels"
 
-const label = (over: Partial<ConversationLabelRow> = {}): ConversationLabelRow => ({
+const label = (over: Partial<LabelRow> = {}): LabelRow => ({
   id: "lbl_1",
   scope: "conversation",
   name: "follow-up",
@@ -15,9 +15,11 @@ const label = (over: Partial<ConversationLabelRow> = {}): ConversationLabelRow =
   ...over,
 })
 
-// Pure presentational pill — color dot + name, with an optional remove ×.
+// Pure presentational pill: colour dot + name, with an optional remove button.
+// Shared by the connector inbox and the issue board, which is why it lives
+// here rather than under either of them.
 const meta = {
-  title: "Inbox/LabelChip",
+  title: "Labels/LabelChip",
   component: LabelChip,
   args: { label: label() },
   parameters: { layout: "padded" },
@@ -32,6 +34,7 @@ export const Removable: Story = {
   args: { label: label({ id: "lbl_2", name: "vip", color: "#7c3aed" }), onRemove: fn() },
 }
 
+/** A row with no colour falls back to `defaultLabelColor(name)`, not to grey. */
 export const NoColor: Story = {
   args: { label: label({ id: "lbl_3", name: "untagged", color: undefined }) },
 }

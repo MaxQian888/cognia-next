@@ -19,17 +19,6 @@ import { useTranslations } from "next-intl"
 import { Settings2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { LarkConfigDialog } from "../../forms/lark-config"
-import { TelegramConfigDialog } from "../../forms/telegram-config"
-import { DiscordConfigDialog } from "../../forms/discord-config"
-import { SlackConfigDialog } from "../../forms/slack-config"
-import { MatrixConfigDialog } from "../../forms/matrix-config"
-import { OneBotConfigDialog } from "../../forms/onebot-config"
-import { DingTalkConfigDialog } from "../../forms/dingtalk-config"
-import { WeComConfigDialog } from "../../forms/wecom-config"
-import { WechatOaConfigDialog } from "../../forms/wechat-oa-config"
-import { WeChatPersonalConfigDialog } from "../../forms/wechat-personal-config"
-import { QQOfficialConfigDialog } from "../../forms/qq-official-config"
 import { LarkWhoamiPanel } from "../../forms/lark/lark-whoami-panel"
 import { AdapterWhoamiPanel } from "../../forms/shared/adapter-whoami-panel"
 import { SendTestMessageSection } from "../../forms/shared/send-test-message-section"
@@ -37,6 +26,7 @@ import { SendTestMessageSection } from "../../forms/shared/send-test-message-sec
 // `chatAllowlist` / `chatBlocklist` on the adapter row, which are bus-level
 // concepts. The "Lark" prefix is a historical naming artefact, left for now.
 // (`InboundActivationEditor` had the same prefix and has been moved out.)
+import { AdapterConfigDialog } from "../../adapter-config-dialog"
 import { InboundActivationEditor } from "../../forms/inbound-activation-editor"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
@@ -219,84 +209,15 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * the governed delivery gateway for durable end-to-end coverage. */}
       <SendTestMessageSection adapterId={row.id} platform={row.type} />
 
-      {/* Edit-credentials dialogs — only the dialog matching the row's
-       * platform mounts open at any time. */}
-      <LarkConfigDialog
-        open={editing && row.type === "lark"}
+      {/* The same dispatcher the adapters list uses. This panel used to carry
+       * its own copy of the ladder, which had no plugin fallback, so a
+       * contributed adapter's Edit button opened nothing at all. */}
+      <AdapterConfigDialog
+        kind={editing ? row.type : null}
+        row={row}
         onOpenChange={(open) => {
           if (!open) setEditing(false)
         }}
-        row={row.type === "lark" ? row : null}
-      />
-      <TelegramConfigDialog
-        open={editing && row.type === "telegram"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "telegram" ? row : null}
-      />
-      <DiscordConfigDialog
-        open={editing && row.type === "discord"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "discord" ? row : null}
-      />
-      <SlackConfigDialog
-        open={editing && row.type === "slack"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "slack" ? row : null}
-      />
-      <MatrixConfigDialog
-        open={editing && row.type === "matrix"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "matrix" ? row : null}
-      />
-      <OneBotConfigDialog
-        open={editing && row.type === "onebot"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "onebot" ? row : null}
-      />
-      <DingTalkConfigDialog
-        open={editing && row.type === "dingtalk"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "dingtalk" ? row : null}
-      />
-      <WeComConfigDialog
-        open={editing && row.type === "wecom"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "wecom" ? row : null}
-      />
-      <WechatOaConfigDialog
-        open={editing && row.type === "wechat-oa"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "wechat-oa" ? row : null}
-      />
-      <WeChatPersonalConfigDialog
-        open={editing && row.type === "wechat-personal"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "wechat-personal" ? row : null}
-      />
-      <QQOfficialConfigDialog
-        open={editing && row.type === "qq-official"}
-        onOpenChange={(open) => {
-          if (!open) setEditing(false)
-        }}
-        row={row.type === "qq-official" ? row : null}
       />
     </div>
   )
