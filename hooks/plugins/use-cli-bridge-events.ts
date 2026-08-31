@@ -9,9 +9,11 @@
  * comment in the bridge said "renderer wires this in M3". This hook is
  * that M3 wiring.
  *
- * Install/uninstall events refresh discovery only. Development build events
- * feed the canonical in-memory Dev Session store; runtime success is recorded
- * exclusively by the renderer request that verifies a new lifecycle generation.
+ * Install/uninstall events refresh discovery and land in the hot-reload
+ * history that the DevTools diagnostics panel reads. Development build events
+ * feed the canonical in-memory Dev Session store. Runtime success is recorded
+ * exclusively by the renderer request that verifies a new lifecycle
+ * generation, so this hook never claims a reload worked.
  *
  * On web / Capacitor the hook is a noop — the bridge isn't running there.
  */
@@ -27,9 +29,17 @@ import {
   usePluginDevSessionStore,
   type PluginDevSessionEvent,
 } from "@/stores/plugins/plugin-dev-session-store"
+import { recordHotReloadEvent } from "@/stores/plugin-runtime/hot-reload-history-store"
 
 interface InstallPayload {
   plugin_id: string
+  /**
+   * Which driver installed it. The in-app "Load unpacked" flow
+   * (`plugin_install_from_directory`) and the loopback CLI bridge both emit
+   * `cli-bridge:plugin-installed`, so without this the panel would credit the
+   * CLI for a drag-and-drop install.
+   */
+  source?: string
 }
 interface UninstallPayload {
   plugin_id: string
@@ -38,6 +48,21 @@ interface UninstallPayload {
 const INSTALL_EVENT = "cli-bridge:plugin-installed"
 const UNINSTALL_EVENT = "cli-bridge:plugin-uninstalled"
 const DEV_SESSION_EVENT = "cli-bridge:plugin-dev-session"
+/**
+ * The bridge only fires these after the Rust side finished the operation, so
+ * every entry recorded here is already terminal.
+ *
+ * These are install / uninstall rows, never `hot-reload` ones: an install
+ * event proves a bundle landed on disk, not that the plugin activated. Only
+ * the verified `plugin_dev_reload` round-trip may claim a runtime success.
+ */
+const CLI_SOURCE = "cli"
+const APP_SOURCE = "app"
+
+/** `plugin_install_from_directory` is the in-app "Load unpacked" flow. */
+function installSource(payload: InstallPayload): string {
+  return payload.source === "load-unpacked" ? APP_SOURCE : CLI_SOURCE
+}
 
 /**
  * Mount once at the app root (next to the other plugin runtime mounts).
@@ -59,12 +84,26 @@ export function useCliBridgeEvents(): void {
           const id = event.payload?.plugin_id
           if (!id) return
           loggers.plugin.info(`[cli-bridge] install event for ${id}`)
+          recordHotReloadEvent({
+            pluginId: id,
+            source: installSource(event.payload),
+            kind: "install",
+            status: "success",
+            timestamp: Date.now(),
+          })
           void refreshManagerScan()
         })
         const unUninstall = await listen<UninstallPayload>(UNINSTALL_EVENT, (event) => {
           const id = event.payload?.plugin_id
           if (!id) return
           loggers.plugin.info(`[cli-bridge] uninstall event for ${id}`)
+          recordHotReloadEvent({
+            pluginId: id,
+            source: CLI_SOURCE,
+            kind: "uninstall",
+            status: "success",
+            timestamp: Date.now(),
+          })
           void refreshManagerScan()
         })
         const unSession = await listen<PluginDevSessionEvent>(DEV_SESSION_EVENT, (event) => {

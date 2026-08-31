@@ -86,31 +86,55 @@ function HotReloadRow({ entry }: { entry: HotReloadEntry }) {
         : t("kindHotReload")
   return (
     <li
-      className="flex items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs"
+      className="flex flex-col gap-1 rounded-md border bg-card px-2.5 py-1.5 text-xs"
       data-testid={`hot-reload-row-${entry.pluginId}`}
+      data-status={entry.status}
+      data-source={entry.source}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <StatusIcon status={entry.status} />
-        <span className="truncate font-mono">{entry.pluginId}</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <StatusIcon status={entry.status} />
+          <span className="truncate font-mono">{entry.pluginId}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+          <Badge variant="outline" className="text-[10px]">
+            {kindLabel}
+          </Badge>
+          {/*
+            Which driver reloaded it. A plugin author running both the CLI and
+            the in-app watcher otherwise cannot tell which one produced a row.
+          */}
+          <span className="text-[10px] uppercase tracking-wide">{entry.source}</span>
+          <span className="tabular-nums">{formatTime(entry.timestamp)}</span>
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
-        <Badge variant="outline" className="text-[10px]">
-          {kindLabel}
-        </Badge>
-        <span className="tabular-nums">{formatTime(entry.timestamp)}</span>
-      </div>
+      {entry.note && (
+        <p
+          className="break-words pl-[1.375rem] font-mono text-[11px] text-muted-foreground"
+          data-testid="hot-reload-note"
+        >
+          {entry.note}
+        </p>
+      )}
     </li>
   )
 }
 
 function StatusIcon({ status }: { status: HotReloadStatus }) {
+  const t = useTranslations("plugins.devtools.hotReload")
+  // The status is otherwise carried by color alone, which neither a screen
+  // reader nor a red/green-blind reader can resolve.
   if (status === "success") {
-    return <CheckIcon className="size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+    return (
+      <CheckIcon className="size-3.5 shrink-0 text-emerald-600" aria-label={t("statusSuccess")} />
+    )
   }
   if (status === "failed") {
-    return <XIcon className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
+    return <XIcon className="size-3.5 shrink-0 text-destructive" aria-label={t("statusFailed")} />
   }
-  return <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+  return (
+    <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-label={t("statusInProgress")} />
+  )
 }
 
 function formatTime(ms: number): string {

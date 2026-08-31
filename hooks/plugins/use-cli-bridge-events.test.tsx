@@ -103,16 +103,45 @@ describe("useCliBridgeEvents", () => {
     expect(listeners["cli-bridge:plugin-dev-session"]).toBeDefined()
   })
 
-  it("rescans install events without recording a fake runtime success", async () => {
+  it("rescans install events and records them in the hot-reload history", async () => {
     render(<Harness />)
     await flushMicrotasks()
     listeners["cli-bridge:plugin-installed"]!.callback({
       payload: { plugin_id: "demo-plugin" },
     })
     const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries).toHaveLength(0)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      pluginId: "demo-plugin",
+      kind: "install",
+      status: "success",
+      source: "cli",
+    })
     await flushMicrotasks()
     expect(mockScan).toHaveBeenCalled()
+  })
+
+  it("never lets an install event claim a runtime success", async () => {
+    // An install event proves a bundle landed on disk. Only the verified
+    // `plugin_dev_reload` round-trip may write a `hot-reload` row, so a
+    // regression that relabels this entry would make the panel lie about
+    // whether the plugin actually activated.
+    render(<Harness />)
+    await flushMicrotasks()
+    listeners["cli-bridge:plugin-installed"]!.callback({
+      payload: { plugin_id: "demo-plugin" },
+    })
+    const entries = useHotReloadHistoryStore.getState().entries
+    expect(entries.some((entry) => entry.kind === "hot-reload")).toBe(false)
+  })
+
+  it("credits the in-app Load unpacked flow rather than the CLI", async () => {
+    render(<Harness />)
+    await flushMicrotasks()
+    listeners["cli-bridge:plugin-installed"]!.callback({
+      payload: { plugin_id: "demo-plugin", source: "load-unpacked" },
+    })
+    expect(useHotReloadHistoryStore.getState().entries[0].source).toBe("app")
   })
 
   it("records CLI build events in the canonical dev session store", async () => {
@@ -130,14 +159,16 @@ describe("useCliBridgeEvents", () => {
     expect(usePluginDevSessionStore.getState().sessions[0].attempts[0].state).toBe("building")
   })
 
-  it("rescans uninstall events without recording a reload result", async () => {
+  it("rescans uninstall events and records them as uninstalls", async () => {
     render(<Harness />)
     await flushMicrotasks()
     listeners["cli-bridge:plugin-uninstalled"]!.callback({
       payload: { plugin_id: "demo-plugin" },
     })
     const entries = useHotReloadHistoryStore.getState().entries
-    expect(entries).toHaveLength(0)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ pluginId: "demo-plugin", kind: "uninstall" })
+    expect(entries[0].kind).not.toBe("hot-reload")
     await flushMicrotasks()
     expect(mockScan).toHaveBeenCalled()
   })

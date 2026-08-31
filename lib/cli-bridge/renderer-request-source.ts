@@ -20,6 +20,8 @@ import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
 const REQUEST_EVENT = "cli-bridge://renderer-request"
+/** Hot-reload history origin: this dispatcher only ever serves the CLI. */
+const RELOAD_SOURCE = "cli"
 const RESPONSE_COMMAND = "cli_bridge_renderer_response"
 
 interface RendererRequestEvent {
@@ -110,9 +112,34 @@ export async function dispatchCommand(
     }
     case "plugin_dev_reload": {
       const { pluginDevReload } = await import("./handlers/plugin-dev-reload")
-      const result = await pluginDevReload(
+      const request =
         payload as unknown as import("./handlers/plugin-dev-reload").PluginDevReloadPayload
-      )
+      // The DevTools diagnostics panel is the only place a plugin author can
+      // see that a reload was even attempted, so the row goes in before the
+      // await and is settled in place by the verified outcome below. Recording
+      // only the outcome would leave the panel blank for the whole 20 s a
+      // hung activation can take.
+      const { recordHotReloadEvent } =
+        await import("@/stores/plugin-runtime/hot-reload-history-store")
+      recordHotReloadEvent({
+        pluginId: request.pluginId,
+        source: RELOAD_SOURCE,
+        kind: "hot-reload",
+        status: "in-progress",
+        timestamp: Date.now(),
+      })
+      const result = await pluginDevReload(request)
+      // Keyed off the request, not the result: the settle-in-place rule pairs
+      // the two rows by plugin id, and echoing the request id makes that
+      // pairing hold even if a handler ever returns a different one.
+      recordHotReloadEvent({
+        pluginId: request.pluginId,
+        source: RELOAD_SOURCE,
+        kind: "hot-reload",
+        status: result.ok ? "success" : "failed",
+        timestamp: Date.now(),
+        ...(result.error ? { note: result.error.message } : {}),
+      })
       const { usePluginDevSessionStore } = await import("@/stores/plugins/plugin-dev-session-store")
       usePluginDevSessionStore.getState().recordReloadResult(result)
       return result

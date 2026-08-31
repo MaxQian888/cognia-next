@@ -66,6 +66,48 @@ describe("HotReloadDiagnostics", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the status instead of leaving it to icon colour alone", () => {
+    recordHotReloadEvent({
+      pluginId: "alpha",
+      source: "cli",
+      kind: "hot-reload",
+      status: "failed",
+      timestamp: 1000,
+    })
+    renderWithIntl(<HotReloadDiagnostics />)
+    expect(
+      screen.getByLabelText(enMessages.plugins.devtools.hotReload.statusFailed)
+    ).toBeInTheDocument()
+  })
+
+  it("shows the failure note and which driver reloaded it", () => {
+    // Without the note a failed row says only "something went wrong", which
+    // is the state the panel was in before it had any writer at all.
+    recordHotReloadEvent({
+      pluginId: "alpha",
+      source: "app",
+      kind: "hot-reload",
+      status: "failed",
+      timestamp: 1000,
+      note: "activation not proven",
+    })
+    renderWithIntl(<HotReloadDiagnostics />)
+    expect(screen.getByTestId("hot-reload-note")).toHaveTextContent("activation not proven")
+    expect(screen.getByTestId("hot-reload-row-alpha")).toHaveAttribute("data-source", "app")
+  })
+
+  it("omits the note line when the entry carries none", () => {
+    recordHotReloadEvent({
+      pluginId: "alpha",
+      source: "cli",
+      kind: "install",
+      status: "success",
+      timestamp: 1000,
+    })
+    renderWithIntl(<HotReloadDiagnostics />)
+    expect(screen.queryByTestId("hot-reload-note")).not.toBeInTheDocument()
+  })
+
   it("clears the history when the clear button is clicked", async () => {
     recordHotReloadEvent({
       pluginId: "alpha",

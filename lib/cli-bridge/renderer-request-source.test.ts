@@ -41,6 +41,10 @@ jest.mock("@tauri-apps/api/event", () => ({ listen: jest.fn() }))
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 
 import { dispatchCommand, installCliRendererRequestSource } from "./renderer-request-source"
+import {
+  useHotReloadHistoryStore,
+  type HotReloadEntry,
+} from "@/stores/plugin-runtime/hot-reload-history-store"
 
 interface CapturedListener {
   event: string
@@ -102,6 +106,42 @@ describe("dispatchCommand", () => {
     await dispatchCommand("plugin_dev_reload", reloadPayload)
     expect(pluginDevReloadMock).toHaveBeenCalledWith(reloadPayload)
     expect(recordReloadResultMock).toHaveBeenCalledWith({ ok: true, outcome: "activated" })
+  })
+
+  it("records the reload attempt and its verified outcome in the hot-reload history", async () => {
+    // The DevTools diagnostics panel reads this store and has no other
+    // writer for `hot-reload` rows, so losing either call leaves a plugin
+    // author with a panel that never mentions their reload.
+    useHotReloadHistoryStore.getState().clear()
+    let observedDuringReload: readonly HotReloadEntry[] = []
+    pluginDevReloadMock.mockImplementation(async () => {
+      observedDuringReload = [...useHotReloadHistoryStore.getState().entries]
+      return {
+        ok: false,
+        outcome: "failed",
+        pluginId: "demo.plugin",
+        error: { code: "host_unverified", message: "activation not proven" },
+      }
+    })
+
+    await dispatchCommand("plugin_dev_reload", { pluginId: "demo.plugin", attempt: 1 })
+
+    expect(observedDuringReload).toHaveLength(1)
+    expect(observedDuringReload[0]).toMatchObject({
+      pluginId: "demo.plugin",
+      kind: "hot-reload",
+      status: "in-progress",
+      source: "cli",
+    })
+
+    const settled = useHotReloadHistoryStore.getState().entries
+    expect(settled).toHaveLength(1)
+    expect(settled[0]).toMatchObject({
+      pluginId: "demo.plugin",
+      kind: "hot-reload",
+      status: "failed",
+      note: "activation not proven",
+    })
   })
 
   it("throws on an unknown command", async () => {

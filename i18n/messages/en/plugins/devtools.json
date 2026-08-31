@@ -14,6 +14,13 @@
     "statusSuccess": "Success",
     "title": "Hot-reload activity"
   },
+  "lifecycle": {
+    "effects": "Effects (active / pending / failed)",
+    "empty": "No lifecycle generations have been observed.",
+    "plugin": "Plugin",
+    "services": "Services",
+    "state": "Generation and state"
+  },
   "validator": {
     "description": "Validate a plugin.json against the host schema without installing.",
     "errorsHeading": "Errors",

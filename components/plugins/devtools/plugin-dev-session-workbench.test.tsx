@@ -28,8 +28,10 @@ jest.mock("./local-plugin-dropzone", () => ({
 jest.mock("../plugin-point-diagnostics-panel", () => ({
   PluginPointDiagnosticsPanel: () => <div data-testid="point-diagnostics" />,
 }))
-jest.mock("../plugin-devtools-panel", () => ({
+jest.mock("./lifecycle-pane", () => ({
   LifecyclePane: () => <div data-testid="lifecycle" />,
+}))
+jest.mock("./triggers-pane", () => ({
   TriggersPane: () => <div data-testid="triggers" />,
 }))
 

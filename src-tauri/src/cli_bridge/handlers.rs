@@ -444,9 +444,9 @@ pub async fn install(
     match install_inner(&state, &req.bundle_path).await {
         Ok((plugin_id, warnings)) => {
             // Emit so the TS PluginManager picks up the new plugin without
-            // a full app restart. The renderer wires this in M3 (TS-side
-            // refresh handler not yet on main); for now this is best-effort
-            // and the user can manually refresh the Settings pane.
+            // a full app restart. `hooks/plugins/use-cli-bridge-events.ts`
+            // consumes this: it rescans discovery and records the install in
+            // the DevTools hot-reload history.
             let _ = state.app_handle.emit(
                 "cli-bridge:plugin-installed",
                 json!({ "plugin_id": plugin_id }),

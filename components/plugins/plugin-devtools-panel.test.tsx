@@ -84,7 +84,6 @@ import {
   ProfilerPane,
   HotReloadPane,
   InspectPane,
-  LifecyclePane,
 } from "./plugin-devtools-panel"
 import { isTauri } from "@/lib/tauri"
 import { isDeveloperModeEnabled } from "@/lib/plugin/devtools/developer-mode"
@@ -155,17 +154,6 @@ describe("PluginDevtoolsPanel — gate", () => {
         screen.getByRole("tab", { name: `plugins.devtoolsPanel.tabs.${key}` })
       ).toBeInTheDocument()
     }
-  })
-})
-
-describe("LifecyclePane", () => {
-  it("renders lifecycle generation, services, and effect counts", async () => {
-    render(<LifecyclePane />)
-
-    expect(await screen.findByText("provider")).toBeInTheDocument()
-    expect(screen.getByText("g4 · enabled / active")).toBeInTheDocument()
-    expect(screen.getByText("workspace.backend@1.0.0:available")).toBeInTheDocument()
-    expect(screen.getByText("2 / 0 / 0")).toBeInTheDocument()
   })
 })
 

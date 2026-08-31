@@ -13,7 +13,8 @@ import {
 import { toast } from "sonner"
 
 import { PluginPointDiagnosticsPanel } from "../plugin-point-diagnostics-panel"
-import { LifecyclePane, TriggersPane } from "../plugin-devtools-panel"
+import { LifecyclePane } from "./lifecycle-pane"
+import { TriggersPane } from "./triggers-pane"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"

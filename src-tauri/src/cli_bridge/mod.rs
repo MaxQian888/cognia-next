@@ -579,9 +579,12 @@ pub async fn plugin_install_from_directory(
     use tauri::Emitter;
     match handlers::install_from_directory_inner(&app, &source_dir).await {
         Ok((plugin_id, warnings)) => {
+            // `source` tells the renderer which driver did this. Without it
+            // the DevTools hot-reload panel labels a drag-and-drop install as
+            // a CLI one, because both arrive on the same event.
             let _ = app.emit(
                 "cli-bridge:plugin-installed",
-                serde_json::json!({ "plugin_id": plugin_id }),
+                serde_json::json!({ "plugin_id": plugin_id, "source": "load-unpacked" }),
             );
             Ok(PluginInstallReceipt {
                 plugin_id,

@@ -21407,6 +21407,13 @@
         "statusSuccess": "成功",
         "title": "热重载活动"
       },
+      "lifecycle": {
+        "effects": "资源（活动 / 等待 / 失败）",
+        "empty": "尚未观测到插件生命周期 generation。",
+        "plugin": "插件",
+        "services": "服务",
+        "state": "Generation 与状态"
+      },
       "validator": {
         "description": "在不安装的前提下，校验 plugin.json 是否符合宿主 schema。",
         "errorsHeading": "错误",
@@ -21466,13 +21473,6 @@
         "error": "异常",
         "loading": "正在采集插件信息…",
         "refresh": "刷新"
-      },
-      "lifecycle": {
-        "effects": "资源（活动 / 等待 / 失败）",
-        "empty": "尚未观测到插件生命周期 generation。",
-        "plugin": "插件",
-        "services": "服务",
-        "state": "Generation 与状态"
       },
       "logs": {
         "empty": "未捕获到日志。"
