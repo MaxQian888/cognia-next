@@ -1,0 +1,11 @@
+---
+"cognia-next": minor
+---
+
+IM modes now speak one vocabulary everywhere. The settings behaviour editor already offered assistant / delegate / draft / silent over the composition axes, while the Inbox chip and the in-chat `/mode` command still offered the legacy auto / manual / draft and cleared the axes on every pick, so a conversation set to "delegate" silently became "assistant" the first time anyone touched either. All three now write the same preset patch, `/mode` accepts the preset names (the legacy spellings stay as aliases), `/status` reports the resolved behaviour alongside the legacy mirror, and `/help` tells a chat when the bot drafts or stays silent instead of promising a reply it will not send.
+
+Fixes along the way. The Inbox mode chip was gated on `isTauri()` although the write is relayed to a paired host, so a phone could not change modes. It was also the only edit path that left an SLA escalation's "forced by" marker behind, so an operator's own choice kept rendering as forced. `delegate` was permanently unavailable in the bot-wide and mobile editors because neither passed the execution target down. Four conversation-header chips (SLA, quiet hours, @-strategy, topic runtime) rendered nowhere at all on a phone. The per-conversation quiet-hours editor took its timezone as an unvalidated text box, so a typo silenced the bot on a window that never opened.
+
+Notifications pushed into a chat now carry their action buttons, answered in-place through a new `notification_action` callback arm rather than a model turn, and the notification channel can reach a conversation through the session or execution-run a record names, so a plan awaiting approval is no longer invisible in IM by construction. A delegated run and the chat that started it now link to each other in both directions.
+
+The conversation override form's twelve config domains are grouped into named sections instead of one flat column in a modal, `/inbox` gains the page header every other feature route has, and the duplicated platform-dialog ladder, LabelChip and quiet-hours editor are each down to one copy. A plugin-contributed connector's "Edit credentials" button in the detail panel previously opened nothing, and now opens the schema-driven dialog.
