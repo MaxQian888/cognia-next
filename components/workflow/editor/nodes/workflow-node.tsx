@@ -13,6 +13,7 @@ import {
   Lock as LockIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
+import { formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 import { agentNodeSummary, type AgentNodeSummary } from "@/lib/workflow/editor/agent-node-summary"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
@@ -154,7 +155,16 @@ function AgentSummaryRow({ summary }: { summary: AgentNodeSummary }) {
  * AND no live run is in progress. Shows "Ran 12s ago · 1.4s" or
  * "Failed 5m ago" with a hover tooltip carrying the error message.
  */
-function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
+function LastRunFooter({
+  lastRun,
+  showUsage,
+  onOpenRuns,
+}: {
+  lastRun: LastRunSummary
+  /** Hidden on the `reduced` performance tier, where every node sheds chrome. */
+  showUsage: boolean
+  onOpenRuns?: () => void
+}) {
   const t = useTranslations("workflows.node.lastRun")
   const fmt = useFormatter()
   const now = useNow()
@@ -188,15 +198,46 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
       : lastRun.status === "failed"
         ? t("failed", { ago })
         : t("skipped", { ago })
+  const usage = showUsage ? lastRun.usage : undefined
   return (
     <div
       title={lastRun.errorMessage ?? undefined}
-      className={cn("border-t px-3 py-1 text-[10px] font-medium", colors)}
+      className={cn(
+        "flex items-center gap-1 border-t px-3 py-1 text-[10px] font-medium",
+        colors,
+        onOpenRuns && "cursor-pointer hover:brightness-110"
+      )}
       data-testid="wf-node-last-run-footer"
       data-status={lastRun.handled ? "handled" : lastRun.status}
+      // The footer is the natural click target for "show me this step's run",
+      // and the workbench already has a runs panel to show it in.
+      {...(onOpenRuns
+        ? {
+            role: "button",
+            tabIndex: 0,
+            onClick: (e: React.MouseEvent) => {
+              e.stopPropagation()
+              onOpenRuns()
+            },
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key !== "Enter" && e.key !== " ") return
+              e.preventDefault()
+              e.stopPropagation()
+              onOpenRuns()
+            },
+          }
+        : {})}
     >
-      {message}
-      {lastRun.attempt > 1 ? <span className="ml-1 opacity-70">×{lastRun.attempt}</span> : null}
+      <span className="truncate">{message}</span>
+      {lastRun.attempt > 1 ? <span className="opacity-70">×{lastRun.attempt}</span> : null}
+      {usage ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1 tabular-nums opacity-80">
+          <span data-testid="wf-node-usage-tokens">{formatTokens(usage.totalTokens)}</span>
+          {usage.costUsd !== undefined ? (
+            <span data-testid="wf-node-usage-cost">{formatCostUsd(usage.costUsd)}</span>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -332,6 +373,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         touchConnect: s.touchConnect,
         requestContextMenu: s.requestContextMenu,
         requestRunFromStep: s.requestRunFromStep,
+        requestRunsPanel: s.requestRunsPanel,
         errorPolicy: s.baseWorkflow.settings.errorPolicy,
       }
     }
@@ -339,17 +381,16 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const storeBits = store?.(storeSelector)
   const isHovered = storeBits?.isHovered ?? false
   const isSpotlit = storeBits?.isSpotlit ?? false
-  const motionEnabled = storeBits
-    ? flagsForTier(
-        resolveEffectiveTier(storeBits.performanceTier, {
-          nodeCount: storeBits.nodeCount,
-          prefersReducedMotion:
-            typeof window !== "undefined" && window.matchMedia
-              ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
-              : false,
-        })
-      ).nodeCardTransitions
-    : true
+  const effectiveTier = storeBits
+    ? resolveEffectiveTier(storeBits.performanceTier, {
+        nodeCount: storeBits.nodeCount,
+        prefersReducedMotion:
+          typeof window !== "undefined" && window.matchMedia
+            ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            : false,
+      })
+    : "high"
+  const motionEnabled = flagsForTier(effectiveTier).nodeCardTransitions
 
   // Hovered-edge endpoint ring + connection-state handle styling (Flowith
   // drag silk) are derived per-node inside the selector above — read the
@@ -592,7 +633,16 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           ) : null}
         </div>
       </div>
-      {showLastRun && effectiveLastRun ? <LastRunFooter lastRun={effectiveLastRun} /> : null}
+      {showLastRun && effectiveLastRun ? (
+        <LastRunFooter
+          lastRun={effectiveLastRun}
+          // The `reduced` tier sheds every optional glyph on the card.
+          showUsage={effectiveTier !== "reduced"}
+          {...(storeBits?.requestRunsPanel
+            ? { onOpenRuns: () => storeBits.requestRunsPanel(id) }
+            : {})}
+        />
+      ) : null}
       {showOutput ? (
         decisionHandles ? (
           // Labeled multi-output handles (branch/switch v2). Each decision

@@ -8,6 +8,7 @@ import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./workflow-node"
+import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
 
@@ -64,6 +65,7 @@ interface RenderArgs {
   typeVersion?: number
   params?: Record<string, unknown>
   locked?: boolean
+  lastRun?: LastRunSummary
 }
 
 function renderNode({
@@ -76,6 +78,7 @@ function renderNode({
   typeVersion = 1,
   params = {},
   locked = false,
+  lastRun,
 }: RenderArgs = {}) {
   const ui = (
     <TooltipProvider>
@@ -89,6 +92,7 @@ function renderNode({
           kind,
           typeVersion,
           ...(locked ? { locked: true } : {}),
+          ...(lastRun ? { lastRun } : {}),
         }}
         positionAbsoluteX={0}
         positionAbsoluteY={0}
@@ -564,5 +568,31 @@ describe("locked nodes", () => {
   it("renders no summary row for a node that carries no agent configuration", () => {
     renderNode({ kind: "flow.branch", label: "Branch" })
     expect(screen.queryByTestId("wf-node-agent-summary")).toBeNull()
+  })
+
+  it("shows the step's tokens and cost on the last-run footer", () => {
+    // The figures were aggregated for the run detail page and stopped there,
+    // so on the canvas the most expensive node looked like the cheapest.
+    renderNode({
+      kind: "ai.prompt",
+      lastRun: {
+        status: "succeeded",
+        startedAt: 0,
+        finishedAt: 1000,
+        durationMs: 1000,
+        attempt: 1,
+        usage: { inputTokens: 12000, outputTokens: 340, totalTokens: 12340, costUsd: 0.0042 },
+      },
+    })
+    expect(screen.getByTestId("wf-node-usage-tokens")).toHaveTextContent("12k")
+    expect(screen.getByTestId("wf-node-usage-cost")).toHaveTextContent("$0.0042")
+  })
+
+  it("renders no usage chips for a step that reported none", () => {
+    renderNode({
+      kind: "flow.branch",
+      lastRun: { status: "succeeded", startedAt: 0, finishedAt: 1, durationMs: 1, attempt: 1 },
+    })
+    expect(screen.queryByTestId("wf-node-usage-tokens")).toBeNull()
   })
 })

@@ -327,6 +327,15 @@ export interface EditorState extends EditorStateSnapshot {
   requestedInspectorPanel: boolean
   requestInspectorPanel: () => void
   clearRequestedInspectorPanel: () => void
+  /**
+   * Signal → right sidebar to reveal the Runs tab, focused on one step. Set by
+   * the canvas node's last-run footer: the node now shows the step's tokens and
+   * cost, and the obvious next question is what that run actually did. Carries
+   * the step id so the panel can scroll to it rather than opening at the top.
+   */
+  requestedRunsPanelStepId: string | null
+  requestRunsPanel: (stepId: string) => void
+  clearRequestedRunsPanel: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -665,6 +674,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
         requestedProblemsPanel: false,
+        requestedRunsPanelStepId: null,
         requestedInspectorPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
@@ -735,6 +745,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
         requestProblemsPanel: () => set({ requestedProblemsPanel: true }),
         clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
+        requestRunsPanel: (stepId: string) => set({ requestedRunsPanelStepId: stepId }),
+        clearRequestedRunsPanel: () => set({ requestedRunsPanelStepId: null }),
         requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
         clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
 

@@ -1,4 +1,4 @@
-import { deriveLastRunSummary } from "./last-run-summary"
+import { deriveLastRunSummary, withStepUsage } from "./last-run-summary"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
 function ev(
@@ -113,5 +113,47 @@ describe("deriveLastRunSummary", () => {
   it("re-sorts unsorted input chronologically", () => {
     const out = deriveLastRunSummary([ev(30, "step_completed", "n1"), ev(10, "step_started", "n1")])
     expect(out["n1"].durationMs).toBe(20)
+  })
+})
+
+describe("withStepUsage", () => {
+  const usageEvent = (over: Record<string, unknown>) =>
+    ({ runId: "r", ts: 1, type: "step_usage", ...over }) as never
+
+  it("attaches tokens and cost to the step that reported them", () => {
+    // `step_usage` was already aggregated for the run detail page. It just
+    // never reached the canvas, so the most expensive node in a graph looked
+    // exactly like the cheapest.
+    const summaries = {
+      n1: { status: "succeeded", startedAt: 0, finishedAt: 1, durationMs: 1, attempt: 1 },
+    } as never
+    const out = withStepUsage(summaries, [
+      usageEvent({ stepId: "n1", payload: { inputTokens: 100, outputTokens: 20, costUsd: 0.004 } }),
+    ])
+    expect(out.n1!.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      costUsd: 0.004,
+    })
+  })
+
+  it("omits the key entirely for a step that reported nothing", () => {
+    // A row of zeros on every non-LLM node would be noise on the card.
+    const summaries = {
+      n1: { status: "succeeded", startedAt: 0, finishedAt: 1, durationMs: 1, attempt: 1 },
+    } as never
+    expect(withStepUsage(summaries, []).n1!.usage).toBeUndefined()
+  })
+
+  it("keeps cost absent when the provider reported no pricing", () => {
+    const summaries = {
+      n1: { status: "succeeded", startedAt: 0, finishedAt: 1, durationMs: 1, attempt: 1 },
+    } as never
+    const out = withStepUsage(summaries, [
+      usageEvent({ stepId: "n1", payload: { inputTokens: 5, outputTokens: 5 } }),
+    ])
+    expect(out.n1!.usage?.totalTokens).toBe(10)
+    expect(out.n1!.usage?.costUsd).toBeUndefined()
   })
 })

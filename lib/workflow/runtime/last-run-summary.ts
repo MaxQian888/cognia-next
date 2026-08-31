@@ -17,6 +17,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
+import { aggregateRunUsage } from "@/lib/workflow/runs/usage-aggregate"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 
 /** One step's outcome from its most recent terminal event. */
@@ -41,6 +42,21 @@ export interface LastRunSummary {
    * a warning state instead of plain success.
    */
   handled?: boolean
+  /**
+   * Tokens and cost this step reported, when it is LLM-backed.
+   *
+   * The figures were already aggregated from `step_usage` events for the Runs
+   * UI, but stopped at the run detail page: the canvas node footer showed
+   * status and duration only, so the most expensive node in a graph looked
+   * exactly like the cheapest.
+   */
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    /** Absent when the provider reported no pricing. */
+    costUsd?: number
+  }
 }
 
 function statusFromType(type: string): LastRunStatus | null {
@@ -128,6 +144,35 @@ export function deriveLastRunSummary(
 }
 
 /**
+ * Attach per-step token/cost figures to summaries. Split out so the pure
+ * derivation stays testable without the aggregate, and so a step with no usage
+ * carries no `usage` key at all rather than a row of zeros.
+ */
+export function withStepUsage(
+  summaries: Record<string, LastRunSummary>,
+  events: ReadonlyArray<WorkflowRunEventRow>
+): Record<string, LastRunSummary> {
+  const { perStep } = aggregateRunUsage([...events])
+  const out: Record<string, LastRunSummary> = {}
+  for (const [stepId, summary] of Object.entries(summaries)) {
+    const usage = perStep[stepId]
+    out[stepId] =
+      usage && usage.totalTokens > 0
+        ? {
+            ...summary,
+            usage: {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              totalTokens: usage.totalTokens,
+              ...(usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {}),
+            },
+          }
+        : summary
+  }
+  return out
+}
+
+/**
  * Live hook that aggregates `step_completed/failed/skipped` events across
  * **every run** of a workflow and returns the latest summary per stepId.
  * Returns an empty object until the first row settles.
@@ -152,7 +197,9 @@ export function useLastRunSummaryByStep(
           .toArray()
         all.push(...events)
       }
-      return deriveLastRunSummary(all)
+      // Same event list, one more pass: `step_usage` rows are already in `all`
+      // and `aggregateRunUsage` is the function the Runs UI reads.
+      return withStepUsage(deriveLastRunSummary(all), all)
     },
     [workflowId],
     {} as Record<string, LastRunSummary>

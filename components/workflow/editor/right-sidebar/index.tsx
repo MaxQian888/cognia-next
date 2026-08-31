@@ -275,6 +275,7 @@ function WorkflowContextWorkbench({
     warningCount,
     requestedProblemsPanel,
     requestedInspectorPanel,
+    requestedRunsPanelStepId,
   } = useStore(
     useShallow((state: EditorState) => ({
       selectedNodeIds: state.selectedNodeIds,
@@ -286,6 +287,7 @@ function WorkflowContextWorkbench({
       warningCount: state.diagnostics?.warningCount ?? 0,
       requestedProblemsPanel: state.requestedProblemsPanel ?? false,
       requestedInspectorPanel: state.requestedInspectorPanel ?? false,
+      requestedRunsPanelStepId: state.requestedRunsPanelStepId ?? null,
     }))
   )
   const scopeKey = `${workbenchInstanceId}::workflow:${workflowId}`
@@ -317,6 +319,14 @@ function WorkflowContextWorkbench({
     smartReveal(scopeKey, "inspector", "narrow")
     useStore.getState().clearRequestedInspectorPanel()
   }, [requestedInspectorPanel, scopeKey, smartReveal, useStore])
+
+  // The canvas node's last-run footer asks for this: the node now shows the
+  // step's tokens and cost, so the obvious next question is what that run did.
+  useEffect(() => {
+    if (!requestedRunsPanelStepId) return
+    smartReveal(scopeKey, "runs", "wide")
+    useStore.getState().clearRequestedRunsPanel()
+  }, [requestedRunsPanelStepId, scopeKey, smartReveal, useStore])
 
   const handleOpenSettings = useCallback(
     (tab?: string) => {
