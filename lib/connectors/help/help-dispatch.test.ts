@@ -40,11 +40,59 @@ function makeRow(over: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   }
 }
 
-function deps() {
+function deps(override: Record<string, unknown> | undefined = undefined) {
   const enqueue = jest.fn().mockResolvedValue({ id: "job" })
   const audit = jest.fn().mockResolvedValue({})
-  return { enqueue, audit, now: () => 5000 }
+  // Injected so the behaviour disclosure is deterministic. Without it the
+  // production `readForResolution` reaches for Dexie, which the node project
+  // has no database for, and the read is swallowed by its own catch.
+  const readOverride = jest.fn().mockResolvedValue(override)
+  return { enqueue, audit, now: () => 5000, readOverride } as never
 }
+
+/** The plain-text mirror of the single card the dispatcher enqueued. */
+function cardText(enqueue: jest.Mock): string {
+  const segment = enqueue.mock.calls[0][0].request.segments[0]
+  return (segment.plainTextMirror ?? segment.text ?? "") as string
+}
+
+describe("maybeHandleHelpCommand — behaviour disclosure", () => {
+  // The card used to promise a reply the bot would never send. It reads the
+  // conversation's own axes, so a channel the operator silenced says so even
+  // when the bot answers everywhere else.
+  it("says a silenced conversation is answered by a person", async () => {
+    const d = deps({ autonomy: "observe", engagement: "human" })
+    await maybeHandleHelpCommand(makeEvent({ plainText: "/help" }), makeRow(), d)
+    const text = cardText((d as unknown as { enqueue: jest.Mock }).enqueue)
+    expect(text).toContain("由人来回答")
+  })
+
+  it("says a draft conversation holds the reply for a human", async () => {
+    const d = deps({ autonomy: "suggest" })
+    await maybeHandleHelpCommand(makeEvent({ plainText: "/help" }), makeRow(), d)
+    const text = cardText((d as unknown as { enqueue: jest.Mock }).enqueue)
+    expect(text).toContain("等人确认")
+  })
+
+  // A conversation that pinned only the legacy mirror MEANS that mode, so its
+  // pin has to suppress the bot's axis defaults rather than mix with them.
+  it("lets a conversation's legacy mode pin outrank the bot's axis default", async () => {
+    const d = deps({ mode: "manual" })
+    await maybeHandleHelpCommand(
+      makeEvent({ plainText: "/help" }),
+      makeRow({ defaultAutonomy: "act" } as never),
+      d
+    )
+    expect(cardText((d as unknown as { enqueue: jest.Mock }).enqueue)).toContain("由人来回答")
+  })
+
+  it("adds no note for a bot that answers on its own", async () => {
+    const d = deps()
+    await maybeHandleHelpCommand(makeEvent({ plainText: "/help" }), makeRow(), d)
+    const text = cardText((d as unknown as { enqueue: jest.Mock }).enqueue)
+    expect(text).not.toContain("我会怎么处理")
+  })
+})
 
 describe("maybeHandleHelpCommand", () => {
   it("serves a help card and returns true on a default trigger", async () => {

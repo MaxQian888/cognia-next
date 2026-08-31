@@ -104,14 +104,6 @@ export function authorityFromApprovalMode(
   return undefined
 }
 
-/** The legacy spelling to mirror alongside an authority write. */
-export function approvalModeFromAuthority(
-  authority: AgentAuthority | undefined
-): "prompt" | "yolo" | undefined {
-  if (authority === undefined) return undefined
-  return authority === "bypassPermissions" ? "yolo" : "prompt"
-}
-
 /**
  * Resolve the axis values a stored row means, preferring the axis fields and
  * falling back to the legacy pair.

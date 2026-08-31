@@ -3,6 +3,7 @@ import * as R from "./render"
 describe("renderStatus", () => {
   it("renders every line including the provider row (W1)", () => {
     const text = R.renderStatus({
+      behaviour: "assistant",
       mode: "auto",
       model: "claude-fable-5（bot 默认 / bot default）",
       provider: "anthropic",
@@ -18,6 +19,7 @@ describe("renderStatus", () => {
       sessionTitle: "Main",
       sessionIdPrefix: "abc12345",
     })
+    expect(text).toContain("behaviour: assistant")
     expect(text).toContain("mode: auto")
     expect(text).toContain("model: claude-fable-5（bot 默认 / bot default）")
     expect(text).toContain("provider: anthropic")
@@ -69,8 +71,39 @@ describe("assignment provenance (slice 1A)", () => {
     expect(R.renderAssignee({ kind: "team" })).toBe("团队 / team: ?")
   })
 
+  // `delegate` mirrors to `mode: "auto"`, so reporting the mirror alone told
+  // the operator the bot answers in the thread when it runs in the background.
+  // Both lines together are what make the mirror's lossiness readable.
+  it("renderStatus reports behaviour separately from the legacy mirror", () => {
+    const text = R.renderStatus({
+      behaviour: "delegate",
+      mode: "auto",
+      model: "m",
+      provider: "p",
+      character: "c",
+      reasoning: "r",
+      approvalMode: "prompt",
+      team: "team_r",
+      workflow: "无 / none",
+      routeSource: "会话覆盖 / conversation override",
+      matchedRule: "无 / none",
+      responseAdapter: "tg",
+      enabledRules: [],
+      sessionTitle: "Main",
+      sessionIdPrefix: "abc",
+    })
+    const lines = text.split("\n")
+    expect(lines).toContain("• 行为 / behaviour: delegate")
+    expect(lines).toContain("• 模式 / mode: auto")
+    // Behaviour sits directly above the mirror it explains.
+    expect(lines.indexOf("• 行为 / behaviour: delegate") + 1).toBe(
+      lines.indexOf("• 模式 / mode: auto")
+    )
+  })
+
   it("renderStatus adds the assignee line only when assigned", () => {
     const base = {
+      behaviour: "silent",
       mode: "manual",
       model: "m",
       provider: "p",

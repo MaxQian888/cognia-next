@@ -65,6 +65,38 @@ function makePolicy(overrides: Partial<ConnectorPolicy> = {}): ConnectorPolicy {
   }
 }
 
+// The sheet never passed a target down, so the editor defaulted to `"direct"`
+// and offered `delegate` as permanently unavailable, even on a bot with a team
+// bound bot-wide. On a phone that is the only place this can be set at all.
+it.each([
+  ["defaultTeamId", "team_1"],
+  ["defaultWorkflowId", "wf_1"],
+])("enables delegate once the bot's %s carries it", async (field, value) => {
+  const user = userEvent.setup()
+  render(
+    <ConnectorPolicySheet
+      open
+      policy={makePolicy({ [field]: value } as Partial<ConnectorPolicy>)}
+      onOpenChange={jest.fn()}
+    />
+  )
+  await user.click(screen.getByTestId("behavior-mode"))
+  expect(screen.getByRole("option", { name: "preset_delegate" })).not.toHaveAttribute(
+    "aria-disabled",
+    "true"
+  )
+})
+
+it("still refuses delegate on a bot with no carrier", async () => {
+  const user = userEvent.setup()
+  render(<ConnectorPolicySheet open policy={makePolicy()} onOpenChange={jest.fn()} />)
+  await user.click(screen.getByTestId("behavior-mode"))
+  expect(screen.getByRole("option", { name: /preset_delegate/ })).toHaveAttribute(
+    "aria-disabled",
+    "true"
+  )
+})
+
 /** The wire payload the sheet handed to the outbound queue. */
 const sentPayload = () =>
   (enqueueMock.mock.calls[0][0] as { payload: Record<string, unknown> }).payload

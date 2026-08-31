@@ -66,6 +66,16 @@ export interface HelpSurfaceLabels {
   skillsHeading: string
   /** Heading above the @-strategy hint. */
   atStrategyHeading: string
+  /**
+   * Heading for the behaviour note. Rendered only when the bot does NOT answer
+   * on its own, because that is the case the admission hint contradicts.
+   */
+  behaviourHeading: string
+  /**
+   * What happens after a message is admitted, for the two behaviours where the
+   * answer is not "the bot replies". Keyed by the named preset.
+   */
+  behaviour: Record<"draft" | "silent", string>
   /** Per-strategy hint sentence. */
   atStrategy: Record<HelpAtStrategy, string>
   /** Mirror-only prefix for "send X to trigger" (text-only platforms). */
@@ -81,6 +91,11 @@ export const DEFAULT_HELP_SURFACE_LABELS: HelpSurfaceLabels = {
   noQuickCommands: "（管理员尚未配置快捷指令）",
   skillsHeading: "可用技能",
   atStrategyHeading: "如何让我回复",
+  behaviourHeading: "我会怎么处理",
+  behaviour: {
+    draft: "我会先把回复写好，等人确认后再发出来，所以你可能不会立刻收到答复。",
+    silent: "这个会话由人来回答，我只负责记录，不会自动回复。",
+  },
   atStrategy: {
     always: "在任意消息下我都会回复。",
     mention_each: "在群聊里请 @我 我才会回复；私聊无需 @。",
@@ -103,6 +118,15 @@ export interface BuildHelpSurfaceInput {
   quickCommands: IMQuickCommand[]
   /** Resolved group-admission policy; omitted ⇒ no hint line. */
   atStrategy?: HelpAtStrategy
+  /**
+   * The bot's resolved behaviour preset, when it is one that does not answer.
+   *
+   * Without this the card told a `silent` bot's users "@ me and I will reply",
+   * and then the bot did not reply. The admission hint answers "will this
+   * message reach the bot"; this answers "and then what", which is a different
+   * question the card was silently getting wrong.
+   */
+  behaviour?: "draft" | "silent"
   /** Built-in skill families this channel exposes; omitted ⇒ no skills line. */
   skillFamilies?: readonly PlatformSkillCapability[]
   /** Operator-authored welcome intro (welcome mode only). */
@@ -138,6 +162,7 @@ export function buildHelpSurface(input: BuildHelpSurfaceInput): A2UISegmentConte
     ...DEFAULT_HELP_SURFACE_LABELS,
     ...input.labels,
     atStrategy: { ...DEFAULT_HELP_SURFACE_LABELS.atStrategy, ...input.labels?.atStrategy },
+    behaviour: { ...DEFAULT_HELP_SURFACE_LABELS.behaviour, ...input.labels?.behaviour },
   }
   const name = input.displayName || "Cognia"
   const title = input.mode === "welcome" ? substitute(labels.welcomeTitle, name) : labels.helpTitle
@@ -213,6 +238,23 @@ export function buildHelpSurface(input: BuildHelpSurfaceInput): A2UISegmentConte
     components.atBody = { component: "Text", text: hint }
     childIds.push("atHeading", "atBody")
     mirrorLines.push("", labels.atStrategyHeading, hint)
+  }
+
+  // ── behaviour note ───────────────────────────────────────────────────
+  // Sits below the admission hint on purpose: it qualifies it. Rendered only
+  // for `draft` and `silent`, the two behaviours where being admitted does not
+  // mean being answered. `assistant` and `delegate` both answer, so a note
+  // there would be noise.
+  if (input.behaviour) {
+    const note = labels.behaviour[input.behaviour]
+    components.behaviourHeading = {
+      component: "Text",
+      text: labels.behaviourHeading,
+      variant: "heading3",
+    }
+    components.behaviourBody = { component: "Text", text: note }
+    childIds.push("behaviourHeading", "behaviourBody")
+    mirrorLines.push("", labels.behaviourHeading, note)
   }
 
   ;(components.root as { children: string[] }).children = childIds

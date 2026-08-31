@@ -30,6 +30,9 @@ import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
+import { imModePresetFor } from "@/lib/connectors/composition/im-mode-presets"
+import { projectStoredMode } from "@/lib/connectors/composition/mode-projection"
+import { readForResolution } from "@/lib/db/conversation-overrides"
 import { buildHelpSurface, type HelpSurfaceMode } from "./build-help-surface"
 
 /** Default help triggers when the adapter row leaves `helpTriggers` unset. */
@@ -41,6 +44,7 @@ export interface HelpDispatchDeps {
   recordWelcome?: (adapterId: string, conversationKey: string) => Promise<boolean>
   audit?: typeof appendAudit
   now?: () => number
+  readOverride?: typeof readForResolution
 }
 
 function resolveTriggers(row: AdapterInstanceRow): string[] {
@@ -48,10 +52,42 @@ function resolveTriggers(row: AdapterInstanceRow): string[] {
   return configured.length > 0 ? configured : DEFAULT_HELP_TRIGGERS.map((t) => t.toLowerCase())
 }
 
+/**
+ * The behaviour to disclose, or `undefined` when the bot answers on its own.
+ *
+ * Only `draft` and `silent` are disclosed, because those are the two cases
+ * where the admission hint above it would otherwise lie: the card said "@ me
+ * and I will reply", and then a silenced bot did not reply. Resolved from the
+ * conversation's own axes first so a channel the operator silenced says so,
+ * rather than reporting the bot-wide default that channel overrode.
+ */
+async function resolveDisclosedBehaviour(
+  row: AdapterInstanceRow,
+  conversationKey: string,
+  readOverride: typeof readForResolution
+): Promise<"draft" | "silent" | undefined> {
+  const override = await readOverride(conversationKey).catch(() => undefined)
+  // Same layering rule `resolveImEffectiveConfig` applies: a conversation that
+  // pinned `mode` MEANS that mode, so its own pin suppresses the bot's axis
+  // defaults rather than mixing with them.
+  const conversationPinsMode = override?.mode !== undefined
+  const { autonomy, engagement } = projectStoredMode({
+    mode: override?.mode ?? row.defaultMode ?? "auto",
+    // The card is sent before any run is dispatched, so the target only
+    // matters here for engagement's `background`, which is not disclosed.
+    targetKind: "direct",
+    autonomy: override?.autonomy ?? (conversationPinsMode ? undefined : row.defaultAutonomy),
+    engagement: override?.engagement ?? (conversationPinsMode ? undefined : row.defaultEngagement),
+  })
+  const preset = imModePresetFor({ autonomy, engagement })
+  return preset === "draft" || preset === "silent" ? preset : undefined
+}
+
 function buildSurfaceForRow(
   event: NormalizedInboundEvent,
   row: AdapterInstanceRow,
-  mode: HelpSurfaceMode
+  mode: HelpSurfaceMode,
+  behaviour: "draft" | "silent" | undefined
 ) {
   // Unique per render: callbacks dedup on the action id (Lark bakes the
   // action id as the triggerId), so a stable surfaceId would let a button
@@ -72,6 +108,7 @@ function buildSurfaceForRow(
     // stale on a legacy row whose policy has since been changed. Same resolver
     // the bus admits on and the header chip reports.
     atStrategy: resolveInboundActivationPolicy(row),
+    behaviour,
     skillFamilies: row.lastKnownSkillCapabilities,
     welcomeText: row.welcomeText,
   })
@@ -97,7 +134,12 @@ export async function maybeHandleHelpCommand(
   const audit = deps.audit ?? appendAudit
   const at = (deps.now ?? Date.now)()
 
-  const { segment } = buildSurfaceForRow(event, row, "help")
+  const behaviour = await resolveDisclosedBehaviour(
+    row,
+    event.conversationKey,
+    deps.readOverride ?? readForResolution
+  )
+  const { segment } = buildSurfaceForRow(event, row, "help", behaviour)
   await enqueue({
     adapterId: event.adapterId,
     conversationKey: event.conversationKey,
@@ -144,7 +186,12 @@ export async function maybeSendWelcome(
   const audit = deps.audit ?? appendAudit
   const at = (deps.now ?? Date.now)()
 
-  const { segment } = buildSurfaceForRow(event, row, "welcome")
+  const behaviour = await resolveDisclosedBehaviour(
+    row,
+    event.conversationKey,
+    deps.readOverride ?? readForResolution
+  )
+  const { segment } = buildSurfaceForRow(event, row, "welcome", behaviour)
   await enqueue({
     adapterId: event.adapterId,
     conversationKey: event.conversationKey,

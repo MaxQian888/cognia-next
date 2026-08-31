@@ -4,10 +4,18 @@ import userEvent from "@testing-library/user-event"
 import { AdapterBehaviorDefaults } from "./adapter-behavior-defaults"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
-const mockAdapterRow = { id: "a", defaultMode: "auto", activationTtlMs: 3_600_000 }
+let mockAdapterRow: Record<string, unknown> = {
+  id: "a",
+  defaultMode: "auto",
+  activationTtlMs: 3_600_000,
+}
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockAdapterRow,
 }))
+
+beforeEach(() => {
+  mockAdapterRow = { id: "a", defaultMode: "auto", activationTtlMs: 3_600_000 }
+})
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 const mockUpdateAdapterConfigSection = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -54,6 +62,24 @@ it("offers delegate only where background work has a carrier", async () => {
     name: /preset_delegate/,
   })
   expect(delegate).toHaveAttribute("aria-disabled", "true")
+})
+
+// The card never passed a target down, so it defaulted to `"direct"` and
+// showed `delegate` as permanently unavailable even on a bot that has a team
+// bound bot-wide. The bot's own default target is the carrier.
+it.each([
+  ["defaultTeamId", "team_1"],
+  ["defaultWorkflowId", "wf_1"],
+])("enables delegate once the bot's %s carries it", async (field, value) => {
+  mockAdapterRow = { ...mockAdapterRow, [field]: value }
+  const user = userEvent.setup()
+  render(<AdapterBehaviorDefaults adapterId="a" />)
+
+  await user.click(screen.getByTestId("behavior-mode"))
+  expect(screen.getByRole("option", { name: "preset_delegate" })).not.toHaveAttribute(
+    "aria-disabled",
+    "true"
+  )
 })
 
 // Tri-state at the BOT scope too — `undefined` there means "whatever this

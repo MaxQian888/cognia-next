@@ -86,6 +86,36 @@ describe("buildHelpSurface", () => {
     expect(without.components.atBody).toBeUndefined()
   })
 
+  // Without this the card told a silenced bot's users "@ me and I will reply",
+  // and then the bot did not reply. The admission hint answers whether the
+  // message reaches the bot; this answers what happens next.
+  it("discloses a behaviour that does not answer, and stays quiet for ones that do", () => {
+    const silent = buildHelpSurface(base({ atStrategy: "mention_each", behaviour: "silent" }))
+    expect((silent.components.behaviourBody as { text: string }).text).toBe(
+      DEFAULT_HELP_SURFACE_LABELS.behaviour.silent
+    )
+    const draft = buildHelpSurface(base({ atStrategy: "mention_each", behaviour: "draft" }))
+    expect((draft.components.behaviourBody as { text: string }).text).toBe(
+      DEFAULT_HELP_SURFACE_LABELS.behaviour.draft
+    )
+    // `assistant` and `delegate` both answer, so a note there would be noise.
+    const answering = buildHelpSurface(base({ atStrategy: "mention_each" }))
+    expect(answering.components.behaviourBody).toBeUndefined()
+    expect(answering.components.behaviourHeading).toBeUndefined()
+  })
+
+  // It qualifies the admission hint, so it has to be readable after it.
+  it("places the behaviour note below the at-strategy hint", () => {
+    const s = buildHelpSurface(base({ atStrategy: "mention_each", behaviour: "silent" }))
+    const children = (s.components.root as { children: string[] }).children
+    expect(children.indexOf("behaviourHeading")).toBeGreaterThan(children.indexOf("atBody"))
+    const mirror = (s.widget as { fallbackText: string }).fallbackText
+    expect(mirror).toContain(DEFAULT_HELP_SURFACE_LABELS.behaviour.silent)
+    expect(mirror.indexOf(DEFAULT_HELP_SURFACE_LABELS.behaviourHeading)).toBeGreaterThan(
+      mirror.indexOf(DEFAULT_HELP_SURFACE_LABELS.atStrategyHeading)
+    )
+  })
+
   it("renders the skills line only when families are supplied", () => {
     const s = buildHelpSurface(
       base({

@@ -483,16 +483,56 @@ describe("maybeHandleControlCommand", () => {
     expect(h.patches).toHaveLength(0)
   })
 
-  it("sets connector mode via /mode auto", async () => {
+  // The named presets are the vocabulary now. The legacy spellings stay as
+  // aliases because they are what end users type into a group chat, and each
+  // writes the SAME patch as the preset it aliases: the axes plus the mirror.
+  it.each([
+    ["/mode silent", { autonomy: "observe", engagement: "human", mode: "manual" }],
+    ["/mode manual", { autonomy: "observe", engagement: "human", mode: "manual" }],
+    ["/mode assistant", { autonomy: "act", engagement: undefined, mode: "auto" }],
+    ["/mode auto", { autonomy: "act", engagement: undefined, mode: "auto" }],
+    ["/mode draft", { autonomy: "suggest", engagement: undefined, mode: "draft" }],
+  ])("%s writes the preset's axes and the legacy mirror", async (text, expected) => {
     const h = harness({ active: session("s1") })
     await maybeHandleControlCommand(
-      makeEvent({ plainText: "/mode manual" }),
+      makeEvent({ plainText: text }),
       makeAdapter(),
       undefined,
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ mode: "manual" })
+    expect(h.patches[0].patch).toEqual(expect.objectContaining(expected))
+  })
+
+  // `assistant` leaves engagement DERIVED, which means clearing a frozen
+  // `background` a previous `delegate` wrote. `toEqual` ignores undefined
+  // values, so assert the key is present rather than that it equals undefined.
+  it("clears a frozen engagement when switching away from delegate", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/mode assistant" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(Object.keys(h.patches[0].patch)).toContain("engagement")
+    expect(h.patches[0].patch.engagement).toBeUndefined()
+  })
+
+  // Background work has no carrier without a team or workflow, so the command
+  // refuses with the reason rather than writing a value nothing acts on.
+  it("refuses /mode delegate on a direct-target conversation", async () => {
+    const h = harness({ active: session("s1") })
+    await maybeHandleControlCommand(
+      makeEvent({ plainText: "/mode delegate" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.patches).toHaveLength(0)
+    expect(h.enqueued[0].text).toContain("delegate")
   })
 
   it("sets approvalMode via /mode yolo", async () => {
@@ -718,10 +758,9 @@ describe("maybeHandleControlCommand", () => {
         },
       ],
       ["/team off", { teamId: undefined, teamDisabled: true }],
-      // An explicit mode edit also clears the axis fields: routing prefers
-      // them, so a stale `autonomy` left by an assignment would otherwise
-      // swallow the command outright.
-      ["/mode draft", { mode: "draft", autonomy: undefined, engagement: undefined }],
+      // An explicit mode edit writes the preset's axes alongside the mirror,
+      // so a stale `autonomy` left by an assignment cannot swallow it.
+      ["/mode draft", { mode: "draft", autonomy: "suggest", engagement: undefined }],
     ]
     for (const [text, expected] of cases) {
       const h = harness({ active: session("s1") })

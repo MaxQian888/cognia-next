@@ -72,6 +72,11 @@ export type ConnectorPolicy = Pick<AdapterInstanceRow, "id" | "displayName" | "d
       | "a2uiEnabled"
       | "hostCapabilityCeiling"
       | "trigger"
+      // Only `delegate` reads these: background work has no carrier without a
+      // team or workflow, so without them the editor showed that preset as
+      // permanently unavailable even on a bot that had one bound.
+      | "defaultTeamId"
+      | "defaultWorkflowId"
     >
   >
 
@@ -232,6 +237,9 @@ export function ConnectorPolicySheet({ open, policy, onOpenChange }: ConnectorPo
             scope="adapter"
             value={draft.behavior}
             onChange={(next) => patch("behavior", next)}
+            targetKind={
+              policy.defaultTeamId ? "team" : policy.defaultWorkflowId ? "workflow" : "direct"
+            }
           />
 
           <Toggle

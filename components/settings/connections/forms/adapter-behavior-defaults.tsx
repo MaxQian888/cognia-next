@@ -9,10 +9,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { ImTargetKind } from "@/lib/connectors/composition/mode-projection"
 import {
   ConversationBehaviorEditor,
   type ConversationBehaviorValue,
 } from "./conversation-behavior-editor"
+
+/**
+ * The execution target this bot's conversations default to.
+ *
+ * Only `delegate` depends on it: background work has no carrier without a team
+ * or workflow, so the editor disables that preset with a reason. Left at its
+ * `"direct"` default, this card offered a permanently-disabled `delegate` even
+ * on a bot with a `defaultTeamId` bound.
+ */
+function targetKindOf(row: AdapterInstanceRow | undefined): ImTargetKind {
+  if (row?.defaultTeamId) return "team"
+  if (row?.defaultWorkflowId) return "workflow"
+  return "direct"
+}
 
 function fromRow(row: AdapterInstanceRow | undefined): ConversationBehaviorValue {
   return {
@@ -80,7 +95,12 @@ function AdapterBehaviorDraft({ adapterId, row }: { adapterId: string; row?: Ada
         <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ConversationBehaviorEditor scope="adapter" value={draft} onChange={setDraft} />
+        <ConversationBehaviorEditor
+          scope="adapter"
+          value={draft}
+          onChange={setDraft}
+          targetKind={targetKindOf(row)}
+        />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setDraft(fromRow(row))}>
             {t("cancel")}

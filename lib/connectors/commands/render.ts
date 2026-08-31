@@ -19,7 +19,11 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
   { name: "new", usage: "/new", desc: "新建并切换到新会话 / start a new session" },
   { name: "switch", usage: "/switch <id|标题>", desc: "切换到指定会话 / switch session" },
   { name: "model", usage: "/model <名称>", desc: "切换模型 / switch model" },
-  { name: "mode", usage: "/mode auto|manual|draft|yolo|prompt", desc: "切换回复/审批模式 / mode" },
+  {
+    name: "mode",
+    usage: "/mode assistant|delegate|draft|silent|yolo|prompt",
+    desc: "切换行为/审批模式 / behaviour or approval mode",
+  },
   { name: "reasoning", usage: "/reasoning low|medium|high|xhigh|max", desc: "思考强度 / effort" },
   { name: "character", usage: "/character <id|名称>", desc: "切换角色 / switch character" },
   { name: "team", usage: "/team <名称|off>", desc: "绑定/解绑 Agent 团队 / bind a team" },
@@ -95,6 +99,17 @@ export function renderUsage(name: ControlCommandName): string {
 }
 
 export interface StatusView {
+  /**
+   * The named behaviour preset the resolved axes add up to, or `custom` plus
+   * the axes when they add up to none.
+   *
+   * `mode` below stays as the legacy three-value mirror. It had to: a
+   * `delegate` conversation mirrors to `auto`, so a reader of `mode` alone
+   * could not tell that the bot answers in the background rather than in the
+   * thread. Reporting both is what makes the mirror's lossiness visible
+   * instead of misleading.
+   */
+  behaviour: string
   mode: string
   model: string
   provider: string
@@ -166,6 +181,7 @@ export function renderStatus(v: StatusView): string {
     `• 来源 / source: ${v.routeSource}`,
     `• 匹配规则 / matched rule: ${v.matchedRule}`,
     `• 回复 Adapter / response adapter: ${v.responseAdapter}`,
+    `• 行为 / behaviour: ${v.behaviour}`,
     `• 模式 / mode: ${v.mode}`,
     ...(v.assignee ? [`• 分配 / assignee: ${v.assignee}`] : []),
     `• 模型 / model: ${v.model}`,
@@ -247,6 +263,21 @@ export function renderDir(summary: string): string {
 
 export function confirmMode(mode: string): string {
   return `已切换模式 / Mode set: ${mode}`
+}
+/**
+ * `delegate` freezes `engagement: "background"`, and background work has no
+ * carrier without a team or workflow to run it. Refusing with the reason beats
+ * writing a value nothing acts on, which is what the settings editor's
+ * disabled row says in its own way.
+ */
+export function denyDelegateWithoutTarget(): string {
+  return (
+    "无法切换到「委派」：当前会话没有绑定团队或工作流，后台任务没有承载方。 / " +
+    "Cannot switch to delegate: this conversation has no team or workflow bound, " +
+    "so a background run has nothing to carry it.\n" +
+    "先用 /team <名称> 或 /workflow <名称> 绑定，再切换。 / " +
+    "Bind one with /team <name> or /workflow <name> first."
+  )
 }
 export function confirmApprovalMode(mode: string): string {
   return `已切换审批模式 / Approval mode set: ${mode}`

@@ -2,7 +2,6 @@ import { ALL_MODES } from "@/types/connectors/policy"
 import type { ConnectorMode } from "@/types/connectors/policy"
 
 import {
-  approvalModeFromAuthority,
   authorityFromApprovalMode,
   autonomyFromConnectorMode,
   connectorModeFromComposition,
@@ -86,18 +85,6 @@ describe("approvalMode <-> authority", () => {
     // Collapsing it to `default` would let a conversation that never chose
     // anything override a preset recommendation.
     expect(authorityFromApprovalMode(undefined)).toBeUndefined()
-    expect(approvalModeFromAuthority(undefined)).toBeUndefined()
-  })
-
-  it("round-trips both legacy values", () => {
-    for (const value of ["prompt", "yolo"] as const) {
-      expect(approvalModeFromAuthority(authorityFromApprovalMode(value))).toBe(value)
-    }
-  })
-
-  it("mirrors every non-bypass authority to prompt", () => {
-    expect(approvalModeFromAuthority("plan")).toBe("prompt")
-    expect(approvalModeFromAuthority("acceptEdits")).toBe("prompt")
   })
 })
 

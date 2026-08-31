@@ -53,6 +53,14 @@ import {
   resolveDeliveryReadiness,
   resolveInboundActivationPolicy,
 } from "@/lib/connectors/conversation-admission"
+import {
+  imModePresetFor,
+  imModePresetPatch,
+  imModePresetUnavailableReason,
+  IM_MODE_CUSTOM,
+  IM_MODE_PRESET_IDS,
+  type ImModePresetId,
+} from "@/lib/connectors/composition/im-mode-presets"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
 import { handleDelegateCommand } from "./delegate"
@@ -60,7 +68,20 @@ import { handleHandoffCommand } from "./handoff"
 import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
 
-const CONNECTOR_MODES: ReadonlySet<string> = new Set<ConnectorMode>(["auto", "manual", "draft"])
+/**
+ * Legacy spellings, kept as aliases onto the named presets.
+ *
+ * This is what end users have been typing into a group chat for as long as the
+ * command has existed, so it is a wire format and cannot be retired
+ * unilaterally. `auto` is `assistant` rather than `delegate` because the
+ * mirror has always meant "the bot answers here", and `manual` is `silent`
+ * because it has always meant "a person answers".
+ */
+const LEGACY_MODE_ALIASES: Readonly<Record<ConnectorMode, ImModePresetId>> = {
+  auto: "assistant",
+  manual: "silent",
+  draft: "draft",
+}
 const REASONING_LEVELS: ReadonlySet<string> = new Set(["low", "medium", "high", "xhigh", "max"])
 
 export interface ControlCommandDeps {
@@ -319,11 +340,25 @@ export async function maybeHandleControlCommand(
             : routing.respondViaAdapterId
               ? routing.respondViaSource
               : effectiveConfig.target.source
+      const behaviourPreset = imModePresetFor({
+        autonomy: effectiveConfig.autonomy.effective,
+        engagement: effectiveConfig.engagement.effective,
+      })
       const enabledRules = (adapterRow.dispatchRules ?? [])
         .filter((rule) => rule.enabled !== false)
         .map((rule, index) => R.renderDispatchRuleSummary(rule, index + 1))
       await reply(
         R.renderStatus({
+          // The named preset the resolved axes add up to. A `delegate`
+          // conversation mirrors to `mode: "auto"`, so reporting the mirror
+          // alone told the operator the bot answers in the thread when it
+          // actually runs in the background. When the axes match no preset
+          // (a `confirm` or `autopilot` autonomy), name them instead of
+          // printing a bare "custom" nobody can act on.
+          behaviour:
+            behaviourPreset === IM_MODE_CUSTOM
+              ? `${IM_MODE_CUSTOM} (${effectiveConfig.autonomy.effective} / ${effectiveConfig.engagement.effective})`
+              : behaviourPreset,
           mode: override?.mode ?? resolved.mode,
           model:
             targetManaged ??
@@ -530,24 +565,37 @@ export async function maybeHandleControlCommand(
         await reply(R.confirmApprovalMode(v), "applied")
         return true
       }
-      if (CONNECTOR_MODES.has(v)) {
+      const preset = (IM_MODE_PRESET_IDS as readonly string[]).includes(v)
+        ? (v as ImModePresetId)
+        : LEGACY_MODE_ALIASES[v as ConnectorMode]
+      if (preset) {
+        // `delegate` freezes `engagement: "background"`, which needs a team or
+        // workflow to carry it. Refuse with the reason rather than writing a
+        // value nothing acts on, matching the settings editor's disabled row.
+        const targetKind = resolveImEffectiveConfig({
+          adapter: adapterRow,
+          override: override ?? null,
+          rule: matchDispatchRule(adapterRow.dispatchRules, event),
+          system: { mode: resolved.mode, characterId: resolved.characterId },
+        }).target.effective.kind
+        if (imModePresetUnavailableReason(preset, targetKind) !== null) {
+          await reply(R.denyDelegateWithoutTarget(), "denied", {
+            reason: "delegate_needs_target",
+            preset,
+          })
+          return true
+        }
         // Explicit mode edit: drop the assignment marker so a later unassign
-        // does not undo the operator's choice (slice 1A), AND clear the axis
-        // fields so the mode the operator just typed is what routing reads.
-        //
-        // Clearing rather than mirroring is deliberate. Routing prefers the
-        // axes, so a stale `autonomy: "observe"` left behind by an assignment
-        // would silently swallow `/mode auto`. Writing the derived axes
-        // instead would be worse: `engagement` follows the execution target,
-        // so freezing it here would strand the conversation on whatever
-        // target it happened to have at the moment the mode was typed.
+        // does not undo the operator's choice (slice 1A). The preset patch
+        // writes the axes AND the legacy mirror, so nothing stale survives:
+        // `imModePresetPatch` clears `engagement` explicitly for the presets
+        // that leave it derived, which is what keeps a conversation from
+        // staying in the background under a preset that answers inline.
         await persist({
-          mode: v as ConnectorMode,
-          autonomy: undefined,
-          engagement: undefined,
+          ...imModePresetPatch(preset),
           ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
         })
-        await reply(R.confirmMode(v), "applied")
+        await reply(R.confirmMode(preset), "applied")
         return true
       }
       await reply(R.renderUsage("mode"), "applied")

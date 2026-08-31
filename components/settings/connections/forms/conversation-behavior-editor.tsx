@@ -29,10 +29,13 @@ import {
   engagementFromConnectorMode,
   type ImTargetKind,
 } from "@/lib/connectors/composition/mode-projection"
-import type {
-  AgentAuthority,
-  AutonomyLevel,
-  EngagementMode,
+import {
+  AGENT_AUTHORITIES,
+  AUTONOMY_LEVELS,
+  ENGAGEMENT_MODES,
+  type AgentAuthority,
+  type AutonomyLevel,
+  type EngagementMode,
 } from "@cognia/agent-config-types/agent-composition"
 import type {
   ActiveRunDispatchMode,
@@ -69,10 +72,6 @@ export interface ConversationBehaviorEditorProps {
    */
   targetKind?: ImTargetKind
 }
-
-const AUTONOMY_LEVELS = ["observe", "suggest", "confirm", "act", "autopilot"] as const
-const ENGAGEMENT_MODES = ["inline", "background", "human"] as const
-const AUTHORITY_LEVELS = ["plan", "default", "acceptEdits", "bypassPermissions"] as const
 
 const INHERIT = "inherit"
 
@@ -312,7 +311,7 @@ export function ConversationBehaviorEditor({
             testId="behavior-authority"
             label={t("authorityLabel")}
             help={t("authorityHelp")}
-            options={AUTHORITY_LEVELS}
+            options={AGENT_AUTHORITIES}
             optionLabel={(v) => t(`authority_${v}`)}
             value={value.authority}
             placeholder={t("inherit")}
