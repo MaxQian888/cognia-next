@@ -18261,6 +18261,7 @@
         "saved": "Saved.",
         "savedBadge": "Saved",
         "savedWithIssues": "Saved — {count} node(s) need attention.",
+        "selectMode": "Select multiple nodes",
         "snapOff": "Snap to grid: off",
         "snapOn": "Snap to grid: on",
         "undo": "Undo"

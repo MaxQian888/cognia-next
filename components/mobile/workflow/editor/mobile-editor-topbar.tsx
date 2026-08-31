@@ -32,6 +32,7 @@ import {
   LayoutGrid as AutoLayoutIcon,
   Maximize2 as FitViewIcon,
   Magnet as SnapIcon,
+  BoxSelect as SelectIcon,
   RectangleHorizontal as OrientationIcon,
   Download as ExportIcon,
   Upload as ImportIcon,
@@ -53,6 +54,7 @@ import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { impact } from "@/lib/capacitor/haptics"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
+import type { MobileCanvasMode } from "./mobile-canvas"
 import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -62,7 +64,7 @@ import type { WorkflowFlowInstance } from "./mobile-canvas"
 export interface MobileEditorTopbarProps {
   store: EditorStore
   reactFlowInstance: WorkflowFlowInstance | null
-  mode: "read" | "edit"
+  mode: MobileCanvasMode
   onToggleMode: () => void
   /** Open the AI copilot sheet. */
   onOpenCopilot: () => void
@@ -71,6 +73,8 @@ export interface MobileEditorTopbarProps {
   /** Landscape is the editor's default. This is the way out of it. */
   orientationLocked: boolean
   onToggleOrientationLock: () => void
+  /** Enter / leave marquee-select, a sub-mode of edit. */
+  onToggleSelectMode: () => void
 }
 
 export function MobileEditorTopbar({
@@ -82,6 +86,7 @@ export function MobileEditorTopbar({
   onOpenWorkbench,
   orientationLocked,
   onToggleOrientationLock,
+  onToggleSelectMode,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
@@ -250,6 +255,20 @@ export function MobileEditorTopbar({
         {mode === "edit" ? t("modeEdit") : t("modeRead")}
       </Button>
 
+      {mode !== "read" ? (
+        <Button
+          type="button"
+          variant={mode === "select" ? "default" : "ghost"}
+          size="icon"
+          className="size-11 shrink-0"
+          onClick={onToggleSelectMode}
+          aria-pressed={mode === "select"}
+          aria-label={t("selectMode")}
+          data-testid="mobile-editor-select-mode"
+        >
+          <SelectIcon className="size-5" aria-hidden="true" />
+        </Button>
+      ) : null}
       <Button
         type="button"
         variant="ghost"

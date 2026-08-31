@@ -18261,6 +18261,7 @@
         "saved": "已保存。",
         "savedBadge": "已保存",
         "savedWithIssues": "已保存 — {count} 个节点需要处理。",
+        "selectMode": "多选节点",
         "snapOff": "网格吸附：关",
         "snapOn": "网格吸附：开",
         "undo": "撤销"

@@ -67,9 +67,11 @@ const edgeTypes: EdgeTypes = {
 const SNAP_GRID: [number, number] = [16, 16]
 const PRO_OPTIONS = { hideAttribution: true } as const
 
+export type MobileCanvasMode = "read" | "edit" | "select"
+
 export interface MobileCanvasProps {
   store: EditorStore
-  mode: "read" | "edit"
+  mode: MobileCanvasMode
   /** True while waiting for the user to tap a connection target. */
   connectActive: boolean
   /** Tapped a node — inspect it, or complete a pending connection. */
@@ -145,7 +147,11 @@ export function MobileCanvas({
     []
   )
 
-  const editable = mode === "edit"
+  const editable = mode === "edit" || mode === "select"
+  // Make's touchscreen mode is the only formally-specified one in this class of
+  // product, and touch marquee select is the one part of it this canvas lacked.
+  // It cannot be always-on: dragging empty space is how you pan.
+  const selecting = mode === "select"
 
   // The desktop reaches its context menu through `contextmenu`, which touch
   // fires inconsistently. Everything destructive on a phone is a long press.
@@ -276,16 +282,18 @@ export function MobileCanvas({
         proOptions={PRO_OPTIONS}
         // Touch-first interaction: one-finger pan, pinch zoom, no marquee
         // select, no double-tap zoom (too easy to trigger accidentally).
-        panOnDrag
+        panOnDrag={!selecting}
         zoomOnPinch
         panOnScroll={false}
-        selectionOnDrag={false}
+        selectionOnDrag={selecting}
         zoomOnDoubleClick={false}
         // A slightly higher threshold so a tap doesn't register as a micro-drag.
         nodeDragThreshold={6}
         // Read mode is non-destructive; edit mode allows moving nodes. Handle
         // connections never use drag (tap-to-connect), so connectable stays off.
-        nodesDraggable={editable}
+        // Never while marquee-selecting: a finger starting on a node would move
+        // it instead of extending the box.
+        nodesDraggable={editable && !selecting}
         nodesConnectable={false}
         elementsSelectable={editable}
         onlyRenderVisibleElements={

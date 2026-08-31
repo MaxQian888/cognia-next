@@ -63,6 +63,14 @@ jest.mock("./mobile-editor-topbar", () => ({
       <button data-testid="open-workbench" onClick={props.onOpenWorkbench as () => void}>
         workbench
       </button>
+      {props.mode !== "read" ? (
+        <button
+          data-testid="mobile-editor-select-mode"
+          onClick={props.onToggleSelectMode as () => void}
+        >
+          select
+        </button>
+      ) : null}
     </div>
   ),
 }))
@@ -134,6 +142,7 @@ jest.mock("./mobile-node-inspector-drawer", () => ({
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { MobileWorkflowEditor } from "./mobile-workflow-editor"
 
 function buildWorkflow(): VisualWorkflow {
@@ -174,22 +183,35 @@ beforeEach(() => {
   fitViewMock.mockReset()
 })
 
+/**
+ * `TooltipProvider` is mounted once in `app/layout.tsx`, so every surface gets
+ * it for free in production. The selection toolbar the select sub-mode shows
+ * uses `Tooltip`, so a bare render here would throw where the app does not.
+ */
+function renderEditor() {
+  return render(
+    <TooltipProvider>
+      <MobileWorkflowEditor workflow={buildWorkflow()} />
+    </TooltipProvider>
+  )
+}
+
 describe("<MobileWorkflowEditor />", () => {
   it("defaults to read mode with the FAB hidden", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     expect(screen.getByTestId("canvas")).toHaveAttribute("data-mode", "read")
     expect(screen.queryByTestId("mobile-editor-fab")).toBeNull()
   })
 
   it("reveals the add-node FAB after switching to edit mode", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode"))
     expect(screen.getByTestId("canvas")).toHaveAttribute("data-mode", "edit")
     expect(screen.getByTestId("mobile-editor-fab")).toBeInTheDocument()
   })
 
   it("opens the copilot sheet from the topbar and passes the workflow id", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "false")
     expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-workflow-id", "wf_edit")
     fireEvent.click(screen.getByTestId("open-copilot"))
@@ -203,7 +225,7 @@ describe("<MobileWorkflowEditor />", () => {
     // right-edge `<Sheet>`, which is how it became the one Context Workbench
     // host without the drawer's snap points, back-dismiss and keyboard inset.
     // The host now hands the drawer its open state and owns nothing else.
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     const sidebar = screen.getByTestId("workbench-sidebar")
     expect(sidebar).toHaveAttribute("data-drawer-open", "false")
     fireEvent.click(screen.getByTestId("open-workbench"))
@@ -213,14 +235,14 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("opens the inspector drawer when a node is tapped", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("tap-n1"))
     expect(screen.getByTestId("drawer")).toBeInTheDocument()
     expect(capturedStore?.getState().selectedNodeIds).toEqual(["n1"])
   })
 
   it("creates an edge through the tap-to-connect flow", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode")) // edit
     fireEvent.click(screen.getByTestId("tap-n1")) // select + open drawer
     expect(screen.getByTestId("drawer")).toHaveAttribute("data-canconnect", "true")
@@ -234,7 +256,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("adds a node from the palette at the viewport center", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("do-init")) // provide a React Flow instance
     fireEvent.click(screen.getByTestId("toggle-mode")) // edit → FAB
     fireEvent.click(screen.getByTestId("mobile-editor-fab")) // open palette
@@ -244,7 +266,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("recenters the canvas via the fit-view button (available in read mode)", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     // Recenter is available without entering edit mode.
     expect(screen.getByTestId("mobile-editor-recenter")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("do-init"))
@@ -253,7 +275,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("clears selection and closes the inspector on a pane tap", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("tap-n1"))
     expect(screen.getByTestId("drawer")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("tap-pane"))
@@ -262,7 +284,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("arms the shared renderer's tap-to-connect only in edit mode", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     // Read mode (default) leaves the handle-tap entry disabled.
     expect(capturedStore?.getState().touchConnect).toBe(false)
     fireEvent.click(screen.getByTestId("toggle-mode")) // → edit
@@ -272,7 +294,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("selects an edge on tap and deletes it via the floating bar", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode")) // edit
     // Build an edge to act on.
     fireEvent.click(screen.getByTestId("tap-n1"))
@@ -289,7 +311,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("does not select edges in read mode", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     // Seed an edge directly, then tap it in read mode.
     capturedStore!.getState().connect({ source: "n1", target: "n2" })
     fireEvent.click(screen.getByTestId("tap-edge"))
@@ -300,7 +322,7 @@ describe("<MobileWorkflowEditor />", () => {
   it("opens the action sheet on a long press and deletes the held node", () => {
     // A phone could only delete a node by opening its inspector and finding
     // the button. Every other destructive gesture in this app is a long press.
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode"))
     fireEvent.click(screen.getByTestId("hold-n1"))
     expect(screen.getByTestId("mobile-canvas-actions")).toBeInTheDocument()
@@ -309,7 +331,7 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("duplicates the held node and selects the copy", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode"))
     const before = capturedStore!.getState().nodes.length
     fireEvent.click(screen.getByTestId("hold-n1"))
@@ -321,10 +343,45 @@ describe("<MobileWorkflowEditor />", () => {
   })
 
   it("offers the canvas actions when the press landed on empty space", () => {
-    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    renderEditor()
     fireEvent.click(screen.getByTestId("toggle-mode"))
     fireEvent.click(screen.getByTestId("hold-pane"))
     expect(screen.getByTestId("mobile-canvas-action-addNode")).toBeInTheDocument()
     expect(screen.queryByTestId("mobile-canvas-action-delete")).toBeNull()
+  })
+
+  it("adds to the selection instead of opening the inspector while selecting", () => {
+    // Make's touchscreen mode is the only formally-specified one in this class
+    // of product, and marquee select was the part this canvas lacked.
+    renderEditor()
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    fireEvent.click(screen.getByTestId("mobile-editor-select-mode"))
+    expect(screen.getByTestId("canvas")).toHaveAttribute("data-mode", "select")
+
+    fireEvent.click(screen.getByTestId("tap-n1"))
+    fireEvent.click(screen.getByTestId("tap-n2"))
+    expect(capturedStore?.getState().selectedNodeIds).toEqual(["n1", "n2"])
+    expect(screen.queryByTestId("drawer")).toBeNull()
+    // Tapping an already-selected node takes it back out.
+    fireEvent.click(screen.getByTestId("tap-n1"))
+    expect(capturedStore?.getState().selectedNodeIds).toEqual(["n2"])
+  })
+
+  it("offers the select sub-mode only once editing", () => {
+    renderEditor()
+    expect(screen.queryByTestId("mobile-editor-select-mode")).toBeNull()
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    expect(screen.getByTestId("mobile-editor-select-mode")).toBeInTheDocument()
+  })
+
+  it("drops the selection when leaving edit mode entirely", () => {
+    renderEditor()
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    fireEvent.click(screen.getByTestId("mobile-editor-select-mode"))
+    fireEvent.click(screen.getByTestId("tap-n1"))
+    expect(capturedStore?.getState().selectedNodeIds).toEqual(["n1"])
+    fireEvent.click(screen.getByTestId("mobile-editor-select-mode"))
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    expect(capturedStore?.getState().selectedNodeIds).toEqual([])
   })
 })

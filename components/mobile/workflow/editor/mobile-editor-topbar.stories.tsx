@@ -24,6 +24,7 @@ const meta = {
     onOpenWorkbench: fn(),
     orientationLocked: true,
     onToggleOrientationLock: fn(),
+    onToggleSelectMode: fn(),
   },
   decorators: [
     (Story) => (

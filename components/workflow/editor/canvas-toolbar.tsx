@@ -97,6 +97,7 @@ export function ToolbarButton({
   destructive,
   side = "top",
   testid,
+  touch = false,
 }: {
   icon: LucideIcon
   label: string
@@ -106,6 +107,8 @@ export function ToolbarButton({
   destructive?: boolean
   side?: "top" | "bottom"
   testid: string
+  /** Size for a finger rather than a cursor. 32px is not a touch target. */
+  touch?: boolean
 }) {
   return (
     <Tooltip>
@@ -115,7 +118,7 @@ export function ToolbarButton({
           variant="ghost"
           size="icon"
           className={cn(
-            "size-8",
+            touch ? "size-11" : "size-8",
             pressed && "bg-accent text-accent-foreground",
             destructive && "text-destructive hover:text-destructive"
           )}

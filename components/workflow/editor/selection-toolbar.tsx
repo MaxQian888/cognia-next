@@ -42,6 +42,7 @@ import {
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
 import { Surface } from "@/components/surface/surface"
+import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -67,6 +68,11 @@ export interface SelectionToolbarProps {
   motionEnabled: boolean
   /** Extract the current selection into a new sub-workflow (C5). */
   onExtractToSubworkflow?: () => void
+  /**
+   * Touch layout: 44px hit areas, and anchored to the bottom so the bar sits
+   * where a thumb reaches instead of under the phone's own top chrome.
+   */
+  touch?: boolean
 }
 
 const ALIGN_ITEMS: ReadonlyArray<{
@@ -198,6 +204,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   reactFlowInstance,
   motionEnabled,
   onExtractToSubworkflow,
+  touch = false,
 }: SelectionToolbarProps) {
   const t = useTranslations("workflows.editor.selectionToolbar")
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
@@ -318,7 +325,12 @@ export const SelectionToolbar = memo(function SelectionToolbar({
       radius="pill"
       elevation={2}
       data-testid="wf-selection-toolbar"
-      className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 border px-2 py-1 backdrop-blur"
+      className={cn(
+        "absolute left-1/2 z-10 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto border px-2 py-1 backdrop-blur",
+        touch
+          ? "bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] [scrollbar-width:none]"
+          : "top-3"
+      )}
     >
       <span
         className="px-1 text-xs font-medium tabular-nums text-muted-foreground"
@@ -335,6 +347,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         label={t("askCopilot")}
         onClick={handleAskCopilot}
         side="bottom"
+        touch={touch}
         testid="wf-sel-ask-copilot"
       />
       <ToolbarButton
@@ -342,6 +355,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         label={t("duplicate")}
         onClick={handleDuplicate}
         side="bottom"
+        touch={touch}
         testid="wf-sel-duplicate"
       />
       <ToolbarButton
@@ -350,6 +364,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         onClick={handleGroup}
         disabled={!canGroup}
         side="bottom"
+        touch={touch}
         testid="wf-sel-group"
       />
       <ToolbarButton
@@ -357,6 +372,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         label={t("createNodeGroup")}
         onClick={() => setNodeGroupDialogOpen(true)}
         side="bottom"
+        touch={touch}
         testid="wf-sel-create-node-group"
       />
       <AlignPopover
@@ -370,6 +386,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         label={allLocked ? t("unlock") : t("lock")}
         onClick={handleToggleLock}
         side="bottom"
+        touch={touch}
         testid="wf-sel-lock"
       />
       <ToolbarButton
@@ -377,6 +394,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         label={t("fit")}
         onClick={handleFit}
         side="bottom"
+        touch={touch}
         testid="wf-sel-fit"
       />
       {singleGroupId ? (
@@ -387,6 +405,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
             label={t("selectChildren")}
             onClick={handleSelectChildren}
             side="bottom"
+            touch={touch}
             testid="wf-sel-group-children"
           />
           <ToolbarButton
@@ -394,6 +413,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
             label={t("toggleGroupDisabled")}
             onClick={handleToggleGroupDisabled}
             side="bottom"
+            touch={touch}
             testid="wf-sel-group-disable"
           />
           <ToolbarButton
@@ -401,6 +421,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
             label={t("runBlock")}
             onClick={handleRunBlock}
             side="bottom"
+            touch={touch}
             testid="wf-sel-group-run"
           />
         </>
@@ -411,6 +432,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
           label={t("extract")}
           onClick={onExtractToSubworkflow}
           side="bottom"
+          touch={touch}
           testid="wf-sel-extract"
         />
       ) : null}
@@ -421,6 +443,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         onClick={handleDelete}
         destructive
         side="bottom"
+        touch={touch}
         testid="wf-sel-delete"
       />
       <NodeGroupCreateDialog

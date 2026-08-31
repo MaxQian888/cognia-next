@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ReactFlowProvider } from "@xyflow/react"
+import { ReactFlowProvider, type ReactFlowInstance } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { X as CancelIcon, Maximize2 as FitViewIcon, Trash2 as TrashIcon } from "lucide-react"
@@ -35,7 +35,9 @@ import {
   serializeClipboard,
 } from "@/lib/workflow/editor/clipboard"
 
-import { MobileCanvas, type WorkflowFlowInstance } from "./mobile-canvas"
+import { SelectionToolbar } from "@/components/workflow/editor/selection-toolbar"
+
+import { MobileCanvas, type MobileCanvasMode, type WorkflowFlowInstance } from "./mobile-canvas"
 import { MobileCanvasActionSheet } from "./mobile-canvas-action-sheet"
 import type { CanvasPressTarget } from "./use-canvas-long-press"
 import { MobileEditorTopbar } from "./mobile-editor-topbar"
@@ -47,7 +49,7 @@ import { useTapConnect } from "./use-tap-connect"
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
   const tConnection = useTranslations("workflows.editor.connection")
-  const [mode, setMode] = useState<"read" | "edit">("read")
+  const [mode, setMode] = useState<MobileCanvasMode>("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
@@ -76,13 +78,27 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   }, [mode, store])
 
   const onToggleMode = useCallback(() => {
-    const next = mode === "edit" ? "read" : "edit"
+    const next = mode === "read" ? "edit" : "read"
     if (next === "read") {
       tapConnect.cancel()
       setPaletteOpen(false)
+      store.getState().clearSelection()
     }
     setMode(next)
-  }, [mode, tapConnect])
+  }, [mode, store, tapConnect])
+
+  /**
+   * Marquee select is a sub-mode of edit, not a third top-level one: dragging
+   * empty space is how you pan, so the two cannot both own the same gesture.
+   */
+  const onToggleSelectMode = useCallback(() => {
+    setMode((current) => {
+      if (current === "select") return "edit"
+      tapConnect.cancel()
+      setInspectorOpen(false)
+      return "select"
+    })
+  }, [tapConnect])
 
   const onNodeTap = useCallback(
     (id: string) => {
@@ -91,10 +107,19 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         if (!result.valid) toast.error(tConnection(result.reasonKey))
         return
       }
+      if (mode === "select") {
+        const current = store.getState().selectedNodeIds
+        store
+          .getState()
+          .setSelectedNodes(
+            current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+          )
+        return
+      }
       store.getState().setSelectedNodes([id])
       setInspectorOpen(true)
     },
-    [store, tapConnect, tConnection]
+    [mode, store, tapConnect, tConnection]
   )
 
   const onEdgeTap = useCallback(
@@ -191,6 +216,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         mode={mode}
         onToggleMode={onToggleMode}
         onOpenCopilot={() => setCopilotOpen(true)}
+        onToggleSelectMode={onToggleSelectMode}
         orientationLocked={orientationLocked}
         onToggleOrientationLock={() => setOrientationLocked((v) => !v)}
         onOpenWorkbench={() => setWorkbenchOpen(true)}
@@ -207,6 +233,19 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           orientationLocked={orientationLocked}
           onInit={setRf}
         />
+        {/* The desktop selection toolbar, in its touch layout. Duplicating its
+            duplicate / group / align / distribute / delete / extract handlers
+            for the phone would have been six more places to keep in step. */}
+        {mode === "select" && !tapConnect.active ? (
+          <SelectionToolbar
+            store={store}
+            // `WorkflowFlowInstance` is the same instance narrowed to this
+            // editor's node/edge shapes; the toolbar only calls fitBounds.
+            reactFlowInstance={rf as ReactFlowInstance | null}
+            motionEnabled={false}
+            touch
+          />
+        ) : null}
         {mode === "edit" && !tapConnect.active ? (
           <FloatingActionButton
             position="absolute"
