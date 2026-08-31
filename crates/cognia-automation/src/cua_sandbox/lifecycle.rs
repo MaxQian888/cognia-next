@@ -600,6 +600,175 @@ mod tests {
         assert!(!args.contains(&"-w".to_string()));
     }
 
+    /// Image used by the live tests. Deliberately whatever is already on the
+    /// machine rather than the cua desktop image: what is being proven here is
+    /// the container lifecycle and the exec channel, and neither depends on
+    /// which image is running.
+    const LIVE_IMAGE: &str = "caddy:2.10.2-alpine";
+    const LIVE_NAME: &str = "cua-lifecycle-selftest";
+
+    async fn cleanup_live() {
+        let _ = docker_remove(LIVE_NAME).await;
+    }
+
+    fn live_spec(policy: ContainerPolicy) -> SpawnSpec {
+        SpawnSpec {
+            image: LIVE_IMAGE.into(),
+            name: LIVE_NAME.into(),
+            policy,
+        }
+    }
+
+    /// The claim the cua-desktop shell tier rests on: a command dispatched
+    /// through this module runs inside the container, not on the developer's
+    /// machine. If this ever stops holding, the tier is silently running the
+    /// model's shell commands on someone's real desktop.
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    async fn live_exec_runs_inside_the_container() {
+        cleanup_live().await;
+        let container = docker_run(&live_spec(ContainerPolicy {
+            network_mode: Some("none".into()),
+            cpus: Some("1.5".into()),
+            memory_mb: Some(512),
+            workspace_mount: None,
+        }))
+        .await
+        .expect("docker run");
+
+        let host_name = Command::new("hostname")
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        let outcome = docker_exec(
+            LIVE_NAME,
+            &["hostname".to_string()],
+            None,
+            &BTreeMap::new(),
+            None,
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("docker exec");
+
+        assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
+        let inside = outcome.stdout.trim();
+        assert!(!inside.is_empty());
+        assert_ne!(
+            inside, host_name,
+            "docker exec reported the host's hostname, so it did not run inside the container"
+        );
+        assert!(
+            container.starts_with(inside),
+            "the container reports its own short id as its hostname"
+        );
+
+        // The frozen policy is readable back, which is what attestation compares
+        // a per-call request against.
+        let state = docker_inspect(LIVE_NAME).await.unwrap().unwrap();
+        assert_eq!(state.network_mode, "none");
+        assert_eq!(state.nano_cpus, 1_500_000_000);
+        assert_eq!(state.memory_bytes, 512 * 1024 * 1024);
+
+        cleanup_live().await;
+    }
+
+    /// Without `--rm`, stopping keeps the container and everything written in
+    /// it. This is the difference between a machine and a scratch process.
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    async fn live_files_survive_a_stop_and_start() {
+        cleanup_live().await;
+        docker_run(&live_spec(ContainerPolicy::default()))
+            .await
+            .expect("docker run");
+
+        let write = docker_exec(
+            LIVE_NAME,
+            &[
+                "sh".to_string(),
+                "-c".to_string(),
+                "echo written-before-stop > /root/proof.txt".to_string(),
+            ],
+            None,
+            &BTreeMap::new(),
+            None,
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("write");
+        assert_eq!(write.exit_code, 0, "stderr: {}", write.stderr);
+
+        docker_stop(LIVE_NAME).await.expect("stop");
+        let stopped = docker_inspect(LIVE_NAME).await.unwrap().unwrap();
+        assert!(
+            !stopped.running,
+            "the container should still exist, stopped"
+        );
+
+        docker_start(LIVE_NAME).await.expect("start");
+        let read = docker_read_file(LIVE_NAME, "/root/proof.txt", 4096)
+            .await
+            .expect("read back");
+        assert_eq!(read.trim(), "written-before-stop");
+
+        cleanup_live().await;
+    }
+
+    /// Suspend is `pause`, and Docker reports a paused container as still
+    /// running. A stopped container reports the opposite, which is exactly why
+    /// implementing suspend with stop would be a lie about the session.
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    async fn live_pause_is_a_suspend_not_a_stop() {
+        cleanup_live().await;
+        docker_run(&live_spec(ContainerPolicy::default()))
+            .await
+            .expect("docker run");
+
+        docker_pause(LIVE_NAME).await.expect("pause");
+        let paused = docker_inspect(LIVE_NAME).await.unwrap().unwrap();
+        assert_eq!(paused.status, "paused");
+        assert!(paused.paused);
+        assert!(paused.running, "a paused container is still running");
+
+        docker_unpause(LIVE_NAME).await.expect("unpause");
+        let resumed = docker_inspect(LIVE_NAME).await.unwrap().unwrap();
+        assert_eq!(resumed.status, "running");
+        assert!(!resumed.paused);
+
+        cleanup_live().await;
+    }
+
+    /// The bug adoption exists to fix: a container that outlived the app takes
+    /// its deterministic name, and a second `docker run` fails forever after.
+    /// `docker_inspect` answering `Some` is what lets the registry reuse it.
+    #[tokio::test]
+    #[ignore = "requires a running Docker daemon and the caddy:2.10.2-alpine image"]
+    async fn live_a_second_run_conflicts_but_inspect_can_adopt() {
+        cleanup_live().await;
+        docker_run(&live_spec(ContainerPolicy::default()))
+            .await
+            .expect("first run");
+
+        let conflict = docker_run(&live_spec(ContainerPolicy::default())).await;
+        assert!(
+            conflict.is_err(),
+            "a duplicate name must fail, which is what used to brick a connection"
+        );
+
+        let adopted = docker_inspect(LIVE_NAME).await.expect("inspect");
+        assert!(adopted.is_some(), "the existing container is adoptable");
+
+        docker_remove(LIVE_NAME).await.expect("remove");
+        assert!(
+            docker_inspect(LIVE_NAME).await.unwrap().is_none(),
+            "delete really removes the container"
+        );
+    }
+
     #[test]
     fn cap_stream_reports_truncation_on_a_char_boundary() {
         let (text, truncated) = cap_stream(b"short");
