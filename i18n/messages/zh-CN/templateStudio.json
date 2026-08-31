@@ -124,6 +124,17 @@
     "detached": "已分离",
     "resources": "{count} 个资源"
   },
+  "instantiateDialog": {
+    "cancel": "取消",
+    "confirm": "创建资源",
+    "description": "该模板会绑定一些设置后应用无法回读的值。",
+    "kind": {
+      "secretRef": "凭据引用",
+      "twinSlot": "数字分身槽位"
+    },
+    "sensitiveTitle": "{count} 项敏感绑定",
+    "title": "用该模板创建资源"
+  },
   "issues": {
     "agent-team": {
       "task-cycle": "团队任务图中存在依赖循环。"
@@ -171,6 +182,19 @@
     "blocked": "计划已阻止",
     "needs-confirmation": "需要确认",
     "ready": "计划已就绪"
+  },
+  "publishDialog": {
+    "bump": {
+      "major": "主版本：已发布的内容发生了结构变化",
+      "minor": "次版本：在已发布内容上做了新增",
+      "patch": "修订版本：契约没有变化"
+    },
+    "cancel": "取消",
+    "confirm": "发布 {version}",
+    "description": "当前为 {current}，本次发布将是 {next}。",
+    "noReasons": "没有会改变版本号的差异。",
+    "title": "发布该模板",
+    "unreleased": "尚未发布"
   },
   "status": {
     "conflict": "冲突",

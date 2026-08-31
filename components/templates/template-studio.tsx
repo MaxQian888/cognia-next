@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -15,6 +16,7 @@ import {
   UploadIcon,
   ChevronDownIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
 import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import type {
@@ -56,6 +58,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { TemplateBindingField } from "./template-binding-field"
+import { PublishConfirmDialog, type PublishSuggestion } from "./publish-confirm-dialog"
+import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
 
 const FULL_DOMAINS: TemplateDomain[] = [
   "agentTeam",
@@ -67,7 +72,7 @@ const FULL_DOMAINS: TemplateDomain[] = [
 ]
 
 const EDITOR_ROUTES: Record<string, string> = {
-  agentTeam: "/agent-teams?mode=template-authoring",
+  agentTeam: "/settings?section=squads&squadTab=templates",
   workflow: "/workflows?mode=template-authoring",
   subagent: "/me/subagents",
   customMode: "/settings?section=agent",
@@ -119,6 +124,21 @@ function downloadPackage(bytes: Uint8Array, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * A stable, readable id for a new draft. Module scope because it reads the
+ * clock, which the purity rule refuses inside a component even from an event
+ * handler, and because the slug rule belongs with the other id helpers rather
+ * than inline in a submit path.
+ */
+function makeDraftId(domain: TemplateDomain, name: string): string {
+  const slug = name
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return `user.${domain}.${slug}.${Date.now().toString(36)}`
+}
+
 export function TemplateStudio() {
   const t = useTranslations("templateStudio")
   const platform = usePlatform()
@@ -134,10 +154,20 @@ export function TemplateStudio() {
     ...(domain === "all" ? {} : { domain }),
     ...(trust === "all" ? {} : { trust }),
   })
-  const [selectionKey, setSelectionKey] = useState<string | undefined>(() => {
-    const requestedId = new URLSearchParams(window.location.search).get("definition")
-    return requestedId ? `id:${requestedId}` : undefined
-  })
+  // `?definition=` is how /agent-teams, the workflow settings tab and global
+  // search hand a template over. Reading it once inside a state initializer
+  // meant a second hand-off from an already-open Studio silently did nothing,
+  // and it touched `window` during render.
+  const searchParams = useSearchParams()
+  const requestedDefinitionId = searchParams.get("definition")
+  const [selectionKey, setSelectionKey] = useState<string | undefined>(
+    requestedDefinitionId ? `id:${requestedDefinitionId}` : undefined
+  )
+  const [lastRequestedId, setLastRequestedId] = useState(requestedDefinitionId)
+  if (requestedDefinitionId !== lastRequestedId) {
+    setLastRequestedId(requestedDefinitionId)
+    if (requestedDefinitionId) setSelectionKey(`id:${requestedDefinitionId}`)
+  }
   const selected = useMemo(() => {
     if (!selectionKey) return undefined
     return selectionKey.startsWith("hash:")
@@ -159,6 +189,8 @@ export function TemplateStudio() {
   const [bindings, setBindings] = useState<Record<string, string>>({})
   const [plan, setPlan] = useState<TemplatePreflightPlan>()
   const [message, setMessage] = useState<string>()
+  const [publishSuggestion, setPublishSuggestion] = useState<PublishSuggestion | null>(null)
+  const [pendingInstantiate, setPendingInstantiate] = useState<TemplatePreflightPlan>()
   const [pendingImport, setPendingImport] = useState<{
     bytes: Uint8Array
     inspected: InspectedTemplatePackage
@@ -179,14 +211,29 @@ export function TemplateStudio() {
     }
   }, [revision, runtime])
 
+  /**
+   * Run an async handler and report what happened.
+   *
+   * Seven handlers here were `void fn()` with no catch, and every one of them
+   * can throw: `publish` on a revision clash or a bump mismatch,
+   * `exportPackage` on a release the repository does not hold (a plugin- or
+   * overlay-supplied one always), `instantiate` on any adapter failure,
+   * `importPackage` on a signature or bounds violation. All of them surfaced
+   * as an unhandled rejection and a UI where nothing happened.
+   */
+  const guard = useCallback(
+    (fn: () => Promise<void>) => () => {
+      void fn().catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : String(error))
+      })
+    },
+    []
+  )
+
   const createDraft = async () => {
     const trimmed = draftName.trim()
     if (!trimmed) return
-    const id = `user.${draftDomain}.${trimmed
-      .normalize("NFKC")
-      .toLocaleLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")}.${Date.now().toString(36)}`
+    const id = makeDraftId(draftDomain, trimmed)
     await runtime.service.createDraft({
       id,
       domain: draftDomain,
@@ -214,21 +261,50 @@ export function TemplateStudio() {
     setPlan(next)
   }
 
+  /**
+   * `plan.requiresConfirmation` is set whenever a binding resolves a secret or
+   * a twin slot, and the preflight alert already says so. The button passed
+   * `confirmed: true` unconditionally, so the one gate the plan asks for was
+   * answered by the caller on the user's behalf.
+   */
   const instantiate = async () => {
     if (!plan) return
-    await runtime.service.instantiate({ plan, confirmed: true })
+    if (plan.status === "needs-confirmation") {
+      setPendingInstantiate(plan)
+      return
+    }
+    await commitInstantiate(plan)
+  }
+
+  const commitInstantiate = async (target: TemplatePreflightPlan) => {
+    await runtime.service.instantiate({ plan: target, confirmed: true })
+    setPendingInstantiate(undefined)
     setMessage(t("messages.instantiated"))
     setPlan(undefined)
     setInstances(await runtime.repository.listInstances())
   }
 
-  const publish = async () => {
+  /**
+   * Ask for the version, then publish.
+   *
+   * `service.publish` refuses a `confirmedBump` that does not match its own
+   * conservative suggestion, and returns the reasons, precisely so a human sees
+   * why a change is major before it becomes major. Fetching the suggestion and
+   * handing it straight back satisfied the check and defeated the point.
+   */
+  const openPublish = async () => {
     if (!selected || selected.status !== "draft") return
     const suggestion = await runtime.service.getPublishSuggestion(selected.id)
+    setPublishSuggestion({ ...suggestion, bump: suggestion.bump as TemplateVersionBump })
+  }
+
+  const publish = async (bump: TemplateVersionBump) => {
+    if (!selected || selected.status !== "draft") return
     const published = await runtime.service.publish(selected.id, {
       expectedRevision: selected.revision,
-      confirmedBump: suggestion.bump as TemplateVersionBump,
+      confirmedBump: bump,
     })
+    setPublishSuggestion(null)
     setSelectionKey(`hash:${published.contentHash}`)
     setMessage(t("messages.published", { version: published.version }))
   }
@@ -325,7 +401,7 @@ export function TemplateStudio() {
                 type="file"
                 accept=".cognia-template,application/zip"
                 className="hidden"
-                onChange={(event) => void inspectImport(event.target.files?.[0])}
+                onChange={(event) => guard(() => inspectImport(event.target.files?.[0]))()}
               />
               <Button variant="outline" onClick={() => importRef.current?.click()}>
                 <UploadIcon className="size-4" />
@@ -460,11 +536,11 @@ export function TemplateStudio() {
                   setBindings={setBindings}
                   plan={plan}
                   mobile={platform === "mobile"}
-                  onPreflight={() => void runPreflight()}
-                  onInstantiate={() => void instantiate()}
-                  onPublish={() => void publish()}
+                  onPreflight={guard(runPreflight)}
+                  onInstantiate={guard(instantiate)}
+                  onPublish={guard(openPublish)}
                   onSaveDraft={saveDraft}
-                  onExport={() => void exportSelected()}
+                  onExport={guard(exportSelected)}
                   t={t}
                 />
               </div>
@@ -510,6 +586,16 @@ export function TemplateStudio() {
         </TabsContent>
       </Tabs>
 
+      <PublishConfirmDialog
+        suggestion={publishSuggestion}
+        onOpenChange={(open) => (open ? undefined : setPublishSuggestion(null))}
+        onConfirm={(bump) => guard(() => publish(bump))()}
+      />
+      <InstantiateConfirmDialog
+        plan={pendingInstantiate}
+        onOpenChange={(open) => (open ? undefined : setPendingInstantiate(undefined))}
+        onConfirm={(target) => guard(() => commitInstantiate(target))()}
+      />
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
@@ -556,7 +642,7 @@ export function TemplateStudio() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               {t("actions.cancel")}
             </Button>
-            <Button onClick={() => void createDraft()} disabled={!draftName.trim()}>
+            <Button onClick={guard(createDraft)} disabled={!draftName.trim()}>
               {t("actions.create")}
             </Button>
           </DialogFooter>
@@ -574,8 +660,26 @@ export function TemplateStudio() {
           </DialogHeader>
           {pendingImport ? (
             <div className="space-y-3 text-sm">
-              <Alert variant="destructive">
-                <AlertTriangleIcon />
+              {/* The alarm state was unconditional, so a correctly signed
+                  package from a verified publisher looked exactly as dangerous
+                  as an unsigned one, and the four trust levels stopped meaning
+                  anything. Only the two the app cannot vouch for are alarming. */}
+              <Alert
+                variant={
+                  pendingImport.inspected.trust === "unsigned" ||
+                  pendingImport.inspected.trust === "signed-unknown"
+                    ? "destructive"
+                    : "default"
+                }
+                data-testid="template-import-trust"
+                data-trust={pendingImport.inspected.trust}
+              >
+                {pendingImport.inspected.trust === "unsigned" ||
+                pendingImport.inspected.trust === "signed-unknown" ? (
+                  <AlertTriangleIcon />
+                ) : (
+                  <CheckCircle2Icon />
+                )}
                 <AlertTitle>{t(`trust.${pendingImport.inspected.trust}`)}</AlertTitle>
                 <AlertDescription>{t("import.inert")}</AlertDescription>
               </Alert>
@@ -590,7 +694,7 @@ export function TemplateStudio() {
             <Button variant="outline" onClick={() => setPendingImport(undefined)}>
               {t("actions.cancel")}
             </Button>
-            <Button onClick={() => void confirmImport()}>{t("actions.confirmImport")}</Button>
+            <Button onClick={guard(confirmImport)}>{t("actions.confirmImport")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -655,18 +759,12 @@ function TemplateInspector({
           <p>{t("inspector.hash", { hash: definition.contentHash })}</p>
         </div>
         {definition.inputs.map((input) => (
-          <div key={input.id} className="space-y-2">
-            <Label htmlFor={`binding-${input.id}`}>
-              {input.label}
-              {input.required ? ` ${t("inspector.required")}` : ""}
-            </Label>
-            <Input
-              id={`binding-${input.id}`}
-              value={bindings[input.id] ?? ""}
-              onChange={(event) => setBindings({ ...bindings, [input.id]: event.target.value })}
-              placeholder={t(`inputKinds.${input.kind}`)}
-            />
-          </div>
+          <TemplateBindingField
+            key={input.id}
+            input={input}
+            value={bindings[input.id] ?? ""}
+            onChange={(next) => setBindings({ ...bindings, [input.id]: next })}
+          />
         ))}
         {plan ? (
           <Alert variant={plan.status === "blocked" ? "destructive" : "default"}>

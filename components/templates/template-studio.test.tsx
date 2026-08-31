@@ -8,6 +8,12 @@ const mockSaveDraft = jest.fn()
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
+// The Studio reads `?definition=` through `useSearchParams` so a second
+// hand-off into an already-open Studio re-selects. These tests drive the URL
+// with `history.replaceState`, so the mock reads the same place.
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
 jest.mock("@/hooks/use-template-catalog", () => ({
   useTemplateCatalog: () => ({ definitions: catalogDefinitions, revision: 0 }),

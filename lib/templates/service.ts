@@ -236,17 +236,36 @@ export class TemplateService {
     })
   }
 
-  async getPublishSuggestion(
-    id: string
-  ): Promise<{ bump: TemplateVersionBump; reasons: string[] }> {
+  /**
+   * The bump `publish` will accept, with the reasons behind it and the two
+   * versions they sit between.
+   *
+   * `currentVersion` / `nextVersion` are returned rather than left to the
+   * caller because the comparison that finds the latest release lives here:
+   * a UI that re-derived them would need its own semver ordering, and the
+   * point of this method is that the confirmation shows the same numbers
+   * `publish` is about to use.
+   */
+  async getPublishSuggestion(id: string): Promise<{
+    bump: TemplateVersionBump
+    reasons: string[]
+    currentVersion: string | null
+    nextVersion: string
+  }> {
     const draft = await this.repository.getDraft(id)
     if (!draft) throw new Error(`Template draft ${id} not found`)
     const releases = (await this.repository.listReleases(id)).sort((a, b) =>
       compareSemver(b.version!, a.version!)
     )
-    return releases[0]
-      ? suggestTemplateVersionBump(releases[0], draft)
-      : { bump: "minor", reasons: ["Initial release"] }
+    const previous = releases[0]
+    const suggestion = previous
+      ? suggestTemplateVersionBump(previous, draft)
+      : { bump: "minor" as const, reasons: ["Initial release"] }
+    return {
+      ...suggestion,
+      currentVersion: previous?.version ?? null,
+      nextVersion: incrementTemplateVersion(previous?.version ?? "0.0.0", suggestion.bump),
+    }
   }
 
   async saveDraft(

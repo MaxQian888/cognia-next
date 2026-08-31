@@ -124,6 +124,17 @@
     "detached": "Detached",
     "resources": "{count, plural, one {# resource} other {# resources}}"
   },
+  "instantiateDialog": {
+    "cancel": "Cancel",
+    "confirm": "Create resources",
+    "description": "This template binds values the app cannot read back once they are set.",
+    "kind": {
+      "secretRef": "credential reference",
+      "twinSlot": "digital twin slot"
+    },
+    "sensitiveTitle": "{count, plural, =1 {1 sensitive binding} other {# sensitive bindings}}",
+    "title": "Create resources from this template"
+  },
   "issues": {
     "agent-team": {
       "task-cycle": "The team task graph contains a dependency cycle."
@@ -171,6 +182,19 @@
     "blocked": "Plan blocked",
     "needs-confirmation": "Confirmation required",
     "ready": "Plan ready"
+  },
+  "publishDialog": {
+    "bump": {
+      "major": "Major: something already published changed shape",
+      "minor": "Minor: this adds to what was published",
+      "patch": "Patch: no contract change"
+    },
+    "cancel": "Cancel",
+    "confirm": "Publish {version}",
+    "description": "Currently {current}. This release will be {next}.",
+    "noReasons": "No differences that change the version.",
+    "title": "Publish this template",
+    "unreleased": "unreleased"
   },
   "status": {
     "conflict": "Conflict",

@@ -3,6 +3,18 @@ import { refreshBuiltInTemplateOverlays } from "./builtin-overlays"
 import type { FullDomainTemplatePorts } from "./adapters"
 
 jest.mock("@/types/agent/agent-team", () => ({
+  // `TEAM_EXECUTION_PATTERNS` is the runtime list `TeamExecutionPattern` is
+  // derived from, and the workflow params schema builds a `z.enum` out of it
+  // at module load. A partial mock of this module leaves that enum with
+  // nothing to enumerate, which fails the whole suite at import time.
+  TEAM_EXECUTION_PATTERNS: [
+    "manager_worker",
+    "parallel_specialists",
+    "background_handoff",
+    "external_handoff",
+    "single_agent_recommended",
+    "ultracode_orchestration",
+  ],
   BUILT_IN_TEAM_TEMPLATES: [
     {
       id: "team",
