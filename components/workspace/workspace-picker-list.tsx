@@ -37,6 +37,7 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
@@ -318,14 +319,17 @@ export function WorkspacePickerList({
       {isLarge && (
         <div className="relative px-1 pb-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+          {/* The shared control rather than a hand-rolled `input`: it already
+              carries the border, focus ring and disabled treatment this was
+              restating by hand, and a style pack can reach it. */}
+          <Input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("searchPlaceholder")}
             aria-label={t("searchPlaceholder")}
             data-testid="workspace-switcher-search"
-            className="h-8 w-full rounded-md border border-input bg-transparent pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="h-8 pr-8 pl-8 text-sm"
           />
           {query && (
             <button

@@ -57,6 +57,7 @@ import type {
   WorkspaceEnvironmentAction,
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
+import { Surface } from "@/components/surface/surface"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
 import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
@@ -545,7 +546,7 @@ export function WorkspaceEnvironmentList({
       </div>
 
       {showCreate && rootDir && createOpen ? (
-        <div className="rounded-lg border p-3" data-testid="workspace-environments-create">
+        <Surface radius="panel" className="border p-3" data-testid="workspace-environments-create">
           <NewWorktreeForm
             rootDir={rootDir}
             canMutate={canMutate}
@@ -554,7 +555,7 @@ export function WorkspaceEnvironmentList({
               void load()
             }}
           />
-        </div>
+        </Surface>
       ) : null}
 
       {error ? (
@@ -618,27 +619,28 @@ export function WorkspaceEnvironmentList({
           {compact ? (
             <ul className="flex flex-col gap-2">
               {scoped.map((row) => (
-                <li
-                  key={row.environmentId}
-                  data-testid={`workspace-environment-card-${row.environmentId}`}
-                  className="flex flex-col gap-2 rounded-lg border bg-card p-3"
-                >
-                  <div className="min-w-0">{renderIdentity(row)}</div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {renderKind(row)}
-                    {presentation === "page" ? (
-                      <span className="text-xs text-muted-foreground">
-                        {row.state ? t(`states.${row.state}`) : t("stateNone")}
-                      </span>
-                    ) : null}
-                    {presentation === "page" ? (
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
-                      </span>
-                    ) : null}
-                  </div>
-                  {renderActions(row)}
-                </li>
+                <Surface asChild key={row.environmentId} radius="panel">
+                  <li
+                    data-testid={`workspace-environment-card-${row.environmentId}`}
+                    className="flex flex-col gap-2 border p-3"
+                  >
+                    <div className="min-w-0">{renderIdentity(row)}</div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {renderKind(row)}
+                      {presentation === "page" ? (
+                        <span className="text-xs text-muted-foreground">
+                          {row.state ? t(`states.${row.state}`) : t("stateNone")}
+                        </span>
+                      ) : null}
+                      {presentation === "page" ? (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
+                        </span>
+                      ) : null}
+                    </div>
+                    {renderActions(row)}
+                  </li>
+                </Surface>
               ))}
             </ul>
           ) : null}
