@@ -39,6 +39,12 @@ use uuid::Uuid;
 
 use super::bridge_transport::{BridgeRequestGuard, BridgeTransport};
 
+type PendingBridgeRequest = (
+    String,
+    oneshot::Receiver<Result<Value, String>>,
+    BridgeRequestGuard,
+);
+
 /// Serialize a typed bridge payload and emit it, cleaning up the pending slot
 /// on either serialization or transport failure. Shared by all five methods.
 fn emit_or_cleanup<T: Serialize>(
@@ -461,17 +467,7 @@ impl DesktopMessagesBridge {
         }
     }
 
-    fn register(
-        &self,
-        transport: &dyn BridgeTransport,
-    ) -> Result<
-        (
-            String,
-            oneshot::Receiver<Result<Value, String>>,
-            BridgeRequestGuard,
-        ),
-        String,
-    > {
+    fn register(&self, transport: &dyn BridgeTransport) -> Result<PendingBridgeRequest, String> {
         let request_guard = transport.reserve_request()?;
         let request_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel::<Result<Value, String>>();

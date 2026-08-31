@@ -114,6 +114,9 @@ pub fn browser_cdp_revoke(
 }
 
 #[tauri::command]
+// Tauri exposes command arguments as individual IPC fields; grouping them
+// would change the public invoke payload.
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_cdp_execute(
     app: AppHandle,
     invoking_window: WebviewWindow,

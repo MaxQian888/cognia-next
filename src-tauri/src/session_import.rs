@@ -20,7 +20,7 @@ pub fn opencode_sessions_read(home: String) -> Result<Vec<Value>, String> {
 pub fn external_agent_sessions_read(source: String, home: String) -> Result<Vec<Value>, String> {
     let actual_home =
         dirs::home_dir().ok_or_else(|| "user home directory unavailable".to_string())?;
-    if std::path::PathBuf::from(&home) != actual_home {
+    if std::path::Path::new(&home) != actual_home {
         return Err("external session store root must match the current user home".into());
     }
     cognia_agent_state::session_import::read_external_agent_sessions(source, home)

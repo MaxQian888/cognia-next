@@ -233,6 +233,8 @@ async fn load_credentials_for_account_async(
     run_secret_store(move || load_credentials_for_account(&account)).await
 }
 
+// These fields mirror the persisted Langfuse credential record one-for-one.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn credentials_set_for_account(
     account: &str,
     enabled: bool,
@@ -294,6 +296,7 @@ pub(crate) fn credentials_set_for_account(
     crate::telemetry::clear_legacy_langfuse_secret()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn credentials_set_for_account_async(
     account: String,
     enabled: bool,
@@ -361,6 +364,8 @@ pub(crate) async fn credentials_clear_for_account_async(account: String) -> Resu
 }
 
 #[tauri::command]
+// Stable renderer invoke fields; grouping them would break the IPC contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn langfuse_credentials_set(
     app: tauri::AppHandle,
     enabled: bool,

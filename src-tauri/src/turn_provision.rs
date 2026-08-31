@@ -186,7 +186,7 @@ async fn provision_with(
             );
             let res = client
                 .post(url)
-                .bearer_auth(&token)
+                .bearer_auth(token)
                 .json(&serde_json::json!({ "ttl": ttl }))
                 .send()
                 .await

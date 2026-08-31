@@ -390,6 +390,9 @@ async fn navigate_existing_embed(
 
 /// Create (or re-navigate) the embedded preview at the given logical bounds.
 #[tauri::command]
+// Bounds are individual Tauri IPC fields and therefore intentionally remain
+// separate in the public command contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_create(
     app: AppHandle,
     invoking_window: WebviewWindow,
@@ -446,6 +449,8 @@ pub async fn browser_embed_create(
 }
 
 #[tauri::command]
+// Bounds are individual Tauri IPC fields in the public command contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_set_bounds(
     app: AppHandle,
     invoking_window: WebviewWindow,
@@ -477,6 +482,8 @@ pub async fn browser_embed_set_bounds(
 /// zero size (the native layer cannot be clipped, so this is how it yields to
 /// overlapping app UI).
 #[tauri::command]
+// Visibility and bounds are individual Tauri IPC fields in the public command contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_set_visible(
     app: AppHandle,
     invoking_window: WebviewWindow,
@@ -1288,6 +1295,8 @@ pub async fn browser_embed_set_frozen(
 /// screenshot pipeline (`capture_primary`) but bypasses its consent/audit gate —
 /// this is our own embedded preview, not arbitrary screen content.
 #[tauri::command]
+// Capture bounds are individual Tauri IPC fields in the public command contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_embed_capture(
     app: AppHandle,
     invoking_window: WebviewWindow,

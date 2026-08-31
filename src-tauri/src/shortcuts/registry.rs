@@ -38,6 +38,48 @@ pub struct ShortcutRegistry {
 struct RegistryInner {
     chord_to_id: HashMap<String, String>,
     id_to_chord: HashMap<String, String>,
+    reserved_selection_chord_to_id: HashMap<String, String>,
+    reserved_selection_id_to_chord: HashMap<String, String>,
+    selection_scope_active: bool,
+}
+
+fn is_selection_scoped(id: &str) -> bool {
+    id.starts_with("selection.")
+}
+
+/// The selection bindings to register, in the order they must be registered.
+///
+/// Order is part of the contract, not an implementation detail. A chord can be
+/// claimed by only one id, and a user reservation for one action can collide
+/// with another action's built-in default (rebinding `selection.explain` to
+/// `selection.copy`'s default chord is enough). Whoever binds first wins, so
+/// iterating a `HashMap` here meant the same build gave a different answer on
+/// different launches, with the loser dropped on a log line.
+///
+/// Two rules settle it:
+///   1. reservations bind before defaults, so the chord the user explicitly
+///      chose beats a default nobody asked for, and
+///   2. within each group the ids are sorted, so a collision between two
+///      reservations resolves the same way every time.
+fn resolved_selection_bindings(
+    defaults: &[(&str, &str)],
+    reserved: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut reserved_bindings: Vec<(String, String)> = reserved
+        .iter()
+        .map(|(id, chord)| (id.clone(), chord.clone()))
+        .collect();
+    reserved_bindings.sort_unstable();
+
+    let mut default_bindings: Vec<(String, String)> = defaults
+        .iter()
+        .filter(|(id, _)| !reserved.contains_key(*id))
+        .map(|(id, chord)| ((*id).to_string(), (*chord).to_string()))
+        .collect();
+    default_bindings.sort_unstable();
+
+    reserved_bindings.extend(default_bindings);
+    reserved_bindings
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -49,8 +91,9 @@ pub struct ShortcutBindingDto {
 impl ShortcutRegistry {
     pub fn list(&self) -> Vec<ShortcutBindingDto> {
         let guard = self.inner.lock();
-        guard
-            .id_to_chord
+        let mut bindings = guard.reserved_selection_id_to_chord.clone();
+        bindings.extend(guard.id_to_chord.clone());
+        bindings
             .iter()
             .map(|(id, chord)| ShortcutBindingDto {
                 id: id.clone(),
@@ -64,7 +107,12 @@ impl ShortcutRegistry {
     }
 
     pub fn chord_for_id(&self, id: &str) -> Option<String> {
-        self.inner.lock().id_to_chord.get(id).cloned()
+        let guard = self.inner.lock();
+        guard
+            .id_to_chord
+            .get(id)
+            .or_else(|| guard.reserved_selection_id_to_chord.get(id))
+            .cloned()
     }
 
     /// Returns the id that already owns `normalized_chord`, if any — the
@@ -75,13 +123,14 @@ impl ShortcutRegistry {
         guard
             .chord_to_id
             .get(normalized_chord)
+            .or_else(|| guard.reserved_selection_chord_to_id.get(normalized_chord))
             .filter(|owner| owner.as_str() != ignoring_id)
             .cloned()
     }
 
-    /// Bind `id → chord`. If `id` already had a binding, the old chord is
-    /// unregistered with the OS first. Conflicts (another id already owns
-    /// the chord) are rejected without touching the OS.
+    /// Bind `id → chord`. A replacement is transactional: register the new OS
+    /// chord first, release the old one, then commit maps/reservations.
+    /// Conflicts are rejected without touching the OS.
     pub fn bind<R: Runtime>(
         &self,
         app: &AppHandle<R>,
@@ -94,49 +143,161 @@ impl ShortcutRegistry {
 
         {
             let guard = self.inner.lock();
-            if let Some(existing) = guard.chord_to_id.get(&normalized) {
+            if let Some(existing) = guard
+                .chord_to_id
+                .get(&normalized)
+                .or_else(|| guard.reserved_selection_chord_to_id.get(&normalized))
+            {
                 if existing != id {
                     return Err(ShortcutError::Conflict(normalized, existing.clone()));
                 }
             }
         }
 
-        // If `id` already has a binding, unregister the old chord first.
-        let previous_chord = self.inner.lock().id_to_chord.get(id).cloned();
-        if let Some(prev) = previous_chord.as_ref() {
-            if prev != &normalized {
-                if let Some(prev_parsed) = parse_chord(prev) {
-                    let _ = app.global_shortcut().unregister(prev_parsed);
+        if is_selection_scoped(id) {
+            let active = self.inner.lock().selection_scope_active;
+            if !active {
+                self.commit_selection_reservation(id, &normalized);
+                return Ok(());
+            }
+            self.bind_active(app, id, &normalized, parsed)?;
+            self.commit_selection_reservation(id, &normalized);
+            return Ok(());
+        }
+
+        self.bind_active(app, id, &normalized, parsed)
+    }
+
+    fn commit_selection_reservation(&self, id: &str, normalized: &str) {
+        let mut guard = self.inner.lock();
+        if let Some(previous) = guard
+            .reserved_selection_id_to_chord
+            .insert(id.to_string(), normalized.to_string())
+        {
+            guard.reserved_selection_chord_to_id.remove(&previous);
+        }
+        guard
+            .reserved_selection_chord_to_id
+            .insert(normalized.to_string(), id.to_string());
+    }
+
+    fn bind_active<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        id: &str,
+        normalized: &str,
+        parsed: Shortcut,
+    ) -> Result<(), ShortcutError> {
+        {
+            let guard = self.inner.lock();
+            if let Some(existing) = guard.chord_to_id.get(normalized) {
+                if existing != id {
+                    return Err(ShortcutError::Conflict(
+                        normalized.to_string(),
+                        existing.clone(),
+                    ));
                 }
             }
         }
 
-        // OS-level register — duplicates are silently OK on the OS side
-        // because we already filtered conflicts above.
+        let previous_chord = self.inner.lock().id_to_chord.get(id).cloned();
+        if previous_chord.as_deref() == Some(normalized) {
+            return Ok(());
+        }
+
+        // Register-first keeps the old binding intact if the OS rejects the
+        // new chord. If releasing the old chord fails, roll the new one back
+        // and leave the in-memory maps untouched.
         app.global_shortcut()
-            .register(parsed)
+            .register(parsed.clone())
             .map_err(|e| ShortcutError::OsRegister(e.to_string()))?;
+        if let Some(previous) = previous_chord.as_deref().and_then(parse_chord) {
+            if let Err(error) = app.global_shortcut().unregister(previous) {
+                let _ = app.global_shortcut().unregister(parsed);
+                return Err(ShortcutError::OsUnregister(error.to_string()));
+            }
+        }
 
         let mut guard = self.inner.lock();
         if let Some(prev) = previous_chord.as_ref() {
             guard.chord_to_id.remove(prev);
         }
-        guard.chord_to_id.insert(normalized.clone(), id.to_string());
-        guard.id_to_chord.insert(id.to_string(), normalized);
+        guard
+            .chord_to_id
+            .insert(normalized.to_string(), id.to_string());
+        guard
+            .id_to_chord
+            .insert(id.to_string(), normalized.to_string());
         Ok(())
     }
 
     pub fn unbind<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> Result<(), ShortcutError> {
-        let chord = self.inner.lock().id_to_chord.remove(id);
-        if let Some(chord) = chord {
-            if let Some(parsed) = parse_chord(&chord) {
-                app.global_shortcut()
-                    .unregister(parsed)
-                    .map_err(|e| ShortcutError::OsUnregister(e.to_string()))?;
+        self.unbind_active(app, id)?;
+        if is_selection_scoped(id) {
+            let mut guard = self.inner.lock();
+            if let Some(chord) = guard.reserved_selection_id_to_chord.remove(id) {
+                guard.reserved_selection_chord_to_id.remove(&chord);
             }
-            self.inner.lock().chord_to_id.remove(&chord);
         }
         Ok(())
+    }
+
+    fn unbind_active<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> Result<(), ShortcutError> {
+        let chord = self.inner.lock().id_to_chord.get(id).cloned();
+        let Some(chord) = chord else {
+            return Ok(());
+        };
+        if let Some(parsed) = parse_chord(&chord) {
+            app.global_shortcut()
+                .unregister(parsed)
+                .map_err(|e| ShortcutError::OsUnregister(e.to_string()))?;
+        }
+        let mut guard = self.inner.lock();
+        guard.id_to_chord.remove(id);
+        guard.chord_to_id.remove(&chord);
+        Ok(())
+    }
+
+    pub fn activate_selection_scope<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        defaults: &[(&str, &str)],
+    ) {
+        self.inner.lock().selection_scope_active = true;
+        let reserved = self.inner.lock().reserved_selection_id_to_chord.clone();
+        // Custom selection.action:* chords hydrate while the scope is off.
+        // They are not in the built-in defaults table, so fold every reserved
+        // selection binding into activation rather than leaving plugin/user
+        // actions permanently reserved-but-unregistered.
+        let bindings = resolved_selection_bindings(defaults, &reserved);
+        for (id, chord) in bindings {
+            if let Err(error) = self.bind(app, &id, &chord) {
+                log::warn!("selection shortcut {id}={chord} not activated: {error}");
+            }
+        }
+    }
+
+    pub fn deactivate_selection_scope<R: Runtime>(&self, app: &AppHandle<R>) {
+        let ids: Vec<String> = self
+            .inner
+            .lock()
+            .id_to_chord
+            .keys()
+            .filter(|id| is_selection_scoped(id))
+            .cloned()
+            .collect();
+        let mut complete = true;
+        for id in ids {
+            if let Err(error) = self.unbind_active(app, &id) {
+                complete = false;
+                log::warn!("selection shortcut {id} not deactivated: {error}");
+            }
+        }
+        self.inner.lock().selection_scope_active = !complete;
+    }
+
+    pub fn selection_scope_active(&self) -> bool {
+        self.inner.lock().selection_scope_active
     }
 
     /// Look up the id for `shortcut` (matched by structural equality), run
@@ -429,7 +590,6 @@ pub const BUILTIN_SHORTCUT_DEFAULTS: &[(&str, &str)] = &[
     ("tray.show", "ctrl+shift+space"),
     ("tray.open-logs", "ctrl+shift+l"),
     ("tray.automation-kill", "ctrl+alt+k"),
-    ("selection.captureClipboard", "alt+shift+c"),
     ("chat.captureSmartSnapshot", "alt+shift+s"),
 ];
 
@@ -536,5 +696,91 @@ mod tests {
             Some("ctrl+shift+space".to_string())
         );
         assert_eq!(reg.chord_for_id("unknown.id"), None);
+    }
+
+    #[test]
+    fn inactive_selection_bindings_remain_visible_and_reserved() {
+        let reg = ShortcutRegistry::default();
+        {
+            let mut guard = reg.inner.lock();
+            guard
+                .reserved_selection_id_to_chord
+                .insert("selection.showToolbar".into(), "alt+shift+space".into());
+            guard
+                .reserved_selection_chord_to_id
+                .insert("alt+shift+space".into(), "selection.showToolbar".into());
+        }
+
+        assert_eq!(
+            reg.chord_for_id("selection.showToolbar"),
+            Some("alt+shift+space".into())
+        );
+        assert_eq!(
+            reg.conflict_for("alt+shift+space", "other.id"),
+            Some("selection.showToolbar".into())
+        );
+        assert!(reg
+            .list()
+            .iter()
+            .any(|binding| binding.id == "selection.showToolbar"));
+        assert!(!reg.selection_scope_active());
+    }
+
+    #[test]
+    fn selection_shortcuts_are_not_unconditional_builtins() {
+        assert!(BUILTIN_SHORTCUT_DEFAULTS
+            .iter()
+            .all(|(id, _)| !is_selection_scoped(id)));
+    }
+
+    #[test]
+    fn selection_scope_activation_includes_reserved_custom_actions() {
+        let reserved = HashMap::from([
+            ("selection.copy".into(), "alt+shift+x".into()),
+            (
+                "selection.action:plug-a:rewrite".into(),
+                "alt+shift+r".into(),
+            ),
+        ]);
+        let bindings = resolved_selection_bindings(
+            &[
+                ("selection.copy", "alt+shift+1"),
+                ("selection.ask", "alt+shift+4"),
+            ],
+            &reserved,
+        );
+        let lookup = |id: &str| {
+            bindings
+                .iter()
+                .find(|(candidate, _)| candidate == id)
+                .map(|(_, chord)| chord.as_str())
+        };
+        assert_eq!(lookup("selection.copy"), Some("alt+shift+x"));
+        assert_eq!(lookup("selection.ask"), Some("alt+shift+4"));
+        assert_eq!(lookup("selection.action:plug-a:rewrite"), Some("alt+shift+r"));
+        // One entry per id: a reserved chord replaces the default rather than
+        // racing it through a second bind call.
+        assert_eq!(bindings.len(), 3);
+    }
+
+    #[test]
+    fn a_reserved_chord_beats_another_actions_default_deterministically() {
+        // The user moved `selection.explain` onto `selection.copy`'s default
+        // chord. Only one id can hold it, so the order decides, and the order
+        // must be the user's choice every single time.
+        let reserved = HashMap::from([("selection.explain".to_string(), "alt+shift+1".to_string())]);
+        let defaults = &[
+            ("selection.copy", "alt+shift+1"),
+            ("selection.explain", "alt+shift+2"),
+        ];
+        let expected = vec![
+            ("selection.explain".to_string(), "alt+shift+1".to_string()),
+            ("selection.copy".to_string(), "alt+shift+1".to_string()),
+        ];
+        // Repeated because the defect was a HashMap walk: one pass could agree
+        // with the contract by luck.
+        for _ in 0..16 {
+            assert_eq!(resolved_selection_bindings(defaults, &reserved), expected);
+        }
     }
 }

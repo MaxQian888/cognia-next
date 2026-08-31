@@ -982,6 +982,7 @@ pub async fn intent_poll_handler(
 }
 
 /// Verify the Bearer lark_web session on an intent-submitting request.
+#[allow(clippy::result_large_err)]
 fn require_web_session(
     state: &SharedState,
     headers: &axum::http::HeaderMap,

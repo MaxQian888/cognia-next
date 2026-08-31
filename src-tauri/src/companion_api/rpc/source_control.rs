@@ -1352,6 +1352,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // Workspace roots are process-global test state and must remain isolated
+    // through repository creation and authorization.
+    #[allow(clippy::await_holding_lock)]
     async fn upward_repository_discovery_is_rejected_but_nested_repository_is_allowed() {
         let _roots = lock_roots();
         let parent = tempfile::TempDir::new().unwrap();
@@ -1387,6 +1390,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn remote_worktree_requests_keep_the_authorized_repository_path() {
         let _roots = lock_roots();
         let root = tempfile::TempDir::new().unwrap();

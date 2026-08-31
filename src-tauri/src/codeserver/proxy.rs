@@ -105,14 +105,14 @@ pub fn build_proxy_at_root(
     request: ProxyBuildRequest,
 ) -> Result<ProxyArtifact, String> {
     validate_request(&request)?;
-    let executable_artifacts = stage_executable_resources(&root, &request)?;
+    let executable_artifacts = stage_executable_resources(root, &request)?;
     let proxy_bundle = load_platform_proxy_bundle(broker_vsix)?;
     let assets = read_assets(&request)?;
     let package = package_json(&request);
     let bytes = build_vsix_bytes(&package, &proxy_bundle, &assets)?;
     let digest = Sha256::digest(&bytes);
     let sha256 = hex::encode(digest);
-    let signing_key = load_or_create_signing_key(&root)?;
+    let signing_key = load_or_create_signing_key(root)?;
     let signature = signing_key.sign(&digest);
     let artifact_dir = root
         .join("artifacts")
@@ -387,19 +387,19 @@ fn validate_request(request: &ProxyBuildRequest) -> Result<(), String> {
                 let _ = (path, hash);
             }
             Some("registered-tool") => {
-                if !source
+                if source
                     .get("tool")
                     .and_then(Value::as_str)
-                    .is_some_and(|value| !value.trim().is_empty())
+                    .is_none_or(|value| value.trim().is_empty())
                 {
                     return Err("IDE_EXECUTABLE_SOURCE_INVALID".to_string());
                 }
             }
             Some("user-selected") => {
-                if !source
+                if source
                     .get("setting")
                     .and_then(Value::as_str)
-                    .is_some_and(|value| !value.trim().is_empty())
+                    .is_none_or(|value| value.trim().is_empty())
                 {
                     return Err("IDE_EXECUTABLE_SOURCE_INVALID".to_string());
                 }
@@ -1022,7 +1022,7 @@ fn valid_id(value: &str) -> bool {
 
 fn valid_version(value: &str) -> bool {
     let mut parts = value
-        .splitn(2, ['-', '+'])
+        .split(['-', '+'])
         .next()
         .unwrap_or_default()
         .split('.');

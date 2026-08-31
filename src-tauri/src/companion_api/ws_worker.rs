@@ -1000,10 +1000,10 @@ fn validate_manifest(manifest: &Value) -> Result<(), String> {
     if object.get("manifestVersion").and_then(Value::as_u64) != Some(1) {
         return Err("worker manifest manifestVersion must be 1".to_string());
     }
-    if !object
+    if object
         .get("maxActiveTurns")
         .and_then(Value::as_u64)
-        .is_some_and(|value| value > 0)
+        .is_none_or(|value| value == 0)
     {
         return Err("worker manifest maxActiveTurns must be positive".to_string());
     }

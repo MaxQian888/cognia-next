@@ -256,7 +256,7 @@ mod platform {
     }
 
     fn dict_i64(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> Option<i64> {
-        dict.find(&cf_key(key))?.downcast::<CFNumber>()?.to_i64()
+        dict.find(cf_key(key))?.downcast::<CFNumber>()?.to_i64()
     }
 
     /// `kCGWindowBounds`'s value is itself a dictionary in the standard
@@ -265,7 +265,7 @@ mod platform {
     /// `core-graphics-types` crate `core-graphics` re-exports) decodes it
     /// directly, no manual FFI binding needed.
     fn dict_rect(dict: &CFDictionary<CFString, CFType>, key: CFStringRef) -> Option<CGRect> {
-        let bounds = dict.find(&cf_key(key))?.downcast::<CFDictionary>()?;
+        let bounds = dict.find(cf_key(key))?.downcast::<CFDictionary>()?;
         CGRect::from_dict_representation(&bounds)
     }
 

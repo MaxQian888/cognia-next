@@ -336,6 +336,8 @@ pub async fn agent_compact(
 }
 
 #[tauri::command]
+// These are stable, individually named fields in the renderer's invoke contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_resolve_permission(
     state: State<'_, SidecarState>,
     session_id: String,
@@ -1219,6 +1221,9 @@ mod tests {
     /// through the sidecar reader back out as a host event. Skips gracefully
     /// when Node is not installed.
     #[tokio::test]
+    // The synchronous guard serializes process-global wake assertions for the
+    // entire asynchronous integration scenario.
+    #[allow(clippy::await_holding_lock)]
     async fn claude_send_with_host_reaches_a_fake_echo_script() {
         use crate::claude::host::test_support::RecordingSidecarHost;
         use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
@@ -1331,6 +1336,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn claude_send_holds_the_host_awake_until_the_turn_ends() {
         use crate::claude::host::test_support::RecordingSidecarHost;
         use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
@@ -1402,6 +1408,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn duplicate_send_ack_releases_only_the_retry_hold() {
         use crate::claude::host::test_support::RecordingSidecarHost;
         use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
@@ -1478,6 +1485,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn failed_send_write_rolls_back_the_wake_hold() {
         use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
 

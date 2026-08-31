@@ -348,7 +348,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        let snap = runtime().snapshot();
+        let snap = runtime().local_snapshot_for_tests();
         let session = snap
             .sessions
             .iter()
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(json["hookSpecificOutput"]["decision"]["behavior"], "allow");
 
         // Pending cleared after resolution.
-        let snap = runtime().snapshot();
+        let snap = runtime().local_snapshot_for_tests();
         let session = snap
             .sessions
             .iter()
@@ -516,7 +516,7 @@ mod tests {
         // agent's own terminal prompt takes over.
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        let snap = runtime().snapshot();
+        let snap = runtime().local_snapshot_for_tests();
         let session = snap
             .sessions
             .iter()

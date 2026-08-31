@@ -557,10 +557,12 @@ mod tests {
     #[test]
     fn write_settings_payload_round_trips_known_fields() {
         let path = temp_settings_path("settings.json");
-        let mut payload = ClaudeSettings::default();
-        payload.model = Some("sonnet".into());
-        payload.hooks = Some(json!({ "PreToolUse": [] }));
-        payload.permissions = Some(json!({ "ask": ["Bash"] }));
+        let payload = ClaudeSettings {
+            model: Some("sonnet".into()),
+            hooks: Some(json!({ "PreToolUse": [] })),
+            permissions: Some(json!({ "ask": ["Bash"] })),
+            ..Default::default()
+        };
 
         let result = write_settings_payload_at(&path, &payload, false).expect("write");
         assert_eq!(result.path, path.to_string_lossy());
@@ -597,8 +599,10 @@ mod tests {
         let path = temp_settings_path("settings.json");
         std::fs::write(&path, b"{\"model\":\"original\"}\n").unwrap();
 
-        let mut payload = ClaudeSettings::default();
-        payload.model = Some("updated".into());
+        let payload = ClaudeSettings {
+            model: Some("updated".into()),
+            ..Default::default()
+        };
         let result = write_settings_payload_at(&path, &payload, false).expect("write");
 
         assert!(result.backup_path.is_some(), "backup path should be set");
@@ -618,15 +622,19 @@ mod tests {
         let path = temp_settings_path("settings.json");
         std::fs::write(&path, b"{\"model\":\"original\"}\n").unwrap();
 
-        let mut first_payload = ClaudeSettings::default();
-        first_payload.model = Some("first".into());
+        let first_payload = ClaudeSettings {
+            model: Some("first".into()),
+            ..Default::default()
+        };
         let first = write_settings_payload_at(&path, &first_payload, false)
             .expect("first write")
             .backup_path
             .expect("first write should back up original");
 
-        let mut second_payload = ClaudeSettings::default();
-        second_payload.model = Some("second".into());
+        let second_payload = ClaudeSettings {
+            model: Some("second".into()),
+            ..Default::default()
+        };
         let second = write_settings_payload_at(&path, &second_payload, false)
             .expect("second write")
             .backup_path

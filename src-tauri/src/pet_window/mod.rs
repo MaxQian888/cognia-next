@@ -18,7 +18,7 @@
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, Webview};
 
 mod macos_panel;
 mod popup;
@@ -217,6 +217,9 @@ fn open_pet_window_claimed<R: Runtime>(
     opts: PetWindowOpts,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
+        window
+            .set_size(LogicalSize::new(opts.width, opts.height))
+            .map_err(|error| error.to_string())?;
         // Re-validate the position before revealing: monitors may have been
         // unplugged / rearranged / DPI-changed while the window sat hidden
         // (the window-state plugin is denylisted for "pet", so nothing else
@@ -225,10 +228,7 @@ fn open_pet_window_claimed<R: Runtime>(
         if let Ok(pos) = window.outer_position() {
             let saved = (pos.x as f64, pos.y as f64);
             let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, Some(saved));
-            let size = window
-                .outer_size()
-                .map(|s| (s.width as f64, s.height as f64))
-                .unwrap_or_else(|_| physical_overlay_size((opts.width, opts.height), scale));
+            let size = physical_overlay_size((opts.width, opts.height), scale);
             let (x, y) =
                 resolve_initial_position(Some(saved), (area_x, area_y, area_w, area_h), size);
             if x != saved.0 || y != saved.1 {

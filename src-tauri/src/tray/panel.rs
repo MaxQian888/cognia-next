@@ -771,9 +771,11 @@ mod tests {
         // NaN survives `clamp` as NaN and would poison `set_size`. Infinities
         // take the same path — a measurement that isn't a real number tells us
         // nothing, so the shipped default is a better answer than the max.
-        let mut cfg = TrayPanelConfig::default();
-        cfg.width = 999.0;
-        cfg.height = 999.0;
+        let mut cfg = TrayPanelConfig {
+            width: 999.0,
+            height: 999.0,
+            ..Default::default()
+        };
         assert!(cfg.absorb_size(f64::NAN, f64::INFINITY));
         assert_eq!(cfg.width, DEFAULT_PANEL_WIDTH);
         assert_eq!(cfg.height, DEFAULT_PANEL_HEIGHT);

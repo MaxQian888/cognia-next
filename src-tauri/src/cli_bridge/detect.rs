@@ -333,6 +333,6 @@ mod tests {
         // in the managed-dir set afterwards. Idempotent with prior calls.
         register_dev_build_dir();
         let dir = current_exe_dir().expect("current exe dir resolves under test");
-        assert!(managed_dirs().lock().iter().any(|d| *d == dir));
+        assert!(managed_dirs().lock().contains(&dir));
     }
 }

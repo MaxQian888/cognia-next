@@ -230,7 +230,7 @@ mod tests {
         for seq in 2..=10 {
             let out = b.push(
                 frame("claude://message", seq),
-                t0 + Duration::from_millis(seq as u64 * 2),
+                t0 + Duration::from_millis(seq * 2),
             );
             assert!(out.is_empty(), "frame {seq} must be buffered");
         }

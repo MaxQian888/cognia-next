@@ -2782,7 +2782,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(response_json(response).await["code"], "unknown_command");
         let after = value(&super::super::metrics::render_prometheus());
-        assert!(after >= before + 1);
+        assert!(after > before);
     }
 
     #[tokio::test]

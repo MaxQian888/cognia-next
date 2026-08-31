@@ -671,18 +671,6 @@ pub(super) async fn dispatch(
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_family_is_non_empty_and_unique() {
-        assert!(!COMMANDS.is_empty());
-        let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
-        assert_eq!(unique.len(), COMMANDS.len());
-    }
-}
-
 /// Whether this caller may act as a host administrator.
 ///
 /// `owner` and `service` are off the device plane — the desktop operator and
@@ -716,4 +704,16 @@ fn is_owner_device(device_id: &str, account_id: Option<&str>) -> bool {
                 .is_owner_device(tenant_id, device_id)
                 .unwrap_or(false)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_family_is_non_empty_and_unique() {
+        assert!(!COMMANDS.is_empty());
+        let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
+        assert_eq!(unique.len(), COMMANDS.len());
+    }
 }

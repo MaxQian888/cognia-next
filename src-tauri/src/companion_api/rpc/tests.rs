@@ -177,7 +177,9 @@ fn bus_emitter_publishes_the_frozen_payload() {
 async fn headless_orchestration_sink_uses_the_service_only_brain_bridge() {
     let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
     crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
-    let mut receiver = crate::companion_api::ws_bridge::test_support::install_socket_for_testing();
+    let owner_state = test_state();
+    let mut receiver =
+        crate::companion_api::ws_bridge::test_support::install_socket_for_testing(&owner_state);
     let sink = headless_orchestration_event_sink();
 
     sink(crate::mcp_server::orchestration_proxy::ExecEvent {
@@ -574,6 +576,15 @@ fn headless_host() -> super::super::dispatch_host::DispatchHost {
     super::super::dispatch_host::DispatchHost::Headless(
         crate::headless::HeadlessServices::stub_for_tests(),
     )
+}
+
+fn headless_host_for_account(account_id: &str) -> super::super::dispatch_host::DispatchHost {
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    services
+        .plugin_runtime
+        .activate_account(account_id)
+        .expect("activate the same plugin account production binds at boot");
+    super::super::dispatch_host::DispatchHost::Headless(services)
 }
 
 #[tokio::test]
@@ -2197,7 +2208,7 @@ async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
 #[tokio::test]
 async fn wasm_runtime_arms_use_the_headless_process_registry() {
     let state = test_state();
-    let host = headless_host();
+    let host = headless_host_for_account(ACCOUNT_ID);
 
     let listed = dispatch(
         "plugin_wasm_list",
@@ -2323,7 +2334,7 @@ async fn wasm_runtime_arms_use_the_headless_process_registry() {
 #[tokio::test]
 async fn plugin_api_facade_uses_the_headless_gateway_and_capabilities() {
     let state = test_state();
-    let host = headless_host();
+    let host = headless_host_for_account(ACCOUNT_ID);
     let services = host.headless().expect("headless services");
     let plugin_id = format!("rpc-native-{}", uuid::Uuid::new_v4());
     let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
@@ -2444,7 +2455,7 @@ async fn plugin_api_facade_uses_the_headless_gateway_and_capabilities() {
 #[tokio::test]
 async fn python_runtime_arms_use_the_headless_process_registry() {
     let state = test_state();
-    let host = headless_host();
+    let host = headless_host_for_account(ACCOUNT_ID);
     let services = host.headless().expect("headless services");
     let plugin_id = format!("rpc-python-{}", uuid::Uuid::new_v4());
     let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
@@ -2931,8 +2942,8 @@ async fn headless_matrix_crypto_close_reaches_the_shared_native_session_store() 
 #[tokio::test]
 async fn headless_sync_pull_routes_through_the_connected_brain() {
     let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-    let mut rx = crate::companion_api::ws_bridge::test_support::install_socket_for_testing();
     let state = test_state();
+    let mut rx = crate::companion_api::ws_bridge::test_support::install_socket_for_testing(&state);
 
     let dispatch_task = {
         let state = Arc::clone(&state);

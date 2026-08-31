@@ -511,6 +511,9 @@ fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
     }
 }
 
+// ExecutionError intentionally carries the complete receipt-ready failure
+// payload used at the remote execution boundary.
+#[allow(clippy::result_large_err)]
 fn validate_contract_value(
     request_id: &str,
     command: &str,
@@ -572,6 +575,7 @@ fn validate_contract_value(
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn authorize_transport(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
@@ -600,6 +604,7 @@ fn authorize_transport(
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 fn authorize_capability(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
@@ -644,6 +649,7 @@ fn snapshot_capability_decision(principal: &DeviceContext, capability: &str) -> 
         .map(|capabilities| capabilities.iter().any(|granted| granted == capability))
 }
 
+#[allow(clippy::result_large_err)]
 fn authorize_approval(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
@@ -715,6 +721,7 @@ fn authorize_approval(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn dispatch(
     state: &SharedState,
     request: &ExecutionRequest,
@@ -732,6 +739,7 @@ async fn dispatch(
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn replay_receipt(
     request_id: &str,
     operation_id: String,

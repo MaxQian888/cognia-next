@@ -297,6 +297,14 @@ pub(crate) fn reset_for_tests() {
 mod tests {
     use super::*;
 
+    static TEST_REQUESTS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn reset_requests() -> parking_lot::MutexGuard<'static, ()> {
+        let guard = TEST_REQUESTS_LOCK.lock();
+        reset_for_tests();
+        guard
+    }
+
     fn ops() -> Vec<String> {
         vec![
             "connectors_keyring_get".into(),
@@ -306,14 +314,14 @@ mod tests {
 
     #[test]
     fn a_request_is_not_an_approval() {
-        reset_for_tests();
+        let _guard = reset_requests();
         request("phone-1", Some("acct"), ops());
         assert!(!take_approved("phone-1", &ops()));
     }
 
     #[test]
     fn approving_lets_exactly_one_lease_through() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", Some("acct"), ops());
         resolve(&open.code, true, Approver::Host).expect("resolve");
 
@@ -324,7 +332,7 @@ mod tests {
 
     #[test]
     fn a_retry_reuses_the_open_request_instead_of_queueing_another() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let first = request("phone-1", None, ops());
         let second = request("phone-1", None, ops());
         assert_eq!(first.id, second.id);
@@ -333,7 +341,7 @@ mod tests {
 
     #[test]
     fn operations_are_compared_as_a_set_not_a_sequence() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.id, true, Approver::Host).expect("resolve");
         let reordered = vec![
@@ -345,7 +353,7 @@ mod tests {
 
     #[test]
     fn an_approval_does_not_cover_operations_it_did_not_name() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, vec!["connectors_keyring_get".into()]);
         resolve(&open.id, true, Approver::Host).expect("resolve");
         assert!(!take_approved("phone-1", &ops()));
@@ -353,7 +361,7 @@ mod tests {
 
     #[test]
     fn an_approval_belongs_to_the_device_that_asked() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.id, true, Approver::Host).expect("resolve");
         assert!(!take_approved("phone-2", &ops()));
@@ -361,7 +369,7 @@ mod tests {
 
     #[test]
     fn a_device_cannot_approve_its_own_escalation() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         let err = resolve(&open.code, true, Approver::Device("phone-1")).expect_err("self-approve");
         assert!(err.starts_with("REMOTE_SCOPE_DENIED"), "{err}");
@@ -370,7 +378,7 @@ mod tests {
 
     #[test]
     fn another_device_may_approve() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.code, true, Approver::Device("laptop-2")).expect("resolve");
         assert!(take_approved("phone-1", &ops()));
@@ -378,7 +386,7 @@ mod tests {
 
     #[test]
     fn denying_leaves_nothing_to_collect() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.id, false, Approver::Host).expect("resolve");
         assert!(!take_approved("phone-1", &ops()));
@@ -387,7 +395,7 @@ mod tests {
 
     #[test]
     fn an_answered_request_cannot_be_answered_again() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.id, false, Approver::Host).expect("first");
         // Without this a denial could be overturned by anyone who kept the code.
@@ -396,14 +404,14 @@ mod tests {
 
     #[test]
     fn an_unknown_code_is_refused_rather_than_ignored() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let err = resolve("NOPE", true, Approver::Host).expect_err("unknown");
         assert!(err.starts_with("REMOTE_CONSENT_REQUIRED"), "{err}");
     }
 
     #[test]
     fn codes_match_case_insensitively_because_people_type_them() {
-        reset_for_tests();
+        let _guard = reset_requests();
         let open = request("phone-1", None, ops());
         resolve(&open.code.to_lowercase(), true, Approver::Host).expect("resolve");
         assert!(take_approved("phone-1", &ops()));
@@ -411,7 +419,7 @@ mod tests {
 
     #[test]
     fn forgetting_a_device_drops_its_open_asks() {
-        reset_for_tests();
+        let _guard = reset_requests();
         request("phone-1", None, ops());
         request("phone-2", None, ops());
         forget_device("phone-1");

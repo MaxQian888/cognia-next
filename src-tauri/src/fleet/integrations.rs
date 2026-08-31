@@ -438,13 +438,18 @@ mod tests {
         );
     }
 
-    /// The two flags that used to be `agent != FleetAgent::Opencode` tests.
     #[test]
-    fn opencode_is_the_only_multi_session_host_and_all_agents_answer_questions() {
-        for m in MANIFESTS {
-            let is_opencode = m.agent == FleetAgent::Opencode;
-            assert_eq!(m.multi_session_host, is_opencode, "{:?}", m.agent);
-            assert!(m.answers_questions, "{:?}", m.agent);
+    fn session_and_question_capabilities_match_each_integration_model() {
+        let expected = [
+            (FleetAgent::ClaudeCode, false, true),
+            (FleetAgent::Codex, false, true),
+            (FleetAgent::Opencode, true, true),
+            (FleetAgent::Cognia, true, false),
+        ];
+        for (agent, multi_session_host, answers_questions) in expected {
+            let manifest = manifest_for(agent);
+            assert_eq!(manifest.multi_session_host, multi_session_host, "{agent:?}");
+            assert_eq!(manifest.answers_questions, answers_questions, "{agent:?}");
         }
     }
 

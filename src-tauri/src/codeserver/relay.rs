@@ -469,9 +469,9 @@ fn to_axum(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> 
     use tokio_tungstenite::tungstenite::Message as Source;
     match message {
         Source::Text(value) => Some(Message::Text(value.to_string().into())),
-        Source::Binary(value) => Some(Message::Binary(value.into())),
-        Source::Ping(value) => Some(Message::Ping(value.into())),
-        Source::Pong(value) => Some(Message::Pong(value.into())),
+        Source::Binary(value) => Some(Message::Binary(value)),
+        Source::Ping(value) => Some(Message::Ping(value)),
+        Source::Pong(value) => Some(Message::Pong(value)),
         Source::Close(frame) => Some(Message::Close(frame.map(|frame| {
             axum::extract::ws::CloseFrame {
                 code: frame.code.into(),

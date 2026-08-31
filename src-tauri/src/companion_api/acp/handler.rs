@@ -2581,6 +2581,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // Resume indexes are process-global; retain the serialization guard for
+    // the complete asynchronous session exchange.
+    #[allow(clippy::await_holding_lock)]
     async fn sdk_session_id_updates_resume_index() {
         let _guard = super::super::registry::resume_test_lock();
         let mut conn = test_conn();

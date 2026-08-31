@@ -78,9 +78,9 @@ pub(crate) const NAV_INTENTS: [&str; 3] = ["push", "replace", "traverse"];
 /// the renderer did for every SPA navigation before intents existed.
 fn nav_intent(payload: &serde_json::Value) -> &'static str {
     match payload.get("intent").and_then(|v| v.as_str()) {
-        Some("replace") => "replace",
-        Some("traverse") => "traverse",
-        _ => "push",
+        Some("replace") => NAV_INTENTS[1],
+        Some("traverse") => NAV_INTENTS[2],
+        _ => NAV_INTENTS[0],
     }
 }
 

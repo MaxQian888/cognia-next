@@ -200,6 +200,9 @@ pub fn build_room_descriptor(
     descriptor
 }
 
+// The proof signs each protocol field independently; keeping them explicit
+// prevents an unsigned field from being hidden in a partially signed bundle.
+#[allow(clippy::too_many_arguments)]
 pub fn build_subscribe_proof(
     descriptor: &RoomDescriptor,
     role: PeerRole,

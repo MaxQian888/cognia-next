@@ -1001,6 +1001,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // The installed workspace service is process-global test state and stays
+    // serialized through the asynchronous maintenance pass.
+    #[allow(clippy::await_holding_lock)]
     async fn maintenance_pass_runs_immediately_against_the_installed_registry() {
         let _guard = test_guard();
         let data = TempDir::new().unwrap();
@@ -1014,6 +1017,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn generic_worktree_remove_fails_closed_for_external_inventory() {
         let _guard = test_guard();
         let data = TempDir::new().unwrap();

@@ -53,6 +53,9 @@ pub fn acquire(data_dir: &Path, tenant_id: &str) -> Result<HeadlessTenantLease, 
         .create(true)
         .read(true)
         .write(true)
+        // Do not truncate before acquiring the exclusive lock: another live
+        // process may own and rely on the existing lease metadata.
+        .truncate(false)
         .open(&path)
         .map_err(|error| format!("open headless tenant lease {}: {error}", path.display()))?;
     file.try_lock().map_err(|error| {

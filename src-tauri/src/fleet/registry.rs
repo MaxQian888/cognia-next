@@ -751,12 +751,12 @@ impl FleetRegistry {
                     Some("idle_prompt") if mid_turn && !parked_on_user => {
                         entry.status = FleetStatus::WaitingInput
                     }
-                    Some("permission_prompt") if mid_turn && !parked_on_user => {
+                    Some("permission_prompt")
+                        if mid_turn && !parked_on_user && entry.pending_permission.is_none() =>
+                    {
                         // Only a display hint — the real approval flow arrives
                         // via the PermissionRequest long-poll (P3).
-                        if entry.pending_permission.is_none() {
-                            entry.status = FleetStatus::WaitingPermission;
-                        }
+                        entry.status = FleetStatus::WaitingPermission;
                     }
                     _ => {}
                 }
@@ -1303,7 +1303,7 @@ impl FleetRegistry {
     /// Full snapshot, most recently active first.
     pub fn snapshot(&self, now_ms: u64) -> FleetSnapshot {
         let mut sessions: Vec<FleetSession> = self.sessions.values().cloned().collect();
-        sessions.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.last_event_at));
         // Stable order (declaration order of the enum) so the settings card
         // doesn't reshuffle its rows between snapshots.
         let mut liveness: Vec<AgentLivenessRow> = self

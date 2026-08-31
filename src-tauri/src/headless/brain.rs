@@ -77,6 +77,9 @@ pub struct BrainConfig {
 impl BrainConfig {
     /// Standard config for a bound server port. `entry` comes from
     /// `COGNIA_BRAIN_ENTRY`.
+    // The constructor deliberately names every credential/path field at the
+    // process-spawn boundary so no security-sensitive value is defaulted.
+    #[allow(clippy::too_many_arguments)]
     pub fn for_port(
         entry: PathBuf,
         port: u16,

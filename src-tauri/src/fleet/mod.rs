@@ -240,6 +240,14 @@ impl FleetRuntime {
         self.snapshot_for_tenant(&crate::companion_api::host_identity::current_tenant_or_unbound())
     }
 
+    /// Test-only view of the local registry before tenant/brain projection.
+    /// Parallel bridge tests may temporarily install a process-global brain;
+    /// registry tests must still inspect the rows they just ingested.
+    #[cfg(test)]
+    pub(crate) fn local_snapshot_for_tests(&self) -> FleetSnapshot {
+        self.registry.lock().snapshot(now_ms())
+    }
+
     pub fn snapshot_for_tenant(&self, tenant_id: &str) -> FleetSnapshot {
         // The brain announces itself with a *local account namespace*, while
         // callers here address a *tenant*. Those were the same hardcoded string
@@ -1067,8 +1075,9 @@ mod tests {
         assert!(!runtime().reject_question("ghost-question"));
     }
 
-    #[test]
-    fn ingest_updates_registry_without_app_handle() {
+    #[tokio::test]
+    async fn ingest_updates_registry_without_app_handle() {
+        let _guard = TEST_RUNTIME_LOCK.lock().await;
         let rt = runtime();
         let event = registry::FleetEvent {
             agent: registry::FleetAgent::ClaudeCode,
@@ -1080,7 +1089,7 @@ mod tests {
         };
         // No app handle in unit tests — emit is a no-op, must not panic.
         assert_eq!(rt.ingest(&event), registry::RegistryEffect::Updated);
-        let snap = rt.snapshot();
+        let snap = rt.local_snapshot_for_tests();
         assert!(snap
             .sessions
             .iter()
@@ -1196,6 +1205,6 @@ mod tests {
         // The 20/25/30s ladder from the design — island wait must be the
         // shortest so the shell script and Claude's own hook timeout never
         // fire first (which would strand the terminal prompt).
-        assert!(PERMISSION_WAIT_MS < 25_000);
+        const { assert!(PERMISSION_WAIT_MS < 25_000) };
     }
 }

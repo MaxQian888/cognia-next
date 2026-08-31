@@ -972,11 +972,12 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
             for kind in selected_kinds(control, agent_control, terminal)? {
-                let changed = grant_kind_capabilities(kind)
-                    .iter()
-                    .fold(false, |changed, capability| {
-                        capabilities.remove(*capability) || changed
-                    });
+                let mut changed = false;
+                for capability in grant_kind_capabilities(kind) {
+                    // Do not short-circuit: revoking a grant kind must remove
+                    // every capability in that kind.
+                    changed |= capabilities.remove(*capability);
+                }
                 println!(
                     "{} {} for {device_id}",
                     if changed {
@@ -1145,6 +1146,8 @@ async fn run_pair(
     Ok(())
 }
 
+// Each argument is an independently named field in the cgnp3 invitation wire contract.
+#[allow(clippy::too_many_arguments)]
 fn encode_pair_invitation_payload(
     base_url: &str,
     invitation: Option<&str>,

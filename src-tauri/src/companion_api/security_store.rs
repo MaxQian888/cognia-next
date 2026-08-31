@@ -1165,8 +1165,8 @@ impl SecurityStore {
         )?;
         if normalized.iter().any(|capability| {
             !is_assignable_device_capability(capability)
-                && !(is_browser_device
-                    && BROWSER_ENROLLMENT
+                && (!is_browser_device
+                    || !BROWSER_ENROLLMENT
                         .capabilities
                         .contains(&capability.as_str()))
         }) {

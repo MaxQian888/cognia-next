@@ -22,7 +22,11 @@ pub struct VoiceLiveDeployment {
     pub workspace_id: Option<String>,
     pub app_id: Option<String>,
     pub model: Option<String>,
-    pub voice: Option<String>,
+    /// Accepted as part of the renderer's shared deployment shape. Voice
+    /// selection is applied by the provider protocol after this host opens
+    /// the authenticated socket, so the native route builder does not use it.
+    #[serde(rename = "voice")]
+    pub _voice: Option<String>,
 }
 
 struct VoiceLiveRoute {
@@ -146,8 +150,20 @@ mod tests {
             workspace_id: None,
             app_id: None,
             model: None,
-            voice: None,
+            _voice: None,
         }
+    }
+
+    #[test]
+    fn deployment_wire_shape_accepts_voice_selection() {
+        let deployment: VoiceLiveDeployment = serde_json::from_value(serde_json::json!({
+            "workspaceId": null,
+            "appId": null,
+            "model": null,
+            "voice": "marin"
+        }))
+        .expect("shared renderer deployment shape");
+        assert_eq!(deployment._voice.as_deref(), Some("marin"));
     }
 
     #[test]

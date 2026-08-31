@@ -358,7 +358,7 @@ pub fn perf_list_traces() -> Result<Vec<TraceFile>, String> {
             modified_ms,
         });
     }
-    files.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    files.sort_by_key(|file| std::cmp::Reverse(file.modified_ms));
     Ok(files)
 }
 

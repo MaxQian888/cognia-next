@@ -151,6 +151,7 @@ impl RateLimiter {
         self.check_class_at(device_id, class, Instant::now())
     }
 
+    #[cfg(test)]
     fn check_at(&self, device_id: &str, now: Instant) -> RateLimitDecision {
         self.check_class_at(device_id, RequestClass::Mutating, now)
     }

@@ -28,6 +28,9 @@ pub(super) struct HeadlessAttempt {
 }
 
 impl HeadlessAttempt {
+    // Every argument is a persisted OAuth attempt field and must be supplied
+    // atomically before the state hash is derived.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn pending(
         attempt_id: String,
         account_id: String,

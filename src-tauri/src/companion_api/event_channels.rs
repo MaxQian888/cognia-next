@@ -1012,6 +1012,7 @@ mod tests {
                 "perf://frame",
                 "sync://invalidate",
                 "task-workspace://resources-changed",
+                "thread-handoff://offer",
                 "transcript://revision",
                 "workflow://approval-request",
                 "workflow://approval-resolved",

@@ -558,7 +558,7 @@ async fn bootstrap_application(
         exp: 0,
     };
     let data = dispatch_bridge(
-        &state,
+        state,
         "workflow_app_bootstrap",
         json!({
             "appSlug": app_slug,

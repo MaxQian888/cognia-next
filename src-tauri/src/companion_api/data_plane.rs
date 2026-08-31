@@ -75,7 +75,7 @@ impl DataPlane {
     /// module docs for the ordering rationale (connected brain → WebView →
     /// degraded store).
     pub fn pick(state: &SharedState) -> Option<Self> {
-        if let Some(socket) = super::ws_bridge::socket_bridge_transport() {
+        if let Some(socket) = super::ws_bridge::socket_bridge_transport_for_state(state) {
             return Some(DataPlane::Bridge {
                 bridge: Arc::clone(&state.desktop_messages_bridge),
                 transport: socket,
@@ -762,7 +762,7 @@ mod tests {
         let state = test_state();
         let store = SqliteAppStore::in_memory().expect("open");
         install_headless_store(Some(store as Arc<dyn AppStore>));
-        let _rx = install_socket_for_testing();
+        let _rx = install_socket_for_testing(&state);
 
         match DataPlane::pick(&state) {
             Some(DataPlane::Bridge { transport, .. }) => {

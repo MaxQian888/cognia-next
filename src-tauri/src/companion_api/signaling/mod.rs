@@ -613,7 +613,6 @@ impl From<IceServerSpec> for RTCIceServer {
             urls: value.urls,
             username: value.username.unwrap_or_default(),
             credential: value.credential.unwrap_or_default(),
-            ..Default::default()
         }
     }
 }

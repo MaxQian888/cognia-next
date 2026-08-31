@@ -913,10 +913,9 @@ static RUNTIME_CONTROL: once_cell::sync::OnceCell<Arc<WorkspaceRuntimeBrowserCon
 
 #[cfg(feature = "workspace-runtime-exec")]
 pub fn install_workspace_runtime_control_from_env() -> Result<bool, String> {
-    if std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
+    if !std::env::var("COGNIA_REMOTE_BROWSER_ENABLED")
         .unwrap_or_else(|_| "false".into())
-        .to_ascii_lowercase()
-        != "true"
+        .eq_ignore_ascii_case("true")
     {
         return Ok(false);
     }
@@ -1472,9 +1471,10 @@ async fn handle_browser_socket(
                         };
                         if socket.send(Message::Text(outgoing.to_string().into())).await.is_err() { break; }
                     }
-                    Message::Ping(bytes) => {
-                        if socket.send(Message::Pong(bytes)).await.is_err() { break; }
-                    }
+                    Message::Ping(bytes) => match socket.send(Message::Pong(bytes)).await {
+                        Ok(()) => {}
+                        Err(_) => break,
+                    },
                     Message::Close(_) => break,
                     _ => {}
                 }

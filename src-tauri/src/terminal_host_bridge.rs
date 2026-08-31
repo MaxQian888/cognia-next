@@ -68,7 +68,7 @@ pub enum HostChannelEvent {
     /// whenever the attachment roster or the controller lease changes, so the
     /// renderer's `info.participants` stays current (ADR-0133).
     SessionSnapshot {
-        session: HostSessionInfo,
+        session: Box<HostSessionInfo>,
     },
 }
 
@@ -341,7 +341,9 @@ fn channel_event_for(frame: TerminalFrame) -> Option<HostChannelEvent> {
         // to Attach/List were routed to their pending caller above.
         FrameKind::SessionSnapshot => serde_json::from_slice::<HostSessionInfo>(&frame.payload)
             .ok()
-            .map(|session| HostChannelEvent::SessionSnapshot { session }),
+            .map(|session| HostChannelEvent::SessionSnapshot {
+                session: Box::new(session),
+            }),
         FrameKind::ReplayGap => serde_json::from_slice::<ReplayGapPayload>(&frame.payload)
             .ok()
             .map(|payload| HostChannelEvent::ReplayGap {

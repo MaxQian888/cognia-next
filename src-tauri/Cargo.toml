@@ -307,7 +307,7 @@ cbc = { version = "0.2", features = ["alloc"] }
 pbkdf2 = "0.13"
 psl = "2.1"
 rand = "0.10"
-jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 serde_urlencoded = "0.7"
 
 # Local IP detection — used by `companion_issue_pair_jwt` to render the
@@ -467,7 +467,7 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 # already in the lock transitively (wry / tauri-nspanel); naming them adds no
 # new versions.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
+objc2-app-kit = { version = "0.3", features = ["NSRunningApplication", "NSScreen"] }
 objc2-foundation = { version = "0.3.2", features = [
   "NSArray",
   "NSDate",

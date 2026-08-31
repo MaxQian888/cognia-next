@@ -18,9 +18,10 @@ use crate::subscription::migration::{self, MigrationOutcome};
 use crate::subscription::opencode::OpencodeProvider;
 use crate::subscription::preset::ProviderPreset;
 use crate::subscription::provider::{ProviderId, SubscriptionProvider};
-use crate::subscription::vault::{self, Account, AccountSummary, ProviderVault};
-
-static SUBSCRIPTION_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+use crate::subscription::vault::{
+    self, Account, AccountAuthMetadata, AccountDetail, AccountSummary, ProviderCredential,
+    ProviderVault,
+};
 
 // ---------------------------------------------------------------------------
 // Provider dispatch helper. Cheap function-call indirection — easier than a
@@ -119,17 +120,47 @@ pub async fn subscription_get_account(
     Ok(vault.find_account(&account_id).cloned())
 }
 
+/// Renderer-safe selected-account projection. Settings surfaces must use this
+/// instead of `subscription_get_account`, which is reserved for runtime code
+/// that actually needs credential bytes.
+#[tauri::command]
+pub async fn subscription_get_account_detail(
+    provider: String,
+    local_account_id: String,
+    account_id: String,
+) -> Result<Option<AccountDetail>, String> {
+    let id = ProviderId::parse(&provider)?;
+    let vault = match vault::load_for_account(&local_account_id, id)? {
+        Some(vault) => vault,
+        None => return Ok(None),
+    };
+    Ok(vault
+        .find_account(&account_id)
+        .map(AccountDetail::from_account))
+}
+
 #[tauri::command]
 pub async fn subscription_save_account(
     provider: String,
     local_account_id: String,
-    account: Account,
+    mut account: Account,
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
     sidecar_state: State<'_, SidecarState>,
+    codex_lifecycle: State<'_, super::codex::lifecycle::CodexLifecycleManager>,
 ) -> Result<(), String> {
     let id = validate_account_for_provider(&provider, &account)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _codex_guard = if id == ProviderId::Codex {
+        Some(
+            codex_lifecycle
+                .lock_account(&local_account_id, &account.id)
+                .await,
+        )
+    } else {
+        None
+    };
+    vault::normalize_account_auth_metadata(&mut account);
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
 
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
@@ -145,7 +176,95 @@ pub async fn subscription_save_account(
     Ok(())
 }
 
+/// Replace credential bytes while preserving account identity, timestamps,
+/// preset bindings, and other metadata. Managed Codex OAuth reauthentication
+/// must use the identity-checking dedicated command instead.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn subscription_replace_account_credential(
+    provider: String,
+    local_account_id: String,
+    account_id: String,
+    credential: ProviderCredential,
+    active_state: State<'_, ActiveAccountState>,
+    api_key_state: State<'_, ApiKeyState>,
+    sidecar_state: State<'_, SidecarState>,
+    codex_lifecycle: State<'_, super::codex::lifecycle::CodexLifecycleManager>,
+) -> Result<AccountDetail, String> {
+    let id = ProviderId::parse(&provider)?;
+    if credential.provider() != id {
+        return Err("replacement credential provider mismatch".into());
+    }
+    for_provider(id, |implementation| implementation.validate(&credential))?;
+    if matches!(credential, ProviderCredential::OpencodeDiscovered(_)) {
+        return Err("external OpenCode discovery pointers are read-only".into());
+    }
+    if matches!(&credential, ProviderCredential::Codex(value) if value.auth_mode == "chatgpt") {
+        return Err("managed Codex OAuth updates require identity-safe reauthentication".into());
+    }
+    let _codex_guard = if id == ProviderId::Codex {
+        Some(
+            codex_lifecycle
+                .lock_account(&local_account_id, &account_id)
+                .await,
+        )
+    } else {
+        None
+    };
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
+    let mut provider_vault = vault::load_for_account(&local_account_id, id)?
+        .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
+    let account = provider_vault
+        .accounts
+        .iter_mut()
+        .find(|account| account.id == account_id)
+        .ok_or_else(|| format!("no account {account_id:?} in {provider} vault"))?;
+    let now_ms = current_unix_ms();
+    account.credential = credential;
+    account.last_used_at_ms = now_ms;
+    if id == ProviderId::Codex {
+        // Managed OAuth is refused above, so this is an api_key rotation and it
+        // settles any pending reauth demand. Clear only those two flags: the
+        // rest of the metadata, including the `codexIdentity` fingerprint that
+        // targeted reauthentication compares against, has to survive a key
+        // swap. Dropping the whole record also erased the rotation history the
+        // Account Center reads back.
+        if let Some(metadata) = account.auth_metadata.as_mut() {
+            metadata.reauth_required_at_ms = None;
+            metadata.reauth_reason = None;
+        }
+    }
+    vault::normalize_account_auth_metadata(account);
+    // Every provider records the rotation, not just the two managed Codex
+    // paths, so `AccountDetail.lastCredentialRotationAtMs` is populated for the
+    // rotation the user just performed instead of staying blank.
+    account
+        .auth_metadata
+        .get_or_insert_with(AccountAuthMetadata::default)
+        .last_credential_rotation_at_ms = Some(now_ms);
+    let refreshes_active = provider_vault.active_account_id.as_deref() == Some(account_id.as_str());
+    let restarts_sidecar = refreshes_active
+        && for_provider(id, |value| {
+            value.requires_sidecar_restart_on_active_switch()
+        });
+    let detail = AccountDetail::from_account(account);
+    // Persist BEFORE tearing the sidecar down. A keyring write can still fail
+    // here (locked keychain, a denied prompt), and shutting down first left the
+    // user with no agent host and the OLD credential still on disk, with
+    // nothing on the error path to bring it back.
+    vault::save_for_account(&local_account_id, id, &provider_vault)?;
+    if restarts_sidecar {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
+    if refreshes_active {
+        apply_active_projection(id, &provider_vault, &active_state, &api_key_state).await;
+    }
+    Ok(detail)
+}
+
+#[tauri::command]
+// Stable renderer invoke fields plus managed Tauri state handles.
+#[allow(clippy::too_many_arguments)]
 pub async fn subscription_delete_account(
     provider: String,
     local_account_id: String,
@@ -155,9 +274,19 @@ pub async fn subscription_delete_account(
     api_key_state: State<'_, ApiKeyState>,
     sidecar_state: State<'_, SidecarState>,
     watcher: State<'_, super::anthropic::credential::WatcherRegistry>,
+    codex_lifecycle: State<'_, super::codex::lifecycle::CodexLifecycleManager>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _codex_guard = if id == ProviderId::Codex {
+        Some(
+            codex_lifecycle
+                .lock_account(&local_account_id, &account_id)
+                .await,
+        )
+    } else {
+        None
+    };
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault = match vault::load_for_account(&local_account_id, id)? {
         Some(v) => v,
         None => return Ok(()),
@@ -225,7 +354,7 @@ pub async fn opencode_adopt_discovered(
     api_key_state: State<'_, ApiKeyState>,
     sidecar_state: State<'_, SidecarState>,
 ) -> Result<AccountSummary, String> {
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let (vault, account) = super::opencode::commands::prepare_discovered_adoption(
         local_account_id.clone(),
         sub_provider,
@@ -261,6 +390,14 @@ fn validate_account_for_provider(provider: &str, account: &Account) -> Result<Pr
     }
     for_provider(id, |p| p.validate(&account.credential))?;
     Ok(id)
+}
+
+fn current_unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 fn upsert_account_preserving_active(vault: &mut ProviderVault, account: Account) -> bool {
@@ -311,7 +448,7 @@ pub async fn subscription_rename_account(
     label: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault = vault::load_for_account(&local_account_id, id)?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
     let account = vault
@@ -416,7 +553,7 @@ pub async fn subscription_set_active(
     sidecar_state: State<'_, SidecarState>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
 
@@ -493,7 +630,7 @@ pub async fn subscription_save_preset(
         return Err(format!("provider {provider:?} does not support presets"));
     }
     preset.validate()?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.upsert_preset(preset);
@@ -510,7 +647,7 @@ pub async fn subscription_delete_preset(
     preset_id: String,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     vault.remove_preset(&preset_id);
@@ -526,7 +663,7 @@ pub async fn subscription_set_default_preset(
     preset_id: Option<String>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     if let Some(ref pid) = preset_id {
@@ -574,7 +711,7 @@ pub async fn subscription_set_preset(
     if preset.is_some() && !supports {
         return Err(format!("provider {provider:?} does not support presets"));
     }
-    let _mutation_guard = SUBSCRIPTION_MUTATION_LOCK.lock().await;
+    let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
         vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
     match preset {
@@ -854,6 +991,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 

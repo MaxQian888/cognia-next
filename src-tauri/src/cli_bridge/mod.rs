@@ -14,14 +14,14 @@
 //!
 //! - `POST /api/dev/plugins/install`   — install a `.zip` bundle from disk
 //! - `POST /api/dev/plugins/install-directory`
-//!                                          — install an unpacked plugin dir
+//!   — install an unpacked plugin dir
 //! - `POST /api/dev/plugins/uninstall` — remove a plugin by id
 //! - `POST /api/dev/plugins/reload`    — install the artifact, then round-trip
-//!                                          through the renderer and prove activation
+//!   through the renderer and prove activation
 //! - `POST /api/dev/plugins/session-events` — forward bounded build/watch state
 //! - `GET  /api/dev/health`            — liveness probe
 //! - `POST /api/dev/acp/ticket`         — mint a single-use Companion socket ticket
-//!                                          for the `cognia acp` stdio bridge
+//!   for the `cognia acp` stdio bridge
 //!
 //! # Discovery
 //!

@@ -933,6 +933,14 @@ mod tests {
         })
     }
 
+    /// Build the desktop topology while excluding concurrent tests that
+    /// temporarily install process-global headless services.
+    async fn build_desktop_router() -> (tokio::sync::MutexGuard<'static, ()>, Router) {
+        let guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
+        (guard, build_router(test_state()))
+    }
+
     /// Generate a fresh TLS cert in a tempdir for tests. Returns the tempdir
     /// so the caller keeps it alive for the duration of the test.
     fn test_tls() -> (TempDir, TlsMaterial) {
@@ -963,7 +971,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_and_shutdown_loopback() {
-        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _topology_guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, true, tls_mat, state)
@@ -976,7 +985,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_and_shutdown_unspecified() {
-        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _topology_guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, false, tls_mat, state)
@@ -990,7 +1000,8 @@ mod tests {
 
     #[tokio::test]
     async fn challenge_fails_closed_without_security_store_after_spawn() {
-        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _topology_guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
         let handle = spawn_server(0, true, tls_mat, state).await.expect("spawn");
@@ -1013,7 +1024,8 @@ mod tests {
 
     #[tokio::test]
     async fn https_rejects_plain_http_clients() {
-        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _topology_guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
         // Verify the listener is actually HTTPS — a plain HTTP request must fail.
         let state = test_state();
         let (_tmp, tls_mat) = test_tls();
@@ -1050,6 +1062,9 @@ mod tests {
     async fn multi_tenant_mode_does_not_mount_legacy_pairing_routes() {
         use tower::ServiceExt as _;
 
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
+
         let router = build_router_for_mode(
             test_state(),
             crate::companion_api::deployment::DeploymentMode::MultiTenant,
@@ -1075,6 +1090,9 @@ mod tests {
     async fn released_terminal_ticket_route_is_removed() {
         use tower::ServiceExt as _;
 
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
+
         let response = build_router_for_mode(
             test_state(),
             crate::companion_api::deployment::DeploymentMode::SingleUser,
@@ -1097,6 +1115,13 @@ mod tests {
     #[tokio::test]
     async fn canonical_routes_are_unversioned_and_versioned_aliases_are_absent() {
         use tower::ServiceExt as _;
+
+        // `build_router` conditionally mounts headless-only services from a
+        // process-global slot. Hold the shared slot lock and select the
+        // desktop topology this contract pins, or a concurrent headless-route
+        // test can attach service-auth middleware to an otherwise absent path.
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
 
         async fn status(path: &str, method: &str) -> StatusCode {
             let mut request = axum::http::Request::builder()
@@ -1143,6 +1168,8 @@ mod tests {
     async fn internal_rpc_rejects_device_scoped_jwt_even_from_loopback() {
         use tower::ServiceExt as _;
 
+        let (_topology_guard, router) = build_desktop_router().await;
+
         let jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, "device-a", ACCOUNT_ID)
             .expect("device token");
         let mut request = axum::http::Request::builder()
@@ -1159,7 +1186,7 @@ mod tests {
                 34567,
             ))));
 
-        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(
             response.headers().get(header::CACHE_CONTROL),
@@ -1191,6 +1218,9 @@ mod tests {
     async fn legacy_terminal_websocket_route_is_removed() {
         use tower::ServiceExt as _;
 
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(None);
+
         let response = build_router(test_state())
             .oneshot(
                 axum::http::Request::builder()
@@ -1209,6 +1239,8 @@ mod tests {
     async fn session_media_routes_require_device_authentication() {
         use tower::ServiceExt as _;
 
+        let (_topology_guard, router) = build_desktop_router().await;
+
         for path in [format!("/api/sessions/s1/media/{}", "a".repeat(64))] {
             let mut request = axum::http::Request::builder()
                 .uri(path)
@@ -1217,7 +1249,7 @@ mod tests {
             request.extensions_mut().insert(axum::extract::ConnectInfo(
                 std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
             ));
-            let response = build_router(test_state()).oneshot(request).await.unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
             assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
         }
     }
@@ -1306,7 +1338,7 @@ mod tests {
     #[tokio::test]
     async fn acp_route_requires_socket_ticket() {
         use tower::ServiceExt as _;
-        let router = build_router(test_state());
+        let (_topology_guard, router) = build_desktop_router().await;
         let resp = router
             .oneshot(
                 axum::http::Request::builder()
@@ -1324,7 +1356,7 @@ mod tests {
     #[tokio::test]
     async fn a2a_route_requires_dpop_device_access() {
         use tower::ServiceExt as _;
-        let router = build_router(test_state());
+        let (_topology_guard, router) = build_desktop_router().await;
         let resp = router
             .oneshot(
                 axum::http::Request::builder()
@@ -1343,7 +1375,8 @@ mod tests {
     async fn workflow_api_routes_are_protected_and_unversioned() {
         use tower::ServiceExt as _;
 
-        let response = build_router(test_state())
+        let (_topology_guard, router) = build_desktop_router().await;
+        let response = router
             .oneshot(
                 axum::http::Request::builder()
                     .method("POST")
@@ -1361,6 +1394,8 @@ mod tests {
     async fn workflow_app_mcp_route_requires_an_application_key() {
         use tower::ServiceExt as _;
 
+        let (_topology_guard, router) = build_desktop_router().await;
+
         let mut request = axum::http::Request::builder()
             .method("POST")
             .uri("/api/apps/review/mcp")
@@ -1375,13 +1410,15 @@ mod tests {
                 [127, 0, 0, 1],
                 34567,
             ))));
-        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn dify_file_upload_route_requires_an_application_key() {
         use tower::ServiceExt as _;
+
+        let (_topology_guard, router) = build_desktop_router().await;
 
         let boundary = "cognia-test-boundary";
         let body = format!(
@@ -1402,13 +1439,15 @@ mod tests {
                 [127, 0, 0, 1],
                 34568,
             ))));
-        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn workflow_batch_create_has_large_body_lane_but_still_requires_session() {
         use tower::ServiceExt as _;
+
+        let (_topology_guard, router) = build_desktop_router().await;
 
         let csv = format!("topic\r\n{}", "a".repeat(70 * 1024));
         let mut request = axum::http::Request::builder()
@@ -1426,13 +1465,15 @@ mod tests {
                 [127, 0, 0, 1],
                 34569,
             ))));
-        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn workflow_human_input_routes_require_an_application_session() {
         use tower::ServiceExt as _;
+
+        let (_topology_guard, router) = build_desktop_router().await;
 
         let mut request = axum::http::Request::builder()
             .uri("/api/apps/review/human-input")
@@ -1444,7 +1485,7 @@ mod tests {
                 [127, 0, 0, 1],
                 34570,
             ))));
-        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        let response = router.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -1452,7 +1493,9 @@ mod tests {
     async fn browser_socket_uses_only_the_unversioned_path() {
         use tower::ServiceExt as _;
 
-        let canonical = build_router(test_state())
+        let (_topology_guard, router) = build_desktop_router().await;
+        let canonical = router
+            .clone()
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/ws/browser/session-1")
@@ -1464,7 +1507,7 @@ mod tests {
             .unwrap();
         assert_ne!(canonical.status(), StatusCode::NOT_FOUND);
 
-        let legacy = build_router(test_state())
+        let legacy = router
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/ws/v1/browser/session-1")
@@ -1480,7 +1523,7 @@ mod tests {
     #[tokio::test]
     async fn a2a_agent_card_is_public() {
         use tower::ServiceExt as _;
-        let router = build_router(test_state());
+        let (_topology_guard, router) = build_desktop_router().await;
         let resp = router
             .oneshot(
                 axum::http::Request::builder()
@@ -1497,10 +1540,10 @@ mod tests {
     #[tokio::test]
     async fn draining_rejects_new_mutations_but_keeps_probes_available() {
         use tower::ServiceExt as _;
-        let _guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let (_topology_guard, router) = build_desktop_router().await;
         set_draining_for_test(true);
         let _reset = DrainingReset;
-        let router = build_router(test_state());
         let mutation = router
             .clone()
             .oneshot(

@@ -761,6 +761,9 @@ async fn reload_inner(state: SharedState, req: ReloadRequest) -> Response {
     }
 }
 
+// The response schema exposes each recovery field independently; explicit
+// arguments keep every call site honest about the action and retry policy.
+#[allow(clippy::too_many_arguments)]
 fn plugin_dev_failure_response(
     session_id: &str,
     attempt: u64,

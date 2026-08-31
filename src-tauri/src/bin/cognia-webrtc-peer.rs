@@ -160,8 +160,8 @@ static STDERR_LOGGER: StderrLogger = StderrLogger;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    app_lib::proxy_config::clear_inherited_proxy_environment();
-    app_lib::proxy_config::apply_current(Default::default()).map_err(|error| error.to_string())?;
+    app_lib::clear_inherited_proxy_environment();
+    app_lib::apply_current_proxy_config(Default::default()).map_err(|error| error.to_string())?;
     let level = match std::env::var("COGNIA_LOG").as_deref() {
         Ok("error") => log::LevelFilter::Error,
         Ok("warn") => log::LevelFilter::Warn,

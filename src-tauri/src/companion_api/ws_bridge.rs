@@ -298,6 +298,10 @@ struct BridgeSlot {
     /// replacement: the new connection closes the old).
     shutdown: watch::Sender<bool>,
     hello: BrainHello,
+    /// Fake bridge ownership is scoped to one state in tests. Real brain
+    /// sockets remain process-global and therefore have no owner.
+    #[cfg(test)]
+    test_owner: Option<usize>,
 }
 
 static CONN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -319,6 +323,7 @@ fn install_socket_bridge(
     transport: Arc<SocketBridgeTransport>,
     shutdown: watch::Sender<bool>,
     hello: BrainHello,
+    _test_owner: Option<usize>,
 ) {
     let old = {
         let mut slot = SOCKET_BRIDGE.write();
@@ -326,6 +331,8 @@ fn install_socket_bridge(
             transport,
             shutdown,
             hello,
+            #[cfg(test)]
+            test_owner: _test_owner,
         })
     };
     if let Some(old) = old {
@@ -366,6 +373,24 @@ pub fn socket_bridge_transport() -> Option<Arc<SocketBridgeTransport>> {
         .read()
         .as_ref()
         .map(|s| Arc::clone(&s.transport))
+}
+
+/// Resolve the connected socket for one state. In production this is the
+/// process-global brain; tests additionally prevent a state-scoped fake from
+/// leaking into unrelated parallel cases.
+pub(crate) fn socket_bridge_transport_for_state(
+    _state: &SharedState,
+) -> Option<Arc<SocketBridgeTransport>> {
+    let slot = SOCKET_BRIDGE.read();
+    #[cfg(test)]
+    if slot
+        .as_ref()
+        .and_then(|slot| slot.test_owner)
+        .is_some_and(|owner| owner != Arc::as_ptr(_state) as usize)
+    {
+        return None;
+    }
+    slot.as_ref().map(|slot| Arc::clone(&slot.transport))
 }
 
 /// Whether a brain is currently connected and helloed.
@@ -476,7 +501,7 @@ pub(crate) fn current_brain_account_id() -> Option<String> {
 /// ADR-0059 D3: the brain owns the data — the SQLite `AppStore` fallback is
 /// handled separately by `data_plane::pick` (R4), not here.
 pub fn resolve_bridge_transport(state: &SharedState) -> Result<Arc<dyn BridgeTransport>, String> {
-    if let Some(socket) = socket_bridge_transport() {
+    if let Some(socket) = socket_bridge_transport_for_state(state) {
         return Ok(socket);
     }
     if let Some(app) = state.app_handle.clone() {
@@ -645,6 +670,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             catalog_hash,
             contract_version,
         },
+        None,
     );
     log::info!("companion-api ws-bridge: brain connected (conn {conn_id})");
 
@@ -967,7 +993,7 @@ pub(crate) mod test_support {
     /// Install a fake connected brain into the process-global slot without a
     /// real WebSocket. Returns the receiver of the outgoing frame queue so
     /// the test can assert on emitted frames. Hold the slot lock first.
-    pub(crate) fn install_socket_for_testing() -> TestBridgeReceiver {
+    pub(crate) fn install_socket_for_testing(state: &SharedState) -> TestBridgeReceiver {
         let (tx, rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
         let conn_id = CONN_COUNTER.fetch_add(1, Ordering::SeqCst);
         let transport = SocketBridgeTransport::new(tx, conn_id);
@@ -987,6 +1013,7 @@ pub(crate) mod test_support {
                     .expect("embedded contract")
                     .schema_version(),
             },
+            Some(Arc::as_ptr(state) as usize),
         );
         TestBridgeReceiver { rx }
     }
@@ -1246,6 +1273,7 @@ mod tests {
     #[tokio::test]
     async fn protocol_mismatch_closes_with_1002() {
         let _guard = lock_slot().await;
+        test_support::clear_socket_for_testing();
         let state = test_state();
         let addr = serve_bridge(state).await;
         let mut ws = connect(addr, &service_token()).await;
@@ -1275,6 +1303,7 @@ mod tests {
     #[tokio::test]
     async fn catalog_mismatch_closes_with_1002() {
         let _guard = lock_slot().await;
+        test_support::clear_socket_for_testing();
         let state = test_state();
         let addr = serve_bridge(state).await;
         let mut ws = connect(addr, &service_token()).await;
@@ -1526,8 +1555,23 @@ mod tests {
     // ── resolve_bridge_transport ordering ─────────────────────────────────────
 
     #[tokio::test]
+    async fn fake_socket_is_visible_only_to_its_owning_state() {
+        let _guard = lock_slot().await;
+        test_support::clear_socket_for_testing();
+        let owner = test_state();
+        let unrelated = test_state();
+
+        let _receiver = test_support::install_socket_for_testing(&owner);
+
+        assert!(socket_bridge_transport_for_state(&owner).is_some());
+        assert!(socket_bridge_transport_for_state(&unrelated).is_none());
+        test_support::clear_socket_for_testing();
+    }
+
+    #[tokio::test]
     async fn resolve_bridge_transport_prefers_socket_then_errors_without_webview() {
         let _guard = lock_slot().await;
+        test_support::clear_socket_for_testing();
         let state = test_state();
 
         // No socket, no app_handle → Err.

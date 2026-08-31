@@ -893,6 +893,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // Backup configuration is read from process-global environment variables;
+    // the guard covers the complete asynchronous backup/restore transaction.
+    #[allow(clippy::await_holding_lock)]
     async fn complete_backup_and_new_directory_restore_preserve_verified_data() {
         let _guard = ENV_LOCK.lock().unwrap();
         let source = tempfile::tempdir().unwrap();

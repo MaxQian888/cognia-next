@@ -60,19 +60,14 @@ pub enum TrayActionPayload {
 
 /// Icon variant the Rust side renders. Matches the four PNG paths in
 /// `src-tauri/icons/tray/`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum TrayIconState {
+    #[default]
     Idle,
     Busy,
     Error,
     Muted,
-}
-
-impl Default for TrayIconState {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl TrayIconState {

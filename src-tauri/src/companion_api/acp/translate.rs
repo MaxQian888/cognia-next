@@ -719,8 +719,10 @@ mod tests {
         assert_eq!(out.len(), 1);
 
         // With deltas already seen → suppressed.
-        let mut streamed = TurnState::default();
-        streamed.saw_text_delta = true;
+        let mut streamed = TurnState {
+            saw_text_delta: true,
+            ..Default::default()
+        };
         assert!(translate_frame("s1", &assistant, &mut streamed).is_empty());
     }
 
@@ -980,8 +982,10 @@ mod tests {
 
     #[test]
     fn turn_state_reset_clears_dedup() {
-        let mut turn = TurnState::default();
-        turn.saw_text_delta = true;
+        let mut turn = TurnState {
+            saw_text_delta: true,
+            ..Default::default()
+        };
         turn.seen_tool_calls.insert("toolu_1".into());
         turn.reset();
         assert!(!turn.saw_text_delta);

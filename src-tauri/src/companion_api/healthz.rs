@@ -356,6 +356,17 @@ mod tests {
 
     #[tokio::test]
     async fn livez_and_readyz_are_distinct_probe_contracts() {
+        struct DrainingReset;
+
+        impl Drop for DrainingReset {
+            fn drop(&mut self) {
+                crate::companion_api::server::set_draining_for_test(false);
+            }
+        }
+
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        let _reset = DrainingReset;
+        crate::companion_api::server::set_draining_for_test(false);
         let router = build_router(test_state());
         let live = router
             .clone()
@@ -370,7 +381,6 @@ mod tests {
         assert_eq!(live.status(), StatusCode::OK);
         assert_eq!(body_json(live).await["status"], "live");
 
-        crate::companion_api::server::set_draining_for_test(false);
         let ready = router
             .oneshot(
                 Request::builder()

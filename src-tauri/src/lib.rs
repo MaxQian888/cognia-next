@@ -465,6 +465,7 @@ pub fn run() {
         // `subscription_set_active`; readers (sidecar spawn, external-agent
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
+        .manage(subscription::codex::lifecycle::CodexLifecycleManager::new())
         .manage(account_auth::AccountSecuritySession::new(dirs::data_dir()))
         .manage(WindowBehavior::new())
         .manage(selection_toolbar::SelectionToolbarState::default())
@@ -736,7 +737,9 @@ pub fn run() {
             subscription::commands::subscription_clear_runtime,
             subscription::commands::subscription_list_accounts,
             subscription::commands::subscription_get_account,
+            subscription::commands::subscription_get_account_detail,
             subscription::commands::subscription_save_account,
+            subscription::commands::subscription_replace_account_credential,
             subscription::commands::subscription_delete_account,
             subscription::commands::subscription_rename_account,
             subscription::commands::subscription_set_active,
@@ -766,8 +769,9 @@ pub fn run() {
             subscription::codex::commands::codex_oauth_discover,
             subscription::codex::commands::codex_oauth_request_device_code,
             subscription::codex::commands::codex_oauth_poll_device_code,
-            subscription::codex::commands::codex_oauth_refresh,
-            subscription::codex::commands::codex_oauth_revoke,
+            subscription::codex::commands::codex_oauth_cancel_device_code,
+            subscription::codex::commands::subscription_refresh_codex_account,
+            subscription::codex::commands::subscription_reauthenticate_codex_account,
             subscription::opencode::commands::opencode_oauth_discover,
             subscription::opencode::commands::opencode_save_zen_key,
             subscription::commands::opencode_adopt_discovered,
@@ -812,6 +816,10 @@ pub fn run() {
             selection_toolbar::selection_toolbar_current_candidate,
             selection_toolbar::selection_toolbar_capture_clipboard,
             selection_toolbar::selection_toolbar_execute,
+            selection_toolbar::selection_toolbar_replace,
+            selection_toolbar::selection_toolbar_undo,
+            selection_toolbar::selection_toolbar_copy_result,
+            selection_toolbar::selection_toolbar_open_permission_settings,
             selection_toolbar::selection_toolbar_take_pending_stage,
             selection_toolbar::selection_toolbar_reveal,
             selection_toolbar::selection_toolbar_set_interactive,
@@ -1456,6 +1464,7 @@ pub fn run() {
             automation::commands::desktop_get_app_state,
             automation::commands::desktop_query_elements,
             automation::commands::desktop_expand_element,
+            automation::commands::desktop_zoom,
             automation::commands::desktop_perform_action,
             automation::commands::desktop_read_tree,
             automation::commands::desktop_find,

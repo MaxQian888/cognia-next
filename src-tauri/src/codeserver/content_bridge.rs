@@ -26,6 +26,9 @@ struct ContentContext {
     media_type: Option<String>,
 }
 
+// Axum owns the concrete response layout; retaining it here avoids rebuilding
+// or erasing the already-complete HTTP error response.
+#[allow(clippy::result_large_err)]
 fn context(headers: &HeaderMap) -> Result<ContentContext, Response> {
     let encoded = headers
         .get(CONTEXT_HEADER)
@@ -38,6 +41,7 @@ fn context(headers: &HeaderMap) -> Result<ContentContext, Response> {
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid content context").into_response())
 }
 
+#[allow(clippy::result_large_err)]
 fn require_service(
     identity: &crate::companion_api::middleware::DeviceContext,
 ) -> Result<(), Response> {

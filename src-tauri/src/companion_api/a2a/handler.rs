@@ -588,6 +588,9 @@ mod tests {
     }
 
     #[tokio::test]
+    // The guard intentionally serializes this process-global task-store test
+    // across every awaited cancellation path.
+    #[allow(clippy::await_holding_lock)]
     async fn tasks_cancel_paths() {
         let _guard = store::test_store_guard();
         store::reset_task_store_for_tests();

@@ -2596,11 +2596,11 @@ mod tests {
         // scanned by a phone over LAN or shown to a developer pasting it
         // into a local browser with cert pinning bypass).
         let server_state = CompanionServerState::new();
-        let result = (|| async {
+        let result = async {
             let port = server_state.bound_port().unwrap_or(DEFAULT_PORT);
             let host = "127.0.0.1".to_string();
             Ok::<_, String>(format!("https://{host}:{port}"))
-        })()
+        }
         .await
         .expect("synthesize url");
         assert!(result.starts_with("https://127.0.0.1:"));
