@@ -26,6 +26,7 @@ import {
   Pencil as EditIcon,
   Eye as ReadIcon,
   Sparkles as CopilotIcon,
+  Search as SearchIcon,
   PanelRight as WorkbenchIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
@@ -68,6 +69,8 @@ export interface MobileEditorTopbarProps {
   onToggleMode: () => void
   /** Open the AI copilot sheet. */
   onOpenCopilot: () => void
+  /** Open canvas-scoped node search. Ctrl/Cmd+F has no equivalent on a phone. */
+  onOpenSearch: () => void
   /** Open the shared Context Workbench. */
   onOpenWorkbench: () => void
   /** Landscape is the editor's default. This is the way out of it. */
@@ -83,6 +86,7 @@ export function MobileEditorTopbar({
   mode,
   onToggleMode,
   onOpenCopilot,
+  onOpenSearch,
   onOpenWorkbench,
   orientationLocked,
   onToggleOrientationLock,
@@ -91,6 +95,7 @@ export function MobileEditorTopbar({
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
   const tWorkbench = useTranslations("contextWorkbench")
+  const tSpotlight = useTranslations("workflows.editor.spotlight")
 
   const { id, name, dirty, snapToGrid } = store(
     useShallow((s: EditorState) => ({
@@ -269,6 +274,21 @@ export function MobileEditorTopbar({
           <SelectIcon className="size-5" aria-hidden="true" />
         </Button>
       ) : null}
+      {/* Search is a top-bar control rather than an overflow item because the
+          desktop reaches it with Ctrl/Cmd+F, and a phone has no keyboard to
+          reach anything with. A graph large enough to need it is exactly the
+          graph a phone cannot scan by eye. */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-11 shrink-0"
+        onClick={onOpenSearch}
+        aria-label={tSpotlight("openShortcut")}
+        data-testid="mobile-editor-search"
+      >
+        <SearchIcon className="size-5" aria-hidden="true" />
+      </Button>
       <Button
         type="button"
         variant="ghost"

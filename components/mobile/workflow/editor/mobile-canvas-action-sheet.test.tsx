@@ -24,6 +24,7 @@ const messages = {
           delete: "Delete node",
           deleteConnection: "Delete connection",
           addNode: "Add node",
+          findNode: "Find node",
           fitView: "Fit to view",
         },
       },
@@ -44,6 +45,7 @@ function renderSheet(target: CanvasPressTarget | null, canPaste = false) {
     onDeleteNode: jest.fn(),
     onDeleteEdge: jest.fn(),
     onFitView: jest.fn(),
+    onFindNode: jest.fn(),
   }
   render(
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
@@ -91,5 +93,14 @@ describe("MobileCanvasActionSheet", () => {
     const h = renderSheet({ kind: "pane" }, true)
     fireEvent.click(screen.getByTestId("mobile-canvas-action-paste"))
     expect(h.onPaste).toHaveBeenCalled()
+  })
+
+  // The canvas is also where a search belongs: on a phone there is no
+  // Ctrl/Cmd+F, and this sheet is the phone's right-click menu.
+  it("finds a node from the canvas actions", () => {
+    const h = renderSheet({ kind: "pane" })
+    fireEvent.click(screen.getByTestId("mobile-canvas-action-findNode"))
+    expect(h.onFindNode).toHaveBeenCalled()
+    expect(h.onOpenChange).toHaveBeenCalledWith(false)
   })
 })

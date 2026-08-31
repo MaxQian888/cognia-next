@@ -42,6 +42,7 @@ import { MobileCanvasActionSheet } from "./mobile-canvas-action-sheet"
 import type { CanvasPressTarget } from "./use-canvas-long-press"
 import { MobileEditorTopbar } from "./mobile-editor-topbar"
 import { MobileNodePaletteSheet } from "./mobile-node-palette-sheet"
+import { MobileNodeSearchSheet } from "./mobile-node-search-sheet"
 import { MobileNodeInspectorDrawer } from "./mobile-node-inspector-drawer"
 import { MobileWorkflowCopilotSheet } from "./mobile-workflow-copilot-sheet"
 import { useTapConnect } from "./use-tap-connect"
@@ -53,6 +54,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [pressTarget, setPressTarget] = useState<CanvasPressTarget | null>(null)
   const [canPaste, setCanPaste] = useState(false)
   // Landscape is the editor's default, not a rule imposed on the user.
@@ -216,6 +218,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         mode={mode}
         onToggleMode={onToggleMode}
         onOpenCopilot={() => setCopilotOpen(true)}
+        onOpenSearch={() => setSearchOpen(true)}
         onToggleSelectMode={onToggleSelectMode}
         orientationLocked={orientationLocked}
         onToggleOrientationLock={() => setOrientationLocked((v) => !v)}
@@ -338,8 +341,18 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           store.getState().clearSelection()
         }}
         onFitView={() => rf?.fitView({ duration: 240, padding: 0.2 })}
+        onFindNode={() => setSearchOpen(true)}
       />
       <MobileNodePaletteSheet open={paletteOpen} onOpenChange={setPaletteOpen} onAdd={addAtCenter} />
+      {/* Revealing a node centres, selects and pulses it. Opening the inspector
+          on top of that would bury the node the user just went looking for, so
+          the sheet closes onto the canvas and the pulse is the confirmation. */}
+      <MobileNodeSearchSheet
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        store={store}
+        reactFlowInstance={rf}
+      />
       <MobileNodeInspectorDrawer
         open={inspectorOpen && selectedId != null}
         onOpenChange={onInspectorOpenChange}

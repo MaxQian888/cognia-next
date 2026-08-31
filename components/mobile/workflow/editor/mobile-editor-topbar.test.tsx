@@ -84,6 +84,7 @@ function renderTopbar(mode: "read" | "edit" = "read") {
   const store: EditorStore = createEditorStore(buildWorkflow())
   const onToggleMode = jest.fn()
   const onOpenCopilot = jest.fn()
+  const onOpenSearch = jest.fn()
   const onOpenWorkbench = jest.fn()
   render(
     <MobileEditorTopbar
@@ -92,13 +93,14 @@ function renderTopbar(mode: "read" | "edit" = "read") {
       mode={mode}
       onToggleMode={onToggleMode}
       onOpenCopilot={onOpenCopilot}
+      onOpenSearch={onOpenSearch}
       onOpenWorkbench={onOpenWorkbench}
       orientationLocked={true}
       onToggleOrientationLock={jest.fn()}
       onToggleSelectMode={jest.fn()}
     />
   )
-  return { store, onToggleMode, onOpenCopilot, onOpenWorkbench }
+  return { store, onToggleMode, onOpenCopilot, onOpenSearch, onOpenWorkbench }
 }
 
 // Run hands the workflow to the paired desktop through the outbound queue, and
@@ -148,6 +150,16 @@ describe("<MobileEditorTopbar />", () => {
     const { onOpenWorkbench } = renderTopbar("read")
     await user.click(screen.getByTestId("mobile-editor-workbench"))
     expect(onOpenWorkbench).toHaveBeenCalledTimes(1)
+  })
+
+  // Ctrl/Cmd+F is how the desktop reaches canvas search, and a phone has no
+  // keyboard to press it with, so the control is in the bar rather than buried
+  // in the overflow menu.
+  it("opens canvas node search from the top bar in either mode", async () => {
+    const user = userEvent.setup()
+    const { onOpenSearch } = renderTopbar("read")
+    await user.click(screen.getByTestId("mobile-editor-search"))
+    expect(onOpenSearch).toHaveBeenCalledTimes(1)
   })
 
   it("disables Save when clean and persists once dirty", async () => {

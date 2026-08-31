@@ -18226,6 +18226,7 @@
           "delete": "Delete node",
           "deleteConnection": "Delete connection",
           "duplicate": "Duplicate",
+          "findNode": "Find node",
           "fitView": "Fit to view",
           "paste": "Paste",
           "runFrom": "Run from here",

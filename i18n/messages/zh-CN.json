@@ -18226,6 +18226,7 @@
           "delete": "删除节点",
           "deleteConnection": "删除连线",
           "duplicate": "复制为副本",
+          "findNode": "查找节点",
           "fitView": "适应视图",
           "paste": "粘贴",
           "runFrom": "从此处开始运行",

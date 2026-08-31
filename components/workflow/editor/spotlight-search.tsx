@@ -1,17 +1,21 @@
 "use client"
 
 /**
- * In-canvas Spotlight search overlay. Ctrl/Cmd+F opens it; type any
- * substring of a node label / kind / sticky-note text to filter, hit
- * Enter / click to pan the viewport to the chosen node and trigger a
+ * In-canvas Spotlight search overlay. Ctrl/Cmd+F opens it, typing any
+ * substring of a node label / kind / sticky-note text filters, and
+ * Enter or a click pans the viewport to the chosen node and triggers a
  * brief pulse highlight (3 s, gated by the resolved performance tier).
  *
  * Distinct from the Cmd+K command palette: spotlight is canvas-scoped
  * (only nodes on the current workflow, no editor actions).
+ *
+ * The rows, the group breadcrumb and the reveal live in `useNodeSpotlight`,
+ * because the phone has the same search and none of this chrome. What stays
+ * here is the CommandDialog and cmdk's own filtering, which is why the query
+ * lives in this component and not in the hook.
  */
 
-import { useMemo, useState } from "react"
-import { useShallow } from "zustand/react/shallow"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import type { ReactFlowInstance } from "@xyflow/react"
 import {
@@ -21,8 +25,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
+import type { EditorStore } from "@/lib/workflow/editor/store"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
+import { useNodeSpotlight } from "@/lib/workflow/editor/use-node-spotlight"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
 export interface SpotlightSearchProps {
@@ -43,107 +48,16 @@ export function SpotlightSearch({
 }: SpotlightSearchProps) {
   const t = useTranslations("workflows.editor.spotlight")
   const [query, setQuery] = useState("")
-  const { nodes, setSelectedNodes, pulseNode } = store(
-    useShallow((s: EditorState) => ({
-      nodes: s.nodes,
-      setSelectedNodes: s.setSelectedNodes,
-      pulseNode: s.pulseNode,
-    }))
-  )
+  const { filterRows, reveal } = useNodeSpotlight({
+    store,
+    reactFlowInstance,
+    animationsEnabled,
+  })
 
-  // Pre-compute group rects so each result row can show its breadcrumb (the
-  // most specific containing group, if any). Smallest containing group wins
-  // — matches the breadcrumb's own group-resolution logic.
-  /* eslint-disable react-hooks/preserve-manual-memoization -- React Flow may mutate the nodes array reference between paints; manual memo over filter+map is intentional. */
-  const groupRects = useMemo(() => {
-    return nodes
-      .filter((n) => n.data.kind === "annotation.group")
-      .map((n) => {
-        const params =
-          (n.data.params as { width?: number; height?: number; title?: string } | undefined) ?? {}
-        return {
-          id: n.id,
-          title:
-            typeof params.title === "string" && params.title.trim().length > 0 ? params.title : "",
-          x: n.position.x,
-          y: n.position.y,
-          width: typeof params.width === "number" && params.width > 0 ? params.width : 240,
-          height: typeof params.height === "number" && params.height > 0 ? params.height : 160,
-        }
-      })
-  }, [nodes])
-  /* eslint-enable react-hooks/preserve-manual-memoization */
-
-  // Build the search rows. cmdk's substring filter applies over the `value`
-  // attribute, so we flatten label / kind / sticky-note text / breadcrumb
-  // into one string and let it do the matching.
-  /* eslint-disable react-hooks/preserve-manual-memoization -- nodes/groupRects identities can change mid-frame from React Flow; manual memo intentional and re-runs cheaply. */
-  const rows = useMemo(() => {
-    return nodes.slice(0, 200).map((n) => {
-      const data = n.data
-      const noteText =
-        typeof (data.params as { text?: unknown } | undefined)?.text === "string"
-          ? (data.params as { text: string }).text
-          : ""
-      // Find the smallest containing group, if any.
-      const w = n.width ?? 240
-      const h = n.height ?? 80
-      const cx = n.position.x + w / 2
-      const cy = n.position.y + h / 2
-      let containingGroup: { title: string } | null = null
-      let smallestArea = Infinity
-      for (const g of groupRects) {
-        if (g.id === n.id) continue
-        if (cx < g.x || cx > g.x + g.width || cy < g.y || cy > g.y + g.height) continue
-        const area = g.width * g.height
-        if (area < smallestArea) {
-          smallestArea = area
-          containingGroup = { title: g.title }
-        }
-      }
-      const groupLabel = containingGroup?.title ?? ""
-      const value = [n.id, data.label, data.kind, noteText, data.notes ?? "", groupLabel]
-        .join(" ")
-        .toLowerCase()
-      return {
-        id: n.id,
-        label: data.label,
-        kind: data.kind,
-        value,
-        position: n.position,
-        width: w,
-        height: h,
-        groupLabel,
-      }
-    })
-  }, [nodes, groupRects])
-  /* eslint-enable react-hooks/preserve-manual-memoization */
-
-  const filteredRows = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return normalizedQuery ? rows.filter((row) => row.value.includes(normalizedQuery)) : rows
-  }, [query, rows])
+  const filteredRows = filterRows(query)
 
   const handleSelect = (rowId: string) => {
-    const row = rows.find((r) => r.id === rowId)
-    if (!row) return
-    if (reactFlowInstance) {
-      // Centre the node at zoom 1.2. Use `setCenter`, which centres the given
-      // flow-space point within the React Flow PANE (it measures the rendered
-      // canvas container). Hand-rolling the offset from `window.innerWidth/2`
-      // is wrong: the pane is narrower than the window (left palette + right
-      // sidebar), so window-centre sits right of the pane centre and the node
-      // lands on the right edge instead of centred.
-      const zoom = 1.2
-      const cxFlow = row.position.x + row.width / 2
-      const cyFlow = row.position.y + row.height / 2
-      reactFlowInstance.setCenter(cxFlow, cyFlow, {
-        zoom,
-        duration: animationsEnabled ? 240 : 0,
-      })
-    }
-    setSelectedNodes([rowId])
-    pulseNode(rowId, animationsEnabled ? 3000 : 0)
+    reveal(rowId)
     onOpenChange(false)
   }
 

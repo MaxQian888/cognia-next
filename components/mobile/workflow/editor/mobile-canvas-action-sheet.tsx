@@ -19,6 +19,7 @@ import {
   Settings2 as ConfigureIcon,
   Trash2 as DeleteIcon,
   Crosshair as FitIcon,
+  Search as SearchIcon,
   Plus as AddIcon,
 } from "lucide-react"
 
@@ -40,6 +41,8 @@ export interface MobileCanvasActionSheetProps {
   onDeleteNode: (nodeId: string) => void
   onDeleteEdge: (edgeId: string) => void
   onFitView: () => void
+  /** Open canvas-scoped node search. */
+  onFindNode: () => void
   /** False while the clipboard holds nothing this editor can paste. */
   canPaste: boolean
 }
@@ -65,6 +68,7 @@ export function MobileCanvasActionSheet({
   onDeleteNode,
   onDeleteEdge,
   onFitView,
+  onFindNode,
   canPaste,
 }: MobileCanvasActionSheetProps) {
   const t = useTranslations("mobile.workflow.editor.actions")
@@ -105,6 +109,7 @@ export function MobileCanvasActionSheet({
     return [
       { key: "addNode", icon: AddIcon, label: t("addNode"), run: run(onAddNode) },
       ...(canPaste ? [{ key: "paste", icon: PasteIcon, label: t("paste"), run: run(onPaste) }] : []),
+      { key: "findNode", icon: SearchIcon, label: t("findNode"), run: run(onFindNode) },
       { key: "fitView", icon: FitIcon, label: t("fitView"), run: run(onFitView) },
     ]
   })()

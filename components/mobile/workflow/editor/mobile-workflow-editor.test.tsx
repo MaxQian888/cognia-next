@@ -63,6 +63,9 @@ jest.mock("./mobile-editor-topbar", () => ({
       <button data-testid="open-workbench" onClick={props.onOpenWorkbench as () => void}>
         workbench
       </button>
+      <button data-testid="open-search" onClick={props.onOpenSearch as () => void}>
+        search
+      </button>
       {props.mode !== "read" ? (
         <button
           data-testid="mobile-editor-select-mode"
@@ -232,6 +235,25 @@ describe("<MobileWorkflowEditor />", () => {
     expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute("data-drawer-open", "true")
     fireEvent.click(screen.getByTestId("collapse-workbench"))
     expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute("data-drawer-open", "false")
+  })
+
+  /**
+   * Canvas search existed on desktop behind Ctrl/Cmd+F, a shortcut a phone
+   * cannot press. Both reachable entry points are pinned here: the topbar
+   * control, and the pane long-press action sheet.
+   */
+  it("opens node search from the topbar", () => {
+    renderEditor()
+    expect(screen.queryByTestId("mobile-node-search")).toBeNull()
+    fireEvent.click(screen.getByTestId("open-search"))
+    expect(screen.getByTestId("mobile-node-search")).toBeInTheDocument()
+  })
+
+  it("opens node search from the canvas long-press sheet", async () => {
+    renderEditor()
+    fireEvent.click(screen.getByTestId("hold-pane"))
+    fireEvent.click(await screen.findByTestId("mobile-canvas-action-findNode"))
+    expect(screen.getByTestId("mobile-node-search")).toBeInTheDocument()
   })
 
   it("opens the inspector drawer when a node is tapped", () => {
