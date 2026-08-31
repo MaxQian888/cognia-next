@@ -45,5 +45,24 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
     ],
+    // Web Share Target. `app/share-target/page.tsx` has existed since Wave 3
+    // with a full session picker, but only the Android native SEND intent
+    // could ever reach it: `MainActivity` rewrites that intent into a
+    // `cognia://share` deep link. An installed web PWA had no route in at all,
+    // so the page was unreachable for every browser user.
+    //
+    // `method: "GET"` is forced, not chosen. A POST target needs a server to
+    // receive the form, and this app is a Next.js static export with no
+    // `app/api/` at runtime. GET puts the payload in the query string, which
+    // is exactly what the page already reads.
+    share_target: {
+      action: "/share-target",
+      method: "GET",
+      params: {
+        title: "title",
+        text: "text",
+        url: "url",
+      },
+    },
   }
 }

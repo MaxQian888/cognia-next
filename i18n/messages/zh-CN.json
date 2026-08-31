@@ -17490,6 +17490,7 @@
       "orExistingSession": "或发送到现有会话",
       "queuedToast": "已加入发送队列。",
       "receivedText": "收到内容",
+      "receivedTitle": "标题",
       "receivedUrl": "链接",
       "retry": "重试",
       "sendCta": "发送到此会话",

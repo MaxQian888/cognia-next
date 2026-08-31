@@ -32,4 +32,25 @@ describe("manifest()", () => {
       expect(icon.src).toMatch(/^\/icons\/.+\.(svg|png)$/u)
     }
   })
+
+  it("declares a share target the static export can actually receive", () => {
+    // `app/share-target/page.tsx` shipped with a full session picker and no way
+    // in for an installed PWA: only Android's native SEND intent reached it.
+    const m = manifest()
+    const target = (m as { share_target?: Record<string, unknown> }).share_target
+    expect(target).toBeDefined()
+    expect(target?.action).toBe("/share-target")
+    // GET is forced, not chosen. A POST target needs a server to receive the
+    // form and this app has no `app/api/` at runtime.
+    expect(target?.method).toBe("GET")
+  })
+
+  it("maps every share param the page reads, and no others", () => {
+    const m = manifest()
+    const params = (m as { share_target?: { params?: Record<string, string> } }).share_target
+      ?.params
+    // Declaring a param the page ignores silently drops what the user shared,
+    // so this pins the two sides together.
+    expect(params).toEqual({ title: "title", text: "text", url: "url" })
+  })
 })

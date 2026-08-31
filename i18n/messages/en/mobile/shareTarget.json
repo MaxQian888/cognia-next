@@ -16,6 +16,7 @@
   "orExistingSession": "or send to an existing chat",
   "queuedToast": "Queued for delivery.",
   "receivedText": "Received text",
+  "receivedTitle": "Title",
   "receivedUrl": "Link",
   "retry": "Try again",
   "sendCta": "Send to this chat",

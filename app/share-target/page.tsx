@@ -47,8 +47,12 @@ export default function ShareTargetPage() {
 
 /**
  * Derive a sensible 50-char-max session title from the shared payload.
- * Prefers the first non-empty line of `text`, falling back to the
- * hostname of `url` so the picker shows something recognisable.
+ *
+ * Prefers the sharer's own `title` when there is one: an article share carries
+ * the headline there, and guessing from the body text when the sharer already
+ * said what this is would be worse for no reason. Then the first non-empty
+ * line of `text`, then the hostname of `url`, so the picker always shows
+ * something recognisable.
  *
  * Takes the next-intl `t` (scoped to `mobile.shareTarget`) so the
  * derived title respects the user's locale. The `fromUrl` and
@@ -56,14 +60,18 @@ export default function ShareTargetPage() {
  * `i18n/messages/zh-CN.json` under `mobile.shareTarget.derivedTitle`.
  */
 function deriveTitle(
+  title: string,
   text: string,
   url: string,
   t: (key: string, params?: Record<string, string | number | Date>) => string
 ): string {
+  const clamp = (value: string) => (value.length > 50 ? `${value.slice(0, 49)}…` : value)
+  const named = title.trim()
+  if (named) return clamp(named)
   const trimmed = text.trim()
   if (trimmed) {
     const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? ""
-    return firstLine.length > 50 ? `${firstLine.slice(0, 49)}…` : firstLine
+    return clamp(firstLine)
   }
   if (url) {
     try {
@@ -82,6 +90,10 @@ function ShareTargetPageInner() {
   const params = useSearchParams()
   const text = params?.get("text") ?? ""
   const url = params?.get("url") ?? ""
+  // Declared in the web manifest's `share_target.params` alongside the other
+  // two. Android's share sheet sends it for most link shares, and dropping it
+  // threw away the one line that says what the user actually shared.
+  const title = params?.get("title") ?? ""
 
   const [search, setSearch] = useState("")
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -96,21 +108,26 @@ function ShareTargetPageInner() {
     return sessions.filter((s) => (s.title ?? "").toLowerCase().includes(q))
   }, [search, sessions])
 
-  // Compose the canonical body: prefer text, fall back to url, otherwise
-  // both. Mirrors the Web Share Target conventions.
+  // Compose the canonical body. Mirrors the Web Share Target conventions:
+  // any of the three may be absent, and a sharer that sends a title plus a URL
+  // (the common shape for an article) must not lose the title.
   const body = useMemo(() => {
-    if (text && url) return `${text}\n${url}`
-    return text || url
-  }, [text, url])
+    // Skip a title the text already opens with, which is what a "share
+    // selection" flow produces: repeating it reads as a stutter.
+    const parts = [title && !text.trim().startsWith(title.trim()) ? title : "", text, url].filter(
+      (part) => part.trim().length > 0
+    )
+    return parts.join("\n")
+  }, [text, title, url])
 
-  // If neither text nor url showed up, kick the user back to the inbox.
+  // If nothing at all showed up, kick the user back to the inbox.
   useEffect(() => {
-    if (!text && !url) {
+    if (!body) {
       const id = window.setTimeout(() => router.replace("/"), 800)
       return () => window.clearTimeout(id)
     }
     return undefined
-  }, [text, url, router])
+  }, [body, router])
 
   const onSendTo = async (session: ChatSession) => {
     if (busyId) return
@@ -135,7 +152,7 @@ function ShareTargetPageInner() {
     if (busyId) return
     setBusyId("__new__")
     try {
-      const session = await createSession({ title: deriveTitle(text, url, t) })
+      const session = await createSession({ title: deriveTitle(title, text, url, t) })
       await enqueue({
         command: "connector_send",
         payload: { sessionId: session.id, segments: [{ type: "text", text: body }] },
@@ -158,7 +175,7 @@ function ShareTargetPageInner() {
     if (busyId) return
     setBusyId("__draft__")
     try {
-      const session = await createSession({ title: deriveTitle(text, url, t) })
+      const session = await createSession({ title: deriveTitle(title, text, url, t) })
       await setDraft(session.id, body)
       toast.success(t("draftSavedToast"))
       router.replace(`/?session=${encodeURIComponent(session.id)}`)
@@ -196,6 +213,18 @@ function ShareTargetPageInner() {
         {body ? (
           <Card className="mt-3" data-testid="share-target-preview">
             <CardContent className="p-3 text-sm">
+              {/* Shown first because it is what the sharer named the thing. A
+                  preview that lists the body and the link but not the headline
+                  is missing the one line the user recognises. */}
+              {title ? (
+                <p className="mb-2">
+                  <span className="text-[10px] uppercase text-muted-foreground">
+                    {t("receivedTitle")}
+                  </span>
+                  <br />
+                  <span className="break-words font-medium">{title}</span>
+                </p>
+              ) : null}
               {text ? (
                 <p>
                   <span className="text-[10px] uppercase text-muted-foreground">

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act, within } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react"
 
 // ---- Module mocks ----
 
@@ -366,5 +366,69 @@ describe("ShareTargetPage", () => {
       fireEvent.click(screen.getByTestId("share-target-new-session"))
     })
     expect(toastErrorMock).toHaveBeenCalledWith("createSessionFailed")
+  })
+})
+
+describe("shared title", () => {
+  it("keeps the title the sharer sent, which the page used to drop", () => {
+    // The web manifest declares `title` alongside `text` and `url`. An article
+    // share carries the headline there, and reading only two of the three
+    // threw away the one line that says what was shared.
+    setParams("title=Some%20Headline&url=https%3A%2F%2Fexample.com%2Fa")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    const preview = screen.getByTestId("share-target-preview")
+    expect(preview).toHaveTextContent("Some Headline")
+    expect(preview).toHaveTextContent("https://example.com/a")
+  })
+
+  it("carries the title into the composed body, ahead of the text", async () => {
+    setParams("title=Some%20Headline&text=body&url=https%3A%2F%2Fa.example")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-pick-s1"))
+    })
+    const arg = (enqueueMock.mock.calls[0] as unknown[])[0] as {
+      payload: { segments: Array<{ text: string }> }
+    }
+    expect(arg.payload.segments[0]!.text).toBe("Some Headline\nbody\nhttps://a.example")
+  })
+
+  it("does not stutter when the text already opens with the title", async () => {
+    // What a "share selection" flow produces: the sharer sends the same string
+    // as both title and body. The preview still labels both fields, but the
+    // message that gets sent must not say it twice.
+    setParams("title=hello&text=hello%20world")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-pick-s1"))
+    })
+    const arg = (enqueueMock.mock.calls[0] as unknown[])[0] as {
+      payload: { segments: Array<{ text: string }> }
+    }
+    expect(arg.payload.segments[0]!.text).toBe("hello world")
+  })
+
+  it("names the new session after the shared title rather than guessing", async () => {
+    setParams("title=Some%20Headline&url=https%3A%2F%2Fexample.com%2Fa")
+    mockSessions = []
+    render(<ShareTargetPage />)
+    fireEvent.click(screen.getByTestId("share-target-new-session"))
+    await waitFor(() => expect(createSessionMock).toHaveBeenCalled())
+    expect(createSessionMock).toHaveBeenCalledWith({ title: "Some Headline" })
+  })
+
+  it("still falls back to the url hostname when no title was sent", async () => {
+    setParams("url=https%3A%2F%2Fexample.com%2Fa")
+    mockSessions = []
+    render(<ShareTargetPage />)
+    fireEvent.click(screen.getByTestId("share-target-new-session"))
+    await waitFor(() => expect(createSessionMock).toHaveBeenCalled())
+    // The suite's `t` mock interpolates, so this is the rendered sentence.
+    expect(createSessionMock.mock.calls[0][0]).toEqual({
+      title: "Share from example.com",
+    })
   })
 })
