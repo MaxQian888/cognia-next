@@ -1,0 +1,12 @@
+{
+  "allow": "Allow",
+  "apiHint": "The plugin asked for this at runtime, outside its declared permissions.",
+  "deny": "Deny",
+  "denyOnDismissHint": "Closing this denies the request.",
+  "manifestHint": "This permission is declared in the plugin's manifest.",
+  "noReason": "The plugin gave no reason.",
+  "permissionLabel": "Permission",
+  "queued": "{count} more waiting",
+  "reasonLabel": "Reason",
+  "title": "{plugin} is asking for a permission"
+}

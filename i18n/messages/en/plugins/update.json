@@ -7,5 +7,10 @@
   "installAll": "Install all",
   "recheck": "Re-check",
   "title": "Plugin updates",
-  "upToDate": "All plugins are up to date."
+  "upToDate": "All plugins are up to date.",
+  "updatesAvailable": {
+    "description": "Auto-update is set to notify only, so nothing was installed.",
+    "review": "Review",
+    "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}"
+  }
 }

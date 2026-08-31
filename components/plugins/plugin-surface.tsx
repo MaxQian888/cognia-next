@@ -115,6 +115,15 @@ export class PluginSurfaceBoundary extends Component<BoundaryProps, BoundaryStat
 
   componentDidCatch(error: unknown, _info: ErrorInfo): void {
     const errorMessage = error instanceof Error ? error.message : String(error)
+    // The localStorage analytics store below has never had a reader. The
+    // Dexie counter the Governance view actually reads had no writer, so the
+    // same error was recorded in the one place nothing looks at and not in the
+    // one place something does.
+    void import("@/lib/plugin/analytics/record").then(
+      ({ recordPluginAnalytic, PLUGIN_ANALYTIC_KEYS }) => {
+        void recordPluginAnalytic(this.props.pluginId, PLUGIN_ANALYTIC_KEYS.surfaceError)
+      }
+    )
     void import("@/lib/plugin/utils/analytics").then(({ trackPluginEvent }) => {
       trackPluginEvent?.({
         pluginId: this.props.pluginId,

@@ -42,6 +42,8 @@ import { getDb } from "@/lib/db/schema"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 
+import { PLUGIN_ANALYTIC_KEYS, recordPluginAnalytic } from "@/lib/plugin/analytics/record"
+
 import { togglePluginEnabled, type TogglePluginResult } from "./toggle-plugin-enabled"
 
 export interface SetPluginEnabledResult extends TogglePluginResult {
@@ -67,6 +69,14 @@ export async function setPluginEnabledForHost(
   next: boolean,
   reason = "manual"
 ): Promise<SetPluginEnabledResult> {
+  // Recorded here rather than at each caller: this is the one place every
+  // enable/disable now passes through, and the analytics table had no writer
+  // at all, which is why Governance's Analytics view could only ever be empty.
+  void recordPluginAnalytic(
+    pluginId,
+    next ? PLUGIN_ANALYTIC_KEYS.enabled : PLUGIN_ANALYTIC_KEYS.disabled
+  )
+
   if (!isMirroredPluginClient()) {
     const result = await togglePluginEnabled(pluginId, next, reason)
     return { ...result, queued: false }

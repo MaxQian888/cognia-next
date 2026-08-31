@@ -68,6 +68,8 @@ import { PluginToolDispatchProvider } from "@/components/providers/plugin-tool-d
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { PluginModalRoot } from "@/components/plugins/dialogs/plugin-modal-root"
 import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consent-overlay"
+import { PluginPermissionRequestHost } from "@/components/plugins/plugin-permission-request-host"
+import { PluginUpdateToaster } from "@/components/plugins/plugin-update-toaster"
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { SettingsLoadFailedBanner } from "@/components/error/settings-load-failed-banner"
@@ -364,6 +366,18 @@ export default async function RootLayout({
                             {/* Per-call consent overlay for tier-"confirm" plugin permissions. */}
                             {/* Listens for `plugin:consent-request` CustomEvents from the broker. */}
                             <PluginConsentOverlay />
+                            {/* The prompt for `ctx.permissions.requestPermission()`.
+                             * The queue behind it always worked; nothing ever
+                             * subscribed to it, so the plugin's promise could
+                             * not settle and the call hung for the session. A
+                             * plugin can ask from any page, so this belongs at
+                             * the root rather than on /plugins. */}
+                            <PluginPermissionRequestHost />
+                            {/* "Notify only" auto-update dispatched an event
+                             * nothing listened for, so the cadence the Policy
+                             * tab presents as the default told the user
+                             * nothing. */}
+                            <PluginUpdateToaster />
                             {/* Toast surface for plugin enable failures fired by
                              * `manager.enablePlugin` rollback path. Translates +
                              * renders so `lib/plugin/core/manager.ts` can stay

@@ -175,6 +175,17 @@ async function mapWithConcurrency<T, R>(
 // Plugin Updater
 // =============================================================================
 
+/**
+ * Fired when "notify only" auto-update finds something. Exported with its
+ * detail type so the listener binds to the same name rather than a string
+ * literal it can silently mistype.
+ */
+export const PLUGIN_UPDATES_AVAILABLE_EVENT = "plugin:updates-available"
+
+export interface PluginUpdatesAvailableDetail {
+  updates: UpdateInfo[]
+}
+
 export class PluginUpdater {
   private config: UpdaterConfig
   private autoUpdateConfig: AutoUpdateConfig | null = null
@@ -776,9 +787,12 @@ export class PluginUpdater {
     if (filteredUpdates.length === 0) return
 
     if (this.autoUpdateConfig.notifyOnly) {
-      // Emit notification event
+      // "Notify only" is the cadence the Policy tab presents as the default,
+      // and for a long time it notified nobody: this event had no listener
+      // anywhere in the repo. `components/plugins/plugin-update-toaster.tsx`
+      // is that listener now.
       window.dispatchEvent(
-        new CustomEvent("plugin:updates-available", {
+        new CustomEvent<PluginUpdatesAvailableDetail>(PLUGIN_UPDATES_AVAILABLE_EVENT, {
           detail: { updates: filteredUpdates },
         })
       )

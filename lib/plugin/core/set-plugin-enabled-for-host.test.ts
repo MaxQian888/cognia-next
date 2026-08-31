@@ -7,6 +7,7 @@ const mockEnqueue = jest.fn()
 const mockUpdate = jest.fn()
 const mockIsCapacitor = jest.fn()
 const mockHasWebCompanionTarget = jest.fn()
+const mockRecordAnalytic = jest.fn()
 
 jest.mock("./toggle-plugin-enabled", () => ({
   togglePluginEnabled: (...args: unknown[]) => mockToggle(...args),
@@ -23,6 +24,10 @@ jest.mock("@/lib/platform/detect", () => ({
 jest.mock("@/lib/platform/web-companion", () => ({
   hasWebCompanionTarget: () => mockHasWebCompanionTarget(),
 }))
+jest.mock("@/lib/plugin/analytics/record", () => ({
+  PLUGIN_ANALYTIC_KEYS: { enabled: "lifecycle.enabled", disabled: "lifecycle.disabled" },
+  recordPluginAnalytic: (...args: unknown[]) => mockRecordAnalytic(...args),
+}))
 
 import { isMirroredPluginClient, setPluginEnabledForHost } from "./set-plugin-enabled-for-host"
 
@@ -32,6 +37,7 @@ beforeEach(() => {
   mockUpdate.mockReset().mockResolvedValue(1)
   mockIsCapacitor.mockReset().mockReturnValue(false)
   mockHasWebCompanionTarget.mockReset().mockReturnValue(false)
+  mockRecordAnalytic.mockReset()
 })
 
 describe("isMirroredPluginClient", () => {
@@ -107,5 +113,21 @@ describe("setPluginEnabledForHost", () => {
       queued: true,
       error: "queue full",
     })
+  })
+
+  // `lib/db/plugin-analytics.ts` had zero importers, so nothing ever wrote a
+  // row and Governance's Analytics view could only ever be empty. This is the
+  // one place every enable/disable passes through.
+  it("records the lifecycle transition for the analytics view", async () => {
+    await setPluginEnabledForHost("p1", true)
+    expect(mockRecordAnalytic).toHaveBeenCalledWith("p1", "lifecycle.enabled")
+    await setPluginEnabledForHost("p1", false)
+    expect(mockRecordAnalytic).toHaveBeenCalledWith("p1", "lifecycle.disabled")
+  })
+
+  it("records it on a companion too, where the host applies the change", async () => {
+    mockIsCapacitor.mockReturnValue(true)
+    await setPluginEnabledForHost("p1", true)
+    expect(mockRecordAnalytic).toHaveBeenCalledWith("p1", "lifecycle.enabled")
   })
 })

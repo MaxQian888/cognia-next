@@ -1,0 +1,12 @@
+{
+  "allow": "允许",
+  "apiHint": "该插件在运行时临时请求，不在已声明的权限之内。",
+  "deny": "拒绝",
+  "denyOnDismissHint": "关闭此对话框即视为拒绝。",
+  "manifestHint": "该权限在插件清单中已声明。",
+  "noReason": "该插件未说明原因。",
+  "permissionLabel": "权限",
+  "queued": "还有 {count} 项等待处理",
+  "reasonLabel": "原因",
+  "title": "{plugin} 正在请求一项权限"
+}

@@ -7,5 +7,10 @@
   "installAll": "全部安装",
   "recheck": "重新检查",
   "title": "插件更新",
-  "upToDate": "全部插件均为最新版本。"
+  "upToDate": "全部插件均为最新版本。",
+  "updatesAvailable": {
+    "description": "自动更新设置为仅通知，未安装任何内容。",
+    "review": "去查看",
+    "title": "{count, plural, other {有 # 个插件可更新}}"
+  }
 }
