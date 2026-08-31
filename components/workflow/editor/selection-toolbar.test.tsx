@@ -62,7 +62,11 @@ describe("SelectionToolbar", () => {
       { x: 200, y: 0 },
     ])
     renderToolbar(store)
-    expect(screen.getByTestId("wf-selection-toolbar")).toBeInTheDocument()
+    const bar = screen.getByTestId("wf-selection-toolbar")
+    expect(bar).toBeInTheDocument()
+    // ADR-0148: tier + elevation, not a hand-picked tint and shadow.
+    expect(bar).toHaveAttribute("data-surface-layer", "overlay")
+    expect(bar).toHaveAttribute("data-elevation", "2")
     expect(screen.getByTestId("wf-selection-count").textContent).toContain("2")
     expect(screen.getByTestId("wf-sel-duplicate")).toBeInTheDocument()
     expect(screen.getByTestId("wf-sel-fit")).toBeInTheDocument()

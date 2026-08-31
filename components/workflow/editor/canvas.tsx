@@ -56,37 +56,26 @@ import { usePalettePreferencesStore } from "@/stores/workflow"
 import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
-import * as ResizablePrimitive from "react-resizable-panels"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { PanelImperativeHandle } from "react-resizable-panels"
-import { GripVerticalIcon } from "lucide-react"
 import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-import { useIsMobile } from "@/hooks/ui/use-mobile"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { useBreakpoint } from "@/hooks/ui/use-breakpoint"
+import { cn } from "@/lib/utils"
 
 /** The right rail's shipped width and floor, as percentages of the editor. */
 const WORKFLOW_RIGHT_DEFAULT_PERCENT = 28
 const WORKFLOW_RIGHT_MIN_PERCENT = 20
-
 /**
- * Keep the workflow editor's mobile Workbench aligned with the shared Context
- * Workbench: a force-mounted bottom sheet can finish its exit animation before
- * settling off-canvas, while a right-edge sheet feels like desktop navigation.
+ * The workbench's floor on a tablet, in pixels. A percentage floor is the
+ * right unit on a wide window and the wrong one on a narrow: 20% of 768px is
+ * ~215px, which fits neither a panel's content nor its tab strip.
  */
-export const WORKFLOW_MOBILE_WORKBENCH_SHEET = {
-  forceMount: true,
-  side: "bottom",
-  className:
-    "h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=closed]:translate-y-full data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]",
-} as const
+const WORKFLOW_RIGHT_MIN_PX = 300
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -99,9 +88,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const tValidation = useTranslations("workflows.validation")
   const tDiag = useTranslations("workflows.diagnostics")
   const tToolbar = useTranslations("workflows.toolbar")
-  const tWorkbench = useTranslations("contextWorkbench")
-  const isMobile = useIsMobile()
-  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
+  // The editor route forks to `MobileWorkflowEditor` below `md`, so this
+  // component only ever renders on tablet or desktop. Tablet is the branch it
+  // never had: at 768px a 20%/56%/28% split leaves ~108px of palette and
+  // ~215px of workbench, both unusable, so the palette starts collapsed and
+  // the workbench gets a pixel floor instead of a percentage one.
+  const breakpoint = useBreakpoint()
+  const isTablet = breakpoint === "tablet"
 
   // (A8) Chrome slice — everything the editor *frame* needs that does NOT
   // change on every drag frame. Crucially this NO LONGER subscribes to
@@ -206,23 +199,30 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     else panel.collapse()
   }, [])
   const toggleRightPanel = useCallback(() => {
-    if (isMobile) {
-      setMobileToolsOpen((open) => !open)
-      return
-    }
     const panel = rightPanelRef.current
     if (!panel) return
     if (panel.isCollapsed()) panel.expand()
     else panel.collapse()
-  }, [isMobile])
+  }, [])
   const collapseRightWorkbench = useCallback(() => {
-    if (isMobile) setMobileToolsOpen(false)
-    else rightPanelRef.current?.collapse()
-  }, [isMobile])
+    rightPanelRef.current?.collapse()
+  }, [])
   const revealRightWorkbench = useCallback(() => {
-    if (isMobile) setMobileToolsOpen(true)
-    else rightPanelRef.current?.expand()
-  }, [isMobile])
+    rightPanelRef.current?.expand()
+  }, [])
+
+  // One clock for every collapsing panel (`lib/ui/shell-dock-motion.ts`). The
+  // rails are sized by react-resizable-panels through `flex-grow`/`flex-basis`,
+  // so that is the property the transition names; it is armed only for the
+  // width of one collapse/expand so a divider drag never rubber-bands.
+  const leftPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const animatingLeft = useEdgePanelTransition(!leftCollapsed, {
+    element: leftPanelElementRef,
+  })
+  const animatingRight = useEdgePanelTransition(!rightCollapsed, {
+    element: rightPanelElementRef,
+  })
+  const panelMotionClass = `transition-[flex-grow,flex-basis] ${SHELL_DOCK_TIMING_CLASS}`
 
   /** Release-snap for the right rail — see `lib/ui/panel-snap.ts`. */
   const handleRightResizeRelease = useCallback(() => {
@@ -1104,7 +1104,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onToggleLeftPanel={toggleLeftPanel}
         leftPanelCollapsed={leftCollapsed}
         onToggleRightPanel={toggleRightPanel}
-        rightPanelCollapsed={isMobile ? !mobileToolsOpen : rightCollapsed}
+        rightPanelCollapsed={rightCollapsed}
       />
       <ShareLinkDialog
         open={shareImageOpen}
@@ -1118,32 +1118,30 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         className="hidden"
         onChange={handleImportInputChange}
       />
-      <ResizablePrimitive.Group
+      <ResizablePanelGroup
         orientation="horizontal"
         resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
-        className="flex flex-1 overflow-hidden"
+        // `h-auto` overrides the shared group's `h-full`: this group is the
+        // flex child *under* the toolbar, so a full-height claim would push the
+        // editor past its container.
+        className="h-auto min-h-0 flex-1 overflow-hidden"
         id="cognia-workflow-editor-layout"
       >
-        <ResizablePrimitive.Panel
+        <ResizablePanel
           panelRef={leftPanelRef}
-          defaultSize="20%"
+          elementRef={leftPanelElementRef}
+          defaultSize={isTablet ? "0%" : "20%"}
           minSize="14%"
           maxSize="32%"
           collapsible
           collapsedSize="0%"
           onResize={handleLeftPanelResize}
-          className="overflow-hidden"
+          className={cn("overflow-hidden", animatingLeft && panelMotionClass)}
         >
           <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
-        </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator
-          className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${leftCollapsed ? "hidden" : ""}`}
-        >
-          <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
-            <GripVerticalIcon className="size-2.5" />
-          </div>
-        </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize="56%" minSize="30%">
+        </ResizablePanel>
+        <ResizableHandle withHandle className={leftCollapsed ? "hidden" : undefined} />
+        <ResizablePanel defaultSize={isTablet ? "72%" : "56%"} minSize="30%">
           <FlowCanvas
             store={useStore}
             perfTier={perfTier}
@@ -1200,76 +1198,45 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               </>
             }
           />
-        </ResizablePrimitive.Panel>
-        {!isMobile ? (
-          <>
-            {/* Stays grabbable over a persistent rail — dragging this edge
-                outward is how the collapsed workbench is reopened. */}
-            <ResizablePrimitive.Separator
-              className={`relative z-20 flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-5 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed && !railPersistent ? "hidden" : ""}`}
-              onPointerDown={() => {
-                rightDragStartCollapsedRef.current = rightCollapsed
-              }}
-              onPointerUp={handleRightResizeRelease}
-            >
-              <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
-                <GripVerticalIcon className="size-2.5" />
-              </div>
-            </ResizablePrimitive.Separator>
-            <ResizablePrimitive.Panel
-              panelRef={rightPanelRef}
-              elementRef={rightPanelElementRef}
-              defaultSize={`${WORKFLOW_RIGHT_DEFAULT_PERCENT}%`}
-              minSize={`${WORKFLOW_RIGHT_MIN_PERCENT}%`}
-              maxSize="42%"
-              collapsible
-              collapsedSize={rightCollapsedSize}
-              onResize={handleRightPanelResize}
-              className="overflow-hidden"
-            >
-              <RightSidebar
-                useStore={store}
-                className="h-full w-full"
-                reactFlowInstance={reactFlowInstance}
-                // Desktop used to pass neither, so its collapse fell through to
-                // the per-scope `mode: "collapsed"` while the panel around it
-                // had its own zero-width collapse — two notions of "shut" for
-                // one column. The host owns it now, like every other surface.
-                onCollapse={collapseRightWorkbench}
-                onEnsureVisible={revealRightWorkbench}
-                railOnly={rightCollapsed && railPersistent}
-              />
-            </ResizablePrimitive.Panel>
-          </>
-        ) : null}
-      </ResizablePrimitive.Group>
-      {isMobile ? (
-        <Sheet open={mobileToolsOpen} onOpenChange={setMobileToolsOpen} modal={mobileToolsOpen}>
-          <SheetContent
-            {...WORKFLOW_MOBILE_WORKBENCH_SHEET}
-            showCloseButton={false}
-            inert={!mobileToolsOpen}
-            aria-hidden={!mobileToolsOpen}
-            data-testid="context-workbench-mobile-sheet"
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
-              <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
-            </SheetHeader>
-            <div
-              aria-hidden
-              className="mx-auto mt-2 mb-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30"
-            />
-            <RightSidebar
-              useStore={store}
-              className="h-full w-full border-l-0"
-              reactFlowInstance={reactFlowInstance}
-              onCollapse={collapseRightWorkbench}
-              placement="mobile-sheet"
-            />
-          </SheetContent>
-        </Sheet>
-      ) : null}
+        </ResizablePanel>
+        {/* Stays grabbable over a persistent rail: dragging this edge outward
+            is how the collapsed workbench is reopened. The wider `after:` hit
+            area is why this handle keeps its own className. */}
+        <ResizableHandle
+          withHandle
+          className={cn("z-20 after:w-5", rightCollapsed && !railPersistent && "hidden")}
+          onPointerDown={() => {
+            rightDragStartCollapsedRef.current = rightCollapsed
+          }}
+          onPointerUp={handleRightResizeRelease}
+        />
+        <ResizablePanel
+          panelRef={rightPanelRef}
+          elementRef={rightPanelElementRef}
+          defaultSize={`${WORKFLOW_RIGHT_DEFAULT_PERCENT}%`}
+          // A tablet's 20% floor is ~215px, which the workbench cannot use.
+          // Pixels there, percent on desktop.
+          minSize={isTablet ? `${WORKFLOW_RIGHT_MIN_PX}px` : `${WORKFLOW_RIGHT_MIN_PERCENT}%`}
+          maxSize="42%"
+          collapsible
+          collapsedSize={rightCollapsedSize}
+          onResize={handleRightPanelResize}
+          className={cn("overflow-hidden", animatingRight && panelMotionClass)}
+        >
+          <RightSidebar
+            useStore={store}
+            className="h-full w-full"
+            reactFlowInstance={reactFlowInstance}
+            // Desktop used to pass neither, so its collapse fell through to
+            // the per-scope `mode: "collapsed"` while the panel around it
+            // had its own zero-width collapse — two notions of "shut" for
+            // one column. The host owns it now, like every other surface.
+            onCollapse={collapseRightWorkbench}
+            onEnsureVisible={revealRightWorkbench}
+            railOnly={rightCollapsed && railPersistent}
+          />
+        </ResizablePanel>
+      </ResizablePanelGroup>
       <CommandPalette
         open={paletteOpen}
         onOpenChange={handlePaletteOpenChange}

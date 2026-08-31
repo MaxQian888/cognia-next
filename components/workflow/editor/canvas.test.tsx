@@ -5,7 +5,7 @@ import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { WORKFLOW_MOBILE_WORKBENCH_SHEET, WorkflowEditorCanvas } from "./canvas"
+import { WorkflowEditorCanvas } from "./canvas"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -605,17 +605,24 @@ describe("WorkflowEditorCanvas — persistent workbench rail", () => {
     expect(sidebar).not.toHaveAttribute("data-rail-only")
   })
 
-  it("animates the mobile workbench vertically in both directions without unmounting it", () => {
-    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.side).toBe("bottom")
-    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
-      "data-[state=open]:slide-in-from-bottom"
-    )
-    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
-      "data-[state=closed]:slide-out-to-bottom"
-    )
-    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.className).toContain(
-      "data-[state=closed]:translate-y-full"
-    )
-    expect(WORKFLOW_MOBILE_WORKBENCH_SHEET.forceMount).toBe(true)
+  it("carries no mobile branch of its own", () => {
+    // The editor route forks to `MobileWorkflowEditor` before this component
+    // mounts, so a second `useIsMobile()` fork inside it was unreachable in
+    // production and could only ever fire from a story or a test. The phone
+    // workbench now lives in one place: the mobile editor's
+    // `ContextWorkbenchMobileDrawer`.
+    renderWithProviders(<WorkflowEditorCanvas workflow={buildSample()} />)
+    expect(screen.queryByTestId("context-workbench-mobile-sheet")).toBeNull()
+  })
+
+  it("mounts the shared resizable primitives rather than hand-rolled handles", () => {
+    renderWithProviders(<WorkflowEditorCanvas workflow={buildSample()} />)
+    const group = document.querySelector('[data-slot="resizable-panel-group"]')
+    expect(group).not.toBeNull()
+    // `h-auto` has to win over the shared group's `h-full`: this group is the
+    // flex child under the toolbar, not the whole editor.
+    expect(group).toHaveClass("h-auto")
+    expect(document.querySelectorAll('[data-slot="resizable-handle"]').length).toBe(2)
+    expect(document.querySelectorAll('[data-slot="resizable-panel"]').length).toBe(3)
   })
 })

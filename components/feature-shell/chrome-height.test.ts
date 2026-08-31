@@ -41,6 +41,7 @@ describe("chrome bar heights", () => {
     ["components/inbox/inbox-sidebar.tsx", "--chrome-h"],
     ["components/settings/settings-sidebar.tsx", "--chrome-h-tall"],
     ["components/feature-shell/feature-page-header.tsx", "--chrome-h"],
+    ["components/workflow/editor/toolbar.tsx", "--chrome-h-tall"],
   ]
 
   it.each(BARS)("%s reads the height from %s", (file, token) => {
@@ -61,7 +62,7 @@ describe("chrome bar heights", () => {
   })
 
   it("scans a set that actually exists", () => {
-    expect(BARS.length).toBeGreaterThanOrEqual(7)
+    expect(BARS.length).toBeGreaterThanOrEqual(8)
     for (const [file] of BARS) {
       expect(rg("--files", file).length).toBe(1)
     }

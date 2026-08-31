@@ -50,7 +50,10 @@ import { cn } from "@/lib/utils"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { InspectorPanel } from "../inspector-panel"
 import { EdgeInspector } from "../edge-inspector"
-import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
+import {
+  ContextWorkbench,
+  ContextWorkbenchMobileDrawer,
+} from "@/components/context-workbench/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type {
   ContextPanelDefinition,
@@ -98,6 +101,17 @@ interface RightSidebarProps {
   /** The container has shrunk to the activity rail; drop the panel body. */
   railOnly?: boolean
   placement?: ContextWorkbenchPlacement
+  /**
+   * Render as the shared phone drawer instead of an in-flow column. The three
+   * other Context Workbench hosts already do this; the workflow editor used to
+   * hand-roll a `<Sheet>` around the column form in two places, which is how
+   * its phone workbench drifted away from everyone else's snap points, back
+   * handling and keyboard inset.
+   */
+  drawer?: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }
 }
 
 function WorkflowPanelLoading() {
@@ -248,6 +262,7 @@ function WorkflowContextWorkbench({
   onEnsureVisible,
   railOnly,
   placement,
+  drawer,
 }: RightSidebarProps) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("workflow")
   const {
@@ -460,18 +475,30 @@ function WorkflowContextWorkbench({
 
   return (
     <WorkflowPanelRuntimeContext.Provider value={panelRuntime}>
-      <ContextWorkbench
-        workbenchInstanceId={workbenchInstanceId}
-        resource={resource}
-        panels={panels}
-        placement={placement}
-        onExitFocus={handleExitFocus}
-        onCollapse={onCollapse}
-        onEnsureVisible={onEnsureVisible}
-        railOnly={railOnly}
-        manageOwnWidth={false}
-        className={cn("w-full", className)}
-      />
+      {drawer ? (
+        <ContextWorkbenchMobileDrawer
+          open={drawer.open}
+          onOpenChange={drawer.onOpenChange}
+          workbenchInstanceId={workbenchInstanceId}
+          resource={resource}
+          panels={panels}
+          onExitFocus={handleExitFocus}
+          onEnsureVisible={onEnsureVisible}
+        />
+      ) : (
+        <ContextWorkbench
+          workbenchInstanceId={workbenchInstanceId}
+          resource={resource}
+          panels={panels}
+          placement={placement}
+          onExitFocus={handleExitFocus}
+          onCollapse={onCollapse}
+          onEnsureVisible={onEnsureVisible}
+          railOnly={railOnly}
+          manageOwnWidth={false}
+          className={cn("w-full", className)}
+        />
+      )}
     </WorkflowPanelRuntimeContext.Provider>
   )
 }

@@ -61,13 +61,20 @@ jest.mock("./mobile-editor-topbar", () => ({
 }))
 
 jest.mock("@/components/workflow/editor/right-sidebar", () => ({
-  RightSidebar: (props: ChildProps) => (
-    <div data-testid="workbench-sidebar" data-placement={String(props.placement)}>
-      <button data-testid="collapse-workbench" onClick={props.onCollapse as () => void}>
-        collapse
-      </button>
-    </div>
-  ),
+  RightSidebar: (props: ChildProps) => {
+    const drawer = props.drawer as { open: boolean; onOpenChange: (o: boolean) => void }
+    return (
+      <div
+        data-testid="workbench-sidebar"
+        data-drawer-open={String(drawer.open)}
+        data-placement={String(props.placement)}
+      >
+        <button data-testid="collapse-workbench" onClick={() => drawer.onOpenChange(false)}>
+          collapse
+        </button>
+      </div>
+    )
+  },
 }))
 
 jest.mock("./mobile-workflow-copilot-sheet", () => ({
@@ -184,24 +191,18 @@ describe("<MobileWorkflowEditor />", () => {
     expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "false")
   })
 
-  it("opens the shared Context Workbench in a full-width mobile Sheet", () => {
+  it("opens the workbench through the shared Context Workbench drawer", () => {
+    // The editor used to wrap the column form of `RightSidebar` in its own
+    // right-edge `<Sheet>`, which is how it became the one Context Workbench
+    // host without the drawer's snap points, back-dismiss and keyboard inset.
+    // The host now hands the drawer its open state and owns nothing else.
     render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
-    const sheet = screen.getByTestId("context-workbench-mobile-sheet")
-    expect(sheet).toHaveAttribute("data-state", "closed")
+    const sidebar = screen.getByTestId("workbench-sidebar")
+    expect(sidebar).toHaveAttribute("data-drawer-open", "false")
     fireEvent.click(screen.getByTestId("open-workbench"))
-    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
-      "data-state",
-      "open"
-    )
-    expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute(
-      "data-placement",
-      "mobile-sheet"
-    )
+    expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute("data-drawer-open", "true")
     fireEvent.click(screen.getByTestId("collapse-workbench"))
-    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
-      "data-state",
-      "closed"
-    )
+    expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute("data-drawer-open", "false")
   })
 
   it("opens the inspector drawer when a node is tapped", () => {

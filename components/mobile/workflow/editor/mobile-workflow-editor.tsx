@@ -23,13 +23,6 @@ import { X as CancelIcon, Maximize2 as FitViewIcon, Trash2 as TrashIcon } from "
 
 import { Button } from "@/components/ui/button"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { RightSidebar } from "@/components/workflow/editor/right-sidebar"
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
@@ -46,7 +39,6 @@ import { useTapConnect } from "./use-tap-connect"
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
   const tConnection = useTranslations("workflows.editor.connection")
-  const tWorkbench = useTranslations("contextWorkbench")
   const [mode, setMode] = useState<"read" | "edit">("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -192,7 +184,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             type="button"
             variant="secondary"
             size="icon"
-            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-4 z-20 size-11 rounded-full shadow-lg"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-4 z-20 size-11 rounded-full"
+            data-elevation="3"
             onClick={() => rf?.fitView({ duration: 240, padding: 0.2 })}
             aria-label={t("fitView")}
             data-testid="mobile-editor-recenter"
@@ -205,7 +198,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             type="button"
             variant="secondary"
             size="sm"
-            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-1/2 z-30 min-h-11 -translate-x-1/2 shadow-lg"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-1/2 z-30 min-h-11 -translate-x-1/2"
+            data-elevation="3"
             onClick={() => tapConnect.cancel()}
             data-testid="mobile-connect-cancel"
           >
@@ -218,7 +212,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             type="button"
             variant="destructive"
             size="sm"
-            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-1/2 z-30 min-h-11 -translate-x-1/2 shadow-lg"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-1/2 z-30 min-h-11 -translate-x-1/2"
+            data-elevation="3"
             onClick={onDeleteEdge}
             data-testid="mobile-edge-delete"
           >
@@ -242,27 +237,14 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         workflowId={workflowId}
         workflowName={workflowName}
       />
-      <Sheet open={workbenchOpen} onOpenChange={setWorkbenchOpen} modal={workbenchOpen}>
-        <SheetContent
-          forceMount
-          side="right"
-          className="w-full gap-0 p-0 sm:max-w-none"
-          inert={!workbenchOpen}
-          aria-hidden={!workbenchOpen}
-          data-testid="context-workbench-mobile-sheet"
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
-            <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
-          </SheetHeader>
-          <RightSidebar
-            useStore={store}
-            className="h-full w-full border-l-0"
-            onCollapse={() => setWorkbenchOpen(false)}
-            placement="mobile-sheet"
-          />
-        </SheetContent>
-      </Sheet>
+      {/* The shared Context Workbench drawer, same as the artifact dock and the
+          project editor. This used to be a hand-rolled right-edge `<Sheet>`,
+          which is how the workflow editor ended up the one host without the
+          drawer's snap points, back-dismiss and keyboard inset. */}
+      <RightSidebar
+        useStore={store}
+        drawer={{ open: workbenchOpen, onOpenChange: setWorkbenchOpen }}
+      />
     </div>
   )
 }

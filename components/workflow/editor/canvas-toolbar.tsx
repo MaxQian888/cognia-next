@@ -46,6 +46,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { Surface } from "@/components/surface/surface"
 import { Controls } from "@/components/ai-elements/controls"
 import type {
   PerformanceTier,
@@ -276,103 +277,115 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarPro
   const duration = props.motionEnabled ? 200 : 0
 
   return (
-    <Controls
-      showZoom={false}
-      showFitView={false}
-      showInteractive={false}
+    // The tier lives on the wrapper rather than on `<Controls>` itself: the
+    // vendored ai-elements wrapper hardcodes `shadow-none!`, and an
+    // `!important` shadow cannot be undone by the `[data-elevation]` ramp, so
+    // an elevation declared on that element would be dead on arrival. The
+    // Controls element keeps the button resets and goes transparent.
+    <Surface
+      layer="overlay"
+      radius="pill"
+      elevation={2}
       data-testid="wf-canvas-toolbar"
-      className="absolute! right-auto! bottom-4! left-1/2! top-auto! z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-pill border bg-popover/95 px-1.5 py-1 shadow-md backdrop-blur"
+      className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 border backdrop-blur"
     >
-      <ToolbarButton
-        icon={Plus}
-        label={t("addNode")}
-        onClick={props.onAddNode}
-        testid="wf-add-node"
-      />
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                aria-label={t("annotation")}
-                data-testid="wf-annotation"
-              >
-                <StickyNote className="size-4" aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top">{t("annotation")}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="center" side="top" className="w-44">
-          <DropdownMenuItem onSelect={props.onAddSticky} data-testid="wf-add-sticky">
-            {t("addSticky")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={props.onAddGroup} data-testid="wf-add-group">
-            {t("addGroup")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ToolbarButton
-        icon={Search}
-        label={t("search")}
-        onClick={props.onOpenSearch}
-        testid="wf-search"
-      />
-      <VSep />
-      <ToolbarButton
-        icon={Undo2}
-        label={t("undo")}
-        onClick={props.onUndo}
-        disabled={!props.canUndo}
-        testid="workflow-undo"
-      />
-      <ToolbarButton
-        icon={Redo2}
-        label={t("redo")}
-        onClick={props.onRedo}
-        disabled={!props.canRedo}
-        testid="workflow-redo"
-      />
-      <VSep />
-      <ToolbarButton
-        icon={ZoomOut}
-        label={t("zoomOut")}
-        onClick={() => void zoomOut({ duration })}
-        testid="wf-zoom-out"
-      />
-      <ZoomReadout resetLabel={t("zoomReset")} duration={duration} />
-      <ToolbarButton
-        icon={ZoomIn}
-        label={t("zoomIn")}
-        onClick={() => void zoomIn({ duration })}
-        testid="wf-zoom-in"
-      />
-      <ToolbarButton
-        icon={Maximize2}
-        label={t("fitView")}
-        onClick={() => void fitView({ duration, padding: 0.2 })}
-        testid="wf-fit-view"
-      />
-      <ToolbarButton
-        icon={props.interactive ? LockOpen : Lock}
-        label={props.interactive ? t("lock") : t("unlock")}
-        onClick={props.onToggleInteractive}
-        pressed={!props.interactive}
-        testid="wf-lock"
-      />
-      <VSep />
-      <ToolbarButton
-        icon={LayoutGrid}
-        label={t("autoLayout")}
-        onClick={props.onAutoLayout}
-        testid="workflow-auto-layout"
-      />
-      <VSep />
-      <ViewOptionsPopover {...props} />
-    </Controls>
+      <Controls
+        showZoom={false}
+        showFitView={false}
+        showInteractive={false}
+        className="relative! inset-auto! flex items-center gap-0.5 border-none! bg-transparent! px-1.5 py-1"
+      >
+        <ToolbarButton
+          icon={Plus}
+          label={t("addNode")}
+          onClick={props.onAddNode}
+          testid="wf-add-node"
+        />
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  aria-label={t("annotation")}
+                  data-testid="wf-annotation"
+                >
+                  <StickyNote className="size-4" aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t("annotation")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="center" side="top" className="w-44">
+            <DropdownMenuItem onSelect={props.onAddSticky} data-testid="wf-add-sticky">
+              {t("addSticky")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={props.onAddGroup} data-testid="wf-add-group">
+              {t("addGroup")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ToolbarButton
+          icon={Search}
+          label={t("search")}
+          onClick={props.onOpenSearch}
+          testid="wf-search"
+        />
+        <VSep />
+        <ToolbarButton
+          icon={Undo2}
+          label={t("undo")}
+          onClick={props.onUndo}
+          disabled={!props.canUndo}
+          testid="workflow-undo"
+        />
+        <ToolbarButton
+          icon={Redo2}
+          label={t("redo")}
+          onClick={props.onRedo}
+          disabled={!props.canRedo}
+          testid="workflow-redo"
+        />
+        <VSep />
+        <ToolbarButton
+          icon={ZoomOut}
+          label={t("zoomOut")}
+          onClick={() => void zoomOut({ duration })}
+          testid="wf-zoom-out"
+        />
+        <ZoomReadout resetLabel={t("zoomReset")} duration={duration} />
+        <ToolbarButton
+          icon={ZoomIn}
+          label={t("zoomIn")}
+          onClick={() => void zoomIn({ duration })}
+          testid="wf-zoom-in"
+        />
+        <ToolbarButton
+          icon={Maximize2}
+          label={t("fitView")}
+          onClick={() => void fitView({ duration, padding: 0.2 })}
+          testid="wf-fit-view"
+        />
+        <ToolbarButton
+          icon={props.interactive ? LockOpen : Lock}
+          label={props.interactive ? t("lock") : t("unlock")}
+          onClick={props.onToggleInteractive}
+          pressed={!props.interactive}
+          testid="wf-lock"
+        />
+        <VSep />
+        <ToolbarButton
+          icon={LayoutGrid}
+          label={t("autoLayout")}
+          onClick={props.onAutoLayout}
+          testid="workflow-auto-layout"
+        />
+        <VSep />
+        <ViewOptionsPopover {...props} />
+      </Controls>
+    </Surface>
   )
 })

@@ -40,6 +40,7 @@ import {
 } from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -305,9 +306,12 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const canDistribute = count >= 3
 
   return (
-    <div
+    <Surface
+      layer="overlay"
+      radius="pill"
+      elevation={2}
       data-testid="wf-selection-toolbar"
-      className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-pill border bg-popover/95 px-2 py-1 shadow-md backdrop-blur"
+      className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 border px-2 py-1 backdrop-blur"
     >
       <span
         className="px-1 text-xs font-medium tabular-nums text-muted-foreground"
@@ -408,6 +412,6 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         store={store}
         selectedNodeIds={selectedNodeIds}
       />
-    </div>
+    </Surface>
   )
 })

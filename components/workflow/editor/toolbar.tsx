@@ -116,7 +116,9 @@ export const EditorToolbar = memo(function EditorToolbar({
 
   return (
     <div
-      className="flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      // Same named height as every other chrome bar (ADR-0148). This one holds
+      // a full-size name Input, so it reads the tall token, not the 40px one.
+      className="flex h-[var(--chrome-h-tall)] shrink-0 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"
       data-testid="workflow-toolbar"
     >
       <Tooltip>

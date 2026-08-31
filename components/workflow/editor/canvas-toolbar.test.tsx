@@ -79,6 +79,17 @@ describe("CanvasToolbar", () => {
   it("renders the capsule with every core control", () => {
     renderToolbar()
     expect(screen.getByTestId("wf-canvas-toolbar")).toBeInTheDocument()
+  })
+
+  it("declares a surface tier instead of hardcoding popover tint and shadow", () => {
+    // ADR-0148: the capsule used to spell `bg-popover/95 shadow-md` itself, so
+    // a wallpaper could not retune it and a flattened style pack could not
+    // reach its depth.
+    renderToolbar()
+    const capsule = screen.getByTestId("wf-canvas-toolbar")
+    expect(capsule).toHaveAttribute("data-surface-layer", "overlay")
+    expect(capsule).toHaveAttribute("data-elevation", "2")
+    expect(capsule.className).not.toMatch(/\bshadow-/)
     for (const id of [
       "wf-add-node",
       "workflow-undo",
