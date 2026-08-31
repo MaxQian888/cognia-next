@@ -271,6 +271,37 @@ describe("createImDeliver: action buttons", () => {
 
   // A record with no actions is a statement, and the plain-text path renders
   // it better on every platform.
+  // The gate saw the title and body, which was the whole message while this
+  // channel sent plain text. A card also renders the labels and the deep link,
+  // and a PLUGIN can register an action, so its label is not necessarily
+  // product-authored. Gating less than the card renders would let the buttons
+  // carry out what the body was blocked for.
+  it("gates the action labels and the deep link, not just the body", async () => {
+    const blocked: string[] = []
+    const h = harness({ proactivePush: true })
+    ;(h.deps as { isPiiSafe: (t: string) => boolean }).isPiiSafe = (t) => {
+      blocked.push(t)
+      return !t.includes("secret")
+    }
+    await createImDeliver(h.deps)(rec({ actions: [{ ...approve, label: "Approve secret" }] }))
+    expect(h.enqueued).toHaveLength(0)
+    expect(h.audits).toContain("notify.im_pii_blocked")
+    expect(blocked[0]).toContain("Approve secret")
+  })
+
+  it("includes the href in what the gate sees", async () => {
+    const seen: string[] = []
+    const h = harness({ proactivePush: true })
+    ;(h.deps as { isPiiSafe: (t: string) => boolean }).isPiiSafe = (t) => {
+      seen.push(t)
+      return true
+    }
+    await createImDeliver(h.deps)(
+      rec({ actions: [approve], href: "/?session=s1" } as Partial<NotificationRecord>)
+    )
+    expect(seen[0]).toContain("/?session=s1")
+  })
+
   it("keeps the plain-text path for a record with no actions", async () => {
     const h = harness({ proactivePush: true })
     await createImDeliver(h.deps)(rec())

@@ -116,6 +116,23 @@ function bodyText(rec: NotificationRecord): string {
 }
 
 /**
+ * Everything the outbound message will actually contain.
+ *
+ * The gate used to see the title and body, which was the whole message while
+ * this channel sent plain text. A card also renders each action's label and
+ * the deep link, and an action can be registered by a PLUGIN
+ * (`lib/notifications/plugin-bridge.ts`), so its label is not necessarily
+ * product-authored text. Gating less than the card renders would let the
+ * buttons carry out what the body was blocked for.
+ */
+function gatedText(rec: NotificationRecord): string {
+  return [bodyText(rec), ...(rec.actions ?? []).map((a) => a.label), rec.href ?? ""]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("\n")
+}
+
+/**
  * Build the `imDeliver` fn the Notification Center calls. Never throws — every
  * skip / block path audits and returns so a failed IM push can't break the
  * notification persist or the other channels.
@@ -169,7 +186,7 @@ export function createImDeliver(
       }
 
       const text = bodyText(rec)
-      if (!isPiiSafe(text)) {
+      if (!isPiiSafe(gatedText(rec))) {
         await audit({
           adapterId: binding.adapterId,
           kind: "notify.im_pii_blocked",
