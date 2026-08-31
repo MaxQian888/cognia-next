@@ -42,6 +42,15 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
 
 jest.mock("@/lib/sandbox/microvm-bridge", () => ({ getMicrovmExec: () => null }))
 
+/**
+ * The real settings store pulls in the keyring at module scope, which throws
+ * in this env. Only the SSH host list is read here.
+ */
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({ settings: { terminalSettings: { sshHosts: [] } } }),
+}))
+
 jest.mock("@/lib/device/device-identity", () => ({
   getFriendlyDeviceLabel: () => "This Mac",
 }))

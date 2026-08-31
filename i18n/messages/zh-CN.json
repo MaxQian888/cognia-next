@@ -8893,6 +8893,7 @@
       "local": "本机",
       "paired-device": "配对设备",
       "remote-host": "远程主机",
+      "ssh-host": "SSH 主机",
       "worker": "执行 Worker"
     },
     "listPane": {
@@ -8973,6 +8974,7 @@
         "routedToRemoteHost": "本窗口当前把执行路由到了远程主机，此时的工作区列表描述的是那台主机，而不是本机。",
         "sandboxIsClientLocal": "沙盒连接只属于运行本窗口的机器，永远不会路由到其他设备。",
         "sandboxNotHosted": "这类设备不承载沙盒。",
+        "sshShellOnly": "SSH 只提供 shell，因此没有工作区或沙箱可以汇报。",
         "workerNoRoutingPlane": "Worker 接收派发的工作，但不在设备路由平面上，因此无法从这里读取它的工作区。",
         "workspaceNotHosted": "这类设备不承载工作区环境。"
       },
@@ -9002,6 +9004,17 @@
       "open": "打开设备控制台",
       "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
       "pairedTitle": "配对设备"
+    },
+    "ssh": {
+      "connect": "打开 shell",
+      "connecting": "连接中…",
+      "credentialRequiredBody": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加。",
+      "credentialRequiredTitle": "未保存密码",
+      "edit": "在设置中编辑",
+      "localOnlyBody": "SSH 使用这台电脑自己的身份连接，因此配对的手机或浏览器无法打开。这里仍然列出它，是为了让机器清单完整。",
+      "localOnlyTitle": "仅限本机",
+      "shellOnly": "只有 shell。Agent、工作区与沙箱都不会经由 SSH 运行。",
+      "title": "SSH"
     },
     "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
     "standalonePair": "与主机配对",

@@ -27,7 +27,15 @@ import type { DeviceKindFilter } from "@/stores/devices/device-console-store"
 
 import { DeviceRowButton } from "./device-row"
 
-const GROUP_ORDER: readonly DeviceKind[] = ["local", "remote-host", "paired-device", "worker"]
+// SSH hosts come last: they are the one group that cannot run anything, so
+// they belong below the machines that can rather than interleaved with them.
+const GROUP_ORDER: readonly DeviceKind[] = [
+  "local",
+  "remote-host",
+  "paired-device",
+  "worker",
+  "ssh-host",
+]
 
 const KIND_FILTERS: readonly DeviceKindFilter[] = ["all", ...GROUP_ORDER]
 

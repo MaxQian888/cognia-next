@@ -30,8 +30,17 @@ import type {
 import type { DevicePlatform, PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SandboxConnectionRow, SandboxShellTier } from "@/types/sandbox"
 
-/** Which candidate space a row belongs to. Mirrors `PlacementCandidateKind`. */
-export type DeviceKind = "local" | "paired-device" | "remote-host" | "worker"
+/**
+ * Which candidate space a row belongs to.
+ *
+ * The first four mirror `PlacementCandidateKind` one for one. `ssh-host` does
+ * not, and deliberately: an SSH box can give you a shell and nothing else, so
+ * letting `evaluatePlacement` pick one to run an agent would be a promise the
+ * transport cannot keep. `placementKindFor` returns `null` for it, and
+ * `deviceCandidates` drops it. The invariant is therefore "every placement
+ * candidate has a row", not "every row is a candidate".
+ */
+export type DeviceKind = "local" | "paired-device" | "remote-host" | "worker" | "ssh-host"
 
 /**
  * Presence, as the console states it.
@@ -272,6 +281,32 @@ export interface RemoteHostInput {
   config: { baseUrl: string; serverVersion: string; serverFingerprint?: string }
 }
 
+/**
+ * Structural subset of `lib/terminal/ssh-profiles`' `SshHostProfile`.
+ *
+ * Declared here for the same reason as {@link RemoteHostInput}: the row
+ * builders stay a pure leaf, testable without the terminal store or the
+ * russh bridge.
+ *
+ * There is no liveness field because there is no liveness source. Nothing
+ * pings a saved SSH host, so its {@link DeviceRow.reachability} is always
+ * `unknown`. Painting it `offline` would claim knowledge the client does not
+ * have, which is the same rule `unknown ≠ offline` states for a remote Host
+ * that has never been activated.
+ */
+export interface SshHostInput {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  authMethod: "password" | "privateKey" | "agent"
+  /** Present when a password lives in the keyring for this profile. */
+  credentialRef?: string
+  /** Id of another profile this one is reached through. */
+  jumpHostId?: string | null
+}
+
 /** Structural subset of `lib/fleet/execution-workers`' `WorkerDeviceSummary`. */
 export interface WorkerInput {
   deviceId: string
@@ -329,6 +364,15 @@ export interface BuildDeviceRowsInput {
   /** Keyed by `deviceId`. Absent entirely when the host could not be asked. */
   hostDevices?: ReadonlyMap<string, HostDeviceSummaryInput>
   remoteHosts: readonly RemoteHostInput[]
+  /**
+   * Saved SSH hosts, from `AppSettings.terminalSettings.sshHosts`.
+   *
+   * Local-identity only: `ssh_terminal_*` is `target: "client"` with
+   * `capability: client.local`, and the Rust arm refuses a profile that did not
+   * come from this machine. They are listed everywhere and connectable only on
+   * the desktop, which the row states rather than hides.
+   */
+  sshHosts: readonly SshHostInput[]
   workers: readonly WorkerInput[]
   /** Keyed by `deviceId`. Live, in-process; empty after a renderer reload. */
   presence?: ReadonlyMap<string, DevicePresenceSummary>

@@ -15,9 +15,10 @@
 import { SmartphoneIcon } from "lucide-react"
 
 import { listPairedDevices } from "@/lib/db/paired-devices"
-import { pairedDeviceRef, remoteHostRef } from "@/lib/devices/build-device-rows"
-import type { DeviceKind, RemoteHostInput } from "@/lib/devices/types"
+import { pairedDeviceRef, remoteHostRef, sshHostRef } from "@/lib/devices/build-device-rows"
+import type { DeviceKind, RemoteHostInput, SshHostInput } from "@/lib/devices/types"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+import { useSettingsStore } from "@/stores/settings"
 
 import { createListProvider } from "./list-provider"
 
@@ -36,20 +37,29 @@ export interface DeviceSearchRow {
 export interface DevicesProviderDeps {
   listPairedDevices: typeof listPairedDevices
   listRemoteHosts: () => readonly RemoteHostInput[]
+  /**
+   * Saved SSH hosts. A third cheap identity source, and the one a user is most
+   * likely to reach for by name: "prod-web-01" is a thing people type.
+   */
+  listSshHosts: () => readonly SshHostInput[]
 }
 
 const defaultDeps: DevicesProviderDeps = {
   listPairedDevices,
   listRemoteHosts: () =>
     useRemoteHostStore.getState().hosts as unknown as readonly RemoteHostInput[],
+  listSshHosts: () =>
+    (useSettingsStore.getState().settings.terminalSettings?.sshHosts ??
+      []) as unknown as readonly SshHostInput[],
 }
 
 export async function loadDeviceSearchRows(
   deps: DevicesProviderDeps = defaultDeps
 ): Promise<DeviceSearchRow[]> {
-  const [devices, hosts] = await Promise.all([
+  const [devices, hosts, sshHosts] = await Promise.all([
     deps.listPairedDevices().catch(() => []),
     Promise.resolve(deps.listRemoteHosts()),
+    Promise.resolve(deps.listSshHosts()),
   ])
 
   return [
@@ -66,6 +76,13 @@ export async function loadDeviceSearchRows(
       label: host.label,
       detail: host.config.baseUrl,
       timestamp: host.lastConnectedAt ?? host.addedAt,
+    })),
+    ...sshHosts.map((profile) => ({
+      ref: sshHostRef(profile),
+      kind: "ssh-host" as const,
+      label: profile.name || `${profile.username}@${profile.host}`,
+      // The address, because two saved profiles often differ only by host.
+      detail: `${profile.username}@${profile.host}:${profile.port}`,
     })),
   ]
 }

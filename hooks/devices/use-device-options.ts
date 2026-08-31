@@ -69,6 +69,10 @@ export function useDeviceOptions(input: UseDeviceOptionsInput): DeviceOption[] {
       },
       pairedDevices: pairedDevices ?? [],
       remoteHosts: hosts as unknown as readonly RemoteHostInput[],
+      // A picker asks "where could this run", and an SSH host is never an
+      // answer to that: `placementKindFor` returns null for it. Listing them
+      // here would only add permanently-disabled rows to every Select.
+      sshHosts: [],
       workers: [],
       sandboxConnections: [],
       activeHostId,

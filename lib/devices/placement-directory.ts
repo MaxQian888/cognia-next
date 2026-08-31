@@ -35,9 +35,18 @@ import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 import type { DeviceKind, DevicePlacementSummary, DeviceRow, DeviceShellTierRow } from "./types"
 
-/** `DeviceKind` and `PlacementCandidateKind` are the same space, by design. */
-export function placementKindFor(kind: DeviceKind): PlacementCandidateKind {
-  return kind
+/**
+ * The placement kind a row maps onto, or `null` when it maps onto none.
+ *
+ * This was an identity function while the two unions were the same space. They
+ * are not any more: an SSH host is a machine the console lists but that
+ * `evaluatePlacement` must never pick, because `ssh_terminal_*` gives a shell
+ * and nothing else. Returning `null` rather than inventing a candidate kind is
+ * what keeps the resolver from promising an execution the transport cannot
+ * perform.
+ */
+export function placementKindFor(kind: DeviceKind): PlacementCandidateKind | null {
+  return kind === "ssh-host" ? null : kind
 }
 
 export interface DevicePlacementInput {
@@ -84,26 +93,42 @@ export function buildDevicePlacement(input: DevicePlacementInput): DevicePlaceme
   return { provides, activeUnits: 0, maxUnits: Number.POSITIVE_INFINITY }
 }
 
-/** Project console rows onto the shared placement vocabulary. */
+/**
+ * Project console rows onto the shared placement vocabulary.
+ *
+ * Rows with no placement kind are dropped, so this can return fewer entries
+ * than it was given. Callers that need a per-row answer must not index by
+ * position; {@link buildDeviceOptions} pairs them back up by row instead.
+ */
 export function deviceCandidates(rows: readonly DeviceRow[]): PlacementCandidate[] {
-  return rows.map((row) => ({
-    ref: row.ref,
-    kind: placementKindFor(row.kind),
-    liveness: row.liveness,
-    provides: row.placement.provides,
-    activeUnits: row.placement.activeUnits,
-    maxUnits: row.placement.maxUnits,
-    labels: {
-      label: row.label,
-      kind: row.kind,
-      reachability: row.reachability,
-    },
-  }))
+  return rows.flatMap((row) => {
+    const kind = placementKindFor(row.kind)
+    if (!kind) return []
+    return [
+      {
+        ref: row.ref,
+        kind,
+        liveness: row.liveness,
+        provides: row.placement.provides,
+        activeUnits: row.placement.activeUnits,
+        maxUnits: row.placement.maxUnits,
+        labels: {
+          label: row.label,
+          kind: row.kind,
+          reachability: row.reachability,
+        },
+      },
+    ]
+  })
 }
 
 export interface DeviceOption {
   row: DeviceRow
-  candidate: PlacementCandidate
+  /**
+   * `null` for a row that is not in the candidate space at all, such as an SSH
+   * host. Distinct from a candidate that merely failed the requirements.
+   */
+  candidate: PlacementCandidate | null
   verdict: PlacementVerdict
   /** Convenience mirror of `verdict.ready` for `disabled=` in a Select. */
   eligible: boolean
@@ -116,6 +141,10 @@ export interface DeviceOption {
  * whole point. A picker renders them disabled with their reason, so the user
  * can see that a Host is merely asleep rather than concluding it was never
  * paired.
+ *
+ * A row with no placement kind gets the same treatment for the same reason: it
+ * is listed, disabled, as `not_permitted`. "Why is my SSH box not in this
+ * list?" is exactly the question this module exists to stop people asking.
  */
 export function buildDeviceOptions(
   rows: readonly DeviceRow[],
@@ -123,8 +152,10 @@ export function buildDeviceOptions(
   now: number
 ): DeviceOption[] {
   return rows.map((row) => {
-    const candidate = deviceCandidates([row])[0]!
-    const verdict = evaluatePlacement(candidate, requirements, now)
+    const candidate = deviceCandidates([row])[0] ?? null
+    const verdict: PlacementVerdict = candidate
+      ? evaluatePlacement(candidate, requirements, now)
+      : { ready: false, reason: "not_permitted" }
     return { row, candidate, verdict, eligible: verdict.ready }
   })
 }

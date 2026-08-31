@@ -100,6 +100,7 @@ function input(overrides: Partial<BuildDeviceRowsInput> = {}): BuildDeviceRowsIn
     local: LOCAL,
     pairedDevices: [],
     remoteHosts: [],
+    sshHosts: [],
     workers: [],
     sandboxConnections: [],
     activeHostId: null,

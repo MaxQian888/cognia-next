@@ -35,6 +35,7 @@
     "local": "This device",
     "paired-device": "Paired device",
     "remote-host": "Remote host",
+    "ssh-host": "SSH host",
     "worker": "Execution worker"
   },
   "capabilityState": {
@@ -142,6 +143,17 @@
     },
     "title": "Capabilities"
   },
+  "ssh": {
+    "title": "SSH",
+    "connect": "Open a shell",
+    "connecting": "Connecting…",
+    "edit": "Edit in Settings",
+    "shellOnly": "A shell and nothing else. No agent, workspace or sandbox runs over SSH.",
+    "localOnlyTitle": "This machine only",
+    "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
+    "credentialRequiredTitle": "Password not saved",
+    "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting."
+  },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
   "summary": "{online} of {total} online",
@@ -206,6 +218,7 @@
     "reason": {
       "sandboxIsClientLocal": "Sandbox connections are local to the machine running this window and are never routed to another device.",
       "sandboxNotHosted": "This kind of device does not host sandboxes.",
+      "sshShellOnly": "SSH gives a shell and nothing else, so there is no workspace or sandbox to report.",
       "workspaceNotHosted": "This kind of device does not host workspace environments.",
       "workerNoRoutingPlane": "A worker receives dispatched work but is not on the device routing plane, so its workspaces cannot be read from here.",
       "routedToRemoteHost": "This window currently routes execution to a remote host, so a workspace list would describe that host rather than this machine.",

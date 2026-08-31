@@ -39,6 +39,7 @@ function fleet(overrides: Partial<Parameters<typeof buildDeviceRows>[0]> = {}): 
     },
     pairedDevices: [],
     remoteHosts: [],
+    sshHosts: [],
     workers: [],
     sandboxConnections: [],
     activeHostId: null,

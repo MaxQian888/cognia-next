@@ -35,6 +35,7 @@
     "local": "本机",
     "paired-device": "配对设备",
     "remote-host": "远程主机",
+    "ssh-host": "SSH 主机",
     "worker": "执行 Worker"
   },
   "capabilityState": {
@@ -142,6 +143,17 @@
     },
     "title": "能力"
   },
+  "ssh": {
+    "title": "SSH",
+    "connect": "打开 shell",
+    "connecting": "连接中…",
+    "edit": "在设置中编辑",
+    "shellOnly": "只有 shell。Agent、工作区与沙箱都不会经由 SSH 运行。",
+    "localOnlyTitle": "仅限本机",
+    "localOnlyBody": "SSH 使用这台电脑自己的身份连接，因此配对的手机或浏览器无法打开。这里仍然列出它，是为了让机器清单完整。",
+    "credentialRequiredTitle": "未保存密码",
+    "credentialRequiredBody": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加。"
+  },
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
   "summary": "{total} 台中 {online} 台在线",
@@ -206,6 +218,7 @@
     "reason": {
       "sandboxIsClientLocal": "沙盒连接只属于运行本窗口的机器，永远不会路由到其他设备。",
       "sandboxNotHosted": "这类设备不承载沙盒。",
+      "sshShellOnly": "SSH 只提供 shell，因此没有工作区或沙箱可以汇报。",
       "workspaceNotHosted": "这类设备不承载工作区环境。",
       "workerNoRoutingPlane": "Worker 接收派发的工作，但不在设备路由平面上，因此无法从这里读取它的工作区。",
       "routedToRemoteHost": "本窗口当前把执行路由到了远程主机，此时的工作区列表描述的是那台主机，而不是本机。",

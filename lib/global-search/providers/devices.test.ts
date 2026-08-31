@@ -1,7 +1,7 @@
 import { createDevicesProvider, loadDeviceSearchRows, type DevicesProviderDeps } from "./devices"
 import type { GlobalSearchContext } from "../types"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
-import type { RemoteHostInput } from "@/lib/devices/types"
+import type { RemoteHostInput, SshHostInput } from "@/lib/devices/types"
 
 function phone(overrides: Partial<PairedDeviceRow> = {}): PairedDeviceRow {
   return {
@@ -29,10 +29,23 @@ function host(overrides: Partial<RemoteHostInput> = {}): RemoteHostInput {
   }
 }
 
+function sshHost(overrides: Partial<SshHostInput> = {}): SshHostInput {
+  return {
+    id: "s1",
+    name: "prod-web-01",
+    host: "10.0.4.21",
+    port: 22,
+    username: "deploy",
+    authMethod: "privateKey",
+    ...overrides,
+  }
+}
+
 function deps(overrides: Partial<DevicesProviderDeps> = {}): DevicesProviderDeps {
   return {
     listPairedDevices: (async () => [phone()]) as DevicesProviderDeps["listPairedDevices"],
     listRemoteHosts: () => [host()],
+    listSshHosts: () => [sshHost()],
     ...overrides,
   }
 }
@@ -43,7 +56,7 @@ const ctx = {
 } as unknown as GlobalSearchContext
 
 describe("loadDeviceSearchRows", () => {
-  it("indexes both paired devices and remote hosts under one kind", async () => {
+  it("indexes every kind of remote machine under one kind", async () => {
     const rows = await loadDeviceSearchRows(deps())
     expect(rows).toEqual([
       {
@@ -60,6 +73,14 @@ describe("loadDeviceSearchRows", () => {
         detail: "https://build.local",
         timestamp: 2_000,
       },
+      // No timestamp: nothing records when an SSH profile was last reached,
+      // and inventing one would sort it against machines that do know.
+      {
+        ref: "ssh:s1",
+        kind: "ssh-host",
+        label: "prod-web-01",
+        detail: "deploy@10.0.4.21:22",
+      },
     ])
   })
 
@@ -75,7 +96,7 @@ describe("loadDeviceSearchRows", () => {
         }) as DevicesProviderDeps["listPairedDevices"],
       })
     )
-    expect(rows.map((row) => row.ref)).toEqual(["host:h1"])
+    expect(rows.map((row) => row.ref)).toEqual(["host:h1", "ssh:s1"])
   })
 })
 

@@ -8893,6 +8893,7 @@
       "local": "This device",
       "paired-device": "Paired device",
       "remote-host": "Remote host",
+      "ssh-host": "SSH host",
       "worker": "Execution worker"
     },
     "listPane": {
@@ -8973,6 +8974,7 @@
         "routedToRemoteHost": "This window currently routes execution to a remote host, so a workspace list would describe that host rather than this machine.",
         "sandboxIsClientLocal": "Sandbox connections are local to the machine running this window and are never routed to another device.",
         "sandboxNotHosted": "This kind of device does not host sandboxes.",
+        "sshShellOnly": "SSH gives a shell and nothing else, so there is no workspace or sandbox to report.",
         "workerNoRoutingPlane": "A worker receives dispatched work but is not on the device routing plane, so its workspaces cannot be read from here.",
         "workspaceNotHosted": "This kind of device does not host workspace environments."
       },
@@ -9002,6 +9004,17 @@
       "open": "Open device console",
       "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
       "pairedTitle": "Paired devices"
+    },
+    "ssh": {
+      "connect": "Open a shell",
+      "connecting": "Connecting…",
+      "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
+      "credentialRequiredTitle": "Password not saved",
+      "edit": "Edit in Settings",
+      "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
+      "localOnlyTitle": "This machine only",
+      "shellOnly": "A shell and nothing else. No agent, workspace or sandbox runs over SSH.",
+      "title": "SSH"
     },
     "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
     "standalonePair": "Pair with a host",

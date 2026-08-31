@@ -57,6 +57,10 @@ const KIND_PLATE: Record<DeviceRow["kind"], string> = {
   "paired-device": "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   "remote-host": "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   worker: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+  // Muted rather than a fifth hue: an SSH host is the one kind that cannot
+  // run work, and giving it the same visual weight as the others would say
+  // otherwise before a word is read.
+  "ssh-host": "bg-muted text-muted-foreground",
 }
 
 function StatCell({ stat }: { stat: DeviceStat }) {

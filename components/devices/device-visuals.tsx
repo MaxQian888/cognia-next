@@ -21,6 +21,7 @@ import {
   ServerIcon,
   SmartphoneIcon,
   CpuIcon,
+  TerminalIcon,
   type LucideIcon,
 } from "lucide-react"
 import { useFormatter, useTranslations } from "next-intl"
@@ -81,6 +82,9 @@ const KIND_ICON: Record<DeviceKind, LucideIcon> = {
   "paired-device": SmartphoneIcon,
   "remote-host": ServerIcon,
   worker: CpuIcon,
+  // A terminal, not a server: what a saved SSH host offers is a shell, and
+  // the icon should not suggest it can host work the way a Cognia host does.
+  "ssh-host": TerminalIcon,
 }
 
 /**

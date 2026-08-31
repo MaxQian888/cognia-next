@@ -33,6 +33,7 @@ import type {
   DeviceReachability,
   DeviceRow,
   RemoteHostInput,
+  SshHostInput,
   WorkerInput,
 } from "./types"
 
@@ -48,6 +49,10 @@ export function remoteHostRef(host: RemoteHostInput): string {
   return host.featureManifest?.schemaVersion === 2
     ? host.featureManifest.hostIdentity.id
     : `host:${host.id}`
+}
+
+export function sshHostRef(profile: { id: string }): string {
+  return `ssh:${profile.id}`
 }
 
 export function workerRef(worker: WorkerInput): string {
@@ -264,6 +269,54 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
   }
 }
 
+/**
+ * A saved SSH host, as the console describes it.
+ *
+ * Everything here is deliberately empty or `unknown`, and each blank is a fact
+ * rather than a gap:
+ *
+ *  * **`reachability: "unknown"`** because nothing pings a saved SSH host.
+ *    `offline` would claim knowledge nobody has, the same rule that keeps an
+ *    unactivated remote Host out of that state.
+ *  * **No capabilities and no grants.** An SSH server never reported anything
+ *    and holds no SecurityStore capability. A matrix of `absent` cells would
+ *    invent twenty negative answers nobody gave.
+ *  * **No placement `provides`.** `placementKindFor` already keeps it out of
+ *    the candidate space; this makes the row itself say why, in the stat strip
+ *    that renders `0` dimensions as `attention`.
+ *  * **Every runtime surface unsupported.** `ssh_terminal_*` is
+ *    `target: "client"` with `capability: client.local`, so a paired phone
+ *    cannot reach one at all, and no workspace, sandbox or shell-tier question
+ *    has an answer over a bare SSH shell.
+ */
+function buildSshHostRow(profile: SshHostInput, input: BuildDeviceRowsInput): DeviceRow {
+  // `lastSeenAt: 0` is what `deriveReachability` reads as "no evidence at
+  // all", which is the honest answer here and the same shape a remote Host
+  // that has never been connected carries. The rule stays in one place rather
+  // than being hardcoded to `unknown` at this call site.
+  const liveness: PlacementLiveness = { online: false, lastSeenAt: 0, source: "manifest" }
+  return {
+    ref: sshHostRef(profile),
+    kind: "ssh-host",
+    label: profile.name || `${profile.username}@${profile.host}`,
+    isSelf: false,
+    baseUrl: `ssh://${profile.username}@${profile.host}:${profile.port}`,
+    adminState: "unknown",
+    reachability: deriveReachability(liveness, false, input.now),
+    liveness,
+    capabilities: [],
+    capabilityReportMissing: true,
+    grants: [],
+    placement: { provides: [], activeUnits: 0, maxUnits: 0 },
+    runtime: {
+      sandbox: { support: "unsupported", reasonKey: "sshShellOnly", connections: [] },
+      shellTiers: [],
+      workspaces: { support: "unsupported", reasonKey: "sshShellOnly" },
+      isRoutingTarget: false,
+    },
+  }
+}
+
 function buildWorkerRow(worker: WorkerInput, input: BuildDeviceRowsInput): DeviceRow {
   const liveness: PlacementLiveness = {
     online: worker.status === "active",
@@ -364,6 +417,7 @@ export function buildDeviceRows(input: BuildDeviceRowsInput): DeviceRow[] {
     ...input.pairedDevices.map((row) => buildPairedDeviceRow(row, input)),
     ...input.remoteHosts.map((host) => buildRemoteHostRow(host, input)),
     ...input.workers.map((worker) => buildWorkerRow(worker, input)),
+    ...input.sshHosts.map((profile) => buildSshHostRow(profile, input)),
   ]
 
   return rows.sort((a, b) => {

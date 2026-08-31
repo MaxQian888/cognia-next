@@ -86,6 +86,16 @@ const FLEET: DeviceRow[] = buildDeviceRows({
       config: { baseUrl: "https://cognia.example.com", serverVersion: "1.3.9" },
     },
   ],
+  sshHosts: [
+    {
+      id: "s1",
+      name: "prod-web-01",
+      host: "10.0.4.21",
+      port: 22,
+      username: "deploy",
+      authMethod: "privateKey",
+    },
+  ],
   workers: [
     {
       deviceId: "w1",

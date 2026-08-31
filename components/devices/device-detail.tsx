@@ -28,6 +28,7 @@
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
+import { TerminalIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
@@ -35,7 +36,9 @@ import type { DeviceRow } from "@/lib/devices/types"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 
 import { DeviceHero } from "./device-hero"
+import { DeviceSection } from "./device-section"
 import { HostControls } from "./host-controls"
+import { SshHostControls } from "./ssh-host-controls"
 import { AccessSection } from "./sections/access-section"
 import { ActivitySection } from "./sections/activity-section"
 import { CapabilitiesSection } from "./sections/capabilities-section"
@@ -104,6 +107,15 @@ export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) 
         <div className="grid items-start gap-3.5 @3xl/device-pane:grid-cols-2">
           <OverviewSection row={row} />
           <HostControls row={row} onRepair={onRepairHost} />
+          {/* An SSH host has no grants, no capability matrix and no runtime to
+              describe, so its own card is the only one that says anything. It
+              sits where `HostControls` does for the same reason: this is the
+              "what can I do with this machine" slot. */}
+          {row.kind === "ssh-host" ? (
+            <DeviceSection id="ssh" title={t("ssh.title")} icon={TerminalIcon}>
+              <SshHostControls row={row} />
+            </DeviceSection>
+          ) : null}
           <CapabilitiesSection row={row} />
           <AccessSection row={row} actions={actions} />
           <RuntimeSection row={row} />
