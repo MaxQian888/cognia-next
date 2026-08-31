@@ -58,6 +58,7 @@ import type {
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
 import { Surface } from "@/components/surface/surface"
+import { cn } from "@/lib/utils"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
 import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
@@ -494,16 +495,21 @@ export function WorkspaceEnvironmentList({
       data-density={compact ? "compact" : "full"}
       data-presentation={presentation}
     >
-      <div className="flex items-center gap-2">
+      {/* At card width the heading and its two actions do not fit on one row,
+          and squeezing them wrapped the title to three lines beside the
+          buttons. Wrapping the row instead puts the actions underneath. */}
+      <div className={cn("flex items-center gap-2", compact && "flex-wrap")}>
         {presentation === "page" ? (
-          <div className="min-w-0 flex-1">
+          <div className={cn("min-w-0 flex-1", compact && "basis-full")}>
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("title")}
             </h2>
             <p className="text-xs text-muted-foreground">{t("description")}</p>
           </div>
         ) : (
-          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+          <span
+            className={cn("min-w-0 flex-1 text-xs text-muted-foreground", compact && "basis-full")}
+          >
             {t("count", { count: scoped?.length ?? 0 })}
           </span>
         )}
