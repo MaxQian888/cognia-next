@@ -6,11 +6,14 @@ import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import {
   admitConversationEvent,
+  evaluateAdmissionPolicy,
   DEFAULT_TOPIC_ACTIVATION_TTL_MS,
   resolveActivationTtlMs,
   resolveDeliveryReadiness,
   resolveInboundActivationPolicy,
 } from "./conversation-admission"
+import { shouldRespondToMessage } from "./at-gate"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 function event(options: {
@@ -199,5 +202,90 @@ describe("conversation admission", () => {
     await expect(
       admitConversationEvent(event({ mentioned: true }), adapter, { now: 1_000 })
     ).resolves.toEqual({ allowed: true, activated: false })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// evaluateAdmissionPolicy: the half both callers share
+// ---------------------------------------------------------------------------
+
+describe("evaluateAdmissionPolicy", () => {
+  const row = (over: Partial<AdapterInstanceRow> = {}) =>
+    ({ type: "lark", ...over }) as AdapterInstanceRow
+
+  it("admits a private chat before the policy is consulted, direct_only included", () => {
+    const dm = { ...event({ mentioned: false }), channel: { id: "c", kind: "private" } }
+    expect(
+      evaluateAdmissionPolicy({
+        event: dm as never,
+        adapter: row({ inboundActivationPolicy: "direct_only" }),
+      })
+    ).toEqual({ kind: "allow" })
+  })
+
+  it("names activation state as its own outcome rather than guessing", () => {
+    // This is the whole reason the function exists: a pure caller cannot see
+    // the window, so it has to be told that the window is what decides.
+    expect(
+      evaluateAdmissionPolicy({
+        event: event({ mentioned: false, thread: true }) as never,
+        adapter: row({
+          inboundActivationPolicy: "mention_activates",
+          deliveryReadiness: "all_messages_verified",
+        }),
+      })
+    ).toEqual({ kind: "consult-activation" })
+  })
+
+  it("separates admitting from activating", () => {
+    expect(
+      evaluateAdmissionPolicy({
+        event: event({ mentioned: true, thread: true }) as never,
+        adapter: row({
+          inboundActivationPolicy: "mention_activates",
+          deliveryReadiness: "all_messages_verified",
+        }),
+      })
+    ).toEqual({ kind: "allow-and-activate" })
+  })
+
+  // The bug this guards: the two switches were hand-mirrored, so a branch
+  // added to one silently disagreed with the other. Every stateless case has
+  // to produce the same verdict on both sides.
+  it("agrees with the pure predictor on every stateless case", () => {
+    const policies = ["always", "mention_each", "mention_activates", "direct_only"] as const
+    const cases = [
+      { mentioned: true, thread: true },
+      { mentioned: false, thread: true },
+      { mentioned: true, thread: false },
+      { mentioned: false, thread: false },
+    ]
+    for (const policy of policies) {
+      for (const verified of [true, false]) {
+        for (const c of cases) {
+          const adapter = row({
+            inboundActivationPolicy: policy,
+            ...(verified ? { deliveryReadiness: "all_messages_verified" as const } : {}),
+          })
+          const ev = event(c)
+          const pure = shouldRespondToMessage(ev as never, adapter)
+          const outcome = evaluateAdmissionPolicy({ event: ev as never, adapter })
+          // `consult-activation` is the one place they legitimately differ.
+          // The predictor answers conservatively and names the deciding state.
+          const expected =
+            outcome.kind === "deny"
+              ? { allowed: false, reason: outcome.reason }
+              : outcome.kind === "consult-activation"
+                ? { allowed: false, reason: "topic_activation_required" }
+                : { allowed: true }
+          expect({ policy, verified, ...c, ...pure }).toEqual({
+            policy,
+            verified,
+            ...c,
+            ...expected,
+          })
+        }
+      }
+    }
   })
 })

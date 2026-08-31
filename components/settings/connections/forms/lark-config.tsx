@@ -64,7 +64,6 @@ import {
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
-import { LarkAtStrategy } from "./lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "./lark/lark-whitelist-editor"
 import { LarkQuickCommandsEditor } from "./lark/lark-quick-commands-editor"
 import type { LarkQuickCommand } from "@/lib/connectors/adapters/lark/quick-commands"
@@ -539,12 +538,12 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
          * only render once the row has an id (i.e. after Save on first
          * creation). Hidden for unsaved rows; the operator must finish
          * the initial Save → reopen to surface them. */}
-        {row && (
-          <>
-            <LarkAtStrategy adapterId={row.id} />
-            <LarkWhitelistEditor adapterId={row.id} />
-          </>
-        )}
+        {/* `InboundActivationEditor` is deliberately NOT mounted here. It is
+            mounted once for every adapter kind in `config-detail.tsx`, and a
+            second copy in this dialog meant a Lark operator saw the same
+            admission controls twice in one detail view, each with its own
+            unsaved state. */}
+        {row && <LarkWhitelistEditor adapterId={row.id} />}
       </div>
     ),
   }

@@ -1,35 +1,38 @@
 /**
- * Cross-platform inbound-message gate (schema v45, im-refactored-crayon).
+ * Cross-platform inbound-message guardrails, plus the pure admission predicate
+ * the plugin API answers with.
  *
- * Originally shipped under `lib/connectors/adapters/lark/at-gate.ts`
- * because Lark was the first platform to wire it in; the body is
- * platform-agnostic and is now reused by Discord / Slack / OneBot /
- * Telegram dispatchers via this shared location.
+ * Originally shipped under `lib/connectors/adapters/lark/at-gate.ts` because
+ * Lark was the first platform to wire it in. The body is platform-agnostic and
+ * is now reused by Discord / Slack / OneBot / Telegram dispatchers via this
+ * shared location.
  *
- * Three orthogonal checks, each evaluated against `AdapterInstanceRow`
- * fields the operator configures in the Adapters detail panel:
+ * ## Two callers, two jobs
  *
- *   1. `chatBlocklist` — if the inbound chat id appears here, deny.
- *   2. `chatAllowlist` — if non-empty AND the inbound chat id is missing
- *      from it, deny. An empty / undefined allowlist is "any chat is fine".
- *   3. `atResponseStrategy`:
- *        - `"always"`        — pass.
- *        - `"mention_only"`  — pass only if the bot was @-mentioned
- *                              (DMs always bypass since they have no
- *                              mention surface).
- *        - `"direct_only"`   — pass only in private 1:1 channels.
+ * `gateInboundEvent` is the TRANSPORT guardrail every adapter runs before it
+ * emits. It enforces `chatBlocklist` / `chatAllowlist` and nothing else. The
+ * mention branch used to live here too; it moved to the bus
+ * (`admitConversationEvent`, step 3.1), which runs after the durable inbound
+ * job exists and can therefore also resolve conversation overrides and topic
+ * activation state. Enforcing it here as well would deny a message before it
+ * was ever recorded.
  *
- * Returns `{ allowed: true }` when the event should continue down the
- * bus, `{ allowed: false, reason }` when the dispatcher should
- * short-circuit (and audit the block via `inbound.policy_blocked`).
+ * `shouldRespondToMessage` is the PURE predictor `ctx.connectors` answers
+ * with. It has no database and no activation state, so it predicts the
+ * first-contact answer and names the state that would decide otherwise. It
+ * shares its policy branch with the bus through `evaluateAdmissionPolicy`, so
+ * the two cannot drift on the parts that are decidable without state.
+ *
+ * Both return `{ allowed: true }` to continue, `{ allowed: false, reason }` to
+ * short-circuit (and, for the gate, audit via `inbound.policy_blocked`).
  */
 
-import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/event"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
 import {
-  resolveInboundActivationPolicy,
+  evaluateAdmissionPolicy,
   type ConversationAdmissionReason,
 } from "@/lib/connectors/conversation-admission"
 
@@ -159,50 +162,21 @@ export function shouldRespondToMessage(
     return { allowed: false, reason: "chat_allowlist" }
   }
 
-  const policy = resolveInboundActivationPolicy(adapter, override ?? undefined)
-  const isDm = event.channel.kind === "private"
-  // Private chats are admitted before the policy is consulted at all, matching
-  // `admitConversationEvent`'s first line — `direct_only` included, since a DM
-  // is exactly what that policy is for.
-  if (isDm) return { allowed: true }
-
-  // A reply to one of OUR messages is as direct an address as a mention, and
-  // `defaultGroupChatPolicy()` gates on both — so this gate has to accept it or
-  // the `reply-to-bot` trigger rule never reaches the bus. Strict
-  // `parentSenderId` matching keeps it from over-matching; the parent is filled
-  // by the adapter parser here, and by `gateInboundEvent` from the
-  // delivered-message ledger for the wire shapes that omit it.
-  const addressesUs = event.mentions.selfMentioned || isReplyToSelf(event)
-  // `delivery_unverified` tests `selfMentioned` ALONE, matching the host: that
-  // gate is about whether the platform will push unmentioned group events to
-  // us at all, which a reply says nothing about.
-  const deliveryVerified = adapter.deliveryReadiness === "all_messages_verified"
-
-  switch (policy) {
-    case "always":
-      // Lark only delivers unmentioned group messages once the operator has
-      // proven it — until then `always` still needs a mention, exactly as
-      // `admitConversationEvent` decides it.
-      if (adapter.type !== "lark" || deliveryVerified) return { allowed: true }
-      return event.mentions.selfMentioned
-        ? { allowed: true }
-        : { allowed: false, reason: "delivery_unverified" }
-    case "direct_only":
-      return { allowed: false, reason: "at_direct_only" }
-    case "mention_each":
-      return addressesUs ? { allowed: true } : { allowed: false, reason: "at_mention_required" }
-    case "mention_activates":
-      // Activation is limited to explicit thread scopes; a parent group keeps
-      // requiring a mention every time.
-      if (event.channel.kind !== "thread") {
-        return addressesUs ? { allowed: true } : { allowed: false, reason: "at_mention_required" }
-      }
-      if (!deliveryVerified) {
-        return event.mentions.selfMentioned
-          ? { allowed: true }
-          : { allowed: false, reason: "delivery_unverified" }
-      }
-      if (addressesUs) return { allowed: true }
+  // The policy branch itself is shared with `admitConversationEvent`, so the
+  // prediction and the decision cannot drift on anything decidable without
+  // state. That includes the DM short-circuit, the `reply-to-bot` acceptance
+  // (`defaultGroupChatPolicy()` gates on both, so this has to accept it or the
+  // trigger rule never reaches the bus) and the Lark delivery-readiness gate.
+  const outcome = evaluateAdmissionPolicy({ event, adapter, override })
+  switch (outcome.kind) {
+    case "allow":
+    // Activation is a write, and a pure predictor makes none. The answer is
+    // the same either way: this message is admitted.
+    case "allow-and-activate":
+      return { allowed: true }
+    case "deny":
+      return { allowed: false, reason: outcome.reason }
+    case "consult-activation":
       // The one branch a pure function cannot reproduce: an already-open
       // activation window would admit this. Predicting first contact is the
       // conservative answer, and it names the state that decides.

@@ -191,9 +191,9 @@ jest.mock("@/components/settings/connections/forms/shared/adapter-whoami-panel",
   ),
 }))
 
-jest.mock("@/components/settings/connections/forms/lark/lark-at-strategy", () => ({
-  LarkAtStrategy: ({ adapterId }: { adapterId: string }) => (
-    <div data-testid="lark-at-strategy" data-adapter-id={adapterId} />
+jest.mock("@/components/settings/connections/forms/inbound-activation-editor", () => ({
+  InboundActivationEditor: ({ adapterId }: { adapterId: string }) => (
+    <div data-testid="inbound-activation-editor" data-adapter-id={adapterId} />
   ),
 }))
 
@@ -366,9 +366,9 @@ describe("ConfigDetail — whoami panel", () => {
 // ---------------------------------------------------------------------------
 
 describe("ConfigDetail — shared sub-sections", () => {
-  it("renders LarkAtStrategy for every platform", () => {
+  it("renders InboundActivationEditor for every platform", () => {
     render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
-    expect(screen.getByTestId("lark-at-strategy")).toBeInTheDocument()
+    expect(screen.getByTestId("inbound-activation-editor")).toBeInTheDocument()
   })
 
   it("renders LarkWhitelistEditor for every platform", () => {

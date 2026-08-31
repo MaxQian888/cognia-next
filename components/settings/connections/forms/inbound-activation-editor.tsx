@@ -1,6 +1,21 @@
 "use client"
 
-/** Lark admission, durable active-run dispatch, and no-@ readiness controls. */
+/**
+ * Inbound-admission controls: which messages reach the bot at all, what a
+ * message does while a run is already in flight, and how the bot treats other
+ * bots in the same room.
+ *
+ * Platform-neutral, and mounted for EVERY adapter kind by `config-detail.tsx`.
+ * It lived under `forms/lark/` and was called `LarkAtStrategy` because Lark
+ * was the first platform to need it, and the name outlived the reason: it also
+ * got mounted a second time inside the Lark config dialog, so a Lark operator
+ * saw the same controls twice in one detail view.
+ *
+ * The Lark-specific parts are two conditionals, not a separate component: the
+ * no-@ delivery probe (only Lark refuses unmentioned group events until an
+ * operator proves the app can receive them) and the runtime-capability
+ * read-out. Both self-hide elsewhere.
+ */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -30,11 +45,11 @@ type SiblingBotPolicy = NonNullable<AdapterInstanceRow["siblingBotPolicy"]>
 
 const SIBLING_POLICIES: SiblingBotPolicy[] = ["ignore", "respond"]
 
-export interface LarkAtStrategyProps {
+export interface InboundActivationEditorProps {
   adapterId: string
 }
 
-export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
+export function InboundActivationEditor({ adapterId }: InboundActivationEditorProps) {
   const t = useTranslations("settings.connections.lark.atStrategy")
   const [saving, setSaving] = useState(false)
 
@@ -137,7 +152,7 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
   }
 
   return (
-    <Card data-testid="lark-at-strategy">
+    <Card data-testid="inbound-activation-editor">
       <CardHeader className="pb-2 pt-3">
         <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
       </CardHeader>

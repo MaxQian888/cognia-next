@@ -4,7 +4,7 @@
  * ControlCommands — shared, self-managing section for every IM adapter's
  * detail panel. Reads `AdapterInstanceRow.controlCommands` via `useLiveQuery`
  * and writes it through `updateAdapterInstance`, the exact pattern
- * `HelpAndWelcome` / `LarkAtStrategy` use. Mounted once in `config-detail.tsx`
+ * `HelpAndWelcome` / `InboundActivationEditor` use. Mounted once in `config-detail.tsx`
  * so every platform gets it without per-form wiring.
  *
  * Fields (control-plane permission gate, enforced in

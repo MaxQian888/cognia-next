@@ -33,12 +33,11 @@ import { QQOfficialConfigDialog } from "../../forms/qq-official-config"
 import { LarkWhoamiPanel } from "../../forms/lark/lark-whoami-panel"
 import { AdapterWhoamiPanel } from "../../forms/shared/adapter-whoami-panel"
 import { SendTestMessageSection } from "../../forms/shared/send-test-message-section"
-// LarkAtStrategy + LarkWhitelistEditor are platform-neutral in behaviour
-// (they read/write `atResponseStrategy` + `chatAllowlist` / `chatBlocklist`
-// on the adapter row, which are bus-level concepts, not Lark-specific).
-// Re-used for every platform in the detail panel; the "Lark" prefix is a
-// historical naming artefact left in place to avoid file churn.
-import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
+// `LarkWhitelistEditor` is platform-neutral in behaviour: it reads and writes
+// `chatAllowlist` / `chatBlocklist` on the adapter row, which are bus-level
+// concepts. The "Lark" prefix is a historical naming artefact, left for now.
+// (`InboundActivationEditor` had the same prefix and has been moved out.)
+import { InboundActivationEditor } from "../../forms/inbound-activation-editor"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
 import { LarkPrincipals } from "../../forms/lark/lark-principals"
@@ -150,7 +149,7 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * platform that distinguishes private / group / channel contexts.
        * The components were originally written for Lark but the body is
        * platform-neutral. */}
-      <LarkAtStrategy adapterId={row.id} />
+      <InboundActivationEditor adapterId={row.id} />
       <LarkWhitelistEditor adapterId={row.id} />
 
       {/* Lark-only: web entry base, entry feature-flag overrides, callback

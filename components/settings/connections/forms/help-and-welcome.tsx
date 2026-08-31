@@ -4,7 +4,7 @@
  * Cross-provider "Help & Welcome card" settings (shared across every IM
  * adapter). Self-managing — reads the adapter row via `useLiveQuery` and
  * writes the three row-level fields through `updateAdapterInstance`, the
- * exact pattern `LarkAtStrategy` / `LarkWhitelistEditor` use. Mounted once
+ * exact pattern `InboundActivationEditor` / `LarkWhitelistEditor` use. Mounted once
  * in the adapter detail panel (`config-detail.tsx`) so every platform gets
  * it without per-form wiring.
  *
