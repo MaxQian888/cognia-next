@@ -50,6 +50,19 @@ export interface AdapterFormSectionsProps {
   onCancel?: () => void
   /** Override the default Save button label (e.g. "Create"). */
   submitLabel?: string
+  /**
+   * Override the default Cancel label. The conversation override form calls
+   * it "Reset", which is what it does there: the dialog stays open and the
+   * fields go back to what was stored.
+   */
+  cancelLabel?: string
+  /**
+   * Override the footer button test ids. The conversation override form's
+   * `conv-override-save` / `conv-override-cancel` are a stability contract its
+   * own tests query by, and adopting this shell should not rewrite them.
+   */
+  submitTestId?: string
+  cancelTestId?: string
   /** Disables both buttons; used during in-flight saves. */
   submitting?: boolean
   /** True when at least one section has unsaved edits. */
@@ -66,6 +79,9 @@ export function AdapterFormSections({
   onSubmit,
   onCancel,
   submitLabel,
+  cancelLabel,
+  submitTestId = "adapter-form-save",
+  cancelTestId,
   submitting = false,
   dirty = false,
   footerSlot,
@@ -82,15 +98,21 @@ export function AdapterFormSections({
       <div className="sticky bottom-0 -mx-4 mt-2 flex items-center justify-end gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur">
         {footerSlot}
         {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            {t("cancel")}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+            {...(cancelTestId ? { "data-testid": cancelTestId } : {})}
+          >
+            {cancelLabel ?? t("cancel")}
           </Button>
         )}
         <Button
           type="button"
           onClick={() => void onSubmit()}
           disabled={submitting || !dirty}
-          data-testid="adapter-form-save"
+          data-testid={submitTestId}
         >
           {submitting ? t("saving") : resolvedSubmitLabel}
         </Button>

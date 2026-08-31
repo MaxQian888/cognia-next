@@ -12782,6 +12782,20 @@
       "reset": "Cancel",
       "save": "Save",
       "saving": "Saving…",
+      "sections": {
+        "behaviour": "Behaviour",
+        "behaviourHelp": "Whether this chat gets an answer, and which messages reach the bot.",
+        "grants": "What it may touch",
+        "grantsHelp": "Computer use, self-driving goals, media the model may see, and scheduling tools.",
+        "model": "Model",
+        "modelHelp": "Provider and model for this chat. Managed by the target when a team or workflow runs it.",
+        "reach": "When it may speak",
+        "reachHelp": "Response deadline, escalation ladder, proactive pushes, quiet hours and mute.",
+        "routing": "Who runs it",
+        "routingHelp": "The persona, and whether a team or a workflow takes the turn instead of a single agent.",
+        "skills": "Skills and approvals",
+        "skillsHelp": "Which built-in skills this chat may use, and whether write-tier ones need a human."
+      },
       "triggerUnavailable": {
         "nextStep": "Reopen this dialog once the conversation's bot is available.",
         "reason": "This chat's bot could not be read, so there is no policy to override from.",
@@ -21468,6 +21482,24 @@
       },
       "title": "Plugin devtools"
     },
+    "discover": {
+      "curation": {
+        "all": "All",
+        "featured": "Featured",
+        "popular": "Popular",
+        "recent": "Recent"
+      },
+      "curationLabel": "Ranking",
+      "curationUnavailable": "Rankings come from the Cognia registry, so they do not apply to this source.",
+      "origin": {
+        "all": "All sources",
+        "builtin": "Built in",
+        "registry": "Cognia registry",
+        "vscode": "Open VSX",
+        "workspace": "Workspace catalogs"
+      },
+      "originLabel": "Source"
+    },
     "discovery": {
       "empty": "No featured plugins to highlight right now.",
       "install": "Install",
@@ -21628,17 +21660,7 @@
         "demoTitle": "Demo marketplace"
       },
       "retry": "Retry",
-      "searchPlaceholder": "Search the marketplace…",
-      "sections": {
-        "all": "All",
-        "builtin": "Built-in",
-        "featured": "Featured",
-        "popular": "Popular",
-        "recent": "Recent",
-        "shared": "Shared",
-        "vscode": "VS Code",
-        "workspace": "Workspace"
-      }
+      "searchPlaceholder": "Search the marketplace…"
     },
     "marketplaceCard": {
       "addToCompareAria": "Add {name} to comparison",

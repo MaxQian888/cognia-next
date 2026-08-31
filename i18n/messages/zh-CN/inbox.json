@@ -443,6 +443,20 @@
     "reset": "取消",
     "save": "保存",
     "saving": "正在保存…",
+    "sections": {
+      "behaviour": "行为",
+      "behaviourHelp": "这个会话答不答，以及哪些消息能到达机器人。",
+      "routing": "由谁执行",
+      "routingHelp": "角色人设，以及这一轮是交给团队或工作流，还是单个 Agent。",
+      "model": "模型",
+      "modelHelp": "本会话的服务商与模型。绑定团队或工作流时由目标接管。",
+      "reach": "何时可以说话",
+      "reachHelp": "响应时限、升级阶梯、主动推送、静音时段与静音开关。",
+      "grants": "可以碰什么",
+      "grantsHelp": "计算机操作、自驱目标、模型可见的媒体，以及日程工具。",
+      "skills": "技能与审批",
+      "skillsHelp": "本会话可用的内置技能，以及写入级技能是否需要人工确认。"
+    },
     "triggerUnavailable": {
       "nextStep": "待该机器人可用后重新打开本对话框。",
       "reason": "无法读取本会话所属的机器人，因此没有可覆盖的策略。",

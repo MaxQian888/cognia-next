@@ -32,6 +32,15 @@ interface QuietHoursAndMuteProps {
   quietHours: QuietHoursValue | null
   onQuietHoursChange: (v: QuietHoursValue | null) => void
   disabled?: boolean
+  /**
+   * Namespaces the control ids, so this can render twice on one page.
+   *
+   * The ids were hard-coded, which was fine while only the platform dialogs
+   * used it. The conversation override form and the mobile policy sheet both
+   * hand-rolled their own quiet-hours editor instead, and only this one
+   * carries the `quietHoursIncomplete` validation, so they are adopting it.
+   */
+  idPrefix?: string
 }
 
 /** Common IANA timezone list for the selector. */
@@ -73,6 +82,7 @@ export function QuietHoursAndMute({
   quietHours,
   onQuietHoursChange,
   disabled,
+  idPrefix = "qhm",
 }: QuietHoursAndMuteProps) {
   const t = useTranslations("settings.connections.quietHours")
   const qhEnabled = quietHours !== null
@@ -92,34 +102,36 @@ export function QuietHoursAndMute({
       {/* Mute toggle */}
       <div className="flex items-center justify-between">
         <div>
-          <Label htmlFor="qhm-muted" className="text-sm font-medium">
+          <Label htmlFor={`${idPrefix}-muted`} className="text-sm font-medium">
             {t("mutedLabel")}
           </Label>
           <p className="text-xs text-muted-foreground">{t("mutedHelp")}</p>
         </div>
         <Switch
-          id="qhm-muted"
+          id={`${idPrefix}-muted`}
           checked={muted}
           onCheckedChange={onMutedChange}
           disabled={disabled}
           aria-label={t("mutedAria")}
+          data-testid={`${idPrefix}-muted`}
         />
       </div>
 
       {/* Quiet hours toggle */}
       <div className="flex items-center justify-between">
         <div>
-          <Label htmlFor="qhm-enable" className="text-sm font-medium">
+          <Label htmlFor={`${idPrefix}-enable`} className="text-sm font-medium">
             {t("enableLabel")}
           </Label>
           <p className="text-xs text-muted-foreground">{t("enableHelp")}</p>
         </div>
         <Switch
-          id="qhm-enable"
+          id={`${idPrefix}-enable`}
           checked={qhEnabled}
           onCheckedChange={handleToggleQH}
           disabled={disabled}
           aria-label={t("enableAria")}
+          data-testid={`${idPrefix}-quiet-enabled`}
         />
       </div>
 
@@ -127,7 +139,12 @@ export function QuietHoursAndMute({
        *  from/to/timezone inputs so they don't overflow on small phones;
        *  sm:grid-cols-3 brings them back side-by-side on tablets+. */}
       {qhEnabled && quietHours && (
-        <QuietHoursFields value={quietHours} onChange={onQuietHoursChange} disabled={disabled} />
+        <QuietHoursFields
+          value={quietHours}
+          onChange={onQuietHoursChange}
+          disabled={disabled}
+          idPrefix={idPrefix}
+        />
       )}
     </div>
   )
@@ -137,6 +154,7 @@ interface QuietHoursFieldsProps {
   value: QuietHoursValue
   onChange: (v: QuietHoursValue) => void
   disabled?: boolean
+  idPrefix: string
 }
 
 /**
@@ -145,7 +163,7 @@ interface QuietHoursFieldsProps {
  * `quietHours` value while this child manages whether the user has the
  * common-zone dropdown open or has flipped into the custom-input mode.
  */
-function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) {
+function QuietHoursFields({ value, onChange, disabled, idPrefix }: QuietHoursFieldsProps) {
   const t = useTranslations("settings.connections.quietHours")
 
   // If the persisted tz is one of the common ones, start in dropdown mode.
@@ -168,11 +186,12 @@ function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) 
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       <div className="space-y-1">
-        <Label htmlFor="qhm-from" className="text-xs">
+        <Label htmlFor={`${idPrefix}-from`} className="text-xs">
           {t("fromLabel")}
         </Label>
         <Input
-          id="qhm-from"
+          id={`${idPrefix}-from`}
+          data-testid={`${idPrefix}-quiet-from`}
           type="time"
           value={value.from}
           onChange={(e) => onChange({ ...value, from: e.target.value })}
@@ -181,11 +200,12 @@ function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) 
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor="qhm-to" className="text-xs">
+        <Label htmlFor={`${idPrefix}-to`} className="text-xs">
           {t("toLabel")}
         </Label>
         <Input
-          id="qhm-to"
+          id={`${idPrefix}-to`}
+          data-testid={`${idPrefix}-quiet-to`}
           type="time"
           value={value.to}
           onChange={(e) => onChange({ ...value, to: e.target.value })}
@@ -194,30 +214,30 @@ function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) 
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor="qhm-tz" className="text-xs">
+        <Label htmlFor={`${idPrefix}-tz`} className="text-xs">
           {t("timezoneLabel")}
         </Label>
         {isCustom ? (
           <Input
-            id="qhm-tz"
+            id={`${idPrefix}-tz`}
             type="text"
             value={value.tz}
             onChange={(e) => onChange({ ...value, tz: e.target.value })}
             disabled={disabled}
             aria-label={t("timezoneAria")}
             placeholder={t("timezonePlaceholder")}
-            data-testid="qhm-tz-custom-input"
+            data-testid={`${idPrefix}-tz-custom-input`}
             aria-invalid={value.tz.length > 0 && !tzValid}
             className="h-9 text-xs"
           />
         ) : (
           <NativeSelect
-            id="qhm-tz"
+            id={`${idPrefix}-tz`}
             value={COMMON_TZ.includes(value.tz) ? value.tz : CUSTOM_TZ_VALUE}
             onChange={(e) => onSelectChange(e.target.value)}
             disabled={disabled}
             aria-label={t("timezoneAria")}
-            data-testid="qhm-tz-select"
+            data-testid={`${idPrefix}-quiet-tz`}
             className="text-xs"
             wrapperClassName="w-full"
           >
@@ -232,7 +252,7 @@ function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) 
           </NativeSelect>
         )}
         {isCustom && value.tz.length > 0 && !tzValid && (
-          <p className="text-[10px] text-destructive" data-testid="qhm-tz-invalid">
+          <p className="text-[10px] text-destructive" data-testid={`${idPrefix}-tz-invalid`}>
             {t("timezoneInvalid")}
           </p>
         )}

@@ -16,6 +16,26 @@ import { __setInboxWriteRouteDepsForTests } from "@/lib/connectors/inbox-writes/
 // which resolves to "unavailable" under jsdom because the test shell declares
 // no `connector-runtime` capability. Without this seam every save assertion
 // times out on `InboxWriteUnavailableError` instead of testing the form.
+/**
+ * Open every section before asserting on its fields.
+ *
+ * The form is a collapsible-section shell now, and Radix unmounts a closed
+ * section's body, so a test that queries a field without opening its section
+ * is asking about something a user would also not see. Called from a wrapper
+ * around `render` rather than per test: which section a field lives in is a
+ * layout decision, and pinning that in twenty-five places would make every
+ * future regrouping a test rewrite.
+ */
+function renderForm(ui: React.ReactElement) {
+  const result = render(ui)
+  for (const trigger of Array.from(
+    document.querySelectorAll<HTMLElement>('[data-testid^="adapter-form-section-"] > button')
+  )) {
+    if (trigger.getAttribute("data-state") !== "open") fireEvent.click(trigger)
+  }
+  return result
+}
+
 let restoreWriteRoute: (() => void) | undefined
 
 beforeEach(async () => {
@@ -33,7 +53,7 @@ afterEach(() => {
 describe("ConversationOverrideForm", () => {
   it("toggles quiet hours into the persisted row", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_quiet"
@@ -75,7 +95,7 @@ describe("ConversationOverrideForm", () => {
     }
     await getDb().conversationOverrides.add(initial)
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_quiet_clear"
@@ -96,7 +116,7 @@ describe("ConversationOverrideForm", () => {
 
   it("persists the per-conversation mute flag and clears it when toggled off", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_mute"
@@ -115,7 +135,7 @@ describe("ConversationOverrideForm", () => {
 
     // Toggle back off from the persisted row → cleared (undefined, not false).
     const onDone2 = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         key="second"
         adapterId="lark-1"
@@ -139,7 +159,7 @@ describe("ConversationOverrideForm", () => {
 
   it("persists whitelisted skill ids and clears them when toggling back to inherit", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_skills"
@@ -163,7 +183,7 @@ describe("ConversationOverrideForm", () => {
 
   it("HITL switch defaults on and persists false when turned off", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_hitl"
@@ -185,7 +205,7 @@ describe("ConversationOverrideForm", () => {
 
   it("reply-quoting switch defaults on, persists false when turned off and clears when turned back on", async () => {
     const onDone = jest.fn()
-    const { unmount } = render(
+    const { unmount } = renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_quote"
@@ -210,7 +230,7 @@ describe("ConversationOverrideForm", () => {
     // Re-open seeded from the persisted row: the switch reflects the opt-out,
     // and turning it back on stores `undefined` (inherit the bot default).
     const onDone2 = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_quote"
@@ -234,7 +254,7 @@ describe("ConversationOverrideForm", () => {
   })
 
   it("renders inherited Character and target state when no initialRow is supplied", () => {
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_new"
@@ -266,7 +286,7 @@ describe("ConversationOverrideForm", () => {
       createdAt: 0,
       updatedAt: 0,
     }
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_seed"
@@ -292,7 +312,7 @@ describe("ConversationOverrideForm", () => {
     useAgentTeamStore.setState({
       teams: { team_research: { id: "team_research", name: "Research Team" } as never },
     })
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_persist"
@@ -332,7 +352,7 @@ describe("ConversationOverrideForm", () => {
       providerSettings: { anthropic: { enabled: true, enabledModels: ["claude-test"] } },
     } as never)
     const user = userEvent.setup()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_direct_model"
@@ -360,7 +380,7 @@ describe("ConversationOverrideForm", () => {
   })
 
   it("persists the explicit scheduler-tool opt-in", async () => {
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_schedule"
@@ -380,7 +400,7 @@ describe("ConversationOverrideForm", () => {
 
   it("persists the response-SLA minutes from the form", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_sla"
@@ -401,7 +421,7 @@ describe("ConversationOverrideForm", () => {
   it("persists an escalation override and clears it back to inherit (slice 1B)", async () => {
     const user = userEvent.setup()
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_esc"
@@ -442,7 +462,7 @@ describe("ConversationOverrideForm", () => {
     await getDb().conversationOverrides.add(initial)
     const user = userEvent.setup()
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="tg-1"
         conversationKey="telegram:tg-1:chat_esc"
@@ -484,7 +504,7 @@ describe("ConversationOverrideForm", () => {
     await getDb().characters.put({ id: "char_manual", name: "Manual" } as never)
     const user = userEvent.setup()
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_marker"
@@ -521,7 +541,7 @@ describe("ConversationOverrideForm", () => {
     }
     await getDb().conversationOverrides.add(initial)
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_marker_keep"
@@ -552,7 +572,7 @@ describe("ConversationOverrideForm", () => {
     }
     await getDb().conversationOverrides.put(initial)
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey={initial.conversationKey}
@@ -588,7 +608,7 @@ describe("ConversationOverrideForm", () => {
       providerSettings: { new: { enabled: true, enabledModels: ["model"] } },
     } as never)
     const existing = await getDb().conversationOverrides.get("co-existing")
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_existing"
@@ -616,7 +636,7 @@ describe("ConversationOverrideForm", () => {
     })
     const onDone = jest.fn()
     const initialRow = (await getDb().conversationOverrides.get("co-delete"))!
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_delete"
@@ -632,7 +652,7 @@ describe("ConversationOverrideForm", () => {
 
   it("Cancel button invokes onCancel without persisting changes", () => {
     const onCancel = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_cancel"
@@ -644,13 +664,18 @@ describe("ConversationOverrideForm", () => {
     expect(onCancel).toHaveBeenCalled()
   })
 
+  // `onCancel` is supplied so the button renders. It used to render whether or
+  // not a handler existed, which meant a form mounted without one showed a
+  // Cancel that did nothing at all. The shell only renders it when there is
+  // something for it to do, and every production mount passes a handler.
   it("never writes a row on Cancel without prior Save", async () => {
     const user = userEvent.setup()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_noempty"
         sessionId="s_noempty"
+        onCancel={jest.fn()}
       />
     )
     await user.click(screen.getByTestId("conv-override-character-state"))
@@ -679,7 +704,7 @@ describe("ConversationOverrideForm", () => {
       },
     ] as never)
     const user = userEvent.setup()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_workflow_picker"
@@ -723,7 +748,7 @@ describe("ConversationOverrideForm", () => {
     }
     await getDb().conversationOverrides.put(initial)
     const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey={initial.conversationKey}
@@ -766,7 +791,7 @@ describe("ConversationOverrideForm", () => {
       createdAt: 0,
       updatedAt: 0,
     })
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_trigger"
@@ -802,7 +827,7 @@ describe("ConversationOverrideForm", () => {
       updatedAt: 0,
     }
     await getDb().conversationOverrides.put(initial)
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey={initial.conversationKey}
@@ -831,7 +856,7 @@ describe("ConversationOverrideForm", () => {
       createdAt: 0,
       updatedAt: 0,
     })
-    const { unmount } = render(
+    const { unmount } = renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_trigger_save"
@@ -856,7 +881,7 @@ describe("ConversationOverrideForm", () => {
       .conversationOverrides.where("conversationKey")
       .equals("lark:lark-1:oc_trigger_save")
       .first()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_trigger_save"
@@ -883,7 +908,7 @@ describe("ConversationOverrideForm", () => {
    */
   it("persists only an explicit OCR opt-out", async () => {
     const onDone = jest.fn()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_ocr"
@@ -921,7 +946,7 @@ describe("ConversationOverrideForm", () => {
   // "whatever this channel supports", which is not the same as off.
   it("persists the A2UI tri-state and clears it back to inherit", async () => {
     const user = userEvent.setup()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey="lark:lark-1:oc_a2ui"
@@ -980,7 +1005,7 @@ describe("ConversationOverrideForm", () => {
       updatedAt: 0,
     })
     const key = "lark:lark-1:oc_media"
-    const { unmount } = render(
+    const { unmount } = renderForm(
       <ConversationOverrideForm adapterId="lark-1" conversationKey={key} sessionId="s_media" />
     )
 
@@ -1002,7 +1027,7 @@ describe("ConversationOverrideForm", () => {
       .conversationOverrides.where("conversationKey")
       .equals(key)
       .first()
-    render(
+    renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
         conversationKey={key}
@@ -1019,5 +1044,91 @@ describe("ConversationOverrideForm", () => {
         .first()
       expect(cleared?.mediaModelGrant).toBeUndefined()
     })
+  })
+})
+
+// The form used to take the timezone as a freeform `<Input>` with no
+// validation, so a typo silenced the bot on a window that never opened. The
+// shared editor offers the common zones and says so when one does not resolve.
+describe("ConversationOverrideForm: quiet-hours timezone", () => {
+  it("offers the zones as a picker rather than a freeform box", async () => {
+    renderForm(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_tz"
+        sessionId="s_tz"
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-quiet-enabled"))
+    const tz = await screen.findByTestId("conv-override-quiet-tz")
+    expect(tz.tagName).toBe("SELECT")
+    expect(screen.queryByTestId("conv-override-tz-custom-input")).not.toBeInTheDocument()
+  })
+
+  it("flags a custom zone that does not resolve", async () => {
+    renderForm(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_tz2"
+        sessionId="s_tz2"
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-quiet-enabled"))
+    fireEvent.change(await screen.findByTestId("conv-override-quiet-tz"), {
+      target: { value: "__custom__" },
+    })
+    const custom = await screen.findByTestId("conv-override-tz-custom-input")
+    fireEvent.change(custom, { target: { value: "Asia/Shangai" } })
+    expect(await screen.findByTestId("conv-override-tz-invalid")).toBeInTheDocument()
+  })
+})
+
+// The form carried twelve unrelated config domains flat in one column inside a
+// modal, so finding one switch was a scroll hunt. These pin the grouping, not
+// which field sits in which group: that is a layout decision the wrapper above
+// deliberately does not encode.
+describe("ConversationOverrideForm: sections", () => {
+  const ids = ["behaviour", "routing", "model", "reach", "grants", "skills"]
+
+  it("groups the form into named sections", () => {
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_sec"
+        sessionId="s_sec"
+      />
+    )
+    for (const id of ids) {
+      expect(screen.getByTestId(`adapter-form-section-${id}`)).toBeInTheDocument()
+    }
+  })
+
+  // Opening on a fully collapsed form would be worse than the flat column for
+  // anyone who came here to flip one switch, so the first question a reader
+  // asks is answered without a click.
+  it("opens the behaviour section and leaves the rest collapsed", () => {
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_sec2"
+        sessionId="s_sec2"
+      />
+    )
+    expect(screen.getByTestId("behavior-mode")).toBeInTheDocument()
+    // A collapsed section's body is unmounted, so its fields are absent.
+    expect(screen.queryByTestId("conv-override-sla")).not.toBeInTheDocument()
+  })
+
+  it("keeps the save and cancel test ids the dialog and its tests query by", () => {
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_sec3"
+        sessionId="s_sec3"
+        onCancel={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("conv-override-save")).toBeInTheDocument()
+    expect(screen.getByTestId("conv-override-cancel")).toBeInTheDocument()
   })
 })

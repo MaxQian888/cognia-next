@@ -33,7 +33,7 @@ describe("QuietHoursAndMute — base", () => {
 
   it("does not render the from/to/tz fields when quietHours is null", () => {
     setup()
-    expect(screen.queryByTestId("qhm-tz-select")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("qhm-quiet-tz")).not.toBeInTheDocument()
   })
 
   it("toggling the enable switch seeds a default 22:00–08:00 UTC value", () => {
@@ -48,7 +48,7 @@ describe("QuietHoursAndMute — timezone selector", () => {
     setup({
       quietHours: { from: "09:00", to: "17:00", tz: "America/New_York" },
     })
-    const select = screen.getByTestId("qhm-tz-select") as HTMLSelectElement
+    const select = screen.getByTestId("qhm-quiet-tz") as HTMLSelectElement
     expect(select).toBeInTheDocument()
     expect(select.value).toBe("America/New_York")
     expect(screen.queryByTestId("qhm-tz-custom-input")).not.toBeInTheDocument()
@@ -58,7 +58,7 @@ describe("QuietHoursAndMute — timezone selector", () => {
     setup({
       quietHours: { from: "09:00", to: "17:00", tz: "Asia/Singapore" },
     })
-    expect(screen.queryByTestId("qhm-tz-select")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("qhm-quiet-tz")).not.toBeInTheDocument()
     const input = screen.getByTestId("qhm-tz-custom-input") as HTMLInputElement
     expect(input.value).toBe("Asia/Singapore")
   })
@@ -67,7 +67,7 @@ describe("QuietHoursAndMute — timezone selector", () => {
     setup({
       quietHours: { from: "09:00", to: "17:00", tz: "UTC" },
     })
-    const select = screen.getByTestId("qhm-tz-select") as HTMLSelectElement
+    const select = screen.getByTestId("qhm-quiet-tz") as HTMLSelectElement
     fireEvent.change(select, { target: { value: "__custom__" } })
     expect(screen.getByTestId("qhm-tz-custom-input")).toBeInTheDocument()
   })

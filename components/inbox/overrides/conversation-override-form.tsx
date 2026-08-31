@@ -55,6 +55,8 @@ import type {
 import { resolveBinding } from "@/lib/connectors/policy-resolve"
 import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { ConversationBehaviorEditor } from "@/components/settings/connections/forms/conversation-behavior-editor"
+import { QuietHoursAndMute } from "@/components/settings/connections/forms/quiet-hours-and-mute"
+import { AdapterFormSections } from "@/components/settings/connections/forms/_shared/adapter-form-sections"
 import type { ImConfigSource, ImExecutionTarget } from "@/lib/connectors/effective-config"
 import { EntityPicker } from "@/components/settings/connections/forms/_shared/entity-picker"
 import { TeamPicker } from "@/components/settings/connections/forms/_shared/team-picker"
@@ -528,615 +530,697 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       <div className="border-b pb-3 text-xs font-mono text-muted-foreground">{conversationKey}</div>
 
-      <div className="border-b pb-5">
-        <ConversationBehaviorEditor
-          scope="conversation"
-          value={{
-            mode: mode === "unset" ? undefined : mode,
-            autonomy,
-            engagement,
-            authority,
-            inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
-            activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
-            activationTtlHours,
-            a2ui,
-          }}
-          sources={effectiveSources}
-          targetKind={effectiveTargetKind}
-          onChange={(next) => {
-            setMode(next.mode ?? "unset")
-            setAutonomy(next.autonomy)
-            setEngagement(next.engagement)
-            setAuthority(next.authority)
-            setActivationPolicy(next.inboundActivationPolicy ?? "inherit")
-            setDispatchMode(next.activeRunDispatchMode ?? "inherit")
-            setActivationTtlHours(next.activationTtlHours ?? "")
-            setA2ui(next.a2ui)
-          }}
-        />
-      </div>
-
-      {/* Whether this chat answers at all. The editor itself needs the bot's
-       * policy — taking a part over seeds it from what the chat currently
-       * evaluates, and seeding from a placeholder would silence the chat — but
-       * an absent section reads as a feature that was never built (ADR-0152),
-       * so the section stays and says why it cannot be edited. */}
-      <div className="border-b pb-5">
-        {inheritedTrigger ? (
-          <ConversationTriggerOverride
-            baseline={inheritedTrigger}
-            value={trigger}
-            onChange={setTrigger}
-          />
-        ) : (
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium">{t("triggerUnavailable.title")}</h4>
-            <UnavailableNotice
-              cause="adapter-row-unreadable"
-              reason={t("triggerUnavailable.reason")}
-              nextStep={t("triggerUnavailable.nextStep")}
-              data-testid="conv-override-trigger-unavailable"
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-character-state">{t("fields.character")}</Label>
-        <Select
-          value={characterState}
-          onValueChange={(value) => setCharacterState(value as typeof characterState)}
-        >
-          <SelectTrigger
-            id="conv-override-character-state"
-            data-testid="conv-override-character-state"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
-            <SelectItem value="none">{t("fields.target.none")}</SelectItem>
-            <SelectItem value="character">{t("fields.target.specificCharacter")}</SelectItem>
-          </SelectContent>
-        </Select>
-        {characterState === "character" && (
-          <EntityPicker
-            id="conv-override-character"
-            value={characterId}
-            items={(characters ?? []).map((character) => ({
-              id: character.id,
-              label: character.name,
-            }))}
-            emptyLabel={t("fields.characterPlaceholder")}
-            missingLabel={(id) => t("fields.referenceMissing", { id })}
-            onChange={(id) => setCharacterId(id ?? "")}
-            triggerTestId="conv-override-character"
-          />
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-target">{t("fields.target.label")}</Label>
-        <Select
-          value={targetKind}
-          onValueChange={(value) => setTargetKind(value as typeof targetKind)}
-        >
-          <SelectTrigger id="conv-override-target" data-testid="conv-override-target">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
-            <SelectItem value="direct">{t("fields.target.direct")}</SelectItem>
-            <SelectItem value="team">{t("fields.target.team")}</SelectItem>
-            <SelectItem value="workflow">{t("fields.target.workflow")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {targetKind === "team" && (
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
-          <TeamPicker
-            id="conv-override-team"
-            value={teamId}
-            onChange={(id) => setTeamId(id ?? "")}
-          />
-          <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
-        </div>
-      )}
-
-      {targetKind === "workflow" && (
-        <div className="space-y-2">
-          <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
-          <EntityPicker
-            id="conv-override-workflow"
-            value={workflowId}
-            items={(executableWorkflows ?? []).map((workflow) => ({
-              id: workflow.id,
-              label: workflow.name,
-              description: t("fields.workflowProduction"),
-            }))}
-            emptyLabel={t("fields.workflowBindingPlaceholder")}
-            missingLabel={(id) => t("fields.referenceMissing", { id })}
-            onChange={(id) => setWorkflowId(id ?? "")}
-            triggerTestId="conv-override-workflow"
-          />
-          <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
-        </div>
-      )}
-
-      <div className="flex flex-col gap-4 border-b pb-5">
-        <div className="flex items-start gap-2">
-          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="conv-override-cu" className="cursor-pointer">
-                {t("fields.allowComputerUse")}
-              </Label>
-              <Switch
-                id="conv-override-cu"
-                checked={allowComputerUse}
-                onCheckedChange={setAllowComputerUse}
-                data-testid="conv-override-cu"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("fields.allowComputerUseWarning")}</p>
-          </div>
-        </div>
-        {/* v49 — Per-conversation opt-in for self-driving `/goal` on
-         * IM channels. Off by default so a goal loop cannot auto-reply
-         * without operator review. */}
-        <div className="flex items-start gap-3 border-t pt-4">
-          <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="conv-override-goal" className="cursor-pointer">
-                {t("fields.allowGoalDriving")}
-              </Label>
-              <Switch
-                id="conv-override-goal"
-                checked={allowGoalDriving}
-                onCheckedChange={setAllowGoalDriving}
-                data-testid="conv-override-goal"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
-            <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
-          </div>
-        </div>
-        {/* Editable only once the bot row is readable: the switch seeds the
-         * grant with the provider this conversation resolves to, and seeding
-         * from an unloaded row would produce a grant naming nobody — which the
-         * resolver reads as no grant at all. Rendered either way, because a
-         * missing consent control is indistinguishable from one that was never
-         * built (ADR-0152). */}
-        <div className="border-t pt-4">
-          {adapterRow ? (
-            <MediaGrantEditor
-              value={mediaGrant}
-              onChange={setMediaGrant}
-              providers={Array.from(
-                new Set(providerModelOptions.map((option) => option.providerId))
-              )}
-              // What this conversation actually resolves to, not just what it
-              // overrides — a grant seeded from an empty override would name no
-              // provider, and a grant naming none grants nothing.
-              effectiveProvider={providerOverride.trim() || adapterRow.defaultProvider}
-            />
-          ) : (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium">{t("mediaGrant.label")}</h4>
-              <UnavailableNotice
-                cause="adapter-row-unreadable"
-                reason={t("mediaGrantUnavailable.reason")}
-                nextStep={t("mediaGrantUnavailable.nextStep")}
-                data-testid="conv-override-media-grant-unavailable"
-              />
-            </div>
-          )}
-        </div>
-        {/* Default-ALLOW, and the only member of this group that is — no
-         * destructive marker, because switching it OFF is the restriction. */}
-        <div className="flex items-start gap-3 border-t pt-4">
-          <ScanTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="conv-override-allow-ocr" className="cursor-pointer">
-                {t("fields.allowOcr")}
-              </Label>
-              <Switch
-                id="conv-override-allow-ocr"
-                checked={allowOcr}
-                onCheckedChange={setAllowOcr}
-                data-testid="conv-override-allow-ocr"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("fields.allowOcrHint")}</p>
-          </div>
-        </div>
-        <div className="flex items-start gap-3 border-t pt-4">
-          <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="conv-override-schedule-tools" className="cursor-pointer">
-                {t("fields.allowScheduleTools")}
-              </Label>
-              <Switch
-                id="conv-override-schedule-tools"
-                checked={allowScheduleTools}
-                onCheckedChange={setAllowScheduleTools}
-                data-testid="conv-override-schedule-tools"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("fields.allowScheduleToolsWarning")}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {targetKind === "team" ||
-        targetKind === "workflow" ||
-        (targetKind === "inherit" && effectiveTargetKind && effectiveTargetKind !== "direct") ? (
-          <p className="text-xs text-muted-foreground" data-testid="conv-override-model-managed">
-            {t("fields.modelManagedByTarget")}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            <Label htmlFor="conv-override-provider-model">
-              {t("fields.providerModelOverride")}
-            </Label>
-            <EntityPicker
-              id="conv-override-provider-model"
-              value={
-                providerOverride || modelOverride
-                  ? `${providerOverride}:${modelOverride}`
-                  : undefined
-              }
-              items={providerModelOptions.map((option) => ({
-                id: `${option.providerId}:${option.modelId}`,
-                label: option.label,
-              }))}
-              emptyLabel={t("fields.providerModelDefault")}
-              missingLabel={(id) => t("fields.referenceMissing", { id })}
-              onChange={(value) => {
-                if (!value) {
-                  setProviderOverride("")
-                  setModelOverride("")
-                  return
-                }
-                const separator = value.indexOf(":")
-                setProviderOverride(value.slice(0, separator))
-                setModelOverride(value.slice(separator + 1))
-              }}
-              triggerTestId="conv-override-provider-model"
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="conv-override-sla">{t("fields.slaResponseMinutes")}</Label>
-        <Input
-          id="conv-override-sla"
-          type="number"
-          min={1}
-          inputMode="numeric"
-          value={slaMinutes}
-          placeholder={t("fields.slaResponseMinutesPlaceholder")}
-          onChange={(e) => setSlaMinutes(e.target.value)}
-          data-testid="conv-override-sla"
-        />
-        <p className="text-xs text-muted-foreground">{t("fields.slaResponseMinutesHint")}</p>
-      </div>
-
-      {/* SLA escalation chain (slice 1B): per-conversation override of the
-       * bot-wide `defaultEscalation`; `undefined` inherits. */}
-      <div className="space-y-2 border-b pb-5" data-testid="conv-override-escalation">
-        <Label>{t("escalation.title")}</Label>
-        <p className="text-xs text-muted-foreground">{t("escalation.sectionHint")}</p>
-        <EscalationPolicyEditor
-          scope="conversation"
-          platform={platform}
-          value={escalation}
-          onChange={setEscalation}
-          characters={(characters ?? []).map((c) => ({ id: c.id, name: c.name }))}
-          disabled={saving}
-          idPrefix="conv-override-escalation"
-        />
-      </div>
-
-      {/* Proactive IM push opt-in (control-plane notifications). Off by default
-       * so a customer-facing channel never gets surprise pushes. */}
-      <div className="flex items-start gap-3 border-b pb-5">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="conv-override-proactive" className="cursor-pointer">
-              {t("fields.proactivePush")}
-            </Label>
-            <Switch
-              id="conv-override-proactive"
-              checked={proactivePush}
-              onCheckedChange={setProactivePush}
-              data-testid="conv-override-proactive"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("fields.proactivePushHint")}</p>
-        </div>
-      </div>
-
-      {/* Live activity card opt-OUT (control-plane visibility). DEFAULT ON —
-       * the live "the agent is working" card surfaces tool count / elapsed /
-       * file edits during a turn. Flip OFF to suppress on noisy channels. */}
-      <div className="flex items-start gap-3 border-b pb-5">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="conv-override-live-activity" className="cursor-pointer">
-              {t("fields.liveActivity")}
-            </Label>
-            <Switch
-              id="conv-override-live-activity"
-              checked={liveActivity}
-              onCheckedChange={setLiveActivity}
-              data-testid="conv-override-live-activity"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("fields.liveActivityHint")}</p>
-        </div>
-      </div>
-
-      {/* Append-mode activity opt-OUT for adapters WITHOUT edit() (workflow⇄IM
-       * visibility parity). DEFAULT ON — such adapters get one compact progress
-       * line per boundary during a turn. Flip OFF to suppress on noisy channels. */}
-      <div className="flex items-start gap-3 border-b pb-5">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="conv-override-append-activity" className="cursor-pointer">
-              {t("fields.appendActivity")}
-            </Label>
-            <Switch
-              id="conv-override-append-activity"
-              checked={appendActivity}
-              onCheckedChange={setAppendActivity}
-              data-testid="conv-override-append-activity"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("fields.appendActivityHint")}</p>
-        </div>
-      </div>
-
-      {/* Reply quoting opt-OUT (ADR-0009 §3A.3). DEFAULT ON — group / thread
-       * ai-run replies quote the triggering message on platforms that declare
-       * `send.reply`. Flip OFF to send un-quoted replies in this conversation. */}
-      <div className="flex items-start gap-3 border-b pb-5">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="conv-override-reply-quoting" className="cursor-pointer">
-              {t("fields.replyQuoting")}
-            </Label>
-            <Switch
-              id="conv-override-reply-quoting"
-              checked={replyQuoting}
-              onCheckedChange={setReplyQuoting}
-              data-testid="conv-override-reply-quoting"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("fields.replyQuotingHint")}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="conv-override-pinned" className="cursor-pointer">
-            {t("fields.pinned")}
-          </Label>
-          <Switch
-            id="conv-override-pinned"
-            checked={pinned}
-            onCheckedChange={setPinned}
-            data-testid="conv-override-pinned"
-          />
-        </div>
-        <div className="flex items-center justify-between">
-          <Label htmlFor="conv-override-archived" className="cursor-pointer">
-            {t("fields.archived")}
-          </Label>
-          <Switch
-            id="conv-override-archived"
-            checked={archived}
-            onCheckedChange={setArchived}
-            data-testid="conv-override-archived"
-          />
-        </div>
-      </div>
-
-      {/* Per-conversation outbound mute — same defer semantics as the
-       * adapter-level mute, scoped to this conversation only. */}
-      <div className="flex items-start gap-3 border-b pb-5">
-        <div className="flex-1 space-y-1">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="conv-override-muted" className="cursor-pointer">
-              {t("fields.muted")}
-            </Label>
-            <Switch
-              id="conv-override-muted"
-              checked={muted}
-              onCheckedChange={setMuted}
-              data-testid="conv-override-muted"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("fields.mutedHint")}</p>
-        </div>
-      </div>
-
-      {/* Quiet hours — per-conversation override that beats the adapter
-       * default in `outbound-runner`. */}
-      <div className="flex flex-col gap-2 border-b pb-5">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="conv-override-quiet-enabled" className="cursor-pointer">
-            {t("fields.quietHours.enabled")}
-          </Label>
-          <Switch
-            id="conv-override-quiet-enabled"
-            checked={quietHours.enabled}
-            onCheckedChange={(v) => setQuietHours((prev) => ({ ...prev, enabled: v }))}
-            data-testid="conv-override-quiet-enabled"
-          />
-        </div>
-        {quietHours.enabled && (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor="conv-override-quiet-from">
-                {t("fields.quietHours.from")}
-              </Label>
-              <Input
-                id="conv-override-quiet-from"
-                type="time"
-                value={quietHours.from}
-                onChange={(e) => setQuietHours((prev) => ({ ...prev, from: e.target.value }))}
-                data-testid="conv-override-quiet-from"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor="conv-override-quiet-to">
-                {t("fields.quietHours.to")}
-              </Label>
-              <Input
-                id="conv-override-quiet-to"
-                type="time"
-                value={quietHours.to}
-                onChange={(e) => setQuietHours((prev) => ({ ...prev, to: e.target.value }))}
-                data-testid="conv-override-quiet-to"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor="conv-override-quiet-tz">
-                {t("fields.quietHours.tz")}
-              </Label>
-              <Input
-                id="conv-override-quiet-tz"
-                value={quietHours.tz}
-                onChange={(e) => setQuietHours((prev) => ({ ...prev, tz: e.target.value }))}
-                placeholder={t("fields.quietHours.tzPlaceholder")}
-                data-testid="conv-override-quiet-tz"
-              />
-            </div>
-          </div>
-        )}
-        <p className="text-[11px] text-muted-foreground">{t("fields.quietHours.help")}</p>
-      </div>
-
-      {/* Built-in skill allowlist — tri-state radio + chip-input for the
-       * whitelist branch. Inherit falls back to the adapter / global
-       * defaults; "all" opens every registered skill (still subject to
-       * HITL routing). */}
-      <div className="flex flex-col gap-2 border-b pb-5">
-        <Label className="cursor-pointer">{t("fields.allowedSkills.label")}</Label>
-        <RadioGroup
-          value={skillMode}
-          onValueChange={(v) => setSkillMode(v as SkillAllowMode)}
-          className="flex flex-wrap gap-3 text-xs"
-        >
-          <label className="flex items-center gap-1.5">
-            <RadioGroupItem
-              value="inherit"
-              id="conv-override-skills-inherit"
-              data-testid="conv-override-skills-inherit"
-            />
-            <span>{t("fields.allowedSkills.inherit")}</span>
-          </label>
-          <label className="flex items-center gap-1.5">
-            <RadioGroupItem
-              value="all"
-              id="conv-override-skills-all"
-              data-testid="conv-override-skills-all"
-            />
-            <span>{t("fields.allowedSkills.all")}</span>
-          </label>
-          <label className="flex items-center gap-1.5">
-            <RadioGroupItem
-              value="whitelist"
-              id="conv-override-skills-whitelist"
-              data-testid="conv-override-skills-whitelist"
-            />
-            <span>{t("fields.allowedSkills.whitelist")}</span>
-          </label>
-        </RadioGroup>
-        {skillMode === "whitelist" && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Input
-                value={skillInput}
-                placeholder={t("fields.allowedSkills.placeholder")}
-                onChange={(e) => setSkillInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") {
-                    e.preventDefault()
-                    addSkillFromInput()
-                  }
-                }}
-                onBlur={() => addSkillFromInput()}
-                data-testid="conv-override-skills-input"
-                className="text-xs"
-              />
+      {/* Twelve unrelated config domains used to sit flat in one column inside
+       * a modal, which made "where do I turn off quiet hours" a scroll hunt.
+       * Grouped onto the same collapsible shell every platform dialog uses,
+       * in the order a reader asks the questions: does it answer, who runs it,
+       * on what model, when may it speak, what may it touch.
+       *
+       * `dirty` is unconditional. The form has never tracked whether anything
+       * changed, so its Save has always been live, and inventing dirty
+       * tracking here would be a behaviour change hiding inside a layout one. */}
+      <AdapterFormSections
+        dirty
+        submitting={saving}
+        submitLabel={t("save")}
+        cancelLabel={t("reset")}
+        submitTestId="conv-override-save"
+        cancelTestId="conv-override-cancel"
+        onSubmit={onSave}
+        onCancel={onCancel}
+        footerSlot={
+          <div className="mr-auto flex flex-wrap items-center gap-2">
+            {initialRow && (
               <Button
-                type="button"
+                variant="destructive"
                 size="sm"
-                variant="outline"
-                onClick={addSkillFromInput}
-                data-testid="conv-override-skills-add"
+                onClick={onDelete}
+                data-testid="conv-override-delete"
               >
-                {t("fields.allowedSkills.add")}
+                {t("deleteOverride")}
               </Button>
-            </div>
-            {skillIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5" data-testid="conv-override-skills-chips">
-                {skillIds.map((id) => (
-                  <Badge key={id} variant="secondary" className="gap-1 pr-1 text-[11px]">
-                    <span className="font-mono">{id}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeSkill(id)}
-                      aria-label={t("fields.allowedSkills.remove", { id })}
-                      data-testid={`conv-override-skills-remove-${id}`}
-                      className="size-4"
-                    >
-                      <XIcon className="size-2.5" aria-hidden />
-                    </Button>
-                  </Badge>
-                ))}
-              </div>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onPromoteToAdapter}
+              disabled={promotingToAdapter || saving || !adapterId}
+              data-testid="conv-override-promote-to-adapter"
+              title={t("fields.promoteToAdapterTitle")}
+            >
+              {promotingToAdapter ? t("saving") : t("fields.promoteToAdapter")}
+            </Button>
           </div>
-        )}
-        <p className="text-[11px] text-muted-foreground">{t("fields.allowedSkills.help")}</p>
-      </div>
+        }
+        sections={[
+          {
+            id: "behaviour",
+            label: t("sections.behaviour"),
+            description: t("sections.behaviourHelp"),
+            defaultOpen: true,
+            children: (
+              <>
+                <div className="border-b pb-5">
+                  <ConversationBehaviorEditor
+                    scope="conversation"
+                    value={{
+                      mode: mode === "unset" ? undefined : mode,
+                      autonomy,
+                      engagement,
+                      authority,
+                      inboundActivationPolicy:
+                        activationPolicy === "inherit" ? undefined : activationPolicy,
+                      activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+                      activationTtlHours,
+                      a2ui,
+                    }}
+                    sources={effectiveSources}
+                    targetKind={effectiveTargetKind}
+                    onChange={(next) => {
+                      setMode(next.mode ?? "unset")
+                      setAutonomy(next.autonomy)
+                      setEngagement(next.engagement)
+                      setAuthority(next.authority)
+                      setActivationPolicy(next.inboundActivationPolicy ?? "inherit")
+                      setDispatchMode(next.activeRunDispatchMode ?? "inherit")
+                      setActivationTtlHours(next.activationTtlHours ?? "")
+                      setA2ui(next.a2ui)
+                    }}
+                  />
+                </div>
 
-      {/* HITL guard on write-tier skills (defaults true). Off makes the
-       * channel "trusted" so write skills don't pop a confirm card. */}
-      <Alert variant="destructive" className="rounded-none border-x-0 bg-transparent">
-        <ShieldAlertIcon aria-hidden />
-        <AlertDescription>
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="conv-override-hitl" className="cursor-pointer">
-                {t("fields.requireHitlForWrites.label")}
-              </Label>
-              <Switch
-                id="conv-override-hitl"
-                checked={requireHitlForWrites}
-                onCheckedChange={setRequireHitlForWrites}
-                data-testid="conv-override-hitl"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("fields.requireHitlForWrites.help")}</p>
-          </div>
-        </AlertDescription>
-      </Alert>
+                {/* Whether this chat answers at all. The editor itself needs the bot's
+                 * policy — taking a part over seeds it from what the chat currently
+                 * evaluates, and seeding from a placeholder would silence the chat — but
+                 * an absent section reads as a feature that was never built (ADR-0152),
+                 * so the section stays and says why it cannot be edited. */}
+                <div className="border-b pb-5">
+                  {inheritedTrigger ? (
+                    <ConversationTriggerOverride
+                      baseline={inheritedTrigger}
+                      value={trigger}
+                      onChange={setTrigger}
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium">{t("triggerUnavailable.title")}</h4>
+                      <UnavailableNotice
+                        cause="adapter-row-unreadable"
+                        reason={t("triggerUnavailable.reason")}
+                        nextStep={t("triggerUnavailable.nextStep")}
+                        data-testid="conv-override-trigger-unavailable"
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            ),
+          },
+          {
+            id: "routing",
+            label: t("sections.routing"),
+            description: t("sections.routingHelp"),
+            children: (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="conv-override-character-state">{t("fields.character")}</Label>
+                  <Select
+                    value={characterState}
+                    onValueChange={(value) => setCharacterState(value as typeof characterState)}
+                  >
+                    <SelectTrigger
+                      id="conv-override-character-state"
+                      data-testid="conv-override-character-state"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
+                      <SelectItem value="none">{t("fields.target.none")}</SelectItem>
+                      <SelectItem value="character">
+                        {t("fields.target.specificCharacter")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {characterState === "character" && (
+                    <EntityPicker
+                      id="conv-override-character"
+                      value={characterId}
+                      items={(characters ?? []).map((character) => ({
+                        id: character.id,
+                        label: character.name,
+                      }))}
+                      emptyLabel={t("fields.characterPlaceholder")}
+                      missingLabel={(id) => t("fields.referenceMissing", { id })}
+                      onChange={(id) => setCharacterId(id ?? "")}
+                      triggerTestId="conv-override-character"
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="conv-override-target">{t("fields.target.label")}</Label>
+                  <Select
+                    value={targetKind}
+                    onValueChange={(value) => setTargetKind(value as typeof targetKind)}
+                  >
+                    <SelectTrigger id="conv-override-target" data-testid="conv-override-target">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">{t("fields.target.inherit")}</SelectItem>
+                      <SelectItem value="direct">{t("fields.target.direct")}</SelectItem>
+                      <SelectItem value="team">{t("fields.target.team")}</SelectItem>
+                      <SelectItem value="workflow">{t("fields.target.workflow")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {targetKind === "team" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
+                    <TeamPicker
+                      id="conv-override-team"
+                      value={teamId}
+                      onChange={(id) => setTeamId(id ?? "")}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("fields.teamBindingHelp")}
+                    </p>
+                  </div>
+                )}
+
+                {targetKind === "workflow" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
+                    <EntityPicker
+                      id="conv-override-workflow"
+                      value={workflowId}
+                      items={(executableWorkflows ?? []).map((workflow) => ({
+                        id: workflow.id,
+                        label: workflow.name,
+                        description: t("fields.workflowProduction"),
+                      }))}
+                      emptyLabel={t("fields.workflowBindingPlaceholder")}
+                      missingLabel={(id) => t("fields.referenceMissing", { id })}
+                      onChange={(id) => setWorkflowId(id ?? "")}
+                      triggerTestId="conv-override-workflow"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("fields.workflowBindingHelp")}
+                    </p>
+                  </div>
+                )}
+              </>
+            ),
+          },
+          {
+            id: "model",
+            label: t("sections.model"),
+            description: t("sections.modelHelp"),
+            children: (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {targetKind === "team" ||
+                  targetKind === "workflow" ||
+                  (targetKind === "inherit" &&
+                    effectiveTargetKind &&
+                    effectiveTargetKind !== "direct") ? (
+                    <p
+                      className="text-xs text-muted-foreground"
+                      data-testid="conv-override-model-managed"
+                    >
+                      {t("fields.modelManagedByTarget")}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="conv-override-provider-model">
+                        {t("fields.providerModelOverride")}
+                      </Label>
+                      <EntityPicker
+                        id="conv-override-provider-model"
+                        value={
+                          providerOverride || modelOverride
+                            ? `${providerOverride}:${modelOverride}`
+                            : undefined
+                        }
+                        items={providerModelOptions.map((option) => ({
+                          id: `${option.providerId}:${option.modelId}`,
+                          label: option.label,
+                        }))}
+                        emptyLabel={t("fields.providerModelDefault")}
+                        missingLabel={(id) => t("fields.referenceMissing", { id })}
+                        onChange={(value) => {
+                          if (!value) {
+                            setProviderOverride("")
+                            setModelOverride("")
+                            return
+                          }
+                          const separator = value.indexOf(":")
+                          setProviderOverride(value.slice(0, separator))
+                          setModelOverride(value.slice(separator + 1))
+                        }}
+                        triggerTestId="conv-override-provider-model"
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            ),
+          },
+          {
+            id: "reach",
+            label: t("sections.reach"),
+            description: t("sections.reachHelp"),
+            children: (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="conv-override-sla">{t("fields.slaResponseMinutes")}</Label>
+                  <Input
+                    id="conv-override-sla"
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={slaMinutes}
+                    placeholder={t("fields.slaResponseMinutesPlaceholder")}
+                    onChange={(e) => setSlaMinutes(e.target.value)}
+                    data-testid="conv-override-sla"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t("fields.slaResponseMinutesHint")}
+                  </p>
+                </div>
+
+                {/* SLA escalation chain (slice 1B): per-conversation override of the
+                 * bot-wide `defaultEscalation`; `undefined` inherits. */}
+                <div className="space-y-2 border-b pb-5" data-testid="conv-override-escalation">
+                  <Label>{t("escalation.title")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("escalation.sectionHint")}</p>
+                  <EscalationPolicyEditor
+                    scope="conversation"
+                    platform={platform}
+                    value={escalation}
+                    onChange={setEscalation}
+                    characters={(characters ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                    disabled={saving}
+                    idPrefix="conv-override-escalation"
+                  />
+                </div>
+
+                {/* Proactive IM push opt-in (control-plane notifications). Off by default
+                 * so a customer-facing channel never gets surprise pushes. */}
+                <div className="flex items-start gap-3 border-b pb-5">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="conv-override-proactive" className="cursor-pointer">
+                        {t("fields.proactivePush")}
+                      </Label>
+                      <Switch
+                        id="conv-override-proactive"
+                        checked={proactivePush}
+                        onCheckedChange={setProactivePush}
+                        data-testid="conv-override-proactive"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t("fields.proactivePushHint")}</p>
+                  </div>
+                </div>
+
+                {/* Live activity card opt-OUT (control-plane visibility). DEFAULT ON —
+                 * the live "the agent is working" card surfaces tool count / elapsed /
+                 * file edits during a turn. Flip OFF to suppress on noisy channels. */}
+                <div className="flex items-start gap-3 border-b pb-5">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="conv-override-live-activity" className="cursor-pointer">
+                        {t("fields.liveActivity")}
+                      </Label>
+                      <Switch
+                        id="conv-override-live-activity"
+                        checked={liveActivity}
+                        onCheckedChange={setLiveActivity}
+                        data-testid="conv-override-live-activity"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t("fields.liveActivityHint")}</p>
+                  </div>
+                </div>
+
+                {/* Append-mode activity opt-OUT for adapters WITHOUT edit() (workflow⇄IM
+                 * visibility parity). DEFAULT ON — such adapters get one compact progress
+                 * line per boundary during a turn. Flip OFF to suppress on noisy channels. */}
+                <div className="flex items-start gap-3 border-b pb-5">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="conv-override-append-activity" className="cursor-pointer">
+                        {t("fields.appendActivity")}
+                      </Label>
+                      <Switch
+                        id="conv-override-append-activity"
+                        checked={appendActivity}
+                        onCheckedChange={setAppendActivity}
+                        data-testid="conv-override-append-activity"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {t("fields.appendActivityHint")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Reply quoting opt-OUT (ADR-0009 §3A.3). DEFAULT ON — group / thread
+                 * ai-run replies quote the triggering message on platforms that declare
+                 * `send.reply`. Flip OFF to send un-quoted replies in this conversation. */}
+                <div className="flex items-start gap-3 border-b pb-5">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="conv-override-reply-quoting" className="cursor-pointer">
+                        {t("fields.replyQuoting")}
+                      </Label>
+                      <Switch
+                        id="conv-override-reply-quoting"
+                        checked={replyQuoting}
+                        onCheckedChange={setReplyQuoting}
+                        data-testid="conv-override-reply-quoting"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t("fields.replyQuotingHint")}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="conv-override-pinned" className="cursor-pointer">
+                      {t("fields.pinned")}
+                    </Label>
+                    <Switch
+                      id="conv-override-pinned"
+                      checked={pinned}
+                      onCheckedChange={setPinned}
+                      data-testid="conv-override-pinned"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="conv-override-archived" className="cursor-pointer">
+                      {t("fields.archived")}
+                    </Label>
+                    <Switch
+                      id="conv-override-archived"
+                      checked={archived}
+                      onCheckedChange={setArchived}
+                      data-testid="conv-override-archived"
+                    />
+                  </div>
+                </div>
+
+                {/* Mute + quiet hours, per conversation. Same defer semantics as the
+                 * adapter-level pair, scoped to this conversation only.
+                 *
+                 * The shared editor, not the copy that used to live here: that copy took
+                 * the timezone as a freeform `<Input>` with no validation, so a typo
+                 * ("Asia/Shangai") silenced the bot on a window that never opened. This
+                 * one offers the common zones, keeps a custom escape hatch, and says so
+                 * when the zone does not resolve. `outbound-runner` reads the result
+                 * either way. */}
+                <div className="border-b pb-5">
+                  <QuietHoursAndMute
+                    idPrefix="conv-override"
+                    muted={muted}
+                    onMutedChange={setMuted}
+                    quietHours={
+                      quietHours.enabled
+                        ? { from: quietHours.from, to: quietHours.to, tz: quietHours.tz }
+                        : null
+                    }
+                    onQuietHoursChange={(next) =>
+                      setQuietHours((prev) =>
+                        next
+                          ? { enabled: true, from: next.from, to: next.to, tz: next.tz }
+                          : { ...prev, enabled: false }
+                      )
+                    }
+                  />
+                  <p className="pt-2 text-[11px] text-muted-foreground">
+                    {t("fields.quietHours.help")}
+                  </p>
+                </div>
+              </>
+            ),
+          },
+          {
+            id: "grants",
+            label: t("sections.grants"),
+            description: t("sections.grantsHelp"),
+            children: (
+              <>
+                <div className="flex flex-col gap-4 border-b pb-5">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="conv-override-cu" className="cursor-pointer">
+                          {t("fields.allowComputerUse")}
+                        </Label>
+                        <Switch
+                          id="conv-override-cu"
+                          checked={allowComputerUse}
+                          onCheckedChange={setAllowComputerUse}
+                          data-testid="conv-override-cu"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("fields.allowComputerUseWarning")}
+                      </p>
+                    </div>
+                  </div>
+                  {/* v49 — Per-conversation opt-in for self-driving `/goal` on
+                   * IM channels. Off by default so a goal loop cannot auto-reply
+                   * without operator review. */}
+                  <div className="flex items-start gap-3 border-t pt-4">
+                    <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="conv-override-goal" className="cursor-pointer">
+                          {t("fields.allowGoalDriving")}
+                        </Label>
+                        <Switch
+                          id="conv-override-goal"
+                          checked={allowGoalDriving}
+                          onCheckedChange={setAllowGoalDriving}
+                          data-testid="conv-override-goal"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("fields.allowGoalDrivingWarning")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t("fields.allowGoalDrivingPlatform")}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Editable only once the bot row is readable: the switch seeds the
+                   * grant with the provider this conversation resolves to, and seeding
+                   * from an unloaded row would produce a grant naming nobody — which the
+                   * resolver reads as no grant at all. Rendered either way, because a
+                   * missing consent control is indistinguishable from one that was never
+                   * built (ADR-0152). */}
+                  <div className="border-t pt-4">
+                    {adapterRow ? (
+                      <MediaGrantEditor
+                        value={mediaGrant}
+                        onChange={setMediaGrant}
+                        providers={Array.from(
+                          new Set(providerModelOptions.map((option) => option.providerId))
+                        )}
+                        // What this conversation actually resolves to, not just what it
+                        // overrides — a grant seeded from an empty override would name no
+                        // provider, and a grant naming none grants nothing.
+                        effectiveProvider={providerOverride.trim() || adapterRow.defaultProvider}
+                      />
+                    ) : (
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium">{t("mediaGrant.label")}</h4>
+                        <UnavailableNotice
+                          cause="adapter-row-unreadable"
+                          reason={t("mediaGrantUnavailable.reason")}
+                          nextStep={t("mediaGrantUnavailable.nextStep")}
+                          data-testid="conv-override-media-grant-unavailable"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {/* Default-ALLOW, and the only member of this group that is — no
+                   * destructive marker, because switching it OFF is the restriction. */}
+                  <div className="flex items-start gap-3 border-t pt-4">
+                    <ScanTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="conv-override-allow-ocr" className="cursor-pointer">
+                          {t("fields.allowOcr")}
+                        </Label>
+                        <Switch
+                          id="conv-override-allow-ocr"
+                          checked={allowOcr}
+                          onCheckedChange={setAllowOcr}
+                          data-testid="conv-override-allow-ocr"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">{t("fields.allowOcrHint")}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 border-t pt-4">
+                    <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="conv-override-schedule-tools" className="cursor-pointer">
+                          {t("fields.allowScheduleTools")}
+                        </Label>
+                        <Switch
+                          id="conv-override-schedule-tools"
+                          checked={allowScheduleTools}
+                          onCheckedChange={setAllowScheduleTools}
+                          data-testid="conv-override-schedule-tools"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("fields.allowScheduleToolsWarning")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ),
+          },
+          {
+            id: "skills",
+            label: t("sections.skills"),
+            description: t("sections.skillsHelp"),
+            children: (
+              <>
+                {/* Built-in skill allowlist — tri-state radio + chip-input for the
+                 * whitelist branch. Inherit falls back to the adapter / global
+                 * defaults; "all" opens every registered skill (still subject to
+                 * HITL routing). */}
+                <div className="flex flex-col gap-2 border-b pb-5">
+                  <Label className="cursor-pointer">{t("fields.allowedSkills.label")}</Label>
+                  <RadioGroup
+                    value={skillMode}
+                    onValueChange={(v) => setSkillMode(v as SkillAllowMode)}
+                    className="flex flex-wrap gap-3 text-xs"
+                  >
+                    <label className="flex items-center gap-1.5">
+                      <RadioGroupItem
+                        value="inherit"
+                        id="conv-override-skills-inherit"
+                        data-testid="conv-override-skills-inherit"
+                      />
+                      <span>{t("fields.allowedSkills.inherit")}</span>
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <RadioGroupItem
+                        value="all"
+                        id="conv-override-skills-all"
+                        data-testid="conv-override-skills-all"
+                      />
+                      <span>{t("fields.allowedSkills.all")}</span>
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <RadioGroupItem
+                        value="whitelist"
+                        id="conv-override-skills-whitelist"
+                        data-testid="conv-override-skills-whitelist"
+                      />
+                      <span>{t("fields.allowedSkills.whitelist")}</span>
+                    </label>
+                  </RadioGroup>
+                  {skillMode === "whitelist" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={skillInput}
+                          placeholder={t("fields.allowedSkills.placeholder")}
+                          onChange={(e) => setSkillInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === ",") {
+                              e.preventDefault()
+                              addSkillFromInput()
+                            }
+                          }}
+                          onBlur={() => addSkillFromInput()}
+                          data-testid="conv-override-skills-input"
+                          className="text-xs"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={addSkillFromInput}
+                          data-testid="conv-override-skills-add"
+                        >
+                          {t("fields.allowedSkills.add")}
+                        </Button>
+                      </div>
+                      {skillIds.length > 0 && (
+                        <div
+                          className="flex flex-wrap gap-1.5"
+                          data-testid="conv-override-skills-chips"
+                        >
+                          {skillIds.map((id) => (
+                            <Badge key={id} variant="secondary" className="gap-1 pr-1 text-[11px]">
+                              <span className="font-mono">{id}</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeSkill(id)}
+                                aria-label={t("fields.allowedSkills.remove", { id })}
+                                data-testid={`conv-override-skills-remove-${id}`}
+                                className="size-4"
+                              >
+                                <XIcon className="size-2.5" aria-hidden />
+                              </Button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("fields.allowedSkills.help")}
+                  </p>
+                </div>
+
+                {/* HITL guard on write-tier skills (defaults true). Off makes the
+                 * channel "trusted" so write skills don't pop a confirm card. */}
+                <Alert variant="destructive" className="rounded-none border-x-0 bg-transparent">
+                  <ShieldAlertIcon aria-hidden />
+                  <AlertDescription>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="conv-override-hitl" className="cursor-pointer">
+                          {t("fields.requireHitlForWrites.label")}
+                        </Label>
+                        <Switch
+                          id="conv-override-hitl"
+                          checked={requireHitlForWrites}
+                          onCheckedChange={setRequireHitlForWrites}
+                          data-testid="conv-override-hitl"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("fields.requireHitlForWrites.help")}
+                      </p>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Alert
         className="rounded-none border-x-0 bg-transparent text-xs"
@@ -1145,38 +1229,6 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         <InfoIcon aria-hidden />
         <AlertDescription>{t("fields.advancedJsonHelp")}</AlertDescription>
       </Alert>
-
-      <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          {initialRow && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={onDelete}
-              data-testid="conv-override-delete"
-            >
-              {t("deleteOverride")}
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={onPromoteToAdapter}
-            disabled={promotingToAdapter || saving || !adapterId}
-            data-testid="conv-override-promote-to-adapter"
-            title={t("fields.promoteToAdapterTitle")}
-          >
-            {promotingToAdapter ? t("saving") : t("fields.promoteToAdapter")}
-          </Button>
-          <Button variant="ghost" onClick={onCancel} data-testid="conv-override-cancel">
-            {t("reset")}
-          </Button>
-          <Button onClick={onSave} disabled={saving} data-testid="conv-override-save">
-            {saving ? t("saving") : t("save")}
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }
