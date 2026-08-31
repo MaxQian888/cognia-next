@@ -243,7 +243,7 @@ describe("restoreSubscriptionFromWebDav", () => {
           providers: ["opencode"],
           accountCount: { anthropic: 0, codex: 0, opencode: 1 },
         },
-        vaults: { opencode: { schemaVersion: 3, accounts: [], presets: [] } },
+        vaults: { opencode: { schemaVersion: 4, accounts: [], presets: [] } },
       },
       "pw"
     )

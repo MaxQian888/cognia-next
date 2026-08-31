@@ -64,7 +64,7 @@ describe("snapshotVaults", () => {
     const got = await snapshotVaults()
     expect(Object.keys(got)).toEqual(["opencode"])
     expect(got.opencode).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       activeAccountId: "a1",
       defaultPresetId: "p1",
     })
@@ -83,7 +83,7 @@ describe("snapshotVaults", () => {
 describe("applyVaults", () => {
   it("writes accounts, presets, default pointer and active pointer", async () => {
     const vault: ProviderVault = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       accounts: [account("a1"), account("a2")],
       activeAccountId: "a2",
       presets: [{ id: "p1", label: "Relay", baseUrl: "https://r.example" }],
@@ -99,7 +99,7 @@ describe("applyVaults", () => {
 
   it("folds a legacy v2 single preset through the shim", async () => {
     const vault = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       accounts: [],
       preset: { id: "legacy", label: "Legacy", baseUrl: "https://l.example" },
     } as unknown as ProviderVault

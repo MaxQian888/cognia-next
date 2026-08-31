@@ -15,6 +15,10 @@ function summary(id: string, provider: ProviderId): AccountSummary {
     expiresAtMs: 0,
     createdAtMs: 0,
     lastUsedAtMs: 0,
+    authMode: provider === "anthropic" ? "subscription" : "chatgpt",
+    credentialSource: "managed",
+    health: "ready",
+    isExternal: false,
   }
 }
 

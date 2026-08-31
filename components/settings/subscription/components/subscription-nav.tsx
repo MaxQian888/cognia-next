@@ -27,10 +27,11 @@ export function SubscriptionNav({ groups, activeId, onSelect }: SubscriptionNavP
       aria-label={t("title")}
     >
       {groups.map((group) => (
-        <div key={group.id}>
+        <div key={group.id} data-nav-group-block>
           <div
             className="px-3 pt-3 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase"
             data-testid={`subscription-nav-group-${group.id}`}
+            data-nav-group
           >
             {t(`groups.${group.id}`)}
           </div>
@@ -74,6 +75,7 @@ function SubscriptionNavItem({
         aria-current={isSelected ? "true" : undefined}
         data-testid={`subscription-nav-item-${id}`}
         data-active={isSelected}
+        data-nav-row
         onClick={() => onSelect(id)}
         className={cn(
           "h-auto w-full items-start justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left font-normal",
@@ -82,9 +84,13 @@ function SubscriptionNavItem({
         )}
       >
         <Icon className="mt-0.5 size-4 shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{label}</span>
-          <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+        <span className="min-w-0 flex-1" data-nav-text>
+          <span className="block truncate text-sm font-medium" data-nav-label>
+            {label}
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground" data-nav-desc>
+            {description}
+          </span>
         </span>
       </Button>
     </div>

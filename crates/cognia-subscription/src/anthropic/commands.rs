@@ -55,6 +55,7 @@ pub async fn anthropic_oauth_save_pkce_result(
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
 
     let _ = local_account_id;

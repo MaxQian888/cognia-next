@@ -8,42 +8,10 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("./account-list", () => ({
-  AccountList: ({
-    provider,
-    onUpdate,
-  }: {
-    provider: string
-    onUpdate?: (account: unknown) => void
-  }) => (
-    <div data-testid={`account-list-${provider}`}>
-      <button
-        data-testid="codex-update-account"
-        onClick={() =>
-          onUpdate?.({
-            id: "existing-codex",
-            credential: { provider: "codex", accessToken: "old", storedAtMs: 0 },
-          })
-        }
-      />
-    </div>
-  ),
-}))
-
 jest.mock("./preset-picker", () => ({
   PresetPicker: ({ provider }: { provider: string }) => (
     <div data-testid={`preset-picker-${provider}`} />
   ),
-}))
-
-jest.mock("./add-account-dialog/codex", () => ({
-  CodexAddAccountDialog: ({
-    open,
-    existingAccount,
-  }: {
-    open: boolean
-    existingAccount?: { id: string }
-  }) => (open ? <div data-testid="codex-add-dialog">{existingAccount?.id}</div> : null),
 }))
 
 jest.mock("./provider-quota-panel", () => ({
@@ -118,18 +86,12 @@ beforeEach(() => {
 })
 
 describe("ProviderTabCodex", () => {
-  it("renders the account list, preset picker, and connection settings card", () => {
+  it("renders quota, preset, and connection settings without duplicated account CRUD", () => {
     render(<ProviderTabCodex />)
-    expect(screen.getByTestId("account-list-codex")).toBeInTheDocument()
+    expect(screen.getByTestId("quota-panel-codex")).toBeInTheDocument()
     expect(screen.getByTestId("preset-picker-codex")).toBeInTheDocument()
     expect(screen.getByText("cardTitle")).toBeInTheDocument()
-  })
-
-  it("opens the same-ID credential update flow", () => {
-    render(<ProviderTabCodex />)
-    fireEvent.click(screen.getByTestId("codex-update-account"))
-
-    expect(screen.getByTestId("codex-add-dialog")).toHaveTextContent("existing-codex")
+    expect(screen.queryByRole("button", { name: /add/i })).not.toBeInTheDocument()
   })
 
   it("shows the connection-settings toggle when the card is expanded", () => {
@@ -147,12 +109,13 @@ describe("ProviderTabCodex", () => {
     expect(screen.queryByText("preferDiscovered.title")).not.toBeInTheDocument()
   })
 
-  it("invokes save with patched settings when autoRefresh toggles", async () => {
+  it("keeps auto-refresh changes pending until Apply is clicked", async () => {
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("cardTitle"))
-    // By id, not by position: this indexed `switches[1]` behind the
-    // since-removed discovery toggle, so removing that silently retargeted it.
     fireEvent.click(document.getElementById("codex-auto-refresh")!)
+    expect(screen.getByText("pending")).toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
         codexSubscriptionSettings: { ...defaultMockCodexSettings, autoRefreshNearExpiry: false },
@@ -160,18 +123,19 @@ describe("ProviderTabCodex", () => {
     })
   })
 
-  it("toggles background usage probing and persists probeEnabled", async () => {
+  it("keeps probe changes pending until Apply and then shows success", async () => {
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("probe.cardTitle"))
-    // Collapsed cards unmount their content, so only the probe card's switch
-    // is mounted here.
     const switches = screen.getAllByRole("switch")
     fireEvent.click(switches[0])
+    expect(saveMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
         codexSubscriptionSettings: { ...defaultMockCodexSettings, probeEnabled: true },
       })
     })
+    expect(screen.getByText("saved")).toBeInTheDocument()
   })
 
   // An api-key login has no usage endpoint upstream, so the quota panel is
@@ -205,7 +169,7 @@ describe("ProviderTabCodex", () => {
     expect(note.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it("clamps a too-fast visible cadence to the floor on save", async () => {
+  it("rejects an invalid cadence without persisting", () => {
     mockSettingsState.codexSubscriptionSettings = {
       ...defaultMockCodexSettings,
       probeEnabled: true,
@@ -214,14 +178,21 @@ describe("ProviderTabCodex", () => {
     fireEvent.click(screen.getByText("probe.cardTitle"))
     const visible = screen.getByLabelText("probe.visibleLabel")
     fireEvent.change(visible, { target: { value: "5" } }) // 5s → below 60s floor
-    await waitFor(() => {
-      expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: {
-          ...mockSettingsState.codexSubscriptionSettings,
-          visibleIntervalMs: 60_000,
-        },
-      })
-    })
+    expect(screen.getByText("invalidCadence")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "save" })).toBeDisabled()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces persistence failures without discarding the draft", async () => {
+    saveMock.mockRejectedValueOnce(new Error("fixture vault unavailable"))
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByText("cardTitle"))
+    fireEvent.click(document.getElementById("codex-auto-refresh")!)
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+
+    expect(await screen.findByText("saveFailed")).toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(document.getElementById("codex-auto-refresh")).not.toBeChecked()
   })
 })
 
@@ -231,7 +202,6 @@ describe("ProviderTabCodex in web mode", () => {
 
   it("refuses to render the account surface instead of dead-ending at the last IPC call", () => {
     render(<ProviderTabCodex />)
-    expect(screen.queryByTestId("account-list-codex")).not.toBeInTheDocument()
     expect(screen.queryByText("cardTitle")).not.toBeInTheDocument()
     expect(screen.getByText("webModeBanner")).toBeInTheDocument()
   })

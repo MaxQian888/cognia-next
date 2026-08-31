@@ -1,4 +1,4 @@
-import { refreshCodexAccountIfStale } from "./refresh"
+import { CodexReauthenticationRequiredError, refreshCodexAccountIfStale } from "./refresh"
 import { discoverCodexAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, CodexCredentialData } from "@/types/subscription"
@@ -210,5 +210,55 @@ describe("refreshCodexAccountIfStale", () => {
     const d = deps({ refreshCodexToken: jest.fn().mockRejectedValue(new Error("invalid_grant")) })
     await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow("invalid_grant")
     expect(d.saveAccount).not.toHaveBeenCalled()
+  })
+
+  it("fails before refresh when the vault already requires reauthentication", async () => {
+    const blocked = {
+      ...account(),
+      authMetadata: {
+        reauthRequiredAtMs: 123,
+        reauthReason: "refresh_token_reused",
+      },
+    }
+    const d = deps({ getAccount: jest.fn().mockResolvedValue(blocked) })
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toBeInstanceOf(
+      CodexReauthenticationRequiredError
+    )
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+  })
+
+  it("normalizes a host terminal-refresh response into an actionable lifecycle error", async () => {
+    const d = deps({
+      refreshManagedAccount: jest
+        .fn()
+        .mockRejectedValue(new Error("reauth_required:invalid_grant")),
+    })
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toMatchObject({
+      code: "reauth_required",
+      reason: "invalid_grant",
+    })
+    expect(d.saveAccount).not.toHaveBeenCalled()
+  })
+
+  it("single-flights concurrent host-managed refreshes", async () => {
+    let resolveRefresh!: (value: CodexCredentialData) => void
+    const refreshManagedAccount = jest.fn(
+      () =>
+        new Promise<CodexCredentialData>((resolve) => {
+          resolveRefresh = resolve
+        })
+    )
+    const d = deps({ refreshManagedAccount })
+
+    const first = refreshCodexAccountIfStale("acc-1", d)
+    const second = refreshCodexAccountIfStale("acc-1", d)
+    await Promise.resolve()
+    expect(refreshManagedAccount).toHaveBeenCalledTimes(1)
+
+    const fresh = credential({ accessToken: "fresh", expiresAtMs: NOW + 3_600_000 })
+    resolveRefresh(fresh)
+    await expect(Promise.all([first, second])).resolves.toEqual([fresh, fresh])
   })
 })

@@ -4,6 +4,24 @@
 import type { AccountVariant, ProviderCredential, ProviderId } from "./credential"
 import type { ProviderPreset } from "./preset"
 
+export type CredentialHealth = "ready" | "expiring" | "reauth_required" | "source_unavailable"
+
+/** Stable, non-secret identity used to prevent targeted Codex reauth account swaps. */
+export interface CodexIdentityFingerprint {
+  issuer?: string
+  subject?: string
+  workspaceId?: string
+  email?: string
+}
+
+/** Persisted lifecycle facts. Transient network failures are intentionally not stored. */
+export interface AccountAuthMetadata {
+  codexIdentity?: CodexIdentityFingerprint
+  reauthRequiredAtMs?: number
+  reauthReason?: string
+  lastCredentialRotationAtMs?: number
+}
+
 /** One credential entry in a provider's vault. */
 export interface Account {
   /** UUIDv7. */
@@ -18,13 +36,13 @@ export interface Account {
    * preset id; when absent, the provider-level `defaultPresetId` applies.
    */
   presetId?: string
+  authMetadata?: AccountAuthMetadata
 }
 
 /**
  * Renderer-safe projection of `Account` — strips the secret bearer. Returned
- * by `subscription_list_accounts` so the account picker doesn't see any token
- * bytes unless the renderer explicitly fetches the full `Account` for an
- * edit dialog.
+ * by `subscription_list_accounts` so the account picker never receives token
+ * bytes. Credential replacement and reauthentication use scoped operations.
  */
 export interface AccountSummary {
   id: string
@@ -41,11 +59,26 @@ export interface AccountSummary {
   expiresAtMs: number
   createdAtMs: number
   lastUsedAtMs: number
+  /** Provider-specific mode such as `chatgpt`, `api_key`, or `subscription`. */
+  authMode: string
+  /** `managed`, `oauth`, `file`, or `keyring`. */
+  credentialSource: string
+  health: CredentialHealth
+  /** True for pointers/imports whose authoritative credential lives outside Cognia. */
+  isExternal: boolean
+  reauthReason?: string
+}
+
+/** Renderer-safe selected-account payload. It contains no credential bytes. */
+export interface AccountDetail extends AccountSummary {
+  presetId?: string
+  codexIdentity?: CodexIdentityFingerprint
+  lastCredentialRotationAtMs?: number
 }
 
 /** Top-level vault — one entry per provider in the keyring. */
 export interface ProviderVault {
-  schemaVersion: 3
+  schemaVersion: 4
   accounts: Account[]
   activeAccountId?: string
   /** Preset library (v3). Accounts bind to one by id; `defaultPresetId` is the fallback. */

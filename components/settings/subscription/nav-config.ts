@@ -26,11 +26,12 @@ import {
   SparklesIcon,
   TerminalIcon,
   ChartColumnIcon,
+  UsersIcon,
 } from "lucide-react"
 import type { ComponentType } from "react"
 
 export type SubscriptionPanelId =
-  "overview" | "usage" | "probes" | "claude" | "codex" | "opencode" | "backup" | "sync"
+  "overview" | "usage" | "probes" | "accounts" | "claude" | "codex" | "opencode" | "backup" | "sync"
 
 export type SubscriptionNavGroupId = "usageGroup" | "providersGroup" | "vaultGroup"
 
@@ -58,6 +59,7 @@ export const SUBSCRIPTION_NAV_GROUPS: readonly SubscriptionNavGroup[] = [
   {
     id: "providersGroup",
     items: [
+      { id: "accounts", icon: UsersIcon },
       { id: "claude", icon: SparklesIcon },
       { id: "codex", icon: TerminalIcon },
       { id: "opencode", icon: KeyRoundIcon },
@@ -85,7 +87,7 @@ const PANEL_IDS = new Set<string>(
 const LEGACY_INNER_TAB_ALIASES: Record<string, SubscriptionPanelId> = {
   overview: "overview",
   usage: "usage",
-  account: "claude",
+  account: "accounts",
   settings: "probes",
 }
 

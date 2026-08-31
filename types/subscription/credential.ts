@@ -59,7 +59,7 @@ export type CodexAuthMode = "chatgpt" | "api_key"
  * Account tab so the user knows whether the bearer came from their existing
  * codex-cli install or from a fresh device-code login.
  */
-export type CodexCredentialSource = LocalCliCredentialSource | "oauth"
+export type CodexCredentialSource = LocalCliCredentialSource | "oauth" | "manual"
 
 /** Codex device-code / api-key credential. */
 export interface CodexCredentialData {

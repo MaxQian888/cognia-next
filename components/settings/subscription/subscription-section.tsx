@@ -39,6 +39,7 @@ import { ProviderTabCodex } from "./provider-tab-codex"
 import { ProviderTabOpencode } from "./provider-tab-opencode"
 import { ClaudeAccountPanel } from "./panels/claude-account-panel"
 import { SubscriptionNav } from "./components/subscription-nav"
+import { AccountCenter } from "./account-center"
 import { SubscriptionOverviewTab } from "./tabs/overview-tab"
 import { SubscriptionSettingsTab } from "./tabs/settings-tab"
 import { SubscriptionUsageTab } from "./tabs/usage-tab"
@@ -59,6 +60,8 @@ function renderPanel(panel: SubscriptionPanelId, onRequestAddAccount: () => void
       return <SubscriptionUsageTab />
     case "probes":
       return <SubscriptionSettingsTab />
+    case "accounts":
+      return <AccountCenter />
     case "claude":
       return <ClaudeAccountPanel />
     case "codex":
@@ -91,9 +94,8 @@ export function SubscriptionSection() {
     router.replace(`?${params.toString()}`, { scroll: false })
   }
 
-  // The Overview panel's empty state offers "add an account", which is the
-  // Claude panel's job — route there rather than making Overview own a dialog.
-  const goToClaudeAccounts = () => select("claude")
+  // The Overview panel's empty state routes to the unified owner of add flows.
+  const goToAccounts = () => select("accounts")
 
   const navNode = (
     <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId={activePanel} onSelect={select} />
@@ -130,7 +132,7 @@ export function SubscriptionSection() {
             data-testid="subscription-panel-body"
           >
             <PanelTransition activeKey={activePanel}>
-              {renderPanel(activePanel, goToClaudeAccounts)}
+              {renderPanel(activePanel, goToAccounts)}
             </PanelTransition>
           </div>
         </div>

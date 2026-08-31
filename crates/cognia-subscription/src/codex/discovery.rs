@@ -25,11 +25,13 @@
 
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
+#[cfg(not(test))]
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const CODEX_KEYRING_SERVICE: &str = "Codex Auth";
+#[cfg(not(test))]
 const CODEX_KEYRING_ACCOUNT: &str = "default";
 
 /// Outcome of probing for a codex-cli credential. The renderer renders this
@@ -166,16 +168,22 @@ fn load_keyring() -> Result<Option<AuthDotJson>, String> {
     // host's real OS keyring (which may legitimately hold a live codex-cli
     // credential and would otherwise make these tests environment-dependent).
     #[cfg(test)]
-    if let Some(blob) = test_support::keyring_override() {
-        return parse_keyring_blob(blob.as_deref());
+    {
+        match test_support::keyring_override() {
+            Some(blob) => parse_keyring_blob(blob.as_deref()),
+            None => Err("subscription simulation blocked an unmocked OS keyring read".into()),
+        }
     }
 
-    let entry = Entry::new(CODEX_KEYRING_SERVICE, CODEX_KEYRING_ACCOUNT)
-        .map_err(|e| format!("keyring init failed: {e}"))?;
-    match entry.get_password() {
-        Ok(blob) => parse_keyring_blob(Some(&blob)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+    #[cfg(not(test))]
+    {
+        let entry = Entry::new(CODEX_KEYRING_SERVICE, CODEX_KEYRING_ACCOUNT)
+            .map_err(|e| format!("keyring init failed: {e}"))?;
+        match entry.get_password() {
+            Ok(blob) => parse_keyring_blob(Some(&blob)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("keyring read failed: {e}")),
+        }
     }
 }
 
@@ -260,8 +268,10 @@ fn decode_jwt_claims(jwt: &str) -> Option<Claims> {
         .decode(payload.trim_end_matches('='))
         .ok()?;
     let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let mut out = Claims::default();
-    out.email = v.get("email").and_then(|x| x.as_str()).map(String::from);
+    let mut out = Claims {
+        email: v.get("email").and_then(|x| x.as_str()).map(String::from),
+        ..Claims::default()
+    };
     // OpenAI scopes its custom claims under namespaced keys. We tolerate
     // either nested shape.
     let profile = v.get("https://api.openai.com/profile");
@@ -509,7 +519,7 @@ mod tests {
         assert_eq!(tokens.chatgpt_plan_type.as_deref(), Some("Plus"));
         assert_eq!(tokens.chatgpt_user_id.as_deref(), Some("user_abc"));
         assert_eq!(tokens.chatgpt_account_id.as_deref(), Some("acct_def"));
-        assert_eq!(got.last_refresh_iso.as_deref().is_some(), true);
+        assert!(got.last_refresh_iso.as_deref().is_some());
     }
 
     #[test]

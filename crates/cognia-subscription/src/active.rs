@@ -334,6 +334,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 

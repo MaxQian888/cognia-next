@@ -79,6 +79,10 @@ describe("useAccounts", () => {
     createdAtMs: 1,
     lastUsedAtMs: 1,
     expiresAtMs: 2,
+    authMode: "subscription",
+    credentialSource: "managed",
+    health: "ready",
+    isExternal: false,
   }
 
   it("surfaces load failures and allows a retry", async () => {

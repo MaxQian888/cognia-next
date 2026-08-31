@@ -18,6 +18,7 @@ jest.mock("@/lib/subscription/core/transport", () => ({
 
 const refreshCodexAccountIfStaleMock = jest.fn()
 jest.mock("./refresh", () => ({
+  ...jest.requireActual("./refresh"),
   refreshCodexAccountIfStale: (...a: unknown[]) => refreshCodexAccountIfStaleMock(...a),
 }))
 
@@ -210,5 +211,24 @@ describe("resolveCodexVaultCredential", () => {
     // Degrade to the stale token (it may still work) rather than losing the
     // credential entirely and failing the turn with "not configured".
     expect(cred?.apiKey).toBe("stale-bearer")
+  })
+
+  it("surfaces a persisted reauthentication requirement before provider execution", async () => {
+    getAccountMock.mockResolvedValue(
+      fullAccount(
+        { authMode: "chatgpt", accessToken: "stale-bearer", expiresAtMs: 1 },
+        {
+          authMetadata: {
+            reauthRequiredAtMs: 123,
+            reauthReason: "refresh_token_revoked",
+          },
+        }
+      )
+    )
+
+    await expect(resolveCodexVaultCredential("codex")).rejects.toThrow(
+      "requires reauthentication (refresh_token_revoked)"
+    )
+    expect(refreshCodexAccountIfStaleMock).not.toHaveBeenCalled()
   })
 })

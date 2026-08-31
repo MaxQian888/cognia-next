@@ -30,19 +30,22 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 import { saveOpencodeZenKey } from "@/lib/subscription/opencode/discovery"
 import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
-import type { Account, OpencodePlan } from "@/types/subscription"
+import { renameAccount, replaceAccountCredential } from "@/lib/subscription/core/transport"
+import type { Account, AccountDetail, AccountSummary, OpencodePlan } from "@/types/subscription"
 
 export interface OpencodeAddAccountDialogProps {
   open: boolean
   onOpenChange: (next: boolean) => void
   onAdded?: (account: Account) => void
-  existingAccount?: Account
+  onUpdated?: (account: AccountDetail) => void
+  existingAccount?: AccountSummary
 }
 
 export function OpencodeAddAccountDialog({
   open,
   onOpenChange,
   onAdded,
+  onUpdated,
   existingAccount,
 }: OpencodeAddAccountDialogProps) {
   const t = useTranslations("subscription.opencode.zen")
@@ -50,8 +53,8 @@ export function OpencodeAddAccountDialog({
 
   const [accessToken, setAccessToken] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
-  const [label, setLabel] = useState("")
-  const [plan, setPlan] = useState<OpencodePlan>("zen")
+  const [label, setLabel] = useState(existingAccount?.label ?? "")
+  const [plan, setPlan] = useState<OpencodePlan>(existingAccount?.plan === "go" ? "go" : "zen")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -60,16 +63,31 @@ export function OpencodeAddAccountDialog({
     setPrevOpen(open)
     if (open) {
       setAccessToken("")
-      const existingCredential =
-        existingAccount?.credential.provider === "opencode-zen"
-          ? existingAccount.credential
-          : undefined
-      setBaseUrl(existingCredential?.baseUrl ?? "")
+      setBaseUrl("")
       setLabel(existingAccount?.label ?? "")
-      setPlan(existingCredential?.plan ?? "zen")
+      setPlan(existingAccount?.plan === "go" ? "go" : "zen")
       setError(null)
       setBusy(false)
     }
+  }
+
+  /**
+   * `replaceAccountCredential` carries the credential and nothing else, so the
+   * Label field this dialog still renders has to be written through the rename
+   * command. Without it an edit here looked accepted (the toast said so) and
+   * was silently dropped.
+   */
+  const replaceCredentialAndLabel = async (
+    account: AccountSummary,
+    credential: Parameters<typeof replaceAccountCredential>[2]
+  ) => {
+    const detail = await replaceAccountCredential("opencode", account.id, credential)
+    const nextLabel = label.trim() || null
+    if (nextLabel !== (account.label ?? null)) {
+      await renameAccount("opencode", account.id, nextLabel)
+      return { ...detail, label: nextLabel ?? undefined }
+    }
+    return detail
   }
 
   const onSubmit = async () => {
@@ -77,29 +95,27 @@ export function OpencodeAddAccountDialog({
     setBusy(true)
     setError(null)
     try {
-      const account = existingAccount
-        ? await persistProviderAccount("opencode", {
-            ...existingAccount,
-            label: label.trim() || existingAccount.label,
-            credential: {
-              provider: "opencode-zen",
-              accessToken: accessToken.trim(),
-              baseUrl: baseUrl.trim() || undefined,
-              plan,
-              storedAtMs: Date.now(),
-            },
-            lastUsedAtMs: Date.now(),
+      if (existingAccount) {
+        const account = await replaceCredentialAndLabel(existingAccount, {
+          provider: "opencode-zen",
+          accessToken: accessToken.trim(),
+          baseUrl: baseUrl.trim() || undefined,
+          plan,
+          storedAtMs: Date.now(),
+        })
+        onUpdated?.(account)
+      } else {
+        const account = await persistProviderAccount(
+          "opencode",
+          await saveOpencodeZenKey({
+            accessToken: accessToken.trim(),
+            baseUrl: baseUrl.trim() || undefined,
+            label: label.trim() || undefined,
+            plan,
           })
-        : await persistProviderAccount(
-            "opencode",
-            await saveOpencodeZenKey({
-              accessToken: accessToken.trim(),
-              baseUrl: baseUrl.trim() || undefined,
-              label: label.trim() || undefined,
-              plan,
-            })
-          )
-      onAdded?.(account)
+        )
+        onAdded?.(account)
+      }
       toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
       onOpenChange(false)
     } catch (e) {
@@ -161,6 +177,12 @@ export function OpencodeAddAccountDialog({
               placeholder={t("baseUrlPlaceholder")}
               spellCheck={false}
             />
+            {/* An `AccountSummary` carries no credential, so the stored URL
+                cannot be prefilled here. Say that the save overwrites it rather
+                than letting a blank field quietly clear a custom endpoint. */}
+            {existingAccount && (
+              <p className="text-xs text-muted-foreground">{t("baseUrlReplaceHint")}</p>
+            )}
           </div>
           <div className="space-y-1">
             <Label htmlFor="opencode-zen-label">{t("labelField")}</Label>

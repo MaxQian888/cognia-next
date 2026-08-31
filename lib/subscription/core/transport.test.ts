@@ -2,13 +2,15 @@ import {
   anthropicOauthSavePkceResult,
   codexOauthDiscover,
   codexOauthPollDeviceCode,
-  codexOauthRefresh,
+  codexOauthCancelDeviceCode,
+  refreshManagedCodexAccount,
+  reauthenticateManagedCodexAccount,
   codexOauthRequestDeviceCode,
-  codexOauthRevoke,
   clearSubscriptionRuntime,
   deleteAccount,
   deleteProviderPreset,
   getAccount,
+  getAccountDetail,
   getActiveAccount,
   getProviderPreset,
   listPresets,
@@ -16,6 +18,7 @@ import {
   opencodeOauthDiscover,
   opencodeSaveZenKey,
   renameAccount,
+  replaceAccountCredential,
   saveProviderPreset,
   saveAccount,
   setActiveAccount,
@@ -112,6 +115,16 @@ describe("subscription core transport", () => {
     })
   })
 
+  it("getAccountDetail uses the renderer-safe detail command", async () => {
+    mockedCall.mockResolvedValueOnce(undefined)
+    await expect(getAccountDetail("codex", "id-2")).resolves.toBeNull()
+    expect(mockedCall).toHaveBeenCalledWith("subscription_get_account_detail", {
+      provider: "codex",
+      localAccountId: "local_acct_a",
+      accountId: "id-2",
+    })
+  })
+
   it("saveAccount forwards both args", async () => {
     const changed = jest.fn()
     const unsubscribe = subscribeSubscriptionChanged(changed)
@@ -125,6 +138,26 @@ describe("subscription core transport", () => {
     })
     expect(changed).toHaveBeenCalledTimes(1)
     unsubscribe()
+  })
+
+  it("replaceAccountCredential sends only the new credential bytes", async () => {
+    const credential = {
+      provider: "codex" as const,
+      accessToken: "fixture-key",
+      refreshToken: "",
+      idTokenRaw: "",
+      expiresAtMs: 0,
+      authMode: "api_key" as const,
+      storedAtMs: 1,
+    }
+    mockedCall.mockResolvedValueOnce({ id: "id-1" })
+    await replaceAccountCredential("codex", "id-1", credential)
+    expect(mockedCall).toHaveBeenCalledWith("subscription_replace_account_credential", {
+      provider: "codex",
+      localAccountId: "local_acct_a",
+      accountId: "id-1",
+      credential,
+    })
   })
 
   it("deleteAccount forwards provider + accountId", async () => {
@@ -329,25 +362,58 @@ describe("subscription core transport", () => {
     [
       "codexOauthPollDeviceCode",
       "codex_oauth_poll_device_code",
-      () => codexOauthPollDeviceCode("dc-1", "CODE-1"),
+      () => codexOauthPollDeviceCode("dc-1", "CODE-1", 3),
     ],
-    ["codexOauthRefresh", "codex_oauth_refresh", () => codexOauthRefresh("rt-1")],
-    ["codexOauthRevoke", "codex_oauth_revoke", () => codexOauthRevoke("tok")],
   ])("%s invokes %s", async (_label, command, runner) => {
     mockedCall.mockResolvedValueOnce(undefined)
     await runner()
-    // Some commands take a payload (poll/refresh/revoke), others are arg-less
+    // Some commands take a payload (poll/refresh), others are arg-less
     // (discover, request_device_code). Just check the first arg matches.
     expect(mockedCall.mock.calls[0][0]).toBe(command)
   })
 
   it("codexOauthPollDeviceCode forwards device_auth_id + user_code", async () => {
     mockedCall.mockResolvedValueOnce({ Pending: { error: "authorization_pending" } })
-    await codexOauthPollDeviceCode("device-code-x", "CODE-9")
+    await codexOauthPollDeviceCode("device-code-x", "CODE-9", 9)
     expect(mockedCall).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
       localAccountId: "local_acct_a",
       deviceCode: "device-code-x",
       userCode: "CODE-9",
+      flowGeneration: 9,
+    })
+  })
+
+  it("codexOauthCancelDeviceCode forwards the flow generation", async () => {
+    mockedCall.mockResolvedValueOnce(true)
+    await expect(codexOauthCancelDeviceCode(9)).resolves.toBe(true)
+    expect(mockedCall).toHaveBeenCalledWith("codex_oauth_cancel_device_code", {
+      localAccountId: "local_acct_a",
+      flowGeneration: 9,
+    })
+  })
+
+  it("managed Codex lifecycle commands are account-scoped", async () => {
+    const credential = {
+      accessToken: "fixture-access",
+      refreshToken: "fixture-refresh",
+      idTokenRaw: "fixture.id.token",
+      expiresAtMs: 123,
+      authMode: "chatgpt" as const,
+      storedAtMs: 100,
+    }
+    mockedCall.mockResolvedValueOnce(credential)
+    await expect(refreshManagedCodexAccount("codex-1")).resolves.toEqual(credential)
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_refresh_codex_account", {
+      localAccountId: "local_acct_a",
+      accountId: "codex-1",
+    })
+
+    mockedCall.mockResolvedValueOnce({ id: "codex-1" })
+    await reauthenticateManagedCodexAccount("codex-1", credential)
+    expect(mockedCall).toHaveBeenLastCalledWith("subscription_reauthenticate_codex_account", {
+      localAccountId: "local_acct_a",
+      accountId: "codex-1",
+      credential,
     })
   })
 

@@ -11,9 +11,8 @@
 import type { CodexCredentialData, ProviderCredential } from "@/types/subscription"
 import {
   codexOauthPollDeviceCode,
-  codexOauthRefresh,
+  codexOauthCancelDeviceCode,
   codexOauthRequestDeviceCode,
-  codexOauthRevoke,
   type DeviceCodePendingPayload,
   type DeviceCodeResponse,
   type PollOutcome,
@@ -33,17 +32,14 @@ export async function requestCodexDeviceCode(): Promise<DeviceCodeResponse> {
 
 export async function pollCodexDeviceCode(
   deviceCode: string,
-  userCode: string
+  userCode: string,
+  flowGeneration: number
 ): Promise<PollOutcome> {
-  return await codexOauthPollDeviceCode(deviceCode, userCode)
+  return await codexOauthPollDeviceCode(deviceCode, userCode, flowGeneration)
 }
 
-export async function refreshCodexToken(refreshToken: string): Promise<TokenResponse> {
-  return await codexOauthRefresh(refreshToken)
-}
-
-export async function revokeCodexToken(token: string): Promise<void> {
-  await codexOauthRevoke(token)
+export async function cancelCodexDeviceCode(flowGeneration: number): Promise<boolean> {
+  return await codexOauthCancelDeviceCode(flowGeneration)
 }
 
 /**

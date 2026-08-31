@@ -21,6 +21,7 @@ import {
   RefreshCwIcon,
   ShieldCheckIcon,
   ShieldQuestionIcon,
+  KeyRoundIcon,
 } from "lucide-react"
 
 import {
@@ -35,6 +36,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Separator } from "@/components/ui/separator"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 import {
   discoveredToCredential,
@@ -42,6 +45,7 @@ import {
 } from "@/lib/subscription/codex/discovery"
 import {
   deadlineMsFromResponse,
+  cancelCodexDeviceCode,
   intervalMsFromResponse,
   pendingIsTerminal,
   pollCodexDeviceCode,
@@ -56,21 +60,31 @@ import type {
   TokenResponse,
 } from "@/lib/subscription/core/transport"
 import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
+import {
+  reauthenticateManagedCodexAccount,
+  replaceAccountCredential,
+} from "@/lib/subscription/core/transport"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import { useCodexDiscovery } from "@/lib/subscription/codex/hooks"
 import type { DiscoveredCodexAuth } from "@/lib/subscription/codex/discovery"
-import type { Account, CodexCredentialData } from "@/types/subscription"
+import type {
+  Account,
+  AccountDetail,
+  AccountSummary,
+  CodexCredentialData,
+} from "@/types/subscription"
 import { openUrl } from "@/lib/native/opener"
 
-export type CodexLoginMode = "reuse" | "oauth"
+export type CodexLoginMode = "reuse" | "oauth" | "api_key"
 
 export interface CodexAddAccountDialogProps {
   open: boolean
   onOpenChange: (next: boolean) => void
   onAdded?: (account: Account) => void
+  onUpdated?: (account: AccountDetail) => void
   /** Default mode shown when the dialog opens. */
   initialMode?: CodexLoginMode
-  existingAccount?: Account
+  existingAccount?: AccountSummary | Account
 }
 
 type OAuthStep = "request" | "awaiting" | "exchanging" | "done"
@@ -79,6 +93,7 @@ export function CodexAddAccountDialog({
   open,
   onOpenChange,
   onAdded,
+  onUpdated,
   initialMode,
   existingAccount,
 }: CodexAddAccountDialogProps) {
@@ -107,15 +122,24 @@ export function CodexAddAccountDialog({
   const persistAccount = async (data: CodexCredentialData) => {
     const now = Date.now()
     const tagged = toCodexProviderCredential(data)
+    if (existingAccount) {
+      const updated =
+        data.authMode === "chatgpt"
+          ? await reauthenticateManagedCodexAccount(existingAccount.id, data)
+          : await replaceAccountCredential("codex", existingAccount.id, tagged)
+      toast.success(tAccountList("credentialsUpdated"))
+      onUpdated?.(updated)
+      onOpenChange(false)
+      return
+    }
     const account: Account = {
-      ...(existingAccount ?? {}),
-      id: existingAccount?.id ?? uuidv7(now),
+      id: uuidv7(now),
       credential: tagged,
-      createdAtMs: existingAccount?.createdAtMs ?? now,
+      createdAtMs: now,
       lastUsedAtMs: now,
     }
     await persistProviderAccount("codex", account)
-    toast.success(tAccountList(existingAccount ? "credentialsUpdated" : "accountAdded"))
+    toast.success(tAccountList("accountAdded"))
     onAdded?.(account)
     onOpenChange(false)
   }
@@ -142,6 +166,13 @@ export function CodexAddAccountDialog({
             disabled={!discovered}
           />
           <ModeRow
+            id="codex-mode-api-key"
+            value="api_key"
+            icon={<KeyRoundIcon className="size-4" />}
+            title={t("login.modes.apiKey.label")}
+            description={t("login.modes.apiKey.description")}
+          />
+          <ModeRow
             id="codex-mode-oauth"
             value="oauth"
             icon={<ShieldQuestionIcon className="size-4" />}
@@ -161,13 +192,15 @@ export function CodexAddAccountDialog({
               await persistAccount(next)
             }}
           />
-        ) : (
+        ) : mode === "oauth" ? (
           <OAuthPanel
             onCompleted={async (response) => {
               const next = tokenResponseToCredential(response, { authMode: "chatgpt" })
               await persistAccount(next)
             }}
           />
+        ) : (
+          <ApiKeyPanel onSubmit={persistAccount} />
         )}
 
         <DialogFooter>
@@ -177,6 +210,62 @@ export function CodexAddAccountDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ApiKeyPanel({
+  onSubmit,
+}: {
+  onSubmit: (credential: CodexCredentialData) => Promise<void>
+}) {
+  const t = useTranslations("subscription.codex.login.apiKey")
+  const [apiKey, setApiKey] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label htmlFor="codex-api-key">{t("field")}</Label>
+        <Input
+          id="codex-api-key"
+          type="password"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder={t("placeholder")}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <p className="text-xs text-muted-foreground">{t("description")}</p>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button
+        size="sm"
+        disabled={!apiKey.trim() || busy}
+        onClick={async () => {
+          setBusy(true)
+          setError(null)
+          try {
+            await onSubmit({
+              accessToken: apiKey.trim(),
+              refreshToken: "",
+              idTokenRaw: "",
+              expiresAtMs: 0,
+              authMode: "api_key",
+              originalSource: "manual",
+              storedAtMs: Date.now(),
+            })
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause))
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+        {t("save")}
+      </Button>
+    </div>
   )
 }
 
@@ -313,6 +402,7 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
   const [error, setError] = useState<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelledRef = useRef(false)
+  const flowGenerationRef = useRef<number | null>(null)
 
   useEffect(() => {
     cancelledRef.current = false
@@ -321,15 +411,27 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current)
       }
+      if (flowGenerationRef.current !== null) {
+        void cancelCodexDeviceCode(flowGenerationRef.current).catch(() => undefined)
+      }
     }
   }, [])
 
   const onStart = async () => {
+    if (flowGenerationRef.current !== null) {
+      void cancelCodexDeviceCode(flowGenerationRef.current).catch(() => undefined)
+      flowGenerationRef.current = null
+    }
     setError(null)
     setPending(null)
     setStep("awaiting")
     try {
       const res = await requestCodexDeviceCode()
+      if (cancelledRef.current) {
+        void cancelCodexDeviceCode(res.flow_generation).catch(() => undefined)
+        return
+      }
+      flowGenerationRef.current = res.flow_generation
       setDevice(res)
       const url = res.verification_uri_complete ?? res.verification_uri
       if (url) void openUrl(url)
@@ -346,17 +448,22 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
     let currentInterval = intervalMs
     const tick = async () => {
       if (cancelledRef.current) return
-      if (Date.now() > deadlineMs) {
+      if (Date.now() >= deadlineMs) {
         setPending({ error: "expired_token" })
+        void cancelCodexDeviceCode(res.flow_generation).catch(() => undefined)
         return
       }
       try {
-        const outcome = await pollCodexDeviceCode(res.device_code, res.user_code)
+        const outcome = await pollCodexDeviceCode(
+          res.device_code,
+          res.user_code,
+          res.flow_generation
+        )
         if (cancelledRef.current) return
         if (pollOutcomeKind(outcome) === "granted") {
           setStep("exchanging")
           await onCompleted(pollOutcomePayload(outcome) as TokenResponse)
-          setStep("done")
+          if (!cancelledRef.current) setStep("done")
           return
         }
         const p = pollOutcomePayload(outcome) as DeviceCodePendingPayload
@@ -371,6 +478,7 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
       } catch (e) {
         if (cancelledRef.current) return
         setError(e instanceof Error ? e.message : String(e))
+        pollTimerRef.current = setTimeout(() => void tick(), currentInterval)
       }
     }
     pollTimerRef.current = setTimeout(() => void tick(), currentInterval)
@@ -431,6 +539,12 @@ function OAuthPanel({ onCompleted }: { onCompleted: (response: TokenResponse) =>
           </Badge>
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
+        {pending && pendingIsTerminal(pending) && (
+          <Button size="sm" variant="outline" onClick={() => void onStart()}>
+            <RefreshCwIcon className="mr-2 size-4" />
+            {tActions("retryOauth")}
+          </Button>
+        )}
       </div>
     )
   }

@@ -21,22 +21,43 @@
 
 import {
   getAccount as defaultGetAccount,
+  refreshManagedCodexAccount as defaultRefreshManagedCodexAccount,
   saveAccount as defaultSaveAccount,
   setActiveAccount as defaultSetActiveAccount,
 } from "@/lib/subscription/core/transport"
 
-import {
-  isCodexCredentialFresh,
-  refreshCodexToken as defaultRefreshCodexToken,
-  toProviderCredential,
-  tokenResponseToCredential,
-} from "./oauth"
+import { isCodexCredentialFresh, toProviderCredential, tokenResponseToCredential } from "./oauth"
 import { discoverCodexAuth, discoveredToCredential } from "./discovery"
 
+import type { TokenResponse } from "@/lib/subscription/core/transport"
 import type { Account, CodexCredentialData, ProviderId } from "@/types/subscription"
 
+export class CodexReauthenticationRequiredError extends Error {
+  readonly code = "reauth_required"
+
+  constructor(readonly reason: string) {
+    super(`Codex account requires reauthentication (${reason})`)
+    this.name = "CodexReauthenticationRequiredError"
+  }
+}
+
+export function assertCodexAccountLifecycleReady(account: Account): void {
+  if (account.authMetadata?.reauthRequiredAtMs) {
+    throw new CodexReauthenticationRequiredError(
+      account.authMetadata.reauthReason || "refresh_credential_invalid"
+    )
+  }
+}
+
+export function normalizeCodexLifecycleError(cause: unknown): unknown {
+  if (cause instanceof CodexReauthenticationRequiredError) return cause
+  const message = cause instanceof Error ? cause.message : String(cause)
+  const match = message.match(/reauth_required:([a-z0-9_]+)/i)
+  return match ? new CodexReauthenticationRequiredError(match[1]) : cause
+}
+
 export interface RefreshCodexDeps {
-  refreshCodexToken: typeof defaultRefreshCodexToken
+  refreshCodexToken: (refreshToken: string) => Promise<TokenResponse>
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   saveAccount: (provider: ProviderId, account: Account) => Promise<void>
   setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
@@ -49,10 +70,14 @@ export interface RefreshCodexDeps {
    * the chat path must not flip the active pointer mid-turn.
    */
   reactivate: boolean
+  /** Host-owned atomic refresh. Tests may omit it to exercise the pure seam. */
+  refreshManagedAccount: (accountId: string) => Promise<CodexCredentialData>
 }
 
 const DEFAULT_DEPS: RefreshCodexDeps = {
-  refreshCodexToken: defaultRefreshCodexToken,
+  refreshCodexToken: async () => {
+    throw new Error("Direct renderer token refresh is disabled; use the host lifecycle manager")
+  },
   getAccount: defaultGetAccount,
   saveAccount: defaultSaveAccount,
   setActiveAccount: defaultSetActiveAccount,
@@ -62,6 +87,22 @@ const DEFAULT_DEPS: RefreshCodexDeps = {
     return discovered ? discoveredToCredential(discovered) : null
   },
   reactivate: false,
+  refreshManagedAccount: defaultRefreshManagedCodexAccount,
+}
+
+const managedRefreshes = new Map<string, Promise<CodexCredentialData>>()
+
+function refreshManagedOnce(
+  accountId: string,
+  refresh: (accountId: string) => Promise<CodexCredentialData>
+): Promise<CodexCredentialData> {
+  const existing = managedRefreshes.get(accountId)
+  if (existing) return existing
+  const pending = refresh(accountId).finally(() => {
+    if (managedRefreshes.get(accountId) === pending) managedRefreshes.delete(accountId)
+  })
+  managedRefreshes.set(accountId, pending)
+  return pending
 }
 
 /**
@@ -82,6 +123,12 @@ export async function refreshCodexAccountIfStale(
   accountId: string,
   deps: Partial<RefreshCodexDeps> = {}
 ): Promise<CodexCredentialData | null> {
+  const useHostLifecycle =
+    deps.refreshManagedAccount !== undefined ||
+    (deps.refreshCodexToken === undefined &&
+      deps.getAccount === undefined &&
+      deps.saveAccount === undefined &&
+      deps.discoverLocalCredential === undefined)
   const {
     refreshCodexToken,
     getAccount,
@@ -90,6 +137,7 @@ export async function refreshCodexAccountIfStale(
     now,
     discoverLocalCredential,
     reactivate,
+    refreshManagedAccount,
   } = {
     ...DEFAULT_DEPS,
     ...deps,
@@ -97,6 +145,7 @@ export async function refreshCodexAccountIfStale(
 
   const account = await getAccount("codex", accountId)
   if (!account || account.credential.provider !== "codex") return null
+  assertCodexAccountLifecycleReady(account)
   const credential = account.credential
 
   // A reused CLI login remains owned by codex-cli. Refresh tokens may rotate,
@@ -119,6 +168,17 @@ export async function refreshCodexAccountIfStale(
   // the refreshToken check keeps the intent explicit for the reader.
   if (credential.authMode !== "chatgpt" || !credential.refreshToken) return null
   if (isCodexCredentialFresh(credential, now())) return null
+
+  if (useHostLifecycle) {
+    let fresh: CodexCredentialData
+    try {
+      fresh = await refreshManagedOnce(accountId, refreshManagedAccount)
+    } catch (cause) {
+      throw normalizeCodexLifecycleError(cause)
+    }
+    if (reactivate) await setActiveAccount("codex", accountId)
+    return fresh
+  }
 
   const response = await refreshCodexToken(credential.refreshToken)
   const fresh = tokenResponseToCredential(response, {

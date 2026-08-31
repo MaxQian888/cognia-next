@@ -37,8 +37,6 @@ pub const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/devicea
 /// Standard OAuth token endpoint — used for the code exchange (step 3) and for
 /// `grant_type=refresh_token`.
 pub const OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-/// Token revoke endpoint. Hit during full Sign Out (vs local-only clear).
-pub const REVOKE_TOKEN_URL: &str = "https://auth.openai.com/oauth/revoke";
 /// Redirect URI the device-code exchange must echo back — codex uses the
 /// deviceauth callback path on the accounts service.
 pub const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/api/accounts/deviceauth/callback";
@@ -87,6 +85,10 @@ pub struct DeviceCodeResponse {
     /// this minimum.
     #[serde(default)]
     pub interval: i64,
+    /// Host-issued generation used to reject completion from a cancelled or
+    /// superseded flow. Zero exists only inside the pure HTTP helper.
+    #[serde(default)]
+    pub flow_generation: u64,
 }
 
 /// `POST /deviceauth/token` success body — a server-minted PKCE bundle the
@@ -184,6 +186,7 @@ pub async fn request_device_code() -> Result<DeviceCodeResponse, String> {
         verification_uri_complete: None,
         expires_in: DEVICE_CODE_EXPIRES_IN_SECS,
         interval: uc.interval,
+        flow_generation: 0,
     })
 }
 
@@ -284,25 +287,6 @@ pub async fn refresh_token(refresh_token: &str) -> Result<TokenResponse, String>
         .map_err(|e| format!("refresh_token parse: {e}"))
 }
 
-/// Revoke a token. Used by the Sign Out flow when the user wants their session
-/// terminated server-side as well as locally.
-pub async fn revoke_token(token: &str) -> Result<(), String> {
-    let client = http_client()?;
-    let body = [("client_id", CLIENT_ID), ("token", token)];
-    let res = client
-        .post(REVOKE_TOKEN_URL)
-        .form(&body)
-        .send()
-        .await
-        .map_err(|e| format!("revoke_token transport: {e}"))?;
-    if !res.status().is_success() {
-        let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        return Err(format!("revoke_token {status}: {body}"));
-    }
-    Ok(())
-}
-
 fn http_client() -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder().user_agent(CODEX_USER_AGENT);
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, DEVICE_USERCODE_URL)
@@ -334,7 +318,6 @@ mod tests {
             "https://auth.openai.com/api/accounts/deviceauth/token"
         );
         assert_eq!(OAUTH_TOKEN_URL, "https://auth.openai.com/oauth/token");
-        assert_eq!(REVOKE_TOKEN_URL, "https://auth.openai.com/oauth/revoke");
         assert_eq!(
             DEVICE_REDIRECT_URI,
             "https://auth.openai.com/api/accounts/deviceauth/callback"
@@ -392,6 +375,7 @@ mod tests {
             verification_uri_complete: None,
             expires_in: DEVICE_CODE_EXPIRES_IN_SECS,
             interval: 5,
+            flow_generation: 0,
         };
         let json = serde_json::to_value(&d).unwrap();
         assert_eq!(json["device_code"], "da");

@@ -23,6 +23,7 @@
 // a linked snapshot in our v2 vault; refresh re-runs discovery so Claude Code
 // remains the owner of refresh-token rotation.
 
+#[cfg(not(test))]
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -177,25 +178,30 @@ fn load_keyring() -> Result<Option<CredentialsDotJson>, String> {
     // touch the developer's / CI host's real keychain (which on a machine with
     // Claude Code installed holds a live credential).
     #[cfg(test)]
-    if let Some(result) = test_support::keyring_override() {
-        return match result {
-            Ok(blob) => parse_keyring_blob(blob.as_deref()),
-            Err(error) => Err(error),
-        };
+    {
+        match test_support::keyring_override() {
+            Some(Ok(blob)) => parse_keyring_blob(blob.as_deref()),
+            Some(Err(error)) => Err(error),
+            None => Err("subscription simulation blocked an unmocked OS keyring read".into()),
+        }
     }
 
-    let account = os_username();
-    let entry = Entry::new(CLAUDE_KEYRING_SERVICE, &account)
-        .map_err(|e| format!("keyring init failed: {e}"))?;
-    match entry.get_password() {
-        Ok(blob) => parse_keyring_blob(Some(&blob)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+    #[cfg(not(test))]
+    {
+        let account = os_username();
+        let entry = Entry::new(CLAUDE_KEYRING_SERVICE, &account)
+            .map_err(|e| format!("keyring init failed: {e}"))?;
+        match entry.get_password() {
+            Ok(blob) => parse_keyring_blob(Some(&blob)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("keyring read failed: {e}")),
+        }
     }
 }
 
 /// Claude Code writes the keychain item with the OS login name as the account
 /// attribute. `USER` covers macOS/Linux; `USERNAME` covers Windows.
+#[cfg(not(test))]
 fn os_username() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))

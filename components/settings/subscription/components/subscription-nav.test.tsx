@@ -49,4 +49,18 @@ describe("SubscriptionNav", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
     expect(screen.getByRole("list")).toBeInTheDocument()
   })
+
+  it("implements the SettingsMasterDetail density contract", () => {
+    render(
+      <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId="accounts" onSelect={jest.fn()} />
+    )
+    const row = screen.getByTestId("subscription-nav-item-accounts")
+    expect(row).toHaveAttribute("data-nav-row")
+    expect(row.querySelector("[data-nav-text]")).not.toBeNull()
+    expect(row.querySelector("[data-nav-label]")).not.toBeNull()
+    expect(row.querySelector("[data-nav-desc]")).not.toBeNull()
+    expect(screen.getByTestId("subscription-nav-group-providersGroup")).toHaveAttribute(
+      "data-nav-group"
+    )
+  })
 })

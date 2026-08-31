@@ -29,6 +29,9 @@ jest.mock("./tabs/usage-tab", () => ({
 jest.mock("./tabs/settings-tab", () => ({
   SubscriptionSettingsTab: () => <div data-testid="probes-panel">probes</div>,
 }))
+jest.mock("./account-center", () => ({
+  AccountCenter: () => <div data-testid="accounts-panel">accounts</div>,
+}))
 jest.mock("./panels/claude-account-panel", () => ({
   ClaudeAccountPanel: () => <div data-testid="claude-panel">claude</div>,
 }))
@@ -78,6 +81,7 @@ describe("SubscriptionSection", () => {
       "overview",
       "usage",
       "probes",
+      "accounts",
       "claude",
       "codex",
       "opencode",
@@ -146,17 +150,17 @@ describe("SubscriptionSection", () => {
     )
   })
 
-  it("routes the overview empty-state CTA to the Claude panel", () => {
+  it("routes the overview empty-state CTA to the Account Center", () => {
     renderWith()
     fireEvent.click(screen.getByTestId("overview-panel"))
     const url = replace.mock.calls.at(-1)![0] as string
-    expect(url).toContain("subTab=claude")
+    expect(url).toContain("subTab=accounts")
   })
 
   describe("legacy deep links", () => {
     it.each([
       ["innerTab=usage", "usage-panel"],
-      ["innerTab=account", "claude-panel"],
+      ["innerTab=account", "accounts-panel"],
       ["innerTab=settings", "probes-panel"],
       ["innerTab=overview", "overview-panel"],
       ["subTab=anthropic&innerTab=usage", "usage-panel"],

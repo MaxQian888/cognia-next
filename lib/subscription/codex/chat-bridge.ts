@@ -23,13 +23,18 @@ import {
   listPresets,
 } from "@/lib/subscription/core/transport"
 import { isCodexCredentialFresh } from "./oauth"
-import { refreshCodexAccountIfStale } from "./refresh"
+import {
+  assertCodexAccountLifecycleReady,
+  CodexReauthenticationRequiredError,
+  normalizeCodexLifecycleError,
+  refreshCodexAccountIfStale,
+} from "./refresh"
 import {
   CODEX_CHATGPT_BASE_URL,
   CODEX_DEFAULT_API_BASE_URL,
   isCodexChatProviderId,
 } from "@/types/subscription"
-import type { Account, ProviderPreset } from "@/types/subscription"
+import type { Account, CodexCredentialData, ProviderPreset } from "@/types/subscription"
 
 export interface CodexVaultCredential {
   apiKey: string
@@ -59,6 +64,7 @@ export async function resolveCodexVaultCredential(
     if (!accountId) return null
     const full = await getAccount("codex", accountId)
     if (!full || full.credential.provider !== "codex") return null
+    assertCodexAccountLifecycleReady(full)
 
     // Renew a near-expiry ChatGPT bearer before handing it to the provider. The
     // external-agent spawn path has always done this; chat never did, so a
@@ -75,9 +81,16 @@ export async function resolveCodexVaultCredential(
     // A failed refresh degrades to the stored token (which may still work, and
     // otherwise 401s with the provider's own message) rather than killing the
     // turn with no credential at all.
-    const credential = isCodexCredentialFresh(full.credential)
-      ? full.credential
-      : ((await refreshCodexAccountIfStale(accountId).catch(() => null)) ?? full.credential)
+    let credential: CodexCredentialData = full.credential
+    if (!isCodexCredentialFresh(full.credential)) {
+      try {
+        credential = (await refreshCodexAccountIfStale(accountId)) ?? full.credential
+      } catch (cause) {
+        const lifecycleError = normalizeCodexLifecycleError(cause)
+        if (lifecycleError instanceof CodexReauthenticationRequiredError) throw lifecycleError
+        credential = full.credential
+      }
+    }
     const apiKey = credential.accessToken?.trim()
     if (!apiKey) return null
 
@@ -102,7 +115,8 @@ export async function resolveCodexVaultCredential(
 
     // api_key mode: standard OpenAI.
     return { apiKey, baseURL: presetBase || CODEX_DEFAULT_API_BASE_URL }
-  } catch {
+  } catch (cause) {
+    if (cause instanceof CodexReauthenticationRequiredError) throw cause
     return null
   }
 }

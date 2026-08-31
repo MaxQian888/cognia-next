@@ -84,6 +84,7 @@ const ERROR_KEY: Record<AccountUnlockErrorCode, string> = {
   "invalid-recovery-key": "errorInvalidRecoveryKey",
   "vault-not-provisioned": "errorVaultNotProvisioned",
   "vault-incompatible": "errorVaultIncompatible",
+  "storage-layout-unsupported": "errorStorageLayoutUnsupported",
   throttled: "errorThrottled",
   unknown: "errorUnknown",
 }
@@ -103,6 +104,14 @@ export interface AccountLockScreenProps {
    * host stores no recovery wrap, so there is genuinely nothing to redeem.
    */
   supportsRecoveryKey: boolean
+  /**
+   * Delete the local database that boot refused, then reload.
+   *
+   * Only reachable from the `storage-layout-unsupported` panel. Retyping a
+   * password can never clear that failure, so without this the user is simply
+   * stuck on the lock screen with a correct password and no way in.
+   */
+  onResetLocalStorage?: () => Promise<void>
   slowAfterMs?: number
   stuckAfterMs?: number
 }
@@ -116,6 +125,7 @@ export function AccountLockScreen({
   onRecoveryUnlock,
   supportsRecoveryKey,
   slowAfterMs = DEFAULT_SLOW_AFTER_MS,
+  onResetLocalStorage,
   stuckAfterMs = DEFAULT_STUCK_AFTER_MS,
 }: AccountLockScreenProps) {
   const t = useTranslations("account.gate")
@@ -139,6 +149,7 @@ export function AccountLockScreen({
   const [submitting, setSubmitting] = useState(false)
   const [stage, setStage] = useState<AccountUnlockStage | null>(null)
   const [errorCode, setErrorCode] = useState<AccountUnlockErrorCode | null>(null)
+  const [resetting, setResetting] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(() => Date.now())
@@ -280,6 +291,9 @@ export function AccountLockScreen({
   }
 
   const visibleError = localError ?? (errorCode ? t(ERROR_KEY[errorCode]) : null)
+  // A refused storage layout is not a credential problem, so the password form
+  // is the wrong affordance entirely: the panel below replaces it.
+  const layoutUnsupported = errorCode === "storage-layout-unsupported"
 
   return (
     <section
@@ -332,7 +346,11 @@ export function AccountLockScreen({
       )}
 
       {mode === "password" ? (
-        <form className="flex flex-col gap-4" onSubmit={handlePasswordSubmit}>
+        <form
+          className="flex flex-col gap-4"
+          hidden={layoutUnsupported}
+          onSubmit={handlePasswordSubmit}
+        >
           <FieldBlock>
             <Label htmlFor={passwordId}>{t("passwordLabel")}</Label>
             <div className="relative">
@@ -406,7 +424,11 @@ export function AccountLockScreen({
           </Button>
         </form>
       ) : (
-        <form className="flex flex-col gap-4" onSubmit={handleRecoverySubmit}>
+        <form
+          className="flex flex-col gap-4"
+          hidden={layoutUnsupported}
+          onSubmit={handleRecoverySubmit}
+        >
           <p className="text-sm text-muted-foreground">{t("recoveryUnlockDescription")}</p>
           <FieldBlock>
             <Label htmlFor={recoveryKeyId}>{t("recoveryKeyLabel")}</Label>
@@ -502,6 +524,37 @@ export function AccountLockScreen({
             )
           })}
         </ol>
+      )}
+
+      {layoutUnsupported && onResetLocalStorage && (
+        <Alert
+          role="alert"
+          data-testid="account-lock-screen-storage-layout"
+          className="border-destructive/40"
+        >
+          <TriangleAlertIcon aria-hidden="true" />
+          <AlertTitle className="text-xs">{t("storageLayoutTitle")}</AlertTitle>
+          <AlertDescription className="text-xs">
+            <p>{t("storageLayoutBody")}</p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={resetting}
+                aria-busy={resetting}
+                data-testid="account-lock-screen-storage-reset"
+                onClick={() => {
+                  if (!window.confirm(t("storageLayoutResetConfirm"))) return
+                  setResetting(true)
+                  void onResetLocalStorage().catch(() => setResetting(false))
+                }}
+              >
+                {t(resetting ? "storageLayoutResetting" : "storageLayoutReset")}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {slow && (

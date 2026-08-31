@@ -15,12 +15,15 @@ import { useAccountStore } from "@/stores/account/account-store"
 
 import type {
   Account,
+  AccountDetail,
+  CodexCredentialData,
   AccountSummary,
   ActiveSnapshot,
   AnthropicCredentialData,
   MigrationOutcome,
   ProviderId,
   ProviderPreset,
+  ProviderCredential,
 } from "@/types/subscription"
 
 /**
@@ -78,9 +81,37 @@ export async function getAccount(provider: ProviderId, accountId: string): Promi
   return got ?? null
 }
 
+/** Safe settings projection; unlike `getAccount`, this cannot expose secrets. */
+export async function getAccountDetail(
+  provider: ProviderId,
+  accountId: string
+): Promise<AccountDetail | null> {
+  const got = await transport.call<AccountDetail | null>("subscription_get_account_detail", {
+    provider,
+    ...subscriptionScope(),
+    accountId,
+  })
+  return got ?? null
+}
+
 export async function saveAccount(provider: ProviderId, account: Account): Promise<void> {
   await transport.call("subscription_save_account", { provider, ...subscriptionScope(), account })
   vaultMutated()
+}
+
+export async function replaceAccountCredential(
+  provider: ProviderId,
+  accountId: string,
+  credential: ProviderCredential
+): Promise<AccountDetail> {
+  const detail = await transport.call<AccountDetail>("subscription_replace_account_credential", {
+    provider,
+    ...subscriptionScope(),
+    accountId,
+    credential,
+  })
+  vaultMutated()
+  return detail
 }
 
 export async function deleteAccount(
@@ -390,6 +421,7 @@ export interface DeviceCodeResponse {
   verification_uri_complete?: string
   expires_in: number
   interval: number
+  flow_generation: number
 }
 
 export interface TokenResponse {
@@ -409,29 +441,57 @@ export interface DeviceCodePendingPayload {
 export type PollOutcome = { Pending: DeviceCodePendingPayload } | { Granted: TokenResponse }
 
 export async function codexOauthRequestDeviceCode(): Promise<DeviceCodeResponse> {
-  return await transport.call<DeviceCodeResponse>("codex_oauth_request_device_code")
+  return await transport.call<DeviceCodeResponse>("codex_oauth_request_device_code", {
+    ...subscriptionScope(),
+  })
 }
 
 export async function codexOauthPollDeviceCode(
   deviceCode: string,
-  userCode: string
+  userCode: string,
+  flowGeneration: number
 ): Promise<PollOutcome> {
   const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", {
     ...subscriptionScope(),
     deviceCode,
     userCode,
+    flowGeneration,
   })
   // A granted poll persists the new account Rust-side — that's a mutation.
   if (outcome && "Granted" in outcome) vaultMutated()
   return outcome
 }
 
-export async function codexOauthRefresh(refreshToken: string): Promise<TokenResponse> {
-  return await transport.call<TokenResponse>("codex_oauth_refresh", { refreshToken })
+export async function codexOauthCancelDeviceCode(flowGeneration: number): Promise<boolean> {
+  return await transport.call<boolean>("codex_oauth_cancel_device_code", {
+    ...subscriptionScope(),
+    flowGeneration,
+  })
 }
 
-export async function codexOauthRevoke(token: string): Promise<void> {
-  await transport.call("codex_oauth_revoke", { token })
+export async function refreshManagedCodexAccount(accountId: string): Promise<CodexCredentialData> {
+  const credential = await transport.call<CodexCredentialData>(
+    "subscription_refresh_codex_account",
+    {
+      ...subscriptionScope(),
+      accountId,
+    }
+  )
+  vaultMutated()
+  return credential
+}
+
+export async function reauthenticateManagedCodexAccount(
+  accountId: string,
+  credential: CodexCredentialData
+): Promise<AccountDetail> {
+  const detail = await transport.call<AccountDetail>("subscription_reauthenticate_codex_account", {
+    ...subscriptionScope(),
+    accountId,
+    credential,
+  })
+  vaultMutated()
+  return detail
 }
 
 // ---------------------------------------------------------------------------

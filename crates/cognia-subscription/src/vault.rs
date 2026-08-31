@@ -10,13 +10,20 @@
 // I/O and structural validation; provider-specific credential validation is
 // delegated to `SubscriptionProvider::validate`.
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use crate::preset::ProviderPreset;
 use crate::provider::ProviderId;
 
 pub const SERVICE: &str = "com.cognia.subscription/v2";
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
+/// Serializes every provider-vault read-modify-write across the app and the
+/// extracted subscription crate. A vault is persisted as one keyring blob, so
+/// account-scoped locks alone cannot prevent updates to different accounts
+/// from overwriting each other.
+pub static VAULT_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const EXPIRING_WINDOW_MS: i64 = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Credential variants — provider-specific shapes. Fields mirror today's v1
@@ -226,6 +233,77 @@ pub struct Account {
     /// Points at a `ProviderPreset.id` in the same vault's `presets` list.
     #[serde(rename = "presetId", default, skip_serializing_if = "Option::is_none")]
     pub preset_id: Option<String>,
+    /// Non-secret lifecycle metadata. Kept outside the credential so the
+    /// renderer-safe projection never needs to deserialize bearer material.
+    #[serde(
+        rename = "authMetadata",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auth_metadata: Option<AccountAuthMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodexIdentityFingerprint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(
+        rename = "workspaceId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl CodexIdentityFingerprint {
+    pub fn is_verifiable(&self) -> bool {
+        self.workspace_id.is_some() && (self.subject.is_some() || self.email.is_some())
+    }
+
+    /// Targeted reauthentication is fail-closed: both identities need the
+    /// same workspace and the same stable subject (email is a legacy fallback).
+    pub fn matches(&self, candidate: &Self) -> bool {
+        if self.workspace_id.is_none() || self.workspace_id != candidate.workspace_id {
+            return false;
+        }
+        match (&self.subject, &candidate.subject) {
+            (Some(current), Some(next)) => current == next,
+            (None, None) => self.email == candidate.email && self.email.is_some(),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountAuthMetadata {
+    #[serde(
+        rename = "codexIdentity",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub codex_identity: Option<CodexIdentityFingerprint>,
+    #[serde(
+        rename = "reauthRequiredAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reauth_required_at_ms: Option<i64>,
+    #[serde(
+        rename = "reauthReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reauth_reason: Option<String>,
+    #[serde(
+        rename = "lastCredentialRotationAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_credential_rotation_at_ms: Option<i64>,
 }
 
 /// Renderer-safe projection of `Account` — strips the secret bearer. Used by
@@ -255,30 +333,83 @@ pub struct AccountSummary {
     pub created_at_ms: i64,
     #[serde(rename = "lastUsedAtMs", default)]
     pub last_used_at_ms: i64,
+    #[serde(rename = "authMode")]
+    pub auth_mode: String,
+    #[serde(rename = "credentialSource")]
+    pub credential_source: String,
+    pub health: String,
+    #[serde(rename = "isExternal")]
+    pub is_external: bool,
+    #[serde(
+        rename = "reauthReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reauth_reason: Option<String>,
 }
 
 impl AccountSummary {
     pub fn from_account(account: &Account) -> Self {
-        let (email, plan, expires_at_ms, variant) = match &account.credential {
-            ProviderCredential::Anthropic(c) => (
-                c.email.clone(),
-                c.plan.clone(),
-                c.expires_at_ms,
-                "anthropic",
-            ),
-            ProviderCredential::Codex(c) => (
-                c.email.clone(),
-                c.chatgpt_plan_type.clone(),
-                c.expires_at_ms,
-                "codex",
-            ),
-            ProviderCredential::OpencodeDiscovered(_) => (None, None, 0, "opencode-discovered"),
-            ProviderCredential::OpencodeZen(z) => (
-                None,
-                Some(z.effective_plan().to_string()),
-                0,
-                "opencode-zen",
-            ),
+        Self::from_account_at(account, current_unix_ms())
+    }
+
+    pub fn from_account_at(account: &Account, now_ms: i64) -> Self {
+        let (email, plan, expires_at_ms, variant, auth_mode, credential_source, is_external) =
+            match &account.credential {
+                ProviderCredential::Anthropic(c) => (
+                    c.email.clone(),
+                    c.plan.clone(),
+                    c.expires_at_ms,
+                    "anthropic",
+                    c.mode.as_str(),
+                    c.original_source.as_deref().unwrap_or("managed"),
+                    c.original_source.is_some(),
+                ),
+                ProviderCredential::Codex(c) => (
+                    c.email.clone(),
+                    c.chatgpt_plan_type.clone(),
+                    c.expires_at_ms,
+                    "codex",
+                    c.auth_mode.as_str(),
+                    c.original_source.as_deref().unwrap_or("managed"),
+                    matches!(c.original_source.as_deref(), Some("file" | "keyring")),
+                ),
+                ProviderCredential::OpencodeDiscovered(_) => (
+                    None,
+                    None,
+                    0,
+                    "opencode-discovered",
+                    "external",
+                    "file",
+                    true,
+                ),
+                ProviderCredential::OpencodeZen(z) => (
+                    None,
+                    Some(z.effective_plan().to_string()),
+                    0,
+                    "opencode-zen",
+                    "api_key",
+                    "managed",
+                    false,
+                ),
+            };
+        let reauth_reason = account
+            .auth_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.reauth_reason.clone());
+        let health = if account
+            .auth_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.reauth_required_at_ms)
+            .is_some()
+        {
+            "reauth_required"
+        } else if variant == "opencode-discovered" {
+            "source_unavailable"
+        } else if expires_at_ms > 0 && expires_at_ms <= now_ms + EXPIRING_WINDOW_MS {
+            "expiring"
+        } else {
+            "ready"
         };
         Self {
             id: account.id.clone(),
@@ -290,6 +421,44 @@ impl AccountSummary {
             expires_at_ms,
             created_at_ms: account.created_at_ms,
             last_used_at_ms: account.last_used_at_ms,
+            auth_mode: auth_mode.to_string(),
+            credential_source: credential_source.to_string(),
+            health: health.to_string(),
+            is_external,
+            reauth_reason,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountDetail {
+    #[serde(flatten)]
+    pub summary: AccountSummary,
+    #[serde(rename = "presetId", default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+    #[serde(
+        rename = "codexIdentity",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub codex_identity: Option<CodexIdentityFingerprint>,
+    #[serde(
+        rename = "lastCredentialRotationAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_credential_rotation_at_ms: Option<i64>,
+}
+
+impl AccountDetail {
+    pub fn from_account(account: &Account) -> Self {
+        let metadata = account.auth_metadata.as_ref();
+        Self {
+            summary: AccountSummary::from_account(account),
+            preset_id: account.preset_id.clone(),
+            codex_identity: metadata.and_then(|value| value.codex_identity.clone()),
+            last_credential_rotation_at_ms: metadata
+                .and_then(|value| value.last_credential_rotation_at_ms),
         }
     }
 }
@@ -337,10 +506,11 @@ impl ProviderVault {
         }
     }
 
-    /// In-place v2→v3 upgrade. Idempotent: when `schema_version` is already 3
-    /// (or higher) it only normalizes a stray legacy `preset`. Returns `true`
-    /// when anything changed (so callers can persist the upgraded blob).
-    pub fn migrate_to_v3(&mut self) -> bool {
+    /// In-place upgrade to the current schema. Idempotent: when the vault is
+    /// already current it still normalizes a stray legacy `preset` and any
+    /// missing Codex identity. Returns `true` when anything changed (so callers
+    /// can persist the upgraded blob).
+    pub fn migrate_to_current(&mut self) -> bool {
         let mut changed = false;
         // Fold a legacy v2 single preset into the v3 library + default pointer.
         if let Some(legacy) = self.preset.take() {
@@ -350,6 +520,33 @@ impl ProviderVault {
                 }
                 self.presets.push(legacy);
             }
+            changed = true;
+        }
+        // Not gated on the version bump. An account can reach a current vault
+        // without an identity (added by a path that skipped normalization, or
+        // migrated while its `id_token_raw` was not yet parseable), and once the
+        // version matched, a version-gated backfill would never look again. The
+        // derivation is pure and only runs while the fingerprint is missing.
+        for account in &mut self.accounts {
+            if account
+                .auth_metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.codex_identity.is_some())
+            {
+                continue;
+            }
+            let ProviderCredential::Codex(credential) = &account.credential else {
+                continue;
+            };
+            let Some(identity) = derive_codex_identity(&credential.id_token_raw, credential)
+                .filter(CodexIdentityFingerprint::is_verifiable)
+            else {
+                continue;
+            };
+            account
+                .auth_metadata
+                .get_or_insert_with(AccountAuthMetadata::default)
+                .codex_identity = Some(identity);
             changed = true;
         }
         if self.schema_version < SCHEMA_VERSION {
@@ -477,8 +674,70 @@ fn validate_vault(vault: &ProviderVault) -> Result<(), String> {
 fn parse_vault_blob(blob: &str) -> Result<ProviderVault, String> {
     let mut parsed: ProviderVault =
         serde_json::from_str(blob).map_err(|e| format!("vault parse failed: {e}"))?;
-    parsed.migrate_to_v3();
+    parsed.migrate_to_current();
     Ok(parsed)
+}
+
+fn current_unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+pub fn derive_codex_identity(
+    raw_jwt: &str,
+    credential: &CodexCredentialData,
+) -> Option<CodexIdentityFingerprint> {
+    let payload = raw_jwt.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let auth = claims.get("https://api.openai.com/auth");
+    let identity = CodexIdentityFingerprint {
+        issuer: claims
+            .get("iss")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned),
+        subject: claims
+            .get("sub")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned),
+        workspace_id: auth
+            .and_then(|value| value.get("chatgpt_account_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+            .or_else(|| credential.account_id.clone()),
+        email: claims
+            .get("email")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim().to_ascii_lowercase())
+            .or_else(|| {
+                credential
+                    .email
+                    .as_ref()
+                    .map(|value| value.trim().to_ascii_lowercase())
+            }),
+    };
+    identity.is_verifiable().then_some(identity)
+}
+
+/// Populate missing non-secret identity metadata from credential bytes already
+/// supplied by the caller. This is pure and never consults an external store.
+pub fn normalize_account_auth_metadata(account: &mut Account) {
+    let ProviderCredential::Codex(credential) = &account.credential else {
+        return;
+    };
+    let Some(identity) = derive_codex_identity(&credential.id_token_raw, credential) else {
+        return;
+    };
+    account
+        .auth_metadata
+        .get_or_insert_with(AccountAuthMetadata::default)
+        .codex_identity
+        .get_or_insert(identity);
 }
 
 /// Persist a vault for the given provider. Overwrites the existing keyring
@@ -561,6 +820,14 @@ pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn vault_mutation_lock_serializes_whole_blob_updates() {
+        let first = VAULT_MUTATION_LOCK.lock().await;
+        assert!(VAULT_MUTATION_LOCK.try_lock().is_err());
+        drop(first);
+        assert!(VAULT_MUTATION_LOCK.try_lock().is_ok());
+    }
+
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
     }
@@ -583,6 +850,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 
@@ -606,6 +874,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 
@@ -683,6 +952,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             last_used_at_ms: 1_700_000_000_000,
             preset_id: None,
+            auth_metadata: None,
         };
         let blob = serde_json::to_string(&zen).unwrap();
         let parsed: Account = serde_json::from_str(&blob).unwrap();
@@ -803,6 +1073,123 @@ mod tests {
         assert_eq!(s.variant, "anthropic");
         assert_eq!(s.email.as_deref(), Some("user@example.com"));
         assert_eq!(s.plan.as_deref(), Some("pro"));
+        assert_eq!(s.credential_source, "keyring");
+        assert!(s.is_external);
+    }
+
+    #[test]
+    fn account_detail_strips_every_secret_field() {
+        let detail = AccountDetail::from_account(&codex_account());
+        let blob = serde_json::to_string(&detail).unwrap();
+        for secret in ["oat-codex-vault", "rt-codex-vault", "eyJ.fake.jwt"] {
+            assert!(!blob.contains(secret));
+        }
+        assert_eq!(detail.summary.auth_mode, "chatgpt");
+    }
+
+    #[test]
+    fn summary_health_prefers_persisted_reauth_and_derives_expiring() {
+        let mut account = codex_account();
+        if let ProviderCredential::Codex(credential) = &mut account.credential {
+            credential.expires_at_ms = 1_000 + EXPIRING_WINDOW_MS;
+        }
+        assert_eq!(
+            AccountSummary::from_account_at(&account, 1_000).health,
+            "expiring"
+        );
+        account.auth_metadata = Some(AccountAuthMetadata {
+            reauth_required_at_ms: Some(900),
+            reauth_reason: Some("refresh_token_revoked".into()),
+            ..AccountAuthMetadata::default()
+        });
+        let summary = AccountSummary::from_account_at(&account, 1_000);
+        assert_eq!(summary.health, "reauth_required");
+        assert_eq!(
+            summary.reauth_reason.as_deref(),
+            Some("refresh_token_revoked")
+        );
+    }
+
+    #[test]
+    fn v3_migration_derives_codex_identity_without_external_io() {
+        let claims = serde_json::json!({
+            "iss": "https://auth.openai.com",
+            "sub": "user-subject",
+            "email": "  USER@Example.COM ",
+            "https://api.openai.com/auth": { "chatgpt_account_id": "workspace-1" }
+        });
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).unwrap());
+        let mut account = codex_account();
+        if let ProviderCredential::Codex(credential) = &mut account.credential {
+            credential.id_token_raw = format!("header.{payload}.signature");
+        }
+        let mut vault = ProviderVault::empty();
+        vault.schema_version = 3;
+        vault.accounts.push(account);
+
+        assert!(vault.migrate_to_current());
+        assert_eq!(vault.schema_version, 4);
+        let identity = vault.accounts[0]
+            .auth_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.codex_identity.as_ref())
+            .expect("identity should be derived from the supplied fixture JWT");
+        assert_eq!(identity.subject.as_deref(), Some("user-subject"));
+        assert_eq!(identity.workspace_id.as_deref(), Some("workspace-1"));
+        assert_eq!(identity.email.as_deref(), Some("user@example.com"));
+    }
+
+    // An account can land in an already-current vault with no fingerprint. A
+    // version-gated backfill would never look at it again, so targeted
+    // reauthentication would have nothing persisted to compare against.
+    #[test]
+    fn identity_backfill_also_heals_a_vault_already_at_the_current_version() {
+        let claims = serde_json::json!({
+            "sub": "user-subject",
+            "https://api.openai.com/auth": { "chatgpt_account_id": "workspace-1" }
+        });
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).unwrap());
+        let mut account = codex_account();
+        if let ProviderCredential::Codex(credential) = &mut account.credential {
+            credential.id_token_raw = format!("header.{payload}.signature");
+        }
+        let mut vault = ProviderVault::empty();
+        vault.schema_version = SCHEMA_VERSION;
+        vault.accounts.push(account);
+
+        assert!(vault.migrate_to_current());
+        assert_eq!(
+            vault.accounts[0]
+                .auth_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.codex_identity.as_ref())
+                .and_then(|identity| identity.workspace_id.as_deref()),
+            Some("workspace-1")
+        );
+        // Idempotent: a second pass has nothing left to normalize.
+        assert!(!vault.migrate_to_current());
+    }
+
+    #[test]
+    fn codex_identity_match_is_workspace_and_subject_safe() {
+        let current = CodexIdentityFingerprint {
+            workspace_id: Some("workspace-1".into()),
+            subject: Some("subject-1".into()),
+            ..CodexIdentityFingerprint::default()
+        };
+        assert!(current.matches(&current));
+        assert!(!current.matches(&CodexIdentityFingerprint {
+            workspace_id: Some("workspace-2".into()),
+            subject: Some("subject-1".into()),
+            ..CodexIdentityFingerprint::default()
+        }));
+        assert!(!current.matches(&CodexIdentityFingerprint {
+            workspace_id: Some("workspace-1".into()),
+            subject: Some("subject-2".into()),
+            ..CodexIdentityFingerprint::default()
+        }));
     }
 
     #[test]
@@ -814,6 +1201,7 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: 0,
             preset_id: None,
+            auth_metadata: None,
         };
         let zen = Account {
             id: "y".into(),
@@ -822,6 +1210,7 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: 0,
             preset_id: None,
+            auth_metadata: None,
         };
         assert_eq!(
             AccountSummary::from_account(&discovered).variant,

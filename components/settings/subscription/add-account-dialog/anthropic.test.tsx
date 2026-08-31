@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Account } from "@/types/subscription"
+import type { Account, AccountSummary } from "@/types/subscription"
 
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
@@ -42,8 +42,10 @@ jest.mock("@/lib/subscription/anthropic/hooks", () => ({
 }))
 
 const savePkceMock = jest.fn()
+const replaceAccountCredentialMock = jest.fn()
 jest.mock("@/lib/subscription/core/transport", () => ({
   anthropicOauthSavePkceResult: (...a: unknown[]) => savePkceMock(...a),
+  replaceAccountCredential: (...a: unknown[]) => replaceAccountCredentialMock(...a),
 }))
 
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
@@ -134,30 +136,42 @@ describe("AnthropicAddAccountDialog", () => {
 
   it("replaces credentials without changing the existing account identity", async () => {
     discoveredResult = discovered()
-    const existing = {
-      ...account(),
+    const onUpdated = jest.fn()
+    const existing: AccountSummary = {
       id: "existing-id",
+      provider: "anthropic",
+      variant: "anthropic",
       label: "Personal",
-      presetId: "preset-1",
       createdAtMs: 123,
+      lastUsedAtMs: 456,
+      expiresAtMs: 789,
+      authMode: "subscription",
+      credentialSource: "managed",
+      health: "ready",
+      isExternal: false,
     }
-    persistProviderAccountMock.mockImplementation(async (_provider, next) => next)
-    render(<AnthropicAddAccountDialog open onOpenChange={() => {}} existingAccount={existing} />)
+    replaceAccountCredentialMock.mockResolvedValueOnce(account())
+    render(
+      <AnthropicAddAccountDialog
+        open
+        onOpenChange={() => {}}
+        existingAccount={existing}
+        onUpdated={onUpdated}
+      />
+    )
 
     await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
 
     await waitFor(() =>
-      expect(persistProviderAccountMock).toHaveBeenCalledWith(
+      expect(replaceAccountCredentialMock).toHaveBeenCalledWith(
         "anthropic",
-        expect.objectContaining({
-          id: "existing-id",
-          label: "Personal",
-          presetId: "preset-1",
-          createdAtMs: 123,
-        })
+        "existing-id",
+        expect.objectContaining({ provider: "anthropic", accessToken: "sk-ant-oat01-test" })
       )
     )
     expect(savePkceMock).not.toHaveBeenCalled()
+    expect(persistProviderAccountMock).not.toHaveBeenCalled()
+    expect(onUpdated).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-1" }))
   })
 
   it("starts the PKCE flow when a non-reuse mode is chosen", async () => {

@@ -39,7 +39,7 @@ export async function snapshotVaults(): Promise<Partial<Record<ProviderId, Provi
       // Still record the empty vault when there's an active pointer / presets.
       if (activeSnapshot.activeAccountId || presets.length > 0) {
         result[provider] = {
-          schemaVersion: 3,
+          schemaVersion: 4,
           accounts: [],
           activeAccountId: activeSnapshot.activeAccountId,
           presets,
@@ -54,7 +54,7 @@ export async function snapshotVaults(): Promise<Partial<Record<ProviderId, Provi
       if (account) fullAccounts.push(account)
     }
     result[provider] = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       accounts: fullAccounts,
       activeAccountId: activeSnapshot.activeAccountId,
       presets,
@@ -80,7 +80,7 @@ export async function applyVaults(
       await saveAccount(provider, account)
       accountCount += 1
     }
-    // v3 preset library + default pointer.
+    // Preset library + default pointer.
     for (const preset of vault.presets ?? []) {
       await saveProviderPreset(provider, preset)
     }

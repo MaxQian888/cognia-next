@@ -146,6 +146,7 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: 0,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 
@@ -290,6 +291,7 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: 0,
             preset_id: None,
+            auth_metadata: None,
         };
         assert!(AnthropicProvider.env_for_sidecar(&wrong, None).is_empty());
     }

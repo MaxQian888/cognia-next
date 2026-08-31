@@ -1,10 +1,9 @@
 "use client"
 
-// OpenCode provider tab — flat. Account list (Zen/Go-keyed accounts), a
-// preset picker (relay/mirror endpoints in front of the managed gateway,
-// parity with Anthropic/Codex), and an inline read-only discovery card
-// listing the whitelisted sub-providers configured in
-// `~/.local/share/opencode/auth.json` (never written back).
+// OpenCode provider tab: quota guidance, routing presets, and the inline
+// discovery card. Managed account CRUD lives in Account Center, but adopting a
+// discovered `auth.json` pointer stays here because Account Center has no view
+// of that file and this row is the capability's only entry point.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -17,30 +16,24 @@ import { Label } from "@/components/ui/label"
 import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { isTauri } from "@/lib/tauri"
 
-import { AccountList } from "./account-list"
-import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
 import { PresetPicker } from "./preset-picker"
 import { ProviderQuotaPanel } from "./provider-quota-panel"
 
 import { useOpencodeDiscovery } from "@/lib/subscription/opencode/discovery"
 import { opencodeAdoptDiscovered } from "@/lib/subscription/core/transport"
-import { OPENCODE_WHITELIST, type Account } from "@/types/subscription"
+import { OPENCODE_WHITELIST } from "@/types/subscription"
 import { toast } from "@/components/ui/sonner"
 
 export function ProviderTabOpencode() {
   const t = useTranslations("subscription.opencode")
   const tDiscovery = useTranslations("subscription.opencode.discovery")
-  const tZen = useTranslations("subscription.opencode.zen")
-  const [addOpen, setAddOpen] = useState(false)
-  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [adopting, setAdopting] = useState<string | null>(null)
-
   const { discovered, loading, error, reload } = useOpencodeDiscovery()
 
-  const adopt = async (subProvider: string, accountId: string | null = null) => {
+  const adopt = async (subProvider: string) => {
     setAdopting(subProvider)
     try {
-      await opencodeAdoptDiscovered(subProvider, accountId)
+      await opencodeAdoptDiscovered(subProvider, null)
       toast.success(tDiscovery("adoptSuccess", { subProvider }))
     } catch (err) {
       toast.error(
@@ -63,34 +56,6 @@ export function ProviderTabOpencode() {
         <Label className="text-sm">{t("title")}</Label>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
-
-      <AccountList
-        provider="opencode"
-        onAdd={() => {
-          setEditingAccount(null)
-          setAddOpen(true)
-        }}
-        onUpdate={(account) => {
-          if (account.credential.provider === "opencode-discovered") {
-            void adopt(account.credential.subProvider, account.id)
-            return
-          }
-          setEditingAccount(account)
-          setAddOpen(true)
-        }}
-        secondaryAction={
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setEditingAccount(null)
-              setAddOpen(true)
-            }}
-          >
-            {tZen("addKey")}
-          </Button>
-        }
-      />
 
       {/* OpenCode Zen/Go has NO API-key-queryable balance/usage endpoint —
           billing gates run server-side inside the inference handler and the
@@ -154,6 +119,10 @@ export function ProviderTabOpencode() {
                       <Badge variant="outline" className="text-[10px]">
                         {kindLabel(entry.kind, tDiscovery)}
                       </Badge>
+                      {/* Adopting links the discovered `auth.json` pointer into
+                          the vault. Account Center owns account CRUD but has no
+                          view of this file, so this row is the only reachable
+                          entry point the capability has. */}
                       <Button
                         size="sm"
                         variant="outline"
@@ -179,16 +148,6 @@ export function ProviderTabOpencode() {
           )}
         </CardContent>
       </Card>
-
-      <OpencodeAddAccountDialog
-        open={addOpen}
-        existingAccount={editingAccount ?? undefined}
-        onAdded={() => setEditingAccount(null)}
-        onOpenChange={(next) => {
-          setAddOpen(next)
-          if (!next) setEditingAccount(null)
-        }}
-      />
     </div>
   )
 }

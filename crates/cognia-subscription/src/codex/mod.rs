@@ -10,6 +10,7 @@
 pub mod commands;
 pub mod credential;
 pub mod discovery;
+pub mod lifecycle;
 pub mod oauth;
 
 use crate::preset::ProviderPreset;
@@ -147,6 +148,7 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: 0,
             preset_id: None,
+            auth_metadata: None,
         }
     }
 

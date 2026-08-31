@@ -16,7 +16,6 @@ import { subscribeSubscriptionChanged } from "./subscription-events"
 
 import {
   deleteProviderPreset,
-  getAccount,
   getActiveAccount,
   getProviderPreset,
   listAccounts,
@@ -29,7 +28,6 @@ import {
 } from "./transport"
 import { deleteProviderAccount } from "./account-lifecycle"
 import type {
-  Account,
   AccountSummary,
   ActiveSnapshot,
   ProviderId,
@@ -57,8 +55,6 @@ export interface UseAccountsResult {
   rename: (accountId: string, label: string | null) => Promise<void>
   /** Delete an account; if active, clears the active pointer. */
   remove: (accountId: string, replacementAccountId?: string | null) => Promise<void>
-  /** Fetch the full Account (incl. credential) for editing flows. */
-  fetchFull: (accountId: string) => Promise<Account | null>
 }
 
 export function useAccounts(provider: ProviderId): UseAccountsResult {
@@ -190,11 +186,6 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
     [provider, activeAccountId, runAction]
   )
 
-  const fetchFull = useCallback(
-    async (accountId: string) => getAccount(provider, accountId),
-    [provider]
-  )
-
   return {
     accounts,
     activeAccountId,
@@ -206,7 +197,6 @@ export function useAccounts(provider: ProviderId): UseAccountsResult {
     setActive,
     rename,
     remove,
-    fetchFull,
   }
 }
 

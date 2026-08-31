@@ -142,7 +142,13 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
         std::fs::create_dir_all(&configdir)
             .map_err(|e| format!("create_dir_all {configdir:?} failed: {e}"))?;
     }
-    let credentials_path = configdir.join(".credentials.json");
+    // Filesystem backends may report the canonical spelling of a watched
+    // path (`/private/var/...` on macOS) even when the caller registered an
+    // equivalent symlinked spelling (`/var/...`). Normalize the watched root
+    // once so exact credential-file filtering remains portable.
+    let watch_dir = std::fs::canonicalize(&configdir)
+        .map_err(|e| format!("canonicalize {configdir:?} failed: {e}"))?;
+    let credentials_path = watch_dir.join(".credentials.json");
     let events_observed = Arc::new(AtomicU64::new(0));
     let rotations_applied = Arc::new(AtomicU64::new(0));
     let last_fire = Arc::new(Mutex::new(
@@ -202,8 +208,8 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
     .map_err(|e| format!("watcher init failed: {e}"))?;
 
     watcher
-        .watch(&configdir, RecursiveMode::NonRecursive)
-        .map_err(|e| format!("watch {configdir:?} failed: {e}"))?;
+        .watch(&watch_dir, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("watch {watch_dir:?} failed: {e}"))?;
 
     Ok(WatcherHandle {
         _watcher: watcher,
@@ -295,9 +301,8 @@ impl WatcherRegistry {
         let mut guard = self.inner.lock();
         let keys = guard
             .iter()
-            .filter_map(|(key, handle)| {
-                (handle.local_account_id == local_account_id).then(|| key.clone())
-            })
+            .filter(|(_, handle)| handle.local_account_id == local_account_id)
+            .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         for key in keys {
             guard.remove(&key);
@@ -324,7 +329,6 @@ fn watcher_key(local_account_id: &str, account_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::Ordering;
     use std::sync::Mutex as StdMutex;
 
     /// Recording sink for tests — counts updates and stores the last
@@ -354,11 +358,25 @@ mod tests {
         std::fs::write(path, payload).unwrap();
     }
 
-    fn wait_for(observed: &Arc<AtomicU64>, min: u64, deadline: std::time::Duration) {
+    fn wait_for_record(
+        sink: &RecordingSink,
+        account: &str,
+        refresh_token: &str,
+        deadline: std::time::Duration,
+    ) -> bool {
         let started = std::time::Instant::now();
-        while observed.load(Ordering::SeqCst) < min {
+        loop {
+            if sink
+                .records
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(seen, fresh)| seen == account && fresh.refresh_token == refresh_token)
+            {
+                return true;
+            }
             if started.elapsed() > deadline {
-                return;
+                return false;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
@@ -380,24 +398,28 @@ mod tests {
         )
         .unwrap();
 
+        // `Watcher::watch` registers synchronously, but the macOS FSEvents
+        // stream can become observable a moment later under load. Production
+        // rotations occur long after startup; give this immediate test write
+        // the same activation boundary.
+        std::thread::sleep(std::time::Duration::from_millis(100));
         // Trigger a write — this should land in the sink.
         write_credentials(&cred_path, "rt-rotated");
-        // Notify is async — give it up to 2s on slow filesystems.
-        wait_for(
-            &handle.events_observed,
-            1,
-            std::time::Duration::from_secs(2),
+        // Notify may report an initial metadata event before the write event,
+        // so wait for the semantic result rather than the first callback.
+        let rotated = wait_for_record(
+            sink.as_ref(),
+            "local-a/acc-a",
+            "rt-rotated",
+            std::time::Duration::from_secs(5),
         );
-        wait_for(
-            &handle.rotations_applied,
-            1,
-            std::time::Duration::from_secs(2),
+        assert!(
+            rotated,
+            "rotated credential was not observed (events={}, applied={}, records={})",
+            handle.events_observed.load(Ordering::SeqCst),
+            handle.rotations_applied.load(Ordering::SeqCst),
+            sink.records.lock().unwrap().len(),
         );
-
-        let records = sink.records.lock().unwrap();
-        assert!(records
-            .iter()
-            .any(|(acc, c)| acc == "local-a/acc-a" && c.refresh_token == "rt-rotated"));
         drop(handle);
     }
 

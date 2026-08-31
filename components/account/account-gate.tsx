@@ -226,12 +226,29 @@ export function AccountGate({ children }: AccountGateProps) {
           supportsRecoveryKey={usesBrowserVault()}
           onUnlock={unlockAccount}
           onRecoveryUnlock={unlockAccountWithRecoveryKey}
+          onResetLocalStorage={resetRefusedLocalDatabase}
         />
       </GateShell>
     )
   }
 
   return <>{children}</>
+}
+
+/**
+ * Delete the local database boot refused, then reload into a clean first run.
+ *
+ * Imported lazily so the storage-layout module (and Dexie with it) stays off
+ * the gate's render path, which runs on every launch including the healthy one.
+ */
+async function resetRefusedLocalDatabase(): Promise<void> {
+  const [{ getDb }, { resetLocalDatabase }] = await Promise.all([
+    import("@/lib/db/schema"),
+    import("@/lib/db/storage-layout"),
+  ])
+  const databaseName = getDb().name
+  await resetLocalDatabase(databaseName)
+  window.location.reload()
 }
 
 function GateShell({ children }: { children: ReactNode }) {

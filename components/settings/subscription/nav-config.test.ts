@@ -26,6 +26,7 @@ describe("resolveSubscriptionPanel", () => {
 
   it("passes a valid panel id through", () => {
     expect(resolveSubscriptionPanel("codex", null)).toBe("codex")
+    expect(resolveSubscriptionPanel("accounts", null)).toBe("accounts")
     expect(resolveSubscriptionPanel("backup", null)).toBe("backup")
     expect(resolveSubscriptionPanel("sync", null)).toBe("sync")
   })
@@ -39,7 +40,7 @@ describe("resolveSubscriptionPanel", () => {
     it.each([
       ["overview", "overview"],
       ["usage", "usage"],
-      ["account", "claude"],
+      ["account", "accounts"],
       ["settings", "probes"],
     ])("maps innerTab=%s to %s", (inner, expected) => {
       expect(resolveSubscriptionPanel("anthropic", inner)).toBe(expected)

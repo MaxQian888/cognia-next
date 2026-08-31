@@ -445,3 +445,81 @@ describe("recovery key", () => {
     expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
   })
 })
+
+describe("unsupported storage layout", () => {
+  /** Drive the screen into the refusal state the way boot does. */
+  async function refuse(overrides: Parameters<typeof renderScreen>[0] = {}) {
+    const view = renderScreen({
+      onUnlock: jest
+        .fn()
+        .mockRejectedValue(
+          new AccountUnlockError("storage-layout-unsupported", "was not written by this build")
+        ),
+      ...overrides,
+    })
+    fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "pw" } })
+    fireEvent.click(screen.getByTestId("account-lock-screen-submit"))
+    await waitFor(() =>
+      expect(screen.getByTestId("account-lock-screen-storage-layout")).toBeVisible()
+    )
+    return view
+  }
+
+  it("offers a reset, because no password can clear this failure", async () => {
+    const onResetLocalStorage = jest.fn().mockReturnValue(new Promise(() => {}))
+    jest.spyOn(window, "confirm").mockReturnValue(true)
+    await refuse({ onResetLocalStorage })
+
+    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+
+    expect(onResetLocalStorage).toHaveBeenCalledTimes(1)
+    // The button stays busy: the reset ends in a reload, not a re-render.
+    await waitFor(() =>
+      expect(screen.getByTestId("account-lock-screen-storage-reset")).toBeDisabled()
+    )
+  })
+
+  it("replaces the unusable password form with the reset panel", async () => {
+    await refuse({ onResetLocalStorage: jest.fn() })
+
+    expect(screen.getByLabelText("passwordLabel")).not.toBeVisible()
+    expect(screen.getByTestId("account-lock-screen-submit")).not.toBeVisible()
+    expect(screen.getByTestId("account-lock-screen-storage-layout")).toBeVisible()
+  })
+
+  it("does not reset when the confirmation is declined", async () => {
+    const onResetLocalStorage = jest.fn()
+    jest.spyOn(window, "confirm").mockReturnValue(false)
+    await refuse({ onResetLocalStorage })
+
+    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+
+    expect(onResetLocalStorage).not.toHaveBeenCalled()
+  })
+
+  it("re-enables the button when the reset itself fails", async () => {
+    // Leaving it spinning forever would strand the user on a screen whose only
+    // action appears to be running.
+    const onResetLocalStorage = jest.fn().mockRejectedValue(new Error("delete blocked"))
+    jest.spyOn(window, "confirm").mockReturnValue(true)
+    await refuse({ onResetLocalStorage })
+
+    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("account-lock-screen-storage-reset")).toBeEnabled()
+    )
+  })
+
+  it("shows no reset panel for an ordinary wrong password", async () => {
+    renderScreen({
+      onUnlock: jest.fn().mockRejectedValue(new AccountUnlockError("invalid-password")),
+      onResetLocalStorage: jest.fn(),
+    })
+    fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "pw" } })
+    fireEvent.click(screen.getByTestId("account-lock-screen-submit"))
+
+    await waitFor(() => expect(screen.getByText("errorInvalidPassword")).toBeVisible())
+    expect(screen.queryByTestId("account-lock-screen-storage-layout")).not.toBeInTheDocument()
+  })
+})

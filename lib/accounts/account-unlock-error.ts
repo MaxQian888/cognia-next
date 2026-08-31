@@ -25,6 +25,9 @@ export type AccountUnlockErrorCode =
   | "vault-incompatible"
   /** Too many failed attempts; the caller must wait out the cooldown. */
   | "throttled"
+  /** The local database was written by a storage layout this build cannot open.
+   *  The data is intact on disk; the only way forward is an explicit reset. */
+  | "storage-layout-unsupported"
   /** Anything else — the message is still logged, never shown verbatim. */
   | "unknown"
 
@@ -55,6 +58,11 @@ function isDecryptionFailure(error: unknown): boolean {
  */
 export function codeOf(error: unknown): AccountUnlockErrorCode {
   if (error instanceof AccountUnlockError) return error.code
+  // Matched by name rather than by `instanceof`, so this module stays free of
+  // an import from the db layer (which imports the vault, which imports this).
+  if (error instanceof Error && error.name === "UnsupportedLocalSchemaError") {
+    return "storage-layout-unsupported"
+  }
   if (isDecryptionFailure(error)) return "invalid-password"
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : ""
   if (/invalid local account password/i.test(message)) return "invalid-password"
@@ -62,6 +70,7 @@ export function codeOf(error: unknown): AccountUnlockErrorCode {
   if (/recovery key is malformed/i.test(message)) return "invalid-recovery-key"
   if (/not provisioned for this account/i.test(message)) return "vault-not-provisioned"
   if (/record is incompatible|verifier is not supported/i.test(message)) return "vault-incompatible"
+  if (/was not written by this build/i.test(message)) return "storage-layout-unsupported"
   return "unknown"
 }
 

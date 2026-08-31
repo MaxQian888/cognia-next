@@ -64,6 +64,7 @@ pub async fn opencode_save_zen_key(
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
 
     let _ = local_account_id;
@@ -149,6 +150,7 @@ fn account_for_adoption(
             .unwrap_or(now_ms),
         last_used_at_ms: now_ms,
         preset_id: existing.and_then(|account| account.preset_id.clone()),
+        auth_metadata: existing.and_then(|account| account.auth_metadata.clone()),
     }
 }
 
@@ -257,6 +259,7 @@ mod adoption_tests {
             created_at_ms: 123,
             last_used_at_ms: 456,
             preset_id: Some("preset-1".into()),
+            auth_metadata: None,
         };
         let replacement = ProviderCredential::OpencodeZen(OpencodeZenData {
             access_token: "new".into(),

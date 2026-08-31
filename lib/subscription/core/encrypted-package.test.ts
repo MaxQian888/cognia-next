@@ -14,7 +14,7 @@ import type { ProviderVault } from "@/types/subscription"
 
 function vault(overrides: Partial<ProviderVault> = {}): ProviderVault {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     accounts: [],
     presets: [],
     ...overrides,

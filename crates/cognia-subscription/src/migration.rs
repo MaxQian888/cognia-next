@@ -149,6 +149,7 @@ fn migrate_anthropic() -> Result<MigrationOutcome, String> {
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);
@@ -199,6 +200,7 @@ fn migrate_codex() -> Result<MigrationOutcome, String> {
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);
@@ -249,6 +251,7 @@ fn migrate_anthropic_for_account(local_account_id: &str) -> Result<MigrationOutc
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);
@@ -301,6 +304,7 @@ fn migrate_codex_for_account(local_account_id: &str) -> Result<MigrationOutcome,
         created_at_ms: now_ms,
         last_used_at_ms: now_ms,
         preset_id: None,
+        auth_metadata: None,
     };
     let account_id = account.id.clone();
     vault.upsert_account(account);

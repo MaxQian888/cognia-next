@@ -3,15 +3,14 @@ import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/cha
 
 import {
   deadlineMsFromResponse,
+  cancelCodexDeviceCode,
   intervalMsFromResponse,
   isCodexCredentialFresh,
   pendingIsTerminal,
   pollCodexDeviceCode,
   pollOutcomeKind,
   pollOutcomePayload,
-  refreshCodexToken,
   requestCodexDeviceCode,
-  revokeCodexToken,
   tokenResponseToCredential,
   toProviderCredential,
 } from "./oauth"
@@ -33,6 +32,7 @@ const deviceCode: DeviceCodeResponse = {
   verification_uri_complete: "https://chat.openai.com/d?u=CODE-1234",
   expires_in: 900,
   interval: 5,
+  flow_generation: 7,
 }
 
 const tokenResponse: TokenResponse = {
@@ -58,34 +58,32 @@ describe("oauth IPC wrappers", () => {
   it("requestCodexDeviceCode calls codex_oauth_request_device_code", async () => {
     ;(transport.call as jest.Mock).mockResolvedValueOnce(deviceCode)
     const got = await requestCodexDeviceCode()
-    expect(transport.call).toHaveBeenCalledWith("codex_oauth_request_device_code")
+    expect(transport.call).toHaveBeenCalledWith("codex_oauth_request_device_code", {
+      localAccountId: "local_acct_a",
+    })
     expect(got).toEqual(deviceCode)
   })
 
   it("pollCodexDeviceCode forwards device_auth_id + user_code", async () => {
     const outcome: PollOutcome = { Granted: tokenResponse }
     ;(transport.call as jest.Mock).mockResolvedValueOnce(outcome)
-    const got = await pollCodexDeviceCode("dc-test", "CODE-1234")
+    const got = await pollCodexDeviceCode("dc-test", "CODE-1234", 7)
     expect(transport.call).toHaveBeenCalledWith("codex_oauth_poll_device_code", {
       localAccountId: "local_acct_a",
       deviceCode: "dc-test",
       userCode: "CODE-1234",
+      flowGeneration: 7,
     })
     expect(got).toEqual(outcome)
   })
 
-  it("refreshCodexToken forwards refresh_token", async () => {
-    ;(transport.call as jest.Mock).mockResolvedValueOnce(tokenResponse)
-    await refreshCodexToken("rt-test")
-    expect(transport.call).toHaveBeenCalledWith("codex_oauth_refresh", {
-      refreshToken: "rt-test",
+  it("cancelCodexDeviceCode invalidates only the supplied generation", async () => {
+    ;(transport.call as jest.Mock).mockResolvedValueOnce(true)
+    await expect(cancelCodexDeviceCode(7)).resolves.toBe(true)
+    expect(transport.call).toHaveBeenCalledWith("codex_oauth_cancel_device_code", {
+      localAccountId: "local_acct_a",
+      flowGeneration: 7,
     })
-  })
-
-  it("revokeCodexToken forwards token", async () => {
-    ;(transport.call as jest.Mock).mockResolvedValueOnce(undefined)
-    await revokeCodexToken("rt-test")
-    expect(transport.call).toHaveBeenCalledWith("codex_oauth_revoke", { token: "rt-test" })
   })
 
   it("plain-web mode rejects through the WebStub transport", async () => {
