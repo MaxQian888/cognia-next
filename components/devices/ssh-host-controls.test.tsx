@@ -324,6 +324,42 @@ it("says a host has no forwarding rules rather than showing an empty list", () =
   expect(screen.getByTestId("ssh-forwards")).toHaveTextContent("devices.ssh.forwardsNone")
 })
 
+/**
+ * The loopback rule constrains forwarding, so on a host with no rule it is a
+ * paragraph about the safety of something that is not happening. It made the
+ * shortest possible answer, one word, into the tallest cell in the record.
+ */
+it("only explains the loopback bind when there is a rule it applies to", () => {
+  const { rerender } = render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.queryByText("devices.ssh.forwardsLoopback")).not.toBeInTheDocument()
+
+  sshHosts = [
+    {
+      ...PROFILE,
+      localForwards: [
+        { id: "l1", localPort: 8080, remoteHost: "db.internal", remotePort: 5432, enabled: true },
+      ],
+    },
+  ]
+  rerender(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByText("devices.ssh.forwardsLoopback")).toBeInTheDocument()
+})
+
+/**
+ * Forwarding is a labelled fact like the address and the route, not a block
+ * bolted under the record with a hand-built label. As its own block it sat
+ * outside the `<dl>` the other three share, so at full card width the card
+ * read as two stacked half-finished sections.
+ */
+it("carries the forwarding rules as a row of the same record", () => {
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  const record = screen.getByTestId("ssh-forwards").closest("dl")
+  expect(record).not.toBeNull()
+  expect(record).toHaveTextContent("devices.ssh.facts.auth")
+  expect(record).toHaveTextContent("devices.ssh.facts.route")
+  expect(record).toHaveTextContent("devices.ssh.facts.forwards")
+})
+
 /** No profile, no facts: the fact block must not render placeholders for a row it cannot resolve. */
 it("shows no facts for a row whose profile is gone", () => {
   sshHosts = []

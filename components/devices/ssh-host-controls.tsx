@@ -230,6 +230,13 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         route ends on the target anyway. Two cards holding one fact is how they
         end up disagreeing.
       */}
+      {/*
+        Four labelled facts in one grid rather than a fact list followed by a
+        loose block. Port forwarding was the odd one out — a hand-built label
+        over a list, sitting under a `<dl>` that already knows how to draw a
+        label over a value — so at full card width the card read as two
+        stacked half-finished sections instead of one record.
+      */}
       {profile ? (
         <DeviceFactList>
           <DeviceFactRow label={t("facts.auth")}>
@@ -237,6 +244,9 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           </DeviceFactRow>
           <DeviceFactRow label={t("facts.route")}>
             <SshRouteFact chain={chain} broken={chainBroken} />
+          </DeviceFactRow>
+          <DeviceFactRow label={t("facts.forwards")}>
+            <SshForwardsFact forwards={forwards} />
           </DeviceFactRow>
           {/*
             Only ever from a connection this app made. There is no way to learn
@@ -250,37 +260,6 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
             </DeviceFactRow>
           ) : null}
         </DeviceFactList>
-      ) : null}
-
-      {profile ? (
-        <div className="space-y-1.5" data-testid="ssh-forwards">
-          <p className="text-[11px] leading-tight text-muted-foreground">{t("facts.forwards")}</p>
-          {forwards.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("forwardsNone")}</p>
-          ) : (
-            <ul className="space-y-1">
-              {forwards.map((forward) => (
-                <li key={forward.id} className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-mono text-[11px] break-all">{forward.text}</span>
-                  {/*
-                    A rule that exists and a rule that runs are different
-                    facts. `enabled` is read as a plain boolean on the Rust
-                    side and fails closed, so a disabled rule opens nothing and
-                    must not be drawn as though it did.
-                  */}
-                  <Badge variant="outline" className="font-normal">
-                    {forward.enabled ? t("forwardEnabled") : t("forwardDisabled")}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-          {/*
-            Both ends bind loopback and that is a constant rather than a
-            setting, so it is stated once instead of repeated per rule.
-          */}
-          <p className="text-[11px] text-muted-foreground">{t("forwardsLoopback")}</p>
-        </div>
       ) : null}
 
       <div className="flex flex-wrap gap-2">
@@ -387,6 +366,52 @@ function SshProbeResult({ state }: { state: SshProbeState }) {
       ) : null}
       <p className="text-[11px] text-muted-foreground">{t("probe.cost")}</p>
     </div>
+  )
+}
+
+/**
+ * The forwarding rules, in both directions, with whether each one runs.
+ *
+ * The loopback sentence is only printed when there is a rule to qualify. It
+ * describes a constraint on forwarding, so on a host with no forwards it is a
+ * paragraph explaining the safety property of something that is not happening,
+ * which is how a fact cell ends up five lines tall for no reason.
+ */
+function SshForwardsFact({
+  forwards,
+}: {
+  forwards: readonly { id: string; text: string; enabled: boolean }[]
+}) {
+  const t = useTranslations("devices.ssh")
+  if (forwards.length === 0) {
+    return (
+      <span className="font-normal text-muted-foreground" data-testid="ssh-forwards">
+        {t("forwardsNone")}
+      </span>
+    )
+  }
+  return (
+    <span className="block space-y-1" data-testid="ssh-forwards">
+      <ul className="space-y-1">
+        {forwards.map((forward) => (
+          <li key={forward.id} className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-[11px] font-normal break-all">{forward.text}</span>
+            {/*
+              A rule that exists and a rule that runs are different facts.
+              `enabled` is read as a plain boolean on the Rust side and fails
+              closed, so a disabled rule opens nothing and must not be drawn as
+              though it did.
+            */}
+            <Badge variant="outline" className="font-normal">
+              {forward.enabled ? t("forwardEnabled") : t("forwardDisabled")}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+      <span className="block text-[11px] font-normal leading-snug text-muted-foreground">
+        {t("forwardsLoopback")}
+      </span>
+    </span>
   )
 }
 

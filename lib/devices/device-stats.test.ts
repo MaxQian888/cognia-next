@@ -226,3 +226,28 @@ describe("stat labels", () => {
     expect(Object.keys(messages.stat).sort()).toEqual([...IDS].sort())
   })
 })
+
+/**
+ * A zero is normally this strip's most useful claim: the device could have
+ * offered a placement dimension and offered none, so it will never be picked.
+ * A saved SSH host could not have. It is a shell on somebody else's server and
+ * `buildSshHostRow` hard-codes an empty `provides` for that reason, so the
+ * amber zero measured it against a bar it was never on, and with no other stat
+ * to sit beside it was the entire masthead strip.
+ */
+describe("questions a kind cannot be asked", () => {
+  it("does not put the placement question to a saved SSH host", () => {
+    const stats = buildDeviceStats(row({ kind: "ssh-host", ref: "ssh:s1" }))
+    expect(stats.map((stat) => stat.id)).not.toContain("placement")
+  })
+
+  it("leaves a shell-only host with no strip at all rather than one lone number", () => {
+    expect(buildDeviceStats(row({ kind: "ssh-host", ref: "ssh:s1" }))).toEqual([])
+  })
+
+  it("still flags a zero on a kind that could have offered something", () => {
+    const stats = buildDeviceStats(row({ kind: "paired-device" }))
+    const placement = stats.find((stat) => stat.id === "placement")
+    expect(placement).toEqual({ id: "placement", value: 0, tone: "attention" })
+  })
+})

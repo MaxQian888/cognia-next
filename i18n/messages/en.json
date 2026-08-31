@@ -9114,6 +9114,11 @@
       "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
       "pairedTitle": "Paired devices"
     },
+    "shellOnly": {
+      "description": "What this console asks of every machine, and why an SSH host has no answer.",
+      "runtime": "Sandbox and workspaces",
+      "title": "Not applicable to a shell"
+    },
     "ssh": {
       "auth": {
         "agent": "ssh-agent",

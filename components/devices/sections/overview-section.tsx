@@ -3,11 +3,18 @@
 /**
  * Who this device is, and whether we can currently reach it.
  *
- * Returns cards rather than one block: identity, presence, the live event
- * plane and the connection are four independent questions, and on a wide pane
- * they sit side by side instead of forcing a scroll past the two nobody asked
- * about. The event-plane card only exists when there is presence to show, so
- * an absent one is information rather than an empty frame.
+ * Returns cards rather than one block: identity, presence and the live event
+ * plane are independent questions, and on a wide pane they sit side by side
+ * instead of forcing a scroll past the two nobody asked about. The event-plane
+ * card only exists when there is presence to show, so an absent one is
+ * information rather than an empty frame.
+ *
+ * The address and the fingerprint used to be a fourth card of their own. They
+ * are not a separate question: an address is how a machine is named and a
+ * fingerprint is how that name is verified, which is what identity means. On
+ * every kind but a remote host the card held exactly one row, and a card frame
+ * costs more vertical space than a single fact does, so the grid ended up with
+ * a 90px stub beside whichever card had real content.
  *
  * Two things here were previously underivable from any surface. Live presence
  * (`eventPlane` / `attention` / open streams) has been maintained by
@@ -18,7 +25,7 @@
  * it was refused.
  */
 
-import { ActivityIcon, CopyIcon, IdCardIcon, RadioIcon, RouteIcon } from "lucide-react"
+import { ActivityIcon, CopyIcon, IdCardIcon, RadioIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -55,6 +62,30 @@ export function OverviewSection({ row }: { row: DeviceRow }) {
           <DeviceFactRow label={t("overview.kind")}>
             <DeviceKindLabel kind={row.kind} />
           </DeviceFactRow>
+          {row.baseUrl ? (
+            <DeviceFactRow label={t("overview.baseUrl")} mono>
+              {row.baseUrl}
+            </DeviceFactRow>
+          ) : null}
+          {row.fingerprint ? (
+            <DeviceFactRow label={t("overview.fingerprint")}>
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono text-[11px]" title={row.fingerprint}>
+                  {shortenFingerprint(row.fingerprint)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="size-5 p-0"
+                  aria-label={t("overview.copyFingerprint")}
+                  onClick={copyFingerprint}
+                  data-testid="copy-fingerprint"
+                >
+                  <CopyIcon className="size-3" />
+                </Button>
+              </span>
+            </DeviceFactRow>
+          ) : null}
           {row.reportedPlatform ? (
             <DeviceFactRow label={t("overview.platform")} mono>
               {row.reportedPlatform}
@@ -157,37 +188,6 @@ export function OverviewSection({ row }: { row: DeviceRow }) {
           ) : (
             <p className="mt-3 text-[11px] text-muted-foreground">{t("overview.noStreams")}</p>
           )}
-        </DeviceSection>
-      ) : null}
-
-      {row.baseUrl || row.fingerprint ? (
-        <DeviceSection id="connection" title={t("overview.connection")} icon={RouteIcon}>
-          <DeviceFactList>
-            {row.baseUrl ? (
-              <DeviceFactRow label={t("overview.baseUrl")} mono>
-                {row.baseUrl}
-              </DeviceFactRow>
-            ) : null}
-            {row.fingerprint ? (
-              <DeviceFactRow label={t("overview.fingerprint")}>
-                <span className="inline-flex items-center gap-1">
-                  <span className="font-mono text-[11px]" title={row.fingerprint}>
-                    {shortenFingerprint(row.fingerprint)}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="size-5 p-0"
-                    aria-label={t("overview.copyFingerprint")}
-                    onClick={copyFingerprint}
-                    data-testid="copy-fingerprint"
-                  >
-                    <CopyIcon className="size-3" />
-                  </Button>
-                </span>
-              </DeviceFactRow>
-            ) : null}
-          </DeviceFactList>
         </DeviceSection>
       ) : null}
     </>

@@ -200,6 +200,11 @@
     "noHostBody": "SSH runs on a machine, not in a browser tab. Pair a host, or open the desktop app, and this host becomes connectable again.",
     "notOnHost": "The paired host has no SSH profile called {name}. Profiles are registered by the desktop that owns the host, so add it there and connect again."
   },
+  "shellOnly": {
+    "title": "Not applicable to a shell",
+    "description": "What this console asks of every machine, and why an SSH host has no answer.",
+    "runtime": "Sandbox and workspaces"
+  },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
   "summary": "{online} of {total} online",

@@ -29,6 +29,12 @@ jest.mock("./sections/wan-section", () => ({
 jest.mock("./host-controls", () => ({
   HostControls: () => <div data-testid="section-host-controls" />,
 }))
+jest.mock("./ssh-host-controls", () => ({
+  SshHostControls: () => <div data-testid="section-ssh-controls" />,
+}))
+jest.mock("./sections/shell-only-section", () => ({
+  ShellOnlySection: () => <div data-testid="section-shell-only" />,
+}))
 
 const actions = {} as DeviceGrantActions
 
@@ -125,5 +131,49 @@ describe("DeviceDetail", () => {
     scroller!.scrollTop = 220
     rerender(<DeviceDetail row={row({ ref: "device:b", label: "Renamed" })} actions={actions} />)
     expect(scroller!.scrollTop).toBe(220)
+  })
+})
+
+/**
+ * A saved SSH host is not a Cognia machine. It reports no capabilities, holds
+ * no grants, hosts neither a sandbox nor a workspace, and the dispatcher
+ * cannot address it, so five of the seven sections had nothing to say and each
+ * said so in a card of its own. Six card frames around six sentences is what
+ * made the pane read as ragged, and it buried the two cards that describe the
+ * machine.
+ */
+describe("a machine that can only give a shell", () => {
+  const sshRow = row({ kind: "ssh-host", ref: "ssh:s1", label: "prod-web-01" })
+
+  it("gives it the SSH card and one record of what does not apply", () => {
+    render(<DeviceDetail row={sshRow} actions={actions} />)
+    expect(screen.getByTestId("section-ssh-controls")).toBeInTheDocument()
+    expect(screen.getByTestId("section-shell-only")).toBeInTheDocument()
+  })
+
+  it("drops the five sections that could only refuse", () => {
+    render(<DeviceDetail row={sshRow} actions={actions} />)
+    for (const id of ["capabilities", "wan", "access", "runtime", "activity"]) {
+      expect(screen.queryByTestId(`section-${id}`)).not.toBeInTheDocument()
+    }
+  })
+
+  /**
+   * It holds a record, a list of forwarding rules and three controls. In half
+   * a pane that is a ribbon several hundred pixels taller than the identity
+   * card beside it, and the column under that card is empty for all of them.
+   */
+  it("puts the SSH card across the pane rather than in a column", () => {
+    render(<DeviceDetail row={sshRow} actions={actions} />)
+    expect(screen.getByTestId("device-section-ssh").className).toContain(
+      "@3xl/device-pane:col-span-2"
+    )
+  })
+
+  it("leaves every section in place for a machine that can answer them", () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    expect(screen.queryByTestId("section-ssh-controls")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("section-shell-only")).not.toBeInTheDocument()
+    expect(screen.getByTestId("section-capabilities")).toBeInTheDocument()
   })
 })

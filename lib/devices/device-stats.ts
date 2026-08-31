@@ -12,7 +12,7 @@
  */
 
 import { summarizeCapabilityCells } from "./capability-cells"
-import type { DeviceRow } from "./types"
+import type { DeviceKind, DeviceRow } from "./types"
 
 export type DeviceStatId = "capabilities" | "grants" | "shellTiers" | "placement"
 
@@ -30,6 +30,28 @@ export interface DeviceStat {
   /** Present when the stat is a fraction. Omitted for a plain count. */
   total?: number
   tone: DeviceStatTone
+}
+
+/**
+ * Whether the placement question can be put to this kind at all.
+ *
+ * A zero here is normally the most useful thing the strip says: the device
+ * could have offered a dimension, offered none, and so will never be picked.
+ * A saved SSH host could not have. It is a shell on somebody else's server,
+ * never a placement target, and `buildSshHostRow` hard-codes an empty
+ * `provides` for exactly that reason. Printing its `0` in the amber that means
+ * "look at this" states a shortfall against a bar the machine was never
+ * measured on, and on a kind with no other stat it is the whole masthead
+ * strip: one alarming number answering a question nobody asked.
+ *
+ * An exhaustive record rather than a `!==` so a sixth kind has to decide.
+ */
+const PLACEMENT_ELIGIBLE: Record<DeviceKind, boolean> = {
+  local: true,
+  "paired-device": true,
+  "remote-host": true,
+  worker: true,
+  "ssh-host": false,
 }
 
 export function buildDeviceStats(row: DeviceRow): DeviceStat[] {
@@ -77,16 +99,18 @@ export function buildDeviceStats(row: DeviceRow): DeviceStat[] {
     })
   }
 
-  // Distinct dimensions, not requirement count: two `platform` requirements
-  // still answer exactly one kind of question a caller can ask.
-  const dimensions = new Set(row.placement.provides.map((requirement) => requirement.dimension))
-  stats.push({
-    id: "placement",
-    value: dimensions.size,
-    // Zero means no requirement can ever match it, so it will never be picked
-    // automatically — the single most useful thing this strip can say.
-    tone: dimensions.size === 0 ? "attention" : "neutral",
-  })
+  if (PLACEMENT_ELIGIBLE[row.kind]) {
+    // Distinct dimensions, not requirement count: two `platform` requirements
+    // still answer exactly one kind of question a caller can ask.
+    const dimensions = new Set(row.placement.provides.map((requirement) => requirement.dimension))
+    stats.push({
+      id: "placement",
+      value: dimensions.size,
+      // Zero means no requirement can ever match it, so it will never be picked
+      // automatically — the single most useful thing this strip can say.
+      tone: dimensions.size === 0 ? "attention" : "neutral",
+    })
+  }
 
   return stats
 }

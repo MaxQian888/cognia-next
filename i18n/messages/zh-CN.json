@@ -9114,6 +9114,11 @@
       "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
       "pairedTitle": "配对设备"
     },
+    "shellOnly": {
+      "description": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。",
+      "runtime": "沙箱与工作区",
+      "title": "对一台 SSH 主机不适用"
+    },
     "ssh": {
       "auth": {
         "agent": "ssh-agent",

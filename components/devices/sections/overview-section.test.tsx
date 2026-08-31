@@ -76,9 +76,26 @@ describe("OverviewSection", () => {
     expect(screen.queryByTestId("device-section-event-plane")).not.toBeInTheDocument()
   })
 
+  /**
+   * An address is how a machine is named and a fingerprint is how that name is
+   * verified, which is identity rather than a separate question. As a card of
+   * its own it held one row on every kind but a remote host, and a card frame
+   * costs more height than a single fact does, so the grid carried a stub
+   * beside whichever card had real content.
+   */
+  it("keeps the address inside the identity record rather than a card of its own", () => {
+    render(<OverviewSection row={row({ baseUrl: "ssh://deploy@10.0.4.21:22" })} />)
+    const identity = screen.getByTestId("device-section-identity")
+    expect(identity).toHaveTextContent("ssh://deploy@10.0.4.21:22")
+    expect(screen.queryByTestId("device-section-connection")).not.toBeInTheDocument()
+  })
+
   it("shortens the fingerprint but keeps the full value reachable", () => {
     const fingerprint = `${"a".repeat(56)}deadbeef`
     render(<OverviewSection row={row({ fingerprint })} />)
+    expect(screen.getByTestId("device-section-identity")).toContainElement(
+      screen.getByTestId("copy-fingerprint")
+    )
     const shortened = screen.getByTitle(fingerprint)
     expect(shortened).toHaveTextContent("aaaaaaaaaaaa…deadbeef")
     expect(screen.getByTestId("copy-fingerprint")).toBeInTheDocument()

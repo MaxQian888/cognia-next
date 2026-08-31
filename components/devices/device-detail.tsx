@@ -44,6 +44,7 @@ import { ActivitySection } from "./sections/activity-section"
 import { CapabilitiesSection } from "./sections/capabilities-section"
 import { OverviewSection } from "./sections/overview-section"
 import { RuntimeSection } from "./sections/runtime-section"
+import { ShellOnlySection } from "./sections/shell-only-section"
 import { WanSection } from "./sections/wan-section"
 
 export interface DeviceDetailProps {
@@ -79,6 +80,19 @@ export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) 
     )
   }
 
+  /**
+   * Whether this machine can be asked the questions the rest of the dashboard
+   * asks at all.
+   *
+   * A saved SSH host cannot. It reports no capability matrix, holds no grants,
+   * hosts neither a sandbox nor a workspace, and the dispatcher has no way to
+   * address it. Each of those five sections knew that and rendered a card
+   * saying so, which is how a machine with two real facts about it arrived as
+   * ten cards, six of them one sentence long. `ShellOnlySection` states the
+   * same five answers once, in the same words, as a record.
+   */
+  const shellOnly = row.kind === "ssh-host"
+
   return (
     <div
       className="@container/device-pane flex h-full min-h-0 flex-col"
@@ -104,27 +118,38 @@ export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) 
 
         {/* `items-start` so a short card keeps its own height instead of being
             stretched to match the tall one beside it — equal-height rows of
-            mostly empty card is the classic dashboard-grid failure. */}
+            mostly empty card is the classic dashboard-grid failure. What that
+            does NOT excuse is a card so much taller than its neighbour that the
+            column beside it is empty for several hundred pixels, which is a
+            sizing mistake rather than a grid one: a card holding a record, a
+            list and a row of controls belongs across the pane, not in half of
+            it. `wide` is how a section says so. */}
         <div className="grid items-start gap-3.5 @3xl/device-pane:grid-cols-2">
           <OverviewSection row={row} />
           <HostControls row={row} onRepair={onRepairHost} />
-          {/* An SSH host has no grants, no capability matrix and no runtime to
-              describe, so its own card is the only one that says anything. It
-              sits where `HostControls` does for the same reason: this is the
-              "what can I do with this machine" slot. */}
-          {row.kind === "ssh-host" ? (
-            <DeviceSection id="ssh" title={t("ssh.title")} icon={TerminalIcon}>
-              <SshHostControls row={row} />
-            </DeviceSection>
-          ) : null}
-          <CapabilitiesSection row={row} />
-          {/* Sits next to Access because both answer "what can this device do
-              from where it is", and because a dormant WAN connection explains a
-              grant that looks live but cannot be exercised off the LAN. */}
-          <WanSection row={row} />
-          <AccessSection row={row} actions={actions} />
-          <RuntimeSection row={row} />
-          <ActivitySection row={row} />
+          {shellOnly ? (
+            <>
+              {/* Full width because of what it holds: the identity record, the
+                  forwarding rules and three controls. In half a pane that is a
+                  700px ribbon beside a 90px stub. */}
+              <DeviceSection id="ssh" title={t("ssh.title")} icon={TerminalIcon} wide>
+                <SshHostControls row={row} />
+              </DeviceSection>
+              <ShellOnlySection />
+            </>
+          ) : (
+            <>
+              <CapabilitiesSection row={row} />
+              {/* Sits next to Access because both answer "what can this device
+                  do from where it is", and because a dormant WAN connection
+                  explains a grant that looks live but cannot be exercised off
+                  the LAN. */}
+              <WanSection row={row} />
+              <AccessSection row={row} actions={actions} />
+              <RuntimeSection row={row} />
+              <ActivitySection row={row} />
+            </>
+          )}
         </div>
       </div>
     </div>
