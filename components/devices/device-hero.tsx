@@ -13,7 +13,8 @@
 
 import { useTranslations } from "next-intl"
 
-import { buildDeviceStats, type DeviceStat } from "@/lib/devices/device-stats"
+import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
+import { buildDeviceStats } from "@/lib/devices/device-stats"
 import type { DeviceRow } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
 
@@ -23,27 +24,6 @@ import {
   ReachabilityLabel,
   useDeviceRelativeTime,
 } from "./device-visuals"
-
-/**
- * The strip is as many columns as there are stats, never four with a hole.
- *
- * `buildDeviceStats` returns between one and four depending on what the kind
- * can answer, and a fixed `grid-cols-4` leaves an empty tile that reads as a
- * value that failed to load. Spelled out rather than interpolated so
- * Tailwind's scanner actually emits these classes.
- */
-const STAT_COLUMNS: Record<number, string> = {
-  1: "grid-cols-1",
-  2: "grid-cols-2",
-  3: "grid-cols-1 @lg/device-pane:grid-cols-3",
-  4: "grid-cols-2 @xl/device-pane:grid-cols-4",
-}
-
-const STAT_TONE: Record<DeviceStat["tone"], string> = {
-  positive: "text-emerald-600 dark:text-emerald-400",
-  attention: "text-amber-600 dark:text-amber-400",
-  neutral: "text-foreground",
-}
 
 /**
  * A tinted plate behind the kind icon.
@@ -63,31 +43,19 @@ const KIND_PLATE: Record<DeviceRow["kind"], string> = {
   "ssh-host": "bg-muted text-muted-foreground",
 }
 
-function StatCell({ stat }: { stat: DeviceStat }) {
-  const t = useTranslations("devices")
-  return (
-    <div className="min-w-0 bg-card px-3 py-2" data-testid={`device-stat-${stat.id}`}>
-      <div className="flex items-baseline gap-0.5">
-        <span
-          className={cn("text-lg font-semibold leading-none tabular-nums", STAT_TONE[stat.tone])}
-        >
-          {stat.value}
-        </span>
-        {stat.total !== undefined ? (
-          <span className="text-xs leading-none tabular-nums text-muted-foreground">
-            /{stat.total}
-          </span>
-        ) : null}
-      </div>
-      <p className="mt-1 truncate text-[11px] text-muted-foreground">{t(`stat.${stat.id}`)}</p>
-    </div>
-  )
-}
-
 export function DeviceHero({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
   const relative = useDeviceRelativeTime()
-  const stats = buildDeviceStats(row)
+  // Labels are translated here rather than inside the strip: `StatStrip` is
+  // shared with `/workspace`, and calling `t()` in the cell is what bound the
+  // old implementation to the `devices` namespace.
+  const stripStats: StatStripItem[] = buildDeviceStats(row).map((stat) => ({
+    id: stat.id,
+    label: t(`stat.${stat.id}`),
+    value: stat.value,
+    ...(stat.total !== undefined ? { total: stat.total } : {}),
+    tone: stat.tone,
+  }))
 
   // The one identifying detail that differs per kind — an address for a Host,
   // a version for anything that runs the app.
@@ -132,19 +100,13 @@ export function DeviceHero({ row }: { row: DeviceRow }) {
         </div>
       </div>
 
-      {stats.length > 0 ? (
-        <div
-          className={cn(
-            "mt-3 grid gap-px overflow-hidden rounded-lg border bg-border",
-            STAT_COLUMNS[stats.length] ?? "grid-cols-2 @xl/device-pane:grid-cols-4"
-          )}
-          data-testid="device-stat-strip"
-        >
-          {stats.map((stat) => (
-            <StatCell key={stat.id} stat={stat} />
-          ))}
-        </div>
-      ) : null}
+      <StatStrip
+        stats={stripStats}
+        pane="device-pane"
+        testId="device-stat-strip"
+        cellTestIdPrefix="device-stat"
+        className="mt-3"
+      />
     </div>
   )
 }
