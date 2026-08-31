@@ -76,6 +76,18 @@ describe("PayloadView", () => {
     expect(screen.queryByRole("heading")).toBeNull()
   })
 
+  it("shows a visible marker for digital-twin provenance", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          data: "answer",
+          provenance: [{ source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" }],
+        })}
+      />
+    )
+    expect(screen.getByText("AI-generated with a Cognia Digital Twin")).toBeInTheDocument()
+  })
+
   it("renders workflow-png as a data-URL image", () => {
     render(
       <PayloadView

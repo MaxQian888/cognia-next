@@ -33,6 +33,27 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
+  const hasTwinProvenance = payload.provenance?.some(
+    (entry) => entry.source === "digital-twin" && entry.disclosure === "ai-generated"
+  )
+  return (
+    <>
+      {hasTwinProvenance ? <TwinDisclosure /> : null}
+      <PayloadBody payload={payload} className={className} />
+    </>
+  )
+}
+
+function TwinDisclosure() {
+  const t = useTranslations("share.view")
+  return (
+    <div className="mx-auto mb-3 w-full max-w-3xl rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+      {t("provenance.digitalTwin")}
+    </div>
+  )
+}
+
+function PayloadBody({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
     case "chat-html":
     // Usage cards and message quote cards are self-contained static HTML —

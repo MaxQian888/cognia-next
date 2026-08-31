@@ -3,7 +3,7 @@
 // what the viewer dispatches on after decryption.
 
 import { encodeBase64 } from "./encoding"
-import type { SharePayload, ShareKind } from "./types"
+import type { SharePayload, ShareKind, ShareProvenance } from "./types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { serializeSharedDefinition, type SharedDiscoverDefinition } from "./discover-item"
 
@@ -23,7 +23,8 @@ const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
 export function chatExportPayload(
   rendered: { content: string; mimeType: string },
   format: SingleExportFormat,
-  title: string
+  title: string,
+  provenance?: ShareProvenance[]
 ): SharePayload {
   return {
     kind: FORMAT_KIND[format],
@@ -31,6 +32,7 @@ export function chatExportPayload(
     data: rendered.content,
     encoding: "utf8",
     title,
+    ...(provenance?.length ? { provenance } : {}),
   }
 }
 

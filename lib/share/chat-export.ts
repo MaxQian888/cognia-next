@@ -9,6 +9,7 @@ import { chatExportPayload } from "./payload"
 import type { SharePayload } from "./types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
+import { resolveSessionTwinProvenance } from "@/lib/twin/export-provenance"
 
 export interface BuildChatShareArgs {
   format: SingleExportFormat
@@ -45,7 +46,10 @@ export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<S
     .messages.where("sessionId")
     .equals(args.session.id)
     .sortBy("createdAt")
-  const wallpaperDataUrl = await resolveThemeWallpaper(args.theme, args.withWallpaper ?? false)
+  const [wallpaperDataUrl, provenance] = await Promise.all([
+    resolveThemeWallpaper(args.theme, args.withWallpaper ?? false),
+    resolveSessionTwinProvenance(args.session, messages),
+  ])
   const rendered = renderSingleExport({
     format: args.format,
     session: args.session,
@@ -56,8 +60,9 @@ export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<S
     includeTimestamps: args.includeTimestamps,
     includeTokens: args.includeTokens,
     wallpaperDataUrl,
+    provenance,
   })
-  return chatExportPayload(rendered, args.format, args.session.title || "Conversation")
+  return chatExportPayload(rendered, args.format, args.session.title || "Conversation", provenance)
 }
 
 /**
@@ -88,7 +93,12 @@ export async function buildMultiChatSharePayload(
     else messagesBySession.set(row.sessionId, [row])
   }
   const exportedAt = new Date()
-  const conversations = args.sessions.map((session) => ({
+  const provenanceBySession = await Promise.all(
+    args.sessions.map((session) =>
+      resolveSessionTwinProvenance(session, messagesBySession.get(session.id) ?? [])
+    )
+  )
+  const conversations = args.sessions.map((session, index) => ({
     title: session.title || args.copy.frameTitle,
     html: renderSingleExport({
       format: "html",
@@ -100,9 +110,11 @@ export async function buildMultiChatSharePayload(
       includeMetadata: args.includeMetadata,
       includeTimestamps: args.includeTimestamps,
       wallpaperDataUrl,
+      provenance: provenanceBySession[index],
     }).content,
   }))
 
+  const provenance = provenanceBySession.flatMap((entry) => entry ?? [])
   return {
     kind: "chat-animated",
     mime: "text/html",
@@ -114,6 +126,7 @@ export async function buildMultiChatSharePayload(
     }),
     encoding: "utf8",
     title: args.title,
+    ...(provenance.length ? { provenance } : {}),
   }
 }
 

@@ -102,7 +102,12 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn meta(expires_at: Option<i64>, max_views: Option<u64>, view_count: u64, revoked: bool) -> ShareMeta {
+    fn meta(
+        expires_at: Option<i64>,
+        max_views: Option<u64>,
+        view_count: u64,
+        revoked: bool,
+    ) -> ShareMeta {
         ShareMeta {
             created_at: 0,
             expires_at,
@@ -135,10 +140,18 @@ mod tests {
 
     #[test]
     fn envelope_rejects_wrong_version_alg_or_missing_fields() {
-        assert!(!looks_like_envelope(&json!({ "v": 2, "alg": "AES-GCM", "iv": "a", "ciphertext": "b", "checksum": "c" })));
-        assert!(!looks_like_envelope(&json!({ "v": 1, "alg": "RSA", "iv": "a", "ciphertext": "b", "checksum": "c" })));
-        assert!(!looks_like_envelope(&json!({ "v": 1, "alg": "AES-GCM", "ciphertext": "b", "checksum": "c" })));
-        assert!(!looks_like_envelope(&json!({ "v": 1, "alg": "AES-GCM", "iv": 5, "ciphertext": "b", "checksum": "c" })));
+        assert!(!looks_like_envelope(
+            &json!({ "v": 2, "alg": "AES-GCM", "iv": "a", "ciphertext": "b", "checksum": "c" })
+        ));
+        assert!(!looks_like_envelope(
+            &json!({ "v": 1, "alg": "RSA", "iv": "a", "ciphertext": "b", "checksum": "c" })
+        ));
+        assert!(!looks_like_envelope(
+            &json!({ "v": 1, "alg": "AES-GCM", "ciphertext": "b", "checksum": "c" })
+        ));
+        assert!(!looks_like_envelope(
+            &json!({ "v": 1, "alg": "AES-GCM", "iv": 5, "ciphertext": "b", "checksum": "c" })
+        ));
         assert!(!looks_like_envelope(&json!("not an object")));
         assert!(!looks_like_envelope(&json!(null)));
     }
@@ -154,13 +167,22 @@ mod tests {
 
     #[test]
     fn read_not_found_when_revoked() {
-        assert_eq!(evaluate_read(&meta(None, None, 0, true), 100), ReadDecision::NotFound);
+        assert_eq!(
+            evaluate_read(&meta(None, None, 0, true), 100),
+            ReadDecision::NotFound
+        );
     }
 
     #[test]
     fn read_not_found_when_expired() {
-        assert_eq!(evaluate_read(&meta(Some(100), None, 0, false), 100), ReadDecision::NotFound);
-        assert_eq!(evaluate_read(&meta(Some(100), None, 0, false), 101), ReadDecision::NotFound);
+        assert_eq!(
+            evaluate_read(&meta(Some(100), None, 0, false), 100),
+            ReadDecision::NotFound
+        );
+        assert_eq!(
+            evaluate_read(&meta(Some(100), None, 0, false), 101),
+            ReadDecision::NotFound
+        );
     }
 
     #[test]
@@ -182,19 +204,28 @@ mod tests {
     #[test]
     fn read_max_views_destroys_on_final_view() {
         // max_views = 3, already viewed twice → this (3rd) is the last.
-        assert_eq!(evaluate_read(&meta(None, Some(3), 2, false), 0), ReadDecision::ServeAndDestroy);
+        assert_eq!(
+            evaluate_read(&meta(None, Some(3), 2, false), 0),
+            ReadDecision::ServeAndDestroy
+        );
         // viewed once → serve and bump to 2.
         assert_eq!(
             evaluate_read(&meta(None, Some(3), 1, false), 0),
             ReadDecision::ServeAndUpdate { next_count: 2 }
         );
         // already at cap → not found.
-        assert_eq!(evaluate_read(&meta(None, Some(3), 3, false), 0), ReadDecision::NotFound);
+        assert_eq!(
+            evaluate_read(&meta(None, Some(3), 3, false), 0),
+            ReadDecision::NotFound
+        );
     }
 
     #[test]
     fn read_burn_after_read_destroys_on_first_view() {
-        assert_eq!(evaluate_read(&meta(None, Some(1), 0, false), 0), ReadDecision::ServeAndDestroy);
+        assert_eq!(
+            evaluate_read(&meta(None, Some(1), 0, false), 0),
+            ReadDecision::ServeAndDestroy
+        );
     }
 
     #[test]

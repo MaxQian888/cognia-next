@@ -149,28 +149,19 @@ pub fn build_router(state: AppState) -> Router {
         // The console's own view of stored artifacts. Separate from
         // `/parts` — that one is the uploader's resume inventory and rides the
         // intake switch, while triage has to keep working with intake off.
-        .route(
-            "/v1/incidents/{incident_id}/artifacts",
-            get(list_artifacts),
-        )
+        .route("/v1/incidents/{incident_id}/artifacts", get(list_artifacts))
         .route(
             "/v1/incidents/{incident_id}/artifacts/{part_number}",
             get(download_artifact),
         )
         .route("/v1/groups", get(list_groups))
-        .route(
-            "/v1/groups/{group_id}",
-            get(get_group).patch(triage_group),
-        )
+        .route("/v1/groups/{group_id}", get(get_group).patch(triage_group))
         .route("/v1/admin/symbols", get(list_symbols))
         .route(
             "/v1/admin/symbols/{build_id}/{platform}",
             put(upload_symbol),
         )
-        .route(
-            "/v1/admin/tenant",
-            get(get_tenant).patch(update_tenant),
-        )
+        .route("/v1/admin/tenant", get(get_tenant).patch(update_tenant))
         .route(
             "/v1/admin/tenant-key",
             post(rotate_tenant_key).delete(crypto_shred_tenant),
@@ -1300,7 +1291,11 @@ mod tests {
 
         // And triage stays mounted: no auth header is a 400, not a 404.
         assert_eq!(
-            status_of(&router, Request::get("/v1/groups").body(Body::empty()).unwrap()).await,
+            status_of(
+                &router,
+                Request::get("/v1/groups").body(Body::empty()).unwrap()
+            )
+            .await,
             StatusCode::BAD_REQUEST
         );
     }
@@ -1470,7 +1465,10 @@ mod tests {
         // Absent, not null: a client that reads the key at all must not find
         // an empty credential it might then try to use.
         assert!(resumed.get("deletionCredential").is_none());
-        assert_eq!(resumed["incident"]["supportCode"], serde_json::json!("ABCDEF1234"));
+        assert_eq!(
+            resumed["incident"]["supportCode"],
+            serde_json::json!("ABCDEF1234")
+        );
     }
 
     #[test]
@@ -1483,7 +1481,10 @@ mod tests {
         assert_eq!(untouched.assigned_to, None);
         let assigned: TriageGroupRequest =
             serde_json::from_str(r#"{"assignedTo":"ops@example.com"}"#).expect("value parses");
-        assert_eq!(assigned.assigned_to, Some(Some("ops@example.com".to_owned())));
+        assert_eq!(
+            assigned.assigned_to,
+            Some(Some("ops@example.com".to_owned()))
+        );
     }
 
     #[test]

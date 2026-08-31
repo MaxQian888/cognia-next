@@ -3,9 +3,11 @@ import type { ChatSession } from "@cognia/agent-config-types"
 
 const sortBy = jest.fn().mockResolvedValue([{ id: "m1" }])
 const anyOf = jest.fn(() => ({ sortBy }))
+const getCharacter = jest.fn()
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     messages: { where: () => ({ equals: () => ({ sortBy }), anyOf }) },
+    characters: { get: getCharacter },
   }),
 }))
 
@@ -20,7 +22,10 @@ jest.mock("@/lib/export/single", () => ({
 
 const session = { id: "s1", title: "My chat" } as ChatSession
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  getCharacter.mockResolvedValue(undefined)
+})
 
 describe("buildChatSharePayload", () => {
   it("fetches messages, renders, and wraps as a chat payload", async () => {
@@ -44,6 +49,17 @@ describe("buildChatSharePayload", () => {
       session: { id: "s2", title: "" } as ChatSession,
     })
     expect(payload.title).toBe("Conversation")
+  })
+
+  it("attaches encrypted structured provenance for a twin-bound conversation", async () => {
+    getCharacter.mockResolvedValueOnce({ id: "character-1", twinId: "twin-1" })
+    const payload = await buildChatSharePayload({
+      format: "text",
+      session: { id: "s3", title: "Twin", characterId: "character-1" } as ChatSession,
+    })
+    expect(payload.provenance).toEqual([
+      { source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" },
+    ])
   })
 })
 

@@ -159,7 +159,10 @@ mod tests {
 
     #[test]
     fn refuses_a_key_that_is_too_short() {
-        assert_eq!(GrantVerifier::new(b"short").unwrap_err(), GrantError::WeakKey);
+        assert_eq!(
+            GrantVerifier::new(b"short").unwrap_err(),
+            GrantError::WeakKey
+        );
     }
 
     #[test]
@@ -168,7 +171,10 @@ mod tests {
             KEY,
             r#"{"grantId":"11111111-1111-1111-1111-111111111111","userId":"usr_ada","orgId":"org_acme","issuedAt":100,"expiresAt":400}"#,
         );
-        let claims = GrantVerifier::new(KEY).unwrap().verify(&token, 200).unwrap();
+        let claims = GrantVerifier::new(KEY)
+            .unwrap()
+            .verify(&token, 200)
+            .unwrap();
         assert_eq!(claims.org_id, "org_acme");
         assert_eq!(claims.user_id, "usr_ada");
     }
@@ -194,7 +200,10 @@ mod tests {
 
     #[test]
     fn refuses_a_grant_signed_with_another_key() {
-        let token = sign(b"ffffffffffffffffffffffffffffffff", r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":400}"#);
+        let token = sign(
+            b"ffffffffffffffffffffffffffffffff",
+            r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":400}"#,
+        );
         assert_eq!(
             GrantVerifier::new(KEY).unwrap().verify(&token, 200),
             Err(GrantError::BadSignature)
@@ -203,7 +212,10 @@ mod tests {
 
     #[test]
     fn refuses_an_expired_grant() {
-        let token = sign(KEY, r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":100}"#);
+        let token = sign(
+            KEY,
+            r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":100}"#,
+        );
         assert_eq!(
             GrantVerifier::new(KEY).unwrap().verify(&token, 200),
             Err(GrantError::Expired)
@@ -214,9 +226,13 @@ mod tests {
     fn refuses_a_tampered_payload_before_looking_at_its_expiry() {
         // Swapping the org in an otherwise-valid grant must fail on the
         // signature, not on anything the payload says.
-        let token = sign(KEY, r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":400}"#);
+        let token = sign(
+            KEY,
+            r#"{"userId":"usr_ada","orgId":"org_acme","expiresAt":400}"#,
+        );
         let (_, signature) = token.split_once('.').unwrap();
-        let forged = URL_SAFE_NO_PAD.encode(r#"{"userId":"usr_ada","orgId":"org_evil","expiresAt":400}"#);
+        let forged =
+            URL_SAFE_NO_PAD.encode(r#"{"userId":"usr_ada","orgId":"org_evil","expiresAt":400}"#);
         assert_eq!(
             GrantVerifier::new(KEY)
                 .unwrap()

@@ -29,6 +29,18 @@ describe("chatExportPayload", () => {
       title: "My chat",
     })
   })
+
+  it("carries structured provenance only when supplied", () => {
+    const provenance = [
+      { source: "digital-twin" as const, sourceId: "twin-1", disclosure: "ai-generated" as const },
+    ]
+    expect(
+      chatExportPayload({ content: "hello", mimeType: "text/plain" }, "text", "Twin", provenance)
+    ).toMatchObject({ provenance })
+    expect(
+      chatExportPayload({ content: "hello", mimeType: "text/plain" }, "text", "Plain")
+    ).not.toHaveProperty("provenance")
+  })
 })
 
 // jsdom's Blob has no `arrayBuffer()`, so fake a Blob-like with the one method

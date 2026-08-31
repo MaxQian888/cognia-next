@@ -457,10 +457,7 @@ impl DiagnosticRepository {
     /// leaves `deletion_credential_hash` alone, so a freshly generated
     /// credential would be handed to the client while the stored hash still
     /// belonged to the first one — a credential that can never verify.
-    pub async fn create_incident(
-        &self,
-        input: CreateIncident,
-    ) -> anyhow::Result<CreatedIncident> {
+    pub async fn create_incident(&self, input: CreateIncident) -> anyhow::Result<CreatedIncident> {
         let mut tx = self.tenant_transaction(input.tenant_id).await?;
         let record = sqlx::query_as::<_, CreatedIncident>(
             r#"INSERT INTO incidents (

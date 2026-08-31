@@ -20,6 +20,12 @@ export type ShareKind =
   | "discover-item"
   | "workflow-result"
 
+export interface ShareProvenance {
+  source: "digital-twin"
+  sourceId: string
+  disclosure: "ai-generated"
+}
+
 /**
  * The decrypted artifact. `data` is the artifact bytes: literal UTF-8 text when
  * `encoding === "utf8"`, or base64 of the raw bytes when `encoding === "base64"`
@@ -34,6 +40,8 @@ export interface SharePayload {
   encoding: "utf8" | "base64"
   /** Optional human title shown in the viewer header / document title. */
   title?: string
+  /** Encrypted with the payload; the viewer must render its disclosure. */
+  provenance?: ShareProvenance[]
 }
 
 /**
