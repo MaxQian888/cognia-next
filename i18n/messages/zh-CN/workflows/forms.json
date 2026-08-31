@@ -502,6 +502,80 @@
     "add": "添加",
     "removeItem": "移除第 {index} 项"
   },
+  "artifact": {
+    "artifactId": {
+      "hint": "要操作的 artifact id。",
+      "label": "Artifact"
+    },
+    "canvasContent": {
+      "hint": "文档的初始内容，可以为空。"
+    },
+    "canvasLanguage": {
+      "hint": "必填：它决定编辑器的语法模式。"
+    },
+    "canvasTitle": {
+      "hint": "显示在画布文档列表里。"
+    },
+    "changeDescription": {
+      "hint": "记录在本次更新产生的版本上。",
+      "label": "变更说明",
+      "placeholder": "更新为 9 月数据"
+    },
+    "chartType": {
+      "hint": "仅对 chart 类型生效。",
+      "label": "图表类型"
+    },
+    "content": {
+      "hint": "artifact 正文。通常是引用前一步结果的表达式。",
+      "label": "内容"
+    },
+    "docType": {
+      "code": "代码",
+      "hint": "code 使用带语法模式的编辑器，text 用于散文编辑。",
+      "label": "文档类型",
+      "text": "文本"
+    },
+    "documentId": {
+      "hint": "留空则列出会话里的文档，而不是读取单个。",
+      "label": "画布文档"
+    },
+    "format": {
+      "hint": "该步骤返回字节而不落盘 —— 保存对话框会让无人值守的运行卡住。图表的 PNG 与 PDF 需要其预览在屏幕上。",
+      "label": "格式"
+    },
+    "language": {
+      "hint": "代码与文档类 artifact 的语法高亮。",
+      "label": "语言"
+    },
+    "newContent": {
+      "hint": "替换正文。原内容会保留为一个版本。"
+    },
+    "query": {
+      "hint": "仅在列出时使用：只保留标题包含该文本的 artifact。",
+      "label": "标题过滤",
+      "placeholder": "营收"
+    },
+    "readArtifactId": {
+      "hint": "留空则列出会话里的 artifact，而不是读取单个。"
+    },
+    "renameTitle": {
+      "hint": "留空则保持原标题。"
+    },
+    "sessionId": {
+      "hint": "归属于哪个会话的 dock。定时任务没有会话时留空即可。",
+      "label": "会话"
+    },
+    "title": {
+      "hint": "显示在 artifact 卡片上，也用作导出文件名。",
+      "label": "标题",
+      "placeholder": "Q3 各地区营收"
+    },
+    "type": {
+      "hint": "决定 artifact 如何渲染，以及提供哪些导出格式。",
+      "label": "类型",
+      "placeholder": "选择类型"
+    }
+  },
   "branch": {
     "condition": {
       "hint": "表达式，求值为真值则走真分支。支持 '{{ }}' 表达式。",
@@ -1060,48 +1134,48 @@
     }
   },
   "editor": {
-    "root": {
-      "label": "Pro IDE 工作区",
-      "hint": "可选。默认使用当前已打开的 Pro IDE。支持 '{{ }}' 表达式。",
-      "placeholder": "/Users/me/my-project"
-    },
     "autoStart": {
-      "label": "需要时启动 IDE",
-      "hint": "当该工作区的 code-server 尚未运行时将其启动。默认关闭——首次启动可能需要下载较大的二进制文件。"
+      "hint": "当该工作区的 code-server 尚未运行时将其启动。默认关闭——首次启动可能需要下载较大的二进制文件。",
+      "label": "需要时启动 IDE"
     },
     "path": {
-      "label": "文件路径",
       "hint": "必填。可为绝对路径，或相对于上面的工作区。支持 '{{ }}' 表达式。",
+      "label": "文件路径",
       "placeholder": "src/index.ts"
     },
     "position": {
-      "line": {
-        "label": "行",
-        "hint": "可选，从 1 开始的行号。",
-        "placeholder": "42"
-      },
       "column": {
         "label": "列",
         "placeholder": "1"
+      },
+      "line": {
+        "hint": "可选，从 1 开始的行号。",
+        "label": "行",
+        "placeholder": "42"
+      }
+    },
+    "root": {
+      "hint": "可选。默认使用当前已打开的 Pro IDE。支持 '{{ }}' 表达式。",
+      "label": "Pro IDE 工作区",
+      "placeholder": "/Users/me/my-project"
+    },
+    "saveAll": {
+      "path": {
+        "hint": "可选。留空表示刷新所有未保存的缓冲区。支持 '{{ }}' 表达式。",
+        "label": "仅此文件",
+        "placeholder": "src/index.ts"
       }
     },
     "showDiff": {
       "content": {
-        "label": "建议的内容",
         "hint": "必填。与磁盘上的文件并排展示，不会写入磁盘。留空表示建议清空该文件。",
+        "label": "建议的内容",
         "placeholder": "完整的建议文件内容"
       },
       "title": {
-        "label": "对比标题",
         "hint": "可选，对比标签页的标题。支持 '{{ }}' 表达式。",
+        "label": "对比标题",
         "placeholder": "建议的修复"
-      }
-    },
-    "saveAll": {
-      "path": {
-        "label": "仅此文件",
-        "hint": "可选。留空表示刷新所有未保存的缓冲区。支持 '{{ }}' 表达式。",
-        "placeholder": "src/index.ts"
       }
     }
   },
@@ -2047,16 +2121,23 @@
   },
   "pickers": {
     "adapterInstance": "选择适配器实例",
+    "addLiteral": "使用「{value}」",
     "character": "选择角色",
+    "externalAgent": "选择外部智能体",
     "mcpServer": "选择 MCP 服务器",
+    "model": "选择模型",
     "noResults": "无匹配项",
     "none": "无",
     "plugin": "选择插件",
+    "remove": "移除 {name}",
     "skill": "选择技能",
     "skillNew": "新建",
     "skillNoneItem": "— 新建 —",
+    "subagent": "选择子智能体",
     "subworkflow": "选择工作流",
     "team": "选择团队",
+    "tool": "添加工具",
+    "toolsUnrestricted": "未列出工具。本轮可使用其角色或预设允许的全部工具。",
     "twin": "选择数字分身",
     "useExpression": "使用表达式",
     "usePicker": "从列表选择"
@@ -2107,6 +2188,21 @@
         "planner_llm": "规划 LLM",
         "team_projection": "团队投影"
       }
+    },
+    "steps": {
+      "add": "添加步骤",
+      "empty": "还没有步骤。计划至少需要一步。",
+      "kind": {
+        "agent_turn": "智能体回合",
+        "approval_gate": "审批关卡",
+        "editor_review": "编辑器评审",
+        "mcp_tool_call": "MCP 工具调用",
+        "sub_workflow": "子工作流",
+        "teammate_dispatch": "派发给队友",
+        "tool_call": "工具调用"
+      },
+      "kindLabel": "步骤类型",
+      "titlePlaceholder": "步骤标题"
     },
     "stepsJson": {
       "hint": "CreatePlanStepInput 行数组。",
@@ -2709,6 +2805,12 @@
       }
     }
   },
+  "structured": {
+    "jsonOnly": "当前值不是 JSON 数组，表格编辑会丢弃它。",
+    "removeRow": "删除该行",
+    "useJson": "改用 JSON 编辑",
+    "useRows": "改用表格编辑"
+  },
   "subworkflow": {
     "inputJson": {
       "hint": "作为子工作流的触发负载转发。",
@@ -2825,8 +2927,11 @@
       "label": "描述"
     },
     "members": {
+      "add": "添加成员",
+      "empty": "还没有成员。团队至少需要一名。",
       "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
-      "label": "成员（JSON 数组）"
+      "label": "成员（JSON 数组）",
+      "rolePlaceholder": "角色（可选）"
     },
     "name": {
       "label": "团队名称"
@@ -3442,80 +3547,6 @@
     "workflowId": {
       "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
       "label": "来源工作流（可选）"
-    }
-  },
-  "artifact": {
-    "title": {
-      "label": "标题",
-      "hint": "显示在 artifact 卡片上，也用作导出文件名。",
-      "placeholder": "Q3 各地区营收"
-    },
-    "type": {
-      "label": "类型",
-      "hint": "决定 artifact 如何渲染，以及提供哪些导出格式。",
-      "placeholder": "选择类型"
-    },
-    "content": {
-      "label": "内容",
-      "hint": "artifact 正文。通常是引用前一步结果的表达式。"
-    },
-    "newContent": {
-      "hint": "替换正文。原内容会保留为一个版本。"
-    },
-    "language": {
-      "label": "语言",
-      "hint": "代码与文档类 artifact 的语法高亮。"
-    },
-    "chartType": {
-      "label": "图表类型",
-      "hint": "仅对 chart 类型生效。"
-    },
-    "sessionId": {
-      "label": "会话",
-      "hint": "归属于哪个会话的 dock。定时任务没有会话时留空即可。"
-    },
-    "artifactId": {
-      "label": "Artifact",
-      "hint": "要操作的 artifact id。"
-    },
-    "readArtifactId": {
-      "hint": "留空则列出会话里的 artifact，而不是读取单个。"
-    },
-    "renameTitle": {
-      "hint": "留空则保持原标题。"
-    },
-    "changeDescription": {
-      "label": "变更说明",
-      "hint": "记录在本次更新产生的版本上。",
-      "placeholder": "更新为 9 月数据"
-    },
-    "query": {
-      "label": "标题过滤",
-      "hint": "仅在列出时使用：只保留标题包含该文本的 artifact。",
-      "placeholder": "营收"
-    },
-    "format": {
-      "label": "格式",
-      "hint": "该步骤返回字节而不落盘 —— 保存对话框会让无人值守的运行卡住。图表的 PNG 与 PDF 需要其预览在屏幕上。"
-    },
-    "documentId": {
-      "label": "画布文档",
-      "hint": "留空则列出会话里的文档，而不是读取单个。"
-    },
-    "canvasTitle": {
-      "hint": "显示在画布文档列表里。"
-    },
-    "canvasLanguage": {
-      "hint": "必填：它决定编辑器的语法模式。"
-    },
-    "canvasContent": {
-      "hint": "文档的初始内容，可以为空。"
-    },
-    "docType": {
-      "label": "文档类型",
-      "hint": "code 使用带语法模式的编辑器，text 用于散文编辑。",
-      "code": "代码",
-      "text": "文本"
     }
   }
 }

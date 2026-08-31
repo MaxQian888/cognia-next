@@ -22,7 +22,22 @@ import {
 } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
 import { DurationField } from "./shared/duration-field"
-import { CharacterPicker, TeamPicker, TwinPicker } from "./shared/entity-picker"
+import {
+  CharacterPicker,
+  ExternalAgentPicker,
+  ModelPicker,
+  TeamPicker,
+  ToolPicker,
+  TwinPicker,
+} from "./shared/entity-picker"
+import { StructuredJsonField, parseJsonRows } from "./shared/structured-json-field"
+import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
+
+/** One row of `action.team.create`'s `members` array. */
+interface TeamMemberRow {
+  characterId?: string
+  role?: string
+}
 import { TypedOutputFields } from "./output-schema-field"
 import { PET_INTERACTION_KINDS, PiiGateField, clampNumberInput } from "./form-support"
 import type { ConfigProps } from "./form-support"
@@ -207,24 +222,14 @@ export function TeamComposeConfig({ params, onChange }: ConfigProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="auto">{t("preferredPattern.options.auto")}</SelectItem>
-            <SelectItem value="manager_worker">
-              {t("preferredPattern.options.manager_worker")}
-            </SelectItem>
-            <SelectItem value="parallel_specialists">
-              {t("preferredPattern.options.parallel_specialists")}
-            </SelectItem>
-            <SelectItem value="background_handoff">
-              {t("preferredPattern.options.background_handoff")}
-            </SelectItem>
-            <SelectItem value="external_handoff">
-              {t("preferredPattern.options.external_handoff")}
-            </SelectItem>
-            <SelectItem value="single_agent_recommended">
-              {t("preferredPattern.options.single_agent_recommended")}
-            </SelectItem>
-            <SelectItem value="ultracode_orchestration">
-              {t("preferredPattern.options.ultracode_orchestration")}
-            </SelectItem>
+            {/* Rendered from the one list `TeamExecutionPattern` is derived
+                from, so the picker cannot offer a pattern the router does not
+                know or miss one it does. */}
+            {TEAM_EXECUTION_PATTERNS.map((pattern) => (
+              <SelectItem key={pattern} value={pattern}>
+                {t(`preferredPattern.options.${pattern}`)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Field>
@@ -374,10 +379,10 @@ export function TeamDelegateConfig({ params, onChange }: ConfigProps) {
           name="targetAgentId"
           required
         >
-          <Input
+          <ExternalAgentPicker
             id="td-tagent"
             value={targetAgentId}
-            onChange={(e) => onChange(patchParam(params, "targetAgentId", e.target.value))}
+            onChange={(v) => onChange(patchParam(params, "targetAgentId", v))}
           />
         </Field>
       ) : null}
@@ -493,9 +498,9 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
   const characterId = readString(params, "characterId")
   const systemPrompt = readString(params, "systemPrompt")
   const model = readString(params, "model")
-  const allowedTools = Array.isArray(params.allowedTools)
-    ? (params.allowedTools as string[]).join(", ")
-    : ""
+  // The node stores an array. The comma-joined string only existed because the
+  // control was a text input.
+  const allowedTools = Array.isArray(params.allowedTools) ? (params.allowedTools as string[]) : []
   const maxTurns = readNumber(params, "maxTurns", 10)
   const toolsEnabled = readBoolean(params, "toolsEnabled", true)
   const requireTools = readBoolean(params, "requireTools", false)
@@ -547,10 +552,10 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
             />
           </Field>
           <Field label={t("model.label")} htmlFor="at-model" hint={t("model.hint")} name="model">
-            <Input
+            <ModelPicker
               id="at-model"
               value={model}
-              onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+              onChange={(v) => onChange(patchParam(params, "model", v))}
             />
           </Field>
           <Field
@@ -559,17 +564,12 @@ export function AgentTurnConfig({ params, onChange }: ConfigProps) {
             hint={t("allowedTools.hint")}
             name="allowedTools"
           >
-            <Input
+            <ToolPicker
               id="at-tools"
               value={allowedTools}
-              onChange={(e) => {
-                const list = e.target.value
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
+              onChange={(list) =>
                 onChange(patchParam(params, "allowedTools", list.length > 0 ? list : undefined))
-              }}
-              placeholder={t("allowedTools.placeholder")}
+              }
             />
           </Field>
         </>
@@ -804,6 +804,7 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
   const orchestration = readString(params, "orchestration", "round_robin")
   const supervisorCharacterId = readString(params, "supervisorCharacterId")
   const membersJson = readString(params, "membersJson", "[]")
+  const { rows: memberRows, jsonOnly: membersJsonOnly } = parseJsonRows<TeamMemberRow>(membersJson)
   return (
     <FieldGroup>
       <Field label={t("name.label")} htmlFor="tc-name" name="name" required>
@@ -853,24 +854,37 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
         hint={t("members.hint")}
         name="membersJson"
       >
-        <Textarea
+        <StructuredJsonField<TeamMemberRow>
           id="tc-members"
-          value={membersJson}
-          onChange={(e) => {
-            const next = patchParam(params, "membersJson", e.target.value) as Record<
-              string,
-              unknown
-            >
-            try {
-              const parsed = JSON.parse(e.target.value)
-              if (Array.isArray(parsed)) (next as Record<string, unknown>).members = parsed
-            } catch {
-              // ignore
-            }
+          rows={memberRows}
+          raw={membersJson}
+          jsonOnly={membersJsonOnly}
+          addLabel={t("members.add")}
+          emptyHint={t("members.empty")}
+          makeRow={() => ({ characterId: "" })}
+          onChange={(rows, raw) => {
+            // Both shapes in one patch. The executor reads `members`,
+            // `membersJson` is what the JSON view shows, and two sequential
+            // patches derived from the same `params` would drop one of them.
+            const next = patchParam(params, "membersJson", raw) as Record<string, unknown>
+            next.members = rows
             onChange(next)
           }}
-          rows={5}
-          className="font-mono text-xs"
+          renderRow={(row, index, patch) => (
+            <>
+              <CharacterPicker
+                id={`tc-member-${index}`}
+                value={row.characterId ?? ""}
+                onChange={(v) => patch({ characterId: v })}
+              />
+              <Input
+                value={row.role ?? ""}
+                onChange={(e) => patch({ role: e.target.value })}
+                placeholder={t("members.rolePlaceholder")}
+                aria-label={t("members.rolePlaceholder")}
+              />
+            </>
+          )}
         />
       </Field>
     </FieldGroup>

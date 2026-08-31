@@ -39,6 +39,12 @@ import { listTwins } from "@/lib/db/twins"
 import { listAdapterInstances } from "@/lib/db/adapter-instances"
 import { discoverMcpServerViaSidecar } from "@/lib/claude/feature-call"
 import { isTauri } from "@/lib/tauri"
+import { useModelOptions } from "@/components/shared/model-select"
+import { listBuiltinTools } from "@/lib/settings/builtin-tools"
+import { SDK_NATIVE_TOOL_NAMES } from "@/lib/workflow/editor/agent-tool-names"
+import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { MultiEntityPicker } from "./multi-entity-picker"
 
 export interface EntityOption {
   value: string
@@ -172,6 +178,166 @@ interface WrapperProps {
   onChange: (value: string) => void
   allowEmpty?: boolean
   allowExpression?: boolean
+}
+
+// ── Registry-backed agent pickers ────────────────────────────────────────────
+//
+// These five fields used to be free-text `<Input>`s while the registry that
+// knows the legal values sat one import away. `model` in particular had to be
+// typed by hand into three separate forms while the composer, the settings
+// defaults page and the eval runner all shared one picker.
+
+/**
+ * The provider serving `modelId`, or undefined when the catalog does not know
+ * it (a hand-typed id, an expression, a provider configured only by base URL).
+ * Extracted so the pairing rule is testable without driving a popover.
+ */
+export function providerForModel(
+  options: ReadonlyArray<{ modelId: string; providerId: string }>,
+  modelId: string
+): string | undefined {
+  return options.find((o) => o.modelId === modelId)?.providerId
+}
+
+/**
+ * Every model the user has configured, grouped label-side by provider so two
+ * providers offering the same model id stay distinguishable.
+ *
+ * `onProviderChange` exists because the forms that take an explicit model also
+ * take an explicit provider, and picking one without the other leaves a node
+ * pointing at a model its declared provider does not serve. The text escape
+ * hatch stays open: these forms also carry `baseURL` / `apiFlavor`, so a
+ * provider the settings page has never seen is still a legal target.
+ */
+export function ModelPicker({
+  allowExpression = true,
+  onPick,
+  ...props
+}: WrapperProps & {
+  /**
+   * Called instead of `onChange` when the value came from the catalog, so the
+   * caller can write the model and its provider in ONE patch. Two sequential
+   * `onChange` calls both derive from the same stale `params` object, and the
+   * second silently drops the first.
+   */
+  onPick?: (modelId: string, providerId: string) => void
+}) {
+  const t = useTranslations("workflows.forms.pickers")
+  const { options: modelOptions } = useModelOptions()
+  const options = useMemo(
+    () =>
+      modelOptions.map((o) => ({
+        value: o.modelId,
+        label: `${o.modelName} · ${o.providerName}`,
+      })),
+    [modelOptions]
+  )
+  const { onChange } = props
+  const handleChange = (next: string) => {
+    const providerId = onPick ? providerForModel(modelOptions, next) : undefined
+    if (providerId && onPick) onPick(next, providerId)
+    else onChange(next)
+  }
+  return (
+    <EntityPicker
+      {...props}
+      onChange={handleChange}
+      options={options}
+      placeholder={t("model")}
+      allowExpression={allowExpression}
+    />
+  )
+}
+
+/**
+ * Subagents that can actually be dispatched: built-ins, plugin-contributed
+ * ones and user templates, resolved through the same function the dispatch
+ * path uses. `hidden` defs stay dispatchable but are filtered out of pickers,
+ * which is the OpenCode semantic the resolver documents.
+ */
+export function SubagentPicker({ allowExpression = true, ...props }: WrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const options = useMemo(
+    () =>
+      resolveDispatchableSubagents()
+        .filter((x) => !x.def.hidden)
+        .map((x) => ({ value: x.id, label: x.def.name ?? x.id })),
+    []
+  )
+  return (
+    <EntityPicker
+      {...props}
+      options={options}
+      placeholder={t("subagent")}
+      allowExpression={allowExpression}
+    />
+  )
+}
+
+/** Configured external coding agents (Codex, OpenCode, Claude Code, ...). */
+export function ExternalAgentPicker({ allowExpression = true, ...props }: WrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  // Select the raw record, derive outside the store. `selectEnabledAgents`
+  // builds a fresh array (and fresh hydrated objects) on every call, so passing
+  // it straight to `useStore` makes useSyncExternalStore see a new snapshot
+  // each render and loop until React bails with "Maximum update depth".
+  // Enabled, not connected: a delegation target the user has configured is a
+  // legal choice even while the host that runs it is offline.
+  const agentsById = useExternalAgentStore((s) => s.agents)
+  const options = useMemo(
+    () =>
+      Object.values(agentsById ?? {})
+        .filter((a) => a.enabled)
+        .map((a) => ({ value: a.id, label: a.name || a.id })),
+    [agentsById]
+  )
+  return (
+    <EntityPicker
+      {...props}
+      options={options}
+      placeholder={t("externalAgent")}
+      allowExpression={allowExpression}
+    />
+  )
+}
+
+interface MultiWrapperProps {
+  id: string
+  value: readonly string[]
+  onChange: (next: string[]) => void
+}
+
+/**
+ * Tool names an agent turn may use. Two registries feed it: the SDK's own
+ * native tools, which cannot be derived and are listed in
+ * `agent-tool-names.ts`, and every entry in `builtin-tools-data.json`. Free
+ * entry stays open for plugin tools the host has not loaded yet.
+ */
+export function ToolPicker(props: MultiWrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const options = useMemo(
+    () => [
+      ...SDK_NATIVE_TOOL_NAMES.map((name) => ({ value: name, label: name })),
+      ...listBuiltinTools().map((tool) => ({ value: tool.name, label: tool.name })),
+    ],
+    []
+  )
+  return (
+    <MultiEntityPicker
+      {...props}
+      options={options}
+      placeholder={t("tool")}
+      emptyHint={t("toolsUnrestricted")}
+    />
+  )
+}
+
+/** Multi-select over the same skill rows `SkillPicker` reads. */
+export function SkillMultiPicker(props: MultiWrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const rows = useLiveQuery(() => listSkills(), [])
+  const options = useMemo(() => rows?.map((s) => ({ value: s.id, label: s.name })) ?? [], [rows])
+  return <MultiEntityPicker {...props} options={options} placeholder={t("skill")} />
 }
 
 export function CharacterPicker({ allowExpression = true, ...props }: WrapperProps) {

@@ -81,7 +81,11 @@ import {
 import { defaultCouncilRunPrompt } from "@/lib/ai/council/run-council"
 import type { AutoOrchestrationProposal, CapabilityCatalog } from "@/lib/ai/agent/team/auto/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { AgentTeamConfig, TeamExecutionPattern } from "@/types/agent/agent-team"
+import {
+  TEAM_EXECUTION_PATTERNS,
+  type AgentTeamConfig,
+  type TeamExecutionPattern,
+} from "@/types/agent/agent-team"
 import { createLogger } from "@cognia/logging"
 
 import {
@@ -95,14 +99,7 @@ import { AutoComposeTaskEditor } from "./auto-compose-task-editor"
 
 const log = createLogger("agentTeams.autoCompose")
 
-const PREVIEW_PATTERNS: readonly TeamExecutionPattern[] = [
-  "manager_worker",
-  "parallel_specialists",
-  "background_handoff",
-  "external_handoff",
-  "single_agent_recommended",
-  "ultracode_orchestration",
-]
+const PREVIEW_PATTERNS: readonly TeamExecutionPattern[] = TEAM_EXECUTION_PATTERNS
 
 export interface AutoComposeDialogProps {
   open: boolean

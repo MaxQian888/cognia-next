@@ -3,7 +3,13 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { EntityPicker, McpToolPicker, TeamPicker } from "./entity-picker"
+import {
+  EntityPicker,
+  McpToolPicker,
+  ModelPicker,
+  TeamPicker,
+  providerForModel,
+} from "./entity-picker"
 
 const getMcpServerMock = jest.fn()
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
@@ -20,6 +26,24 @@ jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn(async () => []) 
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
 jest.mock("@/lib/claude/feature-call", () => ({ discoverMcpServerViaSidecar: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+jest.mock("@/lib/settings/builtin-tools", () => ({ listBuiltinTools: () => [] }))
+jest.mock("@/lib/claude/agents/subagents", () => ({ resolveDispatchableSubagents: () => [] }))
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (selector: (s: unknown) => unknown) => selector({ agents: {} }),
+}))
+jest.mock("@/components/shared/model-select", () => ({
+  useModelOptions: () => ({
+    options: [
+      {
+        modelId: "claude-opus-5",
+        modelName: "Opus 5",
+        providerId: "anthropic",
+        providerName: "Anthropic",
+      },
+    ],
+    groups: [],
+  }),
+}))
 import { isTauri } from "@/lib/tauri"
 const isTauriMock = isTauri as jest.Mock
 
@@ -232,5 +256,36 @@ describe("McpToolPicker", () => {
     // Yield a tick for the effect.
     await screen.findByTestId("mt-use-expression")
     expect(probe).not.toHaveBeenCalled()
+  })
+})
+
+describe("ModelPicker", () => {
+  /**
+   * The forms that take an explicit model also take an explicit provider.
+   * Writing them with two `onChange` calls off the same `params` object drops
+   * the first, which is why the picker reports both at once instead.
+   */
+  it("pairs a catalogued model with its provider", () => {
+    const options = [
+      { modelId: "claude-opus-5", providerId: "anthropic" },
+      { modelId: "gpt-5", providerId: "openai" },
+    ]
+    expect(providerForModel(options, "gpt-5")).toBe("openai")
+  })
+
+  it("reports no provider for an id the catalog does not know", () => {
+    // A hand-typed id, an expression, or a provider configured only by base
+    // URL. The caller then writes the model alone and leaves `provider` be.
+    expect(providerForModel([], "something-custom")).toBeUndefined()
+    expect(providerForModel([], "{{ $json.model }}")).toBeUndefined()
+  })
+
+  it("renders as a picker", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <ModelPicker id="m" value="" onChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("combobox")).toBeInTheDocument()
   })
 })

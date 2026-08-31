@@ -34,6 +34,9 @@ jest.mock("./shared/entity-picker", () => ({
       "SubworkflowPicker",
       "TwinPicker",
       "EntityPicker",
+      "ModelPicker",
+      "SubagentPicker",
+      "ExternalAgentPicker",
     ].map((name) => [
       name,
       ({
@@ -46,6 +49,50 @@ jest.mock("./shared/entity-picker", () => ({
         id?: string
       }) => <input id={id} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} />,
     ])
+  ),
+  ToolPicker: ({
+    value,
+    onChange,
+    id,
+  }: {
+    value?: readonly string[]
+    onChange?: (next: string[]) => void
+    id?: string
+  }) => (
+    <input
+      id={id}
+      value={(value ?? []).join(",")}
+      onChange={(e) =>
+        onChange?.(
+          e.target.value
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        )
+      }
+    />
+  ),
+  SkillMultiPicker: ({
+    value,
+    onChange,
+    id,
+  }: {
+    value?: readonly string[]
+    onChange?: (next: string[]) => void
+    id?: string
+  }) => (
+    <input
+      id={id}
+      value={(value ?? []).join(",")}
+      onChange={(e) =>
+        onChange?.(
+          e.target.value
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        )
+      }
+    />
   ),
 }))
 

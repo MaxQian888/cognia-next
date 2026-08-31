@@ -502,6 +502,80 @@
     "add": "Add",
     "removeItem": "Remove item {index}"
   },
+  "artifact": {
+    "artifactId": {
+      "hint": "The id of the artifact to act on.",
+      "label": "Artifact"
+    },
+    "canvasContent": {
+      "hint": "The document's starting content. May be empty."
+    },
+    "canvasLanguage": {
+      "hint": "Required: it selects the editor's syntax mode."
+    },
+    "canvasTitle": {
+      "hint": "Shown in the Canvas document list."
+    },
+    "changeDescription": {
+      "hint": "Recorded on the version this update creates.",
+      "label": "Change note",
+      "placeholder": "Refreshed with September numbers"
+    },
+    "chartType": {
+      "hint": "Only read for chart artifacts.",
+      "label": "Chart type"
+    },
+    "content": {
+      "hint": "The artifact body. Usually an expression referring to an earlier step.",
+      "label": "Content"
+    },
+    "docType": {
+      "code": "Code",
+      "hint": "Code gets an editor with syntax modes; text gets prose editing.",
+      "label": "Document type",
+      "text": "Text"
+    },
+    "documentId": {
+      "hint": "Leave empty to list the conversation's documents instead of reading one.",
+      "label": "Canvas document"
+    },
+    "format": {
+      "hint": "The step returns the bytes rather than saving them — a save dialog would park an unattended run. PNG and PDF of a chart need its preview on screen.",
+      "label": "Format"
+    },
+    "language": {
+      "hint": "Syntax highlighting for code and document artifacts.",
+      "label": "Language"
+    },
+    "newContent": {
+      "hint": "Replaces the body. The previous content is kept as a version."
+    },
+    "query": {
+      "hint": "Only used when listing: keeps artifacts whose title contains this text.",
+      "label": "Title filter",
+      "placeholder": "revenue"
+    },
+    "readArtifactId": {
+      "hint": "Leave empty to list the conversation's artifacts instead of reading one."
+    },
+    "renameTitle": {
+      "hint": "Leave empty to keep the current title."
+    },
+    "sessionId": {
+      "hint": "Which conversation's dock this belongs in. Leave empty for a scheduled run that has no conversation.",
+      "label": "Conversation"
+    },
+    "title": {
+      "hint": "Shown on the artifact card and used for the export filename.",
+      "label": "Title",
+      "placeholder": "Q3 revenue by region"
+    },
+    "type": {
+      "hint": "Decides how the artifact renders and which export formats it offers.",
+      "label": "Type",
+      "placeholder": "Pick a type"
+    }
+  },
   "branch": {
     "condition": {
       "hint": "Expression that resolves to a truthy value. Supports '{{ }}' expressions.",
@@ -1060,48 +1134,48 @@
     }
   },
   "editor": {
-    "root": {
-      "label": "Pro IDE workspace",
-      "hint": "Optional. Defaults to the Pro IDE you currently have open. Supports '{{ }}' expressions.",
-      "placeholder": "/Users/me/my-project"
-    },
     "autoStart": {
-      "label": "Start the IDE if needed",
-      "hint": "Bring code-server up when it is not already running for this workspace. Off by default — the first start can download a large binary."
+      "hint": "Bring code-server up when it is not already running for this workspace. Off by default — the first start can download a large binary.",
+      "label": "Start the IDE if needed"
     },
     "path": {
-      "label": "File path",
       "hint": "Required. Absolute, or relative to the workspace above. Supports '{{ }}' expressions.",
+      "label": "File path",
       "placeholder": "src/index.ts"
     },
     "position": {
-      "line": {
-        "label": "Line",
-        "hint": "Optional 1-based line to reveal.",
-        "placeholder": "42"
-      },
       "column": {
         "label": "Column",
         "placeholder": "1"
+      },
+      "line": {
+        "hint": "Optional 1-based line to reveal.",
+        "label": "Line",
+        "placeholder": "42"
+      }
+    },
+    "root": {
+      "hint": "Optional. Defaults to the Pro IDE you currently have open. Supports '{{ }}' expressions.",
+      "label": "Pro IDE workspace",
+      "placeholder": "/Users/me/my-project"
+    },
+    "saveAll": {
+      "path": {
+        "hint": "Optional. Leave empty to flush every dirty buffer. Supports '{{ }}' expressions.",
+        "label": "Only this file",
+        "placeholder": "src/index.ts"
       }
     },
     "showDiff": {
       "content": {
-        "label": "Proposed content",
         "hint": "Required. Shown beside the file on disk; never written. An empty value proposes deleting the contents.",
+        "label": "Proposed content",
         "placeholder": "The full proposed file contents"
       },
       "title": {
-        "label": "Diff title",
         "hint": "Optional label for the diff tab. Supports '{{ }}' expressions.",
+        "label": "Diff title",
         "placeholder": "Proposed fix"
-      }
-    },
-    "saveAll": {
-      "path": {
-        "label": "Only this file",
-        "hint": "Optional. Leave empty to flush every dirty buffer. Supports '{{ }}' expressions.",
-        "placeholder": "src/index.ts"
       }
     }
   },
@@ -2047,16 +2121,23 @@
   },
   "pickers": {
     "adapterInstance": "Select an adapter instance",
+    "addLiteral": "Use “{value}”",
     "character": "Select a character",
+    "externalAgent": "Select an external agent",
     "mcpServer": "Select an MCP server",
+    "model": "Select a model",
     "noResults": "No matches",
     "none": "None",
     "plugin": "Select a plugin",
+    "remove": "Remove {name}",
     "skill": "Select a skill",
     "skillNew": "Create new",
     "skillNoneItem": "— create new —",
+    "subagent": "Select a subagent",
     "subworkflow": "Select a workflow",
     "team": "Select a team",
+    "tool": "Add a tool",
+    "toolsUnrestricted": "No tools listed. The turn may use every tool its character or preset allows.",
     "twin": "Select a twin",
     "useExpression": "Use expression",
     "usePicker": "Pick from list"
@@ -2107,6 +2188,21 @@
         "planner_llm": "Planner LLM",
         "team_projection": "Team projection"
       }
+    },
+    "steps": {
+      "add": "Add step",
+      "empty": "No steps yet. A plan needs at least one.",
+      "kind": {
+        "agent_turn": "Agent turn",
+        "approval_gate": "Approval gate",
+        "editor_review": "Editor review",
+        "mcp_tool_call": "MCP tool call",
+        "sub_workflow": "Sub-workflow",
+        "teammate_dispatch": "Teammate dispatch",
+        "tool_call": "Tool call"
+      },
+      "kindLabel": "Step kind",
+      "titlePlaceholder": "Step title"
     },
     "stepsJson": {
       "hint": "Array of CreatePlanStepInput rows.",
@@ -2709,6 +2805,12 @@
       }
     }
   },
+  "structured": {
+    "jsonOnly": "This value isn't a JSON array, so the row editor would discard it.",
+    "removeRow": "Remove row",
+    "useJson": "Edit as JSON",
+    "useRows": "Edit as rows"
+  },
   "subworkflow": {
     "inputJson": {
       "hint": "Forwarded as the subworkflow's trigger payload.",
@@ -2825,8 +2927,11 @@
       "label": "Description"
     },
     "members": {
+      "add": "Add member",
+      "empty": "No members yet. A team needs at least one.",
       "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
-      "label": "Members (JSON array)"
+      "label": "Members (JSON array)",
+      "rolePlaceholder": "Role (optional)"
     },
     "name": {
       "label": "Team name"
@@ -3442,80 +3547,6 @@
     "workflowId": {
       "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
       "label": "Source workflow (optional)"
-    }
-  },
-  "artifact": {
-    "title": {
-      "label": "Title",
-      "hint": "Shown on the artifact card and used for the export filename.",
-      "placeholder": "Q3 revenue by region"
-    },
-    "type": {
-      "label": "Type",
-      "hint": "Decides how the artifact renders and which export formats it offers.",
-      "placeholder": "Pick a type"
-    },
-    "content": {
-      "label": "Content",
-      "hint": "The artifact body. Usually an expression referring to an earlier step."
-    },
-    "newContent": {
-      "hint": "Replaces the body. The previous content is kept as a version."
-    },
-    "language": {
-      "label": "Language",
-      "hint": "Syntax highlighting for code and document artifacts."
-    },
-    "chartType": {
-      "label": "Chart type",
-      "hint": "Only read for chart artifacts."
-    },
-    "sessionId": {
-      "label": "Conversation",
-      "hint": "Which conversation's dock this belongs in. Leave empty for a scheduled run that has no conversation."
-    },
-    "artifactId": {
-      "label": "Artifact",
-      "hint": "The id of the artifact to act on."
-    },
-    "readArtifactId": {
-      "hint": "Leave empty to list the conversation's artifacts instead of reading one."
-    },
-    "renameTitle": {
-      "hint": "Leave empty to keep the current title."
-    },
-    "changeDescription": {
-      "label": "Change note",
-      "hint": "Recorded on the version this update creates.",
-      "placeholder": "Refreshed with September numbers"
-    },
-    "query": {
-      "label": "Title filter",
-      "hint": "Only used when listing: keeps artifacts whose title contains this text.",
-      "placeholder": "revenue"
-    },
-    "format": {
-      "label": "Format",
-      "hint": "The step returns the bytes rather than saving them — a save dialog would park an unattended run. PNG and PDF of a chart need its preview on screen."
-    },
-    "documentId": {
-      "label": "Canvas document",
-      "hint": "Leave empty to list the conversation's documents instead of reading one."
-    },
-    "canvasTitle": {
-      "hint": "Shown in the Canvas document list."
-    },
-    "canvasLanguage": {
-      "hint": "Required: it selects the editor's syntax mode."
-    },
-    "canvasContent": {
-      "hint": "The document's starting content. May be empty."
-    },
-    "docType": {
-      "label": "Document type",
-      "hint": "Code gets an editor with syntax modes; text gets prose editing.",
-      "code": "Code",
-      "text": "Text"
     }
   }
 }

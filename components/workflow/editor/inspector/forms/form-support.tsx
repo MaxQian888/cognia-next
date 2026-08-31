@@ -34,6 +34,7 @@ import {
   FieldRow,
 } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
+import { ModelPicker } from "./shared/entity-picker"
 import { ConditionBuilder } from "./shared/condition-builder"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
 import { useInspectorExpressionCtx } from "./shared/inspector-context"
@@ -426,11 +427,16 @@ export function AiExplicitProviderFields({
           hint={t("model.hint")}
           name="model"
         >
-          <Input
+          <ModelPicker
             id={`${idPrefix}-model`}
             value={model}
-            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-            placeholder={t("model.placeholder")}
+            onChange={(v) => onChange(patchParam(params, "model", v))}
+            // Picking a model also settles the provider, in one patch. Leaving
+            // the two to be typed separately is how a node ends up naming a
+            // model its declared provider does not serve.
+            onPick={(modelId, providerId) =>
+              onChange(patchParam(patchParam(params, "model", modelId), "provider", providerId))
+            }
           />
         </Field>
       </FieldRow>

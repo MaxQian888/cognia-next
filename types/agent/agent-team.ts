@@ -90,22 +90,31 @@ export type TeamExecutionMode =
   | "delegate" // Lead only delegates, never implements
 
 /**
- * Higher-level execution pattern selected for a team run
+ * Higher-level execution patterns a team run can be routed to, in the order
+ * every picker offers them.
+ *
+ * The list existed four more times before this: the router's own
+ * `EXECUTION_PATTERNS`, the workflow params schema, the workflow inspector's
+ * hand-written `<SelectItem>`s, and the auto-compose dialog. Deriving the union
+ * from the array is what makes a fifth copy impossible.
+ *
+ * `ultracode_orchestration` is ADR-0022's addendum: the lead plans a
+ * composition of quality patterns (sweep, loop-until-dry, adversarial or
+ * perspective-diverse verify, judge panel, completeness critic, synthesize)
+ * that fan out tool-enabled teammates. Recommended automatically for complex
+ * tasks when `AgentTeamConfig.ultracode.enabled` is on.
  */
-export type TeamExecutionPattern =
-  | "manager_worker"
-  | "parallel_specialists"
-  | "background_handoff"
-  | "external_handoff"
-  | "single_agent_recommended"
-  /**
-   * Ultracode multi-agent orchestration (ADR-0022 addendum). The lead plans a
-   * composition of quality patterns (sweep → loop-until-dry → adversarial /
-   * perspective-diverse verify → judge panel → completeness critic →
-   * synthesize) that fan out tool-enabled teammates. Recommended automatically
-   * for complex tasks when `AgentTeamConfig.ultracode.enabled` is on.
-   */
-  | "ultracode_orchestration"
+export const TEAM_EXECUTION_PATTERNS = [
+  "manager_worker",
+  "parallel_specialists",
+  "background_handoff",
+  "external_handoff",
+  "single_agent_recommended",
+  "ultracode_orchestration",
+] as const
+
+/** Higher-level execution pattern selected for a team run. */
+export type TeamExecutionPattern = (typeof TEAM_EXECUTION_PATTERNS)[number]
 
 /**
  * Main workspace tabs for the dedicated Agent Team page. Must stay in sync

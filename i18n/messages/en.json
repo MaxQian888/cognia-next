@@ -44130,16 +44130,23 @@
       },
       "pickers": {
         "adapterInstance": "Select an adapter instance",
+        "addLiteral": "Use “{value}”",
         "character": "Select a character",
+        "externalAgent": "Select an external agent",
         "mcpServer": "Select an MCP server",
+        "model": "Select a model",
         "noResults": "No matches",
         "none": "None",
         "plugin": "Select a plugin",
+        "remove": "Remove {name}",
         "skill": "Select a skill",
         "skillNew": "Create new",
         "skillNoneItem": "— create new —",
+        "subagent": "Select a subagent",
         "subworkflow": "Select a workflow",
         "team": "Select a team",
+        "tool": "Add a tool",
+        "toolsUnrestricted": "No tools listed. The turn may use every tool its character or preset allows.",
         "twin": "Select a twin",
         "useExpression": "Use expression",
         "usePicker": "Pick from list"
@@ -44190,6 +44197,21 @@
             "planner_llm": "Planner LLM",
             "team_projection": "Team projection"
           }
+        },
+        "steps": {
+          "add": "Add step",
+          "empty": "No steps yet. A plan needs at least one.",
+          "kind": {
+            "agent_turn": "Agent turn",
+            "approval_gate": "Approval gate",
+            "editor_review": "Editor review",
+            "mcp_tool_call": "MCP tool call",
+            "sub_workflow": "Sub-workflow",
+            "teammate_dispatch": "Teammate dispatch",
+            "tool_call": "Tool call"
+          },
+          "kindLabel": "Step kind",
+          "titlePlaceholder": "Step title"
         },
         "stepsJson": {
           "hint": "Array of CreatePlanStepInput rows.",
@@ -44792,6 +44814,12 @@
           }
         }
       },
+      "structured": {
+        "jsonOnly": "This value isn't a JSON array, so the row editor would discard it.",
+        "removeRow": "Remove row",
+        "useJson": "Edit as JSON",
+        "useRows": "Edit as rows"
+      },
       "subworkflow": {
         "inputJson": {
           "hint": "Forwarded as the subworkflow's trigger payload.",
@@ -44908,8 +44936,11 @@
           "label": "Description"
         },
         "members": {
+          "add": "Add member",
+          "empty": "No members yet. A team needs at least one.",
           "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
-          "label": "Members (JSON array)"
+          "label": "Members (JSON array)",
+          "rolePlaceholder": "Role (optional)"
         },
         "name": {
           "label": "Team name"

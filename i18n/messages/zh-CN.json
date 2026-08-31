@@ -44130,16 +44130,23 @@
       },
       "pickers": {
         "adapterInstance": "选择适配器实例",
+        "addLiteral": "使用「{value}」",
         "character": "选择角色",
+        "externalAgent": "选择外部智能体",
         "mcpServer": "选择 MCP 服务器",
+        "model": "选择模型",
         "noResults": "无匹配项",
         "none": "无",
         "plugin": "选择插件",
+        "remove": "移除 {name}",
         "skill": "选择技能",
         "skillNew": "新建",
         "skillNoneItem": "— 新建 —",
+        "subagent": "选择子智能体",
         "subworkflow": "选择工作流",
         "team": "选择团队",
+        "tool": "添加工具",
+        "toolsUnrestricted": "未列出工具。本轮可使用其角色或预设允许的全部工具。",
         "twin": "选择数字分身",
         "useExpression": "使用表达式",
         "usePicker": "从列表选择"
@@ -44190,6 +44197,21 @@
             "planner_llm": "规划 LLM",
             "team_projection": "团队投影"
           }
+        },
+        "steps": {
+          "add": "添加步骤",
+          "empty": "还没有步骤。计划至少需要一步。",
+          "kind": {
+            "agent_turn": "智能体回合",
+            "approval_gate": "审批关卡",
+            "editor_review": "编辑器评审",
+            "mcp_tool_call": "MCP 工具调用",
+            "sub_workflow": "子工作流",
+            "teammate_dispatch": "派发给队友",
+            "tool_call": "工具调用"
+          },
+          "kindLabel": "步骤类型",
+          "titlePlaceholder": "步骤标题"
         },
         "stepsJson": {
           "hint": "CreatePlanStepInput 行数组。",
@@ -44792,6 +44814,12 @@
           }
         }
       },
+      "structured": {
+        "jsonOnly": "当前值不是 JSON 数组，表格编辑会丢弃它。",
+        "removeRow": "删除该行",
+        "useJson": "改用 JSON 编辑",
+        "useRows": "改用表格编辑"
+      },
       "subworkflow": {
         "inputJson": {
           "hint": "作为子工作流的触发负载转发。",
@@ -44908,8 +44936,11 @@
           "label": "描述"
         },
         "members": {
+          "add": "添加成员",
+          "empty": "还没有成员。团队至少需要一名。",
           "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
-          "label": "成员（JSON 数组）"
+          "label": "成员（JSON 数组）",
+          "rolePlaceholder": "角色（可选）"
         },
         "name": {
           "label": "团队名称"

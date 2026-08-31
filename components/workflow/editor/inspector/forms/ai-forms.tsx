@@ -21,7 +21,7 @@ import {
   FieldRow,
 } from "./shared"
 import { ExpressionField } from "./shared/expression-field"
-import { CharacterPicker, SubworkflowPicker } from "./shared/entity-picker"
+import { CharacterPicker, ModelPicker, SubworkflowPicker } from "./shared/entity-picker"
 import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
 import { getTransformersCapabilities } from "@cognia/transformers-runtime/capabilities"
 import { TRANSFORMERS_MODEL_PRESETS } from "@cognia/transformers-runtime/models"
@@ -392,10 +392,10 @@ export function EnsembleConfig({ params, onChange }: ConfigProps) {
             hint={t("targetModel.hint")}
             name="targetModel"
           >
-            <Input
+            <ModelPicker
               id="en-model"
               value={typeof target.model === "string" ? target.model : ""}
-              onChange={(e) => setTarget("model", e.target.value)}
+              onChange={(v) => setTarget("model", v)}
             />
           </Field>
           <Field label={t("outputSchema.label")} hint={t("outputSchema.hint")} name="outputSchema">

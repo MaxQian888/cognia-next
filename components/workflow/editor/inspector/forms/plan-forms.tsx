@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/select"
 import { Field, FieldGroup, readNumber, readString, patchParam, FieldRow } from "./shared"
 import { CharacterPicker } from "./shared/entity-picker"
+import { StructuredJsonField, parseJsonRows } from "./shared/structured-json-field"
+import { PLAN_STEP_KIND_VALUES } from "@/lib/workflow/nodes/params-schemas"
 import {
   PLAN_EXECUTION_MODES,
   PLAN_REFINEMENT_TRIGGERS,
@@ -25,6 +27,67 @@ import {
   parseObjectJson,
 } from "./form-support"
 import type { ConfigProps } from "./form-support"
+
+/** One row of a plan's `steps` array. Mirrors `PlanCreateStepInputParams`. */
+interface PlanStepRow {
+  title?: string
+  description?: string
+  kind?: string
+  dependsOn?: number[]
+}
+
+/**
+ * `steps` used to be a bare JSON `<Textarea>` on both plan-authoring nodes,
+ * which meant hand-writing an array of records and finding out at run time
+ * whether `kind` was one of the seven the schema accepts.
+ */
+function PlanStepsField({
+  id,
+  raw,
+  onChange,
+}: {
+  id: string
+  raw: string
+  onChange: (rows: PlanStepRow[], raw: string) => void
+}) {
+  const t = useTranslations("workflows.forms.planCreate")
+  const { rows, jsonOnly } = parseJsonRows<PlanStepRow>(raw)
+  return (
+    <StructuredJsonField<PlanStepRow>
+      id={id}
+      rows={rows}
+      raw={raw}
+      jsonOnly={jsonOnly}
+      onChange={onChange}
+      addLabel={t("steps.add")}
+      emptyHint={t("steps.empty")}
+      makeRow={() => ({ title: "", kind: "agent_turn" })}
+      renderRow={(row, index, patch) => (
+        <>
+          <Input
+            value={row.title ?? ""}
+            onChange={(e) => patch({ title: e.target.value })}
+            placeholder={t("steps.titlePlaceholder")}
+            aria-label={t("steps.titlePlaceholder")}
+            data-testid={`${id}-title-${index}`}
+          />
+          <Select value={row.kind ?? "agent_turn"} onValueChange={(v) => patch({ kind: v })}>
+            <SelectTrigger aria-label={t("steps.kindLabel")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PLAN_STEP_KIND_VALUES.map((kind) => (
+                <SelectItem key={kind} value={kind}>
+                  {t(`steps.kind.${kind}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </>
+      )}
+    />
+  )
+}
 
 export function PlanCreateConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.planCreate")
@@ -124,17 +187,17 @@ export function PlanCreateConfig({ params, onChange }: ConfigProps) {
         name="stepsJson"
         required
       >
-        <Textarea
+        <PlanStepsField
           id="plan-create-steps"
-          value={readString(params, "stepsJson")}
-          onChange={(e) => {
-            const next = patchParam(params, "stepsJson", e.target.value) as Record<string, unknown>
-            const parsed = parseArrayJson(e.target.value)
-            if (parsed) next.steps = parsed
+          raw={readString(params, "stepsJson")}
+          onChange={(rows, raw) => {
+            // One patch for both shapes: the executor reads `steps`, the JSON
+            // view shows `stepsJson`, and two patches off the same `params`
+            // would drop one of them.
+            const next = patchParam(params, "stepsJson", raw) as Record<string, unknown>
+            next.steps = rows
             onChange(next)
           }}
-          rows={5}
-          className="font-mono text-xs"
         />
       </Field>
       <Field

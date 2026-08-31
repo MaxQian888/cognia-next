@@ -1265,7 +1265,20 @@ describe("goal action configs", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "ses_plan" }))
     fireEvent.change(fieldInput(container, "title"), { target: { value: "Plan title" } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ title: "Plan title" }))
-    fireEvent.change(fieldInput(container, "stepsJson"), {
+    // Steps are a row editor now, not a raw JSON textarea. Adding a row has to
+    // write BOTH shapes in one patch: the executor reads `steps`, the JSON view
+    // reads `stepsJson`, and two patches off the same `params` drop one.
+    onChange.mockClear()
+    fireEvent.click(screen.getByTestId("plan-create-steps-add"))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const added = onChange.mock.calls[0]![0] as Record<string, unknown>
+    expect(added.steps).toEqual([{ title: "", kind: "agent_turn" }])
+    expect(JSON.parse(String(added.stepsJson))).toEqual([{ title: "", kind: "agent_turn" }])
+
+    // The JSON escape hatch still edits the same pair.
+    onChange.mockClear()
+    fireEvent.click(screen.getByTestId("plan-create-steps-use-json"))
+    fireEvent.change(screen.getByTestId("plan-create-steps-json"), {
       target: { value: '[{"title":"Step","kind":"agent_turn"}]' },
     })
     expect(onChange).toHaveBeenCalledWith(

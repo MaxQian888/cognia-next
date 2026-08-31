@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod"
+import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
 /**
@@ -361,16 +362,7 @@ const TeamComposeParams = z.object({
   objective: requiredString("required"),
   name: optionalString,
   maxRoster: numberRange(1, 16).optional(),
-  preferredPattern: z
-    .enum([
-      "manager_worker",
-      "parallel_specialists",
-      "background_handoff",
-      "external_handoff",
-      "single_agent_recommended",
-      "ultracode_orchestration",
-    ])
-    .optional(),
+  preferredPattern: z.enum(TEAM_EXECUTION_PATTERNS).optional(),
   autoStart: z.boolean().optional(),
   ultracode: z.boolean().optional(),
 })
@@ -454,7 +446,12 @@ const TeamReconcileParams = z.object({
   retain: z.enum(["all", "keep-winner", "prune-losers"]).optional(),
 })
 
-const PlanStepKind = z.enum([
+/**
+ * Exported so the inspector's plan-step row editor offers exactly the kinds the
+ * schema accepts. A hand-kept copy in the form would be the fifth place this
+ * list lives and the first one free to drift.
+ */
+export const PLAN_STEP_KIND_VALUES = [
   "agent_turn",
   "teammate_dispatch",
   "tool_call",
@@ -462,7 +459,9 @@ const PlanStepKind = z.enum([
   "sub_workflow",
   "approval_gate",
   "editor_review",
-])
+] as const
+
+const PlanStepKind = z.enum(PLAN_STEP_KIND_VALUES)
 
 const PlanStepStatus = z.enum([
   "pending",

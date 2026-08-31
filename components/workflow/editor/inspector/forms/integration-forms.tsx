@@ -26,6 +26,7 @@ import { ExpressionField } from "./shared/expression-field"
 import {
   CharacterPicker,
   SkillPicker,
+  SkillMultiPicker,
   McpServerPicker,
   McpToolPicker,
   PluginPicker,
@@ -43,7 +44,14 @@ const MEMORY_TYPES = ["semantic", "episodic", "procedural"] as const
 // ── action.skill.invoke ───────────────────────────────────────────────────
 export function SkillInvokeConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.skillInvoke")
+  // Stored (and read by the executor) as a comma-separated string. The picker
+  // is a presentation change only: rewriting the param to an array would break
+  // every graph already saved, and `SkillInvokeParams` still declares a string.
   const skillIds = readString(params, "skillIds")
+  const selected = skillIds
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean)
   return (
     <FieldGroup>
       <Field
@@ -53,11 +61,10 @@ export function SkillInvokeConfig({ params, onChange }: ConfigProps) {
         name="skillIds"
         required
       >
-        <Input
+        <SkillMultiPicker
           id="si-ids"
-          value={skillIds}
-          onChange={(e) => onChange(patchParam(params, "skillIds", e.target.value))}
-          placeholder={t("skillIds.placeholder")}
+          value={selected}
+          onChange={(list) => onChange(patchParam(params, "skillIds", list.join(",")))}
         />
       </Field>
     </FieldGroup>
