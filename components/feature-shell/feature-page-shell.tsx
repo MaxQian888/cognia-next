@@ -1,9 +1,16 @@
 "use client"
 
 /**
- * Feature Page Shell — the Canvas-style 3-pane layout that every top-level
- * feature route ( /workflows, /inbox, /twin, /discover, /skills, /plugins,
- * /agent-teams, /scheduler, /logs, /me, /settings ) renders inside.
+ * Feature Page Shell — the Canvas-style 3-pane layout that most top-level
+ * feature routes ( /workflows, /twin, /discover, /skills, /plugins,
+ * /agent-teams, /logs, /me, /settings ) render inside.
+ *
+ * `/inbox` is deliberately NOT one of them, despite this list having claimed
+ * it for a while. A mail-style three-pane reader (rail, conversation list,
+ * thread) is a different layout from a feature page with optional rails: its
+ * middle pane is the primary navigation, not a side rail, and its panes have
+ * their own persisted sizes. It renders `FeaturePageHeader` on its own instead,
+ * so the two routes still present the same seam. Same for `/scheduler`.
  *
  *   ┌─────────── header (sticky) ───────────┐
  *   │ left │  center (children)  │  right   │

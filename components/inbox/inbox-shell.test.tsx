@@ -68,10 +68,8 @@ jest.mock("./notices/notice-area", () => ({
 // still consumes it.
 const mockBreakpoint = jest.fn().mockReturnValue("desktop")
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const mockWriteRoute = (require("@/lib/connectors/inbox-writes") as {
-  useInboxWriteRoute: jest.Mock
-}).useInboxWriteRoute
+const mockWriteRoute = // eslint-disable-next-line @typescript-eslint/no-require-imports
+  (require("@/lib/connectors/inbox-writes") as { useInboxWriteRoute: jest.Mock }).useInboxWriteRoute
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const mockIsTauri = (require("@/lib/platform/detect") as { isTauri: jest.Mock }).isTauri
 jest.mock("@/hooks/ui", () => ({
@@ -315,5 +313,25 @@ describe("InboxShell", () => {
       expect(middle.className).toContain("md:flex")
       expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
     })
+  })
+})
+
+// Every other feature route mounts this band, and `/inbox` was the one that
+// did not: no title, no page-level action slot, so it read as a different
+// application from `/scheduler` beside it.
+describe("InboxShell: page header", () => {
+  it("renders the page header on the desktop three-pane layout", () => {
+    mockBreakpoint.mockReturnValue("desktop")
+    render(<InboxShell view="all" />)
+    expect(screen.getByTestId("inbox-header")).toBeInTheDocument()
+    expect(screen.getByTestId("inbox-open-connector-settings")).toBeInTheDocument()
+  })
+
+  // A phone gets one pane, and `MobileInboxBody` already carries a segmented
+  // switcher above it. A second band would cost two rows of chrome for a title.
+  it.each(["tablet", "mobile"])("does not render it on %s", (breakpoint) => {
+    mockBreakpoint.mockReturnValue(breakpoint)
+    render(<InboxShell view="all" />)
+    expect(screen.queryByTestId("inbox-header")).not.toBeInTheDocument()
   })
 })

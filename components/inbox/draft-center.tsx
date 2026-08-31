@@ -31,6 +31,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { DraftEditor } from "./draft-editor"
+import { Surface } from "@/components/surface/surface"
 import { PlatformBadge } from "./platform-badge"
 
 export function DraftCenter() {
@@ -108,22 +109,31 @@ export function DraftCenter() {
               className="border-b last:border-b-0"
               data-testid={`draft-group-${ck}`}
             >
-              <header className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-                {platform && <PlatformBadge platform={platform} iconOnly />}
-                <span className="truncate text-sm font-medium">{titleByKey.get(ck) ?? ck}</span>
-                <Badge variant="secondary" className="ml-auto text-[10px]">
-                  {t("group", { count: rows.length })}
-                </Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)}
-                  data-testid={`draft-group-open-${ck}`}
-                >
-                  {t("open")}
-                </Button>
-              </header>
+              {/* `bg-muted/40` before. See the notice band: a hardcoded
+                  background cannot be retuned by the wallpaper layer. */}
+              <Surface
+                asChild
+                layer="raised"
+                radius="none"
+                className="flex items-center gap-2 border-b px-3 py-2"
+              >
+                <header>
+                  {platform && <PlatformBadge platform={platform} iconOnly />}
+                  <span className="truncate text-sm font-medium">{titleByKey.get(ck) ?? ck}</span>
+                  <Badge variant="secondary" className="ml-auto text-[10px]">
+                    {t("group", { count: rows.length })}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)}
+                    data-testid={`draft-group-open-${ck}`}
+                  >
+                    {t("open")}
+                  </Button>
+                </header>
+              </Surface>
               <ItemGroup>
                 {rows.map((row, index) => (
                   <Fragment key={row.id}>

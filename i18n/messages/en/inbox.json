@@ -661,6 +661,9 @@
     "unavailable": "Replying needs a paired host."
   },
   "shell": {
+    "pageTitle": "Inbox",
+    "pageDescription": "Conversations your bots are having on connected platforms.",
+    "openSettings": "Connector settings",
     "resize": {
       "detailHandle": "Resize conversation list",
       "sidebarHandle": "Resize sidebar"

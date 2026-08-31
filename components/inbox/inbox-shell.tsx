@@ -23,6 +23,8 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
+import { InboxIcon, Settings2Icon } from "lucide-react"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { useBreakpoint } from "@/hooks/ui"
@@ -109,8 +111,31 @@ function DesktopInboxShell({
     // rather than the offcanvas <Sidebar> chrome.
     <SidebarProvider
       data-bg-target="chat"
-      className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt safe-area-pb"
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden safe-area-pt safe-area-pb"
     >
+      {/* Every other feature route mounts this band, and `/inbox` was the one
+       * that did not: no title, no breadcrumb, no page-level action slot, so it
+       * read as a different application from `/scheduler` beside it. The header
+       * is here rather than in the route files because all five inbox routes
+       * mount this shell, and putting it in each of them is how it would drift.
+       *
+       * Desktop only. The mobile branch below is a single pane whose own
+       * `MobileInboxBody` already carries a segmented switcher, and a second
+       * band above it would cost a phone two rows of chrome for one title. */}
+      <FeaturePageHeader
+        variant="management"
+        testId="inbox-header"
+        icon={<InboxIcon />}
+        title={t("pageTitle")}
+        description={t("pageDescription")}
+        primaryAction={{
+          id: "connector-settings",
+          label: t("openSettings"),
+          icon: Settings2Icon,
+          href: "/me/connectors",
+          testId: "inbox-open-connector-settings",
+        }}
+      />
       <ResizablePanelGroup
         orientation="horizontal"
         className="min-h-0 flex-1"

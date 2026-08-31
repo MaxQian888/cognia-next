@@ -661,6 +661,9 @@
     "unavailable": "回复需要已配对的宿主。"
   },
   "shell": {
+    "pageTitle": "收件箱",
+    "pageDescription": "机器人在已连接平台上的会话。",
+    "openSettings": "连接器设置",
     "resize": {
       "detailHandle": "调整会话列表宽度",
       "sidebarHandle": "调整侧栏宽度"

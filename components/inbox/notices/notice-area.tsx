@@ -39,6 +39,7 @@ import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useDegradedAdapters } from "@/hooks/connectors/use-degraded-adapters"
@@ -136,8 +137,13 @@ export function InboxNoticeArea({ conversationKey, className }: InboxNoticeAreaP
   const open = !collapsible || expanded
 
   return (
-    <div
-      className={cn("shrink-0 border-b bg-muted/30", className)}
+    <Surface
+      layer="raised"
+      radius="none"
+      // `bg-muted/30` before. A hardcoded background is invisible to the
+      // wallpaper layer, so this band sat opaque over one while the panes
+      // around it went translucent (ADR-0148).
+      className={cn("shrink-0 border-b", className)}
       role="region"
       aria-label={t("region")}
       data-testid="inbox-notice-area"
@@ -176,6 +182,6 @@ export function InboxNoticeArea({ conversationKey, className }: InboxNoticeAreaP
           </div>
         ))}
       </motion.div>
-    </div>
+    </Surface>
   )
 }
