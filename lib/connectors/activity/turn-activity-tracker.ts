@@ -1,10 +1,19 @@
 /**
  * Per-turn throttled cumulative state for the live-activity card (Feature A).
- * PURE logic — no Dexie, no bus, no React, no side effects. The dispatcher
- * The durable execution presentation runner owns an instance per turn and folds each
- * `CaptureStreamEvent` into it, and consults `shouldEmit` to decide when to
- * flush a card update. Keeping the state machine here (out of the dispatcher)
- * makes the throttle/fold semantics unit-testable in isolation.
+ *
+ * PURE logic — no Dexie, no bus, no React, no side effects. A caller owns one
+ * instance per turn, folds each `CaptureStreamEvent` into it, and consults
+ * `shouldEmit` to decide when to flush a card update. Keeping the state
+ * machine separate from its callers makes the throttle/fold semantics
+ * unit-testable in isolation.
+ *
+ * Owner note: it lives under `lib/connectors/activity/` for historical
+ * reasons and has no connector consumer left. Its one caller today is
+ * `lib/ai/agent/team/teammate-progress-coalescer.ts`. It stays here because
+ * it depends on `./diff-types` and `./diff-producer`, which have no consumer
+ * outside this folder either, so moving one of the three would replace a
+ * misleading path with a worse import edge. Move the cluster together, or not
+ * at all.
  *
  * Throttle contract (user spec): emit when
  *   `force` (turn-end) OR `isToolBoundary` (a tool started/finished) OR

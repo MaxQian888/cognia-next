@@ -52,6 +52,16 @@ export type ConnectorControlBlock =
   /** Needs the desktop process itself, which this host is not. */
   | "needs-desktop-shell"
 
+/**
+ * The union as a value, so a test can walk it.
+ *
+ * Nothing renders this list, and it looks like dead code because of that. It
+ * is not: `ConnectorHostNotice` reads its message with `t(\`block.${block}\`)`,
+ * a template-literal key that `pnpm lint:i18n` skips entirely. This constant
+ * is what lets `control-reach.test.ts` prove every block has a reason and a
+ * next step in both locales, and what makes adding a fourth block a failing
+ * test rather than an untranslated string in production.
+ */
 export const CONNECTOR_CONTROL_BLOCKS: readonly ConnectorControlBlock[] = Object.freeze([
   "no-runtime",
   "runs-on-host",

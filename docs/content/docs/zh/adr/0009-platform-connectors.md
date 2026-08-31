@@ -171,7 +171,7 @@ Schema 在 v18 → v38 之间增加了三个内容：
 
 - **Telegram `webhookSecret`持久性** — `credentialsRef.accounts`现在同时声明`botToken`和`webhookSecret`;现有行在编辑时自动迁移，因此秘密在重启后依然存在并抵达Tauri验证器。（`components/settings/connections/forms/telegram-config.tsx`）
 - **Lark TAT 401 自动刷新** — 新`lib/connectors/adapters/lark/auth-retry.ts`导出`LarkApiError`、`isLarkTatInvalidation`和`withTatRefresh`。封装`doRequest`、`send`和`edit`（用于上传预通过）意味着适配器能在一次重试中恢复服务器端TAT撤销，而无需等待长达两小时等待自然的TTL。
-- **回调绑定TTL** — `recordCallbackBinding`现在默认`expiresAt = createdAt + 30 d`。新`lib/connectors/callback-binding-cleanup.ts`每天在`ConnectorBusProvider`启动时运行;它会获得明确的过期
+- **回调绑定TTL** — `recordCallbackBinding`现在默认`expiresAt = createdAt + 30 d`。`lib/connectors/callback-binding-cleanup.ts`只提供一次性清理，由持久化的日常清扫时钟（`lib/connectors/housekeeping-scheduler.ts`）每天触发；它会清掉明确的过期
   - pre-default-TTL行超过60天宽限期。无需模式提升——`expiresAt`列已经存在。
 
 **诊断/可观测性：**

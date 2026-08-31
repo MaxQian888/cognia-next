@@ -45,8 +45,14 @@ function withDefaults(overrides: Partial<SurfaceRemovalDependencies>): SurfaceRe
   }
 }
 
-/** Delete one published surface platform-side. Resolves even when it is gone. */
-export async function removePlatformSurface(
+/**
+ * Delete one published surface platform-side. Resolves even when it is gone.
+ *
+ * Module-private: `removeChatSurface` is the only caller and the only entry
+ * anyone should use, because it also settles the local row. Exporting this
+ * offered a way to delete the surface platform-side and leave the row behind.
+ */
+async function removePlatformSurface(
   deps: SurfaceRemovalDependencies,
   creds: LarkCredentials,
   chatId: string,

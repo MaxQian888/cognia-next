@@ -42,15 +42,6 @@ export function unregisterPluginConnectorKindsByPlugin(pluginId: string): number
   return count
 }
 
-/** Every resolvable connector kind, sorted for stable display. */
-export function listKnownConnectorKinds(): string[] {
-  const out = new Set<string>(BUILT_IN_AVAILABLE)
-  for (const owned of pluginKinds.values()) {
-    for (const type of owned) out.add(type)
-  }
-  return [...out].sort()
-}
-
 export function isKnownConnectorKind(kind: string): boolean {
   if (BUILT_IN_AVAILABLE.has(kind)) return true
   for (const owned of pluginKinds.values()) {

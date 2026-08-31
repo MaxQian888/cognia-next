@@ -139,9 +139,9 @@ export interface RunWorkflowInput {
   /**
    * Origin of this run when started from outside the workflow's own
    * trigger node (e.g., IM Claude tool, desktop button, HTTP API). Persisted
-   * onto `WorkflowRunRow.triggeredBy` so the IM-side progress-runner can
+   * onto `WorkflowRunRow.triggeredBy` so the IM-side presentation runner can
    * fan-out events to the originating conversation. See
-   * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
+   * `lib/connectors/run-presentation/runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
   /**

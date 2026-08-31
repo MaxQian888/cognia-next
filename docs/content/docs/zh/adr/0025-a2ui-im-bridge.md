@@ -83,6 +83,23 @@ IM-completion轨道（第二阶段）通过使A2UI在每个连接处都成为一
 
 处理器——`lib/a2ui/connector-callback-handler.ts`——将动作附加到`a2uiEventHistory`并从`scheduled-outbound.ts`呼叫`runConnectorDigestTurn`，使助理的下一回合看到点击声，就像渲染器中发生的一样。浏览器端和IM-side用户在同一AI循环中收敛。
 
+#### 修订（2026-08-31）：处理器不再是唯一去向
+
+上面这一步现在是**默认分支**，不是唯一分支。绑定的 `kind` 若指向产品自己画的卡片，
+会在模型回合之前短路：卡片已经写明了每个按钮做什么，再花一个回合让模型重新解释它，
+既更慢也更不可靠。
+
+| `kind`                | 处理者                                        |
+| --------------------- | --------------------------------------------- |
+| `issue_action`        | `lib/issues/im/callback-handler.ts`            |
+| `wf_approve` / cancel | `lib/a2ui/workflow-approval-handler.ts`        |
+| workflow 扇出         | `lib/a2ui/workflow-fanout-handler.ts`          |
+| `notification_action` | `lib/notifications/im-callback-handler.ts`     |
+| 其余                  | `lib/a2ui/connector-callback-handler.ts`       |
+
+词表本身在 `types/connectors/interaction.ts`，那里才是「一个 `kind` 是什么意思」的
+真相源。本 ADR 刻意不逐条复述：那会是第二份会漂移的副本。
+
 第五A2UI MCP工具`a2ui_handle_connector_action`加入桥接（`lib/a2ui/mcp-tool-schemas.ts`），是自定义回调处理器想向特定接口注入动作时的投影端点。
 
 ### 计算机使用隔离

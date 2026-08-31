@@ -215,8 +215,9 @@ improvements. All shipped behind the same plan file under
   the adapter recovers from server-side TAT revocation in one retry
   instead of waiting up to two hours for the natural TTL.
 - **Callback bindings TTL** — `recordCallbackBinding` now defaults
-  `expiresAt = createdAt + 30 d`. New `lib/connectors/callback-binding-cleanup.ts`
-  runs daily on `ConnectorBusProvider` start; it reaps explicit expiries
+  `expiresAt = createdAt + 30 d`. `lib/connectors/callback-binding-cleanup.ts`
+  exposes a one-shot prune, driven daily by the durable housekeeping clock
+  (`lib/connectors/housekeeping-scheduler.ts`); it reaps explicit expiries
   - pre-default-TTL rows past a 60-day grace window. No schema bump
     required — the `expiresAt` column already existed.
 

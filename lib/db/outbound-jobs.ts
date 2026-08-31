@@ -776,7 +776,7 @@ export async function unclaimSending(
 
 /**
  * Transition a job to "sent" and persist the platform-side message id so
- * downstream consumers (workflow-progress-runner in-place edit, future
+ * downstream consumers (the run-presentation runner's in-place edit, future
  * reaction routing) can recover the handle from the row without a second
  * adapter round-trip.
  */

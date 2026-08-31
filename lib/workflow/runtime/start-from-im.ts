@@ -37,10 +37,10 @@ export type StartWorkflowFromIMResult =
 
 /**
  * Start a workflow on behalf of an IM user. Returns as soon as the run row
- * is persisted while the orchestrator continues in the background. Run-status fan-out is handled by
- * `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`, which Dexie-
- * live-queries `workflowRunEvents` for any run whose `triggeredBy.source`
- * is `"im"`.
+ * is persisted while the orchestrator continues in the background.
+ * Run-status fan-out is handled by
+ * `lib/connectors/run-presentation/runner.ts`, which projects the run onto
+ * the originating conversation through its `ExecutionRunBinding`.
  */
 export async function startWorkflowFromIM(
   input: StartWorkflowFromIMInput

@@ -8,16 +8,18 @@
  * conversation that touches 10 surfaces/day with 5 buttons each adds 50
  * rows daily.
  *
- * `recordCallbackBinding` now sets a default `expiresAt = createdAt + 30 d`
- * for every new row, so the only thing missing is a periodic sweeper that
- * deletes rows whose `expiresAt` has passed. This module provides:
+ * `recordCallbackBinding` sets a default `expiresAt = createdAt + 30 d` for
+ * every new row, so all that is needed is a periodic prune of rows whose
+ * `expiresAt` has passed. This module provides the one-shot
+ * `cleanupExpiredCallbackBindings()`, which returns the number of rows
+ * deleted and is safe to call from tests and manual debug.
  *
- *   - `cleanupExpiredCallbackBindings()` — one-shot prune; returns the
- *     number of rows deleted. Safe to call from tests / manual debug.
- *   - `startCallbackBindingCleanupSchedule()` — starts a 24 h timer that
- *     runs the prune in the background and returns a disposer. The first
- *     prune fires after `initialDelayMs` (default 60 s) so it doesn't
- *     compete with app boot work.
+ * It used to own a `setTimeout`/`setInterval` loop of its own. The durable
+ * housekeeping clock (`lib/connectors/housekeeping-scheduler.ts`) replaced
+ * that, and it is what calls this now: one persisted scheduler interval emits
+ * a daily event and three event-triggered tasks fan out from it, which is what
+ * gives a headless host restart and catch-up semantics an in-process timer
+ * could not.
  *
  * Legacy rows from before the `expiresAt` default are also reaped: any
  * row whose `expiresAt` is undefined AND whose `createdAt` is older than
@@ -28,12 +30,6 @@
 
 import { getDb } from "@/lib/db/schema"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
-
-/** Interval between cleanup sweeps. 24 h matches the OS-scheduler conventions used elsewhere. */
-export const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
-
-/** Default delay before the first sweep, so we don't compete with app boot. */
-export const CLEANUP_INITIAL_DELAY_MS = 60 * 1000
 
 /**
  * Pre-default-TTL rows have `expiresAt === undefined`. Treat them as
@@ -131,106 +127,4 @@ export async function cleanupExpiredCallbackBindings(
   }
 
   return { expiredCount, legacyCount, total: toDelete.length }
-}
-
-export interface CallbackBindingCleanupHandle {
-  /** Stop the schedule. Idempotent. */
-  dispose(): void
-  /**
-   * Force a sweep right now (skips the 24 h wait). Resolves with the
-   * cleanup result so callers (manual debug, tests) can inspect.
-   */
-  runNow(): Promise<CleanupResult>
-}
-
-export interface StartCallbackBindingCleanupOptions {
-  /** Override the interval (tests use a small value). Defaults to 24 h. */
-  intervalMs?: number
-  /** Override the initial delay (tests use 0). Defaults to 60 s. */
-  initialDelayMs?: number
-  /** Override the clock (tests). */
-  now?: () => number
-  /** Override the timer scheduler (tests). */
-  scheduler?: {
-    setTimeout: (cb: () => void, ms: number) => unknown
-    clearTimeout: (handle: unknown) => void
-    setInterval: (cb: () => void, ms: number) => unknown
-    clearInterval: (handle: unknown) => void
-  }
-  /**
-   * Optional hook fired after each sweep. Useful for telemetry / audit
-   * surfaces; failures inside the hook are swallowed so the schedule
-   * cannot be derailed by a logger.
-   */
-  onSwept?: (result: CleanupResult) => void
-}
-
-/**
- * Start the daily cleanup schedule. Returns a handle the caller MUST
- * dispose on unmount / teardown so the timers don't leak. The first
- * sweep fires after `initialDelayMs`; subsequent sweeps fire on
- * `intervalMs` thereafter.
- */
-export function startCallbackBindingCleanupSchedule(
-  options: StartCallbackBindingCleanupOptions = {}
-): CallbackBindingCleanupHandle {
-  const {
-    intervalMs = CLEANUP_INTERVAL_MS,
-    initialDelayMs = CLEANUP_INITIAL_DELAY_MS,
-    now,
-    scheduler = {
-      setTimeout: (cb, ms) => setTimeout(cb, ms),
-      clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-      setInterval: (cb, ms) => setInterval(cb, ms),
-      clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
-    },
-    onSwept,
-  } = options
-
-  let disposed = false
-  let initialHandle: unknown = null
-  let intervalHandle: unknown = null
-
-  const sweep = async (): Promise<CleanupResult> => {
-    const result = await cleanupExpiredCallbackBindings({ now: now?.() })
-    try {
-      onSwept?.(result)
-    } catch {
-      // Best-effort — telemetry failures must not break the schedule.
-    }
-    return result
-  }
-
-  initialHandle = scheduler.setTimeout(() => {
-    if (disposed) return
-    void sweep().catch((err) => {
-      console.error(
-        `[callback-binding-cleanup] initial sweep failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      )
-    })
-    intervalHandle = scheduler.setInterval(() => {
-      if (disposed) return
-      void sweep().catch((err) => {
-        console.error(
-          `[callback-binding-cleanup] periodic sweep failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        )
-      })
-    }, intervalMs)
-  }, initialDelayMs)
-
-  return {
-    dispose() {
-      if (disposed) return
-      disposed = true
-      if (initialHandle !== null) scheduler.clearTimeout(initialHandle)
-      if (intervalHandle !== null) scheduler.clearInterval(intervalHandle)
-    },
-    async runNow(): Promise<CleanupResult> {
-      return sweep()
-    },
-  }
 }

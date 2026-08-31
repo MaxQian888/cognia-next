@@ -114,6 +114,25 @@ to `a2uiEventHistory` and calls `runConnectorDigestTurn` from
 it had happened in the renderer. Browser-side and IM-side users converge
 on the same AI loop.
 
+#### Revision (2026-08-31): the handler is no longer the only destination
+
+The step above is now the DEFAULT arm, not the only one. A binding whose
+`kind` names a product-authored card short-circuits before the model turn,
+because the card already says what each button does and spending a turn
+asking the model to re-interpret it is both slower and less reliable:
+
+| `kind`                | Handled by                                    |
+| --------------------- | --------------------------------------------- |
+| `issue_action`        | `lib/issues/im/callback-handler.ts`            |
+| `wf_approve` / cancel | `lib/a2ui/workflow-approval-handler.ts`        |
+| workflow fan-out      | `lib/a2ui/workflow-fanout-handler.ts`          |
+| `notification_action` | `lib/notifications/im-callback-handler.ts`     |
+| everything else       | `lib/a2ui/connector-callback-handler.ts`       |
+
+The vocabulary itself lives in `types/connectors/interaction.ts`, which is
+the storage of record for what a `kind` means. This ADR deliberately does
+not restate the list per kind: it would be a second copy that drifts.
+
 A 5th A2UI MCP tool `a2ui_handle_connector_action` joins the bridge
 (`lib/a2ui/mcp-tool-schemas.ts`) and is the projection endpoint when a
 custom callback handler wants to inject an action onto a specific surface.

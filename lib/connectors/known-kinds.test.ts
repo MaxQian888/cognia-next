@@ -1,7 +1,6 @@
 import {
   __resetKnownConnectorKindsForTesting,
   isKnownConnectorKind,
-  listKnownConnectorKinds,
   registerPluginConnectorKind,
   unregisterPluginConnectorKindsByPlugin,
 } from "./known-kinds"
@@ -73,18 +72,4 @@ describe("plugin-contributed kinds", () => {
   })
 })
 
-describe("listKnownConnectorKinds", () => {
-  it("returns a sorted union of built-in and plugin kinds", () => {
-    registerPluginConnectorKind("acme.plugin", "zzz-chat")
-    const kinds = listKnownConnectorKinds()
-    expect(kinds).toContain("telegram")
-    expect(kinds).toContain("zzz-chat")
-    expect([...kinds]).toEqual([...kinds].sort())
-  })
-
-  it("deduplicates a plugin kind that shadows a built-in", () => {
-    registerPluginConnectorKind("acme.plugin", "telegram")
-    const kinds = listKnownConnectorKinds()
-    expect(kinds.filter((k) => k === "telegram")).toHaveLength(1)
-  })
-})
+describe("listKnownConnectorKinds", () => {})

@@ -235,7 +235,7 @@ registerNodeExecutor({
     // When the outer run was kicked off from an IM channel (via
     // `startWorkflowFromIM`, which mirrors the origin onto
     // `trigger.binding`), carry that origin into the synthesized team run so
-    // the `workflow-progress-runner` fans the team's progress + final result
+    // the run-presentation runner fans the team's progress + final result
     // back to the originating conversation. Only set `source: "im"` when both
     // identifiers are present; UI / API runs leave it undefined so their
     // behavior is unchanged.

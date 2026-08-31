@@ -713,7 +713,7 @@ export interface OutboundJobRow {
   /**
    * The platform-side message id returned by the adapter after a
    * successful send/edit. Persisted so downstream consumers (notably the
-   * workflow-progress-runner's in-place card edit path) can correlate
+   * run-presentation runner's in-place card edit path) can correlate
    * the original send back to the platform's message handle without
    * re-querying the platform API. Non-indexed JSON column — no schema
    * version bump required since IndexedDB stores extra keys
@@ -908,7 +908,7 @@ export interface ConversationOverrideRow {
    * dispatches to the workflow orchestrator (`startWorkflowFromIM`) via
    * `lib/workflow/runtime/start-from-im.ts` instead of the single-character
    * `runAndCapture` path; the message text is surfaced as `$trigger.payload`.
-   * Progress + final fan back through the same `workflow-progress-runner` the
+   * Progress + final fan back through the same run-presentation runner the
    * team path uses. Bound via `/workflow <name|id>` or the inbox override form;
    * `/workflow off` clears it. Non-indexed additive (mirrors `teamId` — no
    * Dexie bump).
