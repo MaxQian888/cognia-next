@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -128,6 +129,17 @@ export function CollaborationCard() {
             data-testid="collaboration-test"
           >
             {t("test")}
+          </Button>
+          {/*
+            The switch and the surface it drives were unreachable from each
+            other: this card is the only place a collaboration server is
+            configured, and `/workspace` is the only place the roster and the
+            shared activity it pulls are visible.
+          */}
+          <Button asChild type="button" size="sm" variant="ghost">
+            <Link href="/workspace" data-testid="collaboration-open-workspace">
+              {t("openWorkspace")}
+            </Link>
           </Button>
         </div>
 

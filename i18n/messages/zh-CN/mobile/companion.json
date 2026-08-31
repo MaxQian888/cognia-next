@@ -409,7 +409,8 @@
       "not-configured": "该配置文件尚未设置协作服务器。",
       "not-signed-in": "刷新前请先在上方登录——服务器通过该会话识别你的身份。",
       "no-org": "已登录，但这个账户不属于任何组织，因此没有可拉取的共享内容。"
-    }
+    },
+    "openWorkspace": "打开工作区"
   },
   "browserCompanion": {
     "title": "浏览器伴侣",

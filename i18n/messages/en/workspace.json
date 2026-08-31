@@ -273,7 +273,15 @@
       "maintainer": "Maintainer",
       "member": "Member",
       "viewer": "Viewer"
-    }
+    },
+    "you": "You",
+    "allRoles": "All roles",
+    "roleFilterAria": "Filter members by role",
+    "noMatches": "No member has that role.",
+    "configureCollaboration": "Set up collaboration",
+    "invite": "Invite",
+    "inviteUnavailable": "Membership is managed by the collaboration server. This app mirrors the roster and does not write to it.",
+    "cachedNote": "Cached copy of the server roster."
   },
   "activity": {
     "title": "Team activity",

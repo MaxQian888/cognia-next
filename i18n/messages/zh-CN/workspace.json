@@ -273,7 +273,15 @@
       "maintainer": "维护者",
       "member": "成员",
       "viewer": "只读"
-    }
+    },
+    "you": "你",
+    "allRoles": "全部角色",
+    "roleFilterAria": "按角色筛选成员",
+    "noMatches": "没有该角色的成员。",
+    "configureCollaboration": "设置协作",
+    "invite": "邀请",
+    "inviteUnavailable": "成员关系由协作服务端管理。本应用只镜像名册，不写入。",
+    "cachedNote": "服务端名册的本地缓存。"
   },
   "activity": {
     "title": "团队动态",

@@ -16095,6 +16095,7 @@
         "clear": "断开",
         "failed": "刷新失败：{reason}",
         "help": "本配置文件的共享事项、工作区与成员关系从这里来。请先在上方登录——服务器通过该会话识别你的身份，组织也由它决定。",
+        "openWorkspace": "打开工作区",
         "refreshed": "已刷新：{issues} 条共享事项、{workspaces} 个工作区。",
         "save": "保存",
         "skipped": {
@@ -47183,16 +47184,24 @@
       "untrustedBadge": "未信任"
     },
     "members": {
+      "allRoles": "全部角色",
+      "cachedNote": "服务端名册的本地缓存。",
+      "configureCollaboration": "设置协作",
       "empty": "这个工作区还没有其他人。",
       "guest": "访客",
+      "invite": "邀请",
+      "inviteUnavailable": "成员关系由协作服务端管理。本应用只镜像名册，不写入。",
+      "noMatches": "没有该角色的成员。",
       "role": {
         "maintainer": "维护者",
         "member": "成员",
         "viewer": "只读"
       },
       "roleAria": "工作区角色",
+      "roleFilterAria": "按角色筛选成员",
       "standingAria": "工作区身份",
-      "title": "成员"
+      "title": "成员",
+      "you": "你"
     },
     "panelRoot": {
       "following": "跟随当前会话",

@@ -20,6 +20,7 @@ import { WORKSPACE_CAPABILITY_KINDS } from "./capability-overlay"
 import { PINNABLE_PANELS, FOLLOWING_PANELS } from "./panel-follow"
 import { PROVISIONING_CANDIDATE_KINDS, PROVISIONING_RISK_KEYS } from "./provisioning-inference"
 import type { WorkspaceOwnerType } from "@/lib/task-workspace/types"
+import { WORKSPACE_ROLES } from "@/types/identity"
 
 const LOCALES = ["en", "zh-CN"] as const
 
@@ -71,6 +72,17 @@ describe.each(LOCALES)("workspace dynamic keys — %s", (locale) => {
   it("has a label for every capability state", () => {
     const states = (messages.capabilities?.state ?? {}) as Record<string, string>
     const missing = CAPABILITY_STATES.filter((state) => !states[state])
+    expect(missing).toEqual([])
+  })
+
+  /**
+   * The roster builds `t(`role.${x}`)` from the shared union, so a role added
+   * to `WORKSPACE_ROLES` without a message renders the raw key in the one
+   * place a person's standing is stated.
+   */
+  it("has a label for every workspace role", () => {
+    const roles = (messages.members?.role ?? {}) as Record<string, string>
+    const missing = WORKSPACE_ROLES.filter((role) => !roles[role])
     expect(missing).toEqual([])
   })
 

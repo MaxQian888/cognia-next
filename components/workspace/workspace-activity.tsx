@@ -30,6 +30,8 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ActivityIcon, ExternalLinkIcon } from "lucide-react"
 
+import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stale-badge"
+import { ConsoleSection } from "@/components/surface/console-section"
 import { Badge } from "@/components/ui/badge"
 import { listCollabPlans } from "@/lib/db/collab-plan-mirror"
 import type { CollabPlanMirrorRow } from "@/lib/db/collab-plan-mirror-types"
@@ -70,114 +72,128 @@ export function WorkspaceActivity({ workspaceId }: { workspaceId: string | null 
   const empty = plans.length === 0 && runs.length === 0
 
   return (
-    <section className="space-y-2" data-testid="workspace-activity">
-      <div className="flex items-center gap-2">
-        <ActivityIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-        <h3 className="text-sm font-medium">{t("title")}</h3>
-      </div>
-
-      {empty ? (
-        // Not an error. A workspace nobody shares work in is the ordinary case,
-        // and a failure-shaped message would make a working app look broken.
-        <p className="text-xs text-muted-foreground italic" data-testid="workspace-activity-empty">
-          {t("empty")}
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {plans.length > 0 ? (
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">{t("plans")}</p>
-              <ul className="space-y-1.5">
-                {plans.map((plan) => (
-                  <li
-                    key={plan.id}
-                    className="flex items-center justify-between gap-2 text-xs"
-                    data-testid={`workspace-activity-plan-${plan.id}`}
-                  >
-                    <span className="flex min-w-0 shrink flex-col">
-                      <span className="truncate" title={plan.title}>
-                        {plan.title}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {plan.totalSteps === 0
-                          ? t("noSteps")
-                          : t("progress", {
-                              completed: plan.completedSteps,
-                              total: plan.totalSteps,
-                            })}
-                      </span>
-                    </span>
-                    <Badge
-                      variant={PLAN_STATUS_VARIANT[plan.status]}
-                      aria-label={t("planStatusAria")}
-                      className="shrink-0"
+    <ConsoleSection
+      id="activity"
+      pane="workspace-pane"
+      idPrefix="workspace-section"
+      icon={ActivityIcon}
+      title={t("title")}
+      meta={
+        // Same honesty the roster carries: this reads a mirror, so it has to
+        // say when the mirror is behind.
+        <span className="flex items-center gap-1.5">
+          <CollabRefreshStaleBadge />
+          <span className="tabular-nums">{plans.length + runs.length}</span>
+        </span>
+      }
+    >
+      <div className="flex flex-col gap-2" data-testid="workspace-activity">
+        {empty ? (
+          // Not an error. A workspace nobody shares work in is the ordinary case,
+          // and a failure-shaped message would make a working app look broken.
+          <p
+            className="text-xs text-muted-foreground italic"
+            data-testid="workspace-activity-empty"
+          >
+            {t("empty")}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {plans.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">{t("plans")}</p>
+                <ul className="space-y-1.5">
+                  {plans.map((plan) => (
+                    <li
+                      key={plan.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                      data-testid={`workspace-activity-plan-${plan.id}`}
                     >
-                      {t(`planStatus.${plan.status}`)}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {runs.length > 0 ? (
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">{t("runs")}</p>
-              <ul className="space-y-1.5">
-                {runs.map((run) => (
-                  <li
-                    key={run.id}
-                    className="flex items-center justify-between gap-2 text-xs"
-                    data-testid={`workspace-activity-run-${run.id}`}
-                  >
-                    <span className="flex min-w-0 shrink flex-col">
-                      <span className="truncate" title={run.title}>
-                        {run.title}
+                      <span className="flex min-w-0 shrink flex-col">
+                        <span className="truncate" title={plan.title}>
+                          {plan.title}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {plan.totalSteps === 0
+                            ? t("noSteps")
+                            : t("progress", {
+                                completed: plan.completedSteps,
+                                total: plan.totalSteps,
+                              })}
+                        </span>
                       </span>
-                      <span className="text-muted-foreground">
-                        {/*
+                      <Badge
+                        variant={PLAN_STATUS_VARIANT[plan.status]}
+                        aria-label={t("planStatusAria")}
+                        className="shrink-0"
+                      >
+                        {t(`planStatus.${plan.status}`)}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {runs.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">{t("runs")}</p>
+                <ul className="space-y-1.5">
+                  {runs.map((run) => (
+                    <li
+                      key={run.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                      data-testid={`workspace-activity-run-${run.id}`}
+                    >
+                      <span className="flex min-w-0 shrink flex-col">
+                        <span className="truncate" title={run.title}>
+                          {run.title}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {/*
                           Falls back to the raw `usr_` id rather than a
                           placeholder word — an id somebody can search for beats
                           "unknown person", the same call the roster makes.
                         */}
-                        {t("startedBy", { name: run.startedBy.label ?? run.startedBy.id })}
-                        {" · "}
-                        {t(`runKind.${run.kind}`)}
-                      </span>
-                      {run.artifacts.length > 0 ? (
-                        <span
-                          className="flex flex-wrap gap-2 pt-0.5"
-                          aria-label={t("artifactsAria")}
-                        >
-                          {run.artifacts.map((artifact) => (
-                            <a
-                              key={artifact.href}
-                              href={artifact.href}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              className="inline-flex items-center gap-1 text-primary hover:underline"
-                            >
-                              <ExternalLinkIcon className="size-3" aria-hidden="true" />
-                              <span className="truncate">{artifact.label}</span>
-                            </a>
-                          ))}
+                          {t("startedBy", { name: run.startedBy.label ?? run.startedBy.id })}
+                          {" · "}
+                          {t(`runKind.${run.kind}`)}
                         </span>
-                      ) : null}
-                    </span>
-                    <Badge
-                      variant={RUN_STATUS_VARIANT[run.status]}
-                      aria-label={t("runStatusAria")}
-                      className="shrink-0"
-                    >
-                      {t(`runStatus.${run.status}`)}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
+                        {run.artifacts.length > 0 ? (
+                          <span
+                            className="flex flex-wrap gap-2 pt-0.5"
+                            aria-label={t("artifactsAria")}
+                          >
+                            {run.artifacts.map((artifact) => (
+                              <a
+                                key={artifact.href}
+                                href={artifact.href}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              >
+                                <ExternalLinkIcon className="size-3" aria-hidden="true" />
+                                <span className="truncate">{artifact.label}</span>
+                              </a>
+                            ))}
+                          </span>
+                        ) : null}
+                      </span>
+                      <Badge
+                        variant={RUN_STATUS_VARIANT[run.status]}
+                        aria-label={t("runStatusAria")}
+                        className="shrink-0"
+                      >
+                        {t(`runStatus.${run.status}`)}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </ConsoleSection>
   )
 }
