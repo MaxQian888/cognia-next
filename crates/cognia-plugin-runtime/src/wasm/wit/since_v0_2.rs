@@ -338,7 +338,7 @@ impl cognia::plugin::workflow::Host for HostState {
         // they are JSON, and as a base64-free byte array otherwise, so the
         // renderer never has to guess an encoding.
         let parsed: serde_json::Value =
-            serde_json::from_slice(&event.payload).unwrap_or_else(|_| serde_json::Value::Null);
+            serde_json::from_slice(&event.payload).unwrap_or(serde_json::Value::Null);
 
         let body = serde_json::json!({
             "workflowId": event.workflow_id,
@@ -921,8 +921,8 @@ mod tests {
     fn max_body_bytes_is_looser_than_every_per_surface_cap() {
         // The generic envelope limit must never be the binding constraint —
         // otherwise a surface's own, stricter check would be unreachable.
-        assert!(ai::MAX_PROMPT_BYTES < MAX_BODY_BYTES);
-        assert!(clipboard::MAX_TEXT_BYTES <= MAX_BODY_BYTES);
-        assert!(notification::MAX_FIELD_BYTES < MAX_BODY_BYTES);
+        const { assert!(ai::MAX_PROMPT_BYTES < MAX_BODY_BYTES) };
+        const { assert!(clipboard::MAX_TEXT_BYTES <= MAX_BODY_BYTES) };
+        const { assert!(notification::MAX_FIELD_BYTES < MAX_BODY_BYTES) };
     }
 }

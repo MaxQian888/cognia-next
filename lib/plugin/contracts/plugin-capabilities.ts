@@ -82,6 +82,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     runtimeBinding: "context.agent.registerTool + PluginRegistry tools",
     hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/tools-bridge.ts"],
     typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-plugin-tool.ts",
       "packages/plugin-sdk/src/manifest/index.ts",
       "packages/plugin-sdk/src/index.ts",
     ],

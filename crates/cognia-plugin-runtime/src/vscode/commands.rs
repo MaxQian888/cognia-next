@@ -313,6 +313,10 @@ fn ensure_staged(install_root: &Path, path: &Path) -> Result<(), VscodeCommandEr
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri command parameters mirror the VS Code extension load contract"
+)]
 pub async fn plugin_load_vscode(
     plugin_id: String,
     manifest_json: String,
@@ -513,8 +517,9 @@ fn lsp_host_script_path(sidecar_dir: &Path) -> PathBuf {
 /// in `claude::sidecar` (it owns the resource-dir vs manifest-walk split).
 /// The app shell registers it at startup, before any `plugin_load_vscode` /
 /// LSP-host spawn can run.
-static SIDECAR_DIR_RESOLVER: std::sync::OnceLock<fn(&AppHandle) -> Result<PathBuf, String>> =
-    std::sync::OnceLock::new();
+type SidecarDirResolver = fn(&AppHandle) -> Result<PathBuf, String>;
+
+static SIDECAR_DIR_RESOLVER: std::sync::OnceLock<SidecarDirResolver> = std::sync::OnceLock::new();
 
 /// Register the app-side sidecar-directory resolver. First registration wins;
 /// later calls are no-ops.

@@ -1,4 +1,5 @@
 import { __resetOcrApiForTesting, clearOcrProvidersForPlugin, createOcrAPI } from "./ocr-api"
+import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { __resetSharedOcrRegistry, getSharedOcrRegistry } from "@/lib/ocr/registry"
 import type { OcrProvider, OcrInput, OcrProviderContext, OcrResult } from "@/types/ocr"
 
@@ -25,6 +26,20 @@ describe("createOcrAPI", () => {
   beforeEach(() => {
     __resetOcrApiForTesting()
     __resetSharedOcrRegistry()
+    resetPermissionGuard()
+    // `confirmDangerousByDefault: false` keeps the guard on its synchronous
+    // path — the consent overlay itself is covered by the guard's own suite.
+    const guard = getPermissionGuard({ confirmDangerousByDefault: false })
+    // Extraction is permission-gated; registration is not.
+    for (const pluginId of ["p", "my-plugin"]) {
+      guard.registerPlugin(pluginId, [
+        "media:image:read",
+        "database:write",
+        "native:filesystem",
+        "native:screen",
+        "automation:screenshot",
+      ])
+    }
   })
 
   it("registers a provider under the prefixed plugin id", () => {
@@ -70,5 +85,50 @@ describe("createOcrAPI", () => {
     expect(api.listRegistered()).toHaveLength(0)
     expect(getSharedOcrRegistry().has("p:a")).toBe(false)
     expect(getSharedOcrRegistry().has("p:b")).toBe(false)
+  })
+
+  it("delegates extraction, file, screen, and slash operations to the host runtime", async () => {
+    const result = {
+      pages: [],
+      providerId: "mock",
+      combinedMarkdown: "text",
+      combinedText: "text",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    } as OcrResult
+    const runtime = {
+      listAvailableProviders: jest.fn(() => ["mock"]),
+      extract: jest.fn(async () => result),
+      extractFile: jest.fn(async () => result),
+      extractScreen: jest.fn(async () => result),
+      runSlashCommand: jest.fn(async () => ({ system: "text", result })),
+    }
+    const api = createOcrAPI("p", runtime)
+    const input = {
+      source: { kind: "data-url", dataUrl: "data:image/png;base64,AA==" },
+    } as OcrInput
+
+    expect(api.isReady()).toBe(true)
+    expect(api.listAvailableProviders()).toEqual(["mock"])
+    await expect(api.extract(input)).resolves.toBe(result)
+    await expect(api.extractFile("/tmp/a.png", { languages: ["en"] })).resolves.toBe(result)
+    await expect(api.extractScreen({ languages: ["en"] })).resolves.toBe(result)
+    await expect(api.runSlashCommand('"/tmp/a.png"')).resolves.toEqual({ system: "text", result })
+
+    expect(runtime.extract).toHaveBeenCalledWith(input)
+    expect(runtime.extractFile).toHaveBeenCalledWith("/tmp/a.png", { languages: ["en"] })
+  })
+
+  it("refuses extraction for a plugin that declared no permissions", () => {
+    getPermissionGuard().registerPlugin("unprivileged", [])
+    const api = createOcrAPI("unprivileged")
+
+    // `extractFile` reads an arbitrary path and `extractScreen` captures the
+    // desktop; neither may run off an undeclared manifest.
+    expect(() => api.extractFile("/etc/hosts")).toThrow(/Permission denied/i)
+    expect(() => api.extractScreen()).toThrow(/Permission denied/i)
+    // Registration stays open — it only touches this plugin's own registry slice.
+    expect(() => api.listRegistered()).not.toThrow()
   })
 })

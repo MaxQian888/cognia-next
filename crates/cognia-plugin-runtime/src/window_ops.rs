@@ -199,12 +199,17 @@ pub async fn plugin_window_set_always_on_top(app: AppHandle, flag: bool) -> Resu
 
 #[cfg(test)]
 mod tests {
+    use super::plugin_window_label;
+
     // Tauri window operations require a `tauri::test::mock_app()` runtime
     // which fails on the developer's Windows STATUS_ENTRYPOINT_NOT_FOUND
     // condition (see ADR 0016 §3.99 verification block). Behavioural tests
     // run via `pnpm tauri dev` smoke instead.
     #[test]
-    fn smoke() {
-        assert!(true);
+    fn plugin_window_labels_are_namespaced() {
+        assert_eq!(
+            plugin_window_label("demo", "settings"),
+            "plugin:demo:settings"
+        );
     }
 }

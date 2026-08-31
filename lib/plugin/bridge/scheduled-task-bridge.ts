@@ -21,13 +21,15 @@
  * See ADR-0026 (plugin extension-point expansion).
  */
 
-import type { PluginManifest, PluginScheduledTaskDef } from "@/types/plugin/plugin"
+import type { PluginManifest } from "@/types/plugin/plugin"
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
-  TaskTrigger,
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
+import { toTaskTrigger } from "@cognia/plugin-sdk/api/scheduled-task"
+
+export { toTaskTrigger } from "@cognia/plugin-sdk/api/scheduled-task"
 import { loggers } from "@/lib/plugin/core/logger"
 import {
   registerScheduledTaskDefsForPlugin,
@@ -62,21 +64,6 @@ const PLUGIN_TASK_TAG = (pluginId: string): string => `plugin:${pluginId}`
 interface PluginTaskPayload {
   pluginId: string
   handler: string
-}
-
-/** Map a manifest trigger onto the scheduler's `TaskTrigger` shape. */
-export function toTaskTrigger(def: PluginScheduledTaskDef): TaskTrigger {
-  const t = def.trigger
-  switch (t.type) {
-    case "cron":
-      return { type: "cron", cronExpression: t.expression, timezone: t.timezone }
-    case "interval":
-      return { type: "interval", intervalMs: Math.max(0, t.seconds) * 1000 }
-    case "once":
-      return { type: "once", runAt: new Date(t.runAt) }
-    case "event":
-      return { type: "event", eventType: t.eventType, eventSource: t.eventSource }
-  }
 }
 
 async function getScheduler(

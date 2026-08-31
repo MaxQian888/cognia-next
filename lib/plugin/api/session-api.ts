@@ -30,6 +30,7 @@ import { createPluginSystemLogger } from "../core/logger"
 import { nanoid } from "nanoid"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { startSeededSession } from "./session-seed"
 
 /**
  * Create the Session API for a plugin
@@ -76,6 +77,8 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
       logger.info(`Created session: ${session.id}`)
       return session
     },
+
+    startSeededSession,
 
     updateSession: async (id: string, updates) => {
       const store = useSessionStore.getState()
@@ -348,11 +351,12 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
     onMessagesChange: "session:read",
     getSessionStats: "session:read",
     createSession: "session:write",
+    startSeededSession: "session:write",
     updateSession: "session:write",
     switchSession: "session:write",
-    deleteSession: "session:write",
+    deleteSession: "session:delete",
     addMessage: "session:write",
     updateMessage: "session:write",
-    deleteMessage: "session:write",
+    deleteMessage: "session:delete",
   })
 }

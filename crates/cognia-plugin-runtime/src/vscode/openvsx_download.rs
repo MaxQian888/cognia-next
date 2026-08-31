@@ -590,7 +590,7 @@ mod tests {
     /// together would silently change that unrelated behaviour.
     #[test]
     fn marketplace_cap_is_stricter_than_the_manual_vsix_cap() {
-        assert!(MAX_OPENVSX_VSIX_BYTES < 200 * 1024 * 1024);
+        const { assert!(MAX_OPENVSX_VSIX_BYTES < 200 * 1024 * 1024) };
     }
 
     #[test]

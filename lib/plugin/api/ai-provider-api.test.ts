@@ -48,6 +48,14 @@ jest.mock("ai", () => ({
 }))
 
 jest.mock("@cognia/vector/embedding", () => ({
+  DEFAULT_EMBEDDING_MODELS: {
+    openai: { provider: "openai", model: "text-embedding-3-small", dimensions: 1536 },
+    "amazon-bedrock": {
+      provider: "amazon-bedrock",
+      model: "amazon.titan-embed-text-v2:0",
+      dimensions: 1024,
+    },
+  },
   generateEmbeddings: jest.fn(),
 }))
 

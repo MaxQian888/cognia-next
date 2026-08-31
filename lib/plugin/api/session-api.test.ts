@@ -139,7 +139,7 @@ describe("Session API", () => {
   beforeEach(() => {
     resetPermissionGuard()
     guard = getPermissionGuard()
-    guard.registerPlugin(testPluginId, ["session:read", "session:write"])
+    guard.registerPlugin(testPluginId, ["session:read", "session:write", "session:delete"])
     mockSessions.length = 0
     mockActiveSessionId = null
     mockSubscribers.length = 0
@@ -158,6 +158,7 @@ describe("Session API", () => {
       expect(typeof api.getCurrentSessionId).toBe("function")
       expect(typeof api.getSession).toBe("function")
       expect(typeof api.createSession).toBe("function")
+      expect(typeof api.startSeededSession).toBe("function")
       expect(typeof api.updateSession).toBe("function")
       expect(typeof api.switchSession).toBe("function")
       expect(typeof api.deleteSession).toBe("function")
@@ -598,5 +599,16 @@ describe("Session API", () => {
       expect(stats.assistantMessageCount).toBe(0)
       expect(stats.totalTokens).toBe(0)
     })
+  })
+
+  it("keeps delete working for a legacy manifest that only declared session:write", async () => {
+    // `session:delete` was split out of `session:write`; an installed plugin
+    // predating the split must not start throwing on its first delete.
+    const legacyPluginId = "legacy-plugin"
+    guard.registerPlugin(legacyPluginId, ["session:read", "session:write"])
+    const legacyApi = createSessionAPI(legacyPluginId)
+
+    const session = await legacyApi.createSession({ title: "Doomed" })
+    await expect(legacyApi.deleteSession(session.id)).resolves.not.toThrow()
   })
 })

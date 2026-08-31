@@ -8,6 +8,10 @@ import {
   getProtocolAdapter,
 } from "@cognia/provider-core/providers/protocol-adapter-registry"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const SPEC = {
   kind: "openai-compatible-variant" as const,
@@ -27,6 +31,7 @@ const MANIFEST = {
 
 afterEach(() => {
   __resetProtocolAdaptersForTesting()
+  __resetPythonRuntimeGenerationsForTesting()
 })
 
 describe("protocol-adapters-bridge python backend", () => {
@@ -39,6 +44,7 @@ describe("protocol-adapters-bridge python backend", () => {
     }) as unknown as PluginManifest
 
   it("registers a python-backed code adapter without importing any JS", async () => {
+    bindPythonRuntimeGeneration("wire-plugin", "generation-1")
     const importer = jest.fn()
     const result = await registerProtocolAdaptersForPlugin(
       pythonManifest([{ id: "py-wire", label: "Py wire", spec: { kind: "code" } }]),

@@ -45,7 +45,7 @@ import type {
   PluginDialog,
   PluginInputDialog,
   PluginConfirmDialog,
-  PluginTool,
+  PluginToolRegistration,
   PluginA2UIComponent,
   A2UITemplateDef,
   NetworkRequestOptions,
@@ -173,8 +173,18 @@ import { createIntegrationsAPI } from "../api/integrations-api"
 import { createShareAPI } from "../api/share-api"
 import { createBackupAPI } from "../api/backup-api"
 import { createAutomationAPI } from "../api/automation-api"
+import { createBrowserAPI } from "../api/browser-api"
+import { createCharacterPacksAPI } from "../api/character-packs-api"
+import { createSandboxAPI } from "../api/sandbox-api"
+import { createRecorderAPI } from "../api/recorder-api"
+import { createSecurityScansAPI } from "../api/security-scans-api"
+import { createEvalAPI } from "../api/eval-api"
+import { createUserSchedulerAPI } from "../api/scheduler-tasks"
 import { createCompanionAPI } from "../api/companion-api"
 import { createPetAPI } from "../api/pet-api"
+import { createResourcesAPI } from "../api/resources-api"
+import { createSitesAPI } from "../api/sites"
+import { createWorkflowAuthorAPI } from "../api/workflow-author-api"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { getDb } from "@/lib/db/schema"
@@ -429,8 +439,17 @@ export function createFullPluginContext(
     share: createShareAPI(pluginId),
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
+    browser: createBrowserAPI(),
+    characterPacks: createCharacterPacksAPI(pluginId),
+    sandbox: createSandboxAPI(pluginId),
+    recorder: createRecorderAPI(pluginId),
+    securityScans: createSecurityScansAPI(),
+    eval: createEvalAPI(),
+    userScheduler: createUserSchedulerAPI(),
     companion: createCompanionAPI(pluginId),
     pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
+    resources: createResourcesAPI(pluginId),
+    sites: createSitesAPI(),
   } satisfies PublicFullPluginContext
   const governedContext = withGovernedPluginContext(fullContext, {
     pluginId,
@@ -793,7 +812,7 @@ function deniedHostToolEgress(
 
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
-    registerTool: (tool: PluginTool) => {
+    registerTool: (tool: PluginToolRegistration) => {
       const ownedTool = { ...tool, pluginId }
       manager.getRegistry().registerTool(pluginId, ownedTool)
       usePluginStore.getState().registerPluginTool(pluginId, ownedTool)
@@ -846,6 +865,16 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
     ): Promise<PluginAgentRunResult> => {
       gateToolEnabledRun(pluginId, options.toolsEnabled)
       return runPluginAgent(prompt, options, { pluginId })
+    },
+
+    runCharacterTurn: async (request) => {
+      if (!pluginHasApiPermission(pluginId, "agent:control")) {
+        throw new Error(
+          'agent.runCharacterTurn requires the "agent:control" permission — declare it in the plugin manifest.'
+        )
+      }
+      const { runPluginAgentTurn } = await import("../api/agent-turn")
+      return runPluginAgentTurn(request)
     },
 
     runStreamed: (prompt: string, options: PluginAgentRunOptions = {}): PluginAgentRun => {
@@ -2660,6 +2689,7 @@ const prefixKind = prefixPluginKind
 
 export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
   return {
+    ...createWorkflowAuthorAPI(),
     registerNode(def: PluginNodeDef): () => void {
       const prefixed = prefixKind(pluginId, def.kind)
       const registry = getOrCreatePluginRegistry(pluginId)

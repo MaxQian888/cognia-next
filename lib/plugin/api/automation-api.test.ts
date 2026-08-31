@@ -8,6 +8,7 @@
  */
 
 import { createAutomationAPI } from "./automation-api"
+import { getComputerUsePipSnapshot } from "@/lib/automation/computer-use-pip"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 
@@ -19,6 +20,18 @@ const desktop = {
   cursorPosition: jest.fn(async () => ({ x: 1, y: 2 })),
   pickAtPoint: jest.fn(async () => ({ name: "picked" })),
   screenshot: jest.fn(async () => ({ width: 10, height: 10, dataB64: "" })),
+  listApps: jest.fn(async () => [{ displayName: "Notes" }]),
+  getAppState: jest.fn(async () => ({ sessionId: "desktop-1", lineageId: "l1", revision: 1 })),
+  queryElements: jest.fn(async () => []),
+  expandElement: jest.fn(async () => ({ elements: [] })),
+  performAction: jest.fn(async () => ({ success: true })),
+  zoom: jest.fn(async () => ({
+    sessionId: "desktop-1",
+    lineageId: "l1",
+    revision: 1,
+    region: { x: 0, y: 0, width: 10, height: 10 },
+    screenshot: { bytes: "WlZa", width: 10, height: 10, capturedAt: 1, format: "png" },
+  })),
   click: jest.fn(async () => undefined),
   mouseButton: jest.fn(async () => undefined),
   type: jest.fn(async () => undefined),
@@ -59,6 +72,8 @@ describe("createAutomationAPI", () => {
     guard.registerPlugin(PLUGIN, [])
     const api = createAutomationAPI(PLUGIN)
     expect(() => api.screenshot()).toThrow(PermissionError)
+    expect(() => api.captureDisplay()).toThrow(PermissionError)
+    expect(() => api.listApps()).toThrow(PermissionError)
     expect(() => api.getFocus()).toThrow(PermissionError)
     expect(() => api.click({ x: 0, y: 0 } as never)).toThrow(PermissionError)
     expect(() => api.type("hi")).toThrow(PermissionError)
@@ -122,6 +137,106 @@ describe("createAutomationAPI", () => {
       expect(desktop.windowOp).toHaveBeenCalledWith({ id: "w" }, "maximize", PLUGIN_CTX)
     })
 
+    it("owns display capture and revision-bound Computer Use provenance", async () => {
+      const captureDisplay = jest.fn(async () => new File(["png"], "screen.png"))
+      const getComputerUseSettings = jest.fn(() => ({ requireConsent: true }))
+      const decorateComputerUseContext = jest.fn(async (_ref, context) => ({
+        ...context,
+        sandboxConnectionId: "remote-1",
+      }))
+      const runtime = {
+        desktop,
+        captureDisplay,
+        getComputerUseSettings,
+        focusedSessionId: jest.fn(() => undefined),
+        sandbox: {
+          hostFallbackRuntimeRef: "host-fallback",
+          activeRefForSession: jest.fn(() => "runtime-1"),
+          decorateComputerUseContext,
+        },
+      }
+      const api = createAutomationAPI(PLUGIN, runtime as never)
+
+      await expect(api.captureDisplay()).resolves.toMatchObject({ name: "screen.png" })
+      expect(captureDisplay).toHaveBeenCalledTimes(1)
+
+      const origin = { sessionId: "chat-1", messageId: "message-1" }
+      await api.listApps(origin)
+      const expectedContext = {
+        surface: "computerUse",
+        pluginId: PLUGIN,
+        sessionKey: "chat-1",
+        turnKey: "message-1",
+        forceTier: "perCall",
+        sandboxConnectionId: "remote-1",
+      }
+      expect(desktop.listApps).toHaveBeenCalledWith(expectedContext)
+      expect(decorateComputerUseContext).toHaveBeenCalledWith(
+        "runtime-1",
+        expect.objectContaining({ surface: "computerUse", pluginId: PLUGIN })
+      )
+
+      await api.getAppState("desktop-1", { kind: "displayName", displayName: "Notes" }, {}, origin)
+      expect(desktop.getAppState).toHaveBeenCalledWith(
+        "desktop-1",
+        { kind: "displayName", displayName: "Notes" },
+        {},
+        expectedContext
+      )
+      await api.queryElements(
+        { sessionId: "desktop-1", lineageId: "l1", revision: 1 },
+        { nameContains: "Save" },
+        10,
+        origin
+      )
+      expect(desktop.queryElements).toHaveBeenCalledWith(
+        { sessionId: "desktop-1", lineageId: "l1", revision: 1 },
+        { nameContains: "Save" },
+        10,
+        expectedContext
+      )
+      await api.expandElement({ sessionId: "desktop-1" } as never, null, 25, origin)
+      expect(desktop.expandElement).toHaveBeenCalledWith(
+        { sessionId: "desktop-1" },
+        null,
+        25,
+        expectedContext
+      )
+      await api.performAction({ kind: "click" } as never, origin)
+      expect(desktop.performAction).toHaveBeenCalledWith({ kind: "click" }, expectedContext)
+    })
+
+    it("still upgrades consent from the focused session when the caller has no sessionId", async () => {
+      const getComputerUseSettings = jest.fn(() => ({ requireConsent: true }))
+      const activeRefForSession = jest.fn(() => undefined)
+      const runtime = {
+        desktop,
+        captureDisplay: jest.fn(),
+        getComputerUseSettings,
+        focusedSessionId: jest.fn(() => "focused-chat"),
+        sandbox: {
+          hostFallbackRuntimeRef: "host-fallback",
+          activeRefForSession,
+          decorateComputerUseContext: jest.fn(async (_ref, context) => context),
+        },
+      }
+      const api = createAutomationAPI(PLUGIN, runtime as never)
+
+      // A workflow node / plan step / bridge call carries no session of its own.
+      await api.listApps()
+
+      expect(getComputerUseSettings).toHaveBeenCalledWith("focused-chat")
+      expect(desktop.listApps).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionKey: "focused-chat", forceTier: "perCall" })
+      )
+      // Placement must NOT borrow the focused session's binding.
+      expect(activeRefForSession).toHaveBeenCalledWith(undefined)
+      expect(runtime.sandbox.decorateComputerUseContext).toHaveBeenCalledWith(
+        "host-fallback",
+        expect.anything()
+      )
+    })
+
     it("forwards paste + launchApp tagged with the plugin surface", async () => {
       const api = createAutomationAPI(PLUGIN)
       await api.paste("long text")
@@ -143,5 +258,76 @@ describe("createAutomationAPI", () => {
       await api.scroll({ x: 1, y: 1 } as never, { dy: -3 } as never)
       expect(desktop.scroll).toHaveBeenCalledWith({ x: 1, y: 1 }, { dy: -3 }, PLUGIN_CTX)
     })
+  })
+})
+
+describe("picture-in-picture live view", () => {
+  // The PiP surface had no producer on this path: its only publishers lived in
+  // the OCR fallback module, so during a real computer-use turn the component
+  // mounted, saw no activity, and never appeared.
+  const guardFor = (permissions: string[]) => {
+    resetPermissionGuard()
+    const g = getPermissionGuard({ confirmDangerousByDefault: false })
+    g.registerPlugin(PLUGIN, permissions)
+    return g
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    guardFor([
+      "automation:screenshot",
+      "automation:read",
+      "automation:click",
+      "automation:type",
+      "automation:pointer",
+      "automation:window",
+    ])
+  })
+
+  it("publishes activity and a frame for get_app_state", async () => {
+    desktop.getAppState.mockResolvedValueOnce({
+      sessionId: "desktop-1",
+      lineageId: "l1",
+      revision: 3,
+      screenshot: { bytes: "QUJD", width: 800, height: 600, capturedAt: 5, format: "png" },
+    } as never)
+    const api = createAutomationAPI(PLUGIN)
+    await api.getAppState("s", { kind: "bundleId", bundleId: "com.apple.Notes" } as never, {}, {
+      sessionId: "chat-1",
+    } as never)
+
+    const snapshot = getComputerUsePipSnapshot("chat-1")
+    expect(snapshot.action).toBe("get_app_state")
+    expect(snapshot.phase).toBe("complete")
+    expect(snapshot.frame?.src).toContain("QUJD")
+  })
+
+  it("publishes an error phase when the call throws", async () => {
+    desktop.performAction.mockRejectedValueOnce(new Error("consent declined"))
+    const api = createAutomationAPI(PLUGIN)
+    await expect(
+      api.performAction({ turnToken: "t" } as never, { sessionId: "chat-2" } as never)
+    ).rejects.toThrow("consent declined")
+
+    const snapshot = getComputerUsePipSnapshot("chat-2")
+    expect(snapshot.action).toBe("perform_action")
+    expect(snapshot.phase).toBe("error")
+    expect(snapshot.error).toBe("consent declined")
+  })
+
+  it("does not publish a frame when the screenshot was withheld", async () => {
+    // A deduped frame carries dimensions but no bytes. Publishing it would
+    // blank the live view with an empty image.
+    desktop.getAppState.mockResolvedValueOnce({
+      sessionId: "desktop-1",
+      lineageId: "l1",
+      revision: 4,
+      screenshot: { bytes: "", width: 800, height: 600, capturedAt: 5, format: "png" },
+    } as never)
+    const api = createAutomationAPI(PLUGIN)
+    await api.getAppState("s", { kind: "bundleId", bundleId: "x" } as never, {}, {
+      sessionId: "chat-3",
+    } as never)
+    expect(getComputerUsePipSnapshot("chat-3").frame).toBeNull()
   })
 })

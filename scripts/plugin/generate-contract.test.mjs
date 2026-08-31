@@ -88,8 +88,8 @@ describe("plugin contract generator", () => {
   test("projects every callable API into generated author documentation", () => {
     const docs = renderApiReference(catalog)
     const methods = catalog.apiNamespaces.flatMap((namespace) => namespace.methods)
-    assert.equal(catalog.apiNamespaces.length, 65)
-    assert.equal(methods.length, 629)
+    assert.equal(catalog.apiNamespaces.length, 76)
+    assert.equal(methods.length, 747)
     assert.match(docs, /`ctx\.session`/)
     assert.match(docs, /`session\.listSessions`/)
     assert.match(docs, /`templates\.instantiate`/)
@@ -104,7 +104,7 @@ describe("plugin contract generator", () => {
         .map((method) => [method.id, method.resourceEffect])
     )
 
-    assert.equal(methods.size, 629)
+    assert.equal(methods.size, 747)
     assert.deepEqual(methods.get("webview.create"), {
       kind: "returned-handle",
       disposeMethod: "dispose",

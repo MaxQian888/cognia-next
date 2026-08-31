@@ -40,6 +40,7 @@ import type { PluginManifest, PluginPermission } from "@/types/plugin"
 import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
 import { usePluginPermissions } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
+import { nodePermissionSupport } from "@/lib/plugin/launcher/launchPluginJs"
 import { AuditLogEntry } from "./audit-log-entry"
 
 export function PluginPermissionReview() {
@@ -70,6 +71,8 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
     const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
     return Array.from(set).sort()
   }, [declared, optional, granted])
+  const isNodeRuntime =
+    Boolean(manifest?.engines?.node) || manifest?.runtimeCompatibility?.tauri?.entrypoint === "node"
 
   const auditLog = useMemo(
     () =>
@@ -109,21 +112,33 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
                   </TableCell>
                 </TableRow>
               ) : (
-                allListed.map((perm) => (
-                  <PermissionRow
-                    key={perm}
-                    perm={perm}
-                    declared={declared.includes(perm)}
-                    optional={optional.includes(perm)}
-                    granted={granted.has(perm)}
-                    dangerous={perms.isDangerous(perm)}
-                    onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                    onRevoke={() => perms.revoke(pluginId, perm)}
-                    tier={perms.getTier(pluginId, perm)}
-                    onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                    description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
-                  />
-                ))
+                allListed.map((perm) => {
+                  const support = isNodeRuntime
+                    ? nodePermissionSupport(perm)
+                    : ({ available: true } as const)
+                  const unavailableReason = support.available
+                    ? undefined
+                    : support.reason === "network-broker-missing"
+                      ? t("nodeNetworkUnavailable")
+                      : t("nodeSubprocessUnavailable")
+                  return (
+                    <PermissionRow
+                      key={perm}
+                      perm={perm}
+                      declared={declared.includes(perm)}
+                      optional={optional.includes(perm)}
+                      granted={granted.has(perm)}
+                      dangerous={perms.isDangerous(perm)}
+                      onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                      onRevoke={() => perms.revoke(pluginId, perm)}
+                      tier={perms.getTier(pluginId, perm)}
+                      onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                      runtimeAvailable={support.available}
+                      unavailableReason={unavailableReason}
+                    />
+                  )
+                })
               )}
             </TableBody>
           </Table>
@@ -168,6 +183,8 @@ export function PermissionRow({
   onRevoke,
   tier,
   onTierChange,
+  runtimeAvailable = true,
+  unavailableReason,
 }: {
   perm: PluginPermission
   declared: boolean
@@ -179,6 +196,8 @@ export function PermissionRow({
   onRevoke: () => void
   tier: PluginPermissionTier
   onTierChange: (tier: PluginPermissionTier) => void
+  runtimeAvailable?: boolean
+  unavailableReason?: string
 }) {
   const t = useTranslations("plugins.permissionReview")
   return (
@@ -189,6 +208,9 @@ export function PermissionRow({
           {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
         </div>
         <p className="break-words text-xs text-muted-foreground">{description}</p>
+        {!runtimeAvailable && unavailableReason ? (
+          <p className="break-words text-xs text-amber-600">{unavailableReason}</p>
+        ) : null}
         {(declared || optional) && (
           <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
             {declared && (
@@ -208,7 +230,7 @@ export function PermissionRow({
       </TableCell>
       <TableCell className="flex items-center gap-2 p-0 text-left sm:table-cell sm:w-20 sm:p-2 sm:text-center">
         <span className="text-xs text-muted-foreground sm:hidden">{t("colGranted")}</span>
-        {granted ? (
+        {granted && runtimeAvailable ? (
           <CheckCircle2Icon
             className="size-3.5 text-secondary-foreground sm:inline"
             aria-label={t("colGranted")}
@@ -219,7 +241,11 @@ export function PermissionRow({
       </TableCell>
       <TableCell className="min-w-0 p-0 whitespace-normal sm:w-40 sm:p-2">
         <span className="mb-1 block text-xs text-muted-foreground sm:hidden">{t("colTier")}</span>
-        <Select value={tier} onValueChange={(v) => onTierChange(v as PluginPermissionTier)}>
+        <Select
+          value={tier}
+          disabled={!runtimeAvailable}
+          onValueChange={(v) => onTierChange(v as PluginPermissionTier)}
+        >
           <SelectTrigger className="h-8 w-full min-w-0 text-xs" aria-label={t("colTier")}>
             <SelectValue />
           </SelectTrigger>
@@ -239,7 +265,13 @@ export function PermissionRow({
             {t("revoke")}
           </Button>
         ) : (
-          <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={onGrant}>
+          <Button
+            className="w-full sm:w-auto"
+            size="sm"
+            variant="outline"
+            disabled={!runtimeAvailable}
+            onClick={onGrant}
+          >
             {t("grant")}
           </Button>
         )}

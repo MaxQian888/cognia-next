@@ -21,6 +21,7 @@ jest.mock("@/stores/scheduler/scheduler-store", () => ({
 
 import {
   createUserScheduledTask,
+  createUserSchedulerAPI,
   deleteUserScheduledTask,
   getSchedulerPermissionPolicy,
   listUserScheduledTasks,
@@ -36,6 +37,20 @@ beforeEach(() => {
 })
 
 describe("plugin scheduler-tasks API", () => {
+  it("mounts the same operations on the context facade", async () => {
+    const api = createUserSchedulerAPI()
+    await api.getPolicy()
+    await api.listTasks()
+    await api.createTask({ name: "n" } as never)
+    await api.deleteTask("t1")
+    await api.runTaskNow("t1")
+
+    expect(state.loadTasks).toHaveBeenCalledTimes(1)
+    expect(state.createTask).toHaveBeenCalledTimes(1)
+    expect(state.deleteTask).toHaveBeenCalledWith("t1")
+    expect(state.runTaskNow).toHaveBeenCalledWith("t1", { triggerSource: "run-now" })
+  })
+
   it("reads the persisted permission policy from the store", async () => {
     await expect(getSchedulerPermissionPolicy()).resolves.toEqual({ agentAutoCreate: true })
   })

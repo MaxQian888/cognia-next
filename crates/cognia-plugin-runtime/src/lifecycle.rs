@@ -903,6 +903,10 @@ pub async fn plugin_launch_js_for_state(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Node host protocol boundary keeps every wire field explicit"
+)]
 async fn run_node_plugin_action(
     state: &PluginRuntimeState,
     plugin_id: &str,
@@ -982,6 +986,10 @@ async fn run_node_plugin_action(
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri command parameters mirror the renderer callback contract"
+)]
 pub async fn plugin_invoke_js_callback(
     app: tauri::AppHandle,
     state: State<'_, PluginRuntimeState>,
@@ -1008,6 +1016,10 @@ pub async fn plugin_invoke_js_callback(
     .await
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the host-neutral callback boundary mirrors the Tauri command contract"
+)]
 pub async fn plugin_invoke_js_callback_for_state(
     state: &PluginRuntimeState,
     plugin_id: String,
@@ -1383,7 +1395,7 @@ pub async fn plugin_runtime_snapshot_for_state(
         .read()
         .get(&plugin_id)
         .map(|r| r.snapshot.clone())
-        .ok_or_else(|| PluginError::NotFound(plugin_id))
+        .ok_or(PluginError::NotFound(plugin_id))
 }
 
 #[tauri::command]

@@ -9,6 +9,10 @@ import {
 import { __resetWorkspaceApiForTesting } from "@/lib/plugin/api/workspace-api"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
   ({
@@ -38,6 +42,8 @@ describe("workspace-backend-bridge python backend", () => {
   beforeEach(() => {
     __resetWorkspaceBackendRegistryForTesting()
     __resetWorkspaceApiForTesting()
+    __resetPythonRuntimeGenerationsForTesting()
+    bindPythonRuntimeGeneration("p", "generation-1")
   })
 
   it("registers a python-backed backend without importing any JS", async () => {

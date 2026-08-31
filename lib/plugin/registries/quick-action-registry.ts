@@ -16,6 +16,7 @@
  */
 
 import type { PluginQuickActionInput, PluginQuickActionSurface } from "@/types/plugin"
+import type { PluginQuickActionInvocation, PluginQuickActionResult } from "@/types/plugin"
 import { loggers } from "@cognia/logging"
 import { registerCommand } from "@/lib/plugin/commands/registry"
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
@@ -76,26 +77,31 @@ function invalidateSnapshot(): void {
 }
 
 /** Run a quick action: inline handler → command id → slash line. */
-export async function runQuickAction(entry: QuickActionEntry): Promise<void> {
+export async function runQuickAction(
+  entry: QuickActionEntry,
+  invocation?: PluginQuickActionInvocation
+): Promise<PluginQuickActionResult> {
   if (entry.run) {
-    await entry.run()
-    return
+    return entry.run(invocation)
   }
   if (entry.command) {
     const { executeCommand } = await import("@/lib/plugin/commands/registry")
-    await executeCommand(entry.command)
-    return
+    return executeCommand<PluginQuickActionResult>(entry.command, invocation)
   }
   if (entry.slash) {
     const { dispatchSlashCommand } = await import("@/lib/slash-commands/registry")
     const line = entry.slash.startsWith("/") ? entry.slash : `/${entry.slash}`
-    await dispatchSlashCommand(line)
-    return
+    const result = await dispatchSlashCommand(
+      line,
+      invocation ? { quickAction: invocation } : undefined
+    )
+    return result?.message ? { kind: "text", text: result.message } : undefined
   }
   loggers.plugin.warn("quick action has no dispatch target", {
     pluginId: entry.pluginId,
     id: entry.fullId,
   })
+  return undefined
 }
 
 /**

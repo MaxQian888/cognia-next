@@ -22,6 +22,7 @@ import { AuditLogEntry } from "../audit-log-entry"
 import { PluginApprovedBinariesCard } from "./plugin-approved-binaries-card"
 import { PluginFrontendTrustCard } from "./plugin-frontend-trust-card"
 import type { PluginManifest, PluginPermission, PluginSource, PluginType } from "@/types/plugin"
+import { nodePermissionSupport } from "@/lib/plugin/launcher/launchPluginJs"
 
 export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.permissionReview")
@@ -39,6 +40,8 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
     const set = new Set<PluginPermission>([...declared, ...optional, ...granted])
     return Array.from(set).sort()
   }, [declared, optional, granted])
+  const isNodeRuntime =
+    Boolean(manifest?.engines?.node) || manifest?.runtimeCompatibility?.tauri?.entrypoint === "node"
 
   const auditLog = useMemo(
     () =>
@@ -96,21 +99,33 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {allListed.map((perm) => (
-              <PermissionRow
-                key={perm}
-                perm={perm}
-                declared={declared.includes(perm)}
-                optional={optional.includes(perm)}
-                granted={granted.has(perm)}
-                dangerous={perms.isDangerous(perm)}
-                onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                onRevoke={() => perms.revoke(pluginId, perm)}
-                tier={perms.getTier(pluginId, perm)}
-                onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
-              />
-            ))}
+            {allListed.map((perm) => {
+              const support = isNodeRuntime
+                ? nodePermissionSupport(perm)
+                : ({ available: true } as const)
+              const unavailableReason = support.available
+                ? undefined
+                : support.reason === "network-broker-missing"
+                  ? t("nodeNetworkUnavailable")
+                  : t("nodeSubprocessUnavailable")
+              return (
+                <PermissionRow
+                  key={perm}
+                  perm={perm}
+                  declared={declared.includes(perm)}
+                  optional={optional.includes(perm)}
+                  granted={granted.has(perm)}
+                  dangerous={perms.isDangerous(perm)}
+                  onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                  onRevoke={() => perms.revoke(pluginId, perm)}
+                  tier={perms.getTier(pluginId, perm)}
+                  onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                  description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                  runtimeAvailable={support.available}
+                  unavailableReason={unavailableReason}
+                />
+              )
+            })}
           </TableBody>
         </Table>
       </Card>

@@ -150,7 +150,7 @@ describe("queryTwinMemory", () => {
     applyTwinContextMock.mockResolvedValue({
       retrievedChunks: [
         {
-          chunk: { content: "fact", vectorDocId: "v", sourceId: "s" },
+          chunk: { contentRedacted: "fact", vectorDocId: "v", sourceId: "s" },
           score: 0.9,
           sourceTitle: "Doc",
         },

@@ -57,7 +57,7 @@ impl CapabilityStore {
     pub fn add_file_path(&self, extension_id: &str, path: PathBuf) {
         let mut map = self.grants.write();
         map.entry(extension_id.to_string())
-            .or_insert_with(CapabilityGrants::default)
+            .or_default()
             .allowed_file_paths
             .push(path);
     }
@@ -65,7 +65,7 @@ impl CapabilityStore {
     pub fn add_spawn_command(&self, extension_id: &str, command: String) {
         let mut map = self.grants.write();
         map.entry(extension_id.to_string())
-            .or_insert_with(CapabilityGrants::default)
+            .or_default()
             .allowed_spawn_commands
             .push(command);
     }
@@ -73,7 +73,7 @@ impl CapabilityStore {
     pub fn add_network_host(&self, extension_id: &str, host: String) {
         let mut map = self.grants.write();
         map.entry(extension_id.to_string())
-            .or_insert_with(CapabilityGrants::default)
+            .or_default()
             .allowed_network_hosts
             .push(host);
     }

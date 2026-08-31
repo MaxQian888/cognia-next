@@ -15,6 +15,10 @@ import {
   __resetExperimentalPythonFlagForTesting,
   setExperimentalPythonBackedEnabled,
 } from "@/lib/plugin/python/experimental-flag"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 function ctx(): TerminalCompletionContext {
   return {
@@ -35,6 +39,8 @@ const signal = new AbortController().signal
 beforeEach(() => {
   __resetCompletionRegistryForTesting()
   __resetExperimentalPythonFlagForTesting()
+  __resetPythonRuntimeGenerationsForTesting()
+  bindPythonRuntimeGeneration("demo", "generation-1")
 })
 
 describe("adaptPluginCompletionProvider", () => {

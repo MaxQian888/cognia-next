@@ -8,6 +8,10 @@ import {
 } from "@cognia/provider-routing/filter-registry"
 import type { FilterContext } from "@cognia/provider-types/deployment-filter"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const MANIFEST = {
   id: "filter-plugin",
@@ -23,6 +27,7 @@ const MANIFEST = {
 
 describe("deployment-filters-bridge python backend", () => {
   it("registers a python-backed filter without importing any JS", async () => {
+    bindPythonRuntimeGeneration("filter-plugin", "generation-1")
     const importer = jest.fn()
     const manifest = {
       ...(MANIFEST as unknown as Record<string, unknown>),
@@ -76,6 +81,7 @@ const CTX: FilterContext = {
 
 afterEach(() => {
   __resetDeploymentFiltersForTesting()
+  __resetPythonRuntimeGenerationsForTesting()
 })
 
 describe("deployment-filters-bridge", () => {

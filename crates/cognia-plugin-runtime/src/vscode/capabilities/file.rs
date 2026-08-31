@@ -31,11 +31,11 @@ pub fn check_path(
 ) -> FileDecision {
     let canon = normalise(requested);
     let extension_dir = extension_install_root.join(extension_id);
-    if canon.starts_with(&normalise(&extension_dir)) {
+    if canon.starts_with(normalise(&extension_dir)) {
         return FileDecision::Allow;
     }
     for allowed in &grants.allowed_file_paths {
-        if canon.starts_with(&normalise(allowed)) {
+        if canon.starts_with(normalise(allowed)) {
             return FileDecision::Allow;
         }
     }

@@ -234,6 +234,10 @@ function formatRust(source) {
   const result = execaSync("rustfmt", ["--emit", "stdout", "--edition", "2021"], {
     input: source,
     reject: false,
+    // `cargo fmt --check` requires the generated contract to end in a newline.
+    // Preserve rustfmt's output byte-for-byte so generation and workspace
+    // formatting checks agree.
+    stripFinalNewline: false,
   })
   if (result.exitCode !== 0 || result.signal) {
     throw new Error(
@@ -324,8 +328,10 @@ pub(crate) const VALID_PLUGIN_TYPES: &[&str] =\n    &[${catalog.pluginTypes
     .map((pluginType) => JSON.stringify(pluginType))
     .join(", ")}];\n\n\
 pub(crate) const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[\n${capabilityFields}\n];\n\n\
-pub(crate) const MANIFEST_CONTRIBUTIONS: &[\n    (&str, &[&str], &str, Option<&str>, Option<&str>, Option<&str>, &str)\n] = &[\n${manifestContributions}\n];\n\n\
-pub(crate) const RUNTIME_ENTRY_CONTRACTS: &[(&str, &[&str], Option<&str>, bool, &[&str])] = &[\n${runtimeEntries}\n];\n\n\
+type ManifestContributionContract = (\n    &'static str,\n    &'static [&'static str],\n    &'static str,\n    Option<&'static str>,\n    Option<&'static str>,\n    Option<&'static str>,\n    &'static str,\n);\n\n\
+pub(crate) const MANIFEST_CONTRIBUTIONS: &[ManifestContributionContract] = &[\n${manifestContributions}\n];\n\n\
+type RuntimeEntryContract = (\n    &'static str,\n    &'static [&'static str],\n    Option<&'static str>,\n    bool,\n    &'static [&'static str],\n);\n\n\
+pub(crate) const RUNTIME_ENTRY_CONTRACTS: &[RuntimeEntryContract] = &[\n${runtimeEntries}\n];\n\n\
 pub(crate) const PLUGIN_PATH_FIELDS: &[&str] = &[\n${rustStrings(
     catalog.pathFields.map((entry) => entry.path)
   )}\n];\n\n\

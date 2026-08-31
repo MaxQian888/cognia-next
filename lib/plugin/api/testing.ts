@@ -69,7 +69,7 @@ export async function seedPlatformBoundSession(
 export async function listCallbackBindings(): Promise<
   Array<{ kind: string; [key: string]: unknown }>
 > {
-  return (await getDb().connectorCallbackBindings.toArray()) as Array<{
+  return (await getDb().connectorCallbackBindings.toArray()) as unknown as Array<{
     kind: string
     [key: string]: unknown
   }>

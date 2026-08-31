@@ -85,6 +85,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   filesystem: ["filesystem:read", "filesystem:write"],
   network: ["network:fetch", "network:upload", "network:websocket"],
   clipboard: ["clipboard:read", "clipboard:write"],
+  selection: ["selection:read"],
   media: [
     "media:image:read",
     "media:image:write",
@@ -146,6 +147,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "network:websocket": "Establish WebSocket connections",
   "clipboard:read": "Read from the clipboard",
   "clipboard:write": "Write to the clipboard",
+  "selection:read": "Read text you selected in another desktop application",
   notification: "Show system notifications",
   "shell:execute": "Execute shell commands",
   "process:spawn": "Spawn child processes",
@@ -264,7 +266,41 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "templates:library:write": "Create user-owned template drafts after confirmation",
 }
 
+/**
+ * Back-compat aliases for permissions that were SPLIT out of a broader one.
+ *
+ * `session:delete` was carved out of `session:write`: before it existed,
+ * `session:write` was what `ctx.session.deleteSession` / `deleteMessage`
+ * required. Installed manifests cannot be rewritten on upgrade, so a plugin
+ * that declared only `session:write` would start throwing at the first delete
+ * — a silent break the user cannot diagnose or fix. Expanding the older, wider
+ * declaration keeps those installs working exactly as they did, while new
+ * plugins can declare `session:delete` alone to grant delete without write.
+ *
+ * Only add an entry here when a permission is genuinely narrowed out of an
+ * existing one; this is a compatibility shim, not a convenience table.
+ */
+const LEGACY_PERMISSION_IMPLICATIONS: Partial<Record<PluginPermission, PluginPermission[]>> = {
+  "session:write": ["session:delete"],
+}
+
+/** Declared permissions plus anything an older, wider declaration implies. */
+export function expandLegacyPermissions(
+  permissions: readonly PluginPermission[]
+): PluginPermission[] {
+  const expanded = new Set<PluginPermission>(permissions)
+  for (const permission of permissions) {
+    for (const implied of LEGACY_PERMISSION_IMPLICATIONS[permission] ?? []) {
+      expanded.add(implied)
+    }
+  }
+  return [...expanded]
+}
+
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
+  // Desktop selections can contain passwords, private messages, or document
+  // fragments. A plugin must receive per-call consent before reading them.
+  "selection:read",
   // Chat interception sees (and can rewrite) everything the user and the
   // model exchange, including tool inputs/outputs — surveillance-grade.
   "hooks:chat-intercept",
@@ -394,8 +430,9 @@ export class PermissionGuard {
 
   registerPlugin(pluginId: string, permissions: PluginPermission[]): void {
     const grantMap = new Map<PluginPermission, PermissionGrant>()
+    const effective = expandLegacyPermissions(permissions)
 
-    for (const permission of permissions) {
+    for (const permission of effective) {
       grantMap.set(permission, {
         pluginId,
         permission,
@@ -411,7 +448,7 @@ export class PermissionGuard {
     // "confirm" tier so they prompt rather than being implicitly silent.
     if (this.config.confirmDangerousByDefault) {
       const tierRow = new Map<PluginPermission, PluginPermissionTier>()
-      for (const permission of permissions) {
+      for (const permission of effective) {
         if (DANGEROUS_PERMISSIONS.includes(permission)) {
           tierRow.set(permission, "confirm")
         }

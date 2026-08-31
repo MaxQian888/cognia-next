@@ -41,6 +41,20 @@ describe("registerQuickAction", () => {
     })
   })
 
+  it("keeps selection opt-in while allowing an explicitly declared selection surface", () => {
+    registerQuickAction("plug-a", {
+      id: "summarize-selection",
+      title: "Summarize selection",
+      run: () => {},
+      surfaces: ["selection"],
+      selection: { input: "text", output: "preview", contentTypes: ["term"] },
+    })
+    registerQuickAction("plug-a", { id: "legacy", title: "Legacy", run: () => {} })
+
+    expect(listQuickActions("selection").map((entry) => entry.id)).toEqual(["summarize-selection"])
+    expect(getQuickAction("plug-a:legacy")?.surfaces).toEqual(["palette", "composer", "tray"])
+  })
+
   it("mirrors a dispatch command into the command registry (qa: prefix for tray-visible)", async () => {
     const run = jest.fn()
     registerQuickAction("plug-a", { id: "sync", title: "Sync now", run })
@@ -94,6 +108,21 @@ describe("registerQuickAction", () => {
 })
 
 describe("runQuickAction", () => {
+  const selectionInvocation = {
+    surface: "selection" as const,
+    selection: {
+      candidateId: "candidate-1",
+      text: "selected text",
+      sourceApp: "TextEdit",
+      origin: "accessibility" as const,
+      capturedAt: 1,
+      truncated: false,
+      contentTypes: ["term" as const],
+      editable: true,
+      replaceCapability: "paste" as const,
+    },
+  }
+
   it("prefers the inline run handler", async () => {
     const run = jest.fn()
     registerQuickAction("plug-a", { id: "x", title: "X", run, command: "other.cmd" })
@@ -101,6 +130,22 @@ describe("runQuickAction", () => {
     await runQuickAction(getQuickAction("plug-a:x")!)
 
     expect(run).toHaveBeenCalled()
+  })
+
+  it("passes selection context to inline handlers and returns their structured result", async () => {
+    const run = jest.fn(async () => ({ kind: "text" as const, text: "summary" }))
+    registerQuickAction("plug-a", {
+      id: "x",
+      title: "X",
+      run,
+      surfaces: ["selection"],
+      selection: { input: "text", output: "preview" },
+    })
+
+    await expect(runQuickAction(getQuickAction("plug-a:x")!, selectionInvocation)).resolves.toEqual(
+      { kind: "text", text: "summary" }
+    )
+    expect(run).toHaveBeenCalledWith(selectionInvocation)
   })
 
   it("falls back to executing the named command", async () => {
@@ -111,6 +156,23 @@ describe("runQuickAction", () => {
     await runQuickAction(getQuickAction("plug-a:x")!)
 
     expect(handler).toHaveBeenCalled()
+  })
+
+  it("passes selection context through the command registry", async () => {
+    const handler = jest.fn(async () => ({ kind: "variants" as const, variants: ["A", "B"] }))
+    registerCommand({ id: "demo.target", pluginId: null, handler })
+    registerQuickAction("plug-a", {
+      id: "x",
+      title: "X",
+      command: "demo.target",
+      surfaces: ["selection"],
+      selection: { input: "text", output: "preview" },
+    })
+
+    await expect(runQuickAction(getQuickAction("plug-a:x")!, selectionInvocation)).resolves.toEqual(
+      { kind: "variants", variants: ["A", "B"] }
+    )
+    expect(handler).toHaveBeenCalledWith(selectionInvocation)
   })
 
   it("dispatches slash targets through the slash registry (leading slash optional)", async () => {
@@ -130,6 +192,33 @@ describe("runQuickAction", () => {
       expect(handler).toHaveBeenCalled()
     } finally {
       unregisterSlashCommand("qa-demo")
+    }
+  })
+
+  it("passes selection context to slash handlers without interpolating selected text", async () => {
+    const handler = jest.fn(async () => ({ message: "summary" }))
+    registerSlashCommand({
+      id: "qa-selection",
+      name: "qa-selection",
+      description: "test",
+      source: "builtin",
+      handler,
+    })
+    try {
+      registerQuickAction("plug-a", {
+        id: "x",
+        title: "X",
+        slash: "qa-selection static-arg",
+        surfaces: ["selection"],
+        selection: { input: "text", output: "preview" },
+      })
+
+      await expect(
+        runQuickAction(getQuickAction("plug-a:x")!, selectionInvocation)
+      ).resolves.toEqual({ kind: "text", text: "summary" })
+      expect(handler).toHaveBeenCalledWith("static-arg", { quickAction: selectionInvocation })
+    } finally {
+      unregisterSlashCommand("qa-selection")
     }
   })
 

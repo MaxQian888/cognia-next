@@ -35,6 +35,20 @@ describe("PluginFilterSheet", () => {
     expect(screen.getByText("status")).toBeInTheDocument()
   })
 
+  it("renders each permission option once when permission groups overlap", () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<PluginFilterSheet />)
+      expect(
+        errorSpy.mock.calls.some((args) =>
+          args.some((arg) => String(arg).includes("Encountered two children with the same key"))
+        )
+      ).toBe(false)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it("no longer renders the sort control (moved to the library header)", () => {
     render(<PluginFilterSheet />)
     expect(screen.queryByText("sort")).not.toBeInTheDocument()

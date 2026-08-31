@@ -47,6 +47,8 @@ export {
   revokePermission,
 } from "./permission-api"
 export { createOcrAPI, clearOcrProvidersForPlugin } from "./ocr-api"
+export { createCharacterPacksAPI } from "./character-packs-api"
+export { createUserSchedulerAPI } from "./scheduler-tasks"
 export { createWorkspaceAPI, clearWorkspaceBackendsForPluginContext } from "./workspace-api"
 export { createModalAPI } from "./modal-api"
 export { createWebviewAPI } from "./webview-api"
@@ -122,6 +124,11 @@ export type {
 
 // Re-export mounted context API types.
 export type { PluginOcrAPI } from "./ocr-api"
+export type {
+  PluginCharacterPackRegistration,
+  PluginCharacterPacksAPI,
+} from "./character-packs-api"
+export type { PluginUserSchedulerAPI } from "./scheduler-tasks"
 export type { PluginWorkspaceAPI } from "./workspace-api"
 export type { PluginModalAPI } from "./modal-api"
 export type { CreateWebviewInput, PluginWebviewAPI } from "./webview-api"

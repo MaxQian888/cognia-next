@@ -15,20 +15,23 @@ const resolveSendOptions = jest.fn(async () => ({ cwd: "/repo" }) as Record<stri
 const runAndCaptureAssistantReply = jest.fn(async () => ({ text: "done", messageId: "m1" }))
 
 jest.mock("@/lib/db/sessions", () => ({
-  getSession: (...a: unknown[]) => getSession(...a),
+  getSession: (...a: unknown[]) => (getSession as (...args: unknown[]) => unknown)(...a),
   listSessions: () => listSessions(),
-  createSession: (...a: unknown[]) => createSession(...a),
-  updateSession: (...a: unknown[]) => updateSession(...a),
+  createSession: (...a: unknown[]) => (createSession as (...args: unknown[]) => unknown)(...a),
+  updateSession: (...a: unknown[]) => (updateSession as (...args: unknown[]) => unknown)(...a),
 }))
 jest.mock("@/lib/db/characters", () => ({
-  resolveCharacterById: (...a: unknown[]) => resolveCharacterById(...a),
+  resolveCharacterById: (...a: unknown[]) =>
+    (resolveCharacterById as (...args: unknown[]) => unknown)(...a),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettings() }))
 jest.mock("@/lib/claude/build-options", () => ({
-  resolveSendOptions: (...a: unknown[]) => resolveSendOptions(...a),
+  resolveSendOptions: (...a: unknown[]) =>
+    (resolveSendOptions as (...args: unknown[]) => unknown)(...a),
 }))
 jest.mock("@/lib/claude/run-and-capture", () => ({
-  runAndCaptureAssistantReply: (...a: unknown[]) => runAndCaptureAssistantReply(...a),
+  runAndCaptureAssistantReply: (...a: unknown[]) =>
+    (runAndCaptureAssistantReply as (...args: unknown[]) => unknown)(...a),
 }))
 
 import { PluginAgentTurnError, runPluginAgentTurn } from "./agent-turn"

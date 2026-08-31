@@ -34,6 +34,10 @@ import {
   type PluginCharacterPackWarning,
 } from "@/lib/plugin/character-pack/validate-requires"
 import { UNSIGNED_TRUST, type CharacterPackTrust } from "@/lib/plugin/character-pack/pack-trust"
+export {
+  buildOverlayCharacterId,
+  isOverlayCharacterId,
+} from "@cognia/plugin-sdk/api/character-pack"
 
 const registry = createValidatingOverlayRegistry<
   PluginCharacterPackDef,
@@ -259,15 +263,3 @@ export function getPackCharacterByRuntimeId(runtimeId: string):
  * `lib/db/characters.ts` and by the local-pack store when registering
  * imported packs.
  */
-export function buildOverlayCharacterId(
-  pluginId: string | undefined,
-  packId: string,
-  localId: string
-): string {
-  return `cognia-pack:${pluginId ?? ""}:${packId}:${localId}`
-}
-
-/** True if `id` is a synthetic overlay character id; false for Dexie row ids. */
-export function isOverlayCharacterId(id: string): boolean {
-  return id.startsWith("cognia-pack:")
-}

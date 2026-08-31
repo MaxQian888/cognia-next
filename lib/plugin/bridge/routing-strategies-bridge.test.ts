@@ -8,6 +8,10 @@ import {
 } from "@cognia/provider-routing/strategy-registry"
 import { makeTelemetrySnapshot } from "@cognia/provider-routing/strategies/built-in"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const MANIFEST = {
   id: "router-plugin",
@@ -33,10 +37,12 @@ const ENTRIES = [
 
 afterEach(() => {
   __resetRoutingStrategiesForTesting()
+  __resetPythonRuntimeGenerationsForTesting()
 })
 
 describe("routing-strategies-bridge python backend", () => {
   it("registers a python-backed strategy without importing any JS", async () => {
+    bindPythonRuntimeGeneration("router-plugin", "generation-1")
     const importer = jest.fn()
     const manifest = {
       ...(MANIFEST as unknown as Record<string, unknown>),

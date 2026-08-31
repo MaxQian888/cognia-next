@@ -6,6 +6,12 @@ import { validatePluginManifest, validatePluginConfig } from "./validation"
 import type { PluginConfigSchema } from "@/types/plugin"
 import type { PluginManifest } from "@/types/plugin"
 import {
+  CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES,
+  CANONICAL_PLUGIN_SELECTION_INPUTS,
+  CANONICAL_PLUGIN_SELECTION_ORIGINS,
+  CANONICAL_PLUGIN_SELECTION_OUTPUTS,
+} from "@/types/plugin"
+import {
   CANONICAL_CONTEXT_ACTIVITIES,
   CONTEXT_RESOURCE_READ_PERMISSIONS,
 } from "@/types/context-workbench"
@@ -50,6 +56,111 @@ describe("Plugin Validation", () => {
 
       expect(result.valid).toBe(true)
       expect(result.errors).toHaveLength(0)
+    })
+
+    it("accepts every value in the exported selection vocabularies", () => {
+      // The guard against the drift that used to be possible: a value could be
+      // added to the union and to `classifySelection`, compile everywhere, and
+      // still be rejected here because the validator kept its own literal list.
+      for (const contentType of CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES) {
+        for (const origin of CANONICAL_PLUGIN_SELECTION_ORIGINS) {
+          for (const output of CANONICAL_PLUGIN_SELECTION_OUTPUTS) {
+            for (const input of CANONICAL_PLUGIN_SELECTION_INPUTS) {
+              const manifest = createValidManifest()
+              manifest.capabilities = ["quick-action"]
+              manifest.permissions = ["extension:ui", "selection:read"]
+              manifest.quickActions = [
+                {
+                  id: "vocabulary",
+                  title: "Vocabulary",
+                  command: "selection.vocabulary",
+                  surfaces: ["selection"],
+                  selection: { input, output, contentTypes: [contentType], origins: [origin] },
+                },
+              ]
+              const result = validatePluginManifest(manifest)
+              expect(
+                result.errors.filter((error) =>
+                  error.field?.startsWith("quickActions[0].selection")
+                )
+              ).toEqual([])
+            }
+          }
+        }
+      }
+    })
+
+    it("requires selection:read only for quick actions that receive selected text", () => {
+      const textAction = createValidManifest()
+      textAction.capabilities = ["quick-action"]
+      textAction.permissions = ["extension:ui"]
+      textAction.quickActions = [
+        {
+          id: "summarize",
+          title: "Summarize",
+          command: "selection.summarize",
+          surfaces: ["selection"],
+          selection: { input: "text", output: "preview" },
+        },
+      ]
+
+      expect(validatePluginManifest(textAction).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "quickActions[0].selection.input",
+            code: "manifest.quickActions.selection.permission_missing",
+            severity: "error",
+          }),
+        ])
+      )
+
+      textAction.permissions.push("selection:read")
+      expect(validatePluginManifest(textAction).valid).toBe(true)
+
+      const metadataAction = createValidManifest()
+      metadataAction.capabilities = ["quick-action"]
+      metadataAction.permissions = ["extension:ui"]
+      metadataAction.quickActions = [
+        {
+          id: "inspect-source",
+          title: "Inspect source",
+          command: "selection.inspectSource",
+          surfaces: ["selection"],
+          selection: { input: "metadata", output: "status" },
+        },
+      ]
+      expect(validatePluginManifest(metadataAction).valid).toBe(true)
+    })
+
+    it("validates runtime compatibility profiles and availability values", () => {
+      const manifest = createValidManifest() as PluginManifest & {
+        runtimeCompatibility: Record<string, unknown>
+      }
+      manifest.runtimeCompatibility = {
+        tauri: { availability: "full" },
+        electron: { availability: "supported" },
+        mobile: { availability: "degraded", reason: 42 },
+      }
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "runtimeCompatibility.tauri.availability",
+            code: "manifest.runtimeCompatibility.availability.invalid",
+          }),
+          expect.objectContaining({
+            field: "runtimeCompatibility.electron",
+            code: "manifest.runtimeCompatibility.unknown_profile",
+          }),
+          expect.objectContaining({
+            field: "runtimeCompatibility.mobile.reason",
+            code: "manifest.runtimeCompatibility.reason.invalid_type",
+          }),
+        ])
+      )
     })
 
     it("rejects malformed unified template package contributions", () => {

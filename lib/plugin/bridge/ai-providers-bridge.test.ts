@@ -1,6 +1,10 @@
 import { registerAiProvidersForPlugin, unregisterAiProvidersForPlugin } from "./ai-providers-bridge"
 import { clearCustomAIProviders, getCustomAIProviders } from "@/lib/plugin/api/ai-provider-api"
 import type { PluginManifest } from "@/types/plugin/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
   ({
@@ -17,6 +21,8 @@ const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
 describe("ai-providers-bridge python backend", () => {
   beforeEach(() => {
     clearCustomAIProviders()
+    __resetPythonRuntimeGenerationsForTesting()
+    bindPythonRuntimeGeneration("p", "generation-1")
   })
 
   it("registers a python-backed LLM provider without importing any JS", async () => {

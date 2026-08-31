@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 let mockPlugin: PluginRow | undefined
@@ -35,6 +35,7 @@ const targetPlugin: PluginRow = {
   path: "/p/review",
   manifest: {
     id: "p_review",
+    engines: { node: ">=26.0.0" },
     permissions: ["clipboard:read", "shell:execute"],
     optionalPermissions: ["network:fetch"],
   },
@@ -99,5 +100,25 @@ describe("PluginPermissionReview", () => {
     const permissionRow = screen.getByText("clipboard:read").closest("tr")
     expect(permissionRow?.className).toContain("grid")
     expect(permissionRow?.className).toContain("sm:table-row")
+  })
+
+  it("shows unsupported native Node permissions without allowing a grant", () => {
+    render(<PluginPermissionReview />)
+    const networkRow = screen.getByText("network:fetch").closest("tr")
+    expect(networkRow).not.toBeNull()
+    const row = within(networkRow as HTMLElement)
+    expect(row.getByText("nodeNetworkUnavailable")).toBeInTheDocument()
+    expect(row.getByRole("button", { name: "grant" })).toBeDisabled()
+    expect(row.getByRole("combobox", { name: "colTier" })).toBeDisabled()
+  })
+
+  it("does not present an unavailable Node permission as effectively granted", () => {
+    getPermissionGuard().registerPlugin("p_review", ["network:fetch"])
+    render(<PluginPermissionReview />)
+    const networkRow = screen.getByText("network:fetch").closest("tr")
+    expect(networkRow).not.toBeNull()
+    const row = within(networkRow as HTMLElement)
+    expect(row.queryByLabelText("colGranted")).not.toBeInTheDocument()
+    expect(row.getByRole("button", { name: "revoke" })).toBeEnabled()
   })
 })

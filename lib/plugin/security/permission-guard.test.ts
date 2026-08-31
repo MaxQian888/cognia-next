@@ -336,10 +336,11 @@ describe("PermissionGuard", () => {
   describe("confirmDangerousByDefault (C4 hardening flag)", () => {
     it("defaults ON: dangerous declared permissions register at the 'confirm' tier", () => {
       const g = new PermissionGuard()
-      g.registerPlugin("p1", ["shell:execute", "clipboard:read"])
+      g.registerPlugin("p1", ["shell:execute", "clipboard:read", "selection:read"])
       // Secure by default — dangerous perms prompt; non-dangerous stay silent.
       expect(g.getTier("p1", "shell:execute")).toBe("confirm")
       expect(g.getTier("p1", "clipboard:read")).toBe("silent")
+      expect(g.getTier("p1", "selection:read")).toBe("confirm")
     })
 
     it("when explicitly off: dangerous declared permissions stay 'silent'", () => {
@@ -565,12 +566,14 @@ describe("Permission Constants", () => {
     expect(PERMISSION_GROUPS.filesystem).toContain("filesystem:write")
     expect(PERMISSION_GROUPS.network).toContain("network:fetch")
     expect(PERMISSION_GROUPS.network).toContain("network:upload")
+    expect(PERMISSION_GROUPS.selection).toEqual(["selection:read"])
   })
 
   it("should have permission descriptions", () => {
     expect(PERMISSION_DESCRIPTIONS["network:fetch"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["network:upload"]).toBeTruthy()
     expect(PERMISSION_DESCRIPTIONS["filesystem:write"]).toBeTruthy()
+    expect(PERMISSION_DESCRIPTIONS["selection:read"]).toMatch(/selected/i)
     expect(PERMISSION_DESCRIPTIONS["builtin-skills:invoke"]).toMatch(/built-in skills/i)
     expect(PERMISSION_DESCRIPTIONS["extension:workflow"]).toBe(
       "Contribute workflow nodes, triggers, tasks, and templates"
@@ -580,6 +583,7 @@ describe("Permission Constants", () => {
   it("should have dangerous permissions list", () => {
     expect(DANGEROUS_PERMISSIONS).toContain("shell:execute")
     expect(DANGEROUS_PERMISSIONS).toContain("process:spawn")
+    expect(DANGEROUS_PERMISSIONS).toContain("selection:read")
   })
 
   it("lists no WASM stub capabilities in api-version 0.2", () => {

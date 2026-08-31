@@ -81,6 +81,7 @@ pub struct HostOptions {
 ///     path by the loader) stays visible inside the sandbox;
 ///   * the interpreter's prefix — a venv root (covering its
 ///     `lib/.../site-packages`) or a no-op under `/usr` (already bound).
+///
 /// Writes are confined to a scratch tmp dir; network stays on (plugins fetch).
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn python_host_scope(
@@ -105,6 +106,7 @@ pub fn python_host_scope(
 
 /// The read-only prefix a non-system interpreter needs so its standard library
 /// + `site-packages` resolve. For `/home/u/.venv/bin/python` → `/home/u/.venv`
+///
 /// (`bin`'s parent); for a system `/usr/bin/python3` → `None` (the launcher
 /// already binds `/usr`); for a bare PATH name → `None`.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1167,10 +1169,11 @@ for line in sys.stdin:
         );
         // The event's call_id mirrors the request id and must NOT have been
         // consumed as a reply (the reply above resolved normally).
-        let events = collected.lock();
-        let progress = events.iter().find(|e| e.kind == "progress").unwrap();
-        assert_eq!(progress.call_id, Some(1));
-        drop(events);
+        {
+            let events = collected.lock();
+            let progress = events.iter().find(|e| e.kind == "progress").unwrap();
+            assert_eq!(progress.call_id, Some(1));
+        }
         host.kill().await;
     }
 

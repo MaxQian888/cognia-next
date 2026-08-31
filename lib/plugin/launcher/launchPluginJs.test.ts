@@ -3,8 +3,27 @@ import {
   deriveScopeFromManifest,
   launchPluginJs,
   nodePermissionArgs,
+  nodePermissionSupport,
   type NodePermissionScope,
 } from "./launchPluginJs"
+
+describe("nodePermissionSupport", () => {
+  it("reports scoped filesystem grants as supported", () => {
+    expect(nodePermissionSupport("filesystem:read")).toEqual({ available: true })
+    expect(nodePermissionSupport("filesystem:write")).toEqual({ available: true })
+  })
+
+  it("keeps in-process network and subprocess grants visible but unavailable", () => {
+    expect(nodePermissionSupport("network:fetch")).toMatchObject({
+      available: false,
+      reason: "network-broker-missing",
+    })
+    expect(nodePermissionSupport("process:spawn")).toMatchObject({
+      available: false,
+      reason: "subprocess-broker-missing",
+    })
+  })
+})
 
 const EMPTY_SCOPE: NodePermissionScope = {
   permissions: [],

@@ -8,11 +8,7 @@
 
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
-import {
-  listCallbackBindings,
-  seedPlatformBoundSession,
-  seedRunningInboundJob,
-} from "./testing"
+import { listCallbackBindings, seedPlatformBoundSession, seedRunningInboundJob } from "./testing"
 
 const dbFixture = createDbTestFixture()
 
@@ -64,9 +60,7 @@ describe("listCallbackBindings", () => {
   })
 
   it("reads back what the host recorded", async () => {
-    const { recordCallbackBinding } = await import(
-      "@/lib/connectors/adapters/_shared/a2ui-mapper"
-    )
+    const { recordCallbackBinding } = await import("@/lib/connectors/adapters/_shared/a2ui-mapper")
     await recordCallbackBinding({
       actionId: "wfapp:1",
       kind: "wf_approve",

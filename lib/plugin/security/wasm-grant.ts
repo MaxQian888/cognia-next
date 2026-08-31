@@ -186,15 +186,3 @@ export async function reconcileWasmGrantLedgerWithManifest(
     warning: drifted ? WASM_GRANT_DRIFT_WARNING : undefined,
   }
 }
-
-export async function verifyPreopenAllowedForCall(
-  pluginId: string,
-  loadedPreopens: readonly string[]
-): Promise<void> {
-  if (loadedPreopens.length === 0) return
-  const granted = new Set(await getGrantedPreopens(pluginId))
-  const denied = loadedPreopens.filter((preopen) => !granted.has(preopen))
-  if (denied.length > 0) {
-    throw new Error(`wasm-runtime: preopen access denied for ${pluginId}: ${denied.join(", ")}`)
-  }
-}

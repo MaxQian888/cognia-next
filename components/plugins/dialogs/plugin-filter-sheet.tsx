@@ -55,7 +55,7 @@ export function PluginFilterSheet() {
   const setFilters = usePluginsStore((s) => s.setFilters)
   const resetFilters = usePluginsStore((s) => s.resetFilters)
 
-  const allPermissions = Object.values(PERMISSION_GROUPS).flat()
+  const allPermissions = [...new Set(Object.values(PERMISSION_GROUPS).flat())]
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>

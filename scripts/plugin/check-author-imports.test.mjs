@@ -5,9 +5,18 @@ import {
   checkAuthorImports,
   checkPluginGovernance,
   findForbiddenAuthorImports,
+  isHostIntegrationTest,
   readGovernanceBaseline,
   stripComments,
 } from "./check-author-imports.mjs"
+
+test("host integration opt-out is explicit and test-file-only", () => {
+  const marked = `/** @cognia-host-integration-test */\nimport x from "@/lib/x"`
+  assert.equal(isHostIntegrationTest("plugin.test.ts", marked), true)
+  assert.equal(isHostIntegrationTest("plugin.spec.tsx", marked), true)
+  assert.equal(isHostIntegrationTest("index.ts", marked), false)
+  assert.equal(isHostIntegrationTest("plugin.test.ts", 'import x from "@/lib/x"'), false)
+})
 
 test("detects host-private author imports without flagging public SDK subpaths", () => {
   assert.deepEqual(
@@ -34,7 +43,7 @@ test("detects host-private author imports without flagging public SDK subpaths",
   )
 })
 
-test("refuses host-internal @cognia packages, admits the author-facing ones", () => {
+test("refuses host-internal packages and plugin-ui deep imports", () => {
   // An allowlist, so a package added to the workspace next month is refused by
   // default rather than quietly becoming part of the author surface.
   assert.deepEqual(
@@ -45,7 +54,12 @@ test("refuses host-internal @cognia packages, admits the author-facing ones", ()
       import { definePlugin } from "@cognia/plugin-sdk"
       import { Button } from "@cognia/plugin-ui/button"
     `),
-    ["@cognia/redact", "@cognia/web-search/types", "@cognia/agent-config-types"]
+    [
+      "@cognia/redact",
+      "@cognia/web-search/types",
+      "@cognia/agent-config-types",
+      "@cognia/plugin-ui/button",
+    ]
   )
 })
 

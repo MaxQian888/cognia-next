@@ -7,6 +7,8 @@ import {
   __resetWorkspaceBackendRegistryForTesting,
   hasWorkspaceBackend,
 } from "@/lib/github/workspace-backend-registry"
+
+jest.mock("./workspace-root", () => ({ getActiveWorkspaceRoot: jest.fn(() => "/workspace") }))
 import type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
 
 function makeBackend(): E2BBackend {
@@ -34,6 +36,10 @@ describe("createWorkspaceAPI", () => {
     const reg = api.registerBackend({ id: "e2b", label: "E2B", backend: makeBackend() })
     expect(reg.backendId).toBe("p:e2b")
     expect(hasWorkspaceBackend("p:e2b")).toBe(true)
+  })
+
+  it("returns the host-resolved active workspace root", () => {
+    expect(createWorkspaceAPI("p").getActiveRoot()).toBe("/workspace")
   })
 
   it("getBackend resolves the plugin's own backend by unprefixed id", () => {

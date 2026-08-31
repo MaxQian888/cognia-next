@@ -215,7 +215,7 @@ pub fn list_permissions_for_state(
         return Ok(grants.clone());
     }
     // Fall back to disk on cold-start.
-    let from_disk = read_ledger(&state, &plugin_id)?;
+    let from_disk = read_ledger(state, &plugin_id)?;
     if !from_disk.is_empty() {
         state
             .permissions
@@ -259,7 +259,7 @@ mod tests {
             granted_at: Utc::now().to_rfc3339(),
             expires_at: None,
         };
-        write_ledger(&state, "demo", &[grant.clone()]).unwrap();
+        write_ledger(&state, "demo", std::slice::from_ref(&grant)).unwrap();
         let from_disk = read_ledger(&state, "demo").unwrap();
         assert_eq!(from_disk.len(), 1);
         assert_eq!(from_disk[0].permission, "filesystem:read");

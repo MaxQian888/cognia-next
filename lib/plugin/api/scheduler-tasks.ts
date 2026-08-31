@@ -32,6 +32,27 @@ async function store() {
   return useSchedulerStore.getState()
 }
 
+export interface PluginUserSchedulerAPI {
+  getPolicy(): Promise<SchedulerPermissionPolicy>
+  listTasks(): Promise<ScheduledTask[]>
+  createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask | null>
+  deleteTask(taskId: string): Promise<boolean>
+  runTaskNow(
+    taskId: string,
+    options?: { triggerSource?: TaskExecutionTriggerSource }
+  ): Promise<TaskExecution | null>
+}
+
+export function createUserSchedulerAPI(): PluginUserSchedulerAPI {
+  return {
+    getPolicy: getSchedulerPermissionPolicy,
+    listTasks: listUserScheduledTasks,
+    createTask: createUserScheduledTask,
+    deleteTask: deleteUserScheduledTask,
+    runTaskNow: runUserScheduledTaskNow,
+  }
+}
+
 /**
  * The user's current scheduler permission policy — `agentAutoCreate`,
  * `scriptTasksEnabled`, `confirmationRequired`, `maxTasksPerSource`.

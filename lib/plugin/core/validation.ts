@@ -10,6 +10,15 @@ import type {
   PluginPermission,
   PluginResilienceConfig,
   PluginType,
+  PluginQuickActionDef,
+} from "@/types/plugin"
+import {
+  CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES,
+  CANONICAL_PLUGIN_RUNTIME_PROFILES,
+  CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES,
+  CANONICAL_PLUGIN_SELECTION_INPUTS,
+  CANONICAL_PLUGIN_SELECTION_ORIGINS,
+  CANONICAL_PLUGIN_SELECTION_OUTPUTS,
 } from "@/types/plugin"
 import { hasLucideExport, hasLucideIcon } from "@/lib/icons/lucide-catalog"
 import { toLucideIconName } from "@/lib/icons/lucide-icon-name"
@@ -99,6 +108,11 @@ const VALID_CAPABILITIES: PluginCapability[] = [...CANONICAL_PLUGIN_CAPABILITIES
 const VALID_PERMISSIONS = [...CANONICAL_PLUGIN_PERMISSIONS] as PluginPermission[]
 
 const VALID_PLUGIN_TYPES = [...CANONICAL_PLUGIN_TYPES] as PluginType[]
+
+// Aliases of the exported vocabularies, so the validator cannot drift from the
+// types a manifest is written against.
+const VALID_RUNTIME_PROFILES = CANONICAL_PLUGIN_RUNTIME_PROFILES
+const VALID_RUNTIME_AVAILABILITIES = CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES
 
 const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
@@ -1536,6 +1550,57 @@ export function validatePluginManifest(
   }
 
   // Optional fields validation
+  if (m.runtimeCompatibility !== undefined) {
+    if (!isPlainObject(m.runtimeCompatibility)) {
+      pushError(
+        "runtimeCompatibility",
+        "manifest.runtimeCompatibility.invalid_type",
+        '"runtimeCompatibility" must be an object'
+      )
+    } else {
+      const compatibility = m.runtimeCompatibility
+      for (const profile of Object.keys(compatibility)) {
+        const field = `runtimeCompatibility.${profile}`
+        if (!(VALID_RUNTIME_PROFILES as readonly string[]).includes(profile)) {
+          pushError(
+            field,
+            "manifest.runtimeCompatibility.unknown_profile",
+            `Unknown plugin runtime profile "${profile}"`
+          )
+          continue
+        }
+        const target = compatibility[profile]
+        if (!isPlainObject(target)) {
+          pushError(
+            field,
+            "manifest.runtimeCompatibility.target.invalid_type",
+            `"${field}" must be an object`
+          )
+          continue
+        }
+        if (
+          typeof target.availability !== "string" ||
+          !(VALID_RUNTIME_AVAILABILITIES as readonly string[]).includes(target.availability)
+        ) {
+          pushError(
+            `${field}.availability`,
+            "manifest.runtimeCompatibility.availability.invalid",
+            `"${field}.availability" must be one of: ${VALID_RUNTIME_AVAILABILITIES.join(", ")}`
+          )
+        }
+        for (const key of ["reason", "entrypoint"] as const) {
+          if (target[key] !== undefined && typeof target[key] !== "string") {
+            pushError(
+              `${field}.${key}`,
+              `manifest.runtimeCompatibility.${key}.invalid_type`,
+              `"${field}.${key}" must be a string`
+            )
+          }
+        }
+      }
+    }
+  }
+
   if (m.permissions && Array.isArray(m.permissions)) {
     for (const perm of m.permissions) {
       if (!VALID_PERMISSIONS.includes(perm as PluginPermission)) {
@@ -1547,6 +1612,90 @@ export function validatePluginManifest(
         )
       }
     }
+  }
+
+  if (Array.isArray(m.quickActions)) {
+    const declaredPermissions = new Set<string>(
+      Array.isArray(m.permissions)
+        ? m.permissions.filter((permission): permission is string => typeof permission === "string")
+        : []
+    )
+    // Derived from the exported vocabularies, never re-typed. A hand-kept copy
+    // meant a new content type could be added to the union and to
+    // `classifySelection`, compile everywhere, and still be rejected here with
+    // no type error anywhere to catch it.
+    const validContentTypes = new Set<string>(CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES)
+    const validOrigins = new Set<string>(CANONICAL_PLUGIN_SELECTION_ORIGINS)
+    const validOutputs = new Set<string>(CANONICAL_PLUGIN_SELECTION_OUTPUTS)
+    ;(m.quickActions as PluginQuickActionDef[]).forEach((action, index) => {
+      const field = `quickActions[${index}]`
+      const selectionSurface = action.surfaces?.includes("selection") === true
+      const selection = action.selection
+      if (selectionSurface && !selection) {
+        pushError(
+          `${field}.selection`,
+          "manifest.quickActions.selection.missing",
+          'A quick action on the "selection" surface requires a selection policy'
+        )
+        return
+      }
+      if (!selectionSurface && selection) {
+        pushError(
+          `${field}.selection`,
+          "manifest.quickActions.selection.surface_missing",
+          'A selection policy requires surfaces to include "selection"'
+        )
+        return
+      }
+      if (!selection) return
+      if (!(CANONICAL_PLUGIN_SELECTION_INPUTS as readonly string[]).includes(selection.input)) {
+        pushError(
+          `${field}.selection.input`,
+          "manifest.quickActions.selection.input.invalid",
+          `Selection input must be one of: ${CANONICAL_PLUGIN_SELECTION_INPUTS.join(", ")}`
+        )
+      }
+      if (!validOutputs.has(selection.output)) {
+        pushError(
+          `${field}.selection.output`,
+          "manifest.quickActions.selection.output.invalid",
+          "Selection output is invalid"
+        )
+      }
+      if (selection.contentTypes?.some((contentType) => !validContentTypes.has(contentType))) {
+        pushError(
+          `${field}.selection.contentTypes`,
+          "manifest.quickActions.selection.content_types.invalid",
+          "Selection contentTypes contains an unknown value"
+        )
+      }
+      if (selection.origins?.some((origin) => !validOrigins.has(origin))) {
+        pushError(
+          `${field}.selection.origins`,
+          "manifest.quickActions.selection.origins.invalid",
+          "Selection origins contains an unknown value"
+        )
+      }
+      if (
+        selection.maxChars !== undefined &&
+        (!Number.isInteger(selection.maxChars) ||
+          selection.maxChars <= 0 ||
+          selection.maxChars > 20_000)
+      ) {
+        pushError(
+          `${field}.selection.maxChars`,
+          "manifest.quickActions.selection.max_chars.invalid",
+          "Selection maxChars must be an integer between 1 and 20,000"
+        )
+      }
+      if (selection.input === "text" && !declaredPermissions.has("selection:read")) {
+        pushError(
+          `${field}.selection.input`,
+          "manifest.quickActions.selection.permission_missing",
+          'Selection text input requires manifest permission "selection:read"'
+        )
+      }
+    })
   }
 
   // Network egress allowlist (Figma-style). Validate shape + require a public

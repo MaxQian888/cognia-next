@@ -39,10 +39,9 @@ import type { UserProviderSettings } from "@cognia/provider-types"
 export function createVectorAPI(pluginId: string): PluginVectorAPI {
   const logger = createPluginSystemLogger(pluginId)
   let store: IVectorStore | null = null
+  let storeFingerprint: string | null = null
 
   const getStore = async (): Promise<IVectorStore> => {
-    if (store) return store
-
     const settings = useSettingsStore.getState()
     const providerSettings = (settings.providerSettings || {}) as Record<
       string,
@@ -60,19 +59,33 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       provider === "native"
         ? undefined
         : (vectorSettings as unknown as Record<string, string | undefined>)[`${provider}ConfigId`]
+    const embeddingModel = vectorSettings.embeddingModel || embeddingDefaults.model
+    const bedrock =
+      embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined
+    const nextFingerprint = JSON.stringify([
+      provider,
+      configId,
+      embeddingProvider,
+      embeddingModel,
+      embeddingDefaults.dimensions,
+      embeddingApiKey,
+      bedrock,
+    ])
+    if (store && storeFingerprint === nextFingerprint) return store
+
     store = createVectorStore({
       provider,
       embeddingConfig: {
         provider: embeddingProvider,
-        model: vectorSettings.embeddingModel || embeddingDefaults.model,
+        model: embeddingModel,
         dimensions: embeddingDefaults.dimensions,
-        bedrock:
-          embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined,
+        bedrock,
       },
       embeddingApiKey,
       configId,
       native: {},
     })
+    storeFingerprint = nextFingerprint
 
     return store
   }

@@ -38,6 +38,25 @@ export interface NodePermissionScope {
   allowedSubprocesses: ReadonlyArray<string>
 }
 
+export type NodePermissionSupport =
+  | { available: true }
+  | { available: false; reason: "network-broker-missing" | "subprocess-broker-missing" }
+
+/** Project the native Node host's currently implemented permission boundary. */
+export function nodePermissionSupport(permission: PluginPermission): NodePermissionSupport {
+  if (
+    permission === "network:fetch" ||
+    permission === "network:upload" ||
+    permission === "network:websocket"
+  ) {
+    return { available: false, reason: "network-broker-missing" }
+  }
+  if (permission === "shell:execute" || permission === "process:spawn") {
+    return { available: false, reason: "subprocess-broker-missing" }
+  }
+  return { available: true }
+}
+
 export type PluginJsHostInvoker = <T>(command: string, args: Record<string, unknown>) => Promise<T>
 
 export interface HostPluginProcess {

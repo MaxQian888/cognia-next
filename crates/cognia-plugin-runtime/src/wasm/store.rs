@@ -44,13 +44,15 @@ pub struct CapabilitySet {
     granted: HashSet<String>,
 }
 
-impl CapabilitySet {
-    pub fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+impl FromIterator<String> for CapabilitySet {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
         Self {
             granted: iter.into_iter().collect(),
         }
     }
+}
 
+impl CapabilitySet {
     pub fn allows(&self, capability: &str) -> bool {
         self.granted.contains(capability)
     }

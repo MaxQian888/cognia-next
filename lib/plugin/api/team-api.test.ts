@@ -26,6 +26,7 @@ jest.mock("@cognia/logging", () => {
     logger: { ...child, child: () => child },
     loggers: {
       agent: { ...child, child: () => child },
+      mcp: { ...child, child: () => child },
       plugin: { ...child, child: () => child },
     },
   }

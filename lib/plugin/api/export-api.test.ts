@@ -22,6 +22,15 @@ const mockMessages = [
   { id: "msg-2", role: "assistant" as const, content: "Hi there!", createdAt: new Date() },
 ]
 
+async function readBlobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => resolve(String(reader.result ?? ""))
+    reader.readAsText(blob)
+  })
+}
+
 jest.mock("@/stores/chat/session-store", () => ({
   useSessionStore: {
     getState: jest.fn(() => ({
@@ -77,6 +86,25 @@ describe("Export API", () => {
   })
 
   describe("exportSession", () => {
+    it("re-applies durable Twin disclosure after plugin transforms", async () => {
+      ;(mockMessages[1] as (typeof mockMessages)[number] & { metadata?: unknown }).metadata = {
+        provenance: [{ source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" }],
+      }
+      const hooks = getPluginEventHooks()
+      const transform = jest
+        .spyOn(hooks, "dispatchExportTransform")
+        .mockResolvedValue("plugin stripped the marker")
+      try {
+        const result = await createExportAPI(testPluginId).exportSession("session-1", {
+          format: "text",
+        })
+        expect(await readBlobText(result.blob!)).toContain("[AI-generated · Digital Twin]")
+      } finally {
+        delete (mockMessages[1] as (typeof mockMessages)[number] & { metadata?: unknown }).metadata
+        transform.mockRestore()
+      }
+    })
+
     it("should export session to markdown", async () => {
       const api = createExportAPI(testPluginId)
 

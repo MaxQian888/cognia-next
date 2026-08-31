@@ -43,6 +43,7 @@ interface DepsConfig {
   consentAnswer?: boolean
   /** Called on handleActivationEvent — lets a test flip a plugin's status. */
   onActivationEvent?: (event: string) => void
+  sandboxRefs?: Record<string, string>
 }
 
 function makeTool(overrides?: Partial<PluginTool>): PluginTool {
@@ -124,6 +125,7 @@ function makeDeps(config: DepsConfig = {}): InvokePluginToolDeps & {
       },
     }),
     getBroker: () => broker,
+    resolveSandboxRuntimeRef: (sessionId: string) => config.sandboxRefs?.[sessionId],
   }
 }
 
@@ -216,7 +218,12 @@ describe("invokePluginTool", () => {
 
   it("threads session, message, sandbox runtime, and AbortSignal into the tool context", async () => {
     const execute = jest.fn().mockResolvedValue("ok")
-    __setInvokePluginToolDepsForTesting(makeDeps({ tools: [makeTool({ execute })] }))
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        tools: [makeTool({ execute })],
+        sandboxRefs: { "sess-1": "sandbox-runtime:one" },
+      })
+    )
     const controller = new AbortController()
 
     await invokePluginTool(
@@ -243,6 +250,55 @@ describe("invokePluginTool", () => {
     const forwardedSignal = execute.mock.calls[0][1].signal as AbortSignal
     controller.abort()
     expect(forwardedSignal.aborted).toBe(true)
+  })
+
+  it("recovers a missing runtime ref for a session-bearing invocation", async () => {
+    const execute = jest.fn().mockResolvedValue("ok")
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        tools: [makeTool({ execute })],
+        sandboxRefs: { "sess-1": "sandbox-runtime:recovered" },
+      })
+    )
+
+    await invokePluginTool("plug-a", "demo_tool", {}, { sessionId: "sess-1" })
+
+    expect(execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ sandboxRuntimeRef: "sandbox-runtime:recovered" })
+    )
+  })
+
+  it("replaces a stale caller ref with the session's active runtime generation", async () => {
+    const execute = jest.fn().mockResolvedValue("ok")
+    __setInvokePluginToolDepsForTesting(
+      makeDeps({
+        tools: [makeTool({ execute })],
+        sandboxRefs: { "sess-1": "sandbox-runtime:current" },
+      })
+    )
+
+    await invokePluginTool(
+      "plug-a",
+      "demo_tool",
+      {},
+      { sessionId: "sess-1", sandboxRuntimeRef: "sandbox-runtime:retired" }
+    )
+
+    expect(execute).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ sandboxRuntimeRef: "sandbox-runtime:current" })
+    )
+  })
+
+  it("refuses a session-bearing invocation when its runtime ref is missing", async () => {
+    const execute = jest.fn().mockResolvedValue("should not run")
+    __setInvokePluginToolDepsForTesting(makeDeps({ tools: [makeTool({ execute })] }))
+
+    await expect(
+      invokePluginTool("plug-a", "demo_tool", {}, { sessionId: "released-session" })
+    ).rejects.toMatchObject({ code: "placement-unavailable" })
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it("defaults config to {} when the plugin has none", async () => {

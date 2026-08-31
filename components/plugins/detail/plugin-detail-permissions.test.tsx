@@ -107,6 +107,26 @@ describe("PluginDetailPermissions", () => {
     expect(screen.getAllByText("shell:execute").length).toBeGreaterThan(0)
   })
 
+  it("marks unsupported Node network and subprocess grants unavailable", () => {
+    mockPlugin = {
+      ...makePlugin(["filesystem:read", "network:fetch", "process:spawn"]),
+      manifest: {
+        id: "alpha",
+        permissions: ["filesystem:read", "network:fetch", "process:spawn"],
+        runtimeCompatibility: { tauri: { availability: "supported", entrypoint: "node" } },
+      },
+    }
+    render(<PluginDetailPermissions pluginId="alpha" />)
+
+    expect(screen.getByText("nodeNetworkUnavailable")).toBeInTheDocument()
+    expect(screen.getByText("nodeSubprocessUnavailable")).toBeInTheDocument()
+    expect(
+      screen
+        .getAllByRole<HTMLButtonElement>("button", { name: "grant" })
+        .filter((button) => button.disabled)
+    ).toHaveLength(2)
+  })
+
   it("mounts the approved-binaries card so durable grants are revocable", () => {
     // A permanent binary grant the user cannot see or withdraw is its own
     // security problem; the ledger's only reader has to be reachable.

@@ -6095,7 +6095,11 @@ export class PluginManager {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
     if (!plugin) return
-    for (const tool of buildWasmToolDefinitions(plugin.manifest)) {
+    const generation = this.loader.getRuntimeGeneration(pluginId)
+    if (!generation) {
+      throw new Error(`WASM plugin ${pluginId} activated without a loaded runtime generation`)
+    }
+    for (const tool of buildWasmToolDefinitions(plugin.manifest, generation)) {
       this.registry.registerTool(pluginId, tool)
       store.registerPluginTool(pluginId, tool)
     }
@@ -6105,7 +6109,7 @@ export class PluginManager {
     // teardown via `teardownPluginWorkflowRegistrations`), so a disabled WASM
     // plugin's nodes disappear cleanly. Without this the Rust dispatch + guest
     // impl were unreachable (`No executor registered for <kind>`).
-    const nodeDefs = buildWasmNodeDefs(plugin.manifest)
+    const nodeDefs = buildWasmNodeDefs(plugin.manifest, generation)
     if (nodeDefs.length > 0) {
       const workflowApi = createWorkflowAPI(pluginId)
       for (const def of nodeDefs) {

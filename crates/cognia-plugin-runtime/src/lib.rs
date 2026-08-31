@@ -9,13 +9,13 @@
 //!
 //! # Module layout
 //!
-//! - [`error`]       — `PluginError` + `Result<T>`.
-//! - [`lifecycle`]   — load / enable / disable / unload / install / uninstall /
-//!                     get_all / runtime_snapshot / set_state / get_state.
+//! - [`error`] — `PluginError` + `Result<T>`.
+//! - [`lifecycle`] — load / enable / disable / unload / install / uninstall /
+//!   get_all / runtime_snapshot / set_state / get_state.
 //! - [`permissions`] — grant / list / revoke.
-//! - [`api_bridge`]  — generic `plugin_api_invoke` / `plugin_api_batch_invoke`
-//!                     pass-through.
-//! - [`commands`]    — re-exports for `tauri::generate_handler!`.
+//! - [`api_bridge`] — generic `plugin_api_invoke` / `plugin_api_batch_invoke`
+//!   pass-through.
+//! - [`commands`] — re-exports for `tauri::generate_handler!`.
 //!
 //! # State model
 //!

@@ -2268,11 +2268,24 @@ describe("PluginManager", () => {
       const loadSpy = jest.spyOn(
         (
           manager as unknown as {
-            loader: { load(plugin: Plugin): Promise<unknown> }
+            loader: {
+              load(plugin: Plugin): Promise<unknown>
+              getRuntimeGeneration(pluginId: string): string | undefined
+            }
           }
         ).loader,
         "load"
       )
+      jest
+        .spyOn(
+          (
+            manager as unknown as {
+              loader: { getRuntimeGeneration(pluginId: string): string | undefined }
+            }
+          ).loader,
+          "getRuntimeGeneration"
+        )
+        .mockReturnValue("wasm-gen-1")
       await manager.enablePlugin("demo.wasm.tools")
 
       // Permission mirroring goes through the shared transport (see
@@ -2294,6 +2307,50 @@ describe("PluginManager", () => {
         expect.objectContaining({ name: "demo.wasm.tools:do_thing" })
       )
       expect(manager.getRegistry().getTool("demo.wasm.tools:do_thing")).toBeDefined()
+    })
+
+    it("fails WASM activation projection when the loaded runtime has no generation", () => {
+      const pluginId = "demo.wasm.missing-generation"
+      const store = {
+        plugins: {
+          [pluginId]: {
+            manifest: {
+              id: pluginId,
+              name: "Missing generation",
+              version: "0.1.0",
+              description: "x",
+              type: "wasm",
+              capabilities: ["tools"],
+              wasmMain: "main.wasm",
+              wasm: { apiVersion: "0.1.0" },
+              permissions: [],
+              tools: [
+                {
+                  name: "do_thing",
+                  description: "Does a thing",
+                  parametersSchema: { type: "object" },
+                },
+              ],
+            },
+            status: "loaded",
+            source: "local",
+            path: `/plugins/${pluginId}`,
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        registerPluginTool: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "" })
+
+      expect(() =>
+        (
+          manager as unknown as {
+            registerWasmTools(id: string): void
+          }
+        ).registerWasmTools(pluginId)
+      ).toThrow(`WASM plugin ${pluginId} activated without a loaded runtime generation`)
+      expect(store.registerPluginTool).not.toHaveBeenCalled()
     })
   })
 
@@ -4762,6 +4819,7 @@ describe("PluginManager", () => {
           loader: {
             load: (plugin: Plugin) => Promise<unknown>
             isLoaded: (pluginId: string) => boolean
+            getRuntimeGeneration: (pluginId: string) => string | undefined
           }
         }
       ).loader
@@ -4770,6 +4828,7 @@ describe("PluginManager", () => {
         activate: jest.fn(),
       }))
       loader.isLoaded = jest.fn(() => false)
+      loader.getRuntimeGeneration = jest.fn(() => "wasm-test-generation")
     }
 
     it("loadPythonPlugin throws PythonRuntimeDisabledError when enablePython is off", async () => {
@@ -5422,6 +5481,7 @@ describe("PluginManager", () => {
           loader: {
             load: jest.Mock
             isLoaded: (pluginId: string) => boolean
+            getRuntimeGeneration: (pluginId: string) => string | undefined
           }
         }
       ).loader
@@ -5880,6 +5940,7 @@ describe("PluginManager", () => {
         activate: jest.fn(),
       }))
       loader.isLoaded = jest.fn(() => false)
+      loader.getRuntimeGeneration = jest.fn(() => "wasm-test-generation")
       return loader
     }
 

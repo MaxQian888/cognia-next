@@ -432,7 +432,7 @@ fn install_prebuilt_wasm_from_git(
     if let Some(b) = branch {
         git.arg("--branch").arg(b);
     }
-    git.arg("--").arg(&repo_url).arg(&staging_path);
+    git.arg("--").arg(repo_url).arg(&staging_path);
     let clone = git
         .output()
         .map_err(|e| format!("git clone (is git installed?): {e}"))?;

@@ -34,7 +34,7 @@ pub fn check_spawn(
 ) -> ProcessDecision {
     // Class 1: inside the extension's own dir.
     let extension_dir = extension_install_dir.join(extension_id);
-    if normalise(command).starts_with(&normalise(&extension_dir)) {
+    if normalise(command).starts_with(normalise(&extension_dir)) {
         return ProcessDecision::Allow;
     }
     // Class 2: explicitly granted.

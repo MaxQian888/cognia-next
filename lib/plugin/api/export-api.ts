@@ -24,6 +24,9 @@ import type {
 } from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+import { resolveSessionTwinProvenance } from "@/lib/twin/export-provenance"
+import { enforceExportDisclosure } from "@/lib/export/disclosure"
+import type { SingleExportFormat } from "@/lib/export/single"
 
 /**
  * Normalise a plugin-facing `Session` into the persistence-shaped
@@ -250,6 +253,15 @@ async function performExport(
   let mimeType: string
   let extension: string
 
+  // Resolve message-backed provenance before any exporter or plugin transform.
+  // This keeps historical Twin attribution stable after character rebinding.
+  const writerSession = data.session ? toChatSession(data.session) : null
+  const writerMessages =
+    data.session && data.messages ? toStoredMessages(data.messages, data.session.id) : null
+  const provenance = writerSession
+    ? await resolveSessionTwinProvenance(writerSession, writerMessages ?? [])
+    : undefined
+
   // Check for custom exporter first
   const requestedExporterId = String(format).includes(":")
     ? String(format)
@@ -261,8 +273,29 @@ async function performExport(
   if (customExporter) {
     try {
       const result = await customExporter.export(data)
+      const disclosureFormat: SingleExportFormat = customExporter.mimeType.includes("html")
+        ? "html"
+        : customExporter.mimeType.includes("json")
+          ? "json"
+          : "text"
+      let payload: string | Blob = result
+      if (provenance?.length) {
+        const textual =
+          typeof result === "string" ||
+          customExporter.mimeType.startsWith("text/") ||
+          customExporter.mimeType.includes("json") ||
+          customExporter.mimeType.includes("html")
+        if (!textual) {
+          return {
+            success: false,
+            error: "Custom binary exporters cannot safely disclose Digital Twin provenance",
+          }
+        }
+        const text = typeof result === "string" ? result : await result.text()
+        payload = enforceExportDisclosure(text, disclosureFormat, provenance)
+      }
       const blob =
-        result instanceof Blob ? result : new Blob([result], { type: customExporter.mimeType })
+        payload instanceof Blob ? payload : new Blob([payload], { type: customExporter.mimeType })
 
       return {
         success: true,
@@ -279,12 +312,6 @@ async function performExport(
       }
     }
   }
-
-  // Built-in formats — normalise the plugin-shaped Session/UIMessage
-  // into the writer-shaped ChatSession/StoredMessage at the boundary.
-  const writerSession = data.session ? toChatSession(data.session) : null
-  const writerMessages =
-    data.session && data.messages ? toStoredMessages(data.messages, data.session.id) : null
 
   switch (format) {
     case "markdown":
@@ -362,7 +389,10 @@ async function performExport(
   // when no plugin transforms it.
   const { getPluginEventHooks } = await import("../messaging/hooks-system")
   const transformed = await getPluginEventHooks().dispatchExportTransform(content, format)
-  const blob = new Blob([transformed], { type: mimeType })
+  const disclosureFormat: SingleExportFormat =
+    format === "animated-html" ? "animated" : (format as SingleExportFormat)
+  const disclosed = enforceExportDisclosure(transformed, disclosureFormat, provenance)
+  const blob = new Blob([disclosed], { type: mimeType })
   const filename = generateExportFilename(
     data.session?.title || data.project?.name || "export",
     extension

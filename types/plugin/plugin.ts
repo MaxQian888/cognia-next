@@ -91,6 +91,7 @@ import type { PluginToolRouteDef } from "./plugin-tool-route"
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
 import type { PluginSurfaceFormFactor } from "./plugin-surface"
 import type { PluginIconName } from "./plugin-icon"
+import type { PluginWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
@@ -253,9 +254,19 @@ export type PluginSource =
   | "git" // Cloned from git repository
   | "dev" // Development mode (hot reload enabled)
 
-export type PluginRuntimeProfile = "browser" | "tauri" | "mobile" | "headless"
+/**
+ * The runtime profiles a manifest may declare compatibility for.
+ *
+ * Exported as a value, not just a type, because `validatePluginManifest` has to
+ * check a parsed manifest at runtime. Hand-keeping a second literal list there
+ * meant a profile could be added to the type, compile everywhere, and still be
+ * rejected by the validator with no type error to catch it.
+ */
+export const CANONICAL_PLUGIN_RUNTIME_PROFILES = ["browser", "tauri", "mobile", "headless"] as const
+export type PluginRuntimeProfile = (typeof CANONICAL_PLUGIN_RUNTIME_PROFILES)[number]
 
-export type PluginRuntimeAvailability = "supported" | "degraded" | "blocked"
+export const CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES = ["supported", "degraded", "blocked"] as const
+export type PluginRuntimeAvailability = (typeof CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES)[number]
 
 export interface PluginRuntimeCompatibilityTarget {
   availability: PluginRuntimeAvailability
@@ -1669,6 +1680,17 @@ export interface PluginTool {
 }
 
 /**
+ * Tool shape accepted from a plugin during activation.
+ *
+ * Ownership is assigned by the host from the activated context. `pluginId`
+ * remains optional for source compatibility with older plugins, but the host
+ * never trusts or persists the caller-provided value.
+ */
+export type PluginToolRegistration = Omit<PluginTool, "pluginId"> & {
+  pluginId?: string
+}
+
+/**
  * Context passed to tool execution
  */
 export interface PluginToolContext {
@@ -1748,8 +1770,82 @@ export interface PluginManifestCommandDef {
 // Quick Actions
 // =============================================================================
 
-/** Surfaces a quick action can appear on. Defaults to all three. */
-export type PluginQuickActionSurface = "palette" | "composer" | "tray"
+/**
+ * Surfaces a quick action can appear on.
+ *
+ * `selection` is deliberately opt-in. Omitting `surfaces` preserves the
+ * historical palette/composer/tray default so installing a newer host never
+ * exposes an older plugin to selected desktop text.
+ */
+export type PluginQuickActionSurface = "palette" | "composer" | "tray" | "selection"
+
+/**
+ * Selection vocabularies, exported as values so the manifest validator can
+ * check against the same list the types are built from. `classifySelection`
+ * derives its own content-type union from this one for the same reason.
+ */
+export const CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES = [
+  "url",
+  "email",
+  "code",
+  "measurement",
+  "foreignLanguage",
+  "term",
+] as const
+export type PluginSelectionContentType = (typeof CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES)[number]
+
+export const CANONICAL_PLUGIN_SELECTION_ORIGINS = ["accessibility", "clipboard", "ocr"] as const
+export type PluginSelectionOrigin = (typeof CANONICAL_PLUGIN_SELECTION_ORIGINS)[number]
+
+export const CANONICAL_PLUGIN_SELECTION_INPUTS = ["metadata", "text"] as const
+export type PluginSelectionInput = (typeof CANONICAL_PLUGIN_SELECTION_INPUTS)[number]
+
+export const CANONICAL_PLUGIN_SELECTION_OUTPUTS = [
+  "none",
+  "preview",
+  "copy",
+  "replace",
+  "status",
+] as const
+export type PluginSelectionOutput = (typeof CANONICAL_PLUGIN_SELECTION_OUTPUTS)[number]
+
+export type PluginSelectionReplaceCapability = "none" | "paste"
+
+/** Selection-specific eligibility and output policy for a quick action. */
+export interface PluginSelectionActionSpec {
+  input: PluginSelectionInput
+  contentTypes?: PluginSelectionContentType[]
+  origins?: PluginSelectionOrigin[]
+  maxChars?: number
+  output: PluginSelectionOutput
+}
+
+/** Immutable host-owned snapshot supplied to a selection quick action. */
+export interface PluginSelectionQuickActionContext {
+  candidateId: string
+  /** Present only when `selection.input` is `text` and consent succeeded. */
+  text?: string
+  sourceApp: string
+  sourceTitle?: string
+  /** Sanitized http(s) URL with credentials, query, and fragment removed. */
+  sourceUrl?: string
+  origin: PluginSelectionOrigin
+  capturedAt: number
+  truncated: boolean
+  contentTypes: PluginSelectionContentType[]
+  editable: boolean
+  replaceCapability: PluginSelectionReplaceCapability
+}
+
+export type PluginQuickActionInvocation =
+  | { surface: "palette" | "composer" | "tray" }
+  | { surface: "selection"; selection: PluginSelectionQuickActionContext }
+
+export type PluginQuickActionResult =
+  | void
+  | { kind: "text"; text: string }
+  | { kind: "variants"; variants: string[] }
+  | { kind: "status"; message?: string }
 
 /**
  * Declarative quick-action contribution (manifest `quickActions[]`).
@@ -1787,12 +1883,16 @@ export interface PluginQuickActionDef {
   slash?: string
   /** Surfaces to appear on. Defaults to all three. */
   surfaces?: PluginQuickActionSurface[]
+  /** Required when `surfaces` contains `selection`; ignored nowhere else. */
+  selection?: PluginSelectionActionSpec
 }
 
 /** Imperative registration shape — adds an inline handler option. */
 export interface PluginQuickActionInput extends PluginQuickActionDef {
   /** Inline handler; takes precedence over `command` / `slash`. */
-  run?: () => void | Promise<void>
+  run?: (
+    invocation?: PluginQuickActionInvocation
+  ) => PluginQuickActionResult | Promise<PluginQuickActionResult>
 }
 
 /**
@@ -2361,8 +2461,17 @@ export interface PluginHostContextAPI {
   share: import("@/lib/plugin/api/share-api").PluginShareAPI
   backup: import("@/lib/plugin/api/backup-api").PluginBackupAPI
   automation: import("@/lib/plugin/api/automation-api").PluginAutomationAPI
+  browser: import("@/lib/plugin/api/browser-api").PluginBrowserAPI
+  characterPacks: import("@/lib/plugin/api/character-packs-api").PluginCharacterPacksAPI
+  sandbox: import("@/lib/plugin/api/sandbox-api").PluginSandboxAPI
+  recorder: import("@/lib/plugin/api/recorder-api").PluginRecorderAPI
+  securityScans: import("@/lib/plugin/api/security-scans-api").PluginSecurityScansAPI
+  eval: import("@/lib/plugin/api/eval-api").PluginEvalAPI
+  userScheduler: import("@/lib/plugin/api/scheduler-tasks").PluginUserSchedulerAPI
   companion: import("@/lib/plugin/api/companion-api").PluginCompanionAPI
   pet: import("@/lib/plugin/api/pet-api").PluginPetAPI
+  resources: import("@/lib/plugin/api/resources-api").PluginResourcesAPI
+  sites: import("@/lib/plugin/api/sites").PluginSitesAPI
 }
 
 /**
@@ -2385,7 +2494,7 @@ export type PluginContext = Omit<
  * prefixes `kind` with `<pluginId>.` automatically; plugin authors should
  * not include the prefix themselves.
  */
-export interface PluginWorkflowAPI {
+export interface PluginWorkflowAPI extends PluginWorkflowAuthorAPI {
   /**
    * Contribute a custom node executor. The kind is auto-prefixed with the
    * plugin id, so a plugin with id `acme.fetch` registering kind
@@ -2531,7 +2640,7 @@ export interface PluginA2UIAPI {
 }
 
 export interface PluginAgentAPI {
-  registerTool: (tool: PluginTool) => () => void
+  registerTool: (tool: PluginToolRegistration) => () => void
   unregisterTool: (name: string) => void
   registerMode: (mode: AgentModeConfig) => () => void
   unregisterMode: (id: string) => void
@@ -2543,6 +2652,10 @@ export interface PluginAgentAPI {
    * `canUseTool` permission gate. See ADR-0026 §Agent-SDK.
    */
   run: (prompt: string, options?: PluginAgentRunOptions) => Promise<PluginAgentRunResult>
+  /** Run a full tool-enabled character turn pinned to a working directory. */
+  runCharacterTurn: (
+    request: import("@/lib/plugin/api/agent-turn").PluginAgentTurnRequest
+  ) => Promise<import("@/lib/plugin/api/agent-turn").PluginAgentTurnResult>
   /**
    * Run one agent turn as a live async-iterable of typed events (`text-delta`
    * / `tool-call` / `tool-result` / `result`). The handle also exposes a
@@ -3623,6 +3736,11 @@ export interface PluginSessionAPI {
 
   /** Create a new session */
   createSession: (options?: CreateSessionInput) => Promise<Session>
+
+  /** Create, seed, and activate a host-equivalent conversation. */
+  startSeededSession: (
+    input?: import("@/lib/plugin/api/session-seed").PluginSeededSessionInput
+  ) => Promise<import("@/lib/plugin/api/session-seed").PluginSeededSessionResult>
 
   /** Update a session */
   updateSession: (id: string, updates: UpdateSessionInput) => Promise<void>

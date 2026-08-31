@@ -11,7 +11,6 @@ import {
   clearWasmCapabilityGrant,
   getGrantedPreopens,
   reconcileWasmGrantLedgerWithManifest,
-  verifyPreopenAllowedForCall,
 } from "./wasm-grant"
 import { listWasmGrantRecords } from "@/lib/db/wasm-grant-ledger"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -200,22 +199,5 @@ describe("reconcileWasmGrantLedgerWithManifest", () => {
     } finally {
       warn.mockRestore()
     }
-  })
-})
-
-describe("verifyPreopenAllowedForCall", () => {
-  it("denies call-time access when the ledger no longer grants a loaded preopen", async () => {
-    await applyWasmCapabilityGrant({
-      pluginId: "demo.wasm",
-      grantedPermissions: [],
-      grantedPreopens: ["/allowed"],
-    })
-    await expect(verifyPreopenAllowedForCall("demo.wasm", ["/allowed"])).resolves.toBeUndefined()
-
-    await clearWasmCapabilityGrant("demo.wasm")
-
-    await expect(verifyPreopenAllowedForCall("demo.wasm", ["/allowed"])).rejects.toThrow(
-      /preopen access denied/
-    )
   })
 })

@@ -171,7 +171,7 @@ try {
       'import { definePlugin as invalidHookExport } from "@cognia/plugin-sdk/hooks";',
       'const manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };',
       "const probe: [EventFilter?, PluginHooks?, PluginPermission?, ExtensionPoint?] = [];",
-      'const contractProbe: ["1.1.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
+      'const contractProbe: ["1.2.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
       'defineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });',
       "void manifest; void probe; void contractProbe; void invalidHookExport;",
       "",
@@ -199,6 +199,13 @@ try {
       "NodeNext",
       "--target",
       "ES2022",
+      // The isolated consumer intentionally links unpublished provider
+      // workspaces. Their peer graph can contain a second physical copy of a
+      // declaration-only dependency (notably ai's global telemetry type).
+      // Check author code against the packed surface without re-validating
+      // third-party declaration internals; the real reference-plugin compile
+      // below uses the same boundary.
+      "--skipLibCheck",
       "--types",
       "node,react",
       "index.ts",

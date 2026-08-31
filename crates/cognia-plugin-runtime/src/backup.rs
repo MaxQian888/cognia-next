@@ -60,7 +60,7 @@ pub async fn plugin_backup_create_for_state(
     if !plugin_dir.exists() {
         return Err(PluginError::NotFound(plugin_id));
     }
-    let backups = ensure_backups_dir(&state)?;
+    let backups = ensure_backups_dir(state)?;
     let timestamp = Utc::now().format("%Y%m%dT%H%M%S").to_string();
     let backup_id = format!("{plugin_id}-{timestamp}");
     let archive_path = backups.join(format!("{backup_id}.tar.gz"));
@@ -118,7 +118,7 @@ pub async fn plugin_backup_restore_for_state(
             "backup_id must be a plugin-scoped identifier".into(),
         ));
     }
-    let archive_path = backups_dir(&state).join(format!("{backup_id}.tar.gz"));
+    let archive_path = backups_dir(state).join(format!("{backup_id}.tar.gz"));
     if !archive_path.exists() {
         return Err(PluginError::NotFound(format!("backup {backup_id}")));
     }
@@ -234,7 +234,7 @@ pub async fn plugin_backup_delete_for_state(
             "backup_id must be a plugin-scoped identifier".into(),
         ));
     }
-    let archive_path = backups_dir(&state).join(format!("{backup_id}.tar.gz"));
+    let archive_path = backups_dir(state).join(format!("{backup_id}.tar.gz"));
     if archive_path.exists() {
         fs::remove_file(&archive_path)?;
     }

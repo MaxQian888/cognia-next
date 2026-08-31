@@ -104,8 +104,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_bad_temperature() {
-        let mut o = GenerateOptions::default();
-        o.temperature = Some(-1.0);
+        let mut o = GenerateOptions {
+            temperature: Some(-1.0),
+            ..GenerateOptions::default()
+        };
         assert!(validate("hi", &o).unwrap_err().contains("temperature"));
         o.temperature = Some(3.5);
         assert!(validate("hi", &o).unwrap_err().contains("temperature"));
@@ -115,8 +117,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_bad_max_tokens() {
-        let mut o = GenerateOptions::default();
-        o.max_tokens = Some(0);
+        let mut o = GenerateOptions {
+            max_tokens: Some(0),
+            ..GenerateOptions::default()
+        };
         assert!(validate("hi", &o).is_err());
         o.max_tokens = Some(200_000);
         assert!(validate("hi", &o).is_err());

@@ -32,6 +32,7 @@ import {
 import type { PluginWorkspaceBackendRegistration } from "@/types/plugin/plugin-workspace-backend"
 import type { WorkspaceWalkOptions, WorkspaceWalkResult } from "@/lib/files/workspace-fs"
 import { allRootPaths } from "@/lib/workspace/roots"
+import { getActiveWorkspaceRoot } from "./workspace-root"
 import {
   acquireWorkspace,
   changedSince,
@@ -46,6 +47,8 @@ import {
 const ownedByPlugin = new Map<string, Set<string>>()
 
 export interface PluginWorkspaceAPI {
+  /** Absolute primary root of the active project, when one is open. */
+  getActiveRoot(): string | undefined
   /**
    * Register a workspace backend. The given id is prefixed with the plugin
    * id to avoid collisions across plugins. Throws if the same plugin tries
@@ -109,6 +112,7 @@ export interface PluginWorkspaceAPI {
 export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
   const logger = createPluginSystemLogger(pluginId)
   return {
+    getActiveRoot: getActiveWorkspaceRoot,
     registerBackend({ id, label, description, backend }) {
       const prefixed = `${pluginId}:${id}`
       const owned = ownedByPlugin.get(pluginId) ?? new Set<string>()

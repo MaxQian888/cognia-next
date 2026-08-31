@@ -17,6 +17,10 @@ import type {
   ExternalAgentSession,
 } from "@/types/agent/external-agent"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 class StubAdapter extends BaseProtocolAdapter {
   readonly protocol = "stub"
@@ -62,9 +66,11 @@ const MANIFEST = {
 } as unknown as PluginManifest
 
 describe("external-agent-adapters-bridge python backend", () => {
+  beforeEach(() => bindPythonRuntimeGeneration("wire-plugin", "generation-1"))
   afterEach(() => {
     unregisterExternalAgentAdaptersForPlugin("wire-plugin")
     __resetPluginProtocolAdaptersForTesting()
+    __resetPythonRuntimeGenerationsForTesting()
   })
 
   it("registers a python-backed adapter whose isConnected() stays synchronous", async () => {

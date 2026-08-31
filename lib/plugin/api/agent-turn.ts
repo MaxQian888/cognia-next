@@ -24,38 +24,17 @@
  * character list. Pass `"bypassPermissions"` explicitly, per call.
  */
 
-import type { SendOptions } from "@cognia/agent-config-types"
+import {
+  PluginAgentTurnError,
+  type PluginAgentTurnRequest,
+  type PluginAgentTurnResult,
+} from "@cognia/plugin-sdk/api/agent-turn"
 
-export interface PluginAgentTurnRequest {
-  /** Character whose persona, tools and model the turn runs with. */
-  characterId: string
-  /** The instruction for this turn. */
-  prompt: string
-  /**
-   * Absolute path the turn runs in. Pinned onto the session, which is what
-   * `resolveSendOptions` reads into `SendOptions.cwd`.
-   */
-  cwd: string
-  /**
-   * Reuse this session when it exists. Otherwise the character's most recent
-   * session is reused — in-run continuity — and one is created if it has none.
-   */
-  sessionId?: string
-  /** Turn timeout. Omitted means the runner's own default. */
-  timeoutMs?: number
-  signal?: AbortSignal
-  /** See the module docblock. Omitted keeps the character's own posture. */
-  permissionMode?: SendOptions["permissionMode"]
-}
-
-export interface PluginAgentTurnResult {
-  /** The session the turn ran in — reused or created. */
-  sessionId: string
-  /** The assistant's reply text. */
-  text: string
-  /** Id of the captured assistant message, when one was persisted. */
-  messageId?: string
-}
+export {
+  PluginAgentTurnError,
+  type PluginAgentTurnRequest,
+  type PluginAgentTurnResult,
+} from "@cognia/plugin-sdk/api/agent-turn"
 
 /**
  * Resolve-or-create the session for `characterId`, pinned to `cwd`.
@@ -87,13 +66,6 @@ async function ensureSession(
     workingDir: cwd,
   })
   return created.id
-}
-
-export class PluginAgentTurnError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "PluginAgentTurnError"
-  }
 }
 
 export async function runPluginAgentTurn(

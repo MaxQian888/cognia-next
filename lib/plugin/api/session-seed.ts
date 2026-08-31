@@ -19,25 +19,15 @@
  */
 
 import type { UIMessage } from "ai"
+import type {
+  PluginSeededSessionInput,
+  PluginSeededSessionResult,
+} from "@cognia/plugin-sdk/api/agent-turn"
 
-export interface PluginSeededSessionInput {
-  title?: string
-  /** Persona the conversation runs as. */
-  characterId?: string
-  /** Workspace the conversation belongs to; omitted means the active one. */
-  projectId?: string
-  /** Absolute path the conversation's turns run in. */
-  workingDir?: string
-  /**
-   * First user message. Persisted into the transcript before the session is
-   * shown, so the conversation opens with the instruction already in it.
-   */
-  seedUserMessage?: string
-}
-
-export interface PluginSeededSessionResult {
-  sessionId: string
-}
+export type {
+  PluginSeededSessionInput,
+  PluginSeededSessionResult,
+} from "@cognia/plugin-sdk/api/agent-turn"
 
 export async function startSeededSession(
   input: PluginSeededSessionInput = {}

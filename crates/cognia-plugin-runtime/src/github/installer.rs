@@ -87,6 +87,7 @@ pub(crate) struct PartialManifest {
 ///   - `owner/repo@ref/sub/dir`
 ///   - `https://github.com/owner/repo`
 ///   - `https://github.com/owner/repo/tree/<ref>/<sub...>`
+///
 /// Trailing `.git` on the repo token is stripped.
 pub fn parse_github_ref(input: &str) -> Result<GithubRef, String> {
     let mut s = input.trim();

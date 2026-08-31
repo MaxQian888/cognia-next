@@ -35,7 +35,6 @@ pub fn engine() -> &'static Engine {
 fn build_engine() -> wasmtime::Result<Engine> {
     let mut cfg = Config::new();
     cfg.wasm_component_model(true);
-    cfg.async_support(true);
     cfg.epoch_interruption(true);
     Engine::new(&cfg)
 }

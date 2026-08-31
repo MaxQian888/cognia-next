@@ -214,6 +214,10 @@ pub fn plugin_python_runtime_info_for_state(state: &PythonRuntimeState) -> Pytho
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri command parameters mirror the Python plugin load contract"
+)]
 pub async fn plugin_python_load(
     state: State<'_, PythonRuntimeState>,
     plugins: State<'_, PluginRuntimeState>,
@@ -2738,8 +2742,8 @@ def rewrite(payload):
         assert_eq!(json["runtime_id"], "python");
 
         let host = rendered_host_script();
-        assert!(host.contains(r#""sdk_version": "0.2.0""#));
-        assert!(host.contains(r#""contract_version": "1.1.0""#));
+        assert!(host.contains(r#""sdk_version": "0.3.0""#));
+        assert!(host.contains(r#""contract_version": "1.2.0""#));
         assert!(!host.contains("__COGNIA_"));
     }
 

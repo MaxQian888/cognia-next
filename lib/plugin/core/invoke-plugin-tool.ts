@@ -35,6 +35,7 @@ import type {
   PluginToolContext,
 } from "@/types/plugin"
 import { TimeoutError } from "@cognia/primitives"
+import { SandboxRuntimeError } from "@cognia/plugin-sdk/api/sandbox"
 
 import { ensureBootCapability, getBootProfile } from "@/lib/boot/capabilities"
 import { breakerKey, getOrCreateBreaker } from "@/lib/plugin/resilience/breaker-registry"
@@ -137,6 +138,7 @@ export interface InvokePluginToolDeps {
       reason?: string
     }) => Promise<boolean>
   }
+  resolveSandboxRuntimeRef: (sessionId: string) => string | undefined
 }
 
 let depsOverride: InvokePluginToolDeps | null = null
@@ -156,17 +158,23 @@ export function __setInvokePluginToolDepsForTesting(deps: InvokePluginToolDeps |
  * error type or option interfaces (same rationale as the IPC handler).
  */
 async function defaultDeps(): Promise<InvokePluginToolDeps> {
-  const [{ getPluginManager }, { getPermissionGuard }, { getPluginConsentBroker }] =
-    await Promise.all([
-      import("@/lib/plugin/core/manager"),
-      import("@/lib/plugin/security/permission-guard"),
-      import("@/lib/plugin/security/consent-broker"),
-    ])
+  const [
+    { getPluginManager },
+    { getPermissionGuard },
+    { getPluginConsentBroker },
+    { sandboxSessionRuntime },
+  ] = await Promise.all([
+    import("@/lib/plugin/core/manager"),
+    import("@/lib/plugin/security/permission-guard"),
+    import("@/lib/plugin/security/consent-broker"),
+    import("@/lib/sandbox/session-runtime"),
+  ])
   return {
     getManager: () => getPluginManager(),
     // Pass the singleton getters through directly — no wrapper lambdas.
     getGuard: getPermissionGuard,
     getBroker: getPluginConsentBroker,
+    resolveSandboxRuntimeRef: (sessionId) => sandboxSessionRuntime.activeRefForSession(sessionId),
   }
 }
 
@@ -309,10 +317,24 @@ export async function invokePluginTool(
     throw abortedError(pluginId, toolName, options.signal.reason)
   }
 
+  // A session id makes the runtime registry authoritative. Do not trust a
+  // caller-carried ref here: it may name a retired generation (or the host
+  // sentinel) after a workspace rebind. Explicit refs remain supported only
+  // for deliberately sessionless workflow/external invocations.
+  const sandboxRuntimeRef = options.sessionId
+    ? deps.resolveSandboxRuntimeRef(options.sessionId)
+    : options.sandboxRuntimeRef
+  if (options.sessionId && !sandboxRuntimeRef) {
+    throw new SandboxRuntimeError(
+      "placement-unavailable",
+      `The sandbox runtime for session "${options.sessionId}" is missing or released; the plugin tool was not run.`
+    )
+  }
+
   const context: PluginToolContext = {
     sessionId: options.sessionId,
     messageId: options.messageId,
-    sandboxRuntimeRef: options.sandboxRuntimeRef,
+    sandboxRuntimeRef,
     config: plugin.config ?? {},
     signal: options.signal,
   }

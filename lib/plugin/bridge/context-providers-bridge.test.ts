@@ -8,6 +8,10 @@ import {
   __resetContextProvidersForTesting,
 } from "@/lib/plugin/registries/context-provider-registry"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  bindPythonRuntimeGeneration,
+  __resetPythonRuntimeGenerationsForTesting,
+} from "@/lib/plugin/python/runtime-generation"
 
 const MANIFEST = {
   id: "ctx-plugin",
@@ -23,10 +27,12 @@ const MANIFEST = {
 
 afterEach(() => {
   __resetContextProvidersForTesting()
+  __resetPythonRuntimeGenerationsForTesting()
 })
 
 describe("context-providers-bridge python backend", () => {
   it("registers a python-backed provider without importing any JS", async () => {
+    bindPythonRuntimeGeneration("ctx-plugin", "generation-1")
     const importer = jest.fn()
     const manifest = {
       ...(MANIFEST as unknown as Record<string, unknown>),

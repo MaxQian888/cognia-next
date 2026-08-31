@@ -45,6 +45,48 @@ export interface PluginSiteSummary {
   updatedAt: number
 }
 
+export type PluginSiteVersion = Pick<
+  SiteVersionRow,
+  | "id"
+  | "siteId"
+  | "sequence"
+  | "status"
+  | "artifactSize"
+  | "artifactFileCount"
+  | "artifactCollectedAt"
+  | "createdAt"
+  | "completedAt"
+>
+
+export type PluginSiteDeployment = Pick<
+  SiteDeploymentRow,
+  "id" | "siteId" | "versionId" | "status" | "productionUrl" | "createdAt" | "updatedAt"
+>
+
+export type PluginSiteOperation = Pick<
+  SiteOperationRow,
+  "id" | "siteId" | "type" | "status" | "attemptCount" | "createdAt" | "updatedAt" | "completedAt"
+>
+
+export interface PluginSitesAPI {
+  listSites: typeof listSites
+  listVersions: typeof listSiteVersionsForPlugin
+  listDeployments: typeof listSiteDeploymentsForPlugin
+  listOperations: typeof listSiteOperationsForPlugin
+  getProductionUrl: typeof getSiteProductionUrl
+}
+
+/** Read-only, redacted Sites capability mounted as `ctx.sites`. */
+export function createSitesAPI(): PluginSitesAPI {
+  return {
+    listSites,
+    listVersions: listSiteVersionsForPlugin,
+    listDeployments: listSiteDeploymentsForPlugin,
+    listOperations: listSiteOperationsForPlugin,
+    getProductionUrl: getSiteProductionUrl,
+  }
+}
+
 async function db() {
   return import("@/lib/db/sites")
 }
@@ -76,21 +118,50 @@ export async function listSites(): Promise<PluginSiteSummary[]> {
 }
 
 /** Immutable versions of one Site, newest first. */
-export async function listSiteVersionsForPlugin(siteId: string): Promise<SiteVersionRow[]> {
+export async function listSiteVersionsForPlugin(siteId: string): Promise<PluginSiteVersion[]> {
   const { listSiteVersions } = await db()
-  return listSiteVersions(siteId)
+  return (await listSiteVersions(siteId)).map((row) => ({
+    id: row.id,
+    siteId: row.siteId,
+    sequence: row.sequence,
+    status: row.status,
+    artifactSize: row.artifactSize,
+    artifactFileCount: row.artifactFileCount,
+    artifactCollectedAt: row.artifactCollectedAt,
+    createdAt: row.createdAt,
+    completedAt: row.completedAt,
+  }))
 }
 
 /** Deployment history of one Site. */
-export async function listSiteDeploymentsForPlugin(siteId: string): Promise<SiteDeploymentRow[]> {
+export async function listSiteDeploymentsForPlugin(
+  siteId: string
+): Promise<PluginSiteDeployment[]> {
   const { listSiteDeployments } = await db()
-  return listSiteDeployments(siteId)
+  return (await listSiteDeployments(siteId)).map((row) => ({
+    id: row.id,
+    siteId: row.siteId,
+    versionId: row.versionId,
+    status: row.status,
+    productionUrl: row.productionUrl,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }))
 }
 
 /** The durable operation journal of one Site. */
-export async function listSiteOperationsForPlugin(siteId: string): Promise<SiteOperationRow[]> {
+export async function listSiteOperationsForPlugin(siteId: string): Promise<PluginSiteOperation[]> {
   const { listSiteOperations } = await db()
-  return listSiteOperations(siteId)
+  return (await listSiteOperations(siteId)).map((row) => ({
+    id: row.id,
+    siteId: row.siteId,
+    type: row.type,
+    status: row.status,
+    attemptCount: row.attemptCount,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    completedAt: row.completedAt,
+  }))
 }
 
 /** The URL a Site currently serves on, if any. */

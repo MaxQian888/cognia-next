@@ -180,8 +180,8 @@ pub async fn plugin_wasm_activate_generation_for_state(
         )
     };
 
-    let perms = granted_permissions(&runtime, &plugin_id);
-    let shell_allow = granted_shell_commands(&runtime, &plugin_id);
+    let perms = granted_permissions(runtime, &plugin_id);
+    let shell_allow = granted_shell_commands(runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
     let services = WasmPluginHost::host_services(state);
     let mut store = WasmPluginHost::build_activation_store(
@@ -496,8 +496,8 @@ pub async fn plugin_wasm_call_generation_for_state(
         (entry.manifest.clone(), plugin_pre)
     };
 
-    let perms = granted_permissions(&runtime, &plugin_id);
-    let shell_allow = granted_shell_commands(&runtime, &plugin_id);
+    let perms = granted_permissions(runtime, &plugin_id);
+    let shell_allow = granted_shell_commands(runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
     let services = WasmPluginHost::host_services(state);
     let mut store = WasmPluginHost::build_activation_store(

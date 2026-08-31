@@ -4,18 +4,20 @@
 
 import { createVectorAPI } from "./vector-api"
 import { initializePluginPermissions } from "./permission-api"
+import { createVectorStore } from "@cognia/vector"
 
 // Mock stores and vector utilities
 const mockCollections = new Map<string, { name: string; documents: Map<string, unknown> }>()
+const mockVectorSettings: Record<string, string | undefined> = {
+  provider: "native",
+  embeddingProvider: "openai",
+  embeddingModel: "text-embedding-3-small",
+}
 
 jest.mock("@/stores", () => ({
   useVectorStore: {
     getState: jest.fn(() => ({
-      settings: {
-        provider: "native",
-        embeddingProvider: "openai",
-        embeddingModel: "text-embedding-3-small",
-      },
+      settings: mockVectorSettings,
     })),
   },
   useSettingsStore: {
@@ -143,6 +145,12 @@ describe("Vector API", () => {
 
   beforeEach(() => {
     mockCollections.clear()
+    Object.keys(mockVectorSettings).forEach((key) => delete mockVectorSettings[key])
+    Object.assign(mockVectorSettings, {
+      provider: "native",
+      embeddingProvider: "openai",
+      embeddingModel: "text-embedding-3-small",
+    })
   })
 
   describe("createVectorAPI", () => {
@@ -163,6 +171,26 @@ describe("Vector API", () => {
       expect(typeof api.embedBatch).toBe("function")
       expect(typeof api.getDocumentCount).toBe("function")
       expect(typeof api.clearCollection).toBe("function")
+    })
+
+    it("rebuilds its cached store when shared vector settings change", async () => {
+      const api = createVectorAPI(testPluginId)
+      const mockedCreateVectorStore = createVectorStore as jest.MockedFunction<
+        typeof createVectorStore
+      >
+      const callsBefore = mockedCreateVectorStore.mock.calls.length
+
+      await api.listCollections()
+      Object.assign(mockVectorSettings, {
+        provider: "qdrant",
+        qdrantConfigId: "twin-runtime-qdrant",
+      })
+      await api.listCollections()
+
+      expect(mockedCreateVectorStore).toHaveBeenCalledTimes(callsBefore + 2)
+      expect(mockedCreateVectorStore).toHaveBeenLastCalledWith(
+        expect.objectContaining({ provider: "qdrant", configId: "twin-runtime-qdrant" })
+      )
     })
   })
 

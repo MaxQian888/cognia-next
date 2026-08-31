@@ -294,10 +294,10 @@ pub(crate) fn validate_manifest_contract(manifest: &Value) -> Result<(), String>
             .get(plugin_type)
             .ok_or_else(|| format!("missing runtime entry contract for {plugin_type}"))?;
         for field in &entry_rule.required {
-            if !manifest
+            if manifest
                 .get(field)
                 .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty())
+                .is_none_or(str::is_empty)
             {
                 return Err(format!(
                     "plugin type {plugin_type} requires manifest {field}"
@@ -337,10 +337,10 @@ pub(crate) fn validate_manifest_contract(manifest: &Value) -> Result<(), String>
             let javascript_entry = entry_rule.javascript_entry.as_deref().ok_or_else(|| {
                 format!("runtime entry contract for {plugin_type} has no JavaScript entry")
             })?;
-            if !manifest
+            if manifest
                 .get(javascript_entry)
                 .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty())
+                .is_none_or(str::is_empty)
             {
                 return Err(format!(
                     "JavaScript contributions require manifest {javascript_entry}"
@@ -396,9 +396,9 @@ mod tests {
 
     #[test]
     fn exposes_protocol_versions_from_the_canonical_catalog() {
-        assert_eq!(contract_version(), "1.1.0");
+        assert_eq!(contract_version(), "1.2.0");
         assert_eq!(protocol_version(), "2.0.0");
-        assert_eq!(sdk_version(), "0.2.0");
+        assert_eq!(sdk_version(), "0.3.0");
         assert_eq!(gateway_client_version(), "2.0.0");
         assert_eq!(minimum_gateway_client_version(), "1.0.0");
     }

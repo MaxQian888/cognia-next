@@ -5,6 +5,7 @@ import { extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
+export const HOST_INTEGRATION_TEST_PRAGMA = "@cognia-host-integration-test"
 const AUTHOR_ROOTS = [
   "crates/cognia-plugin-template-ts",
   "crates/cognia-plugin-template-hybrid",
@@ -30,6 +31,9 @@ export const AUTHOR_PACKAGES = ["@cognia/plugin-sdk", "@cognia/plugin-ui"]
 
 function isHostOnlyCogniaPackage(specifier) {
   if (!specifier.startsWith("@cognia/")) return false
+  // The loader shares exactly the plugin-ui root. Deep imports can resolve
+  // during author builds but fail when the evaluated bundle calls require().
+  if (specifier.startsWith("@cognia/plugin-ui/")) return true
   return !AUTHOR_PACKAGES.some(
     (allowed) => specifier === allowed || specifier.startsWith(`${allowed}/`)
   )
@@ -82,6 +86,19 @@ export function findForbiddenAuthorImports(source) {
 }
 
 /**
+ * First-party plugins may carry explicit host-integration tests next to their
+ * portable unit tests. Those files are not author code and are never shipped,
+ * but the opt-in must be unmistakable and cannot suppress checks in runtime
+ * sources.
+ */
+export function isHostIntegrationTest(path, source) {
+  return (
+    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) &&
+    source.split(/\r?\n/, 6).some((line) => line.includes(HOST_INTEGRATION_TEST_PRAGMA))
+  )
+}
+
+/**
  * `types/cognia-plugin-sdk.d.ts` is the marker for a VENDORED author-type
  * bundle — the same artifact `cognia plugin new` writes into a scaffolded
  * project, because none of the `@cognia/*` packages are published and the
@@ -114,7 +131,9 @@ export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOT
   const violations = []
   for (const root of roots.map((path) => resolve(repoRoot, path))) {
     for (const file of sourceFiles(root)) {
-      for (const specifier of findForbiddenAuthorImports(readFileSync(file, "utf8"))) {
+      const source = readFileSync(file, "utf8")
+      if (isHostIntegrationTest(file, source)) continue
+      for (const specifier of findForbiddenAuthorImports(source)) {
         violations.push(`${relative(repoRoot, file)} imports ${specifier}`)
       }
     }
