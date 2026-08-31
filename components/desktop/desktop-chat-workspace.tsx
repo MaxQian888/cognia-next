@@ -28,10 +28,8 @@ import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import { Button } from "@/components/ui/button"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
-import {
-  NewChatExecutionPicker,
-  type NewChatExecutionSelection,
-} from "@/components/chat/new-chat-execution-picker"
+import { NewChatExecutionPicker } from "@/components/chat/new-chat-execution-picker"
+import { useNewChatExecution } from "@/hooks/chat/use-new-chat-execution"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
@@ -167,26 +165,9 @@ export function DesktopChatWorkspace() {
 
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
-  const [newChatExecutionOverride, setNewChatExecutionOverride] = useState<{
-    projectId: string
-    value: NewChatExecutionSelection
-  } | null>(null)
-  const newChatExecution = useMemo<NewChatExecutionSelection>(
-    () =>
-      activeProject && newChatExecutionOverride?.projectId === activeProject.id
-        ? newChatExecutionOverride.value
-        : {
-            location: activeProject?.defaultExecutionLocation ?? "managedWorktree",
-            base: { kind: "workingState" },
-          },
-    [activeProject, newChatExecutionOverride]
-  )
-  const setNewChatExecution = useCallback(
-    (value: NewChatExecutionSelection) => {
-      if (activeProject) setNewChatExecutionOverride({ projectId: activeProject.id, value })
-    },
-    [activeProject]
-  )
+  // Shared with the mobile shell so both offer the same choice with the same
+  // per-workspace defaulting rules.
+  const { value: newChatExecution, setValue: setNewChatExecution } = useNewChatExecution()
 
   const composerRef = useRef<ComposerHandle | null>(null)
 

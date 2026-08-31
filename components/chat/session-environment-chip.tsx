@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useHasHover } from "@/hooks/ui/use-pointer"
 import { cn } from "@/lib/utils"
 import type { SessionExecutionContext, SessionWorkspaceBaseSpec } from "@/types/execution-context"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
@@ -30,12 +32,22 @@ function baseLabel(
   return t("bases.pullRequest", { provider: base.provider, number: base.number })
 }
 
-/** Persistent, session-scoped summary of the physical execution environment. */
+/**
+ * Persistent, session-scoped summary of the physical execution environment.
+ *
+ * Opens on hover where hovering exists and on tap where it does not. This was a
+ * `HoverCard` alone, and the mobile shell renders it through the shared
+ * `ChatHeader`, so on a phone the panel naming the branch, base and lifecycle
+ * state was unreachable and so was its "Manage" button, which is the only route
+ * from here to changing any of it. The trigger is a real button in both cases,
+ * so it is also keyboard-reachable rather than merely focusable.
+ */
 export function SessionEnvironmentChip({
   executionContext,
   onManage,
 }: SessionEnvironmentChipProps) {
   const t = useTranslations("chat.header.environment")
+  const hasHover = useHasHover()
   const execution = executionContext?.execution
   const mode =
     execution?.mode ?? (executionContext?.location === "managedWorktree" ? "managed" : "local")
@@ -49,52 +61,74 @@ export function SessionEnvironmentChip({
   const conflict = state === "conflict"
   const modeLabel = t(`modes.${mode}`)
 
+  const trigger = (
+    <button
+      type="button"
+      data-testid="session-environment-chip"
+      className={cn(
+        "inline-flex h-7 max-w-48 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        conflict && "border-destructive/50 text-destructive"
+      )}
+      aria-label={t("aria", { mode: modeLabel })}
+    >
+      {conflict ? (
+        <AlertTriangleIcon className="size-3.5 shrink-0" aria-hidden />
+      ) : mode === "local" ? (
+        <LaptopIcon className="size-3.5 shrink-0" aria-hidden />
+      ) : (
+        <GitBranchIcon className="size-3.5 shrink-0" aria-hidden />
+      )}
+      <span className="truncate">{path ? `${modeLabel} · ${leafName(path)}` : modeLabel}</span>
+    </button>
+  )
+
+  const details = (
+    <>
+      <div>
+        <p className="text-sm font-medium">{modeLabel}</p>
+        {path ? <p className="mt-1 break-all text-xs text-muted-foreground">{path}</p> : null}
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">{t("base")}</dt>
+        <dd>{baseLabel(t, execution?.base)}</dd>
+        {branch ? (
+          <>
+            <dt className="text-muted-foreground">{t("branch")}</dt>
+            <dd className="truncate">{branch}</dd>
+          </>
+        ) : null}
+        {state ? (
+          <>
+            <dt className="text-muted-foreground">{t("state")}</dt>
+            <dd className={cn(conflict && "font-medium text-destructive")}>{state}</dd>
+          </>
+        ) : null}
+      </dl>
+      <Button type="button" variant="outline" size="sm" className="w-full" onClick={onManage}>
+        <Settings2Icon className="size-3.5" aria-hidden />
+        {t("manage")}
+      </Button>
+    </>
+  )
+
+  // Radix will not open a HoverCard from a tap, so a touch device gets the
+  // Popover instead. Same trigger, same content, one definition of each.
+  if (!hasHover) {
+    return (
+      <Popover>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverContent align="start" className="w-80 space-y-3">
+          {details}
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
   return (
     <HoverCard openDelay={0} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <div
-          tabIndex={0}
-          className={cn(
-            "inline-flex h-7 max-w-48 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            conflict && "border-destructive/50 text-destructive"
-          )}
-          aria-label={t("aria", { mode: modeLabel })}
-        >
-          {conflict ? (
-            <AlertTriangleIcon className="size-3.5 shrink-0" aria-hidden />
-          ) : mode === "local" ? (
-            <LaptopIcon className="size-3.5 shrink-0" aria-hidden />
-          ) : (
-            <GitBranchIcon className="size-3.5 shrink-0" aria-hidden />
-          )}
-          <span className="truncate">{path ? `${modeLabel} · ${leafName(path)}` : modeLabel}</span>
-        </div>
-      </HoverCardTrigger>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent align="start" className="w-80 space-y-3">
-        <div>
-          <p className="text-sm font-medium">{modeLabel}</p>
-          {path ? <p className="mt-1 break-all text-xs text-muted-foreground">{path}</p> : null}
-        </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          <dt className="text-muted-foreground">{t("base")}</dt>
-          <dd>{baseLabel(t, execution?.base)}</dd>
-          {branch ? (
-            <>
-              <dt className="text-muted-foreground">{t("branch")}</dt>
-              <dd className="truncate">{branch}</dd>
-            </>
-          ) : null}
-          {state ? (
-            <>
-              <dt className="text-muted-foreground">{t("state")}</dt>
-              <dd className={cn(conflict && "font-medium text-destructive")}>{state}</dd>
-            </>
-          ) : null}
-        </dl>
-        <Button type="button" variant="outline" size="sm" className="w-full" onClick={onManage}>
-          <Settings2Icon className="size-3.5" aria-hidden />
-          {t("manage")}
-        </Button>
+        {details}
       </HoverCardContent>
     </HoverCard>
   )

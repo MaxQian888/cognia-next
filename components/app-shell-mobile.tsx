@@ -99,6 +99,8 @@ import {
   resolveConversationSearchOptions,
 } from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
+import { NewChatExecutionPicker } from "@/components/chat/new-chat-execution-picker"
+import { useNewChatExecution } from "@/hooks/chat/use-new-chat-execution"
 import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
@@ -283,6 +285,16 @@ export function AppShellMobile() {
     },
     [directChat, isTeamSession, teamChat]
   )
+  // Where a new conversation runs: the local checkout, or an isolated worktree.
+  // Mobile created every session with a bare `create({ kind: "direct" })`, so
+  // it always took the workspace default and a phone had no way to say
+  // otherwise. Same hook as the desktop, so the defaulting rules cannot drift.
+  const {
+    value: newChatExecution,
+    setValue: setNewChatExecution,
+    rootDir: newChatExecutionRoot,
+  } = useNewChatExecution()
+
   // First turn from the welcome screen's hero composer. `handleSend` above
   // targets whatever session is active, and on the welcome screen there is
   // none — `send` would drop the message. Create one first, then send into it
@@ -301,7 +313,11 @@ export function AppShellMobile() {
         await handleSend(content, manifest, templateRun, turnMetadata)
         return
       }
-      const s = await create({ kind: "direct" })
+      const s = await create({
+        kind: "direct",
+        executionLocation: newChatExecution.location,
+        executionBase: newChatExecution.base,
+      })
       select(s.id)
       setSelectedGuild({ kind: "dm" })
       await directChat.send(content, undefined, {
@@ -314,7 +330,7 @@ export function AppShellMobile() {
       })
       void impact("light")
     },
-    [create, select, setSelectedGuild, directChat, handleSend]
+    [create, select, setSelectedGuild, directChat, handleSend, newChatExecution]
   )
 
   // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
@@ -685,6 +701,17 @@ export function AppShellMobile() {
               onResumeSession={handleSwitchToSession}
               composerRef={composerRef}
               mobileMentionMembers={isTeamSession ? teamMembers : undefined}
+              // Same guard as the desktop: only offered when the workspace has
+              // a directory, because "Local" means nothing without one.
+              newChatExecutionControls={
+                newChatExecutionRoot ? (
+                  <NewChatExecutionPicker
+                    rootDir={newChatExecutionRoot}
+                    value={newChatExecution}
+                    onChange={setNewChatExecution}
+                  />
+                ) : undefined
+              }
               welcomeExtras={{
                 hideSamples: true,
                 header: <MobileActiveRunsCard />,
