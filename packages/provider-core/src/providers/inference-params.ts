@@ -106,7 +106,7 @@ export function buildModelInferenceParams(
   // `topK`, `seed`, and `stopSequences` are valid AI SDK sampling settings but
   // have no dedicated field on our provider config, so they ride in the
   // free-form `advancedParams` map (bare or schema-namespaced key).
-  const topK = finiteNumber(readParam(advancedParams, "topK", "togetherAi.topK", "cohere.k"))
+  const topK = finiteNumber(readParam(advancedParams, "topK"))
   if (topK !== undefined) params.topK = topK
 
   const seed = finiteNumber(readParam(advancedParams, "seed", "openai.seed"))
@@ -118,7 +118,11 @@ export function buildModelInferenceParams(
   // Provider-specific knobs (reasoning effort, thinking budget, safety
   // settings, Ollama numCtx, …) → AI SDK `providerOptions`. Until now the
   // Parameters tab persisted these and nothing read them back.
-  if (options.schema && options.providerId && source.providerSpecificParams) {
+  if (
+    options.schema &&
+    options.providerId &&
+    (source.providerSpecificParams || source.advancedParams)
+  ) {
     const providerOptions = resolveProviderSpecificParams(
       options.providerId,
       source as UserProviderSettings,

@@ -209,12 +209,8 @@ export interface ProviderInferenceDefaults {
 
 /** Connection parameters for a provider */
 export interface ProviderConnectionParams {
-  /** Request timeout in ms (default 30000) */
-  timeout?: number
   /** Max retry attempts (default 2) */
   maxRetries?: number
-  /** Delay between retries in ms (default 1000) */
-  retryDelay?: number
   /** Max concurrent requests (default unlimited) */
   concurrentLimit?: number
 }
@@ -515,7 +511,10 @@ export interface ProviderUIPreferences {
   /** Last provider opened in the settings detail pane. */
   selectedProviderId?: string
   /** Filter by status badge in the sidebar. */
-  statusFilter?: "all" | "connected" | "error" | "not-configured"
+  statusFilter?:
+    "all" | "connected" | "warning" | "limited" | "untested" | "error" | "not-configured"
+  /** Last top-level provider workspace opened in settings. */
+  workspace?: "providers" | "routing"
   /** Filter by category from the catalog (flagship / aggregator / local / …). */
   categoryFilter?: string
   /** Sort order for the sidebar list. */

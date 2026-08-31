@@ -26,6 +26,7 @@ export interface EvalProjectDataset {
   caseIds: string[]
   holdoutCaseIds: string[]
   requiredModalities: EvalCapability[]
+  mediaClearance?: "local-only" | "scanned" | "manual"
 }
 
 export interface EvalVariantPrice {
@@ -206,6 +207,11 @@ export interface EvalPreflightIssue {
     | "ENVIRONMENT_CHECK_REQUIRED"
     | "DISK_QUOTA_INSUFFICIENT"
     | "DISK_QUOTA_UNKNOWN"
+    | "DECISION_WEIGHT_INVALID"
+    | "DECISION_CONSTRAINT_INVALID"
+    | "CONFIDENCE_LEVEL_INVALID"
+    | "MINIMUM_CASES_INVALID"
+    | "RETENTION_INVALID"
   severity: "error" | "warning"
   message: string
   variantId?: string

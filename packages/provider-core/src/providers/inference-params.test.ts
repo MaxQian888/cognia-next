@@ -33,7 +33,7 @@ describe("buildModelInferenceParams", () => {
   it("maps maxRetries from connection params and topK/seed/stopSequences from advanced params", () => {
     expect(
       buildModelInferenceParams({
-        connectionParams: { maxRetries: 5, timeout: 1000 },
+        connectionParams: { maxRetries: 5 },
         advancedParams: { topK: 40, seed: 7, stopSequences: ["\n\n", "END"] },
       })
     ).toEqual({ maxRetries: 5, topK: 40, seed: 7, stopSequences: ["\n\n", "END"] })
@@ -41,20 +41,21 @@ describe("buildModelInferenceParams", () => {
 
   it("reads the schema-namespaced keys the Parameters tab writes", () => {
     // The tab persists under the schema key ("connection.maxRetries",
-    // "openai.seed", "togetherAi.topK"); older rows use bare leaves. Both work.
+    // and "openai.seed"); older rows use bare leaves. Both work.
     expect(
       buildModelInferenceParams({
         connectionParams: { "connection.maxRetries": 3 } as never,
-        advancedParams: { "openai.seed": 11, "togetherAi.topK": 20 },
+        advancedParams: { "openai.seed": 11 },
       })
-    ).toEqual({ maxRetries: 3, seed: 11, topK: 20 })
+    ).toEqual({ maxRetries: 3, seed: 11 })
   })
 
   it("projects providerSpecificParams into providerOptions through the schema", () => {
     const schema = getSchemaForProvider("openai")
     const params = buildModelInferenceParams(
       {
-        providerSpecificParams: { "openai.reasoningEffort": "high", "openai.store": false },
+        providerSpecificParams: { "openai.reasoningEffort": "high" },
+        advancedParams: { "openai.store": false },
       },
       {
         providerId: "openai",
@@ -62,7 +63,7 @@ describe("buildModelInferenceParams", () => {
         modelConfig: { id: "o3", name: "o3", supportsReasoning: true } as never,
       }
     )
-    expect(params?.providerOptions?.openai).toMatchObject({ reasoning_effort: "high" })
+    expect(params?.providerOptions?.openai).toEqual({ reasoningEffort: "high", store: false })
     // Without a schema nothing is projected (and no empty block is attached).
     expect(
       buildModelInferenceParams({ providerSpecificParams: { "openai.reasoningEffort": "high" } })

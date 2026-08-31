@@ -11,6 +11,7 @@ import {
   setNestedValue,
   shouldShowParameter,
 } from "./parameter-resolver"
+import { getSchemaForProvider } from "./provider-parameter-schemas"
 
 const reasoningModel: ModelConfig = {
   id: "o3-mini",
@@ -213,7 +214,7 @@ describe("resolveProviderSpecificParams", () => {
       parameters: [
         {
           key: "openai.reasoningEffort",
-          nativeKey: "reasoning_effort",
+          nativeKey: "reasoningEffort",
           label: "Reasoning effort",
           description: "Controls reasoning depth",
           type: "select",
@@ -244,10 +245,10 @@ describe("resolveProviderSpecificParams", () => {
       schema
     )
 
-    expect(result).toEqual({ openai: { reasoning_effort: "high" } })
+    expect(result).toEqual({ openai: { reasoningEffort: "high" } })
   })
 
-  it("applies visible defaults and skips missing, hidden, and non-provider-specific values", () => {
+  it("does not send display defaults that the user never persisted", () => {
     const schema: ProviderParameterSchema = {
       providerId: "openai",
       providerName: "OpenAI",
@@ -289,8 +290,67 @@ describe("resolveProviderSpecificParams", () => {
       ],
     }
 
-    expect(resolveProviderSpecificParams("openai", undefined, reasoningModel, schema)).toEqual({
-      openai: { reasoning_effort: "medium" },
+    expect(resolveProviderSpecificParams("openai", undefined, reasoningModel, schema)).toEqual({})
+  })
+
+  it("projects supported advanced options while leaving top-level seed to inference params", () => {
+    const schema = getSchemaForProvider("openai")
+    const settings: UserProviderSettings = {
+      providerId: "openai",
+      defaultModel: "gpt-4o",
+      enabled: true,
+      advancedParams: {
+        "openai.logprobs": true,
+        "openai.store": false,
+        "openai.seed": 7,
+      },
+    }
+
+    expect(resolveProviderSpecificParams("openai", settings, undefined, schema)).toEqual({
+      openai: { logprobs: true, store: false },
+    })
+  })
+
+  it("projects Anthropic thinking and Google safety settings into SDK-native shapes", () => {
+    expect(
+      resolveProviderSpecificParams(
+        "anthropic",
+        {
+          providerId: "anthropic",
+          defaultModel: "claude-sonnet-4",
+          enabled: true,
+          providerSpecificParams: {
+            "anthropic.thinking.enabled": true,
+            "anthropic.thinking.budgetTokens": 8192,
+          },
+        },
+        undefined,
+        getSchemaForProvider("anthropic")
+      )
+    ).toEqual({ anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } } })
+
+    expect(
+      resolveProviderSpecificParams(
+        "google",
+        {
+          providerId: "google",
+          defaultModel: "gemini-2.5-pro",
+          enabled: true,
+          providerSpecificParams: {
+            "google.safetySettings.harassment": "BLOCK_ONLY_HIGH",
+            "google.safetySettings.hateSpeech": "OFF",
+          },
+        },
+        undefined,
+        getSchemaForProvider("google")
+      )
+    ).toEqual({
+      google: {
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+        ],
+      },
     })
   })
 })

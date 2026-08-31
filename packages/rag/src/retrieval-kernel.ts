@@ -75,6 +75,29 @@ export interface RetrievalDegradeReason {
   retryable: boolean
 }
 
+/**
+ * Whether a reason means the answer is worse than the corpus allows, rather
+ * than merely narrower than requested.
+ *
+ * `token_budget_exhausted`, `content_missing` and `content_quarantined` are
+ * deliberately absent: dropping a quarantined chunk or one that did not fit the
+ * budget is the system working, not failing. Exported so every domain that
+ * produces control-plane artifacts answers this the same way instead of
+ * restating the list.
+ */
+export function isDegradingRetrievalReason(code: RetrievalDegradeCode): boolean {
+  return DEGRADING_RETRIEVAL_CODES.includes(code)
+}
+
+const DEGRADING_RETRIEVAL_CODES: readonly RetrievalDegradeCode[] = [
+  "embedding_unavailable",
+  "vector_not_configured",
+  "vector_unavailable",
+  "vector_dimension_mismatch",
+  "retrieval_timeout",
+  "kill_switch_active",
+]
+
 export interface RetrievalTraceV1 {
   schemaVersion: 1
   traceId: string
@@ -348,16 +371,7 @@ export function createRetrievalKernel(dependencies: RetrievalKernelDependencies)
           ...hit.citation,
         })),
         partial: reasons.length > 0,
-        degraded: reasons.some((reason) =>
-          [
-            "embedding_unavailable",
-            "vector_not_configured",
-            "vector_unavailable",
-            "vector_dimension_mismatch",
-            "retrieval_timeout",
-            "kill_switch_active",
-          ].includes(reason.code)
-        ),
+        degraded: reasons.some((reason) => isDegradingRetrievalReason(reason.code)),
         reasons,
         trace: {
           schemaVersion: 1,

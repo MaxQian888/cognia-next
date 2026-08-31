@@ -22,6 +22,13 @@ import {
 } from "../types/memory"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
+import { sha256Hex } from "@cognia/rag/retrieval-profile"
+import type { RetrievalDegradeReason, RetrievalTraceV1 } from "@cognia/rag/retrieval-kernel"
+import {
+  memoryCorpusId,
+  memoryRetrievalDegraded,
+  type MemoryRetrievalOutcome,
+} from "../control-plane/retrieval-telemetry"
 import { buildExpandedKeywordQuery } from "./query-expansion"
 import {
   governanceScoreFor,
@@ -180,6 +187,29 @@ export interface MemoryRetrieverDeps {
   vectorSearch?: (embedding: number[], topK: number) => Promise<{ id: string; score: number }[]>
   /** Mark hits accessed (recency). Optional; failures are swallowed by the caller. */
   touch?: (memoryIds: string[]) => Promise<void>
+  /**
+   * The shared rollout kill switch. Same name and shape as
+   * `RetrievalKernelDependencies.killSwitchEngaged`, because it is the same
+   * concept rather than a new one.
+   *
+   * Evaluated per call, so a mid-session flip takes effect on the next recall.
+   * This lives HERE rather than in the dep builder because the builder runs once
+   * per turn and is reused across team members, and because switching off the
+   * vector leg by withholding `vectorSearch` would make the kill switch
+   * indistinguishable from having no backend at all.
+   */
+  killSwitchEngaged?: () => boolean | Promise<boolean>
+  /** Control-plane identity and sink for the trace this recall produces. */
+  telemetry?: MemoryRetrievalTelemetry
+}
+
+export interface MemoryRetrievalTelemetry {
+  profileFingerprint: string
+  generationId: string
+  /** Persist the trace. Fire-and-forget; a trace must never affect the hits. */
+  record?: (trace: RetrievalTraceV1, corpusId: string) => void | Promise<void>
+  now?: () => number
+  createTraceId?: () => string
 }
 
 export interface RetrieveMemoriesInput {
@@ -306,12 +336,78 @@ export function isMemoryEligibleForRetrieval(memory: Memory, now: number = Date.
   return true
 }
 
+/**
+ * Compatibility wrapper. Seven call sites read the plain array, and four test
+ * factories mock this shape, so the richer return is opt-in.
+ */
 export async function retrieveMemories(
   input: RetrieveMemoriesInput,
   deps: MemoryRetrieverDeps
 ): Promise<RetrievedMemory[]> {
+  return (await retrieveMemoriesWithOutcome(input, deps)).hits
+}
+
+export async function retrieveMemoriesWithOutcome(
+  input: RetrieveMemoriesInput,
+  deps: MemoryRetrieverDeps
+): Promise<MemoryRetrievalOutcome> {
+  const now = deps.telemetry?.now ?? Date.now
+  const startedAt = now()
+  const reasons: RetrievalDegradeReason[] = []
+  const exclusions: { id: string; reason: string }[] = []
+  let cacheHit = false
+
+  const finish = async (
+    hits: RetrievedMemory[],
+    candidateIds: string[],
+    scores: RetrievalTraceV1["scores"],
+    queryText: string
+  ): Promise<MemoryRetrievalOutcome> => {
+    const trace: RetrievalTraceV1 = {
+      schemaVersion: 1,
+      traceId: deps.telemetry?.createTraceId?.() ?? crypto.randomUUID(),
+      // The query never appears, only its hash. Everything else is ids, counts
+      // and numbers, which is what makes this safe to persist.
+      //
+      // Only hashed when telemetry is configured. Without it nothing reads the
+      // field, and a SubtleCrypto digest on the return path of every recall
+      // (including the early exits that found nothing) is pure cost.
+      queryHash: queryText && deps.telemetry ? await sha256Hex(queryText) : "",
+      profileFingerprint: deps.telemetry?.profileFingerprint ?? "",
+      generationId: deps.telemetry?.generationId ?? "",
+      candidateIds,
+      hitIds: hits.map((hit) => hit.memory.id),
+      scores,
+      exclusions,
+      cacheHit,
+      budget: { topK: input.topK, tokenLimit: 0, tokensUsed: 0 },
+      latencyMs: Math.max(0, now() - startedAt),
+    }
+    if (deps.telemetry?.record && queryText) {
+      // NOT awaited. `record` is wired to an IndexedDB write, and awaiting it
+      // put a control-plane round trip on the chat send path: a slow or
+      // contended write extended the turn, which is the exact coupling this
+      // dependency is documented not to have. Both a synchronous throw and a
+      // rejected promise are swallowed.
+      try {
+        void Promise.resolve(
+          deps.telemetry.record(
+            trace,
+            memoryCorpusId({
+              ...(input.claimFilter ? { claimFilter: input.claimFilter } : {}),
+              ...(input.reader?.projectId ? { projectId: input.reader.projectId } : {}),
+            })
+          )
+        ).catch(() => undefined)
+      } catch {
+        // A control-plane write must never change what a turn recalls.
+      }
+    }
+    return { hits, degraded: memoryRetrievalDegraded(reasons), reasons, trace }
+  }
+
   const query = input.queryText.trim()
-  if (!query) return []
+  if (!query) return finish([], [], [], "")
 
   const reader = input.reader ?? input.characterId
 
@@ -319,7 +415,9 @@ export async function retrieveMemories(
   // without one can only ever return nothing. Bail before touching the corpus —
   // belt and braces on top of `isVisibleToReader`, which already refuses to hand
   // a row carrying a `projectId` to a reader in a different (or no) project.
-  if (input.claimFilter === "project-only" && !input.reader?.projectId) return []
+  if (input.claimFilter === "project-only" && !input.reader?.projectId) {
+    return finish([], [], [], query)
+  }
 
   let candidates = (await deps.loadCandidates(reader)).filter((memory) =>
     isMemoryEligibleForRetrieval(memory, input.now)
@@ -336,7 +434,7 @@ export async function retrieveMemories(
     const wantProject = input.claimFilter === "project-only"
     candidates = candidates.filter((m) => isProjectClaim(m) === wantProject)
   }
-  if (candidates.length === 0) return []
+  if (candidates.length === 0) return finish([], [], [], query)
 
   const byId = new Map(candidates.map((m) => [m.id, m]))
   const byVectorDocId = new Map<string, Memory>()
@@ -352,6 +450,7 @@ export async function retrieveMemories(
     .slice()
     .sort()
     .join(",")}::${input.claimFilter ?? "all"}`
+  cacheHit = memoryBm25Cache.get(cacheKey)?.signature === corpusSignature(candidates)
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
   const rawKeywordHits = bm25.search(keywordQuery, input.topK * OVERFETCH)
@@ -373,21 +472,42 @@ export async function retrieveMemories(
           return false
         })
 
-  // Vector leg — best effort; any failure degrades to BM25-only. A caller-
-  // supplied embedding lets the leg run even when `deps.embed` is absent.
+  // Vector leg. Best effort, but no longer SILENT: a failure here used to be
+  // caught, emptied, and reported as an ordinary BM25 result, so "the backend
+  // is down" and "the corpus has nothing" looked identical from outside.
   let vectorHits: { id: string; score: number }[] = []
-  if (deps.vectorSearch && (input.precomputedQueryEmbedding || deps.embed)) {
+  const killSwitch = await resolveKillSwitch(deps)
+  if (killSwitch) {
+    // BM25 keeps running. `KILL_SWITCH_ALLOWED` in the control plane permits
+    // `lexical_read` precisely so a stopped rollout still answers from the
+    // keyword index rather than silently returning nothing.
+    reasons.push({ code: "kill_switch_active", stage: "vector", retryable: false })
+  } else if (!deps.vectorSearch || !(input.precomputedQueryEmbedding || deps.embed)) {
+    reasons.push({ code: "vector_not_configured", stage: "vector", retryable: false })
+  } else {
+    let embedding: number[] | undefined
     try {
-      const embedding = input.precomputedQueryEmbedding ?? (await deps.embed!(query))
-      const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH)
-      vectorHits = raw
-        .map((h) => {
-          const m = byVectorDocId.get(h.id)
-          return m ? { id: m.id, score: h.score } : null
-        })
-        .filter((h): h is { id: string; score: number } => h !== null)
+      embedding = input.precomputedQueryEmbedding ?? (await deps.embed!(query))
     } catch {
-      vectorHits = []
+      reasons.push({ code: "embedding_unavailable", stage: "query", retryable: true })
+    }
+    if (embedding && embedding.length === 0) {
+      reasons.push({ code: "vector_dimension_mismatch", stage: "vector", retryable: false })
+      embedding = undefined
+    }
+    if (embedding) {
+      try {
+        const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH)
+        vectorHits = raw
+          .map((h) => {
+            const m = byVectorDocId.get(h.id)
+            return m ? { id: m.id, score: h.score } : null
+          })
+          .filter((h): h is { id: string; score: number } => h !== null)
+      } catch {
+        vectorHits = []
+        reasons.push({ code: "vector_unavailable", stage: "vector", retryable: true })
+      }
     }
   }
 
@@ -396,13 +516,24 @@ export async function retrieveMemories(
     vectorHits.length > 0
       ? reciprocalRankFusion([vectorHits, keywordHits])
       : keywordHits.map((h) => ({ id: h.id, score: h.score }))
-  if (fused.length === 0) return []
+  const candidateIds = fused.map((f) => f.id)
+  const scoreTrace = (): RetrievalTraceV1["scores"] =>
+    fused.map(({ id, score }) => ({
+      id,
+      lexical: keywordHits.find((hit) => hit.id === id)?.score,
+      vector: vectorHits.find((hit) => hit.id === id)?.score,
+      fused: score,
+    }))
+  if (fused.length === 0) return finish([], candidateIds, scoreTrace(), query)
 
   const normalized = normalizeScores(fused)
   const relevanceById = new Map(normalized.map((n) => [n.id, n.score]))
 
   const floored = normalized.filter((n) => n.score >= input.relevanceFloor)
-  if (floored.length === 0) return []
+  for (const below of normalized.filter((n) => n.score < input.relevanceFloor)) {
+    exclusions.push({ id: below.id, reason: "below_floor" })
+  }
+  if (floored.length === 0) return finish([], candidateIds, scoreTrace(), query)
 
   // Per-type recency decay + source-trust (veracity) weighting: a fresh, user-
   // stated fact outranks a stale, inbound one of equal relevance. `veracityFor`
@@ -427,6 +558,11 @@ export async function retrieveMemories(
     score: r.score,
   }))
 
+  const selected = new Set(result.map((r) => r.memory.id))
+  for (const row of floored) {
+    if (!selected.has(row.id)) exclusions.push({ id: row.id, reason: "over_topk" })
+  }
+
   if (deps.touch && result.length > 0) {
     try {
       await deps.touch(result.map((r) => r.memory.id))
@@ -435,5 +571,15 @@ export async function retrieveMemories(
     }
   }
 
-  return result
+  return finish(result, candidateIds, scoreTrace(), query)
+}
+
+/** Fail closed: an unanswerable kill switch is treated as engaged. */
+async function resolveKillSwitch(deps: MemoryRetrieverDeps): Promise<boolean> {
+  if (!deps.killSwitchEngaged) return false
+  try {
+    return await deps.killSwitchEngaged()
+  } catch {
+    return true
+  }
 }

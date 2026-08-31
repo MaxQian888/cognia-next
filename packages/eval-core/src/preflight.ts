@@ -90,6 +90,43 @@ export function runProjectPreflight(
       )
     )
   }
+  if (
+    project.decisionPolicy.dimensions.length === 0 ||
+    project.decisionPolicy.dimensions.some(
+      (dimension) => !Number.isFinite(dimension.weight) || dimension.weight < 0
+    ) ||
+    project.decisionPolicy.dimensions.every((dimension) => dimension.weight === 0)
+  ) {
+    issues.push(
+      issue(
+        "DECISION_WEIGHT_INVALID",
+        "Decision dimensions require finite non-negative weights with a positive total"
+      )
+    )
+  }
+  if (project.decisionPolicy.constraints.some((constraint) => !Number.isFinite(constraint.value))) {
+    issues.push(
+      issue("DECISION_CONSTRAINT_INVALID", "Decision constraint values must be finite numbers")
+    )
+  }
+  if (
+    !Number.isFinite(project.decisionPolicy.confidenceLevel) ||
+    project.decisionPolicy.confidenceLevel <= 0 ||
+    project.decisionPolicy.confidenceLevel >= 1
+  ) {
+    issues.push(issue("CONFIDENCE_LEVEL_INVALID", "Confidence level must be between 0 and 1"))
+  }
+  if (
+    !Number.isInteger(project.decisionPolicy.minimumEffectiveCases) ||
+    project.decisionPolicy.minimumEffectiveCases < 1
+  ) {
+    issues.push(
+      issue("MINIMUM_CASES_INVALID", "Minimum effective cases must be a positive integer")
+    )
+  }
+  if (!Number.isInteger(project.retentionDays) || project.retentionDays < 1) {
+    issues.push(issue("RETENTION_INVALID", "Evidence retention must be a positive day count"))
+  }
   if (project.decisionPolicy.formal) {
     if (project.dataset.holdoutCaseIds.length < project.decisionPolicy.minimumEffectiveCases) {
       issues.push(issue("HOLDOUT_TOO_SMALL", "Formal recommendations require enough holdout cases"))
@@ -149,7 +186,7 @@ export function runProjectPreflight(
   }
   if (
     project.dataset.requiredModalities.some((capability) => capability !== "text") &&
-    project.privacyPolicy.mediaClearance === "local-only" &&
+    (project.dataset.mediaClearance ?? project.privacyPolicy.mediaClearance) === "local-only" &&
     compatibleVariants.some((variant) => !variant.isLocal)
   ) {
     issues.push(issue("MEDIA_CLEARANCE_REQUIRED", "Cloud media requires scan or manual clearance"))

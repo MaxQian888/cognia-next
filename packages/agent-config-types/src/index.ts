@@ -282,6 +282,8 @@ export interface SendOptions {
    * apart) and report as a spurious "ended with no assistant text".
    */
   turnId?: string
+  /** Host-only audit projection of resident built-in Skill security policies. */
+  residentSkillPolicies?: Array<{ id: string; owner: string }>
   /**
    * Host-only immutable sandbox placement binding for this send. The sidecar
    * echoes it on plugin tool requests; model providers never receive it.
@@ -791,6 +793,9 @@ export interface SendOptions {
    */
   provider?: string
 
+  /** Optional positive concurrency ceiling for the selected provider. */
+  providerConcurrencyLimit?: number
+
   /**
    * Per-call credential override. Set by `resolveSendOptions` from the
    * user's persisted provider settings so the sidecar doesn't read
@@ -1242,6 +1247,8 @@ export interface PluginToolExecEvent {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  turnId?: string
+  attemptId?: string
   sandboxRuntimeRef?: string
 }
 
@@ -4844,7 +4851,7 @@ export interface AppSettings {
    * etiquette, computer-use safety, workflow authoring, agent-team delegation,
    * digital-twin grounding, goal/loop execution). When the turn runs on a
    * matching surface, `resolveSendOptions` appends the relevant SKILL.md body to
-   * the system prompt (see lib/skills/surface-activation.ts). Defaults to ON
+   * the system prompt (see lib/skills/delivery.ts). Defaults to ON
    * (undefined ⇒ enabled); set false to suppress all surface auto-activation.
    */
   surfaceSkillsEnabled?: boolean

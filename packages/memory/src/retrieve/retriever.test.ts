@@ -1,6 +1,7 @@
 import type { Memory } from "../types/memory"
 import {
   retrieveMemories,
+  retrieveMemoriesWithOutcome,
   __resetMemoryBm25Cache,
   isMemoryEligibleForRetrieval,
   type MemoryRetrieverDeps,
@@ -454,5 +455,71 @@ describe("claimFilter — corpus partition", () => {
     )
     expect(personalHits.map((h) => h.memory.id)).toEqual(["personal-1"])
     expect(projectHits.map((h) => h.memory.id)).toEqual(["claim-1"])
+  })
+})
+
+describe("retrieval telemetry", () => {
+  const telemetryDeps = (
+    record: MemoryRetrieverDeps["telemetry"] extends infer T ? NonNullable<T>["record"] : never
+  ): MemoryRetrieverDeps => ({
+    loadCandidates: async () => [mem("The user prefers pnpm over npm", { id: "hit" })],
+    telemetry: {
+      profileFingerprint: "fp-1",
+      generationId: "gen-1",
+      createTraceId: () => "trace-1",
+      record,
+    },
+  })
+
+  it("does not wait for the trace write before returning hits", async () => {
+    // `record` is wired to an IndexedDB write in production. Awaiting it put a
+    // control-plane round trip on the chat send path.
+    let settleRecord: (() => void) | null = null
+    const recorded = new Promise<void>((resolve) => {
+      settleRecord = resolve
+    })
+    const record = jest.fn(() => recorded)
+
+    const outcome = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm" },
+      telemetryDeps(record)
+    )
+
+    // Resolved while the write is still outstanding.
+    expect(record).toHaveBeenCalledTimes(1)
+    expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["hit"])
+    settleRecord?.()
+    await recorded
+  })
+
+  it("swallows a rejected trace write instead of failing the recall", async () => {
+    const record = jest.fn(() => Promise.reject(new Error("dexie is busy")))
+    const outcome = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm" },
+      telemetryDeps(record)
+    )
+    expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["hit"])
+    // Give the swallowed rejection a turn to surface as an unhandled one.
+    await Promise.resolve()
+  })
+
+  it("skips the query digest when no telemetry is configured", async () => {
+    const outcome = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm" },
+      {
+        loadCandidates: async () => [mem("The user prefers pnpm over npm", { id: "hit" })],
+      }
+    )
+    expect(outcome.trace.queryHash).toBe("")
+    expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["hit"])
+  })
+
+  it("hashes the query rather than carrying it when telemetry is configured", async () => {
+    const outcome = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm" },
+      telemetryDeps(jest.fn())
+    )
+    expect(outcome.trace.queryHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(outcome.trace.queryHash).not.toContain("pnpm")
   })
 })

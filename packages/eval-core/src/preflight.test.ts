@@ -133,6 +133,25 @@ describe("runProjectPreflight", () => {
     expect(result.effectiveCaseIds).toEqual(input.dataset.caseIds)
   })
 
+  it("blocks malformed decision-policy numbers before execution", () => {
+    const input = project()
+    input.decisionPolicy.dimensions[0].weight = -1
+    input.decisionPolicy.constraints = [{ metric: "quality", operator: "gte", value: NaN }]
+    input.decisionPolicy.confidenceLevel = 1
+    input.decisionPolicy.minimumEffectiveCases = 0
+    input.retentionDays = 0
+
+    expect(runProjectPreflight(input, environment).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "DECISION_WEIGHT_INVALID" }),
+        expect.objectContaining({ code: "DECISION_CONSTRAINT_INVALID" }),
+        expect.objectContaining({ code: "CONFIDENCE_LEVEL_INVALID" }),
+        expect.objectContaining({ code: "MINIMUM_CASES_INVALID" }),
+        expect.objectContaining({ code: "RETENTION_INVALID" }),
+      ])
+    )
+  })
+
   it("requires a concrete provider and model for an enabled formal judge", () => {
     const input = project()
     input.judgePolicy.providerId = undefined
@@ -231,6 +250,23 @@ describe("runProjectPreflight", () => {
         expect.objectContaining({ code: "JUDGE_CALIBRATION_FAILED" }),
         expect.objectContaining({ code: "MEDIA_CLEARANCE_REQUIRED" }),
       ])
+    )
+  })
+
+  it("uses pinned dataset media clearance instead of a stale project-level claim", () => {
+    const input = project()
+    input.dataset.requiredModalities = ["text", "image"]
+    input.variants.forEach((variant) => variant.capabilities.push("image"))
+    input.privacyPolicy.mediaClearance = "scanned"
+    input.dataset.mediaClearance = "local-only"
+
+    expect(runProjectPreflight(input, environment).issues).toContainEqual(
+      expect.objectContaining({ code: "MEDIA_CLEARANCE_REQUIRED" })
+    )
+
+    input.dataset.mediaClearance = "manual"
+    expect(runProjectPreflight(input, environment).issues).not.toContainEqual(
+      expect.objectContaining({ code: "MEDIA_CLEARANCE_REQUIRED" })
     )
   })
 

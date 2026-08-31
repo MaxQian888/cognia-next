@@ -62,20 +62,52 @@ export function resolveProviderSpecificParams(
   modelConfig: ModelConfig | undefined,
   schema: ProviderParameterSchema
 ): Record<string, unknown> {
-  const params = providerSettings?.providerSpecificParams ?? {}
+  const providerSpecificParams = providerSettings?.providerSpecificParams ?? {}
+  const advancedParams = providerSettings?.advancedParams ?? {}
+  const currentValues = { ...providerSpecificParams, ...advancedParams }
   const result: Record<string, unknown> = {}
+  const googleSafetySettings: Array<{ category: string; threshold: unknown }> = []
 
   for (const def of schema.parameters) {
-    if (def.category !== "provider-specific") continue
-    if (!shouldShowParameter(def, modelConfig, params)) continue
+    if (def.category !== "provider-specific" && def.category !== "advanced") continue
+    if (!shouldShowParameter(def, modelConfig, currentValues)) continue
 
-    const value = params[def.key] ?? def.defaultValue
-    if (value !== undefined) {
-      setNestedValue(result, def.key, value, def.nativeKey)
+    const source = def.category === "advanced" ? advancedParams : providerSpecificParams
+    if (!Object.prototype.hasOwnProperty.call(source, def.key)) continue
+
+    const value = source[def.key]
+    if (value === undefined) continue
+
+    // Seed is an AI SDK core call option, not an OpenAI provider option. It is
+    // projected by buildModelInferenceParams instead.
+    if (def.key === "openai.seed") continue
+
+    if (def.key === "anthropic.thinking.enabled") {
+      setNestedValue(result, "anthropic.thinking.type", value ? "enabled" : "disabled")
+      continue
     }
+
+    if (def.key.startsWith("google.safetySettings.")) {
+      const category = GOOGLE_SAFETY_CATEGORY[def.key]
+      if (category) googleSafetySettings.push({ category, threshold: value })
+      continue
+    }
+
+    setNestedValue(result, def.key, value, def.nativeKey)
+  }
+
+  if (googleSafetySettings.length > 0) {
+    setNestedValue(result, "google.safetySettings", googleSafetySettings)
   }
 
   return result
+}
+
+const GOOGLE_SAFETY_CATEGORY: Record<string, string> = {
+  "google.safetySettings.harassment": "HARM_CATEGORY_HARASSMENT",
+  "google.safetySettings.hateSpeech": "HARM_CATEGORY_HATE_SPEECH",
+  "google.safetySettings.sexuallyExplicit": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  "google.safetySettings.dangerousContent": "HARM_CATEGORY_DANGEROUS_CONTENT",
 }
 
 /**

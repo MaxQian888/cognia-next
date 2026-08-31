@@ -74,15 +74,6 @@ export const COMMON_INFERENCE_PARAMETERS: ParameterDefinition[] = [
 
 export const COMMON_CONNECTION_PARAMETERS: ParameterDefinition[] = [
   {
-    key: "connection.timeout",
-    type: "number",
-    label: "providerParams.connection.timeout.label",
-    description: "providerParams.connection.timeout.description",
-    category: "connection",
-    defaultValue: 30000,
-    validation: { min: 5000, max: 300000, step: 1000 },
-  },
-  {
     key: "connection.maxRetries",
     type: "number",
     label: "providerParams.connection.maxRetries.label",
@@ -92,13 +83,13 @@ export const COMMON_CONNECTION_PARAMETERS: ParameterDefinition[] = [
     validation: { min: 0, max: 10 },
   },
   {
-    key: "connection.retryDelay",
+    key: "connection.concurrentLimit",
     type: "number",
-    label: "providerParams.connection.retryDelay.label",
-    description: "providerParams.connection.retryDelay.description",
+    label: "providerParams.connection.concurrentLimit.label",
+    description: "providerParams.connection.concurrentLimit.description",
     category: "connection",
-    defaultValue: 1000,
-    validation: { min: 100, max: 30000, step: 100 },
+    defaultValue: undefined,
+    validation: { min: 1, max: 256 },
   },
 ]
 
@@ -109,7 +100,7 @@ export const COMMON_CONNECTION_PARAMETERS: ParameterDefinition[] = [
 const OPENAI_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
   {
     key: "openai.reasoningEffort",
-    nativeKey: "reasoning_effort",
+    nativeKey: "reasoningEffort",
     type: "select",
     label: "providerParams.openai.reasoningEffort.label",
     description: "providerParams.openai.reasoningEffort.description",
@@ -122,20 +113,6 @@ const OPENAI_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
         { value: "low", label: "providerParams.openai.reasoningEffort.low" },
         { value: "medium", label: "providerParams.openai.reasoningEffort.medium" },
         { value: "high", label: "providerParams.openai.reasoningEffort.high" },
-      ],
-    },
-  },
-  {
-    key: "openai.responseFormat",
-    type: "select",
-    label: "providerParams.openai.responseFormat.label",
-    description: "providerParams.openai.responseFormat.description",
-    category: "advanced",
-    defaultValue: "text",
-    validation: {
-      options: [
-        { value: "text", label: "providerParams.openai.responseFormat.text" },
-        { value: "json_object", label: "providerParams.openai.responseFormat.jsonObject" },
       ],
     },
   },
@@ -192,10 +169,11 @@ const ANTHROPIC_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
 ]
 
 const GOOGLE_SAFETY_OPTIONS = [
-  { value: "NONE", label: "providerParams.google.safetySettings.none" },
-  { value: "LOW", label: "providerParams.google.safetySettings.low" },
-  { value: "MEDIUM", label: "providerParams.google.safetySettings.medium" },
-  { value: "HIGH", label: "providerParams.google.safetySettings.high" },
+  { value: "BLOCK_NONE", label: "providerParams.google.safetySettings.none" },
+  { value: "BLOCK_LOW_AND_ABOVE", label: "providerParams.google.safetySettings.low" },
+  { value: "BLOCK_MEDIUM_AND_ABOVE", label: "providerParams.google.safetySettings.medium" },
+  { value: "BLOCK_ONLY_HIGH", label: "providerParams.google.safetySettings.high" },
+  { value: "OFF", label: "providerParams.google.safetySettings.off" },
 ]
 
 const GOOGLE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
@@ -205,7 +183,7 @@ const GOOGLE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
     label: "providerParams.google.safetySettings.harassment.label",
     description: "providerParams.google.safetySettings.harassment.description",
     category: "provider-specific",
-    defaultValue: "MEDIUM",
+    defaultValue: "BLOCK_MEDIUM_AND_ABOVE",
     group: "providerParams.google.safetySettings.label",
     validation: { options: GOOGLE_SAFETY_OPTIONS },
   },
@@ -215,7 +193,7 @@ const GOOGLE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
     label: "providerParams.google.safetySettings.hateSpeech.label",
     description: "providerParams.google.safetySettings.hateSpeech.description",
     category: "provider-specific",
-    defaultValue: "MEDIUM",
+    defaultValue: "BLOCK_MEDIUM_AND_ABOVE",
     group: "providerParams.google.safetySettings.label",
     validation: { options: GOOGLE_SAFETY_OPTIONS },
   },
@@ -225,7 +203,7 @@ const GOOGLE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
     label: "providerParams.google.safetySettings.sexuallyExplicit.label",
     description: "providerParams.google.safetySettings.sexuallyExplicit.description",
     category: "provider-specific",
-    defaultValue: "MEDIUM",
+    defaultValue: "BLOCK_MEDIUM_AND_ABOVE",
     group: "providerParams.google.safetySettings.label",
     validation: { options: GOOGLE_SAFETY_OPTIONS },
   },
@@ -235,40 +213,9 @@ const GOOGLE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
     label: "providerParams.google.safetySettings.dangerousContent.label",
     description: "providerParams.google.safetySettings.dangerousContent.description",
     category: "provider-specific",
-    defaultValue: "MEDIUM",
+    defaultValue: "BLOCK_MEDIUM_AND_ABOVE",
     group: "providerParams.google.safetySettings.label",
     validation: { options: GOOGLE_SAFETY_OPTIONS },
-  },
-  {
-    key: "google.groundingEnabled",
-    type: "toggle",
-    label: "providerParams.google.groundingEnabled.label",
-    description: "providerParams.google.groundingEnabled.description",
-    category: "provider-specific",
-    defaultValue: false,
-  },
-]
-
-const DEEPSEEK_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
-  {
-    key: "deepseek.enableReasoning",
-    type: "toggle",
-    label: "providerParams.deepseek.enableReasoning.label",
-    description: "providerParams.deepseek.enableReasoning.description",
-    category: "provider-specific",
-    defaultValue: false,
-    condition: { modelCapability: "supportsReasoning" },
-  },
-]
-
-const XAI_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
-  {
-    key: "xai.searchEnabled",
-    type: "toggle",
-    label: "providerParams.xai.searchEnabled.label",
-    description: "providerParams.xai.searchEnabled.description",
-    category: "provider-specific",
-    defaultValue: false,
   },
 ]
 
@@ -278,118 +225,6 @@ const MISTRAL_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
     type: "toggle",
     label: "providerParams.mistral.safePrompt.label",
     description: "providerParams.mistral.safePrompt.description",
-    category: "provider-specific",
-    defaultValue: false,
-  },
-]
-
-const OLLAMA_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
-  {
-    key: "ollama.numCtx",
-    type: "number",
-    label: "providerParams.ollama.numCtx.label",
-    description: "providerParams.ollama.numCtx.description",
-    category: "provider-specific",
-    defaultValue: 2048,
-    validation: { min: 512, max: 131072 },
-  },
-  {
-    key: "ollama.numPredict",
-    type: "number",
-    label: "providerParams.ollama.numPredict.label",
-    description: "providerParams.ollama.numPredict.description",
-    category: "provider-specific",
-    defaultValue: -1,
-    validation: { min: -1, max: 131072 },
-  },
-  {
-    key: "ollama.repeatPenalty",
-    type: "slider",
-    label: "providerParams.ollama.repeatPenalty.label",
-    description: "providerParams.ollama.repeatPenalty.description",
-    category: "provider-specific",
-    defaultValue: 1.1,
-    validation: { min: 0, max: 2, step: 0.1 },
-  },
-  {
-    key: "ollama.mirostat",
-    type: "select",
-    label: "providerParams.ollama.mirostat.label",
-    description: "providerParams.ollama.mirostat.description",
-    category: "provider-specific",
-    defaultValue: "0",
-    validation: {
-      options: [
-        { value: "0", label: "providerParams.ollama.mirostat.disabled" },
-        { value: "1", label: "providerParams.ollama.mirostat.mirostat1" },
-        { value: "2", label: "providerParams.ollama.mirostat.mirostat2" },
-      ],
-    },
-  },
-  {
-    key: "ollama.numGpu",
-    type: "number",
-    label: "providerParams.ollama.numGpu.label",
-    description: "providerParams.ollama.numGpu.description",
-    category: "provider-specific",
-    defaultValue: -1,
-    validation: { min: -1, max: 128 },
-  },
-  {
-    key: "ollama.numThread",
-    type: "number",
-    label: "providerParams.ollama.numThread.label",
-    description: "providerParams.ollama.numThread.description",
-    category: "provider-specific",
-    defaultValue: 0,
-    validation: { min: 0, max: 128 },
-  },
-  {
-    key: "ollama.keepAlive",
-    type: "text",
-    label: "providerParams.ollama.keepAlive.label",
-    description: "providerParams.ollama.keepAlive.description",
-    category: "provider-specific",
-    defaultValue: "5m",
-  },
-]
-
-const TOGETHER_AI_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
-  {
-    key: "togetherAi.repetitionPenalty",
-    type: "slider",
-    label: "providerParams.togetherAi.repetitionPenalty.label",
-    description: "providerParams.togetherAi.repetitionPenalty.description",
-    category: "provider-specific",
-    defaultValue: 1.0,
-    validation: { min: 0, max: 2, step: 0.1 },
-  },
-  {
-    key: "togetherAi.topK",
-    type: "number",
-    label: "providerParams.togetherAi.topK.label",
-    description: "providerParams.togetherAi.topK.description",
-    category: "provider-specific",
-    defaultValue: 40,
-    validation: { min: 1, max: 100 },
-  },
-]
-
-const COHERE_SPECIFIC_PARAMETERS: ParameterDefinition[] = [
-  {
-    key: "cohere.k",
-    type: "number",
-    label: "providerParams.cohere.k.label",
-    description: "providerParams.cohere.k.description",
-    category: "provider-specific",
-    defaultValue: 0,
-    validation: { min: 0, max: 500 },
-  },
-  {
-    key: "cohere.connectors",
-    type: "toggle",
-    label: "providerParams.cohere.connectors.label",
-    description: "providerParams.cohere.connectors.description",
     category: "provider-specific",
     defaultValue: false,
   },
@@ -423,12 +258,12 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderParameterSchema> = {
   openai: buildSchema("openai", "OpenAI", OPENAI_SPECIFIC_PARAMETERS),
   anthropic: buildSchema("anthropic", "Anthropic", ANTHROPIC_SPECIFIC_PARAMETERS),
   google: buildSchema("google", "Google", GOOGLE_SPECIFIC_PARAMETERS),
-  deepseek: buildSchema("deepseek", "DeepSeek", DEEPSEEK_SPECIFIC_PARAMETERS),
-  xai: buildSchema("xai", "xAI", XAI_SPECIFIC_PARAMETERS),
+  deepseek: buildSchema("deepseek", "DeepSeek"),
+  xai: buildSchema("xai", "xAI"),
   mistral: buildSchema("mistral", "Mistral", MISTRAL_SPECIFIC_PARAMETERS),
-  ollama: buildSchema("ollama", "Ollama", OLLAMA_SPECIFIC_PARAMETERS),
-  "together-ai": buildSchema("together-ai", "Together AI", TOGETHER_AI_SPECIFIC_PARAMETERS),
-  cohere: buildSchema("cohere", "Cohere", COHERE_SPECIFIC_PARAMETERS),
+  ollama: buildSchema("ollama", "Ollama"),
+  togetherai: buildSchema("togetherai", "Together AI"),
+  cohere: buildSchema("cohere", "Cohere"),
   // Providers with no unique parameters beyond inference + connection
   groq: buildSchema("groq", "Groq"),
   fireworks: buildSchema("fireworks", "Fireworks"),
