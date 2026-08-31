@@ -47,6 +47,8 @@ interface HostRuntimeTargetRegistry {
   listTargets(accountId: string): Promise<RuntimeTargetRecord[]>
   upsertCompanionTarget(input: UpsertCompanionTargetInput): Promise<RuntimeTargetRecord>
   activateTarget(accountId: string, targetId: string): Promise<RuntimeTargetRecord>
+  deleteTarget(accountId: string, targetId: string): Promise<void>
+  deleteActiveTarget(accountId: string, targetId: string): Promise<void>
 }
 
 export interface HostOrchestrationDependencies {
@@ -183,7 +185,20 @@ export async function pairAndActivateCompanionHost(
     if (existing) {
       await deps.book.upsert(existing)
       if (existingCredential) await deps.book.saveCredential(key, existingCredential)
+      // The credential leg also overwrote the runtime target with this
+      // attempt's endpoint, device and server version. Put the previous
+      // pairing's values back, or the Host picker advertises a Host the
+      // restored record can no longer reach.
+      await deps.registry.upsertCompanionTarget(runtimeTargetInput(existing))
     } else {
+      // Drop the runtime target before the book record, the order
+      // `removeCompanionHost` already uses: the registry row is what the Host
+      // picker reads, so a rollback that itself fails half-way must leave an
+      // invisible record rather than a visible entry with nothing behind it.
+      // Skipping this is how a failed first pairing left a row that could
+      // neither be switched to nor removed — both guards answer
+      // "Companion Host <id> is not paired." and the only escape was devtools.
+      await discardRuntimeTarget(input.accountId, input.config.targetId, deps)
       await deps.book.remove(key)
     }
     if (previousHost) await deps.book.setActive(hostKeyOf(previousHost))
@@ -213,6 +228,26 @@ export async function pairAndActivateCompanionHost(
   } finally {
     ownedRegistry?.close()
   }
+}
+
+/**
+ * Delete a runtime target that no paired record stands behind.
+ *
+ * `deleteTarget` refuses to remove the target the active pointer names, and a
+ * pairing whose rollback also failed can leave the pointer on the very target
+ * being discarded. That account has already been moved offline by
+ * {@link HostOrchestrationDependencies.enterOffline}, so clearing the pointer
+ * along with the row is the honest end state — `ensureDefaultActiveTarget`
+ * restores a standalone target on the next boot.
+ */
+async function discardRuntimeTarget(
+  accountId: string,
+  targetId: string,
+  deps: HostOrchestrationDependencies
+): Promise<void> {
+  const active = await deps.registry.getActiveTarget(accountId)
+  if (active?.id === targetId) await deps.registry.deleteActiveTarget(accountId, targetId)
+  else await deps.registry.deleteTarget(accountId, targetId)
 }
 
 /** Run one leg of pairing, tagging whatever it throws with that leg's name. */

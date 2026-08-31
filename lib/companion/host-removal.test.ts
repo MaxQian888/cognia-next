@@ -17,7 +17,17 @@ const host = (hostId: string): CompanionHostRecord => ({
   updatedAt: 1,
 })
 
-function harness(options: { hosts?: string[]; active?: string; revokeFails?: boolean } = {}) {
+function harness(
+  options: {
+    hosts?: string[]
+    active?: string
+    revokeFails?: boolean
+    /** The runtime-target pointer, when it does not track the book's. */
+    activeTargetId?: string
+    /** Book records whose credential is gone from the Vault. */
+    credentialless?: boolean
+  } = {}
+) {
   const hosts = (options.hosts ?? ["host-a", "host-b"]).map(host)
   let activeId = options.active ?? "host-a"
   const removed: string[] = []
@@ -33,7 +43,8 @@ function harness(options: { hosts?: string[]; active?: string; revokeFails?: boo
     clearActive: jest.fn(async () => {
       activeId = ""
     }),
-    loadCredential: async () => ({ devicePrivateKeyJwk: { kty: "EC", d: "secret" } }),
+    loadCredential: async () =>
+      options.credentialless ? null : { devicePrivateKeyJwk: { kty: "EC", d: "secret" } },
     remove: async ({ hostId }: { hostId: string }) => {
       removed.push(hostId)
     },
@@ -51,6 +62,7 @@ function harness(options: { hosts?: string[]; active?: string; revokeFails?: boo
     revoke: options.revokeFails
       ? jest.fn().mockRejectedValue(new Error("offline"))
       : jest.fn().mockResolvedValue({ kind: "revoked" }),
+    activeRuntimeTargetId: jest.fn(async () => options.activeTargetId ?? activeId),
     deleteRuntimeTarget: jest.fn().mockResolvedValue(undefined),
     deleteActiveRuntimeTarget: jest.fn().mockResolvedValue(undefined),
     deleteDatabase: jest.fn().mockResolvedValue(undefined),
@@ -113,4 +125,74 @@ it("switches Web to standalone before revoking its sole Companion Host", async (
   await removeCompanionHost({ accountId, hostId: "host-a", platform: "web" }, dependencies)
   expect(switched).toEqual(["web-standalone"])
   expect(dependencies.deleteRuntimeTarget).toHaveBeenCalledWith(accountId, "host-a")
+})
+
+it("clears a runtime target whose book record is already gone", async () => {
+  const { dependencies, removed, switched } = harness({ hosts: ["host-b"], active: "host-b" })
+
+  await removeCompanionHost({ accountId, hostId: "orphan-host", platform: "web" }, dependencies)
+
+  // Nothing to revoke with, and nothing to revoke: the pairing that wrote this
+  // row never completed. Refusing here left it listed in the Host picker with
+  // no way out except deleting the row in devtools.
+  expect(dependencies.revoke).not.toHaveBeenCalled()
+  expect(dependencies.deleteRuntimeTarget).toHaveBeenCalledWith(accountId, "orphan-host")
+  expect(dependencies.deleteDatabase).toHaveBeenCalledWith(
+    "cognia-account-local_acct_a-target-orphan-host"
+  )
+  expect(removed).toEqual([])
+  expect(switched).toEqual([])
+})
+
+it("moves Web off an orphaned target before clearing it when the pointer still names it", async () => {
+  const { dependencies, switched } = harness({
+    hosts: ["host-b"],
+    active: "host-b",
+    activeTargetId: "orphan-host",
+  })
+
+  await removeCompanionHost({ accountId, hostId: "orphan-host", platform: "web" }, dependencies)
+
+  expect(switched).toEqual(["web-standalone"])
+  expect(dependencies.deleteRuntimeTarget).toHaveBeenCalledWith(accountId, "orphan-host")
+})
+
+it("quiesces Mobile and enters unpaired when the orphaned target is still active", async () => {
+  const { dependencies } = harness({
+    hosts: ["host-b"],
+    active: "host-b",
+    activeTargetId: "orphan-host",
+  })
+
+  await removeCompanionHost({ accountId, hostId: "orphan-host", platform: "mobile" }, dependencies)
+
+  expect(dependencies.quiesceSoleMobile).toHaveBeenCalledWith(accountId, "orphan-host")
+  expect(dependencies.deleteActiveRuntimeTarget).toHaveBeenCalledWith(accountId, "orphan-host")
+  expect(dependencies.enterUnpaired).toHaveBeenCalled()
+})
+
+it("refuses to report an orphan cleared when its target database survives", async () => {
+  const { dependencies } = harness({ hosts: ["host-b"], active: "host-b" })
+  dependencies.databaseExists = jest.fn().mockResolvedValue(true)
+
+  await expect(
+    removeCompanionHost({ accountId, hostId: "orphan-host", platform: "web" }, dependencies)
+  ).rejects.toThrow(/deletion could not be verified/i)
+})
+
+it("finishes removal locally when the record survives but its credential is gone", async () => {
+  const { dependencies, removed, switched } = harness({
+    hosts: ["host-a"],
+    credentialless: true,
+  })
+
+  await removeCompanionHost({ accountId, hostId: "host-a", platform: "web" }, dependencies)
+
+  // A locked Vault throws instead of resolving null, so a null credential means
+  // the secret is gone and remote revocation is impossible, not merely blocked.
+  expect(switched).toEqual(["web-standalone"])
+  expect(dependencies.revoke).not.toHaveBeenCalled()
+  expect(dependencies.deleteRuntimeTarget).toHaveBeenCalledWith(accountId, "host-a")
+  expect(removed).toEqual(["host-a"])
+  expect(dependencies.removeRecentAlias).toHaveBeenCalledWith("https://host-a.local:7890")
 })

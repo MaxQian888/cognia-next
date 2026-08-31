@@ -40,6 +40,7 @@ export interface HostRemovalDependencies {
   switchWebStandalone(accountId: string): Promise<unknown>
   quiesceSoleMobile(accountId: string, hostId: string): Promise<void>
   revoke: typeof revokeCompanionDevice
+  activeRuntimeTargetId(accountId: string): Promise<string | null>
   deleteRuntimeTarget(accountId: string, hostId: string): Promise<void>
   deleteActiveRuntimeTarget(accountId: string, hostId: string): Promise<void>
   deleteDatabase(name: string): Promise<void>
@@ -48,7 +49,11 @@ export interface HostRemovalDependencies {
   enterUnpaired(): Promise<void>
 }
 
-/** Remote-first completion: no local record is erased until revocation is confirmed. */
+/**
+ * Remote-first completion: no local record is erased until revocation is
+ * confirmed — or until it is established that there is nothing to revoke with,
+ * which is the only case that skips the remote leg.
+ */
 export async function removeCompanionHost(
   input: RemoveCompanionHostInput,
   dependencies?: HostRemovalDependencies
@@ -57,14 +62,26 @@ export async function removeCompanionHost(
   const deps = dependencies ?? productionDependencies(registry!)
   try {
     const key = { accountNamespace: input.accountId, hostId: input.hostId }
-    const [record, credential, active, hosts] = await Promise.all([
+    const [record, active, hosts] = await Promise.all([
       deps.book.get(key),
-      deps.book.loadCredential(key),
       deps.book.getActive(input.accountId),
       deps.book.list(input.accountId),
     ])
-    if (!record) throw new Error(`Companion Host ${input.hostId} is not paired.`)
-    if (!credential) throw new Error(`Companion Host ${input.hostId} credential is unavailable.`)
+    // A runtime target can outlive its book record — a pairing whose activation
+    // failed used to leave one behind, and that row is what the Host picker
+    // lists. Refusing here is what stranded such an entry: switching to it and
+    // removing it answered the same "is not paired", and deleting the row by
+    // hand in devtools was the only way out. There is no identity to revoke and
+    // no secret to revoke it with, so a local forget is the only honest
+    // completion.
+    if (!record) {
+      await forgetRuntimeTargetOnly(input, deps)
+      return
+    }
+    // A locked Vault throws rather than resolving null, so a null credential
+    // means the secret is genuinely gone — not merely out of reach. Removal
+    // still finishes locally, but nothing is revoked remotely.
+    const credential = await deps.book.loadCredential(key)
     const removingActive = active?.hostId === record.hostId
     const alternatives = hosts.filter((host) => host.hostId !== record.hostId)
 
@@ -84,11 +101,14 @@ export async function removeCompanionHost(
       await deps.quiesceSoleMobile(input.accountId, input.hostId)
     }
 
-    const config = await toCompanionConfig(record, credential)
-    await deps.revoke(config)
+    if (credential) {
+      const config = await toCompanionConfig(record, credential)
+      await deps.revoke(config)
+    }
 
-    // Only confirmed revocation reaches this point. Target DB deletion removes
-    // mirrors, cursors, pending/sending/retry/dead-letter queue rows together.
+    // Only confirmed revocation — or a credential that no longer exists to
+    // revoke with — reaches this point. Target DB deletion removes mirrors,
+    // cursors, pending/sending/retry/dead-letter queue rows together.
     if (removingActive && input.platform === "mobile" && alternatives.length === 0) {
       await deps.book.clearActive?.(input.accountId, input.hostId)
       await deps.deleteActiveRuntimeTarget(input.accountId, input.hostId)
@@ -111,6 +131,37 @@ export async function removeCompanionHost(
   }
 }
 
+/**
+ * Clear a runtime target whose book record is already gone.
+ *
+ * Only the registry row and the target database are left to erase: there is no
+ * record to remove, no base URL to drop from the recent-server list, and
+ * nothing to revoke. `deleteTarget` refuses to remove the target the active
+ * pointer names, so an orphan that is somehow still active is cleared through
+ * the pointer-aware paths the sole-Host removal already uses.
+ */
+async function forgetRuntimeTargetOnly(
+  input: RemoveCompanionHostInput,
+  deps: HostRemovalDependencies
+): Promise<void> {
+  const wasActive = (await deps.activeRuntimeTargetId(input.accountId)) === input.hostId
+  if (wasActive && input.platform === "web") {
+    await deps.switchWebStandalone(input.accountId)
+    await deps.deleteRuntimeTarget(input.accountId, input.hostId)
+  } else if (wasActive) {
+    await deps.quiesceSoleMobile(input.accountId, input.hostId)
+    await deps.deleteActiveRuntimeTarget(input.accountId, input.hostId)
+  } else {
+    await deps.deleteRuntimeTarget(input.accountId, input.hostId)
+  }
+  const databaseName = runtimeTargetDatabaseName(input.accountId, input.hostId)
+  await deps.deleteDatabase(databaseName)
+  if (await deps.databaseExists(databaseName)) {
+    throw new Error(`Companion Host database deletion could not be verified: ${databaseName}`)
+  }
+  if (wasActive && input.platform !== "web") await deps.enterUnpaired()
+}
+
 function productionDependencies(registry: RuntimeTargetRegistry): HostRemovalDependencies {
   return {
     book: companionCredentialBook(),
@@ -123,6 +174,8 @@ function productionDependencies(registry: RuntimeTargetRegistry): HostRemovalDep
       await runRuntimeTargetTransitionPhase("release-subscriptions", transition)
     },
     revoke: revokeCompanionDevice,
+    activeRuntimeTargetId: async (accountId) =>
+      (await registry.getActiveTarget(accountId))?.id ?? null,
     deleteRuntimeTarget: (accountId, hostId) => registry.deleteTarget(accountId, hostId),
     deleteActiveRuntimeTarget: (accountId, hostId) =>
       registry.deleteActiveTarget(accountId, hostId),

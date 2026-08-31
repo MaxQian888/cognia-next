@@ -91,6 +91,20 @@ function harness(options: { failReload?: boolean; failRollback?: boolean } = {})
         activeTarget = targets.get(hostId)!
         return activeTarget
       },
+      deleteTarget: async (_accountId, targetId) => {
+        order.push(`registry:delete:${targetId}`)
+        if (activeTarget.id === targetId) {
+          throw new Error("The active runtime target must be switched before it can be removed.")
+        }
+        targets.delete(targetId)
+      },
+      deleteActiveTarget: async (_accountId, targetId) => {
+        order.push(`registry:delete-active:${targetId}`)
+        if (activeTarget.id !== targetId) {
+          throw new Error(`Runtime target ${targetId} is not the active runtime target.`)
+        }
+        targets.delete(targetId)
+      },
     },
     runPhase: async (phase) => {
       order.push(`phase:${phase}`)
@@ -128,7 +142,7 @@ function harness(options: { failReload?: boolean; failRollback?: boolean } = {})
       order.push("offline")
     },
   }
-  return { dependencies, order }
+  return { dependencies, order, targets, activeTargetId: () => activeTarget.id }
 }
 
 it("switches in the required quiesce, teardown, activation, sync, bind, publish order", async () => {
@@ -286,4 +300,147 @@ it("removes a newly paired Host when its first activation fails", async () => {
 
   expect(remove).toHaveBeenCalledWith({ accountNamespace: accountId, hostId: "host-b" })
   expect(await dependencies.book.getActive(accountId)).toEqual(host("host-a"))
+})
+
+it("deletes the runtime target a failed first pairing created, before its book record", async () => {
+  const { dependencies, targets, order } = harness({ failReload: true })
+  const hostC = host("host-c")
+  let persisted = false
+  dependencies.book = {
+    ...dependencies.book,
+    get: async ({ hostId }: { hostId: string }) =>
+      hostId === "host-c" ? (persisted ? hostC : null) : host("host-a"),
+    loadCredential: async ({ hostId }: { hostId: string }) =>
+      hostId === "host-c" && !persisted
+        ? null
+        : { devicePrivateKeyJwk: { kty: "EC", d: `secret-${hostId}` } },
+    saveCredential: async () => {
+      persisted = true
+    },
+    upsert: async () => {
+      persisted = true
+      return hostC
+    },
+    remove: async () => {
+      order.push("book:remove:host-c")
+    },
+  } as unknown as CompanionCredentialBook
+
+  await expect(
+    pairAndActivateCompanionHost(
+      {
+        accountId,
+        platform: "web",
+        config: {
+          targetId: "host-c",
+          accountId,
+          baseUrl: hostC.endpoints.baseUrl,
+          deviceId: hostC.deviceId,
+          devicePrivateKeyJwk: { kty: "EC", d: "new-secret" },
+          deviceKeyThumbprint: hostC.deviceKeyThumbprint,
+          serverVersion: hostC.serverVersion,
+        },
+      },
+      dependencies
+    )
+  ).rejects.toThrow("reload failed")
+
+  // Left behind, this row is what the Host picker lists, and both switching to
+  // it and removing it answer "Companion Host host-c is not paired."
+  expect(targets.has("host-c")).toBe(false)
+  expect(order.indexOf("registry:delete:host-c")).toBeLessThan(order.indexOf("book:remove:host-c"))
+})
+
+it("clears the active pointer with the target when the pairing rollback also failed", async () => {
+  const { dependencies, targets, order } = harness({ failReload: true, failRollback: true })
+  const hostC = host("host-c")
+  let persisted = false
+  dependencies.book = {
+    ...dependencies.book,
+    get: async ({ hostId }: { hostId: string }) =>
+      hostId === "host-c" ? (persisted ? hostC : null) : host("host-a"),
+    loadCredential: async ({ hostId }: { hostId: string }) =>
+      hostId === "host-c" && !persisted
+        ? null
+        : { devicePrivateKeyJwk: { kty: "EC", d: `secret-${hostId}` } },
+    saveCredential: async () => {
+      persisted = true
+    },
+    upsert: async () => {
+      persisted = true
+      return hostC
+    },
+    remove: jest.fn().mockResolvedValue(undefined),
+  } as unknown as CompanionCredentialBook
+
+  await expect(
+    pairAndActivateCompanionHost(
+      {
+        accountId,
+        platform: "mobile",
+        config: {
+          targetId: "host-c",
+          accountId,
+          baseUrl: hostC.endpoints.baseUrl,
+          deviceId: hostC.deviceId,
+          devicePrivateKeyJwk: { kty: "EC", d: "new-secret" },
+          deviceKeyThumbprint: hostC.deviceKeyThumbprint,
+          serverVersion: hostC.serverVersion,
+        },
+      },
+      dependencies
+    )
+  ).rejects.toThrow(/rollback was incomplete/i)
+
+  expect(order).toContain("offline")
+  // `deleteTarget` refuses the target the active pointer names, so without the
+  // pointer-aware path the row would survive its own cleanup.
+  expect(order).toContain("registry:delete-active:host-c")
+  expect(targets.has("host-c")).toBe(false)
+})
+
+it("restores the previous runtime target when a re-pair of the same Host fails", async () => {
+  const { dependencies } = harness({ failReload: true })
+  const upsertCompanionTarget = jest.fn(dependencies.registry.upsertCompanionTarget)
+  dependencies.registry = { ...dependencies.registry, upsertCompanionTarget }
+  dependencies.book = {
+    ...dependencies.book,
+    upsert: async (draft: Parameters<CompanionCredentialBook["upsert"]>[0]) => ({
+      ...host(draft.hostId),
+      ...draft,
+    }),
+    saveCredential: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
+  } as unknown as CompanionCredentialBook
+
+  await expect(
+    pairAndActivateCompanionHost(
+      {
+        accountId,
+        platform: "web",
+        config: {
+          targetId: "host-a",
+          accountId,
+          baseUrl: "https://host-a-new.local:7890",
+          deviceId: "device-host-a-new",
+          devicePrivateKeyJwk: { kty: "EC", d: "new-secret" },
+          deviceKeyThumbprint: "new-thumb",
+          serverVersion: "2.0.0",
+        },
+      },
+      dependencies
+    )
+  ).rejects.toThrow("reload failed")
+
+  // The book record is restored, so the target row must be too. Otherwise the
+  // picker advertises an endpoint the restored credential cannot reach.
+  expect(upsertCompanionTarget).toHaveBeenCalledTimes(2)
+  expect(upsertCompanionTarget).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      id: "host-a",
+      baseUrl: "https://host-a.local:7890",
+      deviceId: "device-host-a",
+      serverVersion: "1.0.0",
+    })
+  )
 })
