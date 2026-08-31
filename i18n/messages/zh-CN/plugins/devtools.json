@@ -1,4 +1,30 @@
 {
+  "apiAudit": {
+    "clear": "清空",
+    "colData": "数据",
+    "colDuration": "耗时",
+    "colError": "错误",
+    "colMethod": "方法",
+    "colOutcome": "结果",
+    "colPlugin": "插件",
+    "colRuntime": "运行时",
+    "description": "插件对宿主发起的每一次调用，以及权限判定结果。只记录元数据：参数和返回值从不落盘。",
+    "durationMs": "{ms} 毫秒",
+    "empty": "还没有调用。启用一个插件并使用它。",
+    "filterOutcome": "结果",
+    "filterOutcomeAll": "全部结果",
+    "filterPlugin": "插件",
+    "filterPluginAll": "全部插件",
+    "outcome": {
+      "allowed": "允许",
+      "denied": "拒绝",
+      "error": "出错"
+    },
+    "summary": "允许 {allowed} · 拒绝 {denied} · 出错 {errored}",
+    "title": "插件 API 调用",
+    "tracedHint": "渲染端内被允许的调用不会上报 trace，以免 trace 存储膨胀；其余都会。",
+    "tracedOnly": "只看会进 Traces 的调用"
+  },
   "dropzone": {
     "hint": "拖入包含 plugin.json 的目录，或点击选择。安装会经过与插件市场相同的冲突、权限与配置审查。",
     "title": "将插件目录拖到这里"

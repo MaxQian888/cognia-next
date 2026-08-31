@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner"
 
 import { PluginPointDiagnosticsPanel } from "../plugin-point-diagnostics-panel"
+import { ApiAuditPane } from "./api-audit-pane"
 import { LifecyclePane } from "./lifecycle-pane"
 import { TriggersPane } from "./triggers-pane"
 import { Badge } from "@/components/ui/badge"
@@ -255,6 +256,7 @@ export function PluginDevSessionWorkbench() {
           </div>
         </TabsContent>
         <TabsContent value="advanced" className="space-y-4">
+          <ApiAuditPane />
           <LifecyclePane />
           <TriggersPane />
           <PluginPointDiagnosticsPanel />

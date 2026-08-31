@@ -1,4 +1,30 @@
 {
+  "apiAudit": {
+    "clear": "Clear",
+    "colData": "Data",
+    "colDuration": "Duration",
+    "colError": "Error",
+    "colMethod": "Method",
+    "colOutcome": "Outcome",
+    "colPlugin": "Plugin",
+    "colRuntime": "Runtime",
+    "description": "Every call a plugin makes into the host, with the permission verdict. Metadata only: arguments and return values are never recorded.",
+    "durationMs": "{ms} ms",
+    "empty": "No calls yet. Activate a plugin and use it.",
+    "filterOutcome": "Outcome",
+    "filterOutcomeAll": "All outcomes",
+    "filterPlugin": "Plugin",
+    "filterPluginAll": "All plugins",
+    "outcome": {
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "error": "Error"
+    },
+    "summary": "{allowed} allowed · {denied} denied · {errored} errored",
+    "title": "Plugin API calls",
+    "tracedHint": "Allowed in-renderer calls are not traced, to keep the trace store small. Everything else is.",
+    "tracedOnly": "Only calls that reach Traces"
+  },
   "dropzone": {
     "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace.",
     "title": "Drop a plugin folder here"

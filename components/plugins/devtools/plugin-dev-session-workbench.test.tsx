@@ -28,6 +28,9 @@ jest.mock("./local-plugin-dropzone", () => ({
 jest.mock("../plugin-point-diagnostics-panel", () => ({
   PluginPointDiagnosticsPanel: () => <div data-testid="point-diagnostics" />,
 }))
+jest.mock("./api-audit-pane", () => ({
+  ApiAuditPane: () => <div data-testid="api-audit" />,
+}))
 jest.mock("./lifecycle-pane", () => ({
   LifecyclePane: () => <div data-testid="lifecycle" />,
 }))
@@ -346,6 +349,9 @@ describe("PluginDevSessionWorkbench", () => {
     await waitFor(() => expect(screen.getByText(/runtime failed/)).toBeInTheDocument())
 
     await userEvent.click(screen.getByRole("tab", { name: "Advanced diagnostics" }))
+    // Nothing else mounts the API audit reader, so an unmounted pane means
+    // the audit ring goes back to having only the sampled trace bridge.
+    expect(screen.getByTestId("api-audit")).toBeInTheDocument()
     expect(screen.getByTestId("lifecycle")).toBeInTheDocument()
     expect(screen.getByTestId("triggers")).toBeInTheDocument()
     expect(screen.getByTestId("point-diagnostics")).toBeInTheDocument()
