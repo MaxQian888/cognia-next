@@ -215,7 +215,7 @@ function InstallSection({
   const [trackedEntry, setTrackedEntry] = useState(entryKey)
   if (trackedEntry !== entryKey) {
     setTrackedEntry(entryKey)
-    setVersions([entry.version])
+    setVersions([{ version: entry.version }])
     setSelected(entry.version)
   }
 

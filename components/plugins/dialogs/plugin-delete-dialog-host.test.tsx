@@ -2,8 +2,8 @@
  * @jest-environment jsdom
  */
 
-const unregisterMock = jest.fn(async () => {})
-const deletePluginMock = jest.fn(async () => {})
+const unregisterMock = jest.fn(async (_id: string) => {})
+const deletePluginMock = jest.fn(async (_id: string) => {})
 const permissionsDeleteMock = jest.fn(async () => 0)
 const analyticsDeleteMock = jest.fn(async () => 0)
 

@@ -38,10 +38,12 @@ jest.mock("@/lib/db/skills", () => ({
 }))
 
 const enqueueMock = jest.fn()
-const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
-  ok: true,
-  queued: false,
-}))
+const setPluginEnabledForHostMock = jest.fn(
+  async (
+    _id: string,
+    _enabled: boolean
+  ): Promise<{ ok: boolean; queued: boolean; error?: string }> => ({ ok: true, queued: false })
+)
 jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: (id: string, enabled: boolean) =>
     setPluginEnabledForHostMock(id, enabled),
