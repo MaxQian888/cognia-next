@@ -687,6 +687,16 @@ describe("makeCliPluginToolHandle", () => {
     expect(resp.result).toContain("skill_id")
   })
 
+  it("routes load_skill_resource to the CLI resource handler, not the fallback", async () => {
+    const fallback = jest
+      .fn()
+      .mockResolvedValue({ type: "plugin_tool_response", sessionId: "s1", toolUseId: "t1" })
+    const handle = makeCliPluginToolHandle(fallback)
+    const resp = await handle(req({}, "load_skill_resource"))
+    expect(fallback).not.toHaveBeenCalled()
+    expect(resp.result).toContain("skill_id")
+  })
+
   it("defaults the fallback to the shared plugin-tool handler", () => {
     expect(typeof makeCliPluginToolHandle()).toBe("function")
   })

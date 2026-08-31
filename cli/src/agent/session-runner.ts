@@ -55,7 +55,11 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { clearCliSubagentContext } from "./subagent-dispatch"
 import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
 import { bindCliSessionHostRuntime } from "./cli-host-runtime"
-import { type LoadableSkill } from "./skill-load-tool"
+import {
+  registerCliSkillLoadContext,
+  releaseCliSkillLoadContext,
+  type LoadableSkill,
+} from "./skill-load-tool"
 import {
   createCliContextAssembler,
   prependTextBlock,
@@ -331,6 +335,19 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     async send(prompt, opts) {
       const session = await ensureReady()
       const sendOptions = session.sendOptions
+      const turnNumber = turnSequence++
+      const turnIdentity = {
+        runId: `${sessionId}:r${turnNumber}`,
+        turnId: `${sessionId}:t${turnNumber}`,
+        attemptId: `${sessionId}:t${turnNumber}:a0`,
+      }
+      sendOptions.turnId = turnIdentity.turnId
+      if (sendOptions.execution) {
+        sendOptions.execution = {
+          ...sendOptions.execution,
+          identity: { sessionId, ...turnIdentity },
+        }
+      }
       // Non-Anthropic (ai-sdk) channel agentic step budget. The sidecar's
       // `dispatchAiSdk` runs a manual agent loop and continues across tool-call
       // legs up to this many steps; without it the channel silently stopped after
@@ -360,6 +377,16 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         opts.onDatabaseError?.(session.databaseError)
       }
       const turn = await assembler.resolveTurn(prompt, session)
+      const scopedSkillIds = [...session.activeSkillIds, ...(turn.contextualSkillIds ?? [])]
+      if (scopedSkillIds.length > 0) {
+        registerCliSkillLoadContext(sessionId, {
+          allowedSkillIds: scopedSkillIds,
+          turnId: turnIdentity.turnId,
+          attemptId: turnIdentity.attemptId,
+        })
+      } else {
+        releaseCliSkillLoadContext(sessionId)
+      }
       if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
       // The twin persona is session-stable, so it appends to the cached system
       // prompt rather than riding every message.
@@ -398,14 +425,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         ? prependTextBlock(turn.content, twinContextBlock(turn.dynamicTwinContext))
         : turn.content
       let result: RunAndCaptureResult
-      const turnNumber = turnSequence++
       const envelopeEmitter = opts.onEnvelope
         ? createEnvelopeEmitter({
             identity: {
               sessionId,
-              runId: `${sessionId}:r${turnNumber}`,
-              turnId: `${sessionId}:t${turnNumber}`,
-              attemptId: `${sessionId}:t${turnNumber}:a0`,
+              ...turnIdentity,
               hostRef: "desktop-sidecar",
               runtime: sendOptions.execution?.runtimeAdapter ?? "builtin",
             },
@@ -428,6 +452,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
             : opts.onEvent,
         })
       } finally {
+        releaseCliSkillLoadContext(sessionId)
         clearDispatch()
         // Defensive: `registerTurnSubagentContext` is a no-op when the tool was
         // never surfaced, so clear unconditionally in case a nested run left an

@@ -70,6 +70,7 @@ import {
 } from "./session-context"
 import { registerTurnSubagentContext } from "./turn-dispatch"
 import { readToolApprovals } from "./tool-approvals"
+import { registerCliSkillLoadContext, releaseCliSkillLoadContext } from "./skill-load-tool"
 import { startToolHostBroker, type ToolHostBroker } from "./tool-host/broker"
 import { createHostToolExecutor } from "./tool-host/host-tools"
 import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
@@ -80,6 +81,38 @@ import {
   publishToolHostStatus,
   type ToolHostSnapshot,
 } from "./tool-host/status"
+
+export function bindExternalTurnSkillScope(
+  input: {
+    sessionId: string
+    activeSkillIds: readonly string[]
+    contextualSkillIds?: readonly string[]
+    turnId: string
+    attemptId: string
+  },
+  deps: {
+    register: typeof registerCliSkillLoadContext
+    release: typeof releaseCliSkillLoadContext
+  } = { register: registerCliSkillLoadContext, release: releaseCliSkillLoadContext }
+): () => void {
+  const ids = [...new Set([...input.activeSkillIds, ...(input.contextualSkillIds ?? [])])]
+  let released = false
+  if (ids.length > 0) {
+    deps.register(input.sessionId, {
+      allowedSkillIds: ids,
+      turnId: input.turnId,
+      attemptId: input.attemptId,
+    })
+  } else {
+    deps.release(input.sessionId)
+    released = true
+  }
+  return () => {
+    if (released) return
+    released = true
+    deps.release(input.sessionId)
+  }
+}
 import { visibleBuiltinTools, visibleHostTools } from "./tool-host/policy"
 import { canHostCogniaTools } from "../tui/runtime/backend-capabilities"
 import { CONTEXT_RESTART_NOTICE } from "../tui/runtime/context-lifecycle"
@@ -562,6 +595,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   // was minted for.
   let broker: ToolHostBroker | null = null
   let activeTurnOptions: SendTurnOptions | undefined
+  let activeToolScope: { turnId: string; attemptId: string } | undefined
   let brokerAttempt = 0
   let skillsAnnounced = false
   let databaseErrorShown = false
@@ -654,6 +688,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     brokerAttempt += 1
     const execHostTool = createHostToolExecutor({
       sessionId,
+      getTurnScope: () => activeToolScope,
       handle: makeConfiguredCliPluginToolHandle(params.config),
     })
     try {
@@ -749,13 +784,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       await ensureAgent()
       const { session, restarted } = await reconcile()
       const turnNumber = turnSequence++
+      const turnIdentity = {
+        runId: `${sessionId}:r${turnNumber}`,
+        turnId: `${sessionId}:t${turnNumber}`,
+        attemptId: `${sessionId}:t${turnNumber}:a0`,
+      }
       const envelopeEmitter = opts.onEnvelope
         ? createEnvelopeEmitter({
             identity: {
               sessionId,
-              runId: `${sessionId}:r${turnNumber}`,
-              turnId: `${sessionId}:t${turnNumber}`,
-              attemptId: `${sessionId}:t${turnNumber}:a0`,
+              ...turnIdentity,
               hostRef: `external-agent:${backend}`,
               runtime: backend,
             },
@@ -777,6 +815,17 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         opts.onDatabaseError?.(session.databaseError)
       }
       const turn = await assembler.resolveTurn(prompt, session)
+      const releaseSkillScope = bindExternalTurnSkillScope({
+        sessionId,
+        activeSkillIds: session.activeSkillIds,
+        contextualSkillIds: turn.contextualSkillIds,
+        turnId: turnIdentity.turnId,
+        attemptId: turnIdentity.attemptId,
+      })
+      activeToolScope = {
+        turnId: turnIdentity.turnId,
+        attemptId: turnIdentity.attemptId,
+      }
       if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
       if (turn.attachments) opts.onAttachments?.(turn.attachments)
 
@@ -793,13 +842,20 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (flattened.unsupported.length > 0) {
         // Fail BEFORE sending: dropping the attachment and answering anyway
         // would look like the agent read something it never received.
+        releaseSkillScope()
+        activeToolScope = undefined
         throw new RunAndCaptureError(
           unsupportedAttachmentMessage(backend, flattened.unsupported),
           "session_error"
         )
       }
       activeTurnOptions = opts
-      const cogniaServers = await ensureToolHost(session)
+      const cogniaServers = await ensureToolHost(session).catch((error) => {
+        releaseSkillScope()
+        activeToolScope = undefined
+        activeTurnOptions = undefined
+        throw error
+      })
 
       appendTranscript(
         home,
@@ -982,6 +1038,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         }
         result = outcome.value
       } finally {
+        releaseSkillScope()
+        activeToolScope = undefined
         watchdog.stop()
         clearDispatch()
         activeTurnOptions = undefined

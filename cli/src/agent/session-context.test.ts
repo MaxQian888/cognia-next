@@ -9,7 +9,7 @@ import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { CliDbSnapshotError } from "../db/bootstrap"
 import type { AgentSummary } from "./discover-agents"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
-import { LOAD_SKILL_TOOL_NAME } from "./skill-load-tool"
+import { LOAD_SKILL_RESOURCE_TOOL_NAME, LOAD_SKILL_TOOL_NAME } from "./skill-load-tool"
 import type { BuiltAttachmentContent } from "./attachments/build"
 import type { TwinContextResult } from "../twin/context-client"
 
@@ -143,6 +143,9 @@ describe("createCliContextAssembler — session context", () => {
       cfg({ skillLoadMode: "name" })
     ).resolveSession()
     expect(nameMode.sendOptions.pluginTools?.map((t) => t.name)).toContain(LOAD_SKILL_TOOL_NAME)
+    expect(nameMode.sendOptions.pluginTools?.map((t) => t.name)).toContain(
+      LOAD_SKILL_RESOURCE_TOOL_NAME
+    )
     expect(nameMode.activeSkillIds).toEqual(["skill-a"])
 
     const fullMode = await makeAssembler(
@@ -177,10 +180,10 @@ describe("createCliContextAssembler — session context", () => {
     expect(ctx.databaseError).toBeNull()
   })
 
-  it("never opens the db for plain (skill-less) chat", async () => {
+  it("opens the db once to resolve contextual built-in enablement for plain chat", async () => {
     let opened = 0
     await makeAssembler({ ensureDb: async () => void (opened += 1) }).resolveSession()
-    expect(opened).toBe(0)
+    expect(opened).toBe(1)
   })
 
   it("falls back to the built-in subagents when discovery throws", async () => {

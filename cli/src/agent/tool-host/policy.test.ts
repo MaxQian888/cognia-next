@@ -64,19 +64,26 @@ describe("visibleHostTools", () => {
       pluginTools: [
         { name: "ask_user", description: "", jsonSchema: {}, pluginId: "core" },
         { name: "dispatch_agent", description: "", jsonSchema: {}, pluginId: "core" },
+        { name: "load_skill_resource", description: "", jsonSchema: {}, pluginId: "core" },
         { name: "web_search", description: "", jsonSchema: {}, pluginId: "web" },
       ],
       ...extra,
     })
 
   it("advertises the resolved manifest", () => {
-    expect(visibleHostTools(withPlugins())).toEqual(["ask_user", "dispatch_agent", "web_search"])
+    expect(visibleHostTools(withPlugins())).toEqual([
+      "ask_user",
+      "dispatch_agent",
+      "load_skill_resource",
+      "web_search",
+    ])
   })
 
   it("keeps the explore→plan tools callable in plan mode and drops the rest", () => {
     expect(visibleHostTools(withPlugins({ permissionMode: "plan" }))).toEqual([
       "ask_user",
       "dispatch_agent",
+      "load_skill_resource",
     ])
   })
 

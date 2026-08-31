@@ -3,13 +3,18 @@
  */
 import {
   LOAD_SKILL_TOOL_NAME,
+  LOAD_SKILL_RESOURCE_TOOL_NAME,
   buildLoadSkillManifestEntry,
+  buildLoadSkillManifestEntries,
   buildLoadSkillSchema,
   handleCliLoadSkill,
+  handleCliLoadSkillResource,
   parseLoadSkillArgs,
+  registerCliSkillLoadContext,
+  releaseCliSkillLoadContext,
   renderLoadedSkill,
 } from "./skill-load-tool"
-import type { Skill } from "@cognia/agent-config-types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 import type { PluginToolExecRequest } from "@/lib/claude/plugin-tool-ipc"
 
 function skill(over: Partial<Skill> = {}): Skill {
@@ -32,6 +37,20 @@ function req(args: Record<string, unknown>): PluginToolExecRequest {
     toolUseId: "tu-1",
   } as PluginToolExecRequest
 }
+
+const resources: SkillResource[] = [
+  {
+    id: "r1",
+    skillId: "deep-research",
+    kind: "reference",
+    name: "rubric.md",
+    path: "references/rubric.md",
+    content: "Verify primary sources.",
+    encoding: "utf-8",
+    createdAt: 0,
+    updatedAt: 0,
+  },
+]
 
 describe("buildLoadSkillSchema / manifest", () => {
   it("constrains skill_id to the known ids when available", () => {
@@ -60,6 +79,21 @@ describe("buildLoadSkillSchema / manifest", () => {
 
   it("manifest description falls back to a generic line with no skills", () => {
     expect(buildLoadSkillManifestEntry([]).description).not.toContain("Available skills:")
+  })
+
+  it("advertises both scoped read-only loaders", () => {
+    expect(
+      buildLoadSkillManifestEntries([{ id: "deep-research", name: "Deep Research" }]).map(
+        (entry) => entry.name
+      )
+    ).toEqual([LOAD_SKILL_TOOL_NAME, LOAD_SKILL_RESOURCE_TOOL_NAME])
+  })
+
+  it("keeps the resource id schema open when catalog metadata lookup degrades", () => {
+    const resource = buildLoadSkillManifestEntries([])[1].jsonSchema as {
+      properties: { skill_id: { enum?: string[] } }
+    }
+    expect(resource.properties.skill_id.enum).toBeUndefined()
   })
 })
 
@@ -91,31 +125,68 @@ describe("renderLoadedSkill", () => {
 })
 
 describe("handleCliLoadSkill", () => {
-  it("returns the skill body as the tool result", async () => {
-    const res = await handleCliLoadSkill(req({ skill_id: "deep-research" }), {
-      get: async () => skill(),
+  beforeEach(() => {
+    releaseCliSkillLoadContext("sess-1")
+    registerCliSkillLoadContext("sess-1", {
+      allowedSkillIds: ["deep-research"],
+      get: async (id) => (id === "deep-research" ? skill() : undefined),
+      listResources: async () => resources,
     })
+  })
+
+  afterEach(() => releaseCliSkillLoadContext("sess-1"))
+
+  it("returns the skill body as the tool result", async () => {
+    const res = await handleCliLoadSkill(req({ skill_id: "deep-research" }))
     expect(res).toMatchObject({ sessionId: "sess-1", toolUseId: "tu-1" })
-    expect(res.result).toContain("# Deep Research")
+    expect(res.result).toMatchObject({
+      ok: true,
+      content: expect.stringContaining("# Deep Research"),
+      resources: [expect.objectContaining({ path: "references/rubric.md" })],
+    })
     expect(res.error).toBeUndefined()
   })
 
   it("reports a missing id without throwing", async () => {
-    const res = await handleCliLoadSkill(req({ skill_id: "nope" }), { get: async () => undefined })
-    expect(res.result).toContain('no skill found with id "nope"')
+    const res = await handleCliLoadSkill(req({ skill_id: "nope" }))
+    expect(res.result).toMatchObject({ ok: false, code: "out_of_scope" })
   })
 
   it("guides the model when no id is supplied", async () => {
-    const res = await handleCliLoadSkill(req({}), { get: async () => skill() })
+    const res = await handleCliLoadSkill(req({}))
     expect(res.result).toContain("provide `{skill_id}`")
   })
 
   it("collapses a Dexie read failure onto an error string", async () => {
-    const res = await handleCliLoadSkill(req({ skill_id: "x" }), {
+    registerCliSkillLoadContext("sess-1", {
+      allowedSkillIds: ["x"],
       get: async () => {
         throw new Error("db locked")
       },
     })
+    const res = await handleCliLoadSkill(req({ skill_id: "x" }))
     expect(res.error).toContain("load_skill failed: db locked")
+  })
+
+  it("rejects a disabled row even when its id was mistakenly registered", async () => {
+    registerCliSkillLoadContext("sess-1", {
+      allowedSkillIds: ["deep-research"],
+      get: async () => skill({ status: "disabled" }),
+    })
+    const res = await handleCliLoadSkill(req({ skill_id: "deep-research" }))
+    expect(res.result).toMatchObject({ ok: false, code: "out_of_scope" })
+  })
+
+  it("pages a resource through the shared scoped loader", async () => {
+    const resourceReq = {
+      ...req({ skill_id: "deep-research", path: "references/rubric.md", limit: 6 }),
+      name: LOAD_SKILL_RESOURCE_TOOL_NAME,
+    }
+    const res = await handleCliLoadSkillResource(resourceReq)
+    expect(res.result).toMatchObject({
+      ok: true,
+      content: "Verify",
+      nextOffset: 6,
+    })
   })
 })

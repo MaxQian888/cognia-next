@@ -24,6 +24,7 @@ import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import {
   acpPermissionRequestToCli,
   captureDecisionToAcp,
+  bindExternalTurnSkillScope,
   classifyExternalFailure,
   createExternalAgentSession,
   externalAgentCredentialEnv,
@@ -167,6 +168,47 @@ describe("external-agent permission adaptation", () => {
 })
 
 describe("createExternalAgentSession", () => {
+  it("binds explicit and contextual Skills to the frozen turn and cleans once", () => {
+    const register = jest.fn()
+    const release = jest.fn()
+    const cleanup = bindExternalTurnSkillScope(
+      {
+        sessionId: "s1",
+        activeSkillIds: ["explicit"],
+        contextualSkillIds: ["contextual"],
+        turnId: "t1",
+        attemptId: "a2",
+      },
+      { register: register as never, release }
+    )
+    expect(register).toHaveBeenCalledWith("s1", {
+      allowedSkillIds: ["explicit", "contextual"],
+      turnId: "t1",
+      attemptId: "a2",
+    })
+    cleanup()
+    cleanup()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears stale scope immediately when a turn has no Skills", () => {
+    const register = jest.fn()
+    const release = jest.fn()
+    const cleanup = bindExternalTurnSkillScope(
+      {
+        sessionId: "s1",
+        activeSkillIds: [],
+        turnId: "t1",
+        attemptId: "a1",
+      },
+      { register: register as never, release }
+    )
+    expect(register).not.toHaveBeenCalled()
+    expect(release).toHaveBeenCalledWith("s1")
+    cleanup()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
   it("binds the external tool host to this session's resolved search config", async () => {
     const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
       "./configured-plugin-tool-handle"

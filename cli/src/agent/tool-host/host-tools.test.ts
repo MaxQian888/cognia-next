@@ -6,6 +6,25 @@ import type { PluginToolExecRequest } from "@/lib/claude/plugin-tool-ipc"
 import { createHostToolExecutor } from "./host-tools"
 
 describe("createHostToolExecutor", () => {
+  it("stamps the active turn scope onto host-routed calls", async () => {
+    const seen: PluginToolExecRequest[] = []
+    const exec = createHostToolExecutor({
+      sessionId: "s1",
+      getTurnScope: () => ({ turnId: "t1", attemptId: "a2" }),
+      handle: async (request) => {
+        seen.push(request)
+        return {
+          type: "plugin_tool_response",
+          sessionId: request.sessionId,
+          toolUseId: request.toolUseId,
+          result: "ok",
+        }
+      },
+    })
+    await exec("load_skill", { skill_id: "x" })
+    expect(seen[0]).toMatchObject({ turnId: "t1", attemptId: "a2" })
+  })
+
   it("routes the call through the shared CLI plugin handle, scoped to the session", async () => {
     const seen: PluginToolExecRequest[] = []
     const exec = createHostToolExecutor({

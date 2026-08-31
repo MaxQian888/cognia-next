@@ -54,12 +54,13 @@ const TOOLS_BY_CATEGORY: ReadonlyMap<string, readonly string[]> = new Map(
  * prompt tells the model to dispatch the read-only Explore/Plan subagents and to
  * ask clarifying questions, so blocking these would break the explore→plan flow.
  * Permitting the CALL does not widen the read-only guarantee — the dispatched
- * child inherits plan mode, and `ask_user` / `load_skill` have no side effects.
+ * child inherits plan mode, and `ask_user` / the Skill loaders have no side effects.
  */
 const PLAN_ALLOWED_HOST_TOOLS: ReadonlySet<string> = new Set([
   "dispatch_agent",
   "Task",
   "load_skill",
+  "load_skill_resource",
   "ask_user",
 ])
 

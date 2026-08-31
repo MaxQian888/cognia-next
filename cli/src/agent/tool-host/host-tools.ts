@@ -19,6 +19,8 @@ import type { ExecResult } from "./protocol"
 
 export interface HostToolExecutorParams {
   sessionId: string
+  /** Frozen identity of the currently executing turn, if one is active. */
+  getTurnScope?: () => { turnId?: string; attemptId?: string } | undefined
   /** Injected in tests; defaults to the shared CLI plugin-tool handle. */
   handle?: (req: PluginToolExecRequest) => Promise<PluginToolExecResponse>
   mintToolUseId?: () => string
@@ -43,6 +45,7 @@ export function createHostToolExecutor(
       toolUseId: mintToolUseId(),
       name,
       args: (args ?? {}) as Record<string, unknown>,
+      ...(params.getTurnScope?.() ?? {}),
     }
     try {
       const response = await handle(request)

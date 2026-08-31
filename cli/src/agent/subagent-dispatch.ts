@@ -38,7 +38,12 @@ import { type ResolvedConfig } from "../config/schema"
 import { type AgentSummary } from "./discover-agents"
 import { type PermissionResponder } from "./permission-gate"
 import { runCliSubagent, type CliSubagentResult, type RunCliSubagentDeps } from "./subagent-runner"
-import { LOAD_SKILL_TOOL_NAME, handleCliLoadSkill } from "./skill-load-tool"
+import {
+  LOAD_SKILL_RESOURCE_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
+  handleCliLoadSkill,
+  handleCliLoadSkillResource,
+} from "./skill-load-tool"
 import {
   startCliBackgroundRun,
   collectCliBackgroundResult,
@@ -432,6 +437,7 @@ export function makeCliPluginToolHandle(
       return handleCliDispatchAgent(req)
     }
     if (req.name === LOAD_SKILL_TOOL_NAME) return handleCliLoadSkill(req)
+    if (req.name === LOAD_SKILL_RESOURCE_TOOL_NAME) return handleCliLoadSkillResource(req)
     return fallback(req)
   }
 }

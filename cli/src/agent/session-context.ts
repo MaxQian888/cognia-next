@@ -48,9 +48,16 @@ import { withBuiltinAgents } from "./builtin-agents"
 import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { buildCliSubagentToolManifest } from "./subagent-dispatch"
-import { buildLoadSkillManifestEntry, type LoadableSkill } from "./skill-load-tool"
+import {
+  buildLoadSkillManifestEntries,
+  releaseCliSkillLoadContext,
+  type LoadableSkill,
+} from "./skill-load-tool"
 import { hashContextVersion } from "./context-version"
 import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
+import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
+import { resolveSkillDelivery } from "@/lib/skills/delivery"
+import { inferBuiltInSkillIntents } from "@/lib/skills/intent-resolver"
 
 /** What the attachment builder did with this turn's `@<path>` references. */
 export interface AttachmentSummary {
@@ -91,6 +98,8 @@ export interface ResolvedCliSessionContext {
   subagentToolEnabled: boolean
   /** Skill ids that resolved into the prompt (empty for plain chat). */
   activeSkillIds: string[]
+  /** Capability-valid contextual built-ins available for per-turn discovery. */
+  contextualSkills: Array<LoadableSkill & { intents: string[] }>
   /** Set when the CLI-local db refused to open with an unsafe snapshot. */
   databaseError: CliDbSnapshotError | null
   /**
@@ -112,6 +121,8 @@ export interface ResolvedCliTurn {
   attachments: AttachmentSummary | null
   /** Per-turn twin RAG recall, already redacted. Belongs to THIS message. */
   dynamicTwinContext?: string
+  /** Contextual built-ins whose triggers matched this prompt. */
+  contextualSkillIds?: string[]
   /**
    * Twin persona/identity, returned only on the first grounded turn.
    *
@@ -252,6 +263,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     if (pluginToolsEnabled) await loadPluginRuntime()
     let ephemeralSkillIds = resolveSkillIds()
     let databaseError: CliDbSnapshotError | null = null
+    let databaseReady = false
     // The desktop build-options pipeline reads enabled skills from Dexie via
     // `getDb()`, which throws unless the CLI-local db (and its `window` +
     // IndexedDB shims) is open. Plain chat touches no Dexie table, so open it
@@ -259,6 +271,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     if (ephemeralSkillIds.length > 0) {
       try {
         await ensureDb()
+        databaseReady = true
       } catch (err) {
         // Degrade gracefully: resolve options WITHOUT skills rather than let the
         // build-options Dexie read crash the whole turn. An unsafe snapshot is
@@ -288,6 +301,42 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
       resolveDisabledMcpTools()
     )
+    let contextualSkills: Array<LoadableSkill & { intents: string[] }> = []
+    if (skillLoadMode === "name" && databaseError === null) {
+      try {
+        if (!databaseReady) {
+          await ensureDb()
+          databaseReady = true
+        }
+        const { listSkillsByIds } = await import("@/lib/db/skills")
+        const rows = await listSkillsByIds(BUILT_IN_SKILL_CATALOG.map(builtinSkillId))
+        const states = Object.fromEntries(rows.map((row) => [row.id, row.status ?? "enabled"]))
+        const pluginTools = new Set((sendOptions.pluginTools ?? []).map((tool) => tool.name))
+        const delivery = resolveSkillDelivery({
+          intents: ["chart", "diagram", "extract-text-from-image", "research-web"],
+          skillStates: states,
+          capabilities: {
+            artifactAuthoring: { available: pluginTools.has("artifact_create") },
+            ocr: { available: pluginTools.has("ocr.extract") },
+            webSearch: {
+              available: pluginTools.has("web_search") || sendOptions.provider === "anthropic",
+            },
+            webFetch: {
+              available: pluginTools.has("web_fetch") || sendOptions.provider === "anthropic",
+            },
+          },
+        })
+        contextualSkills = delivery.catalog.map(({ entry, storageId }) => ({
+          id: storageId,
+          name: entry.name,
+          description: entry.description,
+          intents: entry.triggers.intents,
+        }))
+      } catch (err) {
+        if (err instanceof CliDbSnapshotError) databaseError = err
+        contextualSkills = []
+      }
+    }
     // Hand the sidecar the real hook engine. The desktop gets this injected
     // host-side after its trust gate; the CLI transport bypasses that, so
     // without this line every CLI turn — TUI, subagent and headless alike —
@@ -311,14 +360,19 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     }
     // Name-only skill loading (progressive disclosure): the prompt carries only
     // the catalog, so the model needs `load_skill` to pull a body on demand.
-    if (skillLoadMode === "name" && ephemeralSkillIds.length > 0) {
-      const loadable = await resolveLoadableSkills(ephemeralSkillIds).catch(
+    if (skillLoadMode === "name" && (ephemeralSkillIds.length > 0 || contextualSkills.length > 0)) {
+      const explicitLoadable = await resolveLoadableSkills(ephemeralSkillIds).catch(
         (): LoadableSkill[] => []
+      )
+      const loadable = [...explicitLoadable, ...contextualSkills].filter(
+        (skill, index, all) => all.findIndex((candidate) => candidate.id === skill.id) === index
       )
       sendOptions.pluginTools = [
         ...(sendOptions.pluginTools ?? []),
-        buildLoadSkillManifestEntry(loadable),
+        ...buildLoadSkillManifestEntries(loadable),
       ]
+    } else {
+      releaseCliSkillLoadContext(sessionId)
     }
     const additionalDirectories = [...new Set(config.additionalRoots ?? [])]
     return {
@@ -330,6 +384,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       agents,
       subagentToolEnabled,
       activeSkillIds: ephemeralSkillIds,
+      contextualSkills,
       databaseError,
       contextVersion: hashContextVersion({
         sendOptions,
@@ -347,6 +402,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       return cached
     },
     invalidate() {
+      releaseCliSkillLoadContext(sessionId)
       cached = null
       inflight = null
       twinStableEmitted = false
@@ -417,8 +473,25 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
         built.ocr.length > 0 ||
         built.failed.length > 0 ||
         built.skipped.length > 0
+      const inferredIntents = new Set(inferBuiltInSkillIntents(prompt))
+      const contextual = session.contextualSkills.filter((skill) =>
+        skill.intents.some((intent) => inferredIntents.has(intent))
+      )
+      const contextualSection = contextual.length
+        ? [
+            "<contextual-skills>",
+            "Load and follow a listed Skill when it is relevant to this turn:",
+            ...contextual.map(
+              (skill) =>
+                `- ${skill.id}: ${skill.name}${skill.description ? ` — ${skill.description}` : ""}`
+            ),
+            "</contextual-skills>",
+          ].join("\n")
+        : ""
       return {
-        content: built.content,
+        content: contextualSection
+          ? prependTextBlock(built.content, contextualSection)
+          : built.content,
         attachments: touched
           ? {
               imageCount: built.imageCount,
@@ -430,6 +503,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
             }
           : null,
         ...(dynamicTwinContext ? { dynamicTwinContext } : {}),
+        ...(contextual.length ? { contextualSkillIds: contextual.map((skill) => skill.id) } : {}),
         ...(stableTwinContext ? { stableTwinContext } : {}),
         ...(twinNotice ? { twinNotice } : {}),
       }

@@ -715,7 +715,7 @@ describe("createAgentSession", () => {
     expect(order).toEqual(["ensureDb", "resolveOptions"])
   })
 
-  it("does not open the CLI-local db when no skills are enabled (plain chat pays nothing)", async () => {
+  it("opens the CLI-local db once for contextual built-in enablement in plain chat", async () => {
     const ensureDb = jest.fn()
     const session = createAgentSession({
       config: cfg(),
@@ -731,7 +731,7 @@ describe("createAgentSession", () => {
       capture: jest.fn(async () => result("ok")),
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
-    expect(ensureDb).not.toHaveBeenCalled()
+    expect(ensureDb).toHaveBeenCalledTimes(1)
   })
 
   it("degrades to no skills (no crash) when opening the CLI-local db fails", async () => {
